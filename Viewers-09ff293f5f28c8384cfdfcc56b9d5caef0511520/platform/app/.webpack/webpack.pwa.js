@@ -69,6 +69,22 @@ module.exports = (env, argv) => {
         // Hoisted Yarn Workspace Modules
         path.resolve(__dirname, '../../../node_modules'),
         SRC_DIR,
+        path.resolve(
+          __dirname,
+          'C:/Users/mayar/Desktop/GradProject-Material/OHIF-Standalone/Viewers-09ff293f5f28c8384cfdfcc56b9d5caef0511520/extensions/monai-label/node_modules'
+        ),
+        path.resolve(
+          __dirname,
+          'C:/Users/mayar/Desktop/GradProject-Material/OHIF-Standalone/Viewers-09ff293f5f28c8384cfdfcc56b9d5caef0511520/modes/monai-label/node_modules'
+        ),
+        path.resolve(
+          __dirname,
+          'C:/Users/mayar/Desktop/GradProject-Material/OHIF-Standalone/Viewers-09ff293f5f28c8384cfdfcc56b9d5caef0511520/extensions/monai-label/node_modules'
+        ),
+        path.resolve(
+          __dirname,
+          'C:/Users/mayar/Desktop/GradProject-Material/OHIF-Standalone/Viewers-09ff293f5f28c8384cfdfcc56b9d5caef0511520/modes/monai-label/node_modules'
+        ),
       ],
     },
     plugins: [
