@@ -10,9 +10,6 @@ class SegmentationQueue {
   // Add a new segmentation request to the queue
   enqueue(request) {
     this.queue.push(request);
-    // const ui_comboboxInstance = 'request.model';
-    // const QueueOptions = getQueueOptions();
-    // QueueOptions.append(ui_comboboxInstance);
     this.request = request;
     QueueOptionsManager.addQueueOption(request);
 
