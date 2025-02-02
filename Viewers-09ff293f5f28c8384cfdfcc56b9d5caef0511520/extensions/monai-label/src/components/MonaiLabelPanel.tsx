@@ -121,7 +121,7 @@ export default class MonaiLabelPanel extends Component {
     const response = await this.client().info();
 
     // remove the background
-    const labels = response.data.labels.splice(1)
+    const labels = response.data.labels.splice(1);
 
     const segmentations = [
       {
@@ -129,7 +129,7 @@ export default class MonaiLabelPanel extends Component {
         label: 'Segmentations',
         segments: labels.map((label, index) => ({
           segmentIndex: index + 1,
-          label
+          label,
         })),
         isActive: true,
         activeSegmentIndex: 1,
@@ -137,7 +137,7 @@ export default class MonaiLabelPanel extends Component {
     ];
 
     this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
-      segmentations
+      segmentations,
     });
 
     if (response.status !== 200) {
@@ -193,10 +193,9 @@ export default class MonaiLabelPanel extends Component {
     console.info('These are the predicted labels');
     console.info(onInfoLabelNames);
 
-    if (onInfoLabelNames.hasOwnProperty('background')){
-delete onInfoLabelNames.background;
+    if (onInfoLabelNames.hasOwnProperty('background')) {
+      delete onInfoLabelNames.background;
     }
-
 
     const ret = SegmentationReader.parseNrrdData(response.data);
 
