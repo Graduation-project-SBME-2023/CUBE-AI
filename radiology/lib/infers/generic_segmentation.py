@@ -15,19 +15,23 @@ from monailabel.utils.others.generic import name_to_device
 
 from batchgenerators.utilities.file_and_folder_operations import join
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+from pathlib import Path    
+
+
+logger = logging.getLogger(__name__)
 
 
 class GenericSegmentation(BasicInferTask):
     def __init__(
         self,
         path,
+        root_nnunet_dir,
         type=InferType.SEGMENTATION,
         labels=None,
         network=None,
-        data_name=None,
+        model_name=None,
         plan_type="2d",
         fold=0,
-        root_nnunet_dir=r"C:\Users\Lenovo\Desktop\Grad\Monai\radiology\nnunet",
         dimension=2,
         description="A pre-trained NnUnet model for volumetric segmentation ",
         **kwargs,
@@ -43,18 +47,45 @@ class GenericSegmentation(BasicInferTask):
             **kwargs,
         )
 
-        self.data_name = data_name
+        self.model_name=model_name
         self.plan_type = plan_type
         self.fold = fold
-        root_nnunet_dir=root_nnunet_dir
+        self.root_nnunet_dir = root_nnunet_dir
+        # TODO : remove this hardcoding
+        self.root_nnunet_dir = r"C:\Users\Lenovo\Desktop\Grad\Monai\radiology\nnunet"
+
+
 
         self.temp_path = "/temp"
 
-        os.environ["nnUNet_raw"] = os.path.join(root_nnunet_dir, "nnUNet_raw")
-        os.environ["nnUNet_preprocessed"] = os.path.join(root_nnunet_dir, "nnUNet_Preprocessed")
-        os.environ["nnUNet_results"] = os.path.join(root_nnunet_dir, "nnUNet_Results")
+        os.environ["nnUNet_raw"] = os.path.join(self.root_nnunet_dir, "nnUNet_raw")
+        os.environ["nnUNet_preprocessed"] = os.path.join(self.root_nnunet_dir, "nnUNet_Preprocessed")
+        os.environ["nnUNet_results"] = os.path.join(self.root_nnunet_dir, "nnUNet_Results")
+
+        logging.info(f"nnUNet_results: {os.environ['nnUNet_results']}")
 
 
+        self.task_name = self.get_data_name_from_model_name(self.model_name)
+
+
+    def get_data_name_from_model_name(self, model_name):
+        """
+        Search for the full dataset name in the nnUNet_raw directory using only the model name.
+        Example: If model_name = "blastoma", and dataset folder is "Dataset200_blastoma",
+        this function returns "Dataset200_blastoma".
+        """
+        nnunet_raw_dir = os.environ.get("nnUNet_raw")
+        if not nnunet_raw_dir or not os.path.exists(nnunet_raw_dir):
+            raise FileNotFoundError(f"nnUNet_raw directory not found: {nnunet_raw_dir}")
+
+        # Search for a directory that ends with the given model name
+        for dir_name in os.listdir(nnunet_raw_dir):
+            if dir_name.endswith(f"_{model_name}"):  # Match DatasetXXX_{model_name}
+                return dir_name  # Return full dataset name
+
+        raise ValueError(f"No dataset found for model name: {model_name} in {nnunet_raw_dir}")
+
+    
     def run_inferer(self, data, convert_to_batch=True, device="cuda"):
         # Run Inferer over pre-processed Data.  Derive this logic to customize the normal behavior.
         # In some cases, you want to implement your own for running chained inferers over pre-processed data
@@ -76,7 +107,7 @@ class GenericSegmentation(BasicInferTask):
         predictor.initialize_from_trained_model_folder(    
             join(
                 os.environ["nnUNet_results"],
-                f"{self.data_name}\\nnUNetTrainer__nnUNetPlans__{self.plan_type}",
+                f"{self.task_name}\\nnUNetTrainer__nnUNetPlans__{self.plan_type}",
             ),
             use_folds=(self.fold,), 
             checkpoint_name="checkpoint_best.pth",
