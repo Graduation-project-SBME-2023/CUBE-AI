@@ -51,8 +51,7 @@ class GenericSegmentation(BasicInferTask):
         self.plan_type = plan_type
         self.fold = fold
         self.root_nnunet_dir = root_nnunet_dir
-        # TODO : remove this hardcoding
-        self.root_nnunet_dir = r"C:\Users\Lenovo\Desktop\Grad\Monai\radiology\nnunet"
+
 
 
 
