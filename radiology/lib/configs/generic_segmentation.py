@@ -16,18 +16,28 @@ from monailabel.tasks.scoring.dice import Dice
 from monailabel.tasks.scoring.epistemic import EpistemicScoring
 from monailabel.tasks.scoring.sum import Sum
 from monailabel.utils.others.generic import download_file, strtobool
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 class GenericSegmentation(TaskConfig):
-    def __init__(self,labels:str, data_name:str ,plan_type:str, fold:int ,root_nnunet_dir=r"C:\Users\Lenovo\Desktop\Grad\Monai\radiology\nnunet"):
+    def __init__(self,labels:str, 
+                 model_name:str ,
+                 plan_type:str, 
+                 fold:int 
+                 ):
+        
         super().__init__()
 
         self.epistemic_enabled = None
         self.epistemic_samples = None
+
+        # Dynamically set the root directory (go up two levels from the script's location)
+
+        BASE_DIR = Path(__file__).resolve().parents[2]    
+        self.root_nnunet_dir = os.path.join(BASE_DIR, "nnunet")
         
-        self.task_name=data_name
+        self.model_name=model_name
         self.plan_type=plan_type
-        self.root_nnunet_dir=root_nnunet_dir
         self.labels = labels
         self.fold = fold
     
@@ -52,8 +62,10 @@ class GenericSegmentation(TaskConfig):
         task: InferTask = lib.infers.GenericSegmentation(
             path=self.path,
             labels=self.labels,
-            data_name=self.task_name,
+            model_name=self.model_name,
             fold=self.fold,
+            plan_type=self.plan_type,
+            root_nnunet_dir=self.root_nnunet_dir,
             preload=strtobool(self.conf.get("preload", "false")),
         )
         return task
@@ -70,10 +82,11 @@ class GenericSegmentation(TaskConfig):
             disable_meta_tracking=False,
             publish_path=self.path[1],
             labels=self.labels,
-            task_name=self.task_name,
-            root_nnunet_dir=self.root_nnunet_dir,
+            model_name=self.model_name,
             fold=self.fold,
             plan_type=self.plan_type,
+            root_nnunet_dir=self.root_nnunet_dir,
+
         )
         return task
         
