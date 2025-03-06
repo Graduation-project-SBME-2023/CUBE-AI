@@ -6,11 +6,15 @@ import moment from 'moment';
 import qs from 'query-string';
 import isEqual from 'lodash.isequal';
 import { useTranslation } from 'react-i18next';
-//
+import { UIModalService, UINotificationService } from '@ohif/core';
+
 import filtersMeta from './filtersMeta.js';
 import { useAppConfig } from '@state';
 import { useDebounce, useSearchParams } from '@hooks';
 import { utils, hotkeys, ServicesManager } from '@ohif/core';
+import WFModal from './WFModal';
+import Select from '../../../../ui/src/components/Select/Select';
+import g_workflowManagerInstance from '../Workflow/WorkflowManager.js';
 
 import {
   Icon,
@@ -20,6 +24,7 @@ import {
   StudyListTable,
   StudyListPagination,
   StudyListFilter,
+  WorkflowList,
   TooltipClipboard,
   Header,
   useModal,
@@ -30,6 +35,8 @@ import {
 } from '@ohif/ui';
 
 import i18n from '@ohif/i18n';
+import { set } from 'lodash';
+import { use } from 'i18next';
 
 const { sortBySeriesDate } = utils;
 
@@ -58,9 +65,12 @@ function WorkList({
   const [appConfig] = useAppConfig();
   // ~ Filters
   const searchParams = useSearchParams();
+
   const navigate = useNavigate();
   const STUDIES_LIMIT = 101;
+
   const queryFilterValues = _getQueryFilterValues(searchParams);
+
   const [sessionQueryFilterValues, updateSessionQueryFilterValues] = useSessionStorage({
     key: 'queryFilterValues',
     defaultValue: queryFilterValues,
@@ -76,6 +86,111 @@ function WorkList({
 
   const debouncedFilterValues = useDebounce(filterValues, 200);
   const { resultsPerPage, pageNumber, sortBy, sortDirection } = filterValues;
+
+  const [workflowlist, setWorkflowlist] = useState([]); // Initialize with an empty array
+
+  const [openModal, setOpenModal] = useState(false); // State for modal visibility
+  const [newWorkflowName, setNewWorkflowName] = useState('');
+  const [errorMessage, setErrorMessage] = useState(''); // State for error message
+  const [selectedWorkFlowList, setSelectedWorkFlowList] = useState(null);
+
+  useEffect(() => {
+    const fetchWorkflowNames = async () => {
+      try {
+        await g_workflowManagerInstance.refreshDatabase();
+        const names = g_workflowManagerInstance.getWorkflowNames();
+        setWorkflowlist(names);
+      } catch (error) {
+        console.error('Error fetching workflow names:', error);
+      }
+    };
+
+    fetchWorkflowNames();
+  }, []);
+
+  let notification = new UINotificationService();
+  const handleOpenModal = () => {
+    setOpenModal(true);
+  };
+
+  // Close the modal
+  const handleCloseModal = () => {
+    setOpenModal(false);
+    setNewWorkflowName(''); // Clear input
+  };
+
+  const handleCreateWorkflow = async () => {
+    if (newWorkflowName.trim() !== '') {
+      const workflowFound = g_workflowManagerInstance.workflows.find(
+        workflow => workflow.workflowName === newWorkflowName
+      );
+
+      if (!workflowFound) {
+        const newWorkflow = await g_workflowManagerInstance.createWorkflow(newWorkflowName);
+
+        notification.show({
+          title: 'Workflow creation',
+          message: `Workflow ${newWorkflow.workflowName} is created successfully`,
+          type: 'success',
+          duration: 3000,
+        });
+
+        setWorkflowlist(prevList => [...prevList, newWorkflow.workflowName]);
+
+        handleCloseModal();
+      } else {
+        setErrorMessage(t('Name already exists'));
+      }
+    } else {
+      setErrorMessage('Workflow name cannot be empty');
+    }
+  };
+
+  // const onClearWorkflowsClick = () => {
+  //   console.log('Clearing All Workflows');
+  //   setWorkflowlist([]);
+  //   setSelectedWorkFlowList(null);
+  //   g_workflowManagerInstance.workflows = [];
+  // };
+
+  const appendStudyInWorkflow = async studyUID => {
+    let selectedWorkflow = g_workflowManagerInstance.getWorkflowByName(selectedWorkFlowList.label);
+
+    selectedWorkflow.addStudy(studyUID);
+
+    g_workflowManagerInstance.workflows = g_workflowManagerInstance.workflows.map(workflow =>
+      workflow.workflowName === selectedWorkflow.workflowName ? selectedWorkflow : workflow
+    );
+
+    try {
+      const response = await fetch('http://localhost:8000/workflow/add', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          case_id: studyUID,
+          task_name: selectedWorkflow.workflowName,
+          series_instance_uid: '',
+          instance_uid: '',
+          train: false,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Error: ${response.status}`);
+      }
+      notification.show({
+        title: 'Study Added',
+        message: `Study ${studyUID} is added to workflow${selectedWorkFlowList.label} successfully`,
+        type: 'success',
+        duration: 3000,
+      });
+      const result = await response.json();
+    } catch (error) {
+      console.error('Failed to add workflow record:', error);
+    }
+  };
 
   /*
    * The default sort value keep the filters synchronized with runtime conditional sorting
@@ -251,14 +366,17 @@ function WorkList({
       date,
       time,
     } = study;
+
     const studyDate =
       date &&
       moment(date, ['YYYYMMDD', 'YYYY.MM.DD'], true).isValid() &&
-      moment(date, ['YYYYMMDD', 'YYYY.MM.DD']).format(t('Common:localDateFormat','MMM-DD-YYYY'));
+      moment(date, ['YYYYMMDD', 'YYYY.MM.DD']).format(t('Common:localDateFormat', 'MMM-DD-YYYY'));
     const studyTime =
       time &&
       moment(time, ['HH', 'HHmm', 'HHmmss', 'HHmmss.SSS']).isValid() &&
-      moment(time, ['HH', 'HHmm', 'HHmmss', 'HHmmss.SSS']).format(t('Common:localTimeFormat', 'hh:mm A'));
+      moment(time, ['HH', 'HHmm', 'HHmmss', 'HHmmss.SSS']).format(
+        t('Common:localTimeFormat', 'hh:mm A')
+      );
 
     return {
       dataCY: `studyRow-${studyInstanceUid}`,
@@ -345,57 +463,87 @@ function WorkList({
               : []
           }
         >
-          <div className="flex flex-row gap-2">
-            {appConfig.loadedModes.map((mode, i) => {
-              const modalitiesToCheck = modalities.replaceAll('/', '\\');
+          <div className="flex flex-row items-center justify-between gap-2">
+            <div className="flex flex-row gap-2">
+              {appConfig.loadedModes.map((mode, i) => {
+                const modalitiesToCheck = modalities.replaceAll('/', '\\');
+                const isValidMode = mode.isValidMode({
+                  modalities: modalitiesToCheck,
+                  study,
+                });
+                // TODO: Modes need a default/target route? We mostly support a single one for now.
+                // We should also be using the route path, but currently are not
+                // mode.routeName
+                // mode.routes[x].path
+                // Don't specify default data source, and it should just be picked up... (this may not currently be the case)
+                // How do we know which params to pass? Today, it's just StudyInstanceUIDs and configUrl if exists
+                const query = new URLSearchParams();
+                if (filterValues.configUrl) {
+                  query.append('configUrl', filterValues.configUrl);
+                }
+                query.append('StudyInstanceUIDs', studyInstanceUid);
 
-              const isValidMode = mode.isValidMode({
-                modalities: modalitiesToCheck,
-                study,
-              });
-              // TODO: Modes need a default/target route? We mostly support a single one for now.
-              // We should also be using the route path, but currently are not
-              // mode.routeName
-              // mode.routes[x].path
-              // Don't specify default data source, and it should just be picked up... (this may not currently be the case)
-              // How do we know which params to pass? Today, it's just StudyInstanceUIDs and configUrl if exists
-              const query = new URLSearchParams();
-              if (filterValues.configUrl) {
-                query.append('configUrl', filterValues.configUrl);
-              }
-              query.append('StudyInstanceUIDs', studyInstanceUid);
-              return (
-                mode.displayName && (
-                  <Link
-                    className={isValidMode ? '' : 'cursor-not-allowed'}
-                    key={i}
-                    to={`${dataPath ? '../../' : ''}${mode.routeName}${
-                      dataPath || ''
-                    }?${query.toString()}`}
-                    onClick={event => {
-                      // In case any event bubbles up for an invalid mode, prevent the navigation.
-                      // For example, the event bubbles up when the icon embedded in the disabled button is clicked.
-                      if (!isValidMode) {
-                        event.preventDefault();
-                      }
-                    }}
-                    // to={`${mode.routeName}/dicomweb?StudyInstanceUIDs=${studyInstanceUid}`}
-                  >
-                    {/* TODO revisit the completely rounded style of buttons used for launching a mode from the worklist later - for now use LegacyButton*/}
-                    <LegacyButton
-                      rounded="full"
-                      variant={isValidMode ? 'contained' : 'disabled'}
-                      disabled={!isValidMode}
-                      endIcon={<Icon name="launch-arrow" />} // launch-arrow | launch-info
-                      onClick={() => {}}
-                      data-cy={`mode-${mode.routeName}-${studyInstanceUid}`}
+                return (
+                  mode.displayName && (
+                    <Link
+                      className={isValidMode ? '' : 'cursor-not-allowed'}
+                      key={i}
+                      to={`${dataPath ? '../../' : ''}${mode.routeName}${
+                        dataPath || ''
+                      }?${query.toString()}`}
+                      onClick={event => {
+                        // In case any event bubbles up for an invalid mode, prevent the navigation.
+                        // For example, the event bubbles up when the icon embedded in the disabled button is clicked.
+                        if (!isValidMode) {
+                          event.preventDefault();
+                        }
+                      }}
                     >
-                      {t(`Modes:${mode.displayName}`)}
-                    </LegacyButton>
-                  </Link>
-                )
-              );
-            })}
+                      {/* TODO revisit the completely rounded style of buttons used for launching a mode from the worklist later - for now use LegacyButton*/}
+                      <LegacyButton
+                        rounded="full"
+                        variant={isValidMode ? 'contained' : 'disabled'}
+                        disabled={!isValidMode}
+                        endIcon={<Icon name="launch-arrow" />} // launch-arrow | launch-info
+                        onClick={() => {}}
+                        data-cy={`mode-${mode.routeName}-${studyInstanceUid}`}
+                      >
+                        {t(`Modes:${mode.displayName}`)}
+                      </LegacyButton>
+                    </Link>
+                  )
+                );
+              })}
+            </div>
+            {workflowlist && workflowlist.length > 0 ? (
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="workflow-combobox"
+                  className="mr-2 cursor-pointer text-sm font-medium text-gray-700"
+                  onClick={() => appendStudyInWorkflow(studyInstanceUid)}
+                >
+                  Add to Workflow
+                </label>
+                <Select
+                  id="workflow-combobox"
+                  className="w-40"
+                  options={workflowlist.map(workflow => ({
+                    label: workflow,
+                    value: workflow,
+                  }))}
+                  value={selectedWorkFlowList}
+                  isMulti={false}
+                  isClearable={false}
+                  isSearchable={false}
+                  closeMenuOnSelect={true}
+                  hideSelectedOptions={false}
+                  onChange={e => setSelectedWorkFlowList(e)}
+                  placeholder="Select Workflow"
+                ></Select>
+              </div>
+            ) : (
+              <span className="text-sm text-gray-500">No workflows available</span>
+            )}
           </div>
         </StudyListExpandedRow>
       ),
@@ -490,51 +638,88 @@ function WorkList({
 
   return (
     <div className="flex h-screen flex-col bg-black ">
+      <WFModal
+        isOpen={openModal}
+        onClose={handleCloseModal}
+        onConfirm={handleCreateWorkflow}
+        workFlowName={newWorkflowName}
+        setWorkflowName={setNewWorkflowName}
+        errorMessage={errorMessage}
+      />
       <Header
         isSticky
         menuOptions={menuOptions}
         isReturnEnabled={false}
         WhiteLabeling={appConfig.whiteLabeling}
       />
-      <div className="ohif-scrollbar flex grow flex-col overflow-y-auto">
-        <StudyListFilter
-          numOfStudies={pageNumber * resultsPerPage > 100 ? 101 : numOfStudies}
-          filtersMeta={filtersMeta}
-          filterValues={{ ...filterValues, ...defaultSortValues }}
-          onChange={setFilterValues}
-          clearFilters={() => setFilterValues(defaultFilterValues)}
-          isFiltering={isFiltering(filterValues, defaultFilterValues)}
-          onUploadClick={uploadProps ? () => show(uploadProps) : undefined}
-          getDataSourceConfigurationComponent={
-            dataSourceConfigurationComponent ? () => dataSourceConfigurationComponent() : undefined
-          }
-        />
-        {hasStudies ? (
-          <div className="flex grow flex-col">
-            <StudyListTable
-              tableDataSource={tableDataSource.slice(offset, offsetAndTake)}
-              numOfStudies={numOfStudies}
-              querying={querying}
-              filtersMeta={filtersMeta}
-            />
-            <div className="grow">
-              <StudyListPagination
-                onChangePage={onPageNumberChange}
-                onChangePerPage={onResultsPerPageChange}
-                currentPage={pageNumber}
-                perPage={resultsPerPage}
+      <div className="flex flex-row justify-center gap-4 ">
+        <div className="ohif-scrollbar flex max-w-[75%] grow flex-col overflow-y-auto pl-4">
+          <StudyListFilter
+            numOfStudies={pageNumber * resultsPerPage > 100 ? 101 : numOfStudies}
+            filtersMeta={filtersMeta}
+            filterValues={{ ...filterValues, ...defaultSortValues }}
+            onChange={setFilterValues}
+            clearFilters={() => setFilterValues(defaultFilterValues)}
+            isFiltering={isFiltering(filterValues, defaultFilterValues)}
+            onUploadClick={uploadProps ? () => show(uploadProps) : undefined}
+            getDataSourceConfigurationComponent={
+              dataSourceConfigurationComponent
+                ? () => dataSourceConfigurationComponent()
+                : undefined
+            }
+          />
+          {hasStudies ? (
+            <div className="flex grow flex-col">
+              <StudyListTable
+                tableDataSource={tableDataSource.slice(offset, offsetAndTake)}
+                numOfStudies={numOfStudies}
+                querying={querying}
+                filtersMeta={filtersMeta}
               />
+              <div className="grow">
+                <StudyListPagination
+                  onChangePage={onPageNumberChange}
+                  onChangePerPage={onResultsPerPageChange}
+                  currentPage={pageNumber}
+                  perPage={resultsPerPage}
+                />
+              </div>
             </div>
+          ) : (
+            <div className="w-1/4 max-w-[300px] flex-shrink-0">
+              {appConfig.showLoadingIndicator && isLoadingData ? (
+                <LoadingIndicatorProgress className={'h-full w-full bg-black'} />
+              ) : (
+                <EmptyStudies />
+              )}
+            </div>
+          )}
+        </div>
+        <div className="w-1/4 flex-shrink-0 bg-black p-4 text-white">
+          {workflowlist && workflowlist.length > 0 ? (
+            <WorkflowList
+              workflowsMeta={workflowlist}
+              workflowValues={{ sortBy: 'name', sortDirection: 'asc' }}
+              numOfWorkflows={workflowlist.length}
+              onChange={newValues => console.log('Changed:', newValues)}
+              onWorkflowClick={workflow => {
+                // Redirect to the workflow's route
+                navigate(`/workflow/${workflow}`);
+              }}
+              // clearWorkflows={onClearWorkflowsClick}
+            />
+          ) : (
+            <div className="text-gray-400">No workflows available</div>
+          )}
+          <div className="container mx-auto my-4 flex justify-center">
+            <button
+              className="rounded bg-blue-500 py-2 px-4 font-bold text-white hover:bg-blue-600"
+              onClick={handleOpenModal}
+            >
+              {t('Create Workflow')}
+            </button>
           </div>
-        ) : (
-          <div className="flex flex-col items-center justify-center pt-48">
-            {appConfig.showLoadingIndicator && isLoadingData ? (
-              <LoadingIndicatorProgress className={'h-full w-full bg-black'} />
-            ) : (
-              <EmptyStudies />
-            )}
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );
@@ -618,5 +803,4 @@ function _sortStringDates(s1, s2, sortModifier) {
     return -1 * sortModifier;
   }
 }
-
 export default WorkList;

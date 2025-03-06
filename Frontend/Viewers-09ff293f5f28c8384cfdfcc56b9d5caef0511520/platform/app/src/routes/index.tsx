@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Children } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { ErrorBoundary } from '@ohif/ui';
 
@@ -9,6 +9,7 @@ import Local from './Local';
 import Debug from './Debug';
 import NotFound from './NotFound';
 import buildModeRoutes from './buildModeRoutes';
+import WorkflowDetailPage from './Workflow/WorkflowDetails';
 import PrivateRoute from './PrivateRoute';
 import PropTypes from 'prop-types';
 import { Link } from 'react-router-dom';
@@ -99,6 +100,15 @@ const createRoutes = ({
       hotkeysManager,
     }) || [];
 
+  const workflowRoutes = [
+    {
+      path: '/workflow/:workflowName',
+      children: DataSourceWrapper,
+      private: true,
+      props: { children: WorkflowDetailPage, servicesManager, extensionManager },
+    },
+  ];
+
   const { customizationService } = servicesManager.services;
 
   const WorkListRoute = {
@@ -109,8 +119,10 @@ const createRoutes = ({
   };
 
   const customRoutes = customizationService.getGlobalCustomization('customRoutes');
+
   const allRoutes = [
     ...routes,
+    ...workflowRoutes,
     ...(showStudyList ? [WorkListRoute] : []),
     ...(customRoutes?.routes || []),
     ...bakedInRoutes,

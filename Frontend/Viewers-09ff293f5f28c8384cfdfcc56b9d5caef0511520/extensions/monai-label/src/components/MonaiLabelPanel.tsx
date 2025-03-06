@@ -13,6 +13,9 @@ import SegmentationReader from '../utils/SegmentationReader';
 import MonaiSegmentation from './MonaiSegmentation';
 import SegmentationToolbox from './SegmentationToolbox';
 
+import { createReportAsync } from '@ohif/extension-default';
+import { servicesManager } from 'platform/app/src/App';
+
 export default class MonaiLabelPanel extends Component {
   static propTypes = {
     commandsManager: PropTypes.any,
@@ -32,6 +35,8 @@ export default class MonaiLabelPanel extends Component {
   props: any;
   SeriesInstanceUID: any;
   StudyInstanceUID: any;
+  isMONAILabelConnected: boolean;
+  Modality: any;
 
   constructor(props) {
     super(props);
@@ -54,6 +59,17 @@ export default class MonaiLabelPanel extends Component {
       action: {},
       segmentations: [],
     };
+    this.workflowName = null;
+    /////////////////////////////NEW CODE/////////////////////////////////////
+    const params = new URLSearchParams(window.location.search);
+    const paramsObject = {};
+    for (const [key, value] of params.entries()) {
+      paramsObject[key] = value;
+    }
+
+    if (paramsObject.workflowName) {
+      this.workflowName = paramsObject.workflowName;
+    }
 
     // Todo: fix this hack
     setTimeout(() => {
@@ -65,8 +81,10 @@ export default class MonaiLabelPanel extends Component {
 
       this.SeriesInstanceUID = displaySet.SeriesInstanceUID;
       this.StudyInstanceUID = displaySet.StudyInstanceUID;
+      this.Modality = displaySet.Modality;
       this.FrameOfReferenceUID = displaySet.instances[0].FrameOfReferenceUID;
       this.displaySetInstanceUID = displaySet.displaySetInstanceUID;
+      this.onInfo();
     }, 1000);
   }
 
@@ -78,7 +96,7 @@ export default class MonaiLabelPanel extends Component {
     const subscriptions = [];
 
     [added, updated, removed].forEach((evt) => {
-      const { unsubscribe } = segmentationService.subscribe(evt, () => {
+      const { unsubscribe } = segmentationService.subscribe(evt, (data) => {
         const segmentations = segmentationService.getSegmentations();
 
         if (!segmentations?.length) {
@@ -112,13 +130,15 @@ export default class MonaiLabelPanel extends Component {
 
   onInfo = async () => {
     this.notification.show({
-      title: 'MONAI Label',
-      message: 'Connecting to MONAI Label',
+      title: 'Workflow Server',
+      message: 'Connecting to Workflow Server',
       type: 'info',
       duration: 3000,
     });
 
     const response = await this.client().info();
+
+    this.isMONAILabelConnected = true;
 
     // remove the background
     const labels = response.data.labels.splice(1);
@@ -142,15 +162,15 @@ export default class MonaiLabelPanel extends Component {
 
     if (response.status !== 200) {
       this.notification.show({
-        title: 'MONAI Label',
-        message: 'Failed to Connect to MONAI Label Server',
+        title: 'Workflow Server',
+        message: 'Failed to Connect to Workflow Server',
         type: 'error',
         duration: 5000,
       });
     } else {
       this.notification.show({
-        title: 'MONAI Label',
-        message: 'Connected to MONAI Label Server - Successful',
+        title: 'Workflow Server',
+        message: 'Connected to Workflow Server - Successful',
         type: 'success',
         duration: 2000,
       });
@@ -309,6 +329,62 @@ export default class MonaiLabelPanel extends Component {
     this._update({ data, centroids }, labelNames);
   };
 
+  uploadLabels = async () => {
+    if (!this.isMONAILabelConnected) {
+      console.error('Server is not connected');
+      return;
+    }
+
+    try {
+      const naturalizedReport = await this.getReport();
+
+      const servicesManager = this.props.servicesManager;
+      createReportAsync({
+        servicesManager,
+        getReport: async () => naturalizedReport, // Reuse the already retrieved report
+        reportType: 'Segmentation',
+      });
+
+      try {
+        const response = await fetch(
+          'http://localhost:8000/workflow/update-uids',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              case_id: this.StudyInstanceUID,
+              task_name: this.workflowName,
+              series_instance_uid: this.SeriesInstanceUID,
+              instance_uid: naturalizedReport.SeriesInstanceUID,
+              modality: this.Modality,
+            }),
+          }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Error: ${response.status}`);
+        }
+
+        const result = await response.json();
+      } catch (error) {
+        console.error('Error updating workflow:', error);
+        return;
+      }
+    } catch (error) {
+      console.error('Error generating report:', error);
+    }
+  };
+  getReport = async () => {
+    const datasources = this.props.extensionManager.getActiveDataSource();
+    const segmentationId = '1';
+    return await this.props.commandsManager.runCommand('storeSegmentation', {
+      segmentationId,
+      dataSource: datasources[0],
+    });
+  };
+
   render() {
     return (
       <div className="monaiLabelPanel">
@@ -322,7 +398,7 @@ export default class MonaiLabelPanel extends Component {
 
         {/* <button onClick={this._debug}> Read</button> */}
         <div className="tabs scrollbar" id="style-3">
-          <OptionTable
+          {/* <OptionTable
             ref={this.actions['options']}
             tabIndex={1}
             info={this.state.info}
@@ -334,24 +410,26 @@ export default class MonaiLabelPanel extends Component {
             notification={this.notification}
             //updateView={this.updateView}
             onSelectActionTab={this.onSelectActionTab}
-          />
+          /> */}
 
-          <ActiveLearning
-            ref={this.actions['activelearning']}
-            tabIndex={2}
-            info={this.state.info}
-            viewConstants={{
-              SeriesInstanceUID: this.SeriesInstanceUID,
-              StudyInstanceUID: this.StudyInstanceUID,
-            }}
-            client={this.client}
-            notification={this.notification}
-            /* updateView={this.updateView} */
-            onSelectActionTab={this.onSelectActionTab}
-            onOptionsConfig={this.onOptionsConfig}
-            // additional function - delete scribbles before submit
-            /* onDeleteSegmentByName={this.onDeleteSegmentByName} */
-          />
+          {/* {this.workflowName && (
+            <ActiveLearning
+              ref={this.actions['activelearning']}
+              tabIndex={2}
+              info={this.state.info}
+              viewConstants={{
+                SeriesInstanceUID: this.SeriesInstanceUID,
+                StudyInstanceUID: this.StudyInstanceUID,
+              }}
+              client={this.client}
+              notification={this.notification}
+              // updateView={this.updateView}
+              // onSelectActionTab={this.onSelectActionTab}
+              // onOptionsConfig={this.onOptionsConfig}
+              // additional function - delete scribbles before submit
+              // onDeleteSegmentByName={this.onDeleteSegmentByName}
+            />
+          )} */}
 
           <AutoSegmentation
             ref={this.actions['segmentation']}
@@ -361,13 +439,14 @@ export default class MonaiLabelPanel extends Component {
               SeriesInstanceUID: this.SeriesInstanceUID,
               StudyInstanceUID: this.StudyInstanceUID,
             }}
+            servicesManager={this.props.servicesManager}
             client={this.client}
             notification={this.notification}
             updateView={this.updateView}
             onSelectActionTab={this.onSelectActionTab}
             onOptionsConfig={this.onOptionsConfig}
           />
-          <SmartEdit
+          {/* <SmartEdit
             ref={this.actions['smartedit']}
             tabIndex={4}
             servicesManager={this.props.servicesManager}
@@ -383,9 +462,38 @@ export default class MonaiLabelPanel extends Component {
             updateView={this.updateView}
             onSelectActionTab={this.onSelectActionTab}
             onOptionsConfig={this.onOptionsConfig}
-          />
+          /> */}
         </div>
 
+        {this.workflowName && (
+          <div style={{ marginTop: '10px', textAlign: 'center' }}>
+            <button
+              onClick={this.uploadLabels}
+              disabled={!this.isMONAILabelConnected} // Disable the button if not connected to MONAI
+              style={{
+                backgroundColor: '#2c3e50',
+                color: '#fff',
+                padding: '10px 20px',
+                borderRadius: '20px',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+                transition: 'all 0.3s ease',
+                fontSize: '14px',
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = '#16202b';
+                e.target.style.boxShadow = '0 6px 10px rgba(0, 0, 0, 0.2)';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = '#2c3e50';
+                e.target.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+              }}
+            >
+              Upload Labels
+            </button>
+          </div>
+        )}
         {this.state.segmentations?.map((segmentation) => (
           <>
             <SegmentationToolbox servicesManager={this.props.servicesManager} />
