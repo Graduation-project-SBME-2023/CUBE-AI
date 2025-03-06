@@ -10,7 +10,14 @@
 1. Open **pgAdmin**.
 2. Create a new database named `work_flow`.
 3. Navigate to the **Schemas** section, right-click on it, and select **Query Tool**.
-4. Run the following SQL query to create the `workflow` table:
+
+4. Run the following SQL query to create the `list_workflow` table:
+```sql
+   CREATE TABLE IF NOT EXISTS list_workflow (
+    task_name TEXT PRIMARY KEY
+);
+   ```
+5. Run the following SQL query to create the `workflow` table:
    ```sql
     CREATE TABLE IF NOT EXISTS public.workflow
     (
@@ -32,12 +39,7 @@
     ALTER TABLE IF EXISTS public.workflow
         OWNER to postgres;
    ```
-5. Run the following SQL query to create the `list_workflow` table:
-```sql
-   CREATE TABLE IF NOT EXISTS list_workflow (
-    task_name TEXT PRIMARY KEY
-);
-   ```
+
 ### Additional Database Commands
 
 - **View table data:**
@@ -48,18 +50,13 @@
   ```sql
   DELETE FROM workflow;
   ```
-- **To make relation between two tables:**
-```sql
-    ALTER TABLE workflow
-    ADD CONSTRAINT fk_task_name FOREIGN KEY (task_name)
-    REFERENCES list_workflow (task_name)
-    ON DELETE CASCADE;
-  ```
+
 - **Enforce unique task_name in list_workflow table**
 ```sql
     ALTER TABLE list_workflow
     ADD CONSTRAINT unique_task_name UNIQUE (task_name);
 ```
+
 ## Step 3: Add API in Monai Label Server
 
 1. Navigate to the path of your Monai Label installation, typically:
