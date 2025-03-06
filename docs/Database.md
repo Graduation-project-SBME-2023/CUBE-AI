@@ -70,13 +70,16 @@
 2. Create a new file named `workflow.py` in the `endpoints` directory.
 
 3. Add the following code to `workflow.py`:
-
+ -  **Note : you have to install asyncpg accroding to following command**
+   ```python
+   pip install asyncpg
+   ```
    ```python
    from fastapi import APIRouter, HTTPException, Depends ,Query
     from pydantic import BaseModel
     import asyncpg
     import logging
-    from typing import Optional, List
+    from typing import Optional, List 
     import json
 
 
