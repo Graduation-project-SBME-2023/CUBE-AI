@@ -27,6 +27,3 @@ monailabel start_server --app radiology --studies http://localhost:8042/dicom-we
 ## 4. Verification
 Ensure the server is running correctly by checking the logs or accessing `http://localhost:8000`.
 
----
-For troubleshooting or additional configurations, refer to the MONAI Label documentation.
-
