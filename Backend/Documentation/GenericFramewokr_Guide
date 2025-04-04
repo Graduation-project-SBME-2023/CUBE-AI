@@ -1,9 +1,10 @@
 # Generic Framework Documentation
 
-
+### Follow the following steps before you run the backend for the first time
 
 ---
-## create initialize_inference_task.py  this file to endpoints in MONAILabel
+
+## create initialize_inference_task.py this file to endpoints in MONAILabel
 
 ```PYTHON
 from fastapi import APIRouter, Depends , Query
@@ -21,7 +22,7 @@ router = APIRouter(
 @router.post("/", summary="intialize inference task")
 async def initialize_inference_task(
     model_name: str = Query(..., description="Model name"),
-    
+
 ):
     instance: MONAILabelApp = app_instance()
 
@@ -29,7 +30,7 @@ async def initialize_inference_task(
     return {"message": message}
 ```
 
-## create create_model.py  this file to endpoints in MONAILabel
+## create create_model.py this file to endpoints in MONAILabel
 
 ```PYTHON
 from fastapi import APIRouter, Depends , Query
@@ -50,7 +51,7 @@ async def create_model(
     labels: str = Query(..., description="Labels in JSON format"),
     fold: int = Query(..., description="fold number"),
     plan_type: str = Query(..., description="plan type"),
-    
+
 ):
     instance: MONAILabelApp = app_instance()
 
@@ -59,6 +60,7 @@ async def create_model(
 ```
 
 ## Add this lines in Lib\site-packages\monailabel\app.py
+
 ```PYTHON
 app.include_router(initialize_inference_task.router, prefix=settings.MONAI_LABEL_API_STR)
 app.include_router(create_model.router, prefix=settings.MONAI_LABEL_API_STR)
@@ -66,12 +68,12 @@ app.include_router(create_model.router, prefix=settings.MONAI_LABEL_API_STR)
 ```
 
 ## ADD this line in Lib\site-packages\monailabel\interfaces\app.py at 106
+
 ```PYTHON
 self.init_workflows()
 
 ```
 
-
 ## **License**
-This project is licensed under the MIT License. Feel free to modify and distribute it as needed.
 
+This project is licensed under the MIT License. Feel free to modify and distribute it as needed.
