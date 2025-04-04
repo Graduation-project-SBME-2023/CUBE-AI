@@ -8,8 +8,8 @@ This guide explains how to set up and run the MONAI Label server with a modified
 - **MONAI Version**: Install **MONAI v1.4.0**.
 
 ## 1. Enable Dynamic Model Creation Endpoints
-Before running the server, follow the steps in the **Framework Inference Guide** to activate the endpoints for dynamically creating new models.
-[https://github.com/Graduation-project-SBME-2023/OHIF-Standalone/blob/dev/Backend/Documentation/GenericFramework_Guide.md](#) 
+Before running the server, follow the steps in the **Framework Inference Guide** to activate the endpoints for dynamically creating new models. 
+[Framework Inference Guide](https://github.com/Graduation-project-SBME-2023/OHIF-Standalone/blob/dev/Backend/Documentation/GenericFramework_Guide.md)
 
 ## 2. Download and Prepare Backend
 - Download the `backend` folder containing the `radiology` application.
