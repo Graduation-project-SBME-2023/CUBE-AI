@@ -5,7 +5,8 @@
 1. Navigate to the path of your Monai Label installation, typically:
 
    ```
-    C:\Users\"your user name"\AppData\Local\Programs\Python\Python39\Lib\site-packages\monailabel   ```
+    C:\Users\"your user name"\AppData\Local\Programs\Python\Python39\Lib\site-packages\monailabel
+   ```
 
    Replace `Python39` with your Python version.
 
