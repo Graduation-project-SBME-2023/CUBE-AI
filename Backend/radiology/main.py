@@ -186,11 +186,6 @@ class MyApp(MONAILabelApp):
         if trainer_task is not None:
             self._trainers[model_name] = trainer_task
 
-
-        infer_task = self.models[model_name].infer()
-        self._infers[model_name] = infer_task
-
-
         logger.info(f"Successfully added model '{model_name}'  in trainer tasks.")    
 
     def initialize_inference_task(self, model_name):
@@ -203,8 +198,6 @@ class MyApp(MONAILabelApp):
                 self._infers[key] = task
         else:
             self._infers[model_name] = infer_task
-            
-        print("inferssss",self._infers)
 
 
         return f"Successfully initialized inference task for model {model_name}"
