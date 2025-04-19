@@ -5,7 +5,8 @@
 1. Navigate to the path of your Monai Label installation, typically:
 
    ```
-    C:\Users\"your user name"\AppData\Local\Programs\Python\Python39\Lib\site-packages\monailabel   ```
+    C:\Users\"your user name"\AppData\Local\Programs\Python\Python39\Lib\site-packages\monailabel
+   ```
 
    Replace `Python39` with your Python version.
 
@@ -19,20 +20,23 @@
     from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
    @router.post("/labels", summary=f"{RBAC_USER} Download Labels")
-    async def api_download_labels(
-        series_uids: List[str],
-        task_name: str,  # Now a parameter like in the images endpoint
-        user: User = Depends(RBAC(settings.MONAI_LABEL_AUTH_ROLE_USER))
-    ):
+async def api_download_labels(
+    series_uids: List[str],
+    task_name: str,  # Now a parameter like in the images endpoint
+    user: User = Depends(RBAC(settings.MONAI_LABEL_AUTH_ROLE_USER))
+):
     # Define directories and mapping file path
     radiology_path = Path("radiology")
     target_dir = radiology_path / "Labels"
     mapping_path = radiology_path / "NN_Unet" / "instance_mapping.json"
+    
     # Ensure the target directory exists
     os.makedirs(target_dir, exist_ok=True)
     mapping_path.parent.mkdir(parents=True, exist_ok=True)
+
     downloaded_files = []
     skipped_files = []
+
     # Load the instance mapping from JSON if it exists; otherwise, initialize an empty mapping.
     if mapping_path.exists():
         try:
@@ -43,41 +47,41 @@
             instance_mapping = {}
     else:
         instance_mapping = {}
+
     # Optionally log any mapping entries that might be missing required keys
     for key, entry in instance_mapping.items():
         if "series_uid" not in entry:
             logger.warning(f"Mapping entry '{key}' is missing 'series_uid': {entry}")
+
     # Extract series UIDs already registered for the provided task name
     existing_series_uids = {
         entry.get("series_uid")
         for entry in instance_mapping.values()
         if entry.get("series_uid") and entry.get("task_name") == task_name
     }
+
     for series_uid in series_uids:
         target_file = target_dir / f"{series_uid}.nii.gz"
+
         # Check if the file already exists on disk
         if target_file.exists():
             logger.info(f"File already exists in Labels folder; skipping download: {target_file}")
             skipped_files.append(series_uid)
             continue
+
         # Check if the series UID is already in the mapping for this task
         if series_uid in existing_series_uids:
             logger.info(f"Series UID {series_uid} already exists in instance mapping for task '{task_name}'; skipping download.")
             skipped_files.append(series_uid)
             continue
+
         # Download the label file (assumed to be returned as a FileResponse)
         file_response = download_image(series_uid)
         if isinstance(file_response, FileResponse):
             # Move or copy the downloaded file to the target directory
             shutil.copy(file_response.path, target_file)
             downloaded_files.append(str(target_file))
-            
-            # Update the instance mapping with this new download
-            instance_mapping[series_uid] = {
-                "series_uid": series_uid,
-                "task_name": task_name,
-                "file_path": str(target_file)
-            }
+        
         else:
             logger.error(f"Failed to download label for series UID: {series_uid}")
             skipped_files.append(series_uid)
