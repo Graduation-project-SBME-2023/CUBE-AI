@@ -551,10 +551,13 @@ function WorkflowDetailPage({
       for (const workflowStudy of workflowStudies) {
         const series = await dataSource.query.series.search(workflowStudy.studyInstanceUid);
 
-        if (modelConfig === '2D' && series.some(s => s.numSeriesInstances > 1)) {
+        if (modelConfig === '2d' && series.some(s => s.numSeriesInstances > 1)) {
           has2DConflict = true;
         }
-        if (modelConfig === '3D' && series.some(s => s.numSeriesInstances < 2)) {
+        if (
+          modelConfig === '3d_lowres' ||
+          (modelConfig === '3d_fullres' && series.some(s => s.numSeriesInstances < 2))
+        ) {
           has3DConflict = true;
         }
       }
@@ -670,6 +673,28 @@ function WorkflowDetailPage({
       }, {});
 
       try {
+        const labelMapping = fetchedData['series_instance_uid'].reduce((acc, seriesUID, index) => {
+          acc[seriesUID] = fetchedData['instance_uid'][index];
+          return acc;
+        }, {});
+
+        const apiUrl = 'http://localhost:8000/datastore/process';
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(labelMapping),
+        });
+        if (!response.ok) throw new Error('Failed to process labels');
+        const data = await response.json();
+        console.log('Process Result:', data);
+
+      } catch (error) {
+        console.log('Error Processing Labels:', error);
+      }
+
+      try {
         const apiURL = 'http://localhost:8000/normalize&align/normalize-labels';
         const response = await fetch(apiURL);
         if (!response.ok) {
@@ -766,6 +791,9 @@ function WorkflowDetailPage({
           duration: 3000,
         });
         try {
+          const queryParams = new URLSearchParams({
+            model_name: workflowDetails.workflowName,
+          }).toString();
           const response = await fetch(`http://localhost:8000/train/${workflowName}`, {
             method: 'POST',
             headers: {
@@ -964,13 +992,13 @@ function WorkflowDetailPage({
           seriesTableDataSource={
             seriesInStudiesMap.has(studyInstanceUid)
               ? seriesInStudiesMap.get(studyInstanceUid).map(s => {
-                  // return {
-                  //   description: s.description || '(empty)',
-                  //   seriesNumber: s.seriesNumber ?? '',
-                  //   modality: s.modality || '',
-                  //   instances: s.numSeriesInstances || '',
-                  // };
-                })
+                // return {
+                //   description: s.description || '(empty)',
+                //   seriesNumber: s.seriesNumber ?? '',
+                //   modality: s.modality || '',
+                //   instances: s.numSeriesInstances || '',
+                // };
+              })
               : []
           }
         >
@@ -1008,7 +1036,7 @@ function WorkflowDetailPage({
                           variant={isValidMode ? 'contained' : 'disabled'}
                           disabled={!isValidMode}
                           endIcon={<Icon name="launch-arrow" />} // launch-arrow | launch-info
-                          onClick={() => {}}
+                          onClick={() => { }}
                           data-cy={`mode-${mode.routeName}-${studyInstanceUid}`}
                         >
                           {t(`Modes:${mode.displayName}`)}
@@ -1267,9 +1295,9 @@ function WorkflowDetailPage({
                       color: 'black',
                     }}
                   >
-                    <option value="2D">2D</option>
-                    <option value="3D">3D</option>
-                    <option value="3D Full Resolution">3D Full Resolution</option>
+                    <option value="2d">2D</option>
+                    <option value="3d_lowres">3D</option>
+                    <option value="3d_fullres">3D Full Resolution</option>
                   </select>
                 </div>
               </div>
