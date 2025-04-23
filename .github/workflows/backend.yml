@@ -24,7 +24,7 @@ jobs:
       - name: Compile the code
         run: |
           echo "Skipping tests for now."
-          cd backend
+          cd Backend
           
 
 
