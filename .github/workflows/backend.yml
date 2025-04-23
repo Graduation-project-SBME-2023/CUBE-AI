@@ -4,19 +4,28 @@ on:
   push:
     branches:
       - dev
-
+    paths:
+      - backend/**
+      - .github/workflows/backend.yml
 
 
 jobs:
-  test:
+  compile:
     runs-on: ubuntu-latest 
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Run tests
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'  
+
+      - name: Compile the code
         run: |
           echo "Skipping tests for now."
+          cd backend
+          
 
 
 
