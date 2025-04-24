@@ -18,9 +18,8 @@ RUN git clone https://github.com/MIC-DKFZ/nnUNet.git --branch master && \
     cd ..
 
 # Copy custom code and configurations
-COPY ./lib/ /app/lib/
-COPY ./main/ /app/main/
-COPY ./apps/ /apps/
+
+COPY ./radiology/ /apps/radiology
 COPY ./monailabel/ /usr/local/lib/python3.10/dist-packages/monailabel/
 
 # Setup environment variables
