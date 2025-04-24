@@ -27,11 +27,3 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_USERNAME }}  # Consistent secret name
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
-
-      - name: Build and cache Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: ./Backend
-          file: ./Backend/Dockerfile
-          tags:  ${{ secrets.DOCKER_USERNAME }}/monailabel-custom:latest  # Fixed tag format
-          push: true  # Changed to push to registry
