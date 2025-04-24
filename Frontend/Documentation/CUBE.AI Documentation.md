@@ -247,5 +247,5 @@ modes\monai-label\src\index.tsx
 Update the `displayName`:
 
 ```javascript
-displayName: 'Assisted Segmentationn',
+displayName: 'Assisted Segmentation',
 ```
