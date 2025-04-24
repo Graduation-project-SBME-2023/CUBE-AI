@@ -9,7 +9,7 @@ on:
       - .github/workflows/frontend.yml
 
 jobs:
-  build-monailabel:
+  build-ohif:
     runs-on: ubuntu-latest 
     steps:
       - name: Check out the repository
