@@ -30,10 +30,10 @@ jobs:
         with:
         context: ./backend
         file: ./backend/Dockerfile
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/monailabel-CUBE.ai:latest
-          push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        tags: ${{ secrets.DOCKERHUB_USERNAME }}/monailabel-CUBE.ai:latest
+        push: false
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
           
             
 
