@@ -27,8 +27,8 @@ jobs:
       - name: Build and cache Docker image
         uses: docker/build-push-action@v5
         with:
-          context: ./backend
-          file: ./backend/Dockerfile
+          context: ./Backend
+          file: ./Backend/Dockerfile
           tags:  ${{ secrets.DOCKER_USERNAME }}/monailabel-custom:latest  # Fixed tag format
           push: false  # Changed to push to registry
 
