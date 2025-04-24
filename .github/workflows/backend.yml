@@ -30,7 +30,7 @@ jobs:
           context: ./Backend
           file: ./Backend/Dockerfile
           tags:  ${{ secrets.DOCKER_USERNAME }}/monailabel-custom:latest  # Fixed tag format
-          push: false  # Changed to push to registry
+          push: true  # Changed to push to registry
 
 
 
