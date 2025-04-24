@@ -28,12 +28,12 @@ jobs:
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
-        context: ./backend
-        file: ./backend/Dockerfile
-        tags: ${{ secrets.DOCKERHUB_USERNAME }}/monailabel-CUBE.ai:latest
-        push: false
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+          context: ./backend
+          file: ./backend/Dockerfile
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/monailabel-CUBE.ai:latest
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           
             
 
