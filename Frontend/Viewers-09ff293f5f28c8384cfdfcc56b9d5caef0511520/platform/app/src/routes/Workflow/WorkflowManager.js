@@ -1,4 +1,4 @@
-import Workflow from './WorkFlow';
+import Workflow from './Workflow';
 
 class WorkflowManager {
   constructor() {
