@@ -15,7 +15,7 @@ class WorkflowManager {
       }
 
       const taskRecords = await response.json();
-      console.log('Fetched task names:', taskRecords);
+      console.log('Fetched task namess:', taskRecords);
 
       // Fetch case_ids for each task_name
       const workflows = await Promise.all(
