@@ -1,7 +1,3 @@
-Sure! Here's the full `README.md` content in one file, ready for use:
-
----
-
 # OHIF + MONAI Label + PostgreSQL + Orthanc Setup
 
 This project uses **Docker Compose** to run four essential services for our CUBE.AI platform:
