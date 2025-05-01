@@ -39,7 +39,7 @@ on:
     branches:
       - dev
     paths:
-      - backend/**
+      - Backend/**
       - .github/workflows/backend.yml
 
 jobs:
