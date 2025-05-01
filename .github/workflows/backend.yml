@@ -87,6 +87,10 @@ jobs:
           docker compose up -d
           sleep 10  # wait for services to be ready
 
+      - name: Check Images in Dockerfile
+        working-directory: ./Backend
+        run: docker-compose ps
+
       - name: Tear down containers
         working-directory: ./Backend
         run: docker compose down
