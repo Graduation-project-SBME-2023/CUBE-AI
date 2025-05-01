@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: monailabel:latest
+    container_name: monailabel
     ports:
       - "8000:8000"
     environment:
