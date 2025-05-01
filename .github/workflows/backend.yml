@@ -1,3 +1,37 @@
+# name: backend-server CI/CD
+
+# on:
+#   push:
+#     branches:
+#       - dev
+#     paths:
+#       - backend/**
+#       - .github/workflows/backend.yml
+
+# jobs:
+#   build-monailabel:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Check out the repository
+#         uses: actions/checkout@v4
+
+#       - name: Set up Docker Buildx
+#         uses: docker/setup-buildx-action@v3
+
+#       - name: Login to Docker Hub
+#         uses: docker/login-action@v3
+#         with:
+#           username: ${{ secrets.DOCKER_USERNAME }}  # Consistent secret name
+#           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+#       - name: Build and cache Docker image
+#         uses: docker/build-push-action@v5
+#         with:
+#           context: ./Backend
+#           file: ./Backend/Dockerfile
+#           tags:  ${{ secrets.DOCKER_USERNAME }}/monailabel-custom:latest  # Fixed tag format
+#           push: true  # Changed to push to registry
+
 name: backend-server CI/CD
 
 on:
@@ -9,8 +43,13 @@ on:
       - .github/workflows/backend.yml
 
 jobs:
-  build-monailabel:
-    runs-on: ubuntu-latest 
+  build-test-monailabel:
+    runs-on: ubuntu-latest
+    services:
+      docker:
+        image: docker:24.0.9
+        options: --privileged # needed for docker-in-docker
+
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
@@ -21,31 +60,39 @@ jobs:
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}  # Consistent secret name
+          username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
 
-      - name: Build and cache Docker image
+      - name: Build backend Docker image
         uses: docker/build-push-action@v5
         with:
           context: ./Backend
           file: ./Backend/Dockerfile
-          tags:  ${{ secrets.DOCKER_USERNAME }}/monailabel-custom:latest  # Fixed tag format
-          push: true  # Changed to push to registry
+          tags: ${{ secrets.DOCKER_USERNAME }}/monailabel-custom:latest
+          push: true
 
+      - name: Spin up backend + Postgres using Docker Compose
+        working-directory: ./Backend
+        run: |
+          docker compose up -d
+          sleep 10  # wait for services to be ready
 
+      - name: Healthcheck backend API
+        run: |
+          curl --fail http://localhost:8000/api/health/
 
-
+      - name: Tear down containers
+        working-directory: ./Backend
+        run: docker compose down
 # 1- build docker image for backend server
 
-# * chekout out 
-# * test 
+# * chekout out
+# * test
 # * build docker image for backend server
 # * push docker image to docker hub
-# * ec2 instance and run docker image on ec2 instance 
+# * ec2 instance and run docker image on ec2 instance
 # * nw job ( deployment job)
 
 # scan docekr image for vulnerabilities
 # artifact for docker image
-
-
 
