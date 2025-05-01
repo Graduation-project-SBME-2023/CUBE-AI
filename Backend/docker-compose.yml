@@ -3,7 +3,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: monailabel:latest
     container_name: monailabel
     ports:
       - "8000:8000"
@@ -20,7 +19,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: workflow_db
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
