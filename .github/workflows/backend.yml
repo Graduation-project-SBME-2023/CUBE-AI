@@ -89,7 +89,7 @@ jobs:
 
       - name: Check Images in Dockerfile
         working-directory: ./Backend
-        run: docker-compose ps
+        run: docker ps
 
       - name: Tear down containers
         working-directory: ./Backend
