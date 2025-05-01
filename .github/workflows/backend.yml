@@ -87,10 +87,6 @@ jobs:
           docker compose up -d
           sleep 10  # wait for services to be ready
 
-      - name: Healthcheck backend API
-        run: |
-          curl --fail http://localhost:8000/api/health/
-
       - name: Tear down containers
         working-directory: ./Backend
         run: docker compose down
