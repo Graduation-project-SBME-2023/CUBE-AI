@@ -84,7 +84,7 @@ jobs:
       - name: Spin up backend + Postgres using Docker Compose
         working-directory: ./Backend
         run: |
-          docker compose up -d
+          docker compose up
           sleep 10  # wait for services to be ready
 
       - name: Check Images in Dockerfile
