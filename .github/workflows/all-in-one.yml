@@ -1,0 +1,53 @@
+name: allinone-server CI/CD
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - Frontend/**
+      - Backend/**
+      - .github/workflows/all-in-one.yml
+
+jobs:
+  build-allinone:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Free up space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache
+
+      - name: Prune Docker system
+        run: docker system prune -af
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+      - name: Pull latest images
+        run: |
+          docker pull ${{ secrets.DOCKER_USERNAME }}/monailabel-custom:latest
+          docker pull ${{ secrets.DOCKER_USERNAME }}/ohif-custom:latest
+
+      - name: Spin up all-in-one stack
+        run: |
+          docker compose -f docker-compose.allinone.yml up -d
+          sleep 15  # give services time to boot
+
+      - name: Check running containers
+        run: docker ps
+
+      - name: Tear down containers
+        run: docker compose -f docker-compose.allinone.yml down
