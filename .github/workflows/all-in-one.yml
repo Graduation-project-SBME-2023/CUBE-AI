@@ -43,7 +43,7 @@ jobs:
 
       - name: Spin up all-in-one stack
         run: |
-          docker compose -f docker-compose.allinone.yml up -d
+          docker compose -f docker-compose.allinone.yml up
           sleep 15  # give services time to boot
 
       - name: Check running containers
