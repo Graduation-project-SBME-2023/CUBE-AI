@@ -47,7 +47,7 @@ jobs:
           sleep 15  # give services time to boot
 
       - name: Check running containers
-        run: docker ps
+        run: docker ps -a
 
       - name: Tear down containers
         run: docker compose -f docker-compose.allinone.yml down
