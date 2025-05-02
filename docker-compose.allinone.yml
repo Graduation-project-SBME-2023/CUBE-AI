@@ -6,7 +6,7 @@ version: "3.8"
 
 services:
   backend:
-    image: ${{ secrets.DOCKER_USERNAME }}/monailabel-custom:latest
+    image: hammo2025/monailabel-custom:latest
     container_name: monailabel
     ports:
       - "8000:8000"
@@ -16,7 +16,7 @@ services:
       - postgres
 
   frontend:
-    image: ${{ secrets.DOCKER_USERNAME }}/ohif-custom:latest
+    image: hammo2025/ohif-custom:latest
     container_name: ohifviewer
     ports:
       - "443:443" # SSL
