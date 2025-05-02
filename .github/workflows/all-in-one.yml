@@ -8,7 +8,7 @@ on:
       - Frontend/**
       - Backend/**
       - .github/workflows/all-in-one.yml
-
+      - docker-compose.allinone.yml
 jobs:
   build-allinone:
     runs-on: ubuntu-latest
