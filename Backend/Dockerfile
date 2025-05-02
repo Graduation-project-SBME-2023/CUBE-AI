@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies
 RUN pip install --upgrade pip && \
-    pip install batchgenerators acvl-utils asyncpg
+    pip install batchgenerators acvl-utils asyncpg && \
+    pip install pydicom==2.2.2
 
 # Clone and install nnUNet
 RUN git clone https://github.com/MIC-DKFZ/nnUNet.git --branch master && \
