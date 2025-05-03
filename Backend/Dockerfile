@@ -22,6 +22,7 @@ RUN git clone https://github.com/MIC-DKFZ/nnUNet.git --branch master && \
 COPY ./radiology/ /apps/radiology
 COPY ./monailabel/ /usr/local/lib/python3.10/dist-packages/monailabel/
 COPY ./reader.py /usr/local/lib/python3.10/dist-packages/pydicom_seg/reader.py
+COPY ./segmentation_dataset.py /usr/local/lib/python3.10/dist-packages/pydicom_seg/segmentation_dataset.py
 
 # Setup environment variables
 ENV nnUNet_preprocessed=/apps/radiology/nnunet/nnUNet_preprocessed \
