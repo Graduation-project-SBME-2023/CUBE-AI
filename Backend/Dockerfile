@@ -10,7 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Python dependencies
 RUN pip install --upgrade pip && \
     pip install batchgenerators acvl-utils asyncpg && \
-    pip install pydicom==2.3.1 pydicom_seg==0.2.3
 
 # Clone and install nnUNet
 RUN git clone https://github.com/MIC-DKFZ/nnUNet.git --branch master && \
@@ -22,6 +21,7 @@ RUN git clone https://github.com/MIC-DKFZ/nnUNet.git --branch master && \
 
 COPY ./radiology/ /apps/radiology
 COPY ./monailabel/ /usr/local/lib/python3.10/dist-packages/monailabel/
+COPY ./reader.py /usr/local/lib/python3.10/dist-packages/pydicom_seg/reader.py
 
 # Setup environment variables
 ENV nnUNet_preprocessed=/apps/radiology/nnunet/nnUNet_preprocessed \
