@@ -6,7 +6,7 @@ on:
       - dev
     paths:
       - Frontend/**
-      # - Backend/**
+      - Backend/**
       - .github/workflows/all-in-one.yml
       - docker-compose.allinone.yml
 jobs:
