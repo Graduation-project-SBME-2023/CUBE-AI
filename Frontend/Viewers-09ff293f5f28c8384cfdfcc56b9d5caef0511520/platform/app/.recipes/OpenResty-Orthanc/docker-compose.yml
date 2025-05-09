@@ -66,9 +66,8 @@ services:
       pip install batchgenerators &&
       pip install acvl-utils &&
       pip install asyncpg &&
-      git clone https://github.com/MIC-DKFZ/nnUNet.git --branch master &&
-      cd nnUNet &&
-      pip install -e . &&
+      pip install nnunetv2 &&
+      pip install pydicom==2.4.4 &&
       monailabel start_server --app /apps/radiology --studies http://orthanc:8042/dicom-web --conf models all"
     depends_on:
       - orthanc
