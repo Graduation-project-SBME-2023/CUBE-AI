@@ -45,7 +45,6 @@ services:
     ports:
       - 8043:8042
     volumes:
-      # Config
       - ./config/orthanc.json:/etc/orthanc/orthanc.json:ro
       # Persist data
       - ./volumes/orthanc-db/:/var/lib/orthanc/db/
