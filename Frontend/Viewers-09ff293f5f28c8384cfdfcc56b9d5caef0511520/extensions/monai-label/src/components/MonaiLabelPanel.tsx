@@ -176,6 +176,9 @@ export default class MonaiLabelPanel extends Component {
       });
 
       this.setState({ info: response.data });
+
+      // calc image embedding(if SAM model)
+      AutoSegmentation.calculateImageEmbeddings(true);
     }
   };
 
@@ -323,11 +326,26 @@ export default class MonaiLabelPanel extends Component {
 
     return { data: nrrdArrayBuffer, centroids: jsonData.centroids };
   };
+  saveSegemntation = async (model) => {
+    console.log('model', model);
+    const datasources = extensionManager.getActiveDataSource();
+    console.log('datasources', datasources);
+    const segmentationId = "1"
+    console.log("segmentationId", segmentationId);
+    // Ensure dataSource is available
+    // Call storeSegmentation from the command module
+    await this.props.commandsManager.runCommand('storeSegmentationModified', {
+      segmentationId,
+      dataSource: datasources[0],
+      isModel: model,
+    });
+  };
 
-  updateView = async (response, labelNames) => {
+  updateView = async (response, labelNames, model) => {
     const { data, centroids } = this.parseResponse(response);
     this._update({ data, centroids }, labelNames);
-  };
+    this.saveSegemntation(model);
+  }
 
   uploadLabels = async () => {
     if (!this.isMONAILabelConnected) {

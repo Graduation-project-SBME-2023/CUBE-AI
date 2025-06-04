@@ -3,6 +3,8 @@ import React, { Component } from 'react';
 import PropTypes from 'prop-types';
 
 import './ModelSelector.css';
+import AutoSegmentation from '../components/actions/AutoSegmentation';
+
 
 export default class ModelSelector extends Component {
   static propTypes = {
@@ -14,35 +16,51 @@ export default class ModelSelector extends Component {
     onClick: PropTypes.func,
     onSelectModel: PropTypes.func,
     scribblesSelector: PropTypes.any,
+    isDisabled: PropTypes.bool,
   };
 
   constructor(props) {
     super(props);
 
-    const currentModel = props.currentModel
-      ? props.currentModel
-      : props.models.length > 0
-      ? props.models[0]
-      : '';
+    // Select 'sam' if it's found in the models array, otherwise use the first model or default to an empty string
+    const currentModel = props.models.includes('sam')
+      ? 'sam'
+      : props.currentModel || (props.models.length > 0 ? props.models[0] : '');
+
     this.state = {
       models: props.models,
       currentModel: currentModel,
       buttonDisabled: false,
     };
+
   }
 
   static getDerivedStateFromProps(props, current_state) {
     if (current_state.models !== props.models) {
+      // Check for 'sam' in the updated models list
+      const currentModel = props.models.includes('sam') ? 'sam' : (props.models.length > 0 ? props.models[0] : '');
+
       return {
         models: props.models,
-        currentModel: props.models.length > 0 ? props.models[0] : '',
+        currentModel: currentModel,
       };
     }
     return null;
   }
 
   onChangeModel = evt => {
+
+    if (this.props.isDisabled) return; // Disable model change if isDisabled is true
+
+    console.log("evt.target.value....", evt.target.value)
     this.setState({ currentModel: evt.target.value });
+    AutoSegmentation.clearSam2UIContrainers();
+
+    if (evt.target.value == 'sam') {
+      // calc image embedding(if SAM model)
+      AutoSegmentation.calculateImageEmbeddings(false);
+    }
+
     if (this.props.onSelectModel) this.props.onSelectModel(evt.target.value);
   };
 
@@ -53,7 +71,7 @@ export default class ModelSelector extends Component {
   };
 
   onClickBtn = async () => {
-    if (this.state.buttonDisabled) {
+    if (this.state.buttonDisabled || this.props.isDisabled) {
       return;
     }
 
@@ -70,6 +88,8 @@ export default class ModelSelector extends Component {
 
   render() {
     const currentModel = this.currentModel();
+    const buttonText = currentModel === 'sam' ? 'Propagate' : 'Run';  // Change button text based on current model
+
     return (
       <div className="modelSelector">
         <table>
@@ -83,6 +103,7 @@ export default class ModelSelector extends Component {
                   className="selectBox"
                   onChange={this.onChangeModel}
                   value={currentModel}
+                  disabled={this.props.isDisabled}
                 >
                   {this.props.models.map(model => (
                     <option key={model} name={model} value={model}>
@@ -98,11 +119,15 @@ export default class ModelSelector extends Component {
                   onClick={this.onClickBtn}
                   title={'Run ' + this.props.title}
                   disabled={
-                    this.state.isButtonDisabled || !this.props.models.length
+                    this.state.isButtonDisabled || !this.props.models.length || this.props.isDisabled
                   }
-                  style={{ display: this.props.onClick ? 'block' : 'none' }}
+                  style={{
+                    display: this.props.onClick ? 'block' : 'none',
+                    fontSize: '12px',
+                    padding: '2px 15px',
+                  }}
                 >
-                  Run
+                  {buttonText}
                 </button>
               </td>
             </tr>
