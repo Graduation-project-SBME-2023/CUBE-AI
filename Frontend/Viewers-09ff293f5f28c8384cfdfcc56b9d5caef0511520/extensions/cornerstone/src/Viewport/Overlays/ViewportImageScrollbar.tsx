@@ -5,6 +5,9 @@ import { utilities as csToolsUtils } from '@cornerstonejs/tools';
 import { ImageScrollbar } from '@ohif/ui';
 import { ServicesManger } from '@ohif/core';
 
+import AutoSegmentation from '../../../../monai-label/src/components/actions/AutoSegmentation';
+import getActiveViewportEnabledElement from '../../../../cornerstone/src/utils/getActiveViewportEnabledElement';
+
 function CornerstoneImageScrollbar({
   viewportData,
   viewportId,
@@ -97,6 +100,14 @@ function CornerstoneImageScrollbar({
 
     const updateVolumeIndex = event => {
       const { imageIndex, numberOfSlices } = event.detail;
+
+      // @Added:to update sam objects with slice change
+      const enabledElement = getActiveViewportEnabledElement(
+        viewportGridService
+      );
+      AutoSegmentation.updatePointDisplay(imageIndex, enabledElement)
+      AutoSegmentation.updateBoxDisplay(imageIndex, enabledElement)
+
       // find the index of imageId in the imageIds
       setImageSliceData({ imageIndex, numberOfSlices });
     };

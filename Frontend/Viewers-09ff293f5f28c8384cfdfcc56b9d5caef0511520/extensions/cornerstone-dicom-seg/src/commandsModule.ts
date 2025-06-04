@@ -319,7 +319,7 @@ const commandsModule = ({
      * @returns {Object|void} Returns the naturalized report if successfully stored,
      * otherwise throws an error.
      */
-    storeSegmentation: async ({ segmentationId, dataSource }) => {
+    storeSegmentation: async ({ segmentationId, dataSource, autosave = false }) => {
       const promptResult = await createReportDialogPrompt(uiDialogService, {
         extensionManager,
       });
@@ -361,6 +361,40 @@ const commandsModule = ({
 
       DicomMetadataStore.addInstances([naturalizedReport], true);
 
+      return naturalizedReport;
+    },
+    storeSegmentationModified: async ({ segmentationId, dataSource, isModel }) => {
+      console.log("Entering storeSegmentation");
+      const timeStamp = new Date().toLocaleTimeString();
+      let SeriesDescription = "";
+      if (isModel) {
+        SeriesDescription = `${isModel}-${timeStamp}`;
+      }
+      else {
+        SeriesDescription = `new Modification-${timeStamp}`;
+      }
+      console.log("segmentationId:", segmentationId);
+      const segmentation = segmentationService.getSegmentation(segmentationId);
+      if (!segmentation) {
+        throw new Error('No segmentation found');
+      }
+      console.log("segmentation", segmentation);
+      console.log("desc", SeriesDescription);
+      const generatedData = actions.generateSegmentation({
+        segmentationId,
+        options: {
+          SeriesDescription,
+        },
+      });
+      if (!generatedData || !generatedData.dataset) {
+        throw new Error('Error during segmentation generation');
+      }
+      const { dataset: naturalizedReport } = generatedData;
+      await dataSource.store.dicom(naturalizedReport);
+      // Add the information for where we stored it to the instance as well
+      naturalizedReport.wadoRoot = dataSource.getConfig().wadoRoot;
+      DicomMetadataStore.addInstances([naturalizedReport], true);
+      console.log("Segmentation storage complete");
       return naturalizedReport;
     },
     /**
@@ -420,6 +454,9 @@ const commandsModule = ({
     },
     storeSegmentation: {
       commandFn: actions.storeSegmentation,
+    },
+    storeSegmentationModified: {
+      commandFn: actions.storeSegmentationModified,
     },
     downloadRTSS: {
       commandFn: actions.downloadRTSS,

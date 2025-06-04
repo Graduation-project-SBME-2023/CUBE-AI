@@ -9,8 +9,11 @@ import Select from '../Select';
 
 import SegmentationQueue from '../../../../../extensions/monai-label/src/components/SegmentationQueue';
 import QueueOptionsManager from '../QueueOptionsManager';
+import AutoSegmentation from '../../../../../extensions/monai-label/src/components/actions/AutoSegmentation';
 
 const StudyListPagination = ({ onChangePage, currentPage, perPage, onChangePerPage }) => {
+  AutoSegmentation.clearSam2UIContrainers();
+
   const { t } = useTranslation('StudyList');
 
   const navigateToPage = page => {
