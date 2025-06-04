@@ -179,9 +179,72 @@ def load_video_frames(
     compute_device=torch.device("cuda"),
 ):
     """
-    Load the video frames from video_path. The frames are resized to image_size as in
+    Load the video frames from video_path or directly from an array/tensor. The frames are resized to image_size as in
     the model and are loaded to GPU if offload_video_to_cpu=False. This is used by the demo.
     """
+    # NEW: Handle case where input is array or tensor
+    if isinstance(video_path, (np.ndarray, torch.Tensor)):
+        if isinstance(video_path, np.ndarray):
+            video_tensor = torch.from_numpy(video_path).float()
+        else:
+            video_tensor = video_path.float()
+
+        # Input is [H, W, T] — need to convert to [T, C, H, W]
+        if video_tensor.dim() != 3:
+            raise ValueError("Expected a 3D array [H, W, T] for grayscale video slices")
+
+        H_orig, W_orig, T = video_tensor.shape
+        video_tensor = video_tensor.permute(2, 0, 1)  # [T, H, W]
+
+        #  Normalize each frame to [0, 255] range independently
+        vmin = video_tensor.amin(dim=(1, 2), keepdim=True)
+        vmax = video_tensor.amax(dim=(1, 2), keepdim=True)
+        video_tensor = (video_tensor - vmin) / (vmax - vmin + 1e-5) * 255.0  # [T, H, W]
+
+        # # Apply 95th percentile normalization frame-by-frame
+        # q95 = torch.stack([torch.quantile(f, 0.98, dim=None, keepdim=True) for f in video_tensor])  # [T, 1]
+        # q95 = q95.view(-1, 1, 1)  # [T, 1, 1]
+        # video_tensor = torch.clamp(video_tensor, max=q95)
+        # video_tensor = video_tensor / (q95 + 1e-5) * 255.0  # [T, H, W]
+        # print("first normalize from 0-255")
+
+        video_tensor = video_tensor.unsqueeze(1)  # Add channel: [T, 1, H, W]
+        video_tensor = video_tensor.repeat(1, 3, 1, 1)  # [T, 3, H, W] # channels for color not grayscale
+
+        # #Turns mean/std tuples into 3×1×1 tensors that Will be broadcasted across image frames for normalization
+        img_mean_tensor = torch.tensor(img_mean, dtype=torch.float32)[:, None, None]
+        img_std_tensor = torch.tensor(img_std, dtype=torch.float32)[:, None, None]
+
+        print("img_mean_tensor",img_mean_tensor)
+        print("img_std_tensor",img_std_tensor)
+
+        # Resize to model input size
+        video_tensor = torch.nn.functional.interpolate(
+            video_tensor, size=(image_size, image_size), mode="bilinear", align_corners=False
+        )
+
+        print("Resized video tensor...")
+        print(video_tensor)
+
+        # make the range from 0-255
+        video_tensor = video_tensor / 255.0
+        print("video_tensor normalized from 0-1")
+        print(video_tensor)
+
+        # normalize by mean and std
+        video_tensor -= img_mean_tensor
+        video_tensor /= img_std_tensor
+
+        print("video_tensor normalized using mean-std ")
+        print(video_tensor)
+
+        if not offload_video_to_cpu:
+            video_tensor = video_tensor.to(compute_device)
+            img_mean_tensor = img_mean_tensor.to(compute_device)
+            img_std_tensor = img_std_tensor.to(compute_device)
+
+        return video_tensor, H_orig, W_orig
+
     is_bytes = isinstance(video_path, bytes)
     is_str = isinstance(video_path, str)
     is_mp4_path = is_str and os.path.splitext(video_path)[-1] in [".mp4", ".MP4"]
