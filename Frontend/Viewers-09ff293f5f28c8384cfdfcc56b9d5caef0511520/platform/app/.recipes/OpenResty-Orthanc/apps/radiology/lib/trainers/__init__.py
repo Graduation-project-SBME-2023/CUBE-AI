@@ -17,7 +17,7 @@ from .segmentation import Segmentation
 from .segmentation_spleen import SegmentationSpleen
 from .segmentation_vertebra import SegmentationVertebra
 from .nnunet_liver import NnunetLiver
-
+from .sam import sam
 from .nnunet_lung import NnunetLung
 from .generic_segmentation import GenericSegmentation
 from .segment_liver import segmentliver
