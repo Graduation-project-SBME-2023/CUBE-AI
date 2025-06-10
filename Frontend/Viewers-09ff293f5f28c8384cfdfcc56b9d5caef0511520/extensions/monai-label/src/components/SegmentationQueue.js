@@ -1,18 +1,21 @@
-import QueueOptionsManager from '../../../../platform/ui/src/components/QueueOptionsManager';
-
 class SegmentationQueue {
-  constructor() {
+  constructor(queueName) {
     this.queue = [];
-    this.request = {};
+    this.queueUI = [],
+      this.request = {};
     this.isProcessing = false;
+    this.name = queueName;
   }
 
   // Add a new segmentation request to the queue
   enqueue(request) {
-    this.queue.push(request);
-    this.request = request;
-    QueueOptionsManager.addQueueOption(request);
 
+    console.log(request.PatientName)
+    this.queue.push(request);
+
+    this.queueUI.push({ "value": request.image, "label": request.PatientName + '-' + request.model })
+
+    this.request = request;
     console.log('queue length: ', this.queue.length);
   }
 
@@ -20,23 +23,35 @@ class SegmentationQueue {
     return this.request;
   }
 
-  removeRequest(value, label) {
+  removeRequest(value, label, PatientName) {
+
+    this.queueUI = this.queueUI.filter(
+      option => option.value !== value || option.label !== label
+    );
+
+    const modelFromLabel = label.split('-')[1];
+
+    console.log("modelFromLabel:", modelFromLabel)
+
+    console.log("model", modelFromLabel)
+    // Filter out the request from this.queue based on image and model
     this.queue = this.queue.filter(
-      (request) => request.image !== value || request.model !== label
+      (request) => request.image !== value || request.model !== modelFromLabel
     );
     console.log(
       `Removed request from SegmentationQueue: { value: ${value}, label: ${label} }`
     );
+    console.log(this.queueUI)
   }
 
   // Process the queue, executing one request at a time
   async processQueue() {
     if (this.queue.length === 0) {
-      console.log('empty queue');
+      console.log('Empty Queue now!');
 
       const notification = {
         title: 'MONAI Label',
-        message: 'The queue is empty. Please add a segmentation request.',
+        message: 'Empty Queue now!.',
         type: 'warning',
         duration: 5000,
       };
@@ -53,22 +68,23 @@ class SegmentationQueue {
     }
 
     this.isProcessing = true;
+    this.queueUI.shift();
     const currentTask = this.queue.shift(); // Get the first task in the queue
     console.log(currentTask);
 
+
+    const response = await currentTask.client.segmentation(
+      currentTask.model,
+      currentTask.image,
+      currentTask.params
+    );
     try {
       const nid = currentTask.notification.show({
         title: 'MONAI Label',
-        message: 'Running Auto-Segmentation...',
+        message: `Running Model:${currentTask.model}....`,
         type: 'info',
         duration: 60000,
       });
-
-      const response = await currentTask.client.segmentation(
-        currentTask.model,
-        currentTask.image,
-        currentTask.params
-      );
 
       if (!nid) {
         window.snackbar.hideAll();
@@ -88,7 +104,7 @@ class SegmentationQueue {
           title: 'MONAI Label',
           message: 'Run Segmentation - Successful',
           type: 'success',
-          duration: 2000,
+          duration: 5000,
         });
 
         await currentTask.updateView(response, currentTask.labels);
@@ -102,19 +118,14 @@ class SegmentationQueue {
       });
     } finally {
       console.log('queue length: ', this.queue.length);
-      QueueOptionsManager.updateQueueOptions(this.queue); //update the elements in queue after processing each task
-      this.processQueue(); // Continue processing the next task
+      if (this.queue.length > 0) {
+        this.processQueue(); // Continue processing the next task
+      }
+      else {
+        return;
+      }
     }
   }
 }
-let globalSegmentationQueue = null;
 
-globalSegmentationQueue = globalSegmentationQueue || null;
-
-// Check if an instance already exists, and create a new one if it doesn't
-if (!globalSegmentationQueue) {
-  globalSegmentationQueue = new SegmentationQueue();
-}
-// const globalSegmentationQueue = new SegmentationQueue();
-
-export default globalSegmentationQueue;
+export default SegmentationQueue;
