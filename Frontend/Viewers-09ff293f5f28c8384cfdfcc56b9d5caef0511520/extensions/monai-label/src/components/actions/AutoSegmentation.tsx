@@ -1,11 +1,8 @@
 import React from 'react';
 import ModelSelector from '../ModelSelector';
 import BaseTab from './BaseTab';
-
-
 import globalSegmentationQueueManager from '../SegmentationQueueManager';
 import QueueManager from '../SegmentationQueueManager';
-
 import { getRenderingEngines, utilities as csUtils } from '@cornerstonejs/core';
 import getActiveViewportEnabledElement from '../../../../cornerstone/src/utils/getActiveViewportEnabledElement';
 import { getEnabledElement } from '@cornerstonejs/core';
@@ -17,7 +14,6 @@ import { vec3 } from 'gl-matrix';
 //Global dictionaries containing Sam2 UI components to be refreshed whenever slice or entire study is changed
 let Point_ui = {};
 let Box = {};
-
 
 export default class AutoSegmentation extends BaseTab {
   static instance = null; // Static reference to hold the instance
@@ -65,7 +61,6 @@ export default class AutoSegmentation extends BaseTab {
       volumeEmbeddingsCalculated: false,
 
       sam2CalculateImageEmbeddingsSessionID: "",
-
     };
 
     //initialize a viewportGridService for sam2 functionalities
@@ -287,7 +282,6 @@ export default class AutoSegmentation extends BaseTab {
         viewportConfig.viewportId
       );
       //for version 2 box only on axial although in version 1 box in 3 orientation
-      // if (viewportConfig.viewportType === 'mpr-axial' || viewportConfig.viewportId === 'mpr-axial') {
       const imageSliceData =
         csUtils.getImageSliceDataForVolumeViewport(viewport);
 
@@ -421,7 +415,7 @@ export default class AutoSegmentation extends BaseTab {
     //mapp the 2 corers to image coords to be sent to monailabel
     const point1InImageCoords = this.mappPointToImageCoords(viewport.id, tempBox.x1, tempBox.y1, this.currentSlice)
     const point2InImageCoords = this.mappPointToImageCoords(viewport.id, tempBox.x2, tempBox.y2, this.currentSlice)
-
+    // const mappedBox = [point1InImageCoords[0], point1InImageCoords[1], point2InImageCoords[0], point2InImageCoords[1]]
     const mappedBox = [
       Math.min(point1InImageCoords[0], point2InImageCoords[0]),
       Math.min(point1InImageCoords[1], point2InImageCoords[1]),
@@ -510,7 +504,7 @@ export default class AutoSegmentation extends BaseTab {
       this.sam2Onsegmentation2D(this.currentSlice);
     }
     else {
-      this.sam2Onsegmentation2D(this.currentSlice, PromptsBox);
+      this.sam2Onsegmentation2D(this.currentSlice, PromptsBox, objectId);
     }
 
 
@@ -770,7 +764,6 @@ export default class AutoSegmentation extends BaseTab {
       const objectPrompts = prompts[objectId];
 
       if (objectPrompts.points[0].length > 0) {
-
         // Remove the last point from the object's prompts
         objectPrompts.points[0].pop();
         objectPrompts.points[1].pop();
@@ -835,7 +828,7 @@ export default class AutoSegmentation extends BaseTab {
           document.removeEventListener('keydown', handleKeyDown);
         }
       }
-
+     
     });
   }
 
@@ -1012,8 +1005,7 @@ export default class AutoSegmentation extends BaseTab {
           pointInImageCoords[0],
           pointInImageCoords[1],
           pointInImageCoords[2],
-          2 // version 2
-          // SlicingMap[viewport.id] // version 1
+          2 
         ]);
         newPrompts[pointObj].points[1].push(pointValue);
 
@@ -1202,7 +1194,7 @@ Update the ui based on sam2 points
   /*
   Segment sam in 2d
   */
-  sam2Onsegmentation2D = async (slice, auxillaryBox = null) => {
+  sam2Onsegmentation2D = async (slice, auxillaryBox = null, auxillaryID = null) => {
     const nid = this.notification.show({
       title: 'MONAI Label',
       message: 'Running 2d SAM Segmentation... For 3d segmentation press RUN button',
@@ -1225,6 +1217,7 @@ Update the ui based on sam2 points
     if (auxillaryBox) {
       params.State = "Auxillary_Box";
       params.Auxillary_Box = auxillaryBox;
+      params.Auxillary_Id = auxillaryID; // obj_id
     } else {
       params.State = "2d"
     }
@@ -1295,7 +1288,6 @@ Update the ui based on sam2 points
     const labels = info.models[model].labels;
 
     try {
-
       const response = await this.props
         .client()
         .segmentation(model, image, params);
@@ -1321,11 +1313,8 @@ Update the ui based on sam2 points
 
       }
     } catch (error) {
-
       console.error('Unexpected error:', error);
-      // }
     } finally {
-
       this.setState({ isCalculatingEmbeddings: false });
     }
 
@@ -1355,7 +1344,6 @@ Update the ui based on sam2 points
         }
       }
     }
-
     const nid = this.notification.show({
       title: 'MONAI Label',
       message: 'Running Auto-Segmentation...',
@@ -1446,9 +1434,7 @@ Update the ui based on sam2 points
                 Just select a model and click to run
               </p>
             }
-
           />
-
           {this.state.currentModel === 'sam' && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', marginTop: '5px', marginBottom: '5px' }}>
 
