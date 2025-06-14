@@ -77,6 +77,7 @@ class GenericSegmentation(BasicTrainTask):
         this function returns "Dataset200_blastoma".
         """
         nnunet_raw_dir = os.environ.get("nnUNet_raw")
+        print(f"nnUNet_raw directory: {nnunet_raw_dir}")
         if not nnunet_raw_dir or not os.path.exists(nnunet_raw_dir):
             raise FileNotFoundError(f"nnUNet_raw directory not found: {nnunet_raw_dir}")
 

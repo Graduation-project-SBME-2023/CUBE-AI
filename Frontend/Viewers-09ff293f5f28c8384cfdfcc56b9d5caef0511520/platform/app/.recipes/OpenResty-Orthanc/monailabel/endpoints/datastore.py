@@ -44,7 +44,7 @@ router = APIRouter(
 )
 
 
-Radiology_path = Path("radiology")  
+Radiology_path = Path("/apps/radiology")  
 GENERAL_DATA_DIR = Radiology_path/"General_Data"
 LABEL_DATA_DIR = Radiology_path / "Labels"
 
@@ -286,7 +286,7 @@ async def api_download_labels(
     user: User = Depends(RBAC(settings.MONAI_LABEL_AUTH_ROLE_USER))
 ):
     # Define directories and mapping file path
-    radiology_path = Path("radiology")
+    radiology_path = Path("/apps/radiology")
     target_dir = radiology_path / "Labels"
     mapping_path = radiology_path / "NN_Unet" / "instance_mapping.json"
     
@@ -362,7 +362,7 @@ async def api_download_images(
     user: User = Depends(RBAC(settings.MONAI_LABEL_AUTH_ROLE_USER)),
 ):
     # Define directories and mapping file path
-    radiology_path = Path("radiology")  
+    radiology_path = Path("/apps/radiology")  
     target_dir = radiology_path/"General_Data"
     mapping_path = radiology_path/"NN_Unet\instance_mapping.json"
 
