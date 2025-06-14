@@ -32,7 +32,7 @@ export default class AutoSegmentation extends BaseTab {
     this.modelSelector = React.createRef();
 
     this.state = {
-      currentModel: 'sam', // make sam the initial choice
+      currentModel: 'deepedit_seg',
       selectedQueue: null,
 
       //sam2 dictionary with the object id as key and the points & boxe array as value to be sent to monai server
@@ -828,7 +828,7 @@ export default class AutoSegmentation extends BaseTab {
           document.removeEventListener('keydown', handleKeyDown);
         }
       }
-     
+
     });
   }
 
@@ -1005,7 +1005,7 @@ export default class AutoSegmentation extends BaseTab {
           pointInImageCoords[0],
           pointInImageCoords[1],
           pointInImageCoords[2],
-          2 
+          2
         ]);
         newPrompts[pointObj].points[1].push(pointValue);
 
