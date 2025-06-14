@@ -13,7 +13,7 @@ router = APIRouter(
 )
 
 # Base folders (adjust these as needed)
-radiology_path = Path("radiology")  
+radiology_path = Path("/apps/radiology") 
 BASE_PATH =radiology_path/"NN_Unet"
 LABELS_PATH = radiology_path/"Labels"
 GENERAL_DATA_PATH = radiology_path/"General_Data"

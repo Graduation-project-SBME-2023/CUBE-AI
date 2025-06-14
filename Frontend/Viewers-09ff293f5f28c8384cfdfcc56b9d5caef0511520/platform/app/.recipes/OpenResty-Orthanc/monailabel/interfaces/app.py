@@ -421,7 +421,11 @@ class MONAILabelApp:
             )
 
         request = copy.deepcopy(request)
-        result = task(request, self.datastore())
+        # Check if the class name of the task is "GenericSegmentation"
+        if task.__class__.__name__ == "GenericSegmentation":
+            result = task(request)
+        else:
+            result = task(request, self.datastore())
 
         # Run all scoring methods
         if self._auto_update_scoring:

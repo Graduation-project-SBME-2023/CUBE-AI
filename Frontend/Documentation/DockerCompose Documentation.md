@@ -20,7 +20,22 @@ Before running this setup, make sure you have the following installed:
 
 ## Running the Services
 
-### 1. Clone or navigate to the project directory
+### 1. Clone the project
+Here's the revised section with your requested formatting:
+
+---
+
+### 2. To run the Segment Anything Model (SAM) successfully in MONAI Label:
+
+- **Download the SAM checkpoint file**:
+  [SAM Checkpoint (Google Drive)](https://drive.google.com/drive/folders/15KWC6C-Wnk6EwWLBHdCi2RiMFnphFhw4)
+
+- **Place the checkpoint file in**:
+  ```bash
+  platform\app\.recipes\OpenResty-Orthanc\apps\radiology\sam2\checkpoints
+  ```
+
+### 3. Navigate to the project directory
 
 ```bash
 cd path/to/your/project
@@ -30,7 +45,7 @@ Make sure this directory contains the `docker-compose.yml` file (in platform\app
 
 ---
 
-### 2. Start all services
+### 4. Start all services
 
 Run the following command to build and start the containers:
 
@@ -46,7 +61,7 @@ This will:
 
 ---
 
-### 3. Access the services
+### 5. Access the services
 
 | Service     | URL                       |
 | ----------- | ------------------------- |
@@ -57,7 +72,7 @@ This will:
 
 ---
 
-### 4. Stopping the services
+### 6. Stopping the services
 
 To stop the services gracefully:
 

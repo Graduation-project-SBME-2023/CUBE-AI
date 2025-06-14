@@ -18,7 +18,7 @@ import tempfile
 import time
 from abc import abstractmethod
 from datetime import datetime
-from typing import Any, List
+from typing import Any, List,Optional
 
 import ignite
 import torch
@@ -432,7 +432,7 @@ class BasicTrainTask(TrainTask):
             return Compose(transforms)
         raise ValueError(f"{step} {name}-transforms are not of `list` or `Compose` type")
 
-    def __call__(self, request, datastore: Datastore):
+    def __call__(self, request, datastore: Optional[Datastore] = None):
         logger.info(f"Train Request (input): {request}")
 
         req = copy.deepcopy(self._config)

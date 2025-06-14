@@ -1,8 +1,0 @@
-{
-    "train": {
-        "model_name": "train",
-        "labels": "{\"train\":1}",
-        "fold": 1,
-        "plan_type": "3d_fullres"
-    }
-}
