@@ -19,7 +19,7 @@ router = APIRouter(
 )
 
 # Define data paths using pathlib for cross-platform compatibility
-radiology_path = Path("radiology")
+radiology_path = Path("/apps/radiology")
 DATA_FOLDER = radiology_path / "General_Data"  # Folder containing medical imaging data
 LABEL_FOLDER = radiology_path / "Labels"  # Folder containing segmentation labels
 
