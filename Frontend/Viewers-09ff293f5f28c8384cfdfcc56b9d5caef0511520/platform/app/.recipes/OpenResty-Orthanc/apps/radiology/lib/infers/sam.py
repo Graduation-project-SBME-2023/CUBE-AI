@@ -26,6 +26,10 @@ import tempfile
 import pickle
 import os
 
+from pathlib import Path
+import urllib.request
+
+
 from monai.inferers import Inferer, SlidingWindowInferer, SliceInferer
 from monailabel.interfaces.tasks.infer_v2 import InferType
 from monailabel.tasks.infer.basic_infer import BasicInferTask
@@ -196,10 +200,26 @@ class sam(BasicInferTask):
 
             self.object_bounds = {}  # Dictionary to store bounds per object
 
-    def initialize_predictor(self, device="cuda"):
-        if self.predictor is None:
-            self.predictor = build_sam2_video_predictor(self.config_path, self.checkpoint_path, device=device)
+    def download_checkpoint_if_needed(self, checkpoint_path: Path, checkpoint_url: str):
+            if not checkpoint_path.exists():
+                print(f"Downloading checkpoint to {checkpoint_path}")
+                try:
+                    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+                    urllib.request.urlretrieve(checkpoint_url, checkpoint_path)
+                    print("Checkpoint downloaded successfully.")
+                except Exception as e:
+                    raise RuntimeError(f"Failed to download checkpoint: {e}")
 
+
+    def initialize_predictor(self, device="cuda"):
+        checkpoint_path = Path(self.checkpoint_path)
+        checkpoint_url = "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
+
+        self.download_checkpoint_if_needed(checkpoint_path, checkpoint_url)
+
+        if self.predictor is None:
+            self.predictor = build_sam2_video_predictor(self.config_path, str(checkpoint_path), device=device)
+        
 
     def run_inferer(self, data, device="cuda"):
         """
