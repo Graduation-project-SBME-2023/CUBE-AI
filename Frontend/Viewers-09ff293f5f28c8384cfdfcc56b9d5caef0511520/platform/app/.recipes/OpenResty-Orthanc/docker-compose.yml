@@ -71,6 +71,7 @@ services:
       pip install acvl-utils &&
       pip install asyncpg &&
       pip install nnunetv2 &&
+      pip install nnInteractive &&
       pip install pydicom==2.4.4 &&
       monailabel start_server --app /apps/radiology --studies http://orthanc:8042/dicom-web --conf models all"
     depends_on:
