@@ -58,6 +58,7 @@ export default class ModelSelector extends Component {
 
     if (evt.target.value == 'sam') {
       // calc image embedding(if SAM model)
+      console.log("Calculating image embeddings for SAM model...");
       AutoSegmentation.calculateImageEmbeddings(false);
     }
 

@@ -13,6 +13,8 @@ import AutoSegmentation from '../../../../../extensions/monai-label/src/componen
 
 const StudyListPagination = ({ onChangePage, currentPage, perPage, onChangePerPage }) => {
   AutoSegmentation.clearSam2UIContrainers();
+  AutoSegmentation.clearVistaPoints();
+  AutoSegmentation.clearNnInteractivePoints();
 
   const { t } = useTranslation('StudyList');
 
