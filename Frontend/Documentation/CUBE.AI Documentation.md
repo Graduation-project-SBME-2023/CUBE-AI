@@ -236,6 +236,65 @@ Comment out the following components:
 
 **File Link:** [MonaiLabelPanel.tsx](https://drive.google.com/file/d/1G7OHqVDfoPFeFOBEGfPOrOgwFJjIsTiR/view?usp=sharing)
 
+## Viewer Header Changes
+file path:
+```
+Viewers\extensions\default\src\ViewerLayout\ViewerHeader.tsx
+```
+
+To correct for the navigation between assisted segmentation page if coming from the workflow page or if it's coming from the home page.
+
+* checking if the workflowName parameter exists in the URL, if true, return to the workflow page, if not, return to the home page.
+* Add this to the onClickReturnButton() function
+```javascript
+    const workflowName = query.get('workflowName');
+    if (workflowName) {
+      const workflowPath = `/workflow/${workflowName}`;
+      navigate({
+        pathname: workflowPath,
+        search: configUrl ? `?configUrl=${encodeURIComponent(configUrl)}` : '',
+      });
+      return;
+    }
+```
+
+The complete fuction:
+```javascript
+  const onClickReturnButton = () => {
+    const { pathname } = location;
+    const dataSourceIdx = pathname.indexOf('/', 1);
+    const query = new URLSearchParams(window.location.search);
+    const configUrl = query.get('configUrl');
+
+    const workflowName = query.get('workflowName');
+    if (workflowName) {
+      const workflowPath = `/workflow/${workflowName}`;
+      navigate({
+        pathname: workflowPath,
+        search: configUrl ? `?configUrl=${encodeURIComponent(configUrl)}` : '',
+      });
+      return;
+    }
+
+    const dataSourceName = pathname.substring(dataSourceIdx + 1);
+    const existingDataSource = extensionManager.getDataSources(dataSourceName);
+
+    const searchQuery = new URLSearchParams();
+    if (dataSourceIdx !== -1 && existingDataSource) {
+      searchQuery.append('datasources', pathname.substring(dataSourceIdx + 1));
+    }
+
+    if (configUrl) {
+      searchQuery.append('configUrl', configUrl);
+    }
+
+    navigate({
+      pathname: '/',
+      search: decodeURIComponent(searchQuery.toString()),
+    });
+  };
+```
+
 ## Change Display Name of MonaiLabel to Assisted Segmentation
 
 **File Path:**

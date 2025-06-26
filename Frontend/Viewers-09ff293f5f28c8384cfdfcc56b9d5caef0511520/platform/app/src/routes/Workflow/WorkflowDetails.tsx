@@ -8,6 +8,8 @@ import MonaiLabelClient from '../../../../../extensions/monai-label/src/services
 import { UINotificationService } from '@ohif/core';
 import { utils } from '@ohif/core';
 import filtersMeta from '../WorkList/filtersMeta';
+import { useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router';
 
 import {
   Icon,
@@ -20,6 +22,12 @@ import {
   TableHead,
   Modal,
 } from '@ohif/ui';
+
+const modelConfigDict = {
+  '2d': '2D',
+  '3d_lowres': '3D Low Resolution',
+  '3d_fullres': '3D Full Resolution',
+};
 
 const tableHeader = [
   {
@@ -78,13 +86,17 @@ function WorkflowDetailPage({
   dataPath,
   onRefresh,
   servicesManager,
+  extensionManager
 }) {
-  let ServerSettings = React.createRef();
+  const ServerSettings = useRef();
 
   const [isConnected, setIsConnected] = useState(false);
 
   const [appConfig] = useAppConfig();
   const { t } = useTranslation('WorkflowDetailPage');
+
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const { workflowName } = useParams();
 
@@ -101,30 +113,20 @@ function WorkflowDetailPage({
 
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  const [isMonaiInitialized, setIsMonaiInitialized] = useState(false);
+
+
   const [workflowStudies, setWorkflowStudies] = useState([]);
   const [previousStudies, setPreviousStudies] = useState([]);
-  const [modelConfig, setModelConfig] = useState('3D Full Resolution');
+  const [modelConfig, setModelConfig] = useState('2d');
   const [trainCount, setTrainCount] = useState(0);
   const [validationCount, setValidationCount] = useState(0);
   const [trainValStudies, setTrainValStudies] = useState([]);
 
   const [numFolds, setNumFolds] = useState(1);
 
-  const workflow = g_workflowManagerInstance.getWorkflowByName(workflowName);
+  const [workflowDetails, setWorkflowDetails] = useState(null);
 
-  const [isMonaiInitialized, setIsMonaiInitialized] = useState(false);
-
-  let workflowDetails = null;
-
-  if (workflow) {
-    workflowDetails = workflow;
-  } else {
-    console.error('Workflow not found');
-  }
-
-  if (!workflowDetails) {
-    return <p>Loading...</p>;
-  }
 
   const client = () => {
     const settings =
@@ -174,10 +176,28 @@ function WorkflowDetailPage({
     }
   };
 
-  if (isMonaiInitialized == false) {
-    onInfo();
-    setIsMonaiInitialized(true);
-  }
+  useEffect(() => {
+    if (!isMonaiInitialized) {
+      onInfo();
+      setIsMonaiInitialized(true);
+    }
+  }, [isMonaiInitialized]);
+
+  useEffect(() => {
+    const loadWorkflowStudies = async () => {
+      console.log('Loading workflow studies for:', workflowName);
+      const workflow = await g_workflowManagerInstance.getWorkflowByName(workflowName);
+      if (workflow) {
+        console.log('Workflow loaded:', workflow);
+        setWorkflowDetails(workflow);
+        console.log('Workflow Details in useeffectttttt:', workflow);
+      } else {
+        console.error('Workflow not found');
+      }
+    };
+
+    loadWorkflowStudies();
+  }, [workflowName]);
 
   useEffect(() => {
     if (workflowDetails?.Studies?.length > 0) {
@@ -192,7 +212,7 @@ function WorkflowDetailPage({
         setPreviousStudies([...newStudies]);
       }
     }
-  }, [workflowStudies]);
+  }, [workflowDetails, studies]);
 
   useEffect(() => {
     const fetchAnnotationStatus = async () => {
@@ -836,6 +856,30 @@ function WorkflowDetailPage({
     }
   };
 
+  const onClickReturnButton = () => {
+    const { pathname } = location;
+    const dataSourceIdx = pathname.indexOf('/', 1);
+    const query = new URLSearchParams(window.location.search);
+    const configUrl = query.get('configUrl');
+
+    const dataSourceName = pathname.substring(dataSourceIdx + 1);
+    const existingDataSource = extensionManager.getDataSources(dataSourceName);
+
+    const searchQuery = new URLSearchParams();
+    if (dataSourceIdx !== -1 && existingDataSource) {
+      searchQuery.append('datasources', pathname.substring(dataSourceIdx + 1));
+    }
+
+    if (configUrl) {
+      searchQuery.append('configUrl', configUrl);
+    }
+
+    navigate({
+      pathname: '/',
+      search: decodeURIComponent(searchQuery.toString()),
+    });
+  };
+
   //Study Table Data Section
   const hasStudies = workflowStudies.length > 0;
 
@@ -982,23 +1026,11 @@ function WorkflowDetailPage({
       expandedContent: (
         <StudyListExpandedRow
           seriesTableColumns={
-            {
-              // description: t('StudyList:Description'),
-              // seriesNumber: t('StudyList:Series'),
-              // modality: t('StudyList:Modality'),
-              // instances: t('StudyList:Instances'),
-            }
+            {}
           }
           seriesTableDataSource={
             seriesInStudiesMap.has(studyInstanceUid)
-              ? seriesInStudiesMap.get(studyInstanceUid).map(s => {
-                // return {
-                //   description: s.description || '(empty)',
-                //   seriesNumber: s.seriesNumber ?? '',
-                //   modality: s.modality || '',
-                //   instances: s.numSeriesInstances || '',
-                // };
-              })
+              ? seriesInStudiesMap.get(studyInstanceUid).map(s => { })
               : []
           }
         >
@@ -1059,12 +1091,22 @@ function WorkflowDetailPage({
   return (
     <div className="h-screen bg-gray-900">
       <div className="bg-gray-900 shadow-md">
-        <div className="bg-secondary-dark flex items-center justify-start px-6">
+        <div className="bg-secondary-dark flex items-center justify-start space-x-4 px-6">
+          <button
+            onClick={onClickReturnButton}
+            className="text-white hover:text-gray-300 focus:outline-none"
+            aria-label="Go back"
+          >
+            <Icon
+              name="chevron-left"
+              className="text-primary-active w-8"
+            />
+          </button>
           <Typography
             variant="h4"
             className="py-3 text-lg font-light text-white"
           >
-            {workflowDetails.workflowName}
+            {workflowName}
           </Typography>
         </div>
       </div>
@@ -1472,7 +1514,7 @@ function WorkflowDetailPage({
                 >
                   <h2 className="mb-4 text-center text-xl font-bold">Training Summary</h2>
                   <p>
-                    <strong>Model Type:</strong> {modelConfig}
+                    <strong>Model Type:</strong> {modelConfigDict[modelConfig]}
                   </p>
                   <p>
                     <strong>Number of Folds:</strong> {numFolds}

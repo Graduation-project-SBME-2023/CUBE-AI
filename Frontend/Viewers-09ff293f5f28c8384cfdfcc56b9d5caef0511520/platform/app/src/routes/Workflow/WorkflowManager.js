@@ -76,7 +76,8 @@ class WorkflowManager {
     }
   }
 
-  getWorkflowByName(name) {
+  async getWorkflowByName(name) {
+    this.workflows = await this.refreshDatabase();
     const selectedWorkflow = this.workflows.find(workflow => workflow.workflowName === name);
     const SelectedWorkflowObject = new Workflow(
       selectedWorkflow.workflowName,
@@ -85,6 +86,7 @@ class WorkflowManager {
     );
 
     return SelectedWorkflowObject;
+
   }
   getWorkflowNames() {
     const workflowNames = this.workflows.map(workflow => workflow.workflowName);

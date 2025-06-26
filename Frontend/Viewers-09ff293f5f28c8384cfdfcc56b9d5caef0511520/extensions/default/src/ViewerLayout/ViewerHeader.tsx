@@ -22,6 +22,17 @@ function ViewerHeader({ hotkeysManager, extensionManager, servicesManager }) {
     const query = new URLSearchParams(window.location.search);
     const configUrl = query.get('configUrl');
 
+    const workflowName = query.get('workflowName');
+    // If workflowName exists, return to workflow page
+    if (workflowName) {
+      const workflowPath = `/workflow/${workflowName}`;
+      navigate({
+        pathname: workflowPath,
+        search: configUrl ? `?configUrl=${encodeURIComponent(configUrl)}` : '',
+      });
+      return;
+    }
+
     const dataSourceName = pathname.substring(dataSourceIdx + 1);
     const existingDataSource = extensionManager.getDataSources(dataSourceName);
 
