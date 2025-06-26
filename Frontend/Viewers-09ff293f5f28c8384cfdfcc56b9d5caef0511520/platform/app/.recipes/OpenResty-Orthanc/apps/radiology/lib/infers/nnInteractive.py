@@ -123,8 +123,6 @@ class NNINTERACTIVE(BasicInferTask):
         data["Points"]['points']= updated_points
 
 
-
-
     # Intilization function
     def initialize_session(self):
         # Initialize inference session
@@ -179,9 +177,7 @@ class NNINTERACTIVE(BasicInferTask):
             self.load_model(session, model_path)
 
 
-        POINT_COORDINATES = point_coordinates # points in (x,y,z)
-        # POINT_COORDINATES =(512-327,512-197,30)
-        
+        POINT_COORDINATES = point_coordinates # points in (x,y,z)        
 
         session.add_point_interaction(POINT_COORDINATES, include_interaction=Interactive)
 
@@ -222,17 +218,14 @@ class NNINTERACTIVE(BasicInferTask):
         self.session=self.nnInteractive_segmentation(
             volume_path=data[self.input_key],
             output_path=os.path.join(self.BASE_PATH,"Data","output"),
-            model_path=os.path.join(self.BASE_PATH,"model_weights","nnInteractive_v1.0"),
+            model_path=os.path.join(self.BASE_PATH,"nnInteractive_v1.0"),
             point_coordinates=data["Points"]['points'],  # Example coordinates
-            # point_coordinates=[512-327-1, 190, 30],  # Example coordinates
-            # point_coordinates=data["Points"]['pointsMapped'],  
             Interactive=data['Points']['labels'][0],
             session=self.session,
         )
         if device.startswith("cuda"):
             torch.cuda.empty_cache()
 
-        print("maskkkk",data[self.input_key])
 
         file_ending = ".nii.gz"
         basename = (
@@ -246,11 +239,9 @@ class NNINTERACTIVE(BasicInferTask):
         if os.path.exists(output_path):
             outputs = nib.load(output_path).get_fdata()
             outputs = torch.from_numpy(outputs)
-            print("outputs shape", outputs.shape)
             # see unique values in the outputs
             unique_values = torch.unique(outputs)
             # make class 255 to 0
-            print("Unique values in outputs:", unique_values)
             os.remove(output_path)
 
         data[self.output_label_key] = outputs
