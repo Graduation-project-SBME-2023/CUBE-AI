@@ -154,7 +154,7 @@ function WorkList({
   // };
 
   const appendStudyInWorkflow = async studyUID => {
-    let selectedWorkflow = g_workflowManagerInstance.getWorkflowByName(selectedWorkFlowList.label);
+    let selectedWorkflow = await g_workflowManagerInstance.getWorkflowByName(selectedWorkFlowList.label);
 
     selectedWorkflow.addStudy(studyUID);
 
