@@ -21,3 +21,5 @@ from .nnunet_lung import NnunetLung
 from .sam import sam
 from .generic_segmentation import GenericSegmentation
 from .segment_liver import segmentliver
+from .vista import VISTAPOINT3D
+from .nnInteractive import NNINTERACTIVE
