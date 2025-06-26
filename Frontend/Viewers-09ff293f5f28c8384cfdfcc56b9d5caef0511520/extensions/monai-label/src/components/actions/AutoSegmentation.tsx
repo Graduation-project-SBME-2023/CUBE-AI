@@ -163,16 +163,28 @@ export default class AutoSegmentation extends BaseTab {
 
 
     // Convert to image coordinates and update prompts
-    const pointInImageCoords = this.mappPointToImageCoords(viewport.id, x, y, currentSlice);
+    // const pointInImageCoords = this.mappPointToImageCoords(viewport.id, x, y, currentSlice);
+    const renderingEngines = getRenderingEngines();
+    const currentViewportObj = renderingEngines[0].getViewport(viewport.id);
+
+    const { imageData } = currentViewportObj.getImageData();
+    console.log("imageData", imageData)
+
+    //map canvas coords x and y to world coords
+    const worldCoords = currentViewportObj.canvasToWorld([x, y]);
+    const ijk = vec3.fromValues(0, 0, 0);
+    //mapp world coords to image
+    const imageCoords = imageData.worldToIndex(worldCoords, ijk)
+    // console.log("abdallah img coordss",imageCoords)
 
     // pointsnnInteractive=
 
     this.setState(prevState => ({
       nnInteractivePrompts: {
-        points: [pointInImageCoords],
+        points: [imageCoords],
         labels: [this.state.nnInteractivePointType === '+' ? 1 : 0],
         viewPort: viewport.id, // Store the viewport ID,
-        pointsMapped: [this.mapCoordinates(viewport.id, "mpr-axial", pointInImageCoords)]
+        // pointsMapped: [this.mapCoordinates(viewport.id, "mpr-axial", pointInImageCoords)]
       }
     }));
 
