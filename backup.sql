@@ -32,13 +32,7 @@ CREATE TABLE public.list_workflow (
     task_name text NOT NULL
 );
 
-
-ALTER TABLE public.list_workflow OWNER TO postgres;
-
---
--- TOC entry 218 (class 1259 OID 16402)
--- Name: workflow; Type: TABLE; Schema: public; Owner: postgres
---
+ALTER TABLE public.list_workflow OWNER TO workflow_user;
 
 CREATE TABLE public.workflow (
     case_id text,
@@ -50,10 +44,7 @@ CREATE TABLE public.workflow (
     modality text
 );
 
-
-ALTER TABLE public.workflow OWNER TO postgres;
-
---
+ALTER TABLE public.workflow OWNER TO workflow_user;
 -- TOC entry 4849 (class 0 OID 16395)
 -- Dependencies: 217
 -- Data for Name: list_workflow; Type: TABLE DATA; Schema: public; Owner: postgres
