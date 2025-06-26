@@ -107,6 +107,8 @@ function CornerstoneImageScrollbar({
       );
       AutoSegmentation.updatePointDisplay(imageIndex, enabledElement)
       AutoSegmentation.updateBoxDisplay(imageIndex, enabledElement)
+      AutoSegmentation.updateVistaPointDisplay(imageIndex, enabledElement);
+      AutoSegmentation.updateNnInteractivePointDisplay(imageIndex, enabledElement);
 
       // find the index of imageId in the imageIds
       setImageSliceData({ imageIndex, numberOfSlices });

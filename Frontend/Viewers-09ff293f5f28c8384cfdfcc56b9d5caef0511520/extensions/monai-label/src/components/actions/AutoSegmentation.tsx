@@ -1,19 +1,22 @@
 import React from 'react';
 import ModelSelector from '../ModelSelector';
 import BaseTab from './BaseTab';
-import globalSegmentationQueueManager from '../SegmentationQueueManager';
-import QueueManager from '../SegmentationQueueManager';
 import { getRenderingEngines, utilities as csUtils } from '@cornerstonejs/core';
 import getActiveViewportEnabledElement from '../../../../cornerstone/src/utils/getActiveViewportEnabledElement';
 import { getEnabledElement } from '@cornerstonejs/core';
 import { getEnabledElement as OHIFgetEnabledElement } from '../../../../cornerstone/src/state';
-import { getPatientName } from '../../../../../platform/app/src/routes/WorkList/WorkList'
+// import { getPatientName } from '../../../../../platform/app/src/routes/WorkList/WorkList'
 import { vec3 } from 'gl-matrix';
+import VistaLabels from '../../components/Toolbox/VistaLabels.json';
 
 
 //Global dictionaries containing Sam2 UI components to be refreshed whenever slice or entire study is changed
 let Point_ui = {};
 let Box = {};
+//Global dictionary containing vista UI components to be refreshed whenever slice or entire study is changed
+let VistaPoints = {};
+
+let nnInteractivePoints = {};
 
 export default class AutoSegmentation extends BaseTab {
   static instance = null; // Static reference to hold the instance
@@ -31,8 +34,15 @@ export default class AutoSegmentation extends BaseTab {
     //Model Bank
     this.modelSelector = React.createRef();
 
+    // Convert the JSON to an array of {name, value} pairs
+    const vistaClasses = Object.entries(VistaLabels).map(([name, value]) => ({
+      name,
+      value
+    }));
+
+
     this.state = {
-      currentModel: 'deepedit_seg',
+      currentModel: 'vista', // make sam the initial choice
       selectedQueue: null,
 
       //sam2 dictionary with the object id as key and the points & boxe array as value to be sent to monai server
@@ -61,6 +71,18 @@ export default class AutoSegmentation extends BaseTab {
       volumeEmbeddingsCalculated: false,
 
       sam2CalculateImageEmbeddingsSessionID: "",
+
+      vistaMode: 'automatic', // 'automatic' or 'interactive'
+      vistaSelectedClass: vistaClasses[0] || { name: 'liver', value: 1 }, // default to first class
+      vistaClasses: vistaClasses, // store the array in state
+      vistaPrompts: { points: [], labels: [] }, // To store 3D coordinates and labels
+      vistaDrawingMode: false, // To track if we're in point placement mode
+      vistaPointType: '+', // Current point type (+ or -)
+
+      // nnInteractive model
+      nnInteractivePointType: '+',
+      nnInteractivePrompts: { points: [], labels: [], },
+      nnInteractiveDrawingMode: false,
     };
 
     //initialize a viewportGridService for sam2 functionalities
@@ -85,9 +107,462 @@ export default class AutoSegmentation extends BaseTab {
     // Remove the keydown event listener when the component is unmounted
     document.removeEventListener('keydown', this.handleKeyDown);
   }
+  // Handle point type selection (+ or -) for nnInteractive
+  handleNnInteractivePointSelection = (type) => {
+    nnInteractivePoints = {};
+    this.setState({
+      nnInteractivePointType: type === 'positive' ? '+' : '-',
+      nnInteractiveDrawingMode: true
+    }, () => this.configureViewportInteraction('nninteractive'));
 
+    console.log("#######################")
+    console.log("in handleNnInteractivePointSelection")
+    console.log("nnInteractivePoints", nnInteractivePoints)
+    console.log("nnInteractivePrompts", this.state.nnInteractivePrompts)
+    console.log("#######################")
+  };
+
+  //nnInteractivePointClick
+  handleNnInteractivePointClick = (event) => {
+    console.log("point clicked nnINteractive")
+    const enabledElement = getActiveViewportEnabledElement(this.viewportGridService);
+    if (!enabledElement) return;
+
+    const { viewport } = enabledElement;
+    const imageSliceData = csUtils.getImageSliceDataForVolumeViewport(viewport);
+    const currentSlice = imageSliceData.imageIndex;
+    const activeViewportId = viewport.id;
+
+    // Get canvas coordinates
+    const rect = viewport.element.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+
+    console.log('Point coordinates:', {
+      x, y,
+      viewportRect: rect,
+      viewportId: activeViewportId,
+      slice: currentSlice
+    });
+
+
+
+
+    // Generate unique ID for this point
+    const pointId = Date.now().toString();
+
+    // Add point to nnInteractivePoints
+    nnInteractivePoints[pointId] = {
+      x, y, z: currentSlice,
+      viewerID: activeViewportId,
+      pointType: this.state.nnInteractivePointType,
+      color: this.state.nnInteractivePointType === '+' ? '#4CAF50' : '#f44336'
+    };
+    // nnInteractivePoints[pointId]=volumePoint;
+
+
+    // Convert to image coordinates and update prompts
+    const pointInImageCoords = this.mappPointToImageCoords(viewport.id, x, y, currentSlice);
+
+    // pointsnnInteractive=
+
+    this.setState(prevState => ({
+      nnInteractivePrompts: {
+        points: [pointInImageCoords],
+        labels: [this.state.nnInteractivePointType === '+' ? 1 : 0],
+        viewPort: viewport.id, // Store the viewport ID,
+        pointsMapped: [this.mapCoordinates(viewport.id, "mpr-axial", pointInImageCoords)]
+      }
+    }));
+
+    // Update UI
+    AutoSegmentation.updateNnInteractivePointDisplay(currentSlice, enabledElement);
+
+    // Disable drawing mode after placing one point
+    // Disable drawing mode after placing one point
+    this.setState({ nnInteractiveDrawingMode: false });
+    console.log("#######################")
+    console.log("in handle nninteractive")
+    console.log("nnInteractivePoints", nnInteractivePoints)
+    console.log("nnInteractivePrompts", this.state.nnInteractivePrompts)
+    console.log("#######################")
+    // this.removeVistaPointEventListeners();  };
+  }
+
+
+  // Update nnInteractive point display in viewport
+  static updateNnInteractivePointDisplay(sliceIndex, enabledElement) {
+
+    if (!enabledElement) return;
+    const { viewport } = enabledElement;
+
+    // Clear existing points - more thorough removal
+    const existingPoints = viewport.element.querySelectorAll('.nn-interactive-point');
+    existingPoints.forEach(point => {
+      // Ensure we're removing from the viewport element
+      if (viewport.element.contains(point)) {
+        viewport.element.removeChild(point);
+      }
+    });
+
+    // Draw new points
+    Object.entries(nnInteractivePoints).forEach(([pointId, pointData]) => {
+      if (pointData.viewerID === viewport.id && pointData.z === sliceIndex) {
+        const pointDiv = document.createElement('div');
+        pointDiv.className = 'nn-interactive-point';
+        pointDiv.style.position = 'absolute';
+        pointDiv.style.left = `${pointData.x}px`;
+        pointDiv.style.top = `${pointData.y}px`;
+
+        if (pointData.pointType === '+') {
+          pointDiv.style.width = '14px';
+          pointDiv.style.height = '14px';
+          pointDiv.style.backgroundColor = pointData.color;
+          pointDiv.style.borderRadius = '50%';
+          pointDiv.style.border = '2px solid white';
+        } else {
+          pointDiv.style.width = '10px';
+          pointDiv.style.height = '10px';
+          pointDiv.style.backgroundColor = pointData.color;
+          pointDiv.style.transform = 'rotate(45deg)';
+          pointDiv.style.border = '2px solid white';
+        }
+
+        viewport.element.appendChild(pointDiv);
+      }
+    });
+  }
+  // Handle removing the last nnInteractive point
+  handleNnInteractivePopPoint = () => {
+    this.setState(prevState => {
+      // Get the last point ID
+      const pointIds = Object.keys(nnInteractivePoints);
+      if (pointIds.length === 0) return; // No points to remove
+
+      const lastPointId = pointIds[pointIds.length - 1];
+      delete nnInteractivePoints[lastPointId];
+
+      const newNnInteractivePrompts = {
+        points: prevState.nnInteractivePrompts.points.slice(0, -1)
+      };
+
+      return {
+        nnInteractivePrompts: newNnInteractivePrompts
+      };
+    }, () => {
+      // This callback runs after the state is updated
+      const enabledElement = getActiveViewportEnabledElement(this.viewportGridService);
+      if (enabledElement) {
+        const { viewport } = enabledElement;
+        const imageSliceData = csUtils.getImageSliceDataForVolumeViewport(viewport);
+        const currentSlice = imageSliceData.imageIndex;
+        AutoSegmentation.updateNnInteractivePointDisplay(currentSlice, enabledElement);
+      }
+    });
+  };
+
+
+  // Remove event listeners for nnInteractive points
+  removeNnInteractivePointEventListeners() {
+    const viewports = this.viewportGridService.getState().viewports;
+    const renderingEngines = getRenderingEngines();
+
+    viewports.forEach((viewportConfig) => {
+      const viewport = renderingEngines[0].getViewport(viewportConfig.viewportId);
+      viewport.element.removeEventListener('click', this.handleNnInteractivePointClick);
+    });
+
+    document.removeEventListener('keydown', this.handleEscKeyPress);
+  }
+
+  static clearNnInteractivePoints = () => {
+    nnInteractivePoints = {};
+
+    // Access the instance and clear its prompts state if needed
+    if (AutoSegmentation.instance) {
+      AutoSegmentation.instance.setState({
+        nnInteractivePrompts: { points: [] }
+      });
+    }
+  };
+  //Handles the toggeling of modes in vista model
+  handleVistaModeChange = (event) => {
+    this.setState({
+      vistaMode: event.target.value,
+      vistaPrompts: { points: [], labels: [] },
+      vistaDrawingMode: false
+    });
+
+    VistaPoints = {}; //clear UI components
+
+    const enabledElement = getActiveViewportEnabledElement(this.viewportGridService);
+    if (!enabledElement) return;
+
+    const { viewport } = enabledElement;
+    const imageSliceData = csUtils.getImageSliceDataForVolumeViewport(viewport);
+    const currentSlice = imageSliceData.imageIndex;
+
+    AutoSegmentation.updateVistaPointDisplay(currentSlice, enabledElement);
+  };
+
+  // Update your handleClassChange to store the selected class object
+  handleClassChange = (event) => {
+    const selectedName = event.target.value;
+    const selectedClass = this.state.vistaClasses.find(cls => cls.name === selectedName);
+    this.setState({ vistaSelectedClass: selectedClass });
+    console.log("selectedName", selectedName)
+    console.log("selectedClass", selectedClass)
+    console.log("this.state.vistaSelectedClass", this.state.vistaSelectedClass)
+  };
+
+  // Handle point type selection (+ or -)
+  handleVistaPointSelection = (type) => {
+    this.setState({
+      vistaPointType: type === 'positive' ? '+' : '-',
+      vistaDrawingMode: true
+    }, () => this.configureViewportInteraction('vista'));
+
+    console.log("#######################")
+    console.log("in handleVistaPointSelection")
+    console.log("vistaPoints", VistaPoints)
+    console.log("vistaPrompts", this.state.vistaPrompts)
+    console.log("#######################")
+
+  };
+
+
+  // Handle actual point click
+  handleVistaPointClick = (event) => {
+    console.log("point clicked vista")
+    const enabledElement = getActiveViewportEnabledElement(this.viewportGridService);
+    if (!enabledElement) return;
+
+    const { viewport } = enabledElement;
+    const imageSliceData = csUtils.getImageSliceDataForVolumeViewport(viewport);
+    const currentSlice = imageSliceData.imageIndex;
+    const activeViewportId = viewport.id;
+
+    // Get canvas coordinates
+    const rect = viewport.element.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    console.log('Point coordinates:', {
+      x, y,
+      viewportRect: rect,
+      viewportId: activeViewportId,
+      slice: currentSlice
+    });
+    // Generate unique ID for this point
+    const pointId = Date.now().toString();
+
+    VistaPoints[pointId] = {
+      x, y, z: currentSlice,
+      viewerID: activeViewportId,
+      pointType: this.state.vistaPointType,
+      color: this.state.vistaPointType === '+' ? '#4CAF50' : '#f44336'
+    };
+
+    // Convert to image coordinates and update prompts
+    const pointInImageCoords = this.mappPointToImageCoords(viewport.id, x, y, currentSlice);
+
+    this.setState(prevState => ({
+      vistaPrompts: {
+        points: [...prevState.vistaPrompts.points, pointInImageCoords],
+        labels: [...prevState.vistaPrompts.labels, this.state.vistaPointType === '+' ? 1 : 0]
+      }
+    }));
+
+    // Update UI
+    AutoSegmentation.updateVistaPointDisplay(currentSlice, enabledElement);
+
+    // Disable drawing mode after placing one point
+    this.setState({ vistaDrawingMode: false });
+
+  };
+  // Update point display in viewport
+  static updateVistaPointDisplay(sliceIndex, enabledElement) {
+
+    if (!enabledElement) return;
+    const { viewport } = enabledElement;
+
+    // Clear existing points - more thorough removal
+    const existingPoints = viewport.element.querySelectorAll('.vista-point');
+    existingPoints.forEach(point => {
+      // Ensure we're removing from the viewport element
+      if (viewport.element.contains(point)) {
+        viewport.element.removeChild(point);
+      }
+    });
+
+    // Draw new points
+    Object.entries(VistaPoints).forEach(([pointId, pointData]) => {
+      if (pointData.viewerID === viewport.id && pointData.z === sliceIndex) {
+        const pointDiv = document.createElement('div');
+        pointDiv.className = 'vista-point';
+        pointDiv.style.position = 'absolute';
+        pointDiv.style.left = `${pointData.x}px`;
+        pointDiv.style.top = `${pointData.y}px`;
+
+        if (pointData.pointType === '+') {
+          pointDiv.style.width = '14px';
+          pointDiv.style.height = '14px';
+          pointDiv.style.backgroundColor = pointData.color;
+          pointDiv.style.borderRadius = '50%';
+          pointDiv.style.border = '2px solid white';
+        } else {
+          pointDiv.style.width = '10px';
+          pointDiv.style.height = '10px';
+          pointDiv.style.backgroundColor = pointData.color;
+          pointDiv.style.transform = 'rotate(45deg)';
+          pointDiv.style.border = '2px solid white';
+        }
+
+        viewport.element.appendChild(pointDiv);
+      }
+    });
+  }
+  // Update point display in viewport
+  static updateVistaPointDisplay(sliceIndex, enabledElement) {
+
+    if (!enabledElement) return;
+    const { viewport } = enabledElement;
+
+    // Clear existing points - more thorough removal
+    const existingPoints = viewport.element.querySelectorAll('.vista-point');
+    existingPoints.forEach(point => {
+      // Ensure we're removing from the viewport element
+      if (viewport.element.contains(point)) {
+        viewport.element.removeChild(point);
+      }
+    });
+
+    // Draw new points
+    Object.entries(VistaPoints).forEach(([pointId, pointData]) => {
+      if (pointData.viewerID === viewport.id && pointData.z === sliceIndex) {
+        const pointDiv = document.createElement('div');
+        pointDiv.className = 'vista-point';
+        pointDiv.style.position = 'absolute';
+        pointDiv.style.left = `${pointData.x}px`;
+        pointDiv.style.top = `${pointData.y}px`;
+
+        if (pointData.pointType === '+') {
+          pointDiv.style.width = '14px';
+          pointDiv.style.height = '14px';
+          pointDiv.style.backgroundColor = pointData.color;
+          pointDiv.style.borderRadius = '50%';
+          pointDiv.style.border = '2px solid white';
+        } else {
+          pointDiv.style.width = '10px';
+          pointDiv.style.height = '10px';
+          pointDiv.style.backgroundColor = pointData.color;
+          pointDiv.style.transform = 'rotate(45deg)';
+          pointDiv.style.border = '2px solid white';
+        }
+
+        viewport.element.appendChild(pointDiv);
+      }
+    });
+  }
+
+  // Update point display in viewport
+  static updateVistaPointDisplay(sliceIndex, enabledElement) {
+
+    if (!enabledElement) return;
+    const { viewport } = enabledElement;
+
+    // Clear existing points - more thorough removal
+    const existingPoints = viewport.element.querySelectorAll('.vista-point');
+    existingPoints.forEach(point => {
+      // Ensure we're removing from the viewport element
+      if (viewport.element.contains(point)) {
+        viewport.element.removeChild(point);
+      }
+    });
+
+    // Draw new points
+    Object.entries(VistaPoints).forEach(([pointId, pointData]) => {
+      if (pointData.viewerID === viewport.id && pointData.z === sliceIndex) {
+        const pointDiv = document.createElement('div');
+        pointDiv.className = 'vista-point';
+        pointDiv.style.position = 'absolute';
+        pointDiv.style.left = `${pointData.x}px`;
+        pointDiv.style.top = `${pointData.y}px`;
+
+        if (pointData.pointType === '+') {
+          pointDiv.style.width = '14px';
+          pointDiv.style.height = '14px';
+          pointDiv.style.backgroundColor = pointData.color;
+          pointDiv.style.borderRadius = '50%';
+          pointDiv.style.border = '2px solid white';
+        } else {
+          pointDiv.style.width = '10px';
+          pointDiv.style.height = '10px';
+          pointDiv.style.backgroundColor = pointData.color;
+          pointDiv.style.transform = 'rotate(45deg)';
+          pointDiv.style.border = '2px solid white';
+        }
+
+        viewport.element.appendChild(pointDiv);
+      }
+    });
+  }
+  // Remove event listeners
+  removeVistaPointEventListeners() {
+    const viewports = this.viewportGridService.getState().viewports;
+    const renderingEngines = getRenderingEngines();
+
+    viewports.forEach((viewportConfig) => {
+      const viewport = renderingEngines[0].getViewport(viewportConfig.viewportId);
+      viewport.element.removeEventListener('click', this.handleVistaPointClick);
+    });
+
+    document.removeEventListener('keydown', this.handleEscKeyPress);
+  }
+  // Handle removing the last VISTA point
+  handleVistaPopPoint = () => {
+    this.setState(prevState => {
+      // Get the last point ID
+      const pointIds = Object.keys(VistaPoints);
+      if (pointIds.length === 0) return; // No points to remove
+
+      const lastPointId = pointIds[pointIds.length - 1];
+      delete VistaPoints[lastPointId];
+
+      const newVistaPrompts = {
+        points: prevState.vistaPrompts.points.slice(0, -1),
+        labels: prevState.vistaPrompts.labels.slice(0, -1)
+      };
+
+      return {
+        // vistaPoints: newVistaPoints,
+        vistaPrompts: newVistaPrompts
+      };
+    }, () => {
+      // This callback runs after the state is updated
+      const enabledElement = getActiveViewportEnabledElement(this.viewportGridService);
+      if (enabledElement) {
+        const { viewport } = enabledElement;
+        const imageSliceData = csUtils.getImageSliceDataForVolumeViewport(viewport);
+        const currentSlice = imageSliceData.imageIndex;
+        AutoSegmentation.updateVistaPointDisplay(currentSlice, enabledElement);
+      }
+    });
+  };
+  static clearVistaPoints = () => {
+    VistaPoints = {};
+
+    // Access the instance and clear its prompts state if needed
+    if (AutoSegmentation.instance) {
+      AutoSegmentation.instance.setState({
+        vistaPrompts: { points: [], labels: [] }
+      });
+    }
+  };
   // Helper function to calculate image embeddings
   static async calculateImageEmbeddings(checkModel = false) {
+    console.log("calculateImageEmbeddings Entered...");
     if (!AutoSegmentation.instance) {
       console.error('AutoSegmentation instance is not available.');
       return;
@@ -104,6 +579,7 @@ export default class AutoSegmentation extends BaseTab {
     } else {
 
       let isCalculate = true
+      console.log("Calculating image embeddings...");
 
 
       if (checkModel) {
@@ -117,6 +593,7 @@ export default class AutoSegmentation extends BaseTab {
 
       // If sam then calc volume embeddings
       if (isCalculate) {
+        console.log("Enter isCalculate block...");
 
         // Set the state to indicate that embeddings are being calculated
         instance.setState({ isCalculatingEmbeddings: true });
@@ -310,6 +787,15 @@ export default class AutoSegmentation extends BaseTab {
 
     const { drawingMode } = this.state;
 
+    console.log("this.state.currentModel", this.state.currentModel)
+    console.log("this.state.vistaDrawingMode", this.state.vistaDrawingMode)
+
+    if (this.state.currentModel === 'vista') {
+      // Handle VISTA point drawing discard
+      this.setState({ vistaDrawingMode: false });
+      this.removeVistaPointEventListeners();
+      return;
+    }
     if (drawingMode === 'box' && this.isDrawing) {
 
       // Handle box drawing discard
@@ -828,7 +1314,26 @@ export default class AutoSegmentation extends BaseTab {
           document.removeEventListener('keydown', handleKeyDown);
         }
       }
-
+      else if (model == 'vista') {
+        console.log("vistaDrawingMode", this.state.vistaDrawingMode)
+        if (this.state.vistaDrawingMode) {
+          viewport.element.addEventListener('click', this.handleVistaPointClick);
+          document.addEventListener('keydown', handleKeyDown);
+        } else {
+          viewport.element.removeEventListener('click', this.handleVistaPointClick);
+          document.removeEventListener('keydown', handleKeyDown);
+        }
+      }
+      else if (model == 'nninteractive') {
+        console.log("nnInteractiveDrawingMode", this.state.nnInteractiveDrawingMode)
+        if (this.state.nnInteractiveDrawingMode) {
+          viewport.element.addEventListener('click', this.handleNnInteractivePointClick);
+          document.addEventListener('keydown', handleKeyDown);
+        } else {
+          viewport.element.removeEventListener('click', this.handleNnInteractivePointClick);
+          document.removeEventListener('keydown', handleKeyDown);
+        }
+      }
     });
   }
 
@@ -1136,60 +1641,6 @@ Update the ui based on sam2 points
     this.setState({ selectedQueue });
   };
 
-  // @REMOVE COMMENT For Queue feature
-
-  // Enqueue segmentation task into the global queue
-  onSegmentationEnqueue = () => {
-    const { info, viewConstants } = this.props;
-    const image = viewConstants.SeriesInstanceUID;
-    const model = this.modelSelector.current.currentModel();
-    const config = this.props.onOptionsConfig();
-    const params =
-      config && config.infer && config.infer[model] ? config.infer[model] : {};
-
-    const labels = info.models[model].labels;
-    const PatientName = getPatientName();
-    // Create a request object
-    const request = this.createSegmentationRequest(
-      model,
-      image,
-      params,
-      labels,
-      PatientName
-    );
-
-    // Get the queue based on the name of the queue (the selected one)
-    let queue = QueueManager.getQueue(this.state.selectedQueue);
-
-    // If there are elements in the combobox and none is selected, use the first one in the combobox
-    if (globalSegmentationQueueManager.queuesUI.length > 0 && queue == null) {
-      queue =
-        QueueManager.getQueue(
-          globalSegmentationQueueManager.queuesUI[0].value
-        ) || queue;
-
-      this.state.selectedQueue =
-        globalSegmentationQueueManager.queuesUI[0].value;
-    }
-
-    if (queue != null) {
-      // enqueue the request in the selected queue
-      queue.enqueue(request);
-      this.notification.show({
-        title: 'MONAI Label',
-        message: `Model ${model} is added to queue: ${this.state.selectedQueue}`,
-        type: 'info',
-        duration: 2000,
-      });
-    } else {
-      this.notification.show({
-        title: 'MONAI Label',
-        message: `Queue ${this.state.selectedQueue} does not exist`,
-        type: 'error',
-        duration: 2000,
-      });
-    }
-  };
 
   /*
   Segment sam in 2d
@@ -1350,7 +1801,29 @@ Update the ui based on sam2 points
       type: 'info',
       duration: 60000,
     });
+    //if vista
+    if (model == 'vista') {
+      //get the mode
+      params.Mode = this.state.vistaMode
+      console.log("params.Mode", params.Mode)
+      if (params.Mode == 'automatic') {
+        //send class value
+        params.Class = this.state.vistaSelectedClass.value
+        console.log("params.Class", params.Class)
+      }
+      else {
+        //send points and labels
+        params.Class = 133
 
+        params.Points = this.state.vistaPrompts
+      }
+    }
+    // if nnInteractive
+    if (model == 'nninteractive') {
+      params.Points = this.state.nnInteractivePrompts;
+      params.viewPort = this.state.activeViewportId;
+
+    }
     const labels = info.models[model].labels;
     const response = await this.props
       .client()
@@ -1392,12 +1865,6 @@ Update the ui based on sam2 points
       }
     }
 
-    // @REMOVE COMMENT For Queue feature
-    let defaultQueue = null;
-    if (globalSegmentationQueueManager.queuesUI.length === 1) {
-      defaultQueue = globalSegmentationQueueManager.queuesUI[0].value;
-    }
-
     return (
       <div className="tab">
         <input
@@ -1434,7 +1901,284 @@ Update the ui based on sam2 points
                 Just select a model and click to run
               </p>
             }
-          />
+          />{this.state.currentModel === 'nninteractive' && (
+            <div style={{
+              width: '80%',
+              margin: '10px 0',
+              borderTop: '1px solid #eee',
+              paddingTop: '15px'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '10px',
+                marginBottom: '15px'
+              }}>
+                {/* Pop Button */}
+                <button
+                  onClick={this.handleNnInteractivePopPoint}
+                  style={{
+                    marginRight: '10px',
+                    color: 'black',
+                    fontSize: '17px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    background: 'none',
+                    border: 'none',
+                    padding: 0
+                  }}
+                  title="Remove Last Point"
+                >
+                  ↶
+                </button>
+
+                {/* Point Label */}
+                <span style={{
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  color: '#333',
+                  marginRight: '10px'
+                }}>
+                  Point:
+                </span>
+
+                {/* Positive Button */}
+                <button
+                  onClick={() => this.handleNnInteractivePointSelection('positive')}
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    padding: 0,
+                    backgroundColor: '#4CAF50',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '50%',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: 'bold',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'background-color 0.3s'
+                  }}
+                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#3e8e41'}
+                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#4CAF50'}
+                  title="Positive Point"
+                >
+                  +
+                </button>
+
+                {/* Negative Button */}
+                <button
+                  onClick={() => this.handleNnInteractivePointSelection('negative')}
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    padding: 0,
+                    backgroundColor: '#f44336',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '50%',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: 'bold',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'background-color 0.3s'
+                  }}
+                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#d32f2f'}
+                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#f44336'}
+                  title="Negative Point"
+                >
+                  -
+                </button>
+              </div>
+            </div>
+          )}
+          {this.state.currentModel === 'vista' && (
+            <div style={{
+              width: '80%',
+              margin: '10px 0',
+              borderTop: '1px solid #eee',
+              paddingTop: '15px'
+            }}>
+              {/* Mode Selection Toggle Buttons */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'center',
+                marginBottom: '15px',
+                gap: '10px'
+              }}>
+                <button
+                  onClick={() => this.handleVistaModeChange({ target: { value: 'automatic' } })} style={{
+                    padding: '8px 20px',
+                    backgroundColor: this.state.vistaMode === 'automatic' ? '#007bff' : '#e9ecef',
+                    color: this.state.vistaMode === 'automatic' ? 'white' : '#495057',
+                    border: 'none',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    fontSize: '10px',
+                    fontWeight: '500',
+                    transition: 'all 0.3s ease',
+                    boxShadow: this.state.vistaMode === 'automatic' ? '0 2px 5px rgba(0,0,0,0.1)' : 'none'
+                  }}
+                >
+                  Automatic Mode
+                </button>
+
+                <button
+                  onClick={() => this.handleVistaModeChange({ target: { value: 'interactive' } })} style={{
+                    padding: '8px 20px',
+                    backgroundColor: this.state.vistaMode === 'interactive' ? '#007bff' : '#e9ecef',
+                    color: this.state.vistaMode === 'interactive' ? 'white' : '#495057',
+                    border: 'none',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    fontSize: '10px',
+                    fontWeight: '500',
+                    transition: 'all 0.3s ease',
+                    boxShadow: this.state.vistaMode === 'interactive' ? '0 2px 5px rgba(0,0,0,0.1)' : 'none'
+                  }}
+                >
+                  Interactive Mode
+                </button>
+              </div>
+
+              {/* Conditional Rendering (keep the rest of your existing code here) */}
+              {this.state.vistaMode === 'automatic' ? (
+                <div style={{
+                  // margin: '0 20px 15px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}>
+                  <label
+                    htmlFor="vista-classes"
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: '500',
+                      color: '#333',
+                      whiteSpace: 'nowrap' // Prevents label from wrapping
+                    }}
+                  >
+                    Class:
+                  </label>
+                  <select
+                    id="vista-classes"
+                    value={this.state.vistaSelectedClass.name}
+                    onChange={this.handleClassChange}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: '4px',
+                      border: '1px solid #ddd',
+                      backgroundColor: '#fff',
+                      fontSize: '10px',
+                    }}
+                  >
+                    {this.state.vistaClasses.map((cls) => (
+                      <option key={cls.name} value={cls.name}>
+                        {cls.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center', // Vertically center items
+                  justifyContent: 'center',
+                  gap: '10px',
+                  marginBottom: '15px'
+                }}>
+                  {/* Pop Button */}
+                  <button
+                    onClick={this.handleVistaPopPoint}
+                    style={{
+                      marginRight: '10px',
+                      color: 'black',
+                      fontSize: '17px',
+                      fontWeight: 'bold',
+                      cursor: 'pointer',
+                      background: 'none',
+                      border: 'none',
+                      padding: 0
+                    }}
+                    title="Remove Last Point"
+                  >
+                    ↶
+                  </button>
+
+                  {/* Point Label */}
+                  <span style={{
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    color: '#333',
+                    marginRight: '10px'
+                  }}>
+                    Point:
+                  </span>
+
+                  {/* Positive Button */}
+                  <button
+                    onClick={() => this.handleVistaPointSelection('positive')}
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      padding: 0,
+                      backgroundColor: '#4CAF50',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '50%', // Makes it circular
+                      cursor: 'pointer',
+                      fontSize: '16px',
+                      fontWeight: 'bold',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'background-color 0.3s'
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#3e8e41'}
+                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#4CAF50'}
+                    title="Positive Point"
+                  >
+                    +
+                  </button>
+
+                  {/* Negative Button */}
+                  <button
+                    onClick={() => this.handleVistaPointSelection('negative')}
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      padding: 0,
+                      backgroundColor: '#f44336',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '50%', // Makes it circular
+                      cursor: 'pointer',
+                      fontSize: '16px',
+                      fontWeight: 'bold',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'background-color 0.3s'
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#d32f2f'}
+                    onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#f44336'}
+                    title="Negative Point"
+                  >
+                    -
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+
+
+
           {this.state.currentModel === 'sam' && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', marginTop: '5px', marginBottom: '5px' }}>
 
@@ -1597,46 +2341,6 @@ Update the ui based on sam2 points
                   </div>
                 </div>
               ))}
-            </div>
-          )}
-          {/* {Queues Combobox} */}
-          {this.state.currentModel != ('sam' && 'segmentation') && (
-            <div className="flex items-center mt-4">
-              <select
-                id="patientQueues"
-                className="selectBox"
-                onChange={this.handleQueueChange}
-                value={this.state.selectedQueue || defaultQueue || ''}
-              >
-                {globalSegmentationQueueManager.queuesUI.length === 0 ? (
-                  <option value="No Queues">No Queues</option>
-                ) : (
-                  globalSegmentationQueueManager.queuesUI.map((queue) => (
-                    <option key={queue.value} value={queue.value}>
-                      {queue.value}
-                    </option>
-                  ))
-                )}
-              </select>
-              <button
-                className="customButton"
-                onClick={this.onSegmentationEnqueue}
-                style={{
-                  padding: '8px 15px',
-                  backgroundColor: '#007bff',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '20px',
-                  cursor: 'pointer',
-                  height: 'auto',
-                  lineHeight: 'normal',
-                  display: 'inline-block',
-                  marginLeft: '10px',
-                }}
-                disabled={globalSegmentationQueueManager.queuesUI.length === 0}
-              >
-                Add to Queue
-              </button>
             </div>
           )}
         </div>
