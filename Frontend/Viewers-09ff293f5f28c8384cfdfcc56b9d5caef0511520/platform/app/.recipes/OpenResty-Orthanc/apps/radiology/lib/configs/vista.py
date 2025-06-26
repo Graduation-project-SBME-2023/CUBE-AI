@@ -23,6 +23,7 @@ from monailabel.interfaces.tasks.train import TrainTask
 from monailabel.utils.others.generic import download_file, strtobool
 from monai.networks.nets import UNet
 from pathlib import Path
+import gdown
 
 logger = logging.getLogger(__name__)
 
@@ -155,14 +156,28 @@ class VISTAPOINT3D(TaskConfig):
 
 
 
-        if not os.path.exists(os.path.join(self.radiology_path,"vista3d")):
-            self.extract_zip(os.path.join(self.radiology_path, "vista3d.zip"), self.radiology_path)
+        if not os.path.exists(os.path.join(self.radiology_path,"vista3d","models","model.pt")):
+            # Google Drive file ID (extracted from the URL)
+            file_id = "1wg5z5eBnci3YMMbE3tMGHMQwt429hnsW"
 
-        # # Download PreTrained Model
-        # if strtobool(self.conf.get("use_pretrained_model", "true")):
-        #     url = f"{self.conf.get('pretrained_path', self.PRE_TRAINED_PATH)}"
-        #     url = f"{url}/monaivista_point_104_sam_3d.pt"
-        #     download_file(url, self.path[0])
+            # Define output directory and filename
+            output_dir = os.path.join(self.radiology_path,"vista3d","models")  # Folder name
+            output_filename = "model.pt"  # Desired filename
+
+            # Create directory if it doesn't exist
+            os.makedirs(output_dir, exist_ok=True)
+
+            # Full output path
+            output_path = os.path.join(output_dir, output_filename)
+
+            # Download the file
+            url = f"https://drive.google.com/uc?id={file_id}"
+            gdown.download(url, output_path, quiet=False)
+
+            print(f"Checkpoint saved to: {output_path}")
+
+        
+
 
         self.target_spacing = (1.5, 1.5, 1.5)  # target space for image
         # Setting ROI size - This is for the image padding
@@ -181,7 +196,7 @@ class VISTAPOINT3D(TaskConfig):
 
 
 
-    def extract_zip(self, zip_path, extract_to='.'):
+    def download_checkpoint(self, zip_path, extract_to='.'):
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(extract_to)
             print(f"Extracted all files to: {os.path.abspath(extract_to)}")
