@@ -28,8 +28,11 @@ import re
 import shutil
 from pathlib import Path
 import SimpleITK as sitk
+import logging
 
 
+
+logger = logging.getLogger(__name__)
 
 
 def convert_to_serializable(obj):
@@ -87,39 +90,14 @@ class NNINTERACTIVE(BasicInferTask):
         y_dim = image_array.shape[1]
         z_dim = image_array.shape[2] 
         updated_points = []
-
-        if viewport == "mpr-sagittal":
-
-            x, y, z = data["Points"]['points'][-1] # Assuming points is a list of [x, y, z]
-
-            # Apply sagittal adjustments
-            new_z = x             # Z becomes original X
-            new_y = x_dim - z - 1 # Flip Y
-            new_x = y_dim - y - 1         # X becomes flipped Y
-            point = (int(new_x), int(new_y), int(new_z))
-            updated_points=point
-            print("Updated Points in sagittal view:", updated_points)
-        elif viewport == "mpr-coronal":
-            z, x, y = data["Points"]['points'][-1] 
-            new_z = z
-            new_y =  y  # Flip Y
-            new_x = x # X becomes flipped Y    
-            point = (int(new_x), int(new_y), int(new_z))
-            updated_points=point
-            print("Updated Points in coronal view:", updated_points)
-            
-        elif viewport == "mpr-axial":
-            x, y, z = data["Points"]['points'][-1] 
-            new_z = z_dim - z - 1 # Flip Z
-            new_y = x
-            new_x = y
-            point = (int(new_x), int(new_y), int(new_z))
-            updated_points=point
-            print("Updated Points in axial view:", updated_points)
-        
+        x = data["Points"]['points'][-1]["0"]
+        y = data["Points"]['points'][-1]["1"]
+        z = data["Points"]['points'][-1]["2"]
+        point = (int(x), int(y), int(z))
+        updated_points=point
+        print("Updated Points in  view:", updated_points)
 
 
-        # Save updated points back to data
         data["Points"]['points']= updated_points
 
 
@@ -177,7 +155,9 @@ class NNINTERACTIVE(BasicInferTask):
             self.load_model(session, model_path)
 
 
-        POINT_COORDINATES = point_coordinates # points in (x,y,z)        
+        POINT_COORDINATES = point_coordinates # points in (x,y,z)   
+
+        logger.info("pointssssss",POINT_COORDINATES)    
 
         session.add_point_interaction(POINT_COORDINATES, include_interaction=Interactive)
 
