@@ -90,7 +90,6 @@ class NNINTERACTIVE(BasicInferTask):
         y_dim = image_array.shape[1]
         z_dim = image_array.shape[2] 
         updated_points = []
-        logger.info("PPOR",data['Points']['points'][-1])
         x = data["Points"]['points'][-1]["0"]
         y = data["Points"]['points'][-1]["1"]
         z = data["Points"]['points'][-1]["2"]
