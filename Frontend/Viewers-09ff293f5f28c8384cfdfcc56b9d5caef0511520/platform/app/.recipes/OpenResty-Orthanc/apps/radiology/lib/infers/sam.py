@@ -341,24 +341,17 @@ class sam(BasicInferTask):
 
                 # Calculate width metrics (column indices where mask > 0)
                 nonzero_cols = np.where(np.any(mask_array > 0, axis=0))[0]  # Get columns with at least one positive pixel
-                nonzero_row = np.where(np.any(mask_array > 0, axis=1))[0]
 
-                if len(nonzero_row) > 0:
-                    min_row = np.min(nonzero_row)
-                    max_row = np.max(nonzero_row)
-                    print(f"Segmentation spans rows: {min_row} to {max_row}")
                 if len(nonzero_cols) > 0:
                     min_col = np.min(nonzero_cols)
                     max_col = np.max(nonzero_cols)
                     print(f"Segmentation spans columns: {min_col} to {max_col}")
-
-
-                # Update object_bounds (maintain overall min/max across all slices)
-
+                             
                 if self.object_bounds[obj_id][0] is None or min_col < self.object_bounds[obj_id][0]:
                     self.object_bounds[obj_id][0] = min_col
                 if self.object_bounds[obj_id][1] is None or max_col > self.object_bounds[obj_id][1]:
                     self.object_bounds[obj_id][1] = max_col
+                    
                 if(orientation_axis==0):
 
                     reversed_slice_index=slice_index #No reversion in coronal
@@ -432,16 +425,9 @@ class sam(BasicInferTask):
                 for obj_id, bounds in self.object_bounds.items():
                     if bounds[0] is not None and bounds[1] is not None:
 
-                        # Calculate bounds with 5% margin
-                        reversedBound= [image_array.shape[2] - bounds[0] -1,image_array.shape[2] - bounds[1] -1]
-                        print("reversedBound 111",reversedBound)
-                        if reversedBound[0]>reversedBound[1]:
-                            reversedBound=[reversedBound[1],reversedBound[0]]
-                            print("reversedBound 222",reversedBound)
-
                         #keep marginal error
-                        lower_bound = max(0, reversedBound[0] - margin)
-                        upper_bound = min(total_slices - 1, reversedBound[1] + margin)
+                        lower_bound = max(0, bounds[0] - margin)
+                        upper_bound = min(total_slices - 1, bounds[1] + margin)
                         print("lower_bound",lower_bound)
                         print("upper_bound",upper_bound)
 
