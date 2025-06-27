@@ -1126,11 +1126,10 @@ export default class AutoSegmentation extends BaseTab {
       const hasSagittal = boxes.some(box => box[2] === 'mpr-sagittal');
       const hasCoronal = boxes.some(box => box[2] === 'mpr-coronal');
 
-      const hasEnoughViews = hasAxial && (hasSagittal || hasCoronal);
+      const hasEnoughViews = (hasSagittal || hasCoronal);
 
       if (!hasEnoughViews) {
         missingViews[objectId] = {
-          axial: !hasAxial,
           sagittal: !hasSagittal && !hasCoronal, // Only show if both are missing
           coronal: !hasCoronal && !hasSagittal   // Only show if both are missing
         };

@@ -432,7 +432,7 @@ class BasicTrainTask(TrainTask):
             return Compose(transforms)
         raise ValueError(f"{step} {name}-transforms are not of `list` or `Compose` type")
 
-    def __call__(self, request,datastore: Optional[Datastore] = None):
+    def __call__(self, request, datastore: Optional[Datastore] = None):
         logger.info(f"Train Request (input): {request}")
 
         req = copy.deepcopy(self._config)
@@ -447,29 +447,34 @@ class BasicTrainTask(TrainTask):
         world_size = torch.cuda.device_count() if not multi_gpus or multi_gpus == "all" else len(multi_gpus.split(","))
 
         logger.info(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
+        logger.info(f"Using Device: {device}; Multi-GPU: {multi_gpu}; World Size: {world_size}")
 
-        datalist = self.pre_process(req, datastore)
 
-        if multi_gpu and world_size < 2:
-            logger.info("Distributed/Multi GPU is limited")
-            multi_gpu = False
-            req["multi_gpu"] = False
-
-        if multi_gpu:
-            logger.info("Distributed/Multi GPU Training = TRUE")
-            tfile = tempfile.NamedTemporaryFile().name
-            if any(platform.win32_ver()):
-                req["distributed_backend"] = "gloo"
-                req["distributed_url"] = f"file://{tfile}"
-
-            logger.info(f"Total proces to spawn: {world_size}")
-            torch.multiprocessing.spawn(main_worker, nprocs=world_size, args=(world_size, req, datalist, self))
-            remove_file(tfile)
+        if datastore is not None:
+            datalist = self.pre_process(req, datastore)
         else:
-            logger.info("Distributed Training = FALSE")
-            res = self.train(0, world_size, req, datalist)
-            self.cleanup(req)
-            return res
+            datalist = None
+
+        # if multi_gpu and world_size < 2:
+        #     logger.info("Distributed/Multi GPU is limited")
+        #     multi_gpu = False
+        #     req["multi_gpu"] = False
+
+        # if multi_gpu:
+        #     logger.info("Distributed/Multi GPU Training = TRUE")
+        #     tfile = tempfile.NamedTemporaryFile().name
+        #     if any(platform.win32_ver()):
+        #         req["distributed_backend"] = "gloo"
+        #         req["distributed_url"] = f"file://{tfile}"
+
+        #     logger.info(f"Total proces to spawn: {world_size}")
+        #     torch.multiprocessing.spawn(main_worker, nprocs=world_size, args=(world_size, req, datalist, self))
+        #     remove_file(tfile)
+        # else:
+        logger.info("Distributed Training = FALSE")
+        res = self.train(0, world_size, req, datalist)
+        self.cleanup(req)
+        return res
 
         self.cleanup(req)
         if os.path.exists(self._stats_path):
