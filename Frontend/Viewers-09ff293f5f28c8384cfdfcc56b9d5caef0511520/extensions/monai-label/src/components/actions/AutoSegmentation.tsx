@@ -83,6 +83,7 @@ export default class AutoSegmentation extends BaseTab {
       nnInteractivePointType: '+',
       nnInteractivePrompts: { points: [], labels: [], },
       nnInteractiveDrawingMode: false,
+      resetInteractions:false,
     };
 
     //initialize a viewportGridService for sam2 functionalities
@@ -1833,6 +1834,7 @@ Update the ui based on sam2 points
     if (model == 'nninteractive') {
       params.Points = this.state.nnInteractivePrompts;
       params.viewPort = this.state.activeViewportId;
+      params.resetInteractions = this.state.resetInteractions;
 
     }
     const labels = info.models[model].labels;
@@ -1863,6 +1865,7 @@ Update the ui based on sam2 points
       });
 
       await this.props.updateView(response, labels, model);
+      this.state.resetInteractions = false;
     }
   };
 
@@ -2004,6 +2007,19 @@ Update the ui based on sam2 points
                   title="Negative Point"
                 >
                   -
+                </button>
+              </div>
+              <div style={{ marginTop: '10px' }}>
+                <button
+                  className={`px-4 py-2 text-white rounded-md font-semibold shadow active:scale-95 transition-all ${this.state.resetInteractions
+                    ? 'bg-gray-700 hover:bg-gray-800'
+                    : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
+                  onClick={() => {
+                    this.setState(prevState => ({ resetInteractions: !prevState.resetInteractions }));
+                  }}
+                >
+                  Reset Interactions
                 </button>
               </div>
             </div>

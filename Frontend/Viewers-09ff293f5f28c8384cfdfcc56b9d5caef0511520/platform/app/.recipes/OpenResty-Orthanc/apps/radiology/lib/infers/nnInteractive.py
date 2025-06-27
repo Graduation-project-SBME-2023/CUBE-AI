@@ -201,6 +201,7 @@ class NNINTERACTIVE(BasicInferTask):
             model_path=os.path.join(self.BASE_PATH,"nnInteractive_v1.0"),
             point_coordinates=data["Points"]['points'],  # Example coordinates
             Interactive=data['Points']['labels'][0],
+            new_object=data['resetInteractions'],
             session=self.session,
         )
         if device.startswith("cuda"):
