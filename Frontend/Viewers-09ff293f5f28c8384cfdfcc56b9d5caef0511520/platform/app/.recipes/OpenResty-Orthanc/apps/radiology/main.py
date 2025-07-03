@@ -62,7 +62,7 @@ class MyApp(MONAILabelApp):
         # Load models from app model implementation, e.g., --conf models <segmentation_spleen>
         models = conf.get("models")
         if not models:
-            print("")
+            print("Hello From main.py")
             print("---------------------------------------------------------------------------------------")
             print("Provide --conf models <name>")
             print("Following are the available models.  You can pass comma (,) seperated names to pass multiple")
