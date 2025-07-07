@@ -247,7 +247,6 @@ async def add_list_workflow(data: ListWorkflowRequest, conn=Depends(get_db_conne
     query = """
         INSERT INTO list_workflow (task_name)
         VALUES ($1)
-        ON CONFLICT (task_name) DO NOTHING
         """
     try:
         await conn.execute(query, data.task_name)

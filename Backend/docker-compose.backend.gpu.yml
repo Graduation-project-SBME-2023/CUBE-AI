@@ -1,0 +1,66 @@
+services:
+  monailabel:
+    image: projectmonai/monailabel:0.8.5
+    container_name: monailabel-backend
+    runtime: nvidia
+    ports:
+      - '8000:8000'
+    volumes:
+      - ./apps:/apps
+      - ./monailabel:/usr/local/lib/python3.10/dist-packages/monailabel
+    environment:
+      - nnUNet_preprocessed=/apps/radiology/nnunet/nnUNet_preprocessed
+      - nnUNet_results=/apps/radiology/nnunet/nnUNet_results
+      - nnUNet_raw=/apps/radiology/nnunet/nnUNet_raw
+      - DATABASE_URL=postgresql://workflow_user:password@postgres:5432/workflow_db
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - MONAI_SERVER_PORT=8000
+    command: >
+      /bin/bash -c "pip install --upgrade pip &&
+      pip install batchgenerators &&
+      pip install acvl-utils &&
+      pip install asyncpg &&
+      pip install nnunetv2 &&
+      pip install nnInteractive &&
+      pip install pydicom==2.4.4 &&
+      monailabel start_server --app /apps/radiology --studies http://orthanc:8042/dicom-web --conf models all"
+    depends_on:
+      - postgres
+      - orthanc
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  orthanc:
+    image: jodogne/orthanc-plugins
+    hostname: orthanc
+    container_name: orthanc-backend
+    ports:
+      - 8043:8042
+    volumes:
+      - ./config/orthanc.json:/etc/orthanc/orthanc.json:ro
+      - ./volumes/orthanc-db/:/var/lib/orthanc/db/
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:latest
+    container_name: postgres-backend
+    volumes:
+      # make sure backup.sql exists *here* on your host, next to this compose file
+      - ./backup.sql:/docker-entrypoint-initdb.d/backup.sql
+      - postgres-db:/var/lib/postgresql/data
+    ports:
+      - '5433:5432'
+    environment:
+      POSTGRES_DB: workflow_db
+      POSTGRES_USER: workflow_user
+      POSTGRES_PASSWORD: password
+    restart: unless-stopped
+
+volumes:
+  postgres-db:
