@@ -1,0 +1,22 @@
+# Not used, react app runs super slow on docker
+
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./
+      dockerfile: Dockerfile.dev
+    container_name: ohif-frontend-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount the full monorepo for live reload
+      - ./:/usr/src/viewers:cached
+      - ohif-node-modules:/usr/src/viewers/node_modules
+    environment:
+      - NODE_ENV=development
+    command: yarn run dev
+
+volumes:
+  ohif-node-modules:

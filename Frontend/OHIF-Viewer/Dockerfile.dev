@@ -1,0 +1,32 @@
+# Dev container for OHIF monorepo
+FROM node:18-slim
+
+# Set working directory to monorepo root
+WORKDIR /usr/src/viewers
+
+RUN apt-get update && apt-get install -y build-essential python3
+
+# Install Lerna globally
+RUN yarn global add lerna
+ENV PATH /usr/local/share/.config/yarn/global/node_modules/.bin:$PATH
+ENV PATH /usr/src/viewers/node_modules/.bin:$PATH
+
+# Use local orthanc as the PACS server
+ENV APP_CONFIG=config/docker_openresty-orthanc.js
+
+# File Watch using polling
+ENV CHOKIDAR_USEPOLLING=true
+
+
+COPY ./ ./
+
+# Enable workspaces
+RUN yarn config set workspaces-experimental true
+
+ENV SKIP_PREINSTALL=true
+
+# Install monorepo dependencies
+RUN yarn install
+
+# Expose React dev server port
+EXPOSE 3000
