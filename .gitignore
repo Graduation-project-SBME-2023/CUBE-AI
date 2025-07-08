@@ -28,5 +28,6 @@ Backend/volumes
 
 # node modules
 **/node_modules/
+**/yarn.lock
 
 Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/apps/radiology/logs/app.log
