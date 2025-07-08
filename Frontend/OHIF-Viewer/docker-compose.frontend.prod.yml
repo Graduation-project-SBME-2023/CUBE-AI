@@ -1,4 +1,4 @@
-name: OHIF-Viewer
+name: CUBE.AI
 services:
   ohif_viewer:
     build:
