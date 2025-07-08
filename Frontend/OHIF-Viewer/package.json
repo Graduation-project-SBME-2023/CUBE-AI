@@ -163,5 +163,12 @@
     "glob-parent": "^6.0.2",
     "trim": "^1.0.0",
     "package-json": "^8.1.0"
+  },
+  "proxy": {
+  "/dicom-web": {
+    "target": "http://localhost:8042",
+    "changeOrigin": true,
+    "secure": false
   }
+}
 }
