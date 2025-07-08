@@ -1,4 +1,4 @@
-name: OHIF-Viewer
+name: CUBE.AI
 services:
   monailabel:
     image: projectmonai/monailabel:0.8.5
