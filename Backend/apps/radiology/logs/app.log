@@ -27885,3 +27885,93 @@ Trying to resume download...
 [2025-07-08 20:26:39,665] [1] [MainThread] [INFO] (dicomweb_client.web:2332) - retrieve metadata of series "2.25.810938919281740895469140112638120366092" of study "1.3.12.2.1107.5.1.4.100045.30000020092908174140500000005"
 [2025-07-08 20:26:39,674] [1] [MainThread] [INFO] (dicomweb_client.web:2332) - retrieve metadata of series "2.25.115244882845686983424745263755913088517" of study "1.3.12.2.1107.5.1.4.100045.30000020092908174140500000005"
 [2025-07-08 20:26:39,699] [1] [MainThread] [INFO] (dicomweb_client.web:2332) - retrieve metadata of series "2.25.846823887621331990593011456455608544691" of study "1.3.12.2.1107.5.1.4.100045.30000020092908174140500000005"
+[2025-07-08 20:30:25,374] [1] [MainThread] [INFO] (monailabel.interfaces.utils.app:37) - Initializing App from: /apps/radiology; studies: http://orthanc:8042/dicom-web; conf: {'models': 'all'}
+[2025-07-08 20:30:28,869] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for MONAILabelApp Found: <class 'main.MyApp'>
+[2025-07-08 20:30:29,017] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.nnInteractive.NNINTERACTIVE'>
+[2025-07-08 20:30:29,018] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.nnunet_liver.NnunetLiver'>
+[2025-07-08 20:30:29,019] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.deepedit.DeepEdit'>
+[2025-07-08 20:30:29,021] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.localization_spine.LocalizationSpine'>
+[2025-07-08 20:30:29,021] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.generic_segmentation.GenericSegmentation'>
+[2025-07-08 20:30:29,022] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.vista.VISTAPOINT3D'>
+[2025-07-08 20:30:29,022] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.nnunet_lung.NnunetLung'>
+[2025-07-08 20:30:29,023] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.deepgrow_2d.Deepgrow2D'>
+[2025-07-08 20:30:29,025] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.deepgrow_3d.Deepgrow3D'>
+[2025-07-08 20:30:29,026] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.segment_liver.Segment_liver'>
+[2025-07-08 20:30:29,027] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.localization_vertebra.LocalizationVertebra'>
+[2025-07-08 20:30:29,028] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.segmentation_spleen.SegmentationSpleen'>
+[2025-07-08 20:30:29,030] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.sam.sam'>
+[2025-07-08 20:30:29,031] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.segmentation_vertebra.SegmentationVertebra'>
+[2025-07-08 20:30:29,033] [1] [MainThread] [INFO] (monailabel.utils.others.class_utils:57) - Subclass for TaskConfig Found: <class 'lib.configs.segmentation.Segmentation'>
+[2025-07-08 20:30:29,034] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: deepedit => lib.configs.deepedit.DeepEdit
+[2025-07-08 20:30:33,426] [1] [MainThread] [INFO] (lib.configs.deepedit:141) - EPISTEMIC Enabled: False; Samples: 5
+[2025-07-08 20:30:33,435] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: deepgrow_2d => lib.configs.deepgrow_2d.Deepgrow2D
+[2025-07-08 20:30:34,381] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: deepgrow_3d => lib.configs.deepgrow_3d.Deepgrow3D
+[2025-07-08 20:30:35,406] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: localization_spine => lib.configs.localization_spine.LocalizationSpine
+[2025-07-08 20:30:36,644] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: localization_vertebra => lib.configs.localization_vertebra.LocalizationVertebra
+[2025-07-08 20:30:37,947] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: nninteractive => lib.configs.nnInteractive.NNINTERACTIVE
+[2025-07-08 20:30:38,781] [1] [MainThread] [INFO] (lib.configs.nnInteractive:62) - Model downloaded to: /apps/radiology
+[2025-07-08 20:30:45,606] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: nnunet_liver => lib.configs.nnunet_liver.NnunetLiver
+[2025-07-08 20:30:46,027] [1] [MainThread] [INFO] (lib.configs.nnunet_liver:60) - EPISTEMIC Enabled: False; Samples: 5
+[2025-07-08 20:30:46,028] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: nnunet_lung => lib.configs.nnunet_lung.NnunetLung
+[2025-07-08 20:30:46,307] [1] [MainThread] [INFO] (lib.configs.nnunet_lung:60) - EPISTEMIC Enabled: False; Samples: 5
+[2025-07-08 20:30:46,308] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: sam => lib.configs.sam.sam
+[2025-07-08 20:30:50,225] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: segment_liver => lib.configs.segment_liver.Segment_liver
+[2025-07-08 20:30:53,450] [1] [MainThread] [INFO] (lib.configs.segment_liver:73) - EPISTEMIC Enabled: False; Samples: 5
+[2025-07-08 20:30:53,453] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: segmentation => lib.configs.segmentation.Segmentation
+[2025-07-08 20:30:54,318] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: segmentation_spleen => lib.configs.segmentation_spleen.SegmentationSpleen
+[2025-07-08 20:30:54,554] [1] [MainThread] [INFO] (lib.configs.segmentation_spleen:79) - EPISTEMIC Enabled: False; Samples: 5
+[2025-07-08 20:30:54,554] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: segmentation_vertebra => lib.configs.segmentation_vertebra.SegmentationVertebra
+[2025-07-08 20:30:55,281] [1] [MainThread] [INFO] (main:105) - +++ Adding Model: vista => lib.configs.vista.VISTAPOINT3D
+[2025-07-08 20:31:02,863] [1] [MainThread] [INFO] (main:108) - +++ Using Models: ['deepedit', 'deepgrow_2d', 'deepgrow_3d', 'localization_spine', 'localization_vertebra', 'nninteractive', 'nnunet_liver', 'nnunet_lung', 'sam', 'segment_liver', 'segmentation', 'segmentation_spleen', 'segmentation_vertebra', 'vista']
+[2025-07-08 20:31:02,869] [1] [MainThread] [INFO] (monailabel.interfaces.app:136) - Init Datastore for: http://orthanc:8042/dicom-web
+[2025-07-08 20:31:02,872] [1] [MainThread] [INFO] (monailabel.interfaces.app:157) - Using DICOM WEB: http://orthanc:8042/dicom-web
+[2025-07-08 20:31:02,931] [1] [MainThread] [INFO] (monailabel.datastore.dicom:62) - DICOMWeb Datastore (cache) Path: /root/.cache/monailabel/dicom/277a51f05d17457dc20b8e11c9d93def; FetchByFrame: False
+[2025-07-08 20:31:02,941] [1] [MainThread] [INFO] (monailabel.datastore.dicom:63) - DICOMWeb Convert To Nifti: True
+[2025-07-08 20:31:03,041] [1] [MainThread] [INFO] (monailabel.datastore.local:130) - Auto Reload: True; Extensions: ('*.nii.gz', '*.nii')
+[2025-07-08 20:31:03,133] [1] [MainThread] [INFO] (monailabel.datastore.local:577) - Invalidate count: 0
+[2025-07-08 20:31:03,133] [1] [MainThread] [INFO] (monailabel.datastore.local:151) - Start observing external modifications on datastore (AUTO RELOAD)
+[2025-07-08 20:31:04,181] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: deepedit => <lib.infers.deepedit.DeepEdit object at 0x7ffea00a2290>
+[2025-07-08 20:31:04,181] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: deepedit_seg => <lib.infers.deepedit.DeepEdit object at 0x7ffea00a2fb0>
+[2025-07-08 20:31:04,182] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: deepgrow_2d => <lib.infers.deepgrow.Deepgrow object at 0x7ffea00a2fe0>
+[2025-07-08 20:31:04,183] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: deepgrow_3d => <lib.infers.deepgrow.Deepgrow object at 0x7ffea00a3010>
+[2025-07-08 20:31:04,185] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: localization_spine => <lib.infers.localization_spine.LocalizationSpine object at 0x7ffea00a3040>
+[2025-07-08 20:31:04,188] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: localization_vertebra => <lib.infers.localization_vertebra.LocalizationVertebra object at 0x7ffea00a3070>
+[2025-07-08 20:31:04,189] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: nninteractive => <lib.infers.nnInteractive.NNINTERACTIVE object at 0x7ffea00a30a0>
+[2025-07-08 20:31:04,190] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: nnunet_liver => <lib.infers.nnunet_liver.NnunetLiver object at 0x7ffea00a2260>
+[2025-07-08 20:31:04,191] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: nnunet_lung => <lib.infers.nnunet_lung.NnunetLung object at 0x7ffea00a3100>
+[2025-07-08 20:31:04,192] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: sam => <lib.infers.sam.sam object at 0x7ffea00a2f80>
+[2025-07-08 20:31:04,193] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: segment_liver => <lib.infers.segment_liver.segmentliver object at 0x7ffea00a30d0>
+[2025-07-08 20:31:04,194] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: segmentation => <lib.infers.segmentation.Segmentation object at 0x7ffea00a3160>
+[2025-07-08 20:31:04,195] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: segmentation_spleen => <lib.infers.segmentation_spleen.SegmentationSpleen object at 0x7ffea00a31c0>
+[2025-07-08 20:31:04,196] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: segmentation_vertebra => <lib.infers.segmentation_vertebra.SegmentationVertebra object at 0x7ffea00a31f0>
+[2025-07-08 20:31:04,197] [1] [MainThread] [INFO] (main:240) - +++ Adding Inferer:: vista => <lib.infers.vista.VISTAPOINT3D object at 0x7ffea00a3220>
+[2025-07-08 20:31:04,199] [1] [MainThread] [INFO] (main:306) - {'deepedit': <lib.infers.deepedit.DeepEdit object at 0x7ffea00a2290>, 'deepedit_seg': <lib.infers.deepedit.DeepEdit object at 0x7ffea00a2fb0>, 'deepgrow_2d': <lib.infers.deepgrow.Deepgrow object at 0x7ffea00a2fe0>, 'deepgrow_3d': <lib.infers.deepgrow.Deepgrow object at 0x7ffea00a3010>, 'localization_spine': <lib.infers.localization_spine.LocalizationSpine object at 0x7ffea00a3040>, 'localization_vertebra': <lib.infers.localization_vertebra.LocalizationVertebra object at 0x7ffea00a3070>, 'nninteractive': <lib.infers.nnInteractive.NNINTERACTIVE object at 0x7ffea00a30a0>, 'nnunet_liver': <lib.infers.nnunet_liver.NnunetLiver object at 0x7ffea00a2260>, 'nnunet_lung': <lib.infers.nnunet_lung.NnunetLung object at 0x7ffea00a3100>, 'sam': <lib.infers.sam.sam object at 0x7ffea00a2f80>, 'segment_liver': <lib.infers.segment_liver.segmentliver object at 0x7ffea00a30d0>, 'segmentation': <lib.infers.segmentation.Segmentation object at 0x7ffea00a3160>, 'segmentation_spleen': <lib.infers.segmentation_spleen.SegmentationSpleen object at 0x7ffea00a31c0>, 'segmentation_vertebra': <lib.infers.segmentation_vertebra.SegmentationVertebra object at 0x7ffea00a31f0>, 'vista': <lib.infers.vista.VISTAPOINT3D object at 0x7ffea00a3220>, 'Histogram+GraphCut': <monailabel.scribbles.infer.HistogramBasedGraphCut object at 0x7ffea00a3130>, 'GMM+GraphCut': <monailabel.scribbles.infer.GMMBasedGraphCut object at 0x7ffea00a3190>, 'deepgrow_pipeline': <lib.infers.deepgrow_pipeline.InferDeepgrowPipeline object at 0x7ffea00a32b0>, 'vertebra_pipeline': <lib.infers.vertebra_pipeline.InferVertebraPipeline object at 0x7ffea00a3250>}
+[2025-07-08 20:31:04,201] [1] [MainThread] [INFO] (main:321) - +++ Adding Trainer:: deepedit => <lib.trainers.deepedit.DeepEdit object at 0x7ffea00a32e0>
+[2025-07-08 20:31:04,202] [1] [MainThread] [INFO] (main:321) - +++ Adding Trainer:: deepgrow_2d => <lib.trainers.deepgrow.Deepgrow object at 0x7ffea00a3370>
+[2025-07-08 20:31:04,203] [1] [MainThread] [INFO] (main:321) - +++ Adding Trainer:: deepgrow_3d => <lib.trainers.deepgrow.Deepgrow object at 0x7ffea00a33a0>
+[2025-07-08 20:31:04,204] [1] [MainThread] [INFO] (main:321) - +++ Adding Trainer:: localization_spine => <lib.trainers.localization_spine.LocalizationSpine object at 0x7ffea00a33d0>
+[2025-07-08 20:31:04,204] [1] [MainThread] [INFO] (main:321) - +++ Adding Trainer:: localization_vertebra => <lib.trainers.localization_vertebra.LocalizationVertebra object at 0x7ffea00a3280>
+[2025-07-08 20:31:04,205] [1] [MainThread] [INFO] (main:321) - +++ Adding Trainer:: nnunet_liver => <lib.trainers.nnunet_liver.NnunetLiver object at 0x7ffea00a3340>
+[2025-07-08 20:31:04,206] [1] [MainThread] [INFO] (main:321) - +++ Adding Trainer:: nnunet_lung => <lib.trainers.nnunet_lung.NnunetLung object at 0x7ffea00a3400>
+[2025-07-08 20:31:04,207] [1] [MainThread] [INFO] (main:321) - +++ Adding Trainer:: sam => <lib.trainers.sam.sam object at 0x7ffea00a3460>
+[2025-07-08 20:31:04,208] [1] [MainThread] [INFO] (main:321) - +++ Adding Trainer:: segment_liver => <lib.trainers.segment_liver.segmentliver object at 0x7ffea00a3310>
+[2025-07-08 20:31:04,210] [1] [MainThread] [INFO] (main:321) - +++ Adding Trainer:: segmentation => <lib.trainers.segmentation.Segmentation object at 0x7ffea00a3490>
+[2025-07-08 20:31:04,211] [1] [MainThread] [INFO] (main:321) - +++ Adding Trainer:: segmentation_spleen => <lib.trainers.segmentation_spleen.SegmentationSpleen object at 0x7ffea00a3430>
+[2025-07-08 20:31:04,212] [1] [MainThread] [INFO] (main:321) - +++ Adding Trainer:: segmentation_vertebra => <lib.trainers.segmentation_vertebra.SegmentationVertebra object at 0x7ffea00a3550>
+[2025-07-08 20:31:04,214] [1] [MainThread] [INFO] (main:133) - No worklfows exist
+[2025-07-08 20:31:04,215] [1] [MainThread] [INFO] (monailabel.utils.sessions:51) - Session Path: /root/.cache/monailabel/sessions
+[2025-07-08 20:31:04,215] [1] [MainThread] [INFO] (monailabel.utils.sessions:52) - Session Expiry (max): 3600
+[2025-07-08 20:31:04,216] [1] [MainThread] [INFO] (monailabel.interfaces.app:474) - App Init - completed
+[2025-07-08 20:31:04,221] [1] [MainThread] [INFO] (timeloop:60) - Starting Timeloop..
+[2025-07-08 20:31:04,225] [1] [MainThread] [INFO] (timeloop:42) - Registered job <function MONAILabelApp.on_init_complete.<locals>.run_scheduler at 0x7ffeca73f010>
+[2025-07-08 20:31:04,226] [1] [MainThread] [INFO] (timeloop:63) - Timeloop now started. Jobs will run based on the interval set
+[2025-07-08 20:31:22,961] [1] [MainThread] [INFO] (dicomweb_client.web:2128) - search for series
+[2025-07-08 20:31:25,103] [1] [MainThread] [INFO] (dicomweb_client.web:2128) - search for series
+[2025-07-08 20:31:25,122] [1] [MainThread] [INFO] (dicomweb_client.web:2332) - retrieve metadata of series "2.25.549304489419931208052447129692233436434" of study "1.3.12.2.1107.5.1.4.100045.30000020092908174140500000005"
+[2025-07-08 20:31:25,210] [1] [MainThread] [INFO] (dicomweb_client.web:2332) - retrieve metadata of series "2.25.719527470762171237033461631236738714639" of study "1.3.12.2.1107.5.1.4.100045.30000020092908174140500000005"
+[2025-07-08 20:31:25,222] [1] [MainThread] [INFO] (dicomweb_client.web:2332) - retrieve metadata of series "2.25.592275785749002191913452748437403922377" of study "1.3.12.2.1107.5.1.4.100045.30000020092908174140500000005"
+[2025-07-08 20:31:25,270] [1] [MainThread] [INFO] (dicomweb_client.web:2332) - retrieve metadata of series "2.25.928172483632433353130413210210490951729" of study "1.3.12.2.1107.5.1.4.100045.30000020092908174140500000005"
+[2025-07-08 20:31:25,278] [1] [MainThread] [INFO] (dicomweb_client.web:2332) - retrieve metadata of series "2.25.307251402228359670557578556544299887035" of study "1.3.12.2.1107.5.1.4.100045.30000020092908174140500000005"
+[2025-07-08 20:31:25,291] [1] [MainThread] [INFO] (dicomweb_client.web:2332) - retrieve metadata of series "2.25.810938919281740895469140112638120366092" of study "1.3.12.2.1107.5.1.4.100045.30000020092908174140500000005"
+[2025-07-08 20:31:25,299] [1] [MainThread] [INFO] (dicomweb_client.web:2332) - retrieve metadata of series "2.25.115244882845686983424745263755913088517" of study "1.3.12.2.1107.5.1.4.100045.30000020092908174140500000005"
+[2025-07-08 20:31:25,318] [1] [MainThread] [INFO] (dicomweb_client.web:2332) - retrieve metadata of series "2.25.846823887621331990593011456455608544691" of study "1.3.12.2.1107.5.1.4.100045.30000020092908174140500000005"
