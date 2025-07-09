@@ -165,6 +165,14 @@ module.exports = (env, argv) => {
       },
       proxy: {
         '/dicomweb': 'http://localhost:5000',
+        "/pacs": {
+          "target": "http://localhost:8043/",
+          "pathRewrite": {
+            "^/pacs": ""
+          },
+          "changeOrigin": true,
+          "secure": false
+        }
       },
       static: [
         {
