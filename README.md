@@ -68,7 +68,3 @@ yarn run dev
 ```
 
 This will run the react app on `http://localhost:3000` with hot reload enabled.
-
-# TO DOOOO
-### Set up orthanc connection for dev mode
-Fiddle with the configs and the environment variables that control the datasource for the viewer.
