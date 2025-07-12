@@ -11,15 +11,6 @@ Backend/apps/radiology/model/
 Backend/apps/radiology/sam2/checkpoints/sam2.1_hiera_large.pt
 **.pt
 **.pth
-Backend/apps/radiology/sam2/configs/sam2/sam2_hiera_l.yaml
-Backend/apps/radiology/sam2/configs/sam2/sam2_hiera_t.yaml
-Backend/apps/radiology/sam2/configs/sam2/sam2_hiera_b+.yaml
-Backend/apps/radiology/sam2/configs/sam2/sam2_hiera_s.yaml
-Backend/apps/radiology/sam2/configs/sam2.1/sam2.1_hiera_b+.yaml
-Backend/apps/radiology/sam2/configs/sam2.1/sam2.1_hiera_l.yaml
-Backend/apps/radiology/sam2/configs/sam2.1/sam2.1_hiera_s.yaml
-Backend/apps/radiology/sam2/configs/sam2.1/sam2.1_hiera_t.yaml
-Backend/apps/radiology/sam2/configs/sam2.1_training/sam2.1_hiera_b+_MOSE_finetune.yaml
 
 Backend/apps/radiology/logs/app.log
 
@@ -29,5 +20,3 @@ Backend/volumes
 # node modules
 **/node_modules/
 **/yarn.lock
-
-Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/apps/radiology/logs/app.log
