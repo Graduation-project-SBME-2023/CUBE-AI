@@ -1,0 +1,13 @@
+name: CUBE.AI
+services:
+  monailabel:
+    volumes:
+      - ${PWD}/Backend/apps:/apps
+      - ${PWD}/Backend/monailabel:/usr/local/lib/python3.10/dist-packages/monailabel
+    command: >
+      /bin/bash -c "
+        uvicorn monailabel.app:app --reload --host 0.0.0.0 --port 8000 \
+        --reload-dir /usr/local/lib/python3.10/dist-packages/monailabel \
+        --reload-dir /apps/radiology
+      "
+#      watch directories are not working correctly :<

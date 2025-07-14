@@ -3,23 +3,25 @@ FROM projectmonai/monailabel:0.8.5
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    build-essential \
+    git build-essential \
+    && apt-get purge -y build-essential \
+    && apt-get autoremove -y \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-RUN pip install --upgrade pip && \
-    pip install batchgenerators acvl-utils asyncpg 
+RUN pip install --no-cache-dir -U pip && \
+    pip install --no-cache-dir batchgenerators acvl-utils asyncpg nnunetv2 nnInteractive pydicom==2.4.4
 
-# Clone and install nnUNet
-RUN git clone https://github.com/MIC-DKFZ/nnUNet.git --branch master && \
-    cd nnUNet && \
-    pip install -e . && \
-    cd ..
+## Clone and install nnUNet
+#RUN git clone https://github.com/MIC-DKFZ/nnUNet.git --branch master && \
+#    cd nnUNet && \
+#    pip install -e . && \
+#    cd ..
 
 # Copy custom code and configurations
 
-COPY ./radiology/ /apps/radiology
+COPY ./apps/radiology/ /apps/radiology
 COPY ./monailabel/ /usr/local/lib/python3.10/dist-packages/monailabel/
 COPY ./reader.py /usr/local/lib/python3.10/dist-packages/pydicom_seg/reader.py
 COPY ./segmentation_dataset.py /usr/local/lib/python3.10/dist-packages/pydicom_seg/segmentation_dataset.py
@@ -34,7 +36,7 @@ ENV nnUNet_preprocessed=/apps/radiology/nnunet/nnUNet_preprocessed \
 EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=5 \
     CMD curl --fail http://localhost:8000/api/health/ || exit 1
 
 # Start command with GPU support
