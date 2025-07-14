@@ -36,8 +36,8 @@ window.config = {
       namespace: '@ohif/extension-default.dataSourcesModule.dicomweb',
       sourceName: 'dicomweb',
       configuration: {
-        friendlyName: 'AWS S3 Static wado server',
-        name: 'aws',
+        friendlyName: 'Local Orhtanc',
+        name: 'orhtanc',
         // wadoUriRoot: 'https://d33do7qe4w26qo.cloudfront.net/dicomweb',
         // qidoRoot: 'https://d33do7qe4w26qo.cloudfront.net/dicomweb',
         // wadoRoot: 'https://d33do7qe4w26qo.cloudfront.net/dicomweb',

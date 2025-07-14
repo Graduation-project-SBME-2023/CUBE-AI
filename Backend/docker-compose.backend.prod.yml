@@ -1,0 +1,7 @@
+name: CUBE.AI
+services:
+  monailabel:
+    command: >
+      /bin/bash -c "
+        monailabel start_server
+      "
