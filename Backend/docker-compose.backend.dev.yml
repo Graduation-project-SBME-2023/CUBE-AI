@@ -10,4 +10,4 @@ services:
         --reload-dir /usr/local/lib/python3.10/dist-packages/monailabel \
         --reload-dir /apps/radiology
       "
-#      watch directories are not working correctly :<
+#      watch directories are not working properly :(
