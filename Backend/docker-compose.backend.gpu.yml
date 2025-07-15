@@ -1,7 +1,10 @@
 name: CUBE.AI
 services:
   monailabel:
-    image: ibrahimfateen/custom-monailabel:0.1
+#    build:
+#      context: ${PWD}/Backend/
+#      dockerfile: ${PWD}/Backend/Dockerfile
+    image: ibrahimfateen/custom-monailabel:0.1.1
     container_name: monailabel-backend
     runtime: nvidia
     ports:
