@@ -35,10 +35,6 @@ ENV nnUNet_preprocessed=/apps/radiology/nnunet/nnUNet_preprocessed \
 # Expose ports
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=5 \
-    CMD curl --fail http://localhost:8000/api/health/ || exit 1
-
 # Start command with GPU support
 CMD ["monailabel", "start_server", \
     "--app", "/apps/radiology", \
