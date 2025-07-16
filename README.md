@@ -16,6 +16,16 @@ cd Backend/apps/radiology/sam2/checkpoints
 bash download_ckpts.sh
 ```
 
+- Set environment variable
+-- On mac/linux:
+```bash
+export COMPOSE_PROJECT_DIR="$(pwd)"
+```
+-- On Windows:
+```powershell
+$env:COMPOSE_PROJECT_DIR = (Get-Location).Path
+```
+
 # 1. Running the Application in Production Mode
 To run the application in production mode, you will need to set up the frontend and backend services using Docker. Below are the steps to get everything running smoothly.
 
