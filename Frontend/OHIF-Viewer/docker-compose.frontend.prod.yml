@@ -2,13 +2,13 @@ name: CUBE.AI
 services:
   ohif_viewer:
     build:
-      context: ${PWD}/Frontend/OHIF-Viewer/
-      dockerfile: ${PWD}/Frontend/OHIF-Viewer/Dockerfile.prod
+      context: ${COMPOSE_PROJECT_DIR}/Frontend/OHIF-Viewer/
+      dockerfile: ${COMPOSE_PROJECT_DIR}/Frontend/OHIF-Viewer/Dockerfile.prod
     image: webapp:latest
     container_name: webapp
     volumes:
-      - ${PWD}/Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/config/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
-      - ${PWD}/Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/logs/nginx:/var/logs/nginx
+      - ${COMPOSE_PROJECT_DIR}/Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/config/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - ${COMPOSE_PROJECT_DIR}/Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/logs/nginx:/var/logs/nginx
     ports:
       - '443:443'
       - '80:80'

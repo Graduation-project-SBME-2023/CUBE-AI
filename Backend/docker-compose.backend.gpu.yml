@@ -2,8 +2,8 @@ name: CUBE.AI
 services:
   monailabel:
 #    build:
-#      context: ${PWD}/Backend/
-#      dockerfile: ${PWD}/Backend/Dockerfile
+#      context: ${COMPOSE_PROJECT_DIR}/Backend/
+#      dockerfile: ${COMPOSE_PROJECT_DIR}/Backend/Dockerfile
     image: ibrahimfateen/custom-monailabel:0.1
     container_name: monailabel-backend
     runtime: nvidia
@@ -35,15 +35,15 @@ services:
     ports:
       - 8043:8042
     volumes:
-      - ${PWD}/Backend/config/orthanc.json:/etc/orthanc/orthanc.json:ro
-      - ${PWD}/Backend/volumes/orthanc-db/:/var/lib/orthanc/db/
+      - ${COMPOSE_PROJECT_DIR}/Backend/config/orthanc.json:/etc/orthanc/orthanc.json:ro
+      - ${COMPOSE_PROJECT_DIR}/Backend/volumes/orthanc-db/:/var/lib/orthanc/db/
     restart: unless-stopped
 
   postgres:
     image: postgres:latest
     container_name: postgres-backend
     volumes:
-      - ${PWD}/Backend/backup.sql:/docker-entrypoint-initdb.d/backup.sql
+      - ${COMPOSE_PROJECT_DIR}/Backend/backup.sql:/docker-entrypoint-initdb.d/backup.sql
       - postgres-db:/var/lib/postgresql/data
     ports:
       - '5433:5432'
