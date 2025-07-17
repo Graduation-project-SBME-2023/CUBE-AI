@@ -95,6 +95,7 @@ const Select = ({
       placeholder={placeholder}
       options={options}
       value={value && Array.isArray(value) ? selectedOptions : value}
+      menuPosition="fixed"
       onChange={(selectedOptions, { action }) => {
         const newSelection = !selectedOptions.length
           ? selectedOptions
