@@ -92,7 +92,14 @@ function WorkList({
   const [openModal, setOpenModal] = useState(false); // State for modal visibility
   const [newWorkflowName, setNewWorkflowName] = useState('');
   const [errorMessage, setErrorMessage] = useState(''); // State for error message
-  const [selectedWorkFlowList, setSelectedWorkFlowList] = useState(null);
+  const [selectedWorkFlowList, setSelectedWorkFlowList] = useState({});
+
+  const updateStudySelectedWorkflow = (studyInstanceUid, workflow) => {
+    setSelectedWorkFlowList(prev => ({
+      ...prev,
+      [studyInstanceUid]: workflow,
+    }));
+  };
 
   useEffect(() => {
     const fetchWorkflowNames = async () => {
@@ -154,7 +161,7 @@ function WorkList({
   // };
 
   const appendStudyInWorkflow = async studyUID => {
-    let selectedWorkflow = await g_workflowManagerInstance.getWorkflowByName(selectedWorkFlowList.label);
+    let selectedWorkflow = await g_workflowManagerInstance.getWorkflowByName(selectedWorkFlowList[studyUID].label);
 
     selectedWorkflow.addStudy(studyUID);
 
@@ -517,13 +524,6 @@ function WorkList({
             </div>
             {workflowlist && workflowlist.length > 0 ? (
               <div className="flex items-center gap-2">
-                <label
-                  htmlFor="workflow-combobox"
-                  className="mr-2 cursor-pointer text-sm font-medium text-gray-700"
-                  onClick={() => appendStudyInWorkflow(studyInstanceUid)}
-                >
-                  Add to Workflow
-                </label>
                 <Select
                   id="workflow-combobox"
                   className="w-40"
@@ -531,15 +531,22 @@ function WorkList({
                     label: workflow,
                     value: workflow,
                   }))}
-                  value={selectedWorkFlowList}
+                  value={selectedWorkFlowList[studyInstanceUid] || null}
                   isMulti={false}
                   isClearable={false}
                   isSearchable={false}
                   closeMenuOnSelect={true}
                   hideSelectedOptions={false}
-                  onChange={e => setSelectedWorkFlowList(e)}
+                  onChange={e => updateStudySelectedWorkflow(studyInstanceUid, e)}
                   placeholder="Select Workflow"
                 ></Select>
+                <LegacyButton
+                  htmlFor="workflow-combobox"
+                  className="mr-2 cursor-pointer text-sm font-medium text-gray-700"
+                  onClick={() => appendStudyInWorkflow(studyInstanceUid)}
+                >
+                  Add to Workflow
+                </LegacyButton>
               </div>
             ) : (
               <span className="text-sm text-gray-500">No workflows available</span>
