@@ -10,12 +10,6 @@ cd OHIF-Standalone
 git checkout Refactored-file-structure
 ```
 
-- Install sam checkpoints
-```bash
-cd Backend/apps/radiology/sam2/checkpoints
-bash download_ckpts.sh
-```
-
 - Set environment variable
 -- On mac/linux:
 ```bash
@@ -24,6 +18,12 @@ export COMPOSE_PROJECT_DIR="$(pwd)"
 -- On Windows:
 ```powershell
 $env:COMPOSE_PROJECT_DIR = (Get-Location).Path
+```
+
+- Install sam checkpoints (Only if running in development)
+```bash
+cd Backend/apps/radiology/sam2/checkpoints
+bash download_ckpts.sh
 ```
 
 # 1. Running the Application in Production Mode
