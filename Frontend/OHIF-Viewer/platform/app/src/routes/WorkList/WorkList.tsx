@@ -702,7 +702,7 @@ function WorkList({
             </div>
           )}
         </div>
-        <div className="w-1/4 flex-shrink-0 bg-black p-4 text-white">
+        <div className="w-1/4 flex-shrink-0 bg-black p-4 text-white" style={{ paddingTop: 0}}>
           {workflowlist && workflowlist.length > 0 ? (
             <WorkflowList
               workflowsMeta={workflowlist}

@@ -31,18 +31,18 @@ const WorkflowList = ({
                 </Typography>
               </div>
               <div className="flex h-[34px] flex-row items-center">
-                <LegacyButton
-                  rounded="full"
-                  variant="outlined"
-                  color="primaryActive"
-                  border="primaryActive"
-                  className="mx-8"
-                  startIcon={<Icon name="cancel" />}
-                  onClick={clearWorkflows}
-                  disabled
-                >
-                  {t('Clear')}
-                </LegacyButton>
+                {/*<LegacyButton*/}
+                {/*  rounded="full"*/}
+                {/*  variant="outlined"*/}
+                {/*  color="primaryActive"*/}
+                {/*  border="primaryActive"*/}
+                {/*  className="mx-8"*/}
+                {/*  startIcon={<Icon name="cancel" />}*/}
+                {/*  onClick={clearWorkflows}*/}
+                {/*  disabled*/}
+                {/*>*/}
+                {/*  {t('Clear')}*/}
+                {/*</LegacyButton>*/}
 
                 <Typography
                   variant="h6"
