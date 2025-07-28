@@ -5,6 +5,7 @@ __pycache__/
 .idea/
 **/.DS_Store
 **/.gitignore
+**/.vscode
 
 # models checkpoints
 Backend/apps/radiology/model/
@@ -20,3 +21,6 @@ Backend/volumes
 # node modules
 **/node_modules/
 **/yarn.lock
+
+
+Frontend\Viewers-*
