@@ -1,4 +1,9 @@
-Contains info on how to run the application in both production and development modes.
+This guide explains how to run the OHIF-Standalone application in two modes:
+
+- **[Production Mode](#1-running-the-application-in-production-mode)**: Optimized for deployment, with prebuilt assets and no hot-reloading. Ideal for stable environments and testing the final user experience.
+- **[Development Mode](#2-running-the-application-in-development-mode)**: Enables hot-reload and live updates for both frontend and backend, suitable for local development and debugging.
+
+Read below for detailed instructions on each.
 
 ## Prerequisites
 - Ensure you have Docker and Docker Compose installed on your machine.
@@ -11,6 +16,7 @@ git checkout Refactored-file-structure
 ```
 
 - Set environment variable
+
 -- On mac/linux:
 ```bash
 export COMPOSE_PROJECT_DIR="$(pwd)"
