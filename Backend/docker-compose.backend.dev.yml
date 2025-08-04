@@ -3,11 +3,6 @@ services:
   monailabel:
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/apps:/apps
-      - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/usr/local/lib/python3.10/dist-packages/monailabel
+      - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/monailabel
     command: >
-      /bin/bash -c "
-        uvicorn monailabel.app:app --reload --host 0.0.0.0 --port 8000 \
-        --reload-dir /usr/local/lib/python3.10/dist-packages/monailabel \
-        --reload-dir /apps/radiology
-      "
-#      watch directories are not working properly :(
+      /bin/bash -c "python /monailabel/server_start.py"
