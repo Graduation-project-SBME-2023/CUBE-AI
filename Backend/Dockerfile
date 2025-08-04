@@ -13,12 +13,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir -U pip && \
     pip install --no-cache-dir batchgenerators acvl-utils asyncpg nnunetv2 nnInteractive pydicom==2.4.4
 
-## Clone and install nnUNet
-#RUN git clone https://github.com/MIC-DKFZ/nnUNet.git --branch master && \
-#    cd nnUNet && \
-#    pip install -e . && \
-#    cd ..
-
 # Copy custom code and configurations
 
 COPY ./apps/radiology/ /apps/radiology
@@ -36,7 +30,4 @@ ENV nnUNet_preprocessed=/apps/radiology/nnunet/nnUNet_preprocessed \
 EXPOSE 8000
 
 # Start command with GPU support
-CMD ["monailabel", "start_server", \
-    "--app", "/apps/radiology", \
-    "--studies", "http://orthanc:8042/dicom-web", \
-    "--conf", "models", "all"]
+CMD ["python", "/monailabel/server_start.py"]
