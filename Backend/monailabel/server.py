@@ -15,4 +15,5 @@ monai_server_app.include_router(workflow.router)
 monai_server_app.include_router(norm_align.router)
 monai_server_app.include_router(new_handle.router)
 
+# used internally by generic segmentation trainer, whyyyyyyyyy??
 monai_server_app.include_router(initialize_inference_task.router)  # not sure if this is needed??

@@ -16,7 +16,7 @@ RUN pip install --no-cache-dir -U pip && \
 # Copy custom code and configurations
 
 COPY ./apps/radiology/ /apps/radiology
-COPY ./monailabel/ /usr/local/lib/python3.10/dist-packages/monailabel/
+COPY ./monailabel/ /monailabel/
 COPY ./reader.py /usr/local/lib/python3.10/dist-packages/pydicom_seg/reader.py
 COPY ./segmentation_dataset.py /usr/local/lib/python3.10/dist-packages/pydicom_seg/segmentation_dataset.py
 
