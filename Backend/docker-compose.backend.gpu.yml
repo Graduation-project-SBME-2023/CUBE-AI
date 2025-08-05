@@ -17,6 +17,7 @@ services:
       MONAI_LABEL_APP_CONF: |
         {"models": "all"}
       MONAI_LABEL_STUDIES: http://orthanc:8042/dicom-web
+      DATABASE_URL: postgresql://workflow_user:password@postgres:5432/workflow_db
     depends_on:
       - postgres
       - orthanc
