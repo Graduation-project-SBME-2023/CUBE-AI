@@ -4,7 +4,7 @@ services:
 #    build:
 #      context: ${COMPOSE_PROJECT_DIR}/Backend/
 #      dockerfile: ${COMPOSE_PROJECT_DIR}/Backend/Dockerfile
-    image: ibrahimfateen/custom-monailabel:0.1
+    image: ibrahimfateen/custom-monailabel:0.2
     container_name: monailabel-backend
     runtime: nvidia
     ports:

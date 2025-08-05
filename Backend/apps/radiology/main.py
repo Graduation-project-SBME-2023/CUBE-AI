@@ -118,8 +118,9 @@ class MyApp(MONAILabelApp):
             description="DeepLearning models for radiology",
             version=monailabel.__version__,
         )
+        self.__init_workflows()
 
-    def init_workflows(self):
+    def __init_workflows(self):
      # initialize all the workflows when starting the application
         jsonPath = 'workflows_data.json'
         if os.path.exists(jsonPath):
