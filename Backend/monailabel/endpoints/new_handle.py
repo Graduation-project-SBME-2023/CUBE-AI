@@ -7,8 +7,8 @@ from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel
 
 router = APIRouter(
-    prefix="/test-NN_UNet",
-    tags=["Test nnUNet"],
+    prefix="/NN_UNet",
+    tags=["nnUNet"],
     responses={404: {"description": "Not found"}},
 )
 
