@@ -12,5 +12,3 @@ services:
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/apps:/apps
       - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/monailabel
-    command: >
-      /bin/bash -c "python /monailabel/server_start.py"
