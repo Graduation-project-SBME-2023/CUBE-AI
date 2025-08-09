@@ -12,8 +12,9 @@ monai_app.include_router(test_dicom.router)
 # Include original MONAI Label datastore endpoints
 monai_app.include_router(monai_datastore.router)
 
-# Include your extended datastore endpoints with the same prefix
-monai_app.include_router(my_datastore_router)
+# Include  extended datastore endpoints with the same prefix
+monai_app.include_router(my_datastore_router,    prefix="/datastore",  tags=["Datastore"] # OpenAPI tag for documentation grouping
+)
 
 
 
