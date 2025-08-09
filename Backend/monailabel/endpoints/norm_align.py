@@ -13,8 +13,8 @@ logging.basicConfig(
 
 # Create APIRouter instance for normalization and alignment endpoints
 router = APIRouter(
-    prefix="/test-normalize&align",  # Base URL path for all endpoints in this router
-    tags=["Test Normalize & Align"],  # OpenAPI tag for documentation grouping
+    prefix="/normalize&align",  # Base URL path for all endpoints in this router
+    tags=["Normalize & Align"],  # OpenAPI tag for documentation grouping
     responses={404: {"description": "Not found"}},  # Default error response
 )
 

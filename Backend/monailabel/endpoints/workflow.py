@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 # Define router for workflow operations
 router = APIRouter(
-    prefix="/test-workflow",
-    tags=["Test Workflow"],
+    prefix="/workflow",
+    tags=["Workflow"],
     responses={404: {"description": "Not found"}},
 )
 

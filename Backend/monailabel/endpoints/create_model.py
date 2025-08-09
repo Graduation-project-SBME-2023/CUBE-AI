@@ -2,8 +2,8 @@ from fastapi import APIRouter, Query
 from monailabel.interfaces.utils.app import app_instance
 
 router = APIRouter(
-    prefix="/test-create-model",
-    tags=["Test Create Model"],
+    prefix="/create-model",
+    tags=["Create Model"],
     responses={404: {"description": "Not found"}},
 )
 
