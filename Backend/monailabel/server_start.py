@@ -1,5 +1,5 @@
 import uvicorn
-import patches
+# import patches
 
 from monailabel.app import app as monai_app
 from monailabel.endpoints import datastore as monai_datastore
