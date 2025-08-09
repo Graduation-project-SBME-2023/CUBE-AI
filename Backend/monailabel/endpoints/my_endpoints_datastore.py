@@ -44,7 +44,10 @@ from monailabel.utils.others.generic import file_checksum, get_mime_type
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(
+    prefix="/datastore",
+    tags=["Datastore"],
+)
 
 Radiology_path = Path("/apps/radiology")
 GENERAL_DATA_DIR = Radiology_path / "General_Data"
