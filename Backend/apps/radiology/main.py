@@ -33,6 +33,10 @@ from monailabel.scribbles.infer import GMMBasedGraphCut, HistogramBasedGraphCut
 from monailabel.tasks.activelearning.first import First
 from monailabel.tasks.activelearning.random import Random
 
+from custom_dicom_datastore import MyDICOMWebDatastore
+from dicomweb_client import DICOMwebClient
+
+
 # bundle
 from monailabel.tasks.infer.bundle import BundleInferTask
 from monailabel.tasks.train.bundle import BundleTrainTask
@@ -223,7 +227,11 @@ class MyApp(MONAILabelApp):
         logger.info("+++++++++ workflow's json file is created")        
 
     def init_datastore(self) -> Datastore:
-        datastore = super().init_datastore()
+    # Use your custom datastore instead of default
+    
+        dicom_url = os.environ.get("MONAI_LABEL_STUDIES", "http://localhost:8043/dicom-web")
+        client = DICOMwebClient(url=dicom_url)
+        datastore = MyDICOMWebDatastore(client,search_filter=None)
         if self.heuristic_planner:
             self.planner.run(datastore)
         return datastore
