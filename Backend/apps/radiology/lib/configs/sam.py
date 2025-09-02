@@ -29,6 +29,8 @@ from monailabel.tasks.scoring.epistemic import EpistemicScoring
 from monailabel.tasks.scoring.sum import Sum
 from monailabel.utils.others.generic import download_file, strtobool
 
+import urllib.request
+
 logger = logging.getLogger(__name__)
 
 class sam(TaskConfig):
@@ -53,8 +55,14 @@ class sam(TaskConfig):
         #     os.path.join(self.model_dir, f"pretrained_{name}.pt"),  # pretrained
         #     os.path.join(self.model_dir, f"{name}.pt"),  # published
         # ]
-        self.path="C:/SAM2_GP/sam2/checkpoints/sam2.1_hiera_large.pt"
-        
+
+        # Download model if not present
+        self.path = os.path.join(self.model_dir, "sam2.1_hiera_large.pt")
+        if not os.path.exists(self.path):
+            logger.info(f"Downloading model to {self.path}")
+            self.__download_checkpoints()
+        else:
+            logger.info(f"Using existing model at {self.path}")
         
         # Network
         self.network = UNet(
@@ -129,4 +137,11 @@ class sam(TaskConfig):
                     num_samples=self.epistemic_samples,
                 )
         return methods
+
+    def __download_checkpoints(self):
+        download_url = "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
+        try:
+            urllib.request.urlretrieve(download_url, self.path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to download checkpoint: {e}")
   
