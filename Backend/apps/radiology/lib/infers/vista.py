@@ -67,7 +67,6 @@ class VISTAPOINT3D(BasicInferTask):
             **kwargs,
         )
         self.target_spacing = target_spacing
-        radiology_path = Path ("/apps/radiology") #Path(__file__).resolve().parents[2]  
         self.BASE_PATH = os.getenv("MODELS_DIR")
 
 
