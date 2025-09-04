@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 class MyApp(MONAILabelApp):
     def __init__(self, app_dir, studies, conf):
         # self.model_dir = os.path.join(app_dir, "model")
-        self.model_dir = os.getenv("MODELS_CHCKPNT_DIR", "/models")
+        self.model_dir = os.getenv("MODELS_DIR", "/models")
 
         configs = {}
         for c in get_class_names(lib.configs, "TaskConfig"):
