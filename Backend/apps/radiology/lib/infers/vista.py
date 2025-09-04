@@ -68,7 +68,7 @@ class VISTAPOINT3D(BasicInferTask):
         )
         self.target_spacing = target_spacing
         radiology_path = Path ("/apps/radiology") #Path(__file__).resolve().parents[2]  
-        self.BASE_PATH =os.path.join(radiology_path, "vista3d")
+        self.BASE_PATH = os.getenv("MODELS_DIR")
 
 
     def is_valid(self) -> bool:
@@ -125,10 +125,14 @@ class VISTAPOINT3D(BasicInferTask):
                 "image": image_path,
                 "label_prompt": [label_index],
             }
+
         config['bundle_root'] = self.BASE_PATH
+        config['checkpointloader']['load_path'] = self.path[0]
+        config['metadata_path'] = self.BASE_PATH + '/configs/vista/metadata.json'
+
+        self.output_dir = config['output_dir']
 
         config = convert_to_serializable(config)
-
 
         with open(config_path, "w") as f:
             json.dump(config, f, indent=4)
@@ -153,7 +157,7 @@ class VISTAPOINT3D(BasicInferTask):
 
 
         print("Running MONAI VISTA Inference...")
-        config_path = os.path.join(self.BASE_PATH, "configs", "inference.json")        
+        config_path = os.path.join(self.BASE_PATH, "configs", "vista", "inference.json")
 
         self.run_monai_inference(
             config_path=config_path,
@@ -169,7 +173,6 @@ class VISTAPOINT3D(BasicInferTask):
 
         print("maskkkk",data[self.input_key])
 
-        output_dir=os.path.join(self.BASE_PATH,"eval")  
         file_ending = "_trans.nii.gz"
         basename = (    
             os.path.basename(data[self.input_key])
@@ -177,7 +180,7 @@ class VISTAPOINT3D(BasicInferTask):
         basename = re.sub(r"\.nii\.gz$", "", basename)
         print("basename", basename) 
 
-        output_path = os.path.join(output_dir, f"{basename}/{basename}{file_ending}")
+        output_path = os.path.join(self.output_dir, f"{basename}/{basename}{file_ending}")
 
         if os.path.exists(output_path):
             outputs = nib.load(output_path).get_fdata()

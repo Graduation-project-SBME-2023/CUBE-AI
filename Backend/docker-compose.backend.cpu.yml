@@ -15,7 +15,7 @@ services:
       MONAI_SERVER_PORT: 8000
       MONAI_LABEL_STUDIES: http://orthanc:8042/dicom-web
       DATABASE_URL: postgresql://workflow_user:password@postgres:5432/workflow_db
-      MODELS_CHCKPNT_DIR: /models
+      MODELS_DIR: /models
     volumes:
         - ${COMPOSE_PROJECT_DIR}/Backend/models:/models
     depends_on:

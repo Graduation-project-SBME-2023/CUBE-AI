@@ -67,7 +67,8 @@ COPY ./segmentation_dataset.py /usr/local/lib/python3.10/dist-packages/pydicom_s
 ENV nnUNet_preprocessed=/apps/radiology/nnunet/nnUNet_preprocessed \
     nnUNet_results=/apps/radiology/nnunet/nnUNet_results \
     nnUNet_raw=/apps/radiology/nnunet/nnUNet_raw \
-    DATABASE_URL=postgresql://workflow_user:password@postgres:5432/workflow_db
+    DATABASE_URL=postgresql://workflow_user:password@postgres:5432/workflow_db \
+    PYTHONPATH=/apps/radiology
 
 # Expose ports
 EXPOSE 8000
