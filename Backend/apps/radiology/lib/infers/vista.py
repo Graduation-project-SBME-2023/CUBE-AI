@@ -67,7 +67,8 @@ class VISTAPOINT3D(BasicInferTask):
             **kwargs,
         )
         self.target_spacing = target_spacing
-        self.BASE_PATH = os.getenv("MODELS_DIR")
+        self.models_path = os.getenv("MODELS_DIR")
+        self.BASE_PATH = os.getenv("MONAI_LABEL_APP_DIR") + "/vista3d"
 
 
     def is_valid(self) -> bool:
@@ -125,9 +126,9 @@ class VISTAPOINT3D(BasicInferTask):
                 "label_prompt": [label_index],
             }
 
-        config['bundle_root'] = self.BASE_PATH
+        config['bundle_root'] = self.models_path
         config['checkpointloader']['load_path'] = self.path[0]
-        config['metadata_path'] = self.BASE_PATH + '/configs/vista/metadata.json'
+        config['metadata_path'] = self.models_path + '/configs/vista/metadata.json'
 
         self.output_dir = config['output_dir']
 
@@ -156,7 +157,7 @@ class VISTAPOINT3D(BasicInferTask):
 
 
         print("Running MONAI VISTA Inference...")
-        config_path = os.path.join(self.BASE_PATH, "configs", "vista", "inference.json")
+        config_path = os.path.join(self.models_path, "configs", "vista", "inference.json")
 
         self.run_monai_inference(
             config_path=config_path,
