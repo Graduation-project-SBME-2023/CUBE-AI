@@ -10,7 +10,3 @@ services:
       MONAI_LABEL_RELOAD: "true"
       DATABASE_URL: postgresql://workflow_user:password@postgres:5432/workflow_db
       MODELS_DIR: /models
-    volumes:
-      - ${COMPOSE_PROJECT_DIR}/Backend/apps:/apps
-      - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/monailabel
-      - ${COMPOSE_PROJECT_DIR}/Backend/models:/models
