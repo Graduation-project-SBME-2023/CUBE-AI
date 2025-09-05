@@ -68,6 +68,7 @@ class VISTAPOINT3D(BasicInferTask):
         )
         self.target_spacing = target_spacing
         self.models_path = os.getenv("MODELS_DIR")
+        self.output_dir = self.models_path + "/eval/vista"
         self.BASE_PATH = os.getenv("MONAI_LABEL_APP_DIR") + "/vista3d"
 
 
@@ -130,8 +131,6 @@ class VISTAPOINT3D(BasicInferTask):
         config['checkpointloader']['load_path'] = self.path[0]
         config['metadata_path'] = self.models_path + '/configs/vista/metadata.json'
 
-        self.output_dir = config['output_dir']
-
         config = convert_to_serializable(config)
 
         with open(config_path, "w") as f:
@@ -181,6 +180,7 @@ class VISTAPOINT3D(BasicInferTask):
         print("basename", basename) 
 
         output_path = os.path.join(self.output_dir, f"{basename}/{basename}{file_ending}")
+        print("output_path", output_path)
 
         if os.path.exists(output_path):
             outputs = nib.load(output_path).get_fdata()
