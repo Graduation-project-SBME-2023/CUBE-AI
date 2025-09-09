@@ -102,10 +102,10 @@ class NNINTERACTIVE(BasicInferTask):
 
 
     # Intilization function
-    def initialize_session(self):
+    def initialize_session(self, device: str = "cuda"):
         # Initialize inference session
         session = nnInteractiveInferenceSession(
-            device=torch.device("cuda"),  # Use CPU
+            device=torch.device(device),  # Use CPU
             use_torch_compile=False,
             verbose=True,
             torch_n_threads=os.cpu_count(),
@@ -135,6 +135,7 @@ class NNINTERACTIVE(BasicInferTask):
                                output_path,
                                model_path,
                                point_coordinates: tuple,
+                               device: str = "cuda",
                                Interactive: bool = True,
                                new_object=False,
                                reset_session: bool = False,
@@ -142,7 +143,7 @@ class NNINTERACTIVE(BasicInferTask):
 
         # Session management
         if session is None or reset_session:
-            session = self.initialize_session()
+            session = self.initialize_session(device)
             img=self.load_volume(volume_path)
             session.set_image(img.numpy())
             target_tensor = torch.zeros(img.shape[1:], dtype=torch.uint8)
@@ -203,6 +204,7 @@ class NNINTERACTIVE(BasicInferTask):
             Interactive=data['Points']['labels'][0],
             new_object=data['resetInteractions'],
             session=self.session,
+            device=device
         )
         if device.startswith("cuda"):
             torch.cuda.empty_cache()
