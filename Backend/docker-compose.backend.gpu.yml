@@ -9,8 +9,7 @@ services:
     runtime: nvidia
     ports:
       - '8000:8000'
-    command:
-      - "python /monailabel/server_start.py"
+    command: ["python", "/monailabel/server_start.py"]
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility

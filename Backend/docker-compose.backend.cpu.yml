@@ -8,8 +8,6 @@ services:
     container_name: monailabel-backend
     ports:
       - '8000:8000'
-    command:
-      - "python /monailabel/server_start.py"
     environment:
       MONAI_LABEL_APP_DIR: /apps/radiology
       MONAI_LABEL_APP_CONF: |
@@ -22,6 +20,7 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/apps:/apps
       - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/monailabel
       - ${COMPOSE_PROJECT_DIR}/Backend/models:/models
+    command: ["python", "/monailabel/server_start.py"]
     depends_on:
       - postgres
       - orthanc
