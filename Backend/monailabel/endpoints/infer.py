@@ -129,10 +129,11 @@ def run_inference(
         raise HTTPException(status_code=500, detail="Neither Image nor File not Session ID input is provided")
 
     instance: MONAILabelApp = app_instance()
-
+    print("instance made ===========")
     if file:
         file_ext = "".join(pathlib.Path(file.filename).suffixes) if file.filename else ".nii.gz"
         image_file = tempfile.NamedTemporaryFile(suffix=file_ext).name
+        print(f"image {image_file} =========")
 
         with open(image_file, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
