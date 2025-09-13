@@ -1,5 +1,4 @@
-import { Types, metaData, utilities as csUtils } from '@cornerstonejs/core';
-import { ProbeTool, annotation, drawing } from '@cornerstonejs/tools';
+import { ProbeTool, annotation, drawing, csAnnotation } from '@cornerstonejs/tools';
 
 const { getAnnotations } = annotation.state;
 
@@ -16,6 +15,24 @@ export default class ProbeMONAILabelTool extends ProbeTool {
   ) {
     super(toolProps, defaultToolProps);
   }
+
+  // addNewAnnotation = (evt) => {
+  //   const annotation = super.addNewAnnotation(evt); // might not work?? - private method
+  //   if (!annotation) {
+  //     return;
+  //   }
+  //
+  //   // Determine type based on click (left/right mouse button)
+  //   const mouseEvent = evt.detail.event;
+  //   if (mouseEvent.button === 0) {
+  //     annotation.data.pointType = 'positive';
+  //   } else if (mouseEvent.button === 2) {
+  //     annotation.data.pointType = 'negative';
+  //   }
+  //
+  //   csAnnotation.state.updateAnnotation(annotation);
+  //   return annotation;
+  // }
 
   renderAnnotation = (enabledElement, svgDrawingHelper): boolean => {
     let renderStatus = false;
@@ -67,13 +84,35 @@ export default class ProbeMONAILabelTool extends ProbeTool {
 
       const handleGroupUID = '0';
 
-      drawing.drawHandles(
-        svgDrawingHelper,
-        annotationUID,
-        handleGroupUID,
-        [canvasCoordinates],
-        { color }
-      );
+      // if (annotation.data.pointType === 'negative') {
+      if (false) {
+        const size = 6;
+        const { x, y } = canvasCoordinates;
+        drawing.drawLine(
+          svgDrawingHelper,
+          annotationUID,
+          `${annotationUID}-x1`,
+          [x - size, y - size],
+          [x + size, y + size],
+          { color, lineWidth: 2 }
+        );
+        drawing.drawLine(
+          svgDrawingHelper,
+          annotationUID,
+          `${annotationUID}-x2`,
+          [x - size, y + size],
+          [x + size, y - size],
+          { color, lineWidth: 2 }
+        );
+      } else {
+        drawing.drawHandles(
+          svgDrawingHelper,
+          annotationUID,
+          handleGroupUID,
+          [canvasCoordinates],
+          { color }
+        );
+      }
 
       renderStatus = true;
     }
