@@ -52,8 +52,6 @@ export default class ModelSelector extends Component {
 
     if (this.props.isDisabled) return; // Disable model change if isDisabled is true
 
-    console.log("evt.target.value....", evt.target.value);
-    console.log("I am here");
     this.setState({ currentModel: evt.target.value });
     AutoSegmentation.clearSam2UIContrainers();
 

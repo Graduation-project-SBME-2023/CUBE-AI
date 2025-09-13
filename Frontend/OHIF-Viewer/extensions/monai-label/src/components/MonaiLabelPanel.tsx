@@ -5,6 +5,7 @@ import { Enums } from '@cornerstonejs/tools';
 import './MonaiLabelPanel.css';
 import SettingsTable from './SettingsTable';
 import AutoSegmentation from './actions/AutoSegmentation';
+import InteractiveSegmentation from './actions/InteractiveSegmentation';
 import SmartEdit from './actions/SmartEdit';
 import OptionTable from './actions/OptionTable';
 import ActiveLearning from './actions/ActiveLearning';
@@ -31,6 +32,7 @@ export default class MonaiLabelPanel extends Component {
     activelearning: any;
     segmentation: any;
     smartedit: any;
+    InteractiveSegmentation: any;
   };
   props: any;
   SeriesInstanceUID: any;
@@ -52,12 +54,14 @@ export default class MonaiLabelPanel extends Component {
       activeLearning: React.createRef(),
       segmentation: React.createRef(),
       smartedit: React.createRef(),
+      InteractiveSegmentation: React.createRef(),
     };
 
     this.state = {
       info: {},
       action: {},
       segmentations: [],
+      isDataReady: false,
     };
     this.workflowName = null;
     /////////////////////////////NEW CODE/////////////////////////////////////
@@ -176,26 +180,50 @@ export default class MonaiLabelPanel extends Component {
       });
 
       this.setState({ info: response.data });
+      this.setState({ isDataReady: true });
 
       // calc image embedding(if SAM model)
       AutoSegmentation.calculateImageEmbeddings(true);
     }
   };
 
+  getActiveViewportInfo = () => {
+    const { viewportGridService, displaySetService } =
+      this.props.servicesManager.services;
+    const { viewports, activeViewportId } = viewportGridService.getState();
+    const viewport = viewports.get(activeViewportId);
+    const displaySet = displaySetService.getDisplaySetByUID(
+      viewport.displaySetInstanceUIDs[0]
+    );
+
+    // viewportId = viewport.viewportId
+    // SeriesInstanceUID = displaySet.SeriesInstanceUID;
+    // StudyInstanceUID = displaySet.StudyInstanceUID;
+    // FrameOfReferenceUID = displaySet.instances[0].FrameOfReferenceUID;
+    // displaySetInstanceUID = displaySet.displaySetInstanceUID;
+    // numImageFrames = displaySet.numImageFrames;
+    return { viewport, displaySet };
+  };
+
   onSelectActionTab = (name) => {
+    console.log('Selecting Action Tab...');
+    console.log(name);
+    console.log(Object.keys(this.actions));
     // Leave Event
     for (const action of Object.keys(this.actions)) {
       if (this.state.action === action) {
-        if (this.actions[action].current)
+        if (this.actions[action].current) {
           this.actions[action].current.onLeaveActionTab();
+        }
       }
     }
 
     // Enter Event
     for (const action of Object.keys(this.actions)) {
       if (name === action) {
-        if (this.actions[action].current)
+        if (this.actions[action].current) {
           this.actions[action].current.onEnterActionTab();
+        }
       }
     }
     this.setState({ action: name });
@@ -270,7 +298,7 @@ export default class MonaiLabelPanel extends Component {
   };
 
   _debug = async () => {
-    let nrrdFetch = await fetch('http://localhost:3000/pred2.nrrd');
+    const nrrdFetch = await fetch('http://localhost:3000/pred2.nrrd');
 
     const info = {
       spleen: 1,
@@ -292,7 +320,7 @@ export default class MonaiLabelPanel extends Component {
     const contentType = response.headers['content-type'];
     const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
     const boundary = boundaryMatch ? boundaryMatch[1] : null;
-    console.log("boundary: ", boundary);
+    console.log('boundary: ', boundary);
 
     const text = new TextDecoder().decode(buffer);
     const parts = text
@@ -317,7 +345,7 @@ export default class MonaiLabelPanel extends Component {
 
     // Extract NRRD data
     const separator = '\r\n\r\n';
-    const sepIndex = nrrdPart.indexOf(separator);  // can there be more occurrences of the separator in the response??
+    const sepIndex = nrrdPart.indexOf(separator); // can there be more occurrences of the separator in the response??
 
     if (sepIndex !== -1) {
       const binaryData = nrrdPart.slice(sepIndex + separator.length);
@@ -344,8 +372,8 @@ export default class MonaiLabelPanel extends Component {
     console.log('model', model);
     const datasources = extensionManager.getActiveDataSource();
     console.log('datasources', datasources);
-    const segmentationId = "1"
-    console.log("segmentationId", segmentationId);
+    const segmentationId = '1';
+    console.log('segmentationId', segmentationId);
     // Ensure dataSource is available
     // Call storeSegmentation from the command module
     await this.props.commandsManager.runCommand('storeSegmentationModified', {
@@ -359,7 +387,7 @@ export default class MonaiLabelPanel extends Component {
     const { data, centroids } = this.parseResponse(response);
     this._update({ data, centroids }, labelNames);
     this.saveSegemntation(model);
-  }
+  };
 
   uploadLabels = async () => {
     if (!this.isMONAILabelConnected) {
@@ -418,6 +446,7 @@ export default class MonaiLabelPanel extends Component {
   };
 
   render() {
+    const { isDataReady } = this.state;
     return (
       <div className="monaiLabelPanel">
         <br style={{ margin: '3px' }} />
@@ -463,38 +492,56 @@ export default class MonaiLabelPanel extends Component {
             />
           )} */}
 
-          <AutoSegmentation
-            ref={this.actions['segmentation']}
-            tabIndex={3}
-            info={this.state.info}
-            viewConstants={{
-              SeriesInstanceUID: this.SeriesInstanceUID,
-              StudyInstanceUID: this.StudyInstanceUID,
-            }}
-            servicesManager={this.props.servicesManager}
-            client={this.client}
-            notification={this.notification}
-            updateView={this.updateView}
-            onSelectActionTab={this.onSelectActionTab}
-            onOptionsConfig={this.onOptionsConfig}
-          />
-          {/* <SmartEdit
-            ref={this.actions['smartedit']}
-            tabIndex={4}
-            servicesManager={this.props.servicesManager}
-            commandsManager={this.props.commandsManager}
-            info={this.state.info}
-            // Here we have to send element - In OHIF V2 - const element = cornerstone.getEnabledElements()[this.props.activeIndex].element;
-            viewConstants={{
-              SeriesInstanceUID: this.SeriesInstanceUID,
-              StudyInstanceUID: this.StudyInstanceUID,
-            }}
-            client={this.client}
-            notification={this.notification}
-            updateView={this.updateView}
-            onSelectActionTab={this.onSelectActionTab}
-            onOptionsConfig={this.onOptionsConfig}
-          /> */}
+          {isDataReady && (
+            <div className="tabs scrollbar" id="style-3">
+              <AutoSegmentation
+                ref={this.actions['segmentation']}
+                tabIndex={1}
+                info={this.state.info}
+                viewConstants={{
+                  SeriesInstanceUID: this.SeriesInstanceUID,
+                  StudyInstanceUID: this.StudyInstanceUID,
+                }}
+                servicesManager={this.props.servicesManager}
+                client={this.client}
+                notification={this.notification}
+                updateView={this.updateView}
+                onSelectActionTab={this.onSelectActionTab}
+                onOptionsConfig={this.onOptionsConfig}
+              />
+              <InteractiveSegmentation
+                ref={this.actions['InteractiveSegmentation']}
+                tabIndex={2}
+                info={this.state.info}
+                servicesManager={this.props.servicesManager}
+                client={this.client}
+                notification={this.notification}
+                updateView={this.updateView}
+                onSelectActionTab={this.onSelectActionTab}
+                onOptionsConfig={this.onOptionsConfig}
+                getActiveViewportInfo={this.getActiveViewportInfo}
+                commandsManager={this.props.commandsManager}
+              />
+
+              {/* <SmartEdit
+              ref={this.actions['smartedit']}
+              tabIndex={4}
+              servicesManager={this.props.servicesManager}
+              commandsManager={this.props.commandsManager}
+              info={this.state.info}
+              // Here we have to send element - In OHIF V2 - const element = cornerstone.getEnabledElements()[this.props.activeIndex].element;
+              viewConstants={{
+                SeriesInstanceUID: this.SeriesInstanceUID,
+                StudyInstanceUID: this.StudyInstanceUID,
+              }}
+              client={this.client}
+              notification={this.notification}
+              updateView={this.updateView}
+              onSelectActionTab={this.onSelectActionTab}
+              onOptionsConfig={this.onOptionsConfig}
+            /> */}
+            </div>
+          )}
         </div>
 
         {this.workflowName && (

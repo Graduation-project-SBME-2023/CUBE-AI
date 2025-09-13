@@ -24,6 +24,8 @@ export default class BaseTab extends Component {
   }
 
   onSelectActionTab = evt => {
+    console.log('Selecting Action Tab...');
+    console.log(evt.currentTarget.value);
     this.props.onSelectActionTab(evt.currentTarget.value);
   };
 
