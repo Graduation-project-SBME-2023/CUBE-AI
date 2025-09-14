@@ -35,7 +35,10 @@ export default class InteractiveSegmentation extends BaseTab {
   onEnterActionTab = () => {
     console.log(this.props.commandsManager);
     this.props.commandsManager.runCommand('setToolActive', {
-      toolName: 'ProbeMONAILabel',
+      toolName: 'ProbeMONAILabelNeg'
+    });
+    this.props.commandsManager.runCommand('setToolActive', {
+      toolName: 'ProbeMONAILabelPos',
     });
     console.info('Here we activate the probe');
   };
@@ -43,16 +46,35 @@ export default class InteractiveSegmentation extends BaseTab {
   onLeaveActionTab = () => {
     this.onChangeLabel(null);
 
-    const { toolGroupService, viewportGridService } = this.props.servicesManager.services;
+    const { toolGroupService, viewportGridService } =
+      this.props.servicesManager.services;
 
     const { viewports, activeViewportId } = viewportGridService.getState();
     const viewport = viewports.get(activeViewportId);
     const { viewportOptions } = viewport;
     const toolGroupId = viewportOptions.toolGroupId;
 
-    toolGroupService.getToolGroup(toolGroupId).setToolDisabled('ProbeMONAILabel');
+    toolGroupService
+      .getToolGroup(toolGroupId)
+      .setToolDisabled('ProbeMONAILabelPos');
+
+    toolGroupService
+      .getToolGroup(toolGroupId)
+      .setToolDisabled('ProbeMONAILabelNeg');
 
     console.info('Here we deactivate the probe');
+  };
+
+  setPositiveProbe = () => {
+    this.props.commandsManager.runCommand('setToolActive', {
+      toolName: 'ProbeMONAILabelPos',
+    });
+  };
+
+  setNegativeProbe = () => {
+    this.props.commandsManager.runCommand('setToolActive', {
+      toolName: 'ProbeMONAILabelNeg',
+    });
   };
 
   onRunInference = async () => {
@@ -96,7 +118,7 @@ export default class InteractiveSegmentation extends BaseTab {
     const manager = cornerstoneTools.annotation.state.getAnnotationManager();
     clickPoints[currentLabel] = manager.saveAnnotations(
       null,
-      'ProbeMONAILabel'
+      'ProbeMONAILabelPos'
     );
 
     const points = {};
@@ -146,8 +168,8 @@ export default class InteractiveSegmentation extends BaseTab {
         sidx = fg.length
           ? fg[fg.length - 1][2]
           : bg.length
-            ? bg[bg.length - 1][2]
-            : -1;
+          ? bg[bg.length - 1][2]
+          : -1;
         fg = fg.filter((p) => p[2] === sidx);
         bg = bg.filter((p) => p[2] === sidx);
       }
@@ -198,23 +220,23 @@ export default class InteractiveSegmentation extends BaseTab {
       return;
     }
 
-    const { toolGroupService, viewportGridService } =
-      this.props.servicesManager.services;
-    const { viewports, activeViewportId } = viewportGridService.getState();
-    const viewport = viewports.get(activeViewportId);
-    const { viewportOptions } = viewport;
-    const toolGroupId = viewportOptions.toolGroupId;
+    // const { toolGroupService, viewportGridService } =
+    //   this.props.servicesManager.services;
+    // const { viewports, activeViewportId } = viewportGridService.getState();
+    // const viewport = viewports.get(activeViewportId);
+    // const { viewportOptions } = viewport;
+    // const toolGroupId = viewportOptions.toolGroupId;
 
-    const colorMap = this.segmentInfo();
-    const customColor = this.segColorToRgb(colorMap[label]);
-    toolGroupService.setToolConfiguration(toolGroupId, 'ProbeMONAILabel', {
-      customColor: customColor,
-    });
+    // const colorMap = this.segmentInfo();
+    // const customColor = this.segColorToRgb(colorMap[label]);
+    // toolGroupService.setToolConfiguration(toolGroupId, 'ProbeMONAILabel', {
+    //   customColor: customColor,
+    // });
 
     const annotations = this.state.clickPoints[label];
     if (annotations) {
       const manager = cornerstoneTools.annotation.state.getAnnotationManager();
-      manager.restoreAnnotations(annotations, null, 'ProbeMONAILabel');
+      manager.restoreAnnotations(annotations, null, 'ProbeMONAILabelPos');
     }
   };
 
@@ -249,7 +271,7 @@ export default class InteractiveSegmentation extends BaseTab {
     const clickPoints = this.state.clickPoints;
     if (prev) {
       const manager = cornerstoneTools.annotation.state.getAnnotationManager();
-      const annotations = manager.saveAnnotations(null, 'ProbeMONAILabel');
+      const annotations = manager.saveAnnotations(null, 'ProbeMONAILabelPos');
       console.log('Saving Prev annotations...', annotations);
 
       this.state.clickPoints[prev] = annotations;
@@ -263,10 +285,10 @@ export default class InteractiveSegmentation extends BaseTab {
 
   getModels() {
     const { info } = this.props;
-    const allowed = ["vista", "sam", "nninteractive"];
+    const allowed = ['vista', 'sam', 'nninteractive'];
     console.log(info.models);
-    const models = Object.keys(info.models).filter(key =>
-        allowed.includes(key)
+    const models = Object.keys(info.models).filter((key) =>
+      allowed.includes(key)
     );
     return models;
   }
@@ -350,6 +372,24 @@ export default class InteractiveSegmentation extends BaseTab {
                     onClick={() => this.clearAllPoints()}
                   >
                     Clear All Points
+                  </a>
+                </u>{' '}
+                |{' '}
+                <u>
+                  <a
+                    style={{ color: 'red', cursor: 'pointer' }}
+                    onClick={() => this.setPositiveProbe()}
+                  >
+                    Positive Points
+                  </a>
+                </u>{' '}
+                |{' '}
+                <u>
+                  <a
+                    style={{ color: 'red', cursor: 'pointer' }}
+                    onClick={() => this.setNegativeProbe()}
+                  >
+                    Negative Points
                   </a>
                 </u>
               </div>
