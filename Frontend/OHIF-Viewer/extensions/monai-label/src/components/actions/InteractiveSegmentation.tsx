@@ -35,8 +35,11 @@ export default class InteractiveSegmentation extends BaseTab {
   onEnterActionTab = () => {
     console.log(this.props.commandsManager);
     this.props.commandsManager.runCommand('setToolActive', {
-      toolName: 'ProbeMONAILabelNeg'
+      toolName: 'ProbeMONAILabelNeg',
     });
+    this.props.commandsManager.runCommand('SetToolActive', {
+      toolName: 'RecROIToolMONAILabel',
+    })
     this.props.commandsManager.runCommand('setToolActive', {
       toolName: 'ProbeMONAILabelPos',
     });
@@ -62,18 +65,28 @@ export default class InteractiveSegmentation extends BaseTab {
       .getToolGroup(toolGroupId)
       .setToolDisabled('ProbeMONAILabelNeg');
 
+    toolGroupService
+      .getToolGroup(toolGroupId)
+      .setToolDisabled('RecROIToolMONAILabel');
+
     console.info('Here we deactivate the probe');
   };
 
-  setPositiveProbe = () => {
+  enablePositiveProbe = () => {
     this.props.commandsManager.runCommand('setToolActive', {
       toolName: 'ProbeMONAILabelPos',
     });
   };
 
-  setNegativeProbe = () => {
+  enableNegativeProbe = () => {
     this.props.commandsManager.runCommand('setToolActive', {
       toolName: 'ProbeMONAILabelNeg',
+    });
+  };
+
+  enableBoxTool = () => {
+    this.props.commandsManager.runCommand('setToolActive', {
+      toolName: 'RecROIToolMONAILabel',
     });
   };
 
@@ -126,7 +139,7 @@ export default class InteractiveSegmentation extends BaseTab {
     for (const label in clickPoints) {
       // console.log(clickPoints[label]);
       for (const uid in clickPoints[label]) {
-        const annotations = clickPoints[label][uid]['ProbeMONAILabel'];
+        const annotations = clickPoints[label][uid]['ProbeMONAILabelPos'];
         // console.log(annotations);
         points[label] = [];
         for (const annotation of annotations) {
@@ -378,7 +391,7 @@ export default class InteractiveSegmentation extends BaseTab {
                 <u>
                   <a
                     style={{ color: 'red', cursor: 'pointer' }}
-                    onClick={() => this.setPositiveProbe()}
+                    onClick={() => this.enablePositiveProbe()}
                   >
                     Positive Points
                   </a>
@@ -387,9 +400,18 @@ export default class InteractiveSegmentation extends BaseTab {
                 <u>
                   <a
                     style={{ color: 'red', cursor: 'pointer' }}
-                    onClick={() => this.setNegativeProbe()}
+                    onClick={() => this.enableNegativeProbe()}
                   >
                     Negative Points
+                  </a>
+                </u>{' '}
+                |{' '}
+                <u>
+                  <a
+                    style={{ color: 'red', cursor: 'pointer' }}
+                    onClick={() => this.enableBoxTool()}
+                  >
+                    Box
                   </a>
                 </u>
               </div>
