@@ -45,7 +45,9 @@ def run(params: Optional[dict] = None, run_sync: Optional[bool] = False):
         if params and params.get(model):
             request.update(params[model])
         res, detail = AsyncTask.run("train", request=request, params=params, force_sync=run_sync, enqueue=True)
+        logging.info(f"inside run : Async task added result {res} details {detail}")
         result[model] = {"result": res, "detail": detail}
+        logging.info(f"inside run: running training task: result = {result}")
     return result
 
 
@@ -53,7 +55,8 @@ def run_model(
     model: str, params: Optional[dict] = None, run_sync: Optional[bool] = False, enqueue: Optional[bool] = False
 ):
     request = {"model": model} if model else {}
-    res, detail = AsyncTask.run("train", request=request, params=params, force_sync=run_sync, enqueue=enqueue)
+    res, detail = AsyncTask.run("train", request=request, params=params, force_sync=True, enqueue=enqueue)
+    logging.info(f"inside run model : Async task added result {res} details {detail}")
     if res is None:
         raise HTTPException(status_code=429, detail=detail)
     return res

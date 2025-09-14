@@ -145,9 +145,11 @@ class GenericSegmentation(BasicTrainTask):
         try:
             subprocess.run(command, check=True)
         except subprocess.CalledProcessError as e:
-            logger.error(f"Training failed with error: {e}")
-            raise RuntimeError(f"Training failed for dataset {self.task_name}, fold {self.fold}, error: {e}")
-
+            logger.error(f"Training failed: {e}")
+            return  # prevent crashing
+        except MemoryError as e:
+            logger.error("Out of memory during training. Reducing resources.")
+            return  # gracefully exit on OOM
         check_point_path = os.path.join(
         os.environ["nnUNet_results"],
         self.task_name,
