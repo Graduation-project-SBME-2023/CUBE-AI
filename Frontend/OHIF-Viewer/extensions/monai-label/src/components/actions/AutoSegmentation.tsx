@@ -1783,12 +1783,13 @@ Update the ui based on sam2 points
 
   };
 
-  onSegmentation = async (samCheck = true) => {
+    onSegmentation =  async (samCheck = true) => {
 
     // TODO:: Fix Image ID...
     const { info, viewConstants } = this.props;
-    const image = viewConstants.SeriesInstanceUID;
+    const {displaySet} = this.props.getActiveViewportInfo();
     const model = this.modelSelector.current.currentModel();
+    const image = displaySet.SeriesInstanceUID;
     const config = this.props.onOptionsConfig();
     const params =
       config && config.infer && config.infer[model] ? config.infer[model] : {};

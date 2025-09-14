@@ -81,10 +81,11 @@ def send_response(datastore, result, output, background_tasks):
     res_img = result.get("file") if result.get("file") else result.get("label")
     res_tag = result.get("tag")
     res_json = result.get("params")
-
+    logger.info(f"send_responses: res_tag {res_tag}")
     if res_img:
         if not os.path.exists(res_img):
             res_img = datastore.get_label_uri(res_img, res_tag)
+            logger.info(f"send_responses:if res_img does not exists, res_tag {res_img}")
         else:
             background_tasks.add_task(remove_file, res_img)
 
@@ -96,6 +97,8 @@ def send_response(datastore, result, output, background_tasks):
 
     if output == "dicom_seg":
         res_dicom_seg = result.get("dicom_seg")
+        
+        logger.info(f"send_responses: res_dicom_seg: {res_dicom_seg}")
         if res_dicom_seg is None:
             raise HTTPException(status_code=500, detail="Error processing inference")
         else:
@@ -108,8 +111,10 @@ def send_response(datastore, result, output, background_tasks):
     else:
         logger.info(f"Return only Result Json as Result Image is not available: {res_img}")
         return res_json
+    logger.info(f"send_responses: res_fields: {res_fields}")
 
     return_message = MultipartEncoder(fields=res_fields)
+    logger.info(f"send_responses: return_message: {return_message}")
     return Response(content=return_message.to_string(), media_type=return_message.content_type)
 
 
@@ -129,8 +134,9 @@ def run_inference(
         raise HTTPException(status_code=500, detail="Neither Image nor File not Session ID input is provided")
 
     instance: MONAILabelApp = app_instance()
-    print("instance made ===========")
+    logger.info("infer : Monai instance made")
     if file:
+        logger.info(f"run_inference: file {file} exists")
         file_ext = "".join(pathlib.Path(file.filename).suffixes) if file.filename else ".nii.gz"
         image_file = tempfile.NamedTemporaryFile(suffix=file_ext).name
         print(f"image {image_file} =========")
@@ -141,6 +147,7 @@ def run_inference(
             background_tasks.add_task(remove_file, image_file)
 
     if label:
+        logger.info(f"run_inference: label {label} exists")
         file_ext = "".join(pathlib.Path(label.filename).suffixes) if label.filename else ".nii.gz"
         label_file = tempfile.NamedTemporaryFile(suffix=file_ext).name
 
@@ -162,6 +169,7 @@ def run_inference(
     request.update(p)
 
     if session_id:
+        logger.info(f"run_inference: session_id {session_id} exists")
         session = instance.sessions().get_session(session_id)
         if session:
             request["image"] = session.image
@@ -186,7 +194,7 @@ def run_inference(
         res_img = result.get("file") if result.get("file") else result.get("label")
         dicom_seg_file = nifti_to_dicom_seg(image_path, res_img, p.get("label_info"), use_itk=True)
         result["dicom_seg"] = dicom_seg_file
-
+    logger.info(f"run_inference: {result}")
     return send_response(instance.datastore(), result, output, background_tasks)
 
 
@@ -202,4 +210,5 @@ async def api_run_inference(
     output: Optional[ResultType] = None,
     user: User = Depends(RBAC(settings.MONAI_LABEL_AUTH_ROLE_USER)),
 ):
+    logger.info(f"api infer/model called,background_tasks{background_tasks}, model: {model}, image: {image}, session_id: {session_id}, params: {params}, file: {file}, label:{label}, output: {output}")
     return run_inference(background_tasks, model, image, session_id, params, file, label, output)

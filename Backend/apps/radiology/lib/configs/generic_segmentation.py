@@ -2,7 +2,8 @@ import logging
 import os
 from typing import Any, Dict, Optional, Union
 
-import lib.infers
+from lib.infers.generic_segmentation import GenericSegmentation as InferGenericSegmentation
+from lib.trainers.generic_segmentation import GenericSegmentation as trainGenericSegmentation
 import lib.trainers
 from monai.networks.nets import UNet
 
@@ -56,10 +57,10 @@ class GenericSegmentation(TaskConfig):
         # Others
         self.epistemic_enabled = strtobool(conf.get("epistemic_enabled", "false"))
         self.epistemic_samples = int(conf.get("epistemic_samples", "5"))
-        logger.info(f"EPISTEMIC Enabled: {{self.epistemic_enabled}}; Samples: {{self.epistemic_samples}}")
+        logger.info(f"EPISTEMIC Enabled: {self.epistemic_enabled}; Samples: {self.epistemic_samples}")
 
     def infer(self) -> Union[InferTask, Dict[str, InferTask]]:
-        task: InferTask = lib.infers.GenericSegmentation(
+        task: InferTask = InferGenericSegmentation(
             path=self.path,
             labels=self.labels,
             model_name=self.model_name,
@@ -68,13 +69,14 @@ class GenericSegmentation(TaskConfig):
             root_nnunet_dir=self.root_nnunet_dir,
             preload=strtobool(self.conf.get("preload", "false")),
         )
+        logger.info("generic segmentation inference task instance made")
         return task
 
     def trainer(self) -> Optional[TrainTask]:
         output_dir = os.path.join(self.model_dir, self.name)
         load_path = self.path[0] if os.path.exists(self.path[0]) else self.path[1]
 
-        task: TrainTask = lib.trainers.GenericSegmentation(
+        task: TrainTask = trainGenericSegmentation(
             model_dir=self.model_dir,
             # target_spacing=self.target_spacing,
             description="Train Generic Segmentation Model",

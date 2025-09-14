@@ -269,6 +269,34 @@ export default class MonaiLabelPanel extends Component {
     }
   };
 
+      updateInstanceVariables = () => {
+    const { viewport, displaySet } = this.getActiveViewportInfo();
+    this.SeriesInstanceUID = displaySet.SeriesInstanceUID;
+    this.StudyInstanceUID = displaySet.StudyInstanceUID;
+    this.FrameOfReferenceUID = displaySet.instances[0].FrameOfReferenceUID;
+    this.displaySetInstanceUID = displaySet.displaySetInstanceUID;
+  };
+
+
+  getActiveViewportInfo = () => {
+    const { viewportGridService, displaySetService } =
+      this.props.servicesManager.services;
+    const { viewports, activeViewportId } = viewportGridService.getState();
+    const viewport = viewports.get(activeViewportId);
+    const displaySet = displaySetService.getDisplaySetByUID(
+      viewport.displaySetInstanceUIDs[0]
+    );
+
+    // viewportId = viewport.viewportId
+    // SeriesInstanceUID = displaySet.SeriesInstanceUID;
+    // StudyInstanceUID = displaySet.StudyInstanceUID;
+    // FrameOfReferenceUID = displaySet.instances[0].FrameOfReferenceUID;
+    // displaySetInstanceUID = displaySet.displaySetInstanceUID;
+    // numImageFrames = displaySet.numImageFrames;
+    return { viewport, displaySet };
+  };
+
+
   _debug = async () => {
     let nrrdFetch = await fetch('http://localhost:3000/pred2.nrrd');
 
@@ -477,6 +505,7 @@ export default class MonaiLabelPanel extends Component {
             updateView={this.updateView}
             onSelectActionTab={this.onSelectActionTab}
             onOptionsConfig={this.onOptionsConfig}
+            getActiveViewportInfo={this.getActiveViewportInfo}
           />
           {/* <SmartEdit
             ref={this.actions['smartedit']}
