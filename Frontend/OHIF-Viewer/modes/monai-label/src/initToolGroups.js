@@ -95,6 +95,7 @@ function initDefaultToolGroup(
       { toolName: toolNames.SegmentationDisplay },
       { toolName: 'ProbeMONAILabelPos' },
       { toolName: 'ProbeMONAILabelNeg' },
+      { toolNam: 'RecROIToolMONAILabel' },
     ],
     // enabled
     // disabled
@@ -176,6 +177,7 @@ function initMPRToolGroup(extensionManager, toolGroupService, commandsManager) {
       { toolName: toolNames.SegmentationDisplay },
       { toolName: 'ProbeMONAILabelPos' },
       { toolName: 'ProbeMONAILabelNeg' },
+      { toolName: 'RecROIToolMONAILabel' },
     ],
     disabled: [
       {

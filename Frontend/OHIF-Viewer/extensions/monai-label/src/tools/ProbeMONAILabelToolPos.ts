@@ -78,7 +78,7 @@ export default class ProbeMONAILabelToolPos extends ProbeTool {
         annotationUID,
         handleGroupUID,
         [canvasCoordinates],
-        { color }
+        { color, handleRadius: '4' }
       );
 
       renderStatus = true;
