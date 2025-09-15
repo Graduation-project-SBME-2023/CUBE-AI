@@ -1,7 +1,7 @@
 import React, { Component } from 'react';
-import PropTypes from 'prop-types';
+import PropTypes, { object } from 'prop-types';
 import { cache, triggerEvent, eventTarget } from '@cornerstonejs/core';
-import { Enums } from '@cornerstonejs/tools';
+import { Enums, segmentation } from '@cornerstonejs/tools';
 import './MonaiLabelPanel.css';
 import SettingsTable from './SettingsTable';
 import AutoSegmentation from './actions/AutoSegmentation';
@@ -15,6 +15,8 @@ import SegmentationToolbox from './SegmentationToolbox';
 
 import { createReportAsync } from '@ohif/extension-default';
 import { servicesManager } from 'platform/app/src/App';
+
+
 
 export default class MonaiLabelPanel extends Component {
   static propTypes = {
@@ -85,7 +87,7 @@ export default class MonaiLabelPanel extends Component {
       this.FrameOfReferenceUID = displaySet.instances[0].FrameOfReferenceUID;
       this.displaySetInstanceUID = displaySet.displaySetInstanceUID;
       this.onInfo();
-    }, 1000);
+    }, 3000);
   }
 
   async componentDidMount() {
@@ -135,7 +137,7 @@ export default class MonaiLabelPanel extends Component {
       type: 'info',
       duration: 3000,
     });
-
+    console.log("on info function used")
     const response = await this.client().info();
 
     this.isMONAILabelConnected = true;
@@ -143,22 +145,28 @@ export default class MonaiLabelPanel extends Component {
     // remove the background
     const labels = response.data.labels.splice(1);
 
-    const segmentations = [
-      {
-        id: '1',
-        label: 'Segmentations',
-        segments: labels.map((label, index) => ({
-          segmentIndex: index + 1,
-          label,
-        })),
-        isActive: true,
-        activeSegmentIndex: 1,
-      },
-    ];
+    const { displaySet } = this.getActiveViewportInfo();
+const segmentationId = displaySet.SeriesInstanceUID;
 
-    this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
-      segmentations,
-    });
+const segmentations = [
+  {
+    id: segmentationId, // use same ID everywhere
+    label: 'Segmentations',
+    segments: labels.map((label, index) => ({
+      segmentIndex: index + 1,
+      label,
+    })),
+    isActive: true,
+    activeSegmentIndex: 1,
+    // scalarData: null,
+    // FrameOfReferenceUID: displaySet.instances[0].FrameOfReferenceUID,
+    // centroidsIJK: centroidsIJK,
+  },
+];
+
+this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
+  segmentations,
+});
 
     if (response.status !== 200) {
       this.notification.show({
@@ -209,67 +217,90 @@ export default class MonaiLabelPanel extends Component {
   };
 
   _update = async (response, labelNames) => {
-    // Process the obtained binary file from the MONAI Label server
-    /* const onInfoLabelNames = this.state.info.labels */
-    const onInfoLabelNames = labelNames;
+  // Update instance variables
+  this.updateInstanceVariables();
+  const client_response = await this.client().info();
+  const labels = client_response.data.labels.splice(1);
+  console.log(labels)
+  const onInfoLabelNames = labelNames;
+  console.info('These are the predicted labels:', onInfoLabelNames);
 
-    console.info('These are the predicted labels');
-    console.info(onInfoLabelNames);
+  // Remove background label if present
+  // if (onInfoLabelNames.hasOwnProperty('background')) {
+  //   delete onInfoLabelNames.background;
+  // }
 
-    if (onInfoLabelNames.hasOwnProperty('background')) {
-      delete onInfoLabelNames.background;
-    }
+  // Parse NRRD segmentation data
+  const ret = SegmentationReader.parseNrrdData(response.data);
+  if (!ret) {
+    throw new Error('Failed to parse NRRD data');
+  }
 
-    const ret = SegmentationReader.parseNrrdData(response.data);
+  const { image: buffer, header } = ret;
+  const data = new Uint16Array(buffer);
 
-    if (!ret) {
-      throw new Error('Failed to parse NRRD data');
-    }
+  // Reformat centroids
+  const centroidsIJK = new Map();
+  for (const [key, value] of Object.entries(response.centroids)) {
+    const segmentIndex = parseInt(value[0], 10);
+    const image = value.slice(1).map((v) => parseFloat(v));
+    centroidsIJK.set(segmentIndex, { image: image, world: [] });
+  }
 
-    const { image: buffer, header } = ret;
-    const data = new Uint16Array(buffer);
+  // Get the active display set (each series = unique segmentation ID)
+  const { displaySet } = this.getActiveViewportInfo();
+  const segmentationId = displaySet.SeriesInstanceUID;
 
-    // reformat centroids
-    const centroidsIJK = new Map();
-    for (const [key, value] of Object.entries(response.centroids)) {
-      const segmentIndex = parseInt(value[0], 10);
-      const image = value.slice(1).map((v) => parseFloat(v));
-      centroidsIJK.set(segmentIndex, { image: image, world: [] });
-    }
-
-    const segmentations = [
-      {
-        id: '1',
-        label: 'Segmentations',
-        segments: Object.keys(onInfoLabelNames).map((key) => ({
-          segmentIndex: onInfoLabelNames[key],
-          label: key,
-        })),
-        isActive: true,
-        activeSegmentIndex: 1,
-        scalarData: data,
-        FrameOfReferenceUID: this.FrameOfReferenceUID,
-        centroidsIJK: centroidsIJK,
-      },
-    ];
-
-    // Todo: rename volumeId
-    const volumeLoadObject = cache.getVolume('1');
-    if (volumeLoadObject) {
-      const { scalarData } = volumeLoadObject;
-      scalarData.set(data);
-      triggerEvent(eventTarget, Enums.Events.SEGMENTATION_DATA_MODIFIED, {
-        segmentationId: '1',
-      });
-      console.debug("updated the segmentation's scalar data");
-    } else {
-      this.props.commandsManager.runCommand('hydrateSegmentationsForViewport', {
-        segmentations,
-      });
-    }
+  // Define segmentation object
+  const segmentation_object = {
+    id: segmentationId, // CHANGED: now unique per volume
+    label: `Segmentation_${segmentationId}`, // CHANGED: unique label
+    segments: labels.map((label, index) => ({
+      segmentIndex: index,
+      label,
+    })),
+    isActive: true,
+    activeSegmentIndex: 1,
+    scalarData: data,
+    FrameOfReferenceUID: this.FrameOfReferenceUID,
+    centroidsIJK: centroidsIJK,
   };
 
-      updateInstanceVariables = () => {
+  // Try to find existing volume in cache
+  const volumeLoadObject = await cache.getVolumeLoadObject(segmentationId);
+  console.log("_update: the volume load object", volumeLoadObject)
+  if (volumeLoadObject) {
+    const volume = await volumeLoadObject.promise;
+    console.log("Resolved volume:", volume);
+    console.log(`_update: found existing volume for segmentationId ${segmentationId}`);
+    const { scalarData } = volume;
+    console.log("data = ", data )
+    scalarData.set(data);
+
+    triggerEvent(eventTarget, Enums.Events.SEGMENTATION_DATA_MODIFIED, {
+      segmentationId,
+    });
+
+    console.debug(`Updated scalar data for segmentation ${segmentationId}`);
+  } else {
+    await this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
+      segmentations: [segmentation_object],
+    });
+
+    // Ensure loaded before accessing state
+    const loadObject = cache.getVolumeLoadObject(segmentationId);
+    if (loadObject) {
+      await loadObject.promise;
+    }
+
+    const segmentation_objects = await segmentation.state.getSegmentations();
+    console.log("_update: segmentation object in cornerstone", segmentation_objects);
+  }
+  return segmentationId;
+};
+
+
+    updateInstanceVariables = () => {
     const { viewport, displaySet } = this.getActiveViewportInfo();
     this.SeriesInstanceUID = displaySet.SeriesInstanceUID;
     this.StudyInstanceUID = displaySet.StudyInstanceUID;
@@ -368,14 +399,24 @@ export default class MonaiLabelPanel extends Component {
     }
   };
 
-  saveSegemntation = async (model) => {
+  saveSegemntation = async (model, segmentationId) => {
     console.log('model', model);
     const datasources = extensionManager.getActiveDataSource();
     console.log('datasources', datasources);
-    const segmentationId = "1"
+    const { displaySet } = this.getActiveViewportInfo();
+    // const segmentationId = displaySet.SeriesInstanceUID;
     console.log("segmentationId", segmentationId);
     // Ensure dataSource is available
-    // Call storeSegmentation from the command module
+    // Call storeSegmentation from tzhe command module
+    const seg = await segmentation.state.getSegmentation(segmentationId);
+    console.log(`saveSegmentation: in the saveSegmentation `, seg)
+    if (!seg) {
+      console.error(`No segmentation found for ID: ${segmentationId}`);
+      return;
+    }
+     if (Array.isArray(seg.segments)) {
+      seg.segments = seg.segments.filter(Boolean);
+    }
     await this.props.commandsManager.runCommand('storeSegmentationModified', {
       segmentationId,
       dataSource: datasources[0],
@@ -384,9 +425,13 @@ export default class MonaiLabelPanel extends Component {
   };
 
   updateView = async (response, labelNames, model) => {
+    console.log("update_view: inside update view ")
+    console.log(`update_view: response ${response} `)
     const { data, centroids } = this.parseResponse(response);
-    this._update({ data, centroids }, labelNames);
-    this.saveSegemntation(model);
+      // get segmentationId directly
+    const segmentationId = await this._update({ data, centroids }, labelNames);
+    // pass segmentationId explicitly
+    this.saveSegemntation(model, segmentationId);
   }
 
   uploadLabels = async () => {
@@ -438,7 +483,8 @@ export default class MonaiLabelPanel extends Component {
   };
   getReport = async () => {
     const datasources = this.props.extensionManager.getActiveDataSource();
-    const segmentationId = '1';
+    const { displaySet } = this.getActiveViewportInfo();
+    const segmentationId = displaySet.SeriesInstanceUID;
     return await this.props.commandsManager.runCommand('storeSegmentation', {
       segmentationId,
       dataSource: datasources[0],
