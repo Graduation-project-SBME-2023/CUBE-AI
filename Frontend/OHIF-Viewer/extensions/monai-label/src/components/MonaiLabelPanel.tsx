@@ -216,19 +216,14 @@ this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
       : {};
   };
 
-  _update = async (response, labelNames) => {
+_update = async (response, labelNames) => {
   // Update instance variables
   this.updateInstanceVariables();
   const client_response = await this.client().info();
-  const labels = client_response.data.labels.splice(1);
-  console.log(labels)
+  const labels = client_response.data.labels.slice(1);
+  console.log(labels);
   const onInfoLabelNames = labelNames;
   console.info('These are the predicted labels:', onInfoLabelNames);
-
-  // Remove background label if present
-  // if (onInfoLabelNames.hasOwnProperty('background')) {
-  //   delete onInfoLabelNames.background;
-  // }
 
   // Parse NRRD segmentation data
   const ret = SegmentationReader.parseNrrdData(response.data);
@@ -251,13 +246,15 @@ this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
   const { displaySet } = this.getActiveViewportInfo();
   const segmentationId = displaySet.SeriesInstanceUID;
 
-  // Define segmentation object
+  // Define segmentation object with proper structure
   const segmentation_object = {
-    id: segmentationId, // CHANGED: now unique per volume
-    label: `Segmentation_${segmentationId}`, // CHANGED: unique label
+    id: segmentationId,
+    label: `Segmentation_${segmentationId}`,
     segments: labels.map((label, index) => ({
-      segmentIndex: index,
+      segmentIndex: index + 1,
       label,
+      isActive: true,
+      isVisible: true,
     })),
     isActive: true,
     activeSegmentIndex: 1,
@@ -265,16 +262,22 @@ this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
     FrameOfReferenceUID: this.FrameOfReferenceUID,
     centroidsIJK: centroidsIJK,
   };
-
+  
+  console.log('BEFORE loading - segmentation_object.segments:', segmentation_object.segments);
+  console.log('BEFORE loading - segments length:', segmentation_object.segments.length);
+  console.log('BEFORE loading - first 5 segments:', segmentation_object.segments.slice(0, 5));  
+  
   // Try to find existing volume in cache
   const volumeLoadObject = await cache.getVolumeLoadObject(segmentationId);
-  console.log("_update: the volume load object", volumeLoadObject)
+  console.log("_update: the volume load object", volumeLoadObject);
+  
   if (volumeLoadObject) {
+    // Volume exists - update it
     const volume = await volumeLoadObject.promise;
     console.log("Resolved volume:", volume);
     console.log(`_update: found existing volume for segmentationId ${segmentationId}`);
     const { scalarData } = volume;
-    console.log("data = ", data )
+    console.log("data = ", data);
     scalarData.set(data);
 
     triggerEvent(eventTarget, Enums.Events.SEGMENTATION_DATA_MODIFIED, {
@@ -283,22 +286,111 @@ this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
 
     console.debug(`Updated scalar data for segmentation ${segmentationId}`);
   } else {
-    await this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
-      segmentations: [segmentation_object],
-    });
+    // Volume doesn't exist - create it
+    console.log("Volume not found in cache, creating new segmentation");
+    
+    try {
+      // Use the segmentation service to properly create the segmentation
+      const { segmentationService } = this.props.servicesManager.services;
+      
+      // First, remove any existing segmentation with the same ID
+      const existingSegmentations = segmentationService.getSegmentations();
+      const existingSegmentation = existingSegmentations.find(seg => seg.id === segmentationId);
+      if (existingSegmentation) {
+        console.log(`Removing existing segmentation with ID: ${segmentationId}`);
+        segmentationService.remove(segmentationId);
+        
+        // Wait for removal to complete
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      // Create the new segmentation using the command manager
+      await this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
+        segmentations: [segmentation_object],
+      });
 
-    // Ensure loaded before accessing state
-    const loadObject = cache.getVolumeLoadObject(segmentationId);
-    if (loadObject) {
-      await loadObject.promise;
+      // Wait for the volume to be properly loaded and cached with retries
+      let retries = 0;
+      const maxRetries = 20; // Increased retries
+      let newVolumeLoadObject = null;
+      
+      while (retries < maxRetries && !newVolumeLoadObject) {
+        newVolumeLoadObject = await cache.getVolumeLoadObject(segmentationId);
+        if (!newVolumeLoadObject) {
+          console.log(`Waiting for volume to cache... (attempt ${retries + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, 300)); // Increased wait time
+          retries++;
+        }
+      }
+
+      if (!newVolumeLoadObject) {
+        console.error("Failed to load volume into cache after retries");
+        throw new Error("Segmentation volume failed to load into cache");
+      }
+      
+      // Ensure the volume is fully loaded
+      const volume = await newVolumeLoadObject.promise;
+      console.log("New volume loaded:", volume);
+
+      // Wait a bit more for segmentation service to register everything
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Verify the segmentation was properly created
+      const segmentation_objects = segmentationService.getSegmentations();
+      console.log("_update: segmentation objects from service", segmentation_objects);
+      
+      // Additional check: ensure the segmentation exists in cornerstone state
+      const cornerstoneSegmentation = segmentation.state.getSegmentation(segmentationId);
+      console.log("_update: cornerstone segmentation state", cornerstoneSegmentation);
+      
+      if (!cornerstoneSegmentation) {
+        console.error("Failed to register segmentation with cornerstone tools");
+        
+        // Try manual registration as fallback
+        console.log("Attempting manual segmentation registration...");
+        
+        // Get the volume reference for manual registration
+        const volumeId = segmentationId;
+        
+        try {
+          // Add segmentation to cornerstone state manually
+          segmentation.state.addSegmentation({
+            segmentationId,
+            representation: {
+              type: Enums.SegmentationRepresentations.Labelmap,
+              data: {
+                volumeId,
+              },
+            },
+            config: {
+              segments: Object.fromEntries(
+                labels.map((label, index) => [
+                  index + 1,
+                  {
+                    label,
+                    isActive: true,
+                    isVisible: true,
+                  }
+                ])
+              ),
+            },
+          });
+          
+          console.log("Manual segmentation registration successful");
+        } catch (manualError) {
+          console.error("Manual registration also failed:", manualError);
+          throw new Error("Both automatic and manual segmentation registration failed");
+        }
+      }
+      
+    } catch (error) {
+      console.error("Error during segmentation creation:", error);
+      throw error;
     }
-
-    const segmentation_objects = await segmentation.state.getSegmentations();
-    console.log("_update: segmentation object in cornerstone", segmentation_objects);
   }
+  
   return segmentationId;
 };
-
 
     updateInstanceVariables = () => {
     const { viewport, displaySet } = this.getActiveViewportInfo();
@@ -414,9 +506,7 @@ this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
       console.error(`No segmentation found for ID: ${segmentationId}`);
       return;
     }
-     if (Array.isArray(seg.segments)) {
-      seg.segments = seg.segments.filter(Boolean);
-    }
+
     await this.props.commandsManager.runCommand('storeSegmentationModified', {
       segmentationId,
       dataSource: datasources[0],

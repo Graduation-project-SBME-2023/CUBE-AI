@@ -254,6 +254,8 @@ const commandsModule = ({
       labelmapObj.segmentsOnLabelmap.forEach(segmentIndex => {
         // segmentation service already has a color for each segment
         const segment = segmentationInOHIF?.segments[segmentIndex];
+        
+        
         const { label, color } = segment;
 
         const RecommendedDisplayCIELabValue = dcmjs.data.Colors.rgb2DICOMLAB(
@@ -364,58 +366,39 @@ const commandsModule = ({
       return naturalizedReport;
     },
     storeSegmentationModified: async ({ segmentationId, dataSource, isModel }) => {
-  console.log("Entering storeSegmentation");
-  const timeStamp = new Date().toLocaleTimeString();
-  let SeriesDescription = isModel
-    ? `${isModel}-${timeStamp}`
-    : `new Modification-${timeStamp}`;
-
-  console.log("segmentationId:", segmentationId);
-  const segmentation = segmentationService.getSegmentation(segmentationId);
-  if (!segmentation) {
-    throw new Error("No segmentation found");
-  }
-
-  // 🔧 Fix: clean up segments array
-  if (Array.isArray(segmentation.segments)) {
-    const denseSegments = [];
-    segmentation.segments.forEach((segment, idx) => {
-      if (segment) {
-        denseSegments.push(segment);
-      } else {
-        console.warn(
-          `storeSegmentationModified: skipping empty segment at index ${idx}`
-        );
+      console.log("Entering storeSegmentation");
+      const timeStamp = new Date().toLocaleTimeString();
+      let SeriesDescription = "";
+      if (isModel) {
+        SeriesDescription = `${isModel}-${timeStamp}`;
       }
-    });
-    segmentation.segments = denseSegments;
-  }
-
-  console.log("segmentation (cleaned)", segmentation);
-  console.log("desc", SeriesDescription);
-
-  const generatedData = actions.generateSegmentation({
-    segmentationId,
-    options: {
-      SeriesDescription,
+      else {
+        SeriesDescription = `new Modification-${timeStamp}`;
+      }
+      console.log("segmentationId:", segmentationId);
+      const segmentation = segmentationService.getSegmentation(segmentationId);
+      if (!segmentation) {
+        throw new Error('No segmentation found');
+      }
+      console.log("segmentation", segmentation);
+      console.log("desc", SeriesDescription);
+      const generatedData = actions.generateSegmentation({
+        segmentationId,
+        options: {
+          SeriesDescription,
+        },
+      });
+      if (!generatedData || !generatedData.dataset) {
+        throw new Error('Error during segmentation generation');
+      }
+      const { dataset: naturalizedReport } = generatedData;
+      await dataSource.store.dicom(naturalizedReport);
+      // Add the information for where we stored it to the instance as well
+      naturalizedReport.wadoRoot = dataSource.getConfig().wadoRoot;
+      DicomMetadataStore.addInstances([naturalizedReport], true);
+      console.log("Segmentation storage complete");
+      return naturalizedReport;
     },
-  });
-
-  if (!generatedData || !generatedData.dataset) {
-    throw new Error("Error during segmentation generation");
-  }
-
-  const { dataset: naturalizedReport } = generatedData;
-  await dataSource.store.dicom(naturalizedReport);
-
-  // Add the information for where we stored it to the instance as well
-  naturalizedReport.wadoRoot = dataSource.getConfig().wadoRoot;
-  DicomMetadataStore.addInstances([naturalizedReport], true);
-
-  console.log("Segmentation storage complete");
-  return naturalizedReport;
-},
-
     /**
      * Converts segmentations into RTSS for download.
      * This sample function retrieves all segentations and passes to
