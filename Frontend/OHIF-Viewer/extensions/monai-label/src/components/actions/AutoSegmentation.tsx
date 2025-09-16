@@ -1643,7 +1643,8 @@ Update the ui based on sam2 points
   }
 
   onSelectModel = (model) => {
-    this.setState({ currentModel: model });
+    //this.setState({ currentModel: model });
+
   };
 
   // Set the selected queue to the current selected one
@@ -1750,36 +1751,36 @@ Update the ui based on sam2 points
 
     const labels = info.models[model].labels;
 
-    try {
-      const response = await this.props
-        .client()
-        .segmentation(model, image, params);
+    // try {
+    //   const response = await this.props
+    //     .client()
+    //     .segmentation(model, image, params);
 
-      window.snackbar.hideAll();
+    //   window.snackbar.hideAll();
 
-      if (response.status !== 200) {
-        this.notification.show({
-          title: 'MONAI Label',
-          message: 'Failed to process the volume',
-          type: 'error',
-          duration: 30000,
-        });
-      } else {
-        this.notification.show({
-          title: 'MONAI Label',
-          message: 'Volume processed successfully',
-          type: 'success',
-          duration: 10000,
-        });
+    //   if (response.status !== 200) {
+    //     this.notification.show({
+    //       title: 'MONAI Label',
+    //       message: 'Failed to process the volume',
+    //       type: 'error',
+    //       duration: 30000,
+    //     });
+    //   } else {
+    //     this.notification.show({
+    //       title: 'MONAI Label',
+    //       message: 'Volume processed successfully',
+    //       type: 'success',
+    //       duration: 10000,
+    //     });
 
-        this.setState({ volumeEmbeddingsCalculated: true });
+    //     this.setState({ volumeEmbeddingsCalculated: true });
 
-      }
-    } catch (error) {
-      console.error('Unexpected error:', error);
-    } finally {
-      this.setState({ isCalculatingEmbeddings: false });
-    }
+    //   }
+    // } catch (error) {
+    //   console.error('Unexpected error:', error);
+    // } finally {
+    //   this.setState({ isCalculatingEmbeddings: false });
+    // }
 
   };
 

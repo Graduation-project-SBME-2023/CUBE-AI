@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { Component } from 'react';
 import ModelSelector from '../ModelSelector';
 import BaseTab from './BaseTab';
 import * as cornerstoneTools from '@cornerstonejs/tools';
+import ModelBasedRendering from "../../tools/ModelBasedRendering";
 
 export default class InteractiveSegmentation extends BaseTab {
   modelSelector: any;
@@ -10,11 +11,12 @@ export default class InteractiveSegmentation extends BaseTab {
     super(props);
 
     this.modelSelector = React.createRef();
+    const models = this.getModels(); 
     this.state = {
-      currentModel: null,
+      currentModel: models.length > 0 ? models[0] : null, // null brings so much errors
       currentLabel: null,
       clickPoints: new Map(),
-      availableOrgans: {},
+      // availableOrgans: models.length > 0 ? this.getModelLabels(models[0]) : {},
     };
   }
 
@@ -26,7 +28,7 @@ export default class InteractiveSegmentation extends BaseTab {
       currentModel: model,
       currentLabel: currentLabel,
       clickPoints: clickPoints,
-      availableOrgans: this.getModelLabels(model),
+      // availableOrgans: this.getModelLabels(model),
     });
 
     this.clearAllPoints();
@@ -72,25 +74,40 @@ export default class InteractiveSegmentation extends BaseTab {
     console.info('Here we deactivate the probe');
   };
 
-  enablePositiveProbe = () => {
-    this.props.commandsManager.runCommand('setToolActive', {
-      toolName: 'ProbeMONAILabelPos',
-    });
-  };
+enablePositiveProbe = (objectId) => {
+  console.log("Enable Positive Probe for Object", objectId);
+  this.props.commandsManager.runCommand('setToolActive', {
+    toolName: 'ProbeMONAILabelPos',
+  });
+};
 
-  enableNegativeProbe = () => {
-    this.props.commandsManager.runCommand('setToolActive', {
-      toolName: 'ProbeMONAILabelNeg',
-    });
-  };
+enableNegativeProbe = (objectId) => {
+  console.log("Enable Negative Probe for Object", objectId);
+  this.props.commandsManager.runCommand('setToolActive', {
+    toolName: 'ProbeMONAILabelNeg',
+  });
+};
 
-  enableBoxTool = () => {
-    this.props.commandsManager.runCommand('setToolActive', {
-      toolName: 'RecROIToolMONAILabel',
-    });
-  };
+enableBoxTool = (objectId) => {
+  console.log("Enable Box Tool for Object", objectId);
+  this.props.commandsManager.runCommand('setToolActive', {
+    toolName: 'RecROIToolMONAILabel',
+  });
+};
+
+clearPoints = (objectId) => {
+  console.log("Clearing points for Object", objectId);
+  cornerstoneTools.annotation.state
+    .getAnnotationManager()
+    .removeAllAnnotations();
+  this.props.servicesManager.services.cornerstoneViewportService
+    .getRenderingEngine()
+    .render();
+};
+
 
   onRunInference = async () => {
+    console.log(" run inference start");
     const { currentModel, currentLabel, clickPoints } = this.state;
     const { info } = this.props;
     const { viewport, displaySet } = this.props.getActiveViewportInfo();
@@ -129,6 +146,8 @@ export default class InteractiveSegmentation extends BaseTab {
     const { worldToIndex } = viewportInfo.viewportData.data[0].volume.imageData;
 
     const manager = cornerstoneTools.annotation.state.getAnnotationManager();
+    console.log("=== All Annotations ===");
+    console.log(manager.saveAnnotations());
     clickPoints[currentLabel] = manager.saveAnnotations(
       null,
       'ProbeMONAILabelPos'
@@ -140,7 +159,9 @@ export default class InteractiveSegmentation extends BaseTab {
       // console.log(clickPoints[label]);
       for (const uid in clickPoints[label]) {
         const annotations = clickPoints[label][uid]['ProbeMONAILabelPos'];
-        // console.log(annotations);
+        console.log("the annotaion is {annotations}");
+        console.log(annotations); 
+
         points[label] = [];
         for (const annotation of annotations) {
           const pt = annotation.data.handles.points[0];
@@ -253,14 +274,7 @@ export default class InteractiveSegmentation extends BaseTab {
     }
   };
 
-  clearPoints = () => {
-    cornerstoneTools.annotation.state
-      .getAnnotationManager()
-      .removeAllAnnotations();
-    this.props.servicesManager.services.cornerstoneViewportService
-      .getRenderingEngine()
-      .render();
-  };
+
 
   clearAllPoints = () => {
     const clickPoints = new Map();
@@ -340,6 +354,7 @@ export default class InteractiveSegmentation extends BaseTab {
     // const segInfo = this.segmentInfo();
     const labels = this.getModelLabels(this.getSelectedModel());
 
+
     return (
       <div className="tab" style={{ display: display }}>
         <input
@@ -363,123 +378,21 @@ export default class InteractiveSegmentation extends BaseTab {
             onClick={this.onRunInference}
             onSelectModel={this.onSelectModel}
             usage={
-              <div style={{ fontSize: 'smaller' }}>
-                {/*<p>*/}
-                {/*  <input id="autorun" type="checkbox" />&nbsp;*/}
-                {/*  <span style={{ color: 'green' }}>Auto Run</span> on every*/}
-                {/*  click*/}
-                {/*</p>*/}
-                <br />
-                <u>
-                  <a
-                    style={{ color: 'red', cursor: 'pointer' }}
-                    onClick={() => this.clearPoints()}
-                  >
-                    Clear Points
-                  </a>
-                </u>{' '}
-                |{' '}
-                <u>
-                  <a
-                    style={{ color: 'red', cursor: 'pointer' }}
-                    onClick={() => this.clearAllPoints()}
-                  >
-                    Clear All Points
-                  </a>
-                </u>{' '}
-                |{' '}
-                <u>
-                  <a
-                    style={{ color: 'red', cursor: 'pointer' }}
-                    onClick={() => this.enablePositiveProbe()}
-                  >
-                    Positive Points
-                  </a>
-                </u>{' '}
-                |{' '}
-                <u>
-                  <a
-                    style={{ color: 'red', cursor: 'pointer' }}
-                    onClick={() => this.enableNegativeProbe()}
-                  >
-                    Negative Points
-                  </a>
-                </u>{' '}
-                |{' '}
-                <u>
-                  <a
-                    style={{ color: 'red', cursor: 'pointer' }}
-                    onClick={() => this.enableBoxTool()}
-                  >
-                    Box
-                  </a>
-                </u>
-              </div>
+            <ModelBasedRendering
+              mode={this.state.currentModel}    
+              onBoxClick={(id) => this.enableBoxTool(id)}
+              onPositiveClick={(id) => this.enablePositiveProbe(id)}
+              onNegativeClick={(id) => this.enableNegativeProbe(id)}
+              onResetClick={(id) => this.clearPoints(id)}
+              onResetAllClick={this.clearAllPoints}
+              onObjectIdChange={this.onObjectIdChange}
+              onColorChange={this.onColorChange}
+              onAddObjectClick={this.onAddObject}
+            />
             }
+
           />
-          <div className="optionsTableContainer">
-            <hr />
-            <p>Available Organ(s):</p>
-            <hr />
-            <div className="bodyTableContainer">
-              <table className="optionsTable">
-                <tbody>
-                  <tr
-                    key="background"
-                    className="clickable-row"
-                    style={{
-                      backgroundColor:
-                        this.state.currentLabel === 'background'
-                          ? 'darkred'
-                          : 'transparent',
-                    }}
-                    onClick={() => this.onChangeLabel('background')}
-                  >
-                    <td>
-                      {/* Content for the "background" entry */}
-                      <span
-                        className="segColor"
-                        // style={{
-                        //   backgroundColor: this.segColorToRgb(
-                        //     segInfo['background']
-                        //   ),
-                        // }}
-                      />
-                    </td>
-                    <td>background</td>
-                  </tr>
-                  {labels
-                    .filter((l) => l !== 'background')
-                    .map((label) => (
-                      <tr
-                        key={label}
-                        className="clickable-row"
-                        style={{
-                          backgroundColor:
-                            this.state.currentLabel === label
-                              ? 'darkblue'
-                              : 'transparent',
-                          cursor: 'pointer',
-                        }}
-                        onClick={() => this.onChangeLabel(label)}
-                      >
-                        <td>
-                          <span
-                            className="segColor"
-                            // style={{
-                            //   backgroundColor: this.segColorToRgb(
-                            //     segInfo[label]
-                            //   ),
-                            // }}
-                          />
-                        </td>
-                        <td>{label}</td>
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          
         </div>
       </div>
     );
