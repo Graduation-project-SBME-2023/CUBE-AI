@@ -1675,7 +1675,7 @@ Update the ui based on sam2 points
       config && config.infer && config.infer[model] ? config.infer[model] : {};
 
     //Sepecfic configuration for sam
-    params.samc2onfig = this.state.prompts;
+    params.sam2config = this.state.prompts;
     params.SliceIndex = slice
 
     if (auxillaryBox) {
@@ -1687,6 +1687,7 @@ Update the ui based on sam2 points
     }
 
     const labels = info.models[model].labels;
+    console.log("Sam Params: ", params);
     const response = await this.props
       .client()
       .segmentation(model, image, params);

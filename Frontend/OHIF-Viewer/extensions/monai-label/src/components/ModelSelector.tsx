@@ -1,9 +1,7 @@
-
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
 
 import './ModelSelector.css';
-import AutoSegmentation from '../components/actions/AutoSegmentation';
 
 
 export default class ModelSelector extends Component {

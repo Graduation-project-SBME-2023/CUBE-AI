@@ -464,7 +464,7 @@ class sam(BasicInferTask):
         labels =None                    # Labels of the points: 1->positive point , 0->negative points
 
         #loop over all objects for segmentation
-        for obj_id, prompt_details in data["samc2onfig"].items():
+        for obj_id, prompt_details in data["sam2config"].items():
 
             print("at obj_id:",obj_id,"coressponds",prompt_details)
             points = prompt_details.get("points", [[], []])     #extract points

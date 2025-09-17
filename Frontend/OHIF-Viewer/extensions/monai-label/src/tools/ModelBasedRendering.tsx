@@ -92,6 +92,7 @@ export default class ModelBasedRendering extends Component {
     objects: [
       { id: 1, color: "#ff0000" } // start with one object
     ],
+    selectedId: 1,
   };
 
   // Add another object
@@ -102,6 +103,14 @@ export default class ModelBasedRendering extends Component {
       objects: [...prev.objects, { id: nextId, color: randomColor }],
     }));
   };
+
+  handleRowSelect = (objId) => {
+    console.log("Row selected:", objId);
+    this.setState({ selectedId: objId });
+    if (this.props.onRowSelect) {
+      this.props.onRowSelect(objId);
+    }
+  }
 
 renderRow1(config = {}) {
   const { objects } = this.state;
@@ -146,15 +155,17 @@ renderRow1(config = {}) {
       {objects.map((obj) => (
         <div
           key={obj.id}
+          onClick={() => this.handleRowSelect(obj.id)}
           style={{
             display: "flex",
             alignItems: "center",
             gap: "4px",
             marginBottom: "6px",
             padding: "4px 6px",
-            border: "2px solid #929295ff",
             borderRadius: "10px",
             flexWrap: "wrap",
+            cursor: "pointer",
+            border: this.state.selectedId === obj.id ? "2px solid blue" : "2px solid #929295ff",
           }}
         >
           <span style={{ fontWeight: "bold", fontSize: "12px" }}>

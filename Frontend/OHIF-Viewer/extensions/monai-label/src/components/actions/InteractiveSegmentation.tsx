@@ -2,7 +2,7 @@ import React, { Component } from 'react';
 import ModelSelector from '../ModelSelector';
 import BaseTab from './BaseTab';
 import * as cornerstoneTools from '@cornerstonejs/tools';
-import ModelBasedRendering from "../../tools/ModelBasedRendering";
+import ModelBasedRendering from '../../tools/ModelBasedRendering';
 
 export default class InteractiveSegmentation extends BaseTab {
   modelSelector: any;
@@ -11,22 +11,23 @@ export default class InteractiveSegmentation extends BaseTab {
     super(props);
 
     this.modelSelector = React.createRef();
-    const models = this.getModels(); 
+    const models = this.getModels();
     this.state = {
       currentModel: models.length > 0 ? models[0] : null, // null brings so much errors
-      currentLabel: null,
+      currentObject: null,
       clickPoints: new Map(),
+      samMode: '2d', // or 3d
       // availableOrgans: models.length > 0 ? this.getModelLabels(models[0]) : {},
     };
   }
 
   onSelectModel = (model) => {
     // console.log('Selecting  (Point) Interaction Model...');
-    const currentLabel = null;
+    const currentObject = null;
     const clickPoints = new Map();
     this.setState({
       currentModel: model,
-      currentLabel: currentLabel,
+      currentObject: currentObject,
       clickPoints: clickPoints,
       // availableOrgans: this.getModelLabels(model),
     });
@@ -41,7 +42,7 @@ export default class InteractiveSegmentation extends BaseTab {
     });
     this.props.commandsManager.runCommand('SetToolActive', {
       toolName: 'RecROIToolMONAILabel',
-    })
+    });
     this.props.commandsManager.runCommand('setToolActive', {
       toolName: 'ProbeMONAILabelPos',
     });
@@ -74,41 +75,40 @@ export default class InteractiveSegmentation extends BaseTab {
     console.info('Here we deactivate the probe');
   };
 
-enablePositiveProbe = (objectId) => {
-  console.log("Enable Positive Probe for Object", objectId);
-  this.props.commandsManager.runCommand('setToolActive', {
-    toolName: 'ProbeMONAILabelPos',
-  });
-};
+  enablePositiveProbe = (objectId) => {
+    console.log('Enable Positive Probe for Object', objectId);
+    this.props.commandsManager.runCommand('setToolActive', {
+      toolName: 'ProbeMONAILabelPos',
+    });
+  };
 
-enableNegativeProbe = (objectId) => {
-  console.log("Enable Negative Probe for Object", objectId);
-  this.props.commandsManager.runCommand('setToolActive', {
-    toolName: 'ProbeMONAILabelNeg',
-  });
-};
+  enableNegativeProbe = (objectId) => {
+    console.log('Enable Negative Probe for Object', objectId);
+    this.props.commandsManager.runCommand('setToolActive', {
+      toolName: 'ProbeMONAILabelNeg',
+    });
+  };
 
-enableBoxTool = (objectId) => {
-  console.log("Enable Box Tool for Object", objectId);
-  this.props.commandsManager.runCommand('setToolActive', {
-    toolName: 'RecROIToolMONAILabel',
-  });
-};
+  enableBoxTool = (objectId) => {
+    console.log('Enable Box Tool for Object', objectId);
+    this.props.commandsManager.runCommand('setToolActive', {
+      toolName: 'RecROIToolMONAILabel',
+    });
+  };
 
-clearPoints = (objectId) => {
-  console.log("Clearing points for Object", objectId);
-  cornerstoneTools.annotation.state
-    .getAnnotationManager()
-    .removeAllAnnotations();
-  this.props.servicesManager.services.cornerstoneViewportService
-    .getRenderingEngine()
-    .render();
-};
-
+  clearPoints = (objectId) => {
+    console.log('Clearing points for Object', objectId);
+    cornerstoneTools.annotation.state
+      .getAnnotationManager()
+      .removeAllAnnotations();
+    this.props.servicesManager.services.cornerstoneViewportService
+      .getRenderingEngine()
+      .render();
+  };
 
   onRunInference = async () => {
-    console.log(" run inference start");
-    const { currentModel, currentLabel, clickPoints } = this.state;
+    console.log(' run inference start');
+    const { currentModel, currentObject, clickPoints } = this.state;
     const { info } = this.props;
     const { viewport, displaySet } = this.props.getActiveViewportInfo();
 
@@ -134,7 +134,7 @@ clearPoints = (objectId) => {
 
     const nid = this.notification.show({
       title: 'MONAI Label - ' + model,
-      message: 'Running Point Based Inference...',
+      message: 'Running Interactive Inference...',
       type: 'info',
       duration: 4000,
     });
@@ -146,78 +146,121 @@ clearPoints = (objectId) => {
     const { worldToIndex } = viewportInfo.viewportData.data[0].volume.imageData;
 
     const manager = cornerstoneTools.annotation.state.getAnnotationManager();
-    console.log("=== All Annotations ===");
-    console.log(manager.saveAnnotations());
-    clickPoints[currentLabel] = manager.saveAnnotations(
-      null,
-      'ProbeMONAILabelPos'
-    );
+    clickPoints[currentObject] = manager.saveAnnotations();
 
-    const points = {};
-    let label_names = [];
-    for (const label in clickPoints) {
-      // console.log(clickPoints[label]);
-      for (const uid in clickPoints[label]) {
-        const annotations = clickPoints[label][uid]['ProbeMONAILabelPos'];
-        console.log("the annotaion is {annotations}");
-        console.log(annotations); 
-
-        points[label] = [];
-        for (const annotation of annotations) {
-          const pt = annotation.data.handles.points[0];
-          points[label].push(worldToIndex(pt).map(Math.round));
-        }
+    const positive_points = {};
+    const negative_points = {};
+    const boxes = {};
+    const object_ids = [];
+    const framOfReferenceUID = Object.keys(clickPoints[currentObject])[0]; //might cause problems in the future
+    for (const object_id in clickPoints) {
+      const negative_annotations =
+        clickPoints[object_id][framOfReferenceUID]['ProbeMONAILabelNeg'];
+      const positive_annotations =
+        clickPoints[object_id][framOfReferenceUID]['ProbeMONAILabelPos'];
+      const box_annotations =
+        clickPoints[object_id][framOfReferenceUID]['RecROIToolMONAILabel'];
+      negative_points[object_id] = [];
+      for (const neg_annotation in negative_annotations) {
+        console.log(neg_annotation);
+        const pt = negative_annotations[neg_annotation].data.handles.points[0];
+        negative_points[object_id].push(worldToIndex(pt).map(Math.round));
       }
-      label_names.push(label);
+
+      positive_points[object_id] = [];
+      for (const pos_annotation in positive_annotations) {
+        const pt = positive_annotations[pos_annotation].data.handles.points[0];
+        positive_points[object_id].push(worldToIndex(pt).map(Math.round));
+      }
+
+      boxes[object_id] = [];
+      for (const box_annotation in box_annotations) {
+        const pt1 = box_annotations[box_annotation].data.handles.points[0];
+        const pt2 = box_annotations[box_annotation].data.handles.points[3];
+        boxes[object_id].push([
+          worldToIndex(pt1).map(Math.round),
+          worldToIndex(pt2).map(Math.round),
+        ]);
+      }
+      object_ids.push(object_id);
     }
+
+    console.log('positive points: ', positive_points);
+    console.log('negative points: ', negative_points);
+    console.log('boxes: ', boxes);
 
     const config = this.props.onOptionsConfig();
     const params =
       config && config.infer && config.infer[model] ? config.infer[model] : {};
-    let sidx = -1;
-    if (info.data.models[model].type === 'vista3d') {
-      params['points'] = points[currentLabel];
-      params['point_labels'] = new Array(params['points'].length).fill(1);
-      if (points['background'] && points['background'].length > 0) {
-        for (let i = 0; i < points['background'].length; i++) {
-          params['point_labels'].push(0);
-        }
-        params['points'] = params['points'].concat(points['background']);
-      }
+    if (model === 'vista') {
+      params['Points'] = {
+        points: [
+          ...(positive_points[currentObject] || []),
+          ...(negative_points[currentObject] || []),
+        ],
+        labels: [
+          ...(positive_points[currentObject]
+            ? new Array(positive_points[currentObject].length).fill(1)
+            : []),
+          ...(negative_points[currentObject]
+            ? new Array(negative_points[currentObject].length).fill(0)
+            : []),
+        ],
+      };
+      params['Mode'] = 'interactive';
+      params['Class'] = 133;
+    } else if (model === 'sam') {
+      params['State'] = this.state.samMode;
+      // 2d or 3d
+      if (this.state.samMode === '3d') {
+        // no more params
+      } else {
+        params['sam2config'] = {};
+        for (const obj of object_ids) {
+          const posPts = positive_points[obj] || [];
+          const negPts = negative_points[obj] || [];
+          const boxPts = boxes[obj] || [];
 
-      params['label_prompt'] = [info.modelLabelToIdxMap[model][currentLabel]];
-      label_names = [currentLabel];
-    } else if (info.data.models[model].type === 'deepedit') {
-      params['background'] = [];
-      for (const label in points) {
-        params[label] = points[label];
+          const coords = [...posPts, ...negPts];
+          const labels = [
+            ...new Array(posPts.length).fill(1),
+            ...new Array(negPts.length).fill(0),
+          ];
+
+          const bboxes = boxPts.map((box) => {
+            const xmin = Math.min(box[0][0], box[1][0]);
+            const ymin = Math.min(box[0][1], box[1][1]);
+            const xmax = Math.max(box[0][0], box[1][0]);
+            const ymax = Math.max(box[0][1], box[1][1]);
+            const slice = box[0][2];
+            return [[xmin, ymin, xmax, ymax], slice];
+          });
+          params['sam2config'][obj] = {
+            points: [coords, labels],
+            boxes: bboxes,
+          };
+        }
       }
+    } else if (model === 'nninteractive') {
+      // last point added only
     } else {
-      let bg =
-        points['background'] && points['background'].length
-          ? points['background']
-          : [];
-      let fg = points[currentLabel];
-      if (info.data.models[model].dimension === 2) {
-        sidx = fg.length
-          ? fg[fg.length - 1][2]
-          : bg.length
-          ? bg[bg.length - 1][2]
-          : -1;
-        fg = fg.filter((p) => p[2] === sidx);
-        bg = bg.filter((p) => p[2] === sidx);
-      }
-      params['foreground'] = fg;
-      params['background'] = bg;
-      label_names = [currentLabel];
+      this.notification.show({
+        title: 'MONAI Label - ' + model,
+        message: 'Model not yet supported for Point Inference',
+        type: 'error',
+        duration: 6000,
+      });
+      // hideNotification(nid, this.notification);
+      return;
     }
 
     const response = await this.props
       .client()
       .infer(model, displaySet.SeriesInstanceUID, params);
+    const labels = info.models[model].labels;
     // console.log(response);
 
-    hideNotification(nid, this.notification);
+    // hideNotification(nid, this.notification);
     if (response.status !== 200) {
       this.notification.show({
         title: 'MONAI Label - ' + model,
@@ -235,21 +278,12 @@ clearPoints = (objectId) => {
       duration: 4000,
     });
 
-    const label_class_unknown = info.data.models[model].type === 'deepgrow';
-    console.log('Target Labels to update: ', label_names, label_class_unknown);
-    this.props.updateView(
-      response,
-      model,
-      label_names,
-      true,
-      label_class_unknown,
-      sidx
-    );
+    this.props.updateView(response, labels, model);
   };
 
   initPoints = () => {
-    const label = this.state.currentLabel;
-    if (!label) {
+    const object = this.state.currentObject;
+    if (!object) {
       console.log('Current Label is Null (No need to init)');
       return;
     }
@@ -267,14 +301,12 @@ clearPoints = (objectId) => {
     //   customColor: customColor,
     // });
 
-    const annotations = this.state.clickPoints[label];
+    const annotations = this.state.clickPoints[object];
     if (annotations) {
       const manager = cornerstoneTools.annotation.state.getAnnotationManager();
-      manager.restoreAnnotations(annotations, null, 'ProbeMONAILabelPos');
+      manager.restoreAnnotations(annotations);
     }
   };
-
-
 
   clearAllPoints = () => {
     const clickPoints = new Map();
@@ -286,6 +318,26 @@ clearPoints = (objectId) => {
     const c = s ? s.color : [0, 0, 0];
     return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
   }
+
+  onChangeObject = (id) => {
+    const { currentObject } = this.state;
+    if (id === currentObject) {
+      console.log('Both new and prev are same');
+      return;
+    }
+
+    const prev = currentObject;
+    const clickPoints = this.state.clickPoints;
+    if (prev) {
+      const manager = cornerstoneTools.annotation.state.getAnnotationManager();
+      this.state.clickPoints[prev] = manager.saveAnnotations();
+      console.log('Saving Prev annotations...', this.state.clickPoints[prev]);
+      this.clearPoints();
+    }
+    this.state.currentObject = id;
+    this.setState({ currentObject: id, clickPoints: clickPoints });
+    this.initPoints();
+  };
 
   onChangeLabel = (name) => {
     console.log(name, this.state.currentLabel);
@@ -354,7 +406,6 @@ clearPoints = (objectId) => {
     // const segInfo = this.segmentInfo();
     const labels = this.getModelLabels(this.getSelectedModel());
 
-
     return (
       <div className="tab" style={{ display: display }}>
         <input
@@ -378,21 +429,20 @@ clearPoints = (objectId) => {
             onClick={this.onRunInference}
             onSelectModel={this.onSelectModel}
             usage={
-            <ModelBasedRendering
-              mode={this.state.currentModel}    
-              onBoxClick={(id) => this.enableBoxTool(id)}
-              onPositiveClick={(id) => this.enablePositiveProbe(id)}
-              onNegativeClick={(id) => this.enableNegativeProbe(id)}
-              onResetClick={(id) => this.clearPoints(id)}
-              onResetAllClick={this.clearAllPoints}
-              onObjectIdChange={this.onObjectIdChange}
-              onColorChange={this.onColorChange}
-              onAddObjectClick={this.onAddObject}
-            />
+              <ModelBasedRendering
+                mode={this.state.currentModel}
+                onBoxClick={(id) => this.enableBoxTool(id)}
+                onPositiveClick={(id) => this.enablePositiveProbe(id)}
+                onNegativeClick={(id) => this.enableNegativeProbe(id)}
+                onResetClick={(id) => this.clearPoints(id)}
+                onResetAllClick={this.clearAllPoints}
+                onObjectIdChange={this.onObjectIdChange}
+                onColorChange={this.onColorChange}
+                onAddObjectClick={this.onAddObject}
+                onRowSelect={this.onChangeObject}
+              />
             }
-
           />
-          
         </div>
       </div>
     );
