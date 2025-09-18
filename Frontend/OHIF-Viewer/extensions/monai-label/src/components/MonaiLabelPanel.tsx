@@ -288,57 +288,123 @@ export default class MonaiLabelPanel extends Component {
   };
 
   parseResponse = (response) => {
-    const buffer = response.data;
     const contentType = response.headers['content-type'];
     const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
     const boundary = boundaryMatch ? boundaryMatch[1] : null;
-    console.log("boundary: ", boundary);
 
-    const text = new TextDecoder().decode(buffer);
-    const parts = text
-      .split(`--${boundary}`)
-      .filter((part) => part.trim() !== '');
+    const uint8 = new Uint8Array(response.data);
+    const boundaryBytes = new TextEncoder().encode(`--${boundary}`);
 
-    // Find the JSON part and NRRD part
-    // Linear searches, with no memory inefficiency
-    const jsonPart = parts.find((part) =>
-      part.includes('Content-Type: application/json')
-    );
-    const nrrdPart = parts.find((part) =>
-      part.includes('Content-Type: application/octet-stream')
-    );
+    const parts = this.splitMultipart(uint8, boundaryBytes);
 
-    // Extract JSON data
-    const jsonStartIndex = jsonPart.indexOf('{');
-    const jsonEndIndex = jsonPart.lastIndexOf('}');
-    const jsonData = JSON.parse(
-      jsonPart.slice(jsonStartIndex, jsonEndIndex + 1)
-    );
+    let jsonData;
+    let nrrdArrayBuffer;
 
-    // Extract NRRD data
-    const separator = '\r\n\r\n';
-    const sepIndex = nrrdPart.indexOf(separator);  // can there be more occurrences of the separator in the response??
+    for (const part of parts) {
+      const headerEnd = this.findDoubleCRLF(part);
+      if (headerEnd === -1) continue;
 
-    if (sepIndex !== -1) {
-      const binaryData = nrrdPart.slice(sepIndex + separator.length);
-      const binaryDataEnd = binaryData.lastIndexOf('\r\n');
+      const headers = new TextDecoder().decode(part.subarray(0, headerEnd));
+      const body = part.subarray(headerEnd);
 
-      const slicedData = binaryData.slice(0, binaryDataEnd);
-      const encoder = new TextEncoder();
-      const nrrdArrayBuffer = encoder.encode(slicedData).buffer;
-
-      // const nrrdArrayBuffer = new Uint8Array(
-      //   binaryData
-      //     .slice(0, binaryDataEnd)
-      //     .split('')
-      //     .map((c) => c.charCodeAt(0))
-      // ).buffer;
-
-      return { data: nrrdArrayBuffer, centroids: jsonData.centroids };
-    } else {
-      throw new Error('Separator not found in nrrdPart');
+      if (headers.includes('Content-Type: application/json')) {
+        const jsonText = new TextDecoder().decode(body);
+        jsonData = JSON.parse(jsonText);
+      } else if (headers.includes('Content-Type: application/octet-stream')) {
+        nrrdArrayBuffer = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength);
+      }
     }
+
+    if (!jsonData || !nrrdArrayBuffer) {
+      throw new Error('Failed to parse multipart response');
+    }
+    return { data: nrrdArrayBuffer, centroids: jsonData.centroids };
+
+    // const text = new TextDecoder().decode(buffer);
+    // const parts = text
+    //   .split(`--${boundary}`)
+    //   .filter((part) => part.trim() !== '');
+    //
+    // // Find the JSON part and NRRD part
+    // // Linear searches, with no memory inefficiency
+    // const jsonPart = parts.find((part) =>
+    //   part.includes('Content-Type: application/json')
+    // );
+    // const nrrdPart = parts.find((part) =>
+    //   part.includes('Content-Type: application/octet-stream')
+    // );
+    //
+    // // Extract JSON data
+    // const jsonStartIndex = jsonPart.indexOf('{');
+    // const jsonEndIndex = jsonPart.lastIndexOf('}');
+    // const jsonData = JSON.parse(
+    //   jsonPart.slice(jsonStartIndex, jsonEndIndex + 1)
+    // );
+    //
+    // // Extract NRRD data
+    // const separator = '\r\n\r\n';
+    // const sepIndex = nrrdPart.indexOf(separator); // can there be more occurrences of the separator in the response??
+    //
+    // if (sepIndex !== -1) {
+    //   const binaryData = nrrdPart.slice(sepIndex + separator.length);
+    //   const binaryDataEnd = binaryData.lastIndexOf('\r\n');
+    //
+    //   const slicedData = binaryData.slice(0, binaryDataEnd);
+    //   const encoder = new TextEncoder();
+    //   const nrrdArrayBuffer = encoder.encode(slicedData).buffer;
+    //
+    //   // const nrrdArrayBuffer = new Uint8Array(
+    //   //   binaryData
+    //   //     .slice(0, binaryDataEnd)
+    //   //     .split('')
+    //   //     .map((c) => c.charCodeAt(0))
+    //   // ).buffer;
+    //
+    //   return { data: nrrdArrayBuffer, centroids: jsonData.centroids };
+    // } else {
+    //   throw new Error('Separator not found in nrrdPart');
+    // }
   };
+
+  private splitMultipart(buffer: Uint8Array, boundary: Uint8Array): Uint8Array[] {
+    const parts: Uint8Array[] = [];
+    let start = 0;
+
+    while (start < buffer.length) {
+      const boundaryIndex = this.findSubarray(buffer, boundary, start);
+      if (boundaryIndex === -1) break;
+
+      const partStart = boundaryIndex + boundary.length + 2; // skip \r\n
+      const nextBoundary = this.findSubarray(buffer, boundary, partStart);
+      const partEnd = nextBoundary !== -1 ? nextBoundary : buffer.length;
+
+      parts.push(buffer.subarray(partStart, partEnd - 2)); // strip trailing \r\n
+      start = partEnd;
+    }
+    return parts;
+  }
+
+  private findSubarray(haystack: Uint8Array, needle: Uint8Array, start = 0): number {
+    outer: for (let i = start; i <= haystack.length - needle.length; i++) {
+      for (let j = 0; j < needle.length; j++) {
+        if (haystack[i + j] !== needle[j]) continue outer;
+      }
+      return i;
+    }
+    return -1;
+  }
+
+  private findDoubleCRLF(buffer: Uint8Array): number {
+    for (let i = 0; i < buffer.length - 3; i++) {
+      if (
+        buffer[i] === 13 && buffer[i + 1] === 10 && // \r\n
+        buffer[i + 2] === 13 && buffer[i + 3] === 10 // \r\n
+      ) {
+        return i + 4; // position after \r\n\r\n
+      }
+    }
+    return -1;
+  }
 
   saveSegemntation = async (model) => {
     console.log('model', model);
