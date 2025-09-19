@@ -4,7 +4,7 @@ services:
 #    build:
 #      context: ${COMPOSE_PROJECT_DIR}/Backend/
 #      dockerfile: ${COMPOSE_PROJECT_DIR}/Backend/Dockerfile
-    image: ibrahimfateen/custom-monailabel:0.1
+    image: cubeai1/custom-monailabel:0.2
     container_name: monailabel-backend
     ports:
       - '8000:8000'
@@ -14,6 +14,7 @@ services:
         {"models": "all"}
       MONAI_SERVER_PORT: 8000
       MONAI_LABEL_STUDIES: http://orthanc:8042/dicom-web
+      DATABASE_URL: postgresql://workflow_user:password@postgres:5432/workflow_db
     depends_on:
       - postgres
       - orthanc
