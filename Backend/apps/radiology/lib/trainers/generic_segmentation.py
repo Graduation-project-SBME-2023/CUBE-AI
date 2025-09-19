@@ -2,6 +2,7 @@ import os
 import subprocess
 import logging
 from monailabel.tasks.train.basic_train import BasicTrainTask, Context
+from monailabel.interfaces.utils.app import app_instance
 from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
 import shutil
 from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
@@ -170,25 +171,14 @@ class GenericSegmentation(BasicTrainTask):
         self.initialize_inferer()
 
     def initialize_inferer(self):
-
         logger.info("Initializing Inference Task")
-
-
-        api_url = "http://localhost:8000/initialize-inference-task/"
-        payload = {
-            "model_name": self.model_name,
-        }
-
-        response = requests.post(api_url, params=payload)
-
-        if response.status_code == 200:
-            logger.info(f"Inference task initialized: {response.json()}")
-        else:
-            logger.error(f"Failed to initialize inference task: {response.text}")
-
-        logger.info("Training completed. Inference API triggered.")
-
-
+        instance = app_instance()
+        try:
+            message = instance.initialize_inference_task(self.model_name)
+            logger.info(f"Inference task initialized: {self.model_name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize inference task: {e}")
+            raise RuntimeError(f"Failed to initialize inference task for model {self.model_name}")
 
     def val_inferer(self, context: Context):
         # Inference logic for nnUNet.

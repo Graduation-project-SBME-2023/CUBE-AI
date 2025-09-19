@@ -14,12 +14,13 @@ logging.basicConfig(
 # Create APIRouter instance for normalization and alignment endpoints
 router = APIRouter(
     prefix="/normalize&align",  # Base URL path for all endpoints in this router
-    tags=["normalize&align"],  # OpenAPI tag for documentation grouping
+    tags=["Normalize & Align"],  # OpenAPI tag for documentation grouping
     responses={404: {"description": "Not found"}},  # Default error response
 )
 
 # Define data paths using pathlib for cross-platform compatibility
-radiology_path = Path("/apps/radiology")
+radiology_path = os.getenv("MONAI_LABEL_APP_DIR", "/apps/radiology")
+radiology_path = Path(radiology_path)
 DATA_FOLDER = radiology_path / "General_Data"  # Folder containing medical imaging data
 LABEL_FOLDER = radiology_path / "Labels"  # Folder containing segmentation labels
 

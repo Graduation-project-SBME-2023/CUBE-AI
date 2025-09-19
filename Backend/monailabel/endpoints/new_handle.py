@@ -13,10 +13,11 @@ router = APIRouter(
 )
 
 # Base folders (adjust these as needed)
-radiology_path = Path("/apps/radiology") 
-BASE_PATH =radiology_path/"NN_Unet"
-LABELS_PATH = radiology_path/"Labels"
-GENERAL_DATA_PATH = radiology_path/"General_Data"
+radiology_path = os.getenv("MONAI_LABEL_RADIOLOGY_PATH", "/apps/radiology")
+radiology_path = Path(radiology_path)
+BASE_PATH = radiology_path / "NN_Unet"
+LABELS_PATH = radiology_path / "Labels"
+GENERAL_DATA_PATH = radiology_path / "General_Data"
 MAPPING_FILE = BASE_PATH / "instance_mapping.json"
 
 # Ensure nnUNet main folders exist
@@ -27,6 +28,7 @@ NNUNET_RESULTS = BASE_PATH / "nnUNet_results"
 for folder in [NNUNET_RAW, NNUNET_PREPROCESSED, NNUNET_RESULTS]:
     folder.mkdir(parents=True, exist_ok=True)
 
+
 def ensure_all_task_folders(task_name: str) -> Tuple[Path, Path, Path]:
     """
     Creates a new task folder (DatasetXXX_TaskName) in each of the main directories and
@@ -35,7 +37,7 @@ def ensure_all_task_folders(task_name: str) -> Tuple[Path, Path, Path]:
     print('enter the ensure_all_task_folders')
     index = len(list(NNUNET_RAW.glob("Dataset*"))) + 1
     dataset_name = f"Dataset{index:03d}_{task_name}"
-    
+
     raw_folder = NNUNET_RAW / dataset_name
     preprocessed_folder = NNUNET_PREPROCESSED / dataset_name
     results_folder = NNUNET_RESULTS / dataset_name
@@ -49,6 +51,7 @@ def ensure_all_task_folders(task_name: str) -> Tuple[Path, Path, Path]:
     print("exist the ensure_all_task_folders", raw_folder, preprocessed_folder, results_folder)
     return raw_folder, preprocessed_folder, results_folder
 
+
 def ensure_extra_folders(dataset_folder_name: str):
     """
     Ensures that the task folders exist in nnUNet_preprocessed and nnUNet_results
@@ -61,6 +64,7 @@ def ensure_extra_folders(dataset_folder_name: str):
     results_folder.mkdir(parents=True, exist_ok=True)
     print("exist the ensure_extra_folders", preprocessed_folder, results_folder)
 
+
 # Global mapping loaded from file.
 if MAPPING_FILE.exists():
     print('Enter the if (mapping file exists)')
@@ -70,9 +74,11 @@ else:
     print('Enter the else (mapping file not exists)')
     instance_mapping = {}
 
+
 def save_mapping(mapping: dict):
     with open(MAPPING_FILE, "w") as f:
         json.dump(mapping, f, indent=4)
+
 
 def find_image_file(series_instance_uid: str) -> Path:
     """
@@ -87,6 +93,7 @@ def find_image_file(series_instance_uid: str) -> Path:
             return file
     raise FileNotFoundError(f"No valid file found for Series Instance UID {series_instance_uid} in 'General Data'.")
 
+
 def find_label_file(instance_uid: str) -> Path:
     """
     Search in LABELS_PATH for a file with the given instance_uid and a supported extension.
@@ -98,20 +105,23 @@ def find_label_file(instance_uid: str) -> Path:
             return file
     raise FileNotFoundError(f"Label file with instance UID {instance_uid} not found in supported formats (.npy, .dcm)")
 
+
 # ------------------------------------------------------------------
 # Pydantic models for the input format.
 # ------------------------------------------------------------------
 class ImageEntry(BaseModel):
     instance_uid: str
-    modality: str   # e.g. "ct", "mri", etc.
+    modality: str  # e.g. "ct", "mri", etc.
     training: bool  # True for training case; False for testing case
+
 
 class TaskCreationRequest(BaseModel):
     task_name: str
     channel_names: Dict[str, str]  # Provided once per task (used in dataset.json)
-    labels: Dict[str, int]         # Provided once per task (used in dataset.json)
+    labels: Dict[str, int]  # Provided once per task (used in dataset.json)
     # Each key is a series UID; its value holds the associated instance UID, modality, and training flag.
     images: Dict[str, ImageEntry]
+
 
 # ------------------------------------------------------------------
 # The API endpoint using the new input format.
@@ -161,7 +171,8 @@ def create_task(data: TaskCreationRequest = Body(...)):
         raw_folder, preprocessed_folder, results_folder = ensure_all_task_folders(data.task_name)
         dataset_folder = raw_folder
         next_counter = 1
-    print("Dataset folder info:", dataset_folder_name, raw_folder, preprocessed_folder, results_folder, dataset_folder, next_counter)
+    print("Dataset folder info:", dataset_folder_name, raw_folder, preprocessed_folder, results_folder, dataset_folder,
+          next_counter)
 
     num_training_new = 0
     num_testing_new = 0
@@ -170,12 +181,13 @@ def create_task(data: TaskCreationRequest = Body(...)):
         # Skip iteration if the same series_uid and instance_uid already exist for the task.
         print('instance mapping valuess-----------', instance_mapping.values())
         if any(
-            info.get("series_uid") == series_uid and 
-            info.get("instance_uid") == entry.instance_uid and 
-            info.get("task_name", "").lower() == data.task_name.lower()
-            for info in instance_mapping.values()
+                info.get("series_uid") == series_uid and
+                info.get("instance_uid") == entry.instance_uid and
+                info.get("task_name", "").lower() == data.task_name.lower()
+                for info in instance_mapping.values()
         ):
-            print(f"Skipping existing case: series_uid={series_uid}, instance_uid={entry.instance_uid}, task_name={data.task_name}")
+            print(
+                f"Skipping existing case: series_uid={series_uid}, instance_uid={entry.instance_uid}, task_name={data.task_name}")
             continue  # Do not process duplicate case
 
         # Check if a case for this series already exists (even if instance_uid differs).
@@ -237,7 +249,7 @@ def create_task(data: TaskCreationRequest = Body(...)):
                     print("Destination image fileeeeeeeeeeeeeeeeeee:", img_destination)
                 except Exception as e:
                     raise HTTPException(status_code=500, detail=f"Error moving image file {source_img_file}: {e}")
-        
+
         new_label_filename = None
         print("Entry training flag:", entry.training)
         if entry.training:
@@ -254,7 +266,7 @@ def create_task(data: TaskCreationRequest = Body(...)):
                     print("Destination label fileeeeeeeeeeeeeeeeeee:", label_destination)
                 except Exception as e:
                     raise HTTPException(status_code=500, detail=f"Error moving label file {source_label_file}: {e}")
-                
+
         print("New label filename:", new_label_filename)
         # Update the instance mapping.
         instance_mapping[case_identifier] = {
@@ -267,7 +279,7 @@ def create_task(data: TaskCreationRequest = Body(...)):
             "label_filename": new_label_filename,
         }
         print("Updated instance mapping:", instance_mapping)
-        
+
     overall_training = sum(
         1 for info in instance_mapping.values()
         if info.get("task_name", "").lower() == data.task_name.lower() and info.get("training")
@@ -305,5 +317,5 @@ def create_task(data: TaskCreationRequest = Body(...)):
         "dataset_folder": dataset_folder.name,
         "num_training": overall_training,
         "num_testing": overall_training,
-        "instance_mapping_update": instance_mapping  
+        "instance_mapping_update": instance_mapping
     }

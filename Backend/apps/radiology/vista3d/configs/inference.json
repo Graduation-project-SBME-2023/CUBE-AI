@@ -8,7 +8,7 @@
         "$import json",
         "$import pathlib"
     ],
-    "bundle_root": "C:/Users/Lenovo/Desktop/Grad/monai/radiology/vista3d",
+    "bundle_root": "/apps/radiology/vista3d",
     "image_key": "image",
     "output_dir": "$@bundle_root + '/eval'",
     "output_ext": ".nii.gz",
@@ -16,9 +16,9 @@
     "output_postfix": "trans",
     "separate_folder": true,
     "input_dict": {
-        "image": "C:\\Users\\Lenovo\\.cache\\monailabel\\dicom\\e6414d4049f71ab28e6f9528a15f294e\\1.2.840.113845.13.5681.3264321649.2854263722.nii.gz",
+        "image": "/tmp/tmp56y7so7c.nii.gz",
         "label_prompt": [
-            121
+            1
         ]
     },
     "everything_labels": "$list(set([i+1 for i in range(132)]) - set([2,16,18,20,21,23,24,25,26,27,128,129,130,131,132]))",

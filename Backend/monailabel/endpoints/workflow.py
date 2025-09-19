@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import asyncpg
 import logging
 from typing import Optional, List
+import os
 
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ router = APIRouter(
 )
 
 # Database connection settings
-DATABASE_URL = "postgresql://workflow_user:password@postgres:5432/workflow_db"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://workflow_user:password@postgres:5432/workflow_db")
 
 
 # Define the Pydantic model for validation
