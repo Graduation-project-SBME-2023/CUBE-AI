@@ -41,8 +41,6 @@ class NNINTERACTIVE(TaskConfig):
             "seg": 1,
         }
 
-        radiolog_path=Path("/apps/radiology")
-
 
         # Model Files
         self.path = [
@@ -52,7 +50,7 @@ class NNINTERACTIVE(TaskConfig):
 
         REPO_ID = "nnInteractive/nnInteractive"
         MODEL_NAME = "nnInteractive_v1.0"  # Updated models may be available in the future
-        DOWNLOAD_DIR = radiolog_path  # Specify the download directory
+        DOWNLOAD_DIR = os.getenv("MODELS_DIR")  # Specify the download directory
 
         download_path = snapshot_download(
             repo_id=REPO_ID,

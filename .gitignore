@@ -12,6 +12,7 @@ Backend/apps/radiology/model/
 Backend/apps/radiology/sam2/checkpoints/sam2.1_hiera_large.pt
 **.pt
 **.pth
+Backend/models
 
 Backend/apps/radiology/logs/app.log
 
