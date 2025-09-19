@@ -143,40 +143,20 @@ class VISTAPOINT3D(TaskConfig):
             "urinary_bladder": 104,
         }
 
-
-        
-
-        # Model Files
-        self.path = [
-            os.path.join(self.model_dir, f"pretrained_{name}.pt"),  # pretrained
-            os.path.join(self.model_dir, f"{name}.pt"),  # published
-        ]
-
-        self.radiology_path = Path("/apps/radiology")  # Path(__file__).resolve().parents[2]
+        models_path = os.getenv("MODELS_DIR", self.model_dir)
+        self.path = [os.path.join(models_path, "vista.pt")]
 
 
 
-        if not os.path.exists(os.path.join(self.radiology_path,"vista3d","models","model.pt")):
+        if not os.path.exists(self.path[0]):
             # Google Drive file ID (extracted from the URL)
             file_id = "1wg5z5eBnci3YMMbE3tMGHMQwt429hnsW"
 
-            # Define output directory and filename
-            output_dir = os.path.join(self.radiology_path,"vista3d","models")  # Folder name
-            output_filename = "model.pt"  # Desired filename
-
-            # Create directory if it doesn't exist
-            os.makedirs(output_dir, exist_ok=True)
-
-            # Full output path
-            output_path = os.path.join(output_dir, output_filename)
-
             # Download the file
             url = f"https://drive.google.com/uc?id={file_id}"
-            gdown.download(url, output_path, quiet=False)
+            gdown.download(url, self.path[0], quiet=False)
 
-            print(f"Checkpoint saved to: {output_path}")
-
-        
+            print(f"Checkpoint saved to: {self.path[0]}")
 
 
         self.target_spacing = (1.5, 1.5, 1.5)  # target space for image

@@ -15,10 +15,8 @@ import os
 import nibabel as nib
 import numpy as np
 from enum import Enum
-from typing import  Callable, Sequence
+from typing import Callable, Sequence
 from PIL import Image
-import matplotlib.pyplot as plt
-import matplotlib.pyplot as plt
 import shutil
 import gc
 import time
@@ -26,23 +24,15 @@ import tempfile
 import pickle
 import os
 
-from pathlib import Path
-import urllib.request
-
 
 from monai.inferers import Inferer, SlidingWindowInferer, SliceInferer
 from monailabel.interfaces.tasks.infer_v2 import InferType
 from monailabel.tasks.infer.basic_infer import BasicInferTask
 
-import sam2
 from sam2.build_sam import build_sam2_video_predictor
 
 logger = logging.getLogger(__name__)
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.join(current_dir, "../../..")  # Go up 3 levels from current file
-checkpoint_rel_path = "sam2/checkpoints/sam2.1_hiera_large.pt"
-config_rel_path = "sam2/configs/sam2.1/sam2.1_hiera_l"
 
 class CallBackTypes(str, Enum):
     PRE_TRANSFORMS = "PRE_TRANSFORMS"
@@ -187,39 +177,17 @@ class sam(BasicInferTask):
             self.inference_state = None
             self.jpeg_filepath = "./jpeg_slice_files"
 
-            # Get the directory where this script is located
-            current_file_path = os.path.abspath(__file__)
+            self.config_path = "configs/sam2.1/sam2.1_hiera_l"
+            self.hydra_overrides_extra = [
+                "++model._target_=custom_sam.sam2_volume_predictor.SAM2VolumePredictor",
+            ]
 
-            # Go up 3 directory levels to reach radiology/
-            current_dir = os.path.dirname(os.path.dirname(os.path.dirname(current_file_path)))
-
-            self.checkpoint_path = os.path.join(current_dir,"sam2/checkpoints/sam2.1_hiera_large.pt")
-
-            # self.config_path =  os.path.join(current_dir,"sam2/configs/sam2.1/sam2.1_hiera_l")
-            self.config_path =  "configs/sam2.1/sam2.1_hiera_l"
 
             self.object_bounds = {}  # Dictionary to store bounds per object
 
-    def download_checkpoint_if_needed(self, checkpoint_path: Path, checkpoint_url: str):
-            if not checkpoint_path.exists():
-                print(f"Downloading checkpoint to {checkpoint_path}")
-                try:
-                    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
-                    urllib.request.urlretrieve(checkpoint_url, checkpoint_path)
-                    print("Checkpoint downloaded successfully.")
-                except Exception as e:
-                    raise RuntimeError(f"Failed to download checkpoint: {e}")
-
-
     def initialize_predictor(self, device="cuda"):
-        checkpoint_path = Path(self.checkpoint_path)
-        checkpoint_url = "https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
-
-        self.download_checkpoint_if_needed(checkpoint_path, checkpoint_url)
-
         if self.predictor is None:
-            self.predictor = build_sam2_video_predictor(self.config_path, str(checkpoint_path), device=device)
-        
+            self.predictor = build_sam2_video_predictor(self.config_path, self.path[0], hydra_overrides_extra=self.hydra_overrides_extra, device=device)
 
     def run_inferer(self, data, device="cuda"):
         """
@@ -232,7 +200,7 @@ class sam(BasicInferTask):
             image_array, spacing, origin  = ImageProcessor.load_nifti(data["image"])
 
             # Initialize the predictor for new task
-            self.initialize_predictor()
+            self.initialize_predictor(device=device)
 
             # Reprocess if new volume
             if data["State"] =='ProcessVolume':
@@ -310,7 +278,7 @@ class sam(BasicInferTask):
                 Image.fromarray(slice_normalized).save(os.path.join(self.jpeg_filepath, f"{slice_index:05}.jpg"))
 
                 #initialize a new predictor and new inference with only one slice .
-                auxillary_predictor = build_sam2_video_predictor(self.config_path, self.checkpoint_path, device=device)
+                auxillary_predictor = build_sam2_video_predictor(self.config_path, self.path[0], hydra_overrides_extra=self.hydra_overrides_extra, device=device)
 
                 auxillary_inference_state = auxillary_predictor.init_state(video_path=self.jpeg_filepath)
 

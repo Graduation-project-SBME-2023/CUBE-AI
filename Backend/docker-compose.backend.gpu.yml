@@ -9,6 +9,7 @@ services:
     runtime: nvidia
     ports:
       - '8000:8000'
+    command: ["python", "/monailabel/server_start.py"]
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
@@ -18,6 +19,11 @@ services:
         {"models": "all"}
       MONAI_LABEL_STUDIES: http://orthanc:8042/dicom-web
       DATABASE_URL: postgresql://workflow_user:password@postgres:5432/workflow_db
+      MODELS_DIR: /models
+    volumes:
+      - ${COMPOSE_PROJECT_DIR}/Backend/apps:/apps
+      - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/monailabel
+      - ${COMPOSE_PROJECT_DIR}/Backend/models:/models
     depends_on:
       - postgres
       - orthanc

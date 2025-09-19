@@ -8,21 +8,21 @@
         "$import json",
         "$import pathlib"
     ],
-    "bundle_root": "/apps/radiology/vista3d",
+    "bundle_root": "/models",
     "image_key": "image",
-    "output_dir": "$@bundle_root + '/eval'",
+    "output_dir": "$@bundle_root + '/eval/vista'",
     "output_ext": ".nii.gz",
     "output_dtype": "$np.float32",
     "output_postfix": "trans",
     "separate_folder": true,
     "input_dict": {
-        "image": "/tmp/tmp56y7so7c.nii.gz",
+        "image": "/root/.cache/monailabel/dicom/277a51f05d17457dc20b8e11c9d93def/1.2.840.113704.7.32.0.5.1.4.100045.30000020092908373860900000531.nii.gz",
         "label_prompt": [
             1
         ]
     },
     "everything_labels": "$list(set([i+1 for i in range(132)]) - set([2,16,18,20,21,23,24,25,26,27,128,129,130,131,132]))",
-    "metadata_path": "$@bundle_root + '/configs/metadata.json'",
+    "metadata_path": "/models/configs/vista/metadata.json",
     "metadata": "$json.loads(pathlib.Path(@metadata_path).read_text())",
     "labels_dict": "$@metadata['network_data_format']['outputs']['pred']['channel_def']",
     "subclass": {
@@ -179,7 +179,7 @@
     ],
     "checkpointloader": {
         "_target_": "CheckpointLoader",
-        "load_path": "$@bundle_root + '/models/model.pt'",
+        "load_path": "/models/vista.pt",
         "load_dict": {
             "model": "@network"
         },
