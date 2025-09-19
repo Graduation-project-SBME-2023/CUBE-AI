@@ -75,56 +75,230 @@ class ImageProcessor:
         logger.info(f"Saved {num_slices} slices to {output_dir}.")
 
     @staticmethod
-    def reconstruct_nifti(video_segments):
+    def reconstruct_nifti(video_segments, binarize=False):
+        # Filter out empty slices
+        video_segments = {k: v for k, v in video_segments.items() if v}
+        if not video_segments:
+            raise ValueError("No valid masks found in video_segments")
 
-        # Determine the number of slices from the video_segments dictionary
-        num_slices = len(video_segments)
+        slice_indices = sorted(video_segments.keys())
+        max_index = max(slice_indices)
+        print(f"Max num of slice is {max_index}")
 
-        # Retrieve the shape of the first slice to define the full volume dimensions
-        first_frame_index = min(video_segments.keys())
-        first_mask = list(video_segments[first_frame_index].values())[0]  # Get first available mask
-        slice_shape = (first_mask.shape[1], first_mask.shape[2])
-        mask_volume = np.zeros((*slice_shape, num_slices), dtype=np.uint8)
+        # Get shape from first valid mask
+        for idx in slice_indices:
+            if video_segments[idx]:
+                first_mask = list(video_segments[idx].values())[0]
+                break
 
+        if first_mask.ndim == 3:   # shape (1, H, W)
+            H, W = first_mask.shape[1], first_mask.shape[2]
+        elif first_mask.ndim == 2: # shape (H, W)
+            H, W = first_mask.shape
+        else:
+            raise ValueError(f"Unexpected mask shape: {first_mask.shape}")
 
-        # Assign unique values for each obj_id across all slices
+        mask_volume = np.zeros((H, W, max_index + 1), dtype=np.uint8)
+
+        # Fill volume slice by slice
         for slice_idx, obj_masks in video_segments.items():
             for obj_id, mask in obj_masks.items():
-                # Assign the obj_id as the mask value in the 3D volume
-                mask_volume[:, :, slice_idx] = np.where(mask > 0, obj_id, mask_volume[:, :, slice_idx])
+                if binarize:
+                    # All objects become binary 1
+                    mask_volume[:, :, slice_idx] = np.where(
+                        mask > 0,
+                        1,
+                        mask_volume[:, :, slice_idx]
+                    )
+                else:
+                    # Each object keeps unique ID (multi-label)
+                    mask_volume[:, :, slice_idx] = np.where(
+                        mask > 0,
+                        obj_id,
+                        mask_volume[:, :, slice_idx]
+                    )
 
         return mask_volume
 
     @staticmethod
     def resize_to_match(target_shape, source):
         result = np.zeros(target_shape, dtype=source.dtype)
-        changed_direction=None
+        min_shape = tuple(min(t, s) for t, s in zip(target_shape, source.shape))
 
-        for direction in range(3):
-            if target_shape[direction] != source.shape[direction]:
-                changed_direction=direction
+        # Copy overlapping region
+        result[:min_shape[0], :min_shape[1], :min_shape[2]] = source[:min_shape[0], :min_shape[1], :min_shape[2]]
 
-        if changed_direction != None:
-            if changed_direction == 0:
-                source_reversed = source[::-1, :, :] # to be compitable with the other revesion in slices
-                start = source_reversed.shape[0] -1
-                end = start + source_reversed.shape[0]
-                if end > result.shape[0]:
-                    print("Warning: End index exceeds result boundaries. Cropping source_reversed.")
-                    # Calculate the valid range within result
-                    valid_length = result.shape[0] - start
-                    source_reversed = source_reversed[:valid_length, :, :]  # Crop source_reversed
-                    end = result.shape[0]  # Adjust end to match result's limit
-                result[start:end,:,:]=source_reversed
-            elif changed_direction == 1:
-                end = source.shape[1]
-                result[:,0:end,:]=source
-
-            elif changed_direction == 2:
-                end = source.shape[2]
-                result[:,:,0:end]=source
+        if target_shape != source.shape:
+            print(f"Warning: Shape mismatch fixed. Target={target_shape}, Source={source.shape}")
 
         return result
+
+    @staticmethod
+    def load_nrrd_file(image_path):
+        """Load NRRD files using pynrrd library"""
+        try:
+            import nrrd
+            array, header = nrrd.read(image_path)
+            
+            spacing = header.get('space directions', None)
+            if spacing is not None:
+                spacing = [abs(spacing[i][i]) for i in range(len(spacing))]
+            else:
+                spacing = header.get('spacings', [1.0, 1.0, 1.0])
+            
+            # Extract origin
+            origin = header.get('space origin', [0.0, 0.0, 0.0])
+            
+            return array, spacing, origin
+            
+        except ImportError:
+            raise ImportError("pynrrd library required for NRRD files. Install with: pip install pynrrd")
+    
+    @staticmethod
+    def detect_file_format(data_bytes: bytes):
+        """Detect if file is NRRD or NIfTI based on header"""
+        if data_bytes.startswith(b'NRRD'):
+            return 'nrrd'
+        elif data_bytes[344:348] == b'n+1\x00' or data_bytes[344:348] == b'ni1\x00':
+            return 'nifti'
+        else:
+            try:
+                header_text = data_bytes[:1000].decode('ascii', errors='ignore')
+                if 'NRRD' in header_text or 'dimension:' in header_text:
+                    return 'nrrd'
+            except:
+                pass
+            return 'unknown'
+    
+    @staticmethod
+    def load_via_tempfile(data_bytes: bytes):
+        """
+        Load image data from bytes using appropriate method based on format
+        
+        Args:
+            data_bytes: Raw bytes of image file
+            
+        Returns:
+            tuple: (array, spacing, origin)
+        """
+        try:
+            # Detect file format
+            file_format = ImageProcessor.detect_file_format(data_bytes)
+            
+            if file_format == 'nrrd':
+                suffix = '.nrrd'
+                load_func = ImageProcessor.load_nrrd_file
+            elif file_format == 'nifti':
+                suffix = '.nii'
+                load_func = ImageProcessor.load_nifti
+            else:
+                # Default to NRRD since your data starts with NRRD header
+                suffix = '.nrrd'
+                load_func = ImageProcessor.load_nrrd_file
+            
+            # Create temporary file with appropriate suffix
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:
+                temp_file.write(data_bytes)
+                temp_path = temp_file.name
+            
+            try:
+                # Load using appropriate function
+                array, spacing, origin = load_func(temp_path)
+                return array, spacing, origin
+            finally:
+                # Clean up temporary file
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+                    
+        except Exception as e:
+            raise ValueError(f"Could not load image data via temporary file: {e}")
+    
+    @staticmethod
+    def load_nrrd_from_bytes(data_bytes: bytes):
+        """
+        Direct parsing of NRRD data from bytes without temporary file
+        
+        Args:
+            data_bytes: Raw bytes of NRRD file
+            
+        Returns:
+            tuple: (array, spacing, origin, metadata)
+        """
+ 
+        header_end = data_bytes.find(b'\n\n')
+        if header_end == -1:
+            header_end = data_bytes.find(b'\r\n\r\n')
+        if header_end == -1:
+            raise ValueError("Could not find end of NRRD header")
+        
+     
+        header_bytes = data_bytes[:header_end]
+        header_text = header_bytes.decode('ascii', errors='ignore')
+        
+  
+        header_info = {}
+        lines = header_text.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if line.startswith('#') or not line or ':' not in line:
+                continue
+                
+            key, value = line.split(':', 1)
+            key = key.strip().lower()
+            value = value.strip()
+            
+            if key == 'dimension':
+                header_info['dimension'] = int(value)
+            elif key == 'type':
+                header_info['type'] = value
+            elif key == 'sizes':
+                header_info['sizes'] = [int(x) for x in value.split()]
+            elif key == 'encoding':
+                header_info['encoding'] = value
+            elif key == 'space directions':
+         
+                directions = value.replace('(', '').replace(')', '').split()
+                header_info['space_directions'] = directions
+            elif key == 'space origin':
+                origin_str = value.replace('(', '').replace(')', '')
+                header_info['space_origin'] = [float(x) for x in origin_str.split(',')]
+        
+
+        data_start = header_end + 2
+        binary_data = data_bytes[data_start:]
+        
+        # Convert to numpy array
+        dtype_map = {
+            'uint8': np.uint8, 'int8': np.int8,
+            'uint16': np.uint16, 'int16': np.int16, 
+            'uint32': np.uint32, 'int32': np.int32,
+            'float': np.float32, 'double': np.float64
+        }
+        
+        numpy_dtype = dtype_map.get(header_info.get('type', 'uint8'), np.uint8)
+        flat_array = np.frombuffer(binary_data, dtype=numpy_dtype)
+        
+
+        dimensions = header_info.get('sizes', [])
+        if dimensions:
+            try:
+                array = flat_array.reshape(dimensions)
+            except ValueError:
+                print(f"Warning: Could not reshape to {dimensions}")
+                array = flat_array
+        else:
+            array = flat_array
+        
+        spacing = [1.0, 1.0, 1.0]  # default
+        origin = [0.0, 0.0, 0.0]   # default
+        
+        if 'space_origin' in header_info:
+            origin = header_info['space_origin']
+        
+        
+        return array, spacing, origin, header_info
+
 
 
 class StateManager:
@@ -171,11 +345,12 @@ class sam(BasicInferTask):
                 load_strict=True,
                 **kwargs,
             )
-            self.predictor = None
             self.annotated_image = None
             self.image_path = None
             self.inference_state = None
             self.jpeg_filepath = "./jpeg_slice_files"
+            self.mask_data = None 
+            self.current_volume_id = None   # track which volume is active
 
             self.config_path = "configs/sam2.1/sam2.1_hiera_l"
             self.hydra_overrides_extra = [
@@ -197,251 +372,342 @@ class sam(BasicInferTask):
 
         try:
             # Load the 3D NIfTI image
+            volume_id = data["image"]
             image_array, spacing, origin  = ImageProcessor.load_nifti(data["image"])
 
             # Initialize the predictor for new task
             self.initialize_predictor(device=device)
-
-            # Reprocess if new volume
-            if data["State"] =='ProcessVolume':
-
-            # if self.image_path != data["image"]:
-                self.image_path = data["image"]
-
-                # Convert slices in the array to JPEG images in axial orientation
-                # ImageProcessor.convert_volume_to_frames(image_array, axis=2, output_dir=self.jpeg_filepath)
-
-                #create an inference state (Note: Image Embeddings are calculated only here)
-
-                # self.inference_state = self.predictor.init_state(video_path=self.jpeg_filepath) #Load using JPEG
-                self.inference_state = self.predictor.init_state(video_path=image_array) #Load using tensor
-
-                #create an array equivilant to the image shape to carry segmentation
-                self.annotated_image = np.zeros_like(image_array, dtype=np.int32)
-
-                #Keep track of the first promted slice that will be used
-                self.StartSliceIndex=image_array.shape[2]
-
-                #Reset the object bounds
-                self.object_bounds={}
-
-            #Process same volume
+            
+            if not hasattr(self, "current_volume_id") or self.current_volume_id != volume_id:
+                logger.info(f"Initializing NEW volume: {volume_id}")
+                self.current_volume_id = volume_id
+                self._initialize_new_volume(data, image_array)
             else:
-                # If the inference state not defined ; load the cashed one
-                if (not hasattr(self, 'inference_state')) or (self.inference_state is None):
+                logger.info(f"Reusing existing volume state: {volume_id}")
+                # load cached state if available
+                if hasattr(self, "temp_state_path") and self.temp_state_path:
                     self.inference_state = StateManager.load_state(self.temp_state_path)
 
-            # In case of 2d segmentation
-            if data["State"]=='2d':
-                # Reset the predictor state
-                self.predictor.reset_state(self.inference_state)
-                self.segment_objects(data, image_array)
 
-            elif data["State"] == 'Auxillary_Box':
-                print("Auxillary_Box State Enteredd!!!")
+            if data["State"] == "2d":
+                self._handle_2d(data, image_array)
 
-                #Extract the box data
-                box_arr = data['Auxillary_Box'][0]
-                slice_index=data['Auxillary_Box'][1]
-                orientation_axis =data['Auxillary_Box'][2]
-                obj_id=data["Auxillary_Id"]
-                print("obj_id",obj_id)
+            elif data["State"] == "Mask":
+                self.mask_data = data.get("Mask")
+                self._handle_mask(self.mask_data)
 
-                print("box_arr",box_arr)
-                print("slice_index",slice_index)
-                print("orientation_axis",orientation_axis)
+            elif data["State"] == "Auxillary_Box":
+                self._handle_auxillary_box(data, image_array, device)
 
-                #Extract slice data
-                slice_data = image_array[slice_index,:,:]
-                slice_normalized = ((slice_data - np.min(slice_data)) / (np.max(slice_data) - np.min(slice_data)) * 255).astype(np.uint8)
+            elif data["State"] == "3d":
+                self._handle_3d(data, image_array)
 
-                print("image_array shape",image_array.shape)
-                print("Shape of slice",slice_data.shape)
-                #Remove directory if it exists
-                if os.path.exists(self.jpeg_filepath):
-                    try:
-                        shutil.rmtree(self.jpeg_filepath)
-                        print(f"Removed existing directory: {self.jpeg_filepath}")
-                    except Exception as e:
-                        print(f"Error removing directory: {e}")
-                        raise
+            else:
+                raise ValueError(f"Unknown state")
 
-                #Create fresh directory
-                try:
-                    os.makedirs(self.jpeg_filepath, exist_ok=True)
-                    print(f"Created clean directory: {self.jpeg_filepath}")
-                except Exception as e:
-                    print(f"Error creating directory: {e}")
-                    raise
-
-                # Convert to PIL Image and save as JPEG
-                Image.fromarray(slice_normalized).save(os.path.join(self.jpeg_filepath, f"{slice_index:05}.jpg"))
-
-                #initialize a new predictor and new inference with only one slice .
-                auxillary_predictor = build_sam2_video_predictor(self.config_path, self.path[0], hydra_overrides_extra=self.hydra_overrides_extra, device=device)
-
-                auxillary_inference_state = auxillary_predictor.init_state(video_path=self.jpeg_filepath)
-
-                # Add the point/box to the predictor
-                _,out_obj_ids, out_mask_logits = auxillary_predictor.add_new_points_or_box(
-                    inference_state=auxillary_inference_state,
-                    frame_idx=int(0),
-                    obj_id=obj_id,
-                    points=[],
-                    labels=[],
-                    box=[box_arr] if len([box_arr]) > 0 else None
-                )
-                print("out_mask_logits:", out_mask_logits)
-                print("obj_id:", out_obj_ids)
-
-                # Convert tensor to NumPy array where self.out_mask_logits=[obj_id][chanel:0 for grayscale]
-                obj_id_int = int(obj_id)
-
-                mask_array =out_mask_logits[0][0].cpu().numpy()
-
-                print("mask_array shape",mask_array.shape)
-
-                if obj_id not in self.object_bounds:
-                    self.object_bounds[obj_id] = [None, None]
-
-                print("obj_id_int:",obj_id_int)
-                print("self.object_bounds:",self.object_bounds)
-
-                # Calculate width metrics (column indices where mask > 0)
-                nonzero_cols = np.where(np.any(mask_array > 0, axis=0))[0]  # Get columns with at least one positive pixel
-
-                if len(nonzero_cols) > 0:
-                    min_col = np.min(nonzero_cols)
-                    max_col = np.max(nonzero_cols)
-                    print(f"Segmentation spans columns: {min_col} to {max_col}")
-                             
-                if self.object_bounds[obj_id][0] is None or min_col < self.object_bounds[obj_id][0]:
-                    self.object_bounds[obj_id][0] = min_col
-                if self.object_bounds[obj_id][1] is None or max_col > self.object_bounds[obj_id][1]:
-                    self.object_bounds[obj_id][1] = max_col
-                    
-                if(orientation_axis==0):
-
-                    reversed_slice_index=slice_index #No reversion in coronal
-
-                    #Clearing first
-                    self.annotated_image[int(reversed_slice_index), :, :] = np.where(
-                        self.annotated_image[int(reversed_slice_index), :, :] == int(obj_id),
-                        0,
-                        self.annotated_image[int(reversed_slice_index), :, :]
-                    )
-
-                    # Add the new segmentation mask
-                    self.annotated_image[int(reversed_slice_index), :, :] = np.where(
-                        mask_array > 0,
-                        obj_id,
-                        self.annotated_image[int(reversed_slice_index), :, :]
-                    )
-                else:
-
-                    slice_index =image_array.shape[1] - int(slice_index) -1 #reverse the slice first
-
-                    #Clearing
-                    self.annotated_image[:, int(slice_index), :] = np.where(
-                        self.annotated_image[:, int(slice_index), :] == int(obj_id),
-                        0,
-                        self.annotated_image[:, int(slice_index), :]
-                    )
-
-                    # Add the new segmentation mask
-                    self.annotated_image[:, int(slice_index), :] = np.where(
-                        mask_array > 0,
-                        obj_id,
-                        self.annotated_image[:, int(slice_index), :]
-                    )
-
-
-                print(f"Current object bounds (width): {self.object_bounds[obj_id]}")
-            # In case of 3d segmentation
-            elif data["State"] =='3d':
-
-                # Invert the start slicing index as OHIF slice numbering is reversed
-                print("self.StartSliceIndex in 3d ",self.StartSliceIndex)
-                self.StartSliceIndex = image_array.shape[2] - int(self.StartSliceIndex) -1
-                print("self.StartSliceIndex after inversion",self.StartSliceIndex)
-
-                #initialize a dictionary where segmentation are stored in
-                video_segments={}
-
-                # propagation in whole slices
-                for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(
-                    self.inference_state, start_frame_idx=int(self.StartSliceIndex), reverse =True
-                ):
-                    video_segments[out_frame_idx] = {
-                        out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
-                        for i, out_obj_id in enumerate(out_obj_ids)
-                    }
-                #clear old segmentation
-                self.annotated_image = np.zeros_like(image_array, dtype=np.int32)
-
-                #reconstruct the jpeg slices into volume mask
-                mask = ImageProcessor.reconstruct_nifti(video_segments)
-
-                #resize the mask to fit in the annotated image
-                self.annotated_image=ImageProcessor.resize_to_match(self.annotated_image.shape,mask)
-
-                # Apply object bounds filtering after reconstruction
-                total_slices = image_array.shape[2]
-                margin = int(0.05 * total_slices)  # 5% of total slices as margin
-                print("margin",margin)
-
-                for obj_id, bounds in self.object_bounds.items():
-                    if bounds[0] is not None and bounds[1] is not None:
-
-                        #keep marginal error
-                        lower_bound = max(0, bounds[0] - margin)
-                        upper_bound = min(total_slices - 1, bounds[1] + margin)
-                        print("lower_bound",lower_bound)
-                        print("upper_bound",upper_bound)
-
-                        # Count slices BEFORE filtering
-                        pre_slices = [
-                            z for z in range(self.annotated_image.shape[2])
-                            if np.any(self.annotated_image[:, :, z] == int(obj_id))
-                        ]
-                        print(f"[Before] Object {obj_id} exists in {len(pre_slices)} slices: {pre_slices}")
-
-                        print(f"Filtering object {obj_id} - keeping slices {lower_bound} to {upper_bound}")
-
-                        # Filter slices for this object
-                        for z in range(self.annotated_image.shape[2]):
-                            if z < lower_bound or z > upper_bound:
-                                # Clear segmentation outside bounds for this object
-                                self.annotated_image[:, :, z] = np.where(
-                                    self.annotated_image[:, :, z] == int(obj_id),
-                                    0,
-                                    self.annotated_image[:, :, z]
-                                )
-
-                        # Count slices AFTER filtering
-                        post_slices = [
-                            z for z in range(self.annotated_image.shape[2])
-                            if np.any(self.annotated_image[:, :, z] == int(obj_id))
-                        ]
-                        print(f"[After]  Object {obj_id} exists in {len(post_slices)} slices: {post_slices}")
-
-            data["pred"] = self.annotated_image #add the segmentation to the response for OHIF
-
-
-            self.temp_state_path = StateManager.save_state(self.inference_state) #save the last version from infernence
+            # save results
+            data["pred"] = self.annotated_image
+            self.temp_state_path = StateManager.save_state(self.inference_state)
 
         except Exception as e:
-            # Ensure cleanup happens even if error occurs
             self.cleanup_inference_state()
             raise
         finally:
-            # Always clean up
             self.cleanup_inference_state()
             logger.info(f"Execution time: {time.time() - start_time:.2f} seconds")
 
-
         return data
+    
+    def _initialize_new_volume(self, data, image_array):
+       
+        """Initialize inference for a new volume."""
+        self.image_path = data["image"]
+        self.inference_state = self.predictor.init_state(video_path=image_array)
+        self.annotated_image = np.zeros_like(image_array, dtype=np.int32)
+        self.StartSliceIndex = image_array.shape[2]
+        self.object_bounds = {}
+        logger.info("New volume initialized.")
+    
+    def _handle_2d(self, data, image_array):
+        """handle 2D segmentation."""
+        self.predictor.reset_state(self.inference_state)
+        if self.mask_data is not None :
+            self._handle_mask(self.mask_data)
+        self.segment_objects(data, image_array)
+        
+    def _handle_auxillary_box(self, data, image_array, device):
+        """handle Auxillary_Box segmentation."""
+        #Extract the box data
+        box_arr = data['Auxillary_Box'][0]
+        slice_index=data['Auxillary_Box'][1]
+        orientation_axis =data['Auxillary_Box'][2]
+        obj_id=data["Auxillary_Id"]
+        print("obj_id",obj_id)
 
+        print("box_arr",box_arr)
+        print("slice_index",slice_index)
+        print("orientation_axis",orientation_axis)
+
+        #Extract slice data
+        slice_data = image_array[slice_index,:,:]
+        slice_normalized = ((slice_data - np.min(slice_data)) / (np.max(slice_data) - np.min(slice_data)) * 255).astype(np.uint8)
+
+        print("image_array shape",image_array.shape)
+        print("Shape of slice",slice_data.shape)
+        #Remove directory if it exists
+        if os.path.exists(self.jpeg_filepath):
+            try:
+                shutil.rmtree(self.jpeg_filepath)
+                print(f"Removed existing directory: {self.jpeg_filepath}")
+            except Exception as e:
+                print(f"Error removing directory: {e}")
+                raise
+
+        #Create fresh directory
+        try:
+            os.makedirs(self.jpeg_filepath, exist_ok=True)
+            print(f"Created clean directory: {self.jpeg_filepath}")
+        except Exception as e:
+            print(f"Error creating directory: {e}")
+            raise
+
+        # Convert to PIL Image and save as JPEG
+        Image.fromarray(slice_normalized).save(os.path.join(self.jpeg_filepath, f"{slice_index:05}.jpg"))
+
+        #initialize a new predictor and new inference with only one slice .
+        auxillary_predictor = build_sam2_video_predictor(self.config_path, self.checkpoint_path, device=device)
+
+        auxillary_inference_state = auxillary_predictor.init_state(video_path=self.jpeg_filepath)
+
+        # Add the point/box to the predictor
+        _,out_obj_ids, out_mask_logits = auxillary_predictor.add_new_points_or_box(
+            inference_state=auxillary_inference_state,
+            frame_idx=int(0),
+            obj_id=obj_id,
+            points=[],
+            labels=[],
+            box=[box_arr] if len([box_arr]) > 0 else None
+        )
+        print("out_mask_logits:", out_mask_logits)
+        print("obj_id:", out_obj_ids)
+
+        # Convert tensor to NumPy array where self.out_mask_logits=[obj_id][chanel:0 for grayscale]
+        obj_id_int = int(obj_id)
+
+        mask_array =out_mask_logits[0][0].cpu().numpy()
+
+        print("mask_array shape",mask_array.shape)
+
+        if obj_id not in self.object_bounds:
+            self.object_bounds[obj_id] = [None, None]
+
+        print("obj_id_int:",obj_id_int)
+        print("self.object_bounds:",self.object_bounds)
+
+        # Calculate width metrics (column indices where mask > 0)
+        nonzero_cols = np.where(np.any(mask_array > 0, axis=0))[0]  # Get columns with at least one positive pixel
+
+        if len(nonzero_cols) > 0:
+            min_col = np.min(nonzero_cols)
+            max_col = np.max(nonzero_cols)
+            print(f"Segmentation spans columns: {min_col} to {max_col}")
+                        
+        if self.object_bounds[obj_id][0] is None or min_col < self.object_bounds[obj_id][0]:
+            self.object_bounds[obj_id][0] = min_col
+        if self.object_bounds[obj_id][1] is None or max_col > self.object_bounds[obj_id][1]:
+            self.object_bounds[obj_id][1] = max_col
+            
+        if(orientation_axis==0):
+
+            reversed_slice_index=slice_index #No reversion in coronal
+
+            #Clearing first
+            self.annotated_image[int(reversed_slice_index), :, :] = np.where(
+                self.annotated_image[int(reversed_slice_index), :, :] == int(obj_id),
+                0,
+                self.annotated_image[int(reversed_slice_index), :, :]
+            )
+
+            # Add the new segmentation mask
+            self.annotated_image[int(reversed_slice_index), :, :] = np.where(
+                mask_array > 0,
+                obj_id,
+                self.annotated_image[int(reversed_slice_index), :, :]
+            )
+        else:
+
+            slice_index =image_array.shape[1] - int(slice_index) -1 #reverse the slice first
+
+            #Clearing
+            self.annotated_image[:, int(slice_index), :] = np.where(
+                self.annotated_image[:, int(slice_index), :] == int(obj_id),
+                0,
+                self.annotated_image[:, int(slice_index), :]
+            )
+
+            # Add the new segmentation mask
+            self.annotated_image[:, int(slice_index), :] = np.where(
+                mask_array > 0,
+                obj_id,
+                self.annotated_image[:, int(slice_index), :]
+            )
+
+
+        print(f"Current object bounds (width): {self.object_bounds[obj_id]}")
+             
+    def _handle_mask(self, mask_data):
+        """Handle mask refinement state."""
+       
+        mask = mask_data
+        if not mask or "0" not in mask:
+            raise ValueError("Expected indexed mask data not found")
+
+        max_index = max(int(k) for k in mask.keys() if k.isdigit())
+        mask_list = [mask[str(i)] for i in range(max_index + 1)]
+        mask_bytes = bytes(mask_list)
+        mask_array_input, _, _ = ImageProcessor.load_via_tempfile(mask_bytes)
+
+        unique_labels = np.unique(mask_array_input)
+        unique_labels = unique_labels[unique_labels != 0] # to remove background
+        # loop through each label through all slices
+        for idx, label in enumerate(unique_labels, start=1):
+            for slice_idx in range(mask_array_input.shape[2]):
+                _, out_obj_ids, out_mask_logits = self.predictor.add_new_mask(
+                    inference_state=self.inference_state,
+                    frame_idx=slice_idx,
+                    obj_id=idx,
+                    mask=mask_array_input[:, :, slice_idx],
+                )
+
+                mask_array_output = out_mask_logits[0][0].cpu().numpy()
+
+                self.annotated_image[:, :, slice_idx] = np.where(
+                    self.annotated_image[:, :, slice_idx] == idx,
+                    0,
+                    self.annotated_image[:, :, slice_idx],
+                )
+                self.annotated_image[:, :, slice_idx] = np.where(
+                    mask_array_output > 0,
+                    idx,
+                    self.annotated_image[:, :, slice_idx],
+                )
+   
+    def _handle_3d(self, data, image_array):
+        """handle 3D Propagation"""
+        print("self.StartSliceIndex in 3d ", self.StartSliceIndex)
+        self.StartSliceIndex = image_array.shape[2] - int(self.StartSliceIndex) - 1
+        print("self.StartSliceIndex after inversion", self.StartSliceIndex)
+
+
+        video_segments = {}
+
+        # margin
+        total_slices = image_array.shape[2]
+        margin = int(0.05 * total_slices)  # 5% of total slices as margin
+
+        
+        if not self.object_bounds:
+            print("no bounding box defined, defaulting to forward & Backward propagation for all slices")
+            for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(
+                self.inference_state,
+                start_frame_idx=int(self.StartSliceIndex),
+                reverse=True  # forward
+            ):
+                video_segments[out_frame_idx] = {
+                    out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+                    for i, out_obj_id in enumerate(out_obj_ids)
+                }
+            
+            for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(
+                self.inference_state,
+                start_frame_idx=int(self.StartSliceIndex)-1,
+                reverse=False  # Backward
+            ):
+                video_segments[out_frame_idx] = {
+                    out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+                    for i, out_obj_id in enumerate(out_obj_ids)
+                }           
+                
+        else:
+            # iteration over boundlimits
+            for obj_id, bounds in self.object_bounds.items():
+                if bounds[0] is None or bounds[1] is None:
+                    print(f"Object {obj_id} has undefined bounds, defaulting to forward & Backward propagation")
+                    for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(
+                        self.inference_state,
+                        start_frame_idx=int(self.StartSliceIndex),
+                        reverse=True  # forward
+                    ):
+                        video_segments[out_frame_idx] = {
+                            out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+                            for i, out_obj_id in enumerate(out_obj_ids)
+                            if out_obj_id == obj_id  
+                        }
+                        
+                    for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(
+                        self.inference_state,
+                        start_frame_idx=int(self.StartSliceIndex)-1,
+                        reverse=False  # backward
+                    ):
+                        video_segments[out_frame_idx] = {
+                            out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+                            for i, out_obj_id in enumerate(out_obj_ids)
+                            if out_obj_id == obj_id  
+                        }                        
+                else:
+                    # calculate bounds with margin
+                    lower_bound = max(0, bounds[0] - margin)
+                    upper_bound = min(total_slices - 1, bounds[1] + margin)
+                    print(f"Object {obj_id} - Propagating from slice {lower_bound} to {upper_bound}")
+
+                    # forward to upper limits
+                    if self.StartSliceIndex <= upper_bound:
+                        for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(
+                            self.inference_state,
+                            start_frame_idx=int(self.StartSliceIndex),
+                            reverse=True,  
+                            max_frame_num_to_track=upper_bound + 1 
+                        ):
+                            if lower_bound <= out_frame_idx <= upper_bound:
+                                video_segments[out_frame_idx] = {
+                                    out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+                                    for i, out_obj_id in enumerate(out_obj_ids)
+
+                                }
+                            else :
+                                break
+
+                    # backward to lower
+                    if self.StartSliceIndex - 1 >= lower_bound:
+                        for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(
+                            self.inference_state,
+                            start_frame_idx=int(self.StartSliceIndex) - 1,
+                            reverse=False,  
+                            max_frame_num_to_track=lower_bound  
+                        ):
+                            if lower_bound <= out_frame_idx <= upper_bound:
+                                video_segments[out_frame_idx] = {
+                                    out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+                                    for i, out_obj_id in enumerate(out_obj_ids)
+                        
+                                }
+                            else:
+                                break
+
+        # clear old segmentation
+        self.annotated_image = np.zeros_like(image_array, dtype=np.int32)
+
+        # reconstruct the JPEG slices into volume mask
+        if video_segments:
+            logger.info("the video segments is {video_segments}")
+            mask = ImageProcessor.reconstruct_nifti(video_segments)
+            # resize the mask to fit in the annotated image
+            self.annotated_image = ImageProcessor.resize_to_match(self.annotated_image.shape, mask)
+        else:
+            print("No valid segments generated")
+
+        
+    
     def cleanup_inference_state(self):
         """Helper method to clean up inference state safely"""
         if hasattr(self, 'inference_state'):

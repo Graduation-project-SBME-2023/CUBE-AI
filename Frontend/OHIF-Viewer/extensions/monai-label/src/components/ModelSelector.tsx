@@ -59,8 +59,8 @@ export default class ModelSelector extends Component {
 
     if (evt.target.value == 'sam') {
       // calc image embedding(if SAM model)
-      console.log("Calculating image embeddings for SAM model...");
-      AutoSegmentation.calculateImageEmbeddings(false);
+      // console.log("Calculating image embeddings for SAM model...");
+      // AutoSegmentation.calculateImageEmbeddings(false);
     }
 
     if (this.props.onSelectModel) this.props.onSelectModel(evt.target.value);
