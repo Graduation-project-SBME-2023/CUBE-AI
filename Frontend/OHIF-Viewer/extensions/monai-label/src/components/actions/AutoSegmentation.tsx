@@ -1643,7 +1643,7 @@ Update the ui based on sam2 points
   }
 
   onSelectModel = (model) => {
-    //this.setState({ currentModel: model });
+    this.setState({ currentModel: model });
 
   };
 
