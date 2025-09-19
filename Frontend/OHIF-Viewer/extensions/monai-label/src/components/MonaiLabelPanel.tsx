@@ -16,8 +16,6 @@ import SegmentationToolbox from './SegmentationToolbox';
 import { createReportAsync } from '@ohif/extension-default';
 import { servicesManager } from 'platform/app/src/App';
 
-
-
 export default class MonaiLabelPanel extends Component {
   static propTypes = {
     commandsManager: PropTypes.any,
@@ -146,27 +144,27 @@ export default class MonaiLabelPanel extends Component {
     const labels = response.data.labels.splice(1);
 
     const { displaySet } = this.getActiveViewportInfo();
-const segmentationId = displaySet.SeriesInstanceUID;
+    const segmentationId = displaySet.SeriesInstanceUID;
 
-const segmentations = [
-  {
-    id: segmentationId, // use same ID everywhere
-    label: 'Segmentations',
-    segments: labels.map((label, index) => ({
-      segmentIndex: index + 1,
-      label,
-    })),
-    isActive: true,
-    activeSegmentIndex: 1,
-    // scalarData: null,
-    // FrameOfReferenceUID: displaySet.instances[0].FrameOfReferenceUID,
-    // centroidsIJK: centroidsIJK,
-  },
-];
+    const segmentations = [
+      {
+        id: segmentationId, // use same ID everywhere
+        label: 'Segmentations',
+        segments: labels.map((label, index) => ({
+          segmentIndex: index + 1,
+          label,
+        })),
+        isActive: true,
+        activeSegmentIndex: 1,
+        // scalarData: null,
+        // FrameOfReferenceUID: displaySet.instances[0].FrameOfReferenceUID,
+        // centroidsIJK: centroidsIJK,
+      },
+    ];
 
-this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
-  segmentations,
-});
+    this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
+      segmentations,
+    });
 
     if (response.status !== 200) {
       this.notification.show({
@@ -262,15 +260,15 @@ _update = async (response, labelNames) => {
     FrameOfReferenceUID: this.FrameOfReferenceUID,
     centroidsIJK: centroidsIJK,
   };
-  
+
   console.log('BEFORE loading - segmentation_object.segments:', segmentation_object.segments);
   console.log('BEFORE loading - segments length:', segmentation_object.segments.length);
-  console.log('BEFORE loading - first 5 segments:', segmentation_object.segments.slice(0, 5));  
-  
+  console.log('BEFORE loading - first 5 segments:', segmentation_object.segments.slice(0, 5));
+
   // Try to find existing volume in cache
   const volumeLoadObject = await cache.getVolumeLoadObject(segmentationId);
   console.log("_update: the volume load object", volumeLoadObject);
-  
+
   if (volumeLoadObject) {
     // Volume exists - update it
     const volume = await volumeLoadObject.promise;
@@ -288,22 +286,22 @@ _update = async (response, labelNames) => {
   } else {
     // Volume doesn't exist - create it
     console.log("Volume not found in cache, creating new segmentation");
-    
+
     try {
       // Use the segmentation service to properly create the segmentation
       const { segmentationService } = this.props.servicesManager.services;
-      
+
       // First, remove any existing segmentation with the same ID
       const existingSegmentations = segmentationService.getSegmentations();
       const existingSegmentation = existingSegmentations.find(seg => seg.id === segmentationId);
       if (existingSegmentation) {
         console.log(`Removing existing segmentation with ID: ${segmentationId}`);
         segmentationService.remove(segmentationId);
-        
+
         // Wait for removal to complete
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      
+
       // Create the new segmentation using the command manager
       await this.props.commandsManager.runCommand('loadSegmentationsForViewport', {
         segmentations: [segmentation_object],
@@ -313,7 +311,7 @@ _update = async (response, labelNames) => {
       let retries = 0;
       const maxRetries = 20; // Increased retries
       let newVolumeLoadObject = null;
-      
+
       while (retries < maxRetries && !newVolumeLoadObject) {
         newVolumeLoadObject = await cache.getVolumeLoadObject(segmentationId);
         if (!newVolumeLoadObject) {
@@ -327,31 +325,31 @@ _update = async (response, labelNames) => {
         console.error("Failed to load volume into cache after retries");
         throw new Error("Segmentation volume failed to load into cache");
       }
-      
+
       // Ensure the volume is fully loaded
       const volume = await newVolumeLoadObject.promise;
       console.log("New volume loaded:", volume);
 
       // Wait a bit more for segmentation service to register everything
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       // Verify the segmentation was properly created
       const segmentation_objects = segmentationService.getSegmentations();
       console.log("_update: segmentation objects from service", segmentation_objects);
-      
+
       // Additional check: ensure the segmentation exists in cornerstone state
       const cornerstoneSegmentation = segmentation.state.getSegmentation(segmentationId);
       console.log("_update: cornerstone segmentation state", cornerstoneSegmentation);
-      
+
       if (!cornerstoneSegmentation) {
         console.error("Failed to register segmentation with cornerstone tools");
-        
+
         // Try manual registration as fallback
         console.log("Attempting manual segmentation registration...");
-        
+
         // Get the volume reference for manual registration
         const volumeId = segmentationId;
-        
+
         try {
           // Add segmentation to cornerstone state manually
           segmentation.state.addSegmentation({
@@ -375,20 +373,20 @@ _update = async (response, labelNames) => {
               ),
             },
           });
-          
+
           console.log("Manual segmentation registration successful");
         } catch (manualError) {
           console.error("Manual registration also failed:", manualError);
           throw new Error("Both automatic and manual segmentation registration failed");
         }
       }
-      
+
     } catch (error) {
       console.error("Error during segmentation creation:", error);
       throw error;
     }
   }
-  
+
   return segmentationId;
 };
 
@@ -439,57 +437,78 @@ _update = async (response, labelNames) => {
   };
 
   parseResponse = (response) => {
-    const buffer = response.data;
     const contentType = response.headers['content-type'];
     const boundaryMatch = contentType.match(/boundary=([^;]+)/i);
     const boundary = boundaryMatch ? boundaryMatch[1] : null;
-    console.log("boundary: ", boundary);
 
-    const text = new TextDecoder().decode(buffer);
-    const parts = text
-      .split(`--${boundary}`)
-      .filter((part) => part.trim() !== '');
+    const uint8 = new Uint8Array(response.data);
+    const boundaryBytes = new TextEncoder().encode(`--${boundary}`);
 
-    // Find the JSON part and NRRD part
-    // Linear searches, with no memory inefficiency
-    const jsonPart = parts.find((part) =>
-      part.includes('Content-Type: application/json')
-    );
-    const nrrdPart = parts.find((part) =>
-      part.includes('Content-Type: application/octet-stream')
-    );
+    const parts = this.splitMultipart(uint8, boundaryBytes);
 
-    // Extract JSON data
-    const jsonStartIndex = jsonPart.indexOf('{');
-    const jsonEndIndex = jsonPart.lastIndexOf('}');
-    const jsonData = JSON.parse(
-      jsonPart.slice(jsonStartIndex, jsonEndIndex + 1)
-    );
+    let jsonData;
+    let nrrdArrayBuffer;
 
-    // Extract NRRD data
-    const separator = '\r\n\r\n';
-    const sepIndex = nrrdPart.indexOf(separator);  // can there be more occurrences of the separator in the response??
+    for (const part of parts) {
+      const headerEnd = this.findDoubleCRLF(part);
+      if (headerEnd === -1) continue;
 
-    if (sepIndex !== -1) {
-      const binaryData = nrrdPart.slice(sepIndex + separator.length);
-      const binaryDataEnd = binaryData.lastIndexOf('\r\n');
+      const headers = new TextDecoder().decode(part.subarray(0, headerEnd));
+      const body = part.subarray(headerEnd);
 
-      const slicedData = binaryData.slice(0, binaryDataEnd);
-      const encoder = new TextEncoder();
-      const nrrdArrayBuffer = encoder.encode(slicedData).buffer;
-
-      // const nrrdArrayBuffer = new Uint8Array(
-      //   binaryData
-      //     .slice(0, binaryDataEnd)
-      //     .split('')
-      //     .map((c) => c.charCodeAt(0))
-      // ).buffer;
-
-      return { data: nrrdArrayBuffer, centroids: jsonData.centroids };
-    } else {
-      throw new Error('Separator not found in nrrdPart');
+      if (headers.includes('Content-Type: application/json')) {
+        const jsonText = new TextDecoder().decode(body);
+        jsonData = JSON.parse(jsonText);
+      } else if (headers.includes('Content-Type: application/octet-stream')) {
+        nrrdArrayBuffer = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength);
+      }
     }
+
+    if (!jsonData || !nrrdArrayBuffer) {
+      throw new Error('Failed to parse multipart response');
+    }
+    return { data: nrrdArrayBuffer, centroids: jsonData.centroids };
   };
+
+  private splitMultipart(buffer: Uint8Array, boundary: Uint8Array): Uint8Array[] {
+    const parts: Uint8Array[] = [];
+    let start = 0;
+
+    while (start < buffer.length) {
+      const boundaryIndex = this.findSubarray(buffer, boundary, start);
+      if (boundaryIndex === -1) break;
+
+      const partStart = boundaryIndex + boundary.length + 2; // skip \r\n
+      const nextBoundary = this.findSubarray(buffer, boundary, partStart);
+      const partEnd = nextBoundary !== -1 ? nextBoundary : buffer.length;
+
+      parts.push(buffer.subarray(partStart, partEnd - 2)); // strip trailing \r\n
+      start = partEnd;
+    }
+    return parts;
+  }
+
+  private findSubarray(haystack: Uint8Array, needle: Uint8Array, start = 0): number {
+    outer: for (let i = start; i <= haystack.length - needle.length; i++) {
+      for (let j = 0; j < needle.length; j++) {
+        if (haystack[i + j] !== needle[j]) continue outer;
+      }
+      return i;
+    }
+    return -1;
+  }
+
+  private findDoubleCRLF(buffer: Uint8Array): number {
+    for (let i = 0; i < buffer.length - 3; i++) {
+      if (
+        buffer[i] === 13 && buffer[i + 1] === 10 && // \r\n
+        buffer[i + 2] === 13 && buffer[i + 3] === 10 // \r\n
+      ) {
+        return i + 4; // position after \r\n\r\n
+      }
+    }
+    return -1;
+  }
 
   saveSegemntation = async (model, segmentationId) => {
     console.log('model', model);
