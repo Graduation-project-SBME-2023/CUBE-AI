@@ -356,7 +356,7 @@ class sam(BasicInferTask):
             self.hydra_overrides_extra = [
                 "++model._target_=custom_sam.sam2_volume_predictor.SAM2VolumePredictor",
             ]
-
+            self.predictor = None
 
             self.object_bounds = {}  # Dictionary to store bounds per object
 
