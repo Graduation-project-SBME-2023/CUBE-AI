@@ -97,7 +97,7 @@ class MyApp(MONAILabelApp):
         self.heuristic_planner = strtobool(conf.get("heuristic_planner", "false"))
         self.planner = HeuristicPlanner(spatial_size=spatial_size, target_spacing=target_spacing)
 
-        excluded = ["segmentation_vertebra", "localization_vertebra", "segmentation", "nnunet_lung", "nnunet_liver",
+        excluded = ["segmentation_vertebra", "segmentation", "nnunet_lung", "nnunet_liver",
                     "localization_spine", "segment_liver"]
 
         # app models
