@@ -97,6 +97,9 @@ class MyApp(MONAILabelApp):
         self.heuristic_planner = strtobool(conf.get("heuristic_planner", "false"))
         self.planner = HeuristicPlanner(spatial_size=spatial_size, target_spacing=target_spacing)
 
+        excluded = ["segmentation_vertebra", "localization_vertebra", "segmentation", "nnunet_lung", "nnunet_liver",
+                    "localization_spine", "segment_liver"]
+
         # app models
         self.models: Dict[str, TaskConfig] = {}
         for n in models:
@@ -106,6 +109,8 @@ class MyApp(MONAILabelApp):
                 # OO
                 if k == "generic_segmentation":
                     continue # To skip instantiating an object from the class generic at starting the application
+                if k in excluded:
+                    continue
                 if n == k or n == "all":
                     logger.info(f"+++ Adding Model: {k} => {v}")
                     self.models[k] = eval(f"{v}()")
