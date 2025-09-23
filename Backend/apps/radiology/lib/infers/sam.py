@@ -475,7 +475,7 @@ class sam(BasicInferTask):
         Image.fromarray(slice_normalized).save(os.path.join(self.jpeg_filepath, f"{slice_index:05}.jpg"))
 
         #initialize a new predictor and new inference with only one slice .
-        auxillary_predictor = build_sam2_video_predictor(self.config_path, self.checkpoint_path, device=device)
+        auxillary_predictor = build_sam2_video_predictor(self.config_path, self.path[0], device=device)
 
         auxillary_inference_state = auxillary_predictor.init_state(video_path=self.jpeg_filepath)
 
