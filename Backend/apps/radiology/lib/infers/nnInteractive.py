@@ -70,8 +70,9 @@ class NNINTERACTIVE(BasicInferTask):
             **kwargs,
         )
         self.target_spacing = target_spacing
-        radiology_path =Path("/apps/radiology")
+        radiology_path = Path("../../../models")
         self.BASE_PATH =radiology_path
+        self.DATA_PATH = Path("/apps/radiology")
         self.session=None
 
 
@@ -112,6 +113,7 @@ class NNINTERACTIVE(BasicInferTask):
             do_autozoom=True,
             use_pinned_memory=True,
         )
+        logger.info("session initialized")
         return session
 
     # load the model
@@ -166,7 +168,7 @@ class NNINTERACTIVE(BasicInferTask):
             # Store session metadata for future comparisons
             session._current_image_shape = current_shape
             session._current_volume_path = current_volume_path
-
+            logger.info(f"model path {model_path}")
             # Load model for new session
             self.load_model(session, model_path)
         elif new_object:
@@ -227,7 +229,7 @@ class NNINTERACTIVE(BasicInferTask):
 
         self.session, output_path=self.nnInteractive_segmentation(
             volume_path=data[self.input_key],
-            output_path=os.path.join(self.BASE_PATH,"Data","output"),
+            output_path=os.path.join(self.DATA_PATH,"Data","output"),
             model_path=os.path.join(self.BASE_PATH,"nnInteractive_v1.0"),
             point_coordinates=data["Points"]['points'],  # Example coordinates
             Interactive=data['Points']['labels'][0],
