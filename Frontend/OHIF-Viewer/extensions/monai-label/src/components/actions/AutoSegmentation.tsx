@@ -2033,8 +2033,8 @@ Update the ui based on sam2 points
         params.Class = 133;
 
         params.Points = this.state.vistaPrompts;
-        params.Mask = this.state.prevMask2Refine;
-        console.log("mask has been sent to vista",this.state.prevMask2Refine );
+        // params.Mask = this.state.prevMask2Refine;
+        // console.log("mask has been sent to vista",this.state.prevMask2Refine );
         
       }
     }
