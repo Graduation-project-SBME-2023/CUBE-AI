@@ -349,7 +349,7 @@ class sam(BasicInferTask):
             self.image_path = None
             self.inference_state = None
             self.jpeg_filepath = "./jpeg_slice_files"
-            self.mask_data = None 
+            # self.mask_data = None 
             self.current_volume_id = None   # track which volume is active
 
             self.config_path = "configs/sam2.1/sam2.1_hiera_l"
@@ -387,14 +387,16 @@ class sam(BasicInferTask):
                 # load cached state if available
                 if hasattr(self, "temp_state_path") and self.temp_state_path:
                     self.inference_state = StateManager.load_state(self.temp_state_path)
+                    self.annotated_image = np.zeros_like(image_array, dtype=np.int32)
+                    self.object_bounds = {}                    
 
 
             if data["State"] == "2d":
                 self._handle_2d(data, image_array)
 
-            elif data["State"] == "Mask":
-                self.mask_data = data.get("Mask")
-                self._handle_mask(self.mask_data)
+            # elif data["State"] == "Mask":
+            #     self.mask_data = data.get("Mask")
+            #     self._handle_mask(self.mask_data)
 
             elif data["State"] == "Auxillary_Box":
                 self._handle_auxillary_box(data, image_array, device)
@@ -431,10 +433,10 @@ class sam(BasicInferTask):
     def _handle_2d(self, data, image_array):
         """handle 2D segmentation."""
         self.predictor.reset_state(self.inference_state)
-        if self.mask_data is not None :
-            self._handle_mask(self.mask_data)
+        if data.get("Mask") is not None :
+            self._handle_mask(data.get("Mask"))
         self.segment_objects(data, image_array)
-        
+    
     def _handle_auxillary_box(self, data, image_array, device):
         """handle Auxillary_Box segmentation."""
         #Extract the box data

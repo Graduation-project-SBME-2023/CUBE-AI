@@ -87,6 +87,7 @@ export default class AutoSegmentation extends BaseTab {
       // prev mask
       prevMask2Refine:null,
       prevLabeL:[],
+      buttonClicked : false,
     };
 
     //initialize a viewportGridService for sam2 functionalities
@@ -640,6 +641,8 @@ export default class AutoSegmentation extends BaseTab {
     // Access the instance and clear its prompts state
     if (AutoSegmentation.instance) {
       AutoSegmentation.instance.setState({ prompts: {} });
+      AutoSegmentation.instance.setState({prevMask2Refine : null});
+      AutoSegmentation.instance.setState({buttonClicked : false});
       AutoSegmentation.instance.setState({ volumeEmbeddingsCalculated: false });
     }
   };
@@ -1658,7 +1661,6 @@ Update the ui based on sam2 points
   }
 
   onSelectModel = (model) => {
-    console.log("iam here y shahd changing the model to ", model)
     Point_ui = {};
     Box = {};
     VistaPoints = {};
@@ -1667,42 +1669,12 @@ Update the ui based on sam2 points
     this.setState(
       {
         currentModel: model
-      },
-      // () => {
-        
-      //   const enabledElement = getActiveViewportEnabledElement(this.viewportGridService);
-      //   if (enabledElement) {
-      //     const { viewport } = enabledElement;
-      //     const imageSliceData = csUtils.getImageSliceDataForVolumeViewport(viewport);
-      //     const currentSlice = imageSliceData.imageIndex;
+      },);
+    if (model !=='sam'){
+      this.setState({prevMask2Refine : null, buttonClicked : false});
+    }
 
-          
-      //     this.updatePointDisplay(currentSlice, enabledElement);
-      //     this.updateBoxDisplay(currentSlice, enabledElement);
-
-         
-      //     this.updateVistaPointDisplay(currentSlice, enabledElement);
-
-          
-      //     this.updateNnInteractivePointDisplay(currentSlice, enabledElement);
-
-      //     // this.props.updateView([], [], model); //null response to clear masks
-      //   }
-
-      //   this.removePointEventListeners();
-      //   this.removeVistaPointEventListeners();
-      //   this.removeNnInteractivePointEventListeners();
-      // }
-    );
-    // console.log("notification appears")
-    // this.notification.show({
-    //   title: 'Model Changed',
-    //   message: `Switched to ${model} model. All previous segmentation prompts have been cleared.`,
-    //   type: 'info',
-    //   duration: 3000,
-    // });
   };
-
 
   // Set the selected queue to the current selected one
   handleQueueChange = (event) => {
@@ -1713,11 +1685,13 @@ Update the ui based on sam2 points
 
 
   handleRefineBySAM = async () => {
+
     console.log('Refine by SAM clicked');
 
     await new Promise((resolve) => {
       this.setState({
         prompts: {},
+        buttonClicked: true,
         // uiComponents: [],
       }, () => {
         console.log("cleared old prompts");
@@ -1736,65 +1710,65 @@ Update the ui based on sam2 points
 
     const nid = this.notification.show({
       title: 'MONAI Label',
-      message: 'Refining Mask Input ... For further Refinement use Prompts',
+      message: 'For Refinement use Prompts',
       type: 'info',
       duration: 10000,
     });
 
-    const { info, viewConstants } = this.props;
-    const image = viewConstants.SeriesInstanceUID;
-    const model = this.modelSelector.current.currentModel();
-    const config = this.props.onOptionsConfig();
-    const params =
-      config && config.infer && config.infer[model] ? { ...config.infer[model] } : {};
+    // const { info, viewConstants } = this.props;
+    // const image = viewConstants.SeriesInstanceUID;
+    // const model = this.modelSelector.current.currentModel();
+    // const config = this.props.onOptionsConfig();
+    // const params =
+    //   config && config.infer && config.infer[model] ? { ...config.infer[model] } : {};
 
-    params.State = "Mask";
-    params.Mask = this.state.prevMask2Refine;
-    console.log("mask has been sent to sam",this.state.prevMask2Refine );
-    params.LabelMask = this.state.prevLabel; // to get the id based on this label
-    console.log("label has been sent to sam from prev mask");
+    // params.State = "Mask";
+    // params.Mask = this.state.prevMask2Refine;
+    // console.log("mask has been sent to sam",this.state.prevMask2Refine );
+    // params.LabelMask = this.state.prevLabel; // to get the id based on this label
+    // console.log("label has been sent to sam from prev mask");
 
-    const labels = info.models[model].labels;
+    // const labels = info.models[model].labels;
 
-    try {
-      const response = await this.props.client().segmentation(model, image, params);
+    // try {
+    //   const response = await this.props.client().segmentation(model, image, params);
 
-      if (!nid) {
-        window.snackbar.hideAll();
-      } else {
-        this.notification.hide(nid);
-      }
+    //   if (!nid) {
+    //     window.snackbar.hideAll();
+    //   } else {
+    //     this.notification.hide(nid);
+    //   }
 
-      if (response.status !== 200) {
-        this.notification.show({
-          title: 'MONAI Label',
-          message: 'Failed to Enhance Input Mask',
-          type: 'error',
-          duration: 5000,
-        });
-      } else {
-        this.notification.show({
-          title: 'MONAI Label',
-          message: 'Mask is Refined Successfully',
-          type: 'success',
-          duration: 10000,
-        });
+    //   if (response.status !== 200) {
+    //     this.notification.show({
+    //       title: 'MONAI Label',
+    //       message: 'Failed to Enhance Input Mask',
+    //       type: 'error',
+    //       duration: 5000,
+    //     });
+    //   } else {
+    //     this.notification.show({
+    //       title: 'MONAI Label',
+    //       message: 'Mask is Refined Successfully',
+    //       type: 'success',
+    //       duration: 10000,
+    //     });
 
-        await this.props.updateView(response, labels, model);
-      }
-    } catch (error) {
-      if (!nid) {
-        window.snackbar.hideAll();
-      } else {
-        this.notification.hide(nid);
-      }
-      this.notification.show({
-        title: 'MONAI Label',
-        message: `Error during refinement: ${error.message || error}`,
-        type: 'error',
-        duration: 5000,
-      });
-    }
+    //     await this.props.updateView(response, labels, model);
+    //   }
+    // } catch (error) {
+    //   if (!nid) {
+    //     window.snackbar.hideAll();
+    //   } else {
+    //     this.notification.hide(nid);
+    //   }
+    //   this.notification.show({
+    //     title: 'MONAI Label',
+    //     message: `Error during refinement: ${error.message || error}`,
+    //     type: 'error',
+    //     duration: 5000,
+    //   });
+    // }
   };
 
   /*
@@ -1818,6 +1792,13 @@ Update the ui based on sam2 points
 
     //Sepecfic configuration for sam
     params.samc2onfig = this.state.prompts;
+    if (this.state.buttonClicked === true){
+    params.Mask = this.state.prevMask2Refine ;
+    console.log("mask has been sent to sam");   
+}
+    else{
+    params.Mask = null ;
+    }
     params.SliceIndex = slice;
 
     if (auxillaryBox) {
@@ -2589,7 +2570,7 @@ Update the ui based on sam2 points
               ))}
             </div>
           )}
-          {!['sam', 'vista', 'nninteractive'].includes(this.state.currentModel) && (
+          {/* {!['sam', 'vista', 'nninteractive'].includes(this.state.currentModel) && (
             <div style={{ textAlign: 'center', marginTop: '20px' }}>
               <button
                 onClick={this.handleRefineBySAM} // You can define this method
@@ -2609,7 +2590,7 @@ Update the ui based on sam2 points
                 Refine By SAM
               </button>
             </div>
-           )}
+           )} */}
 
         </div>
       </div>
