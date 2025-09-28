@@ -713,11 +713,11 @@ _update = async (response, labelNames) => {
         {this.state.segmentations?.map((segmentation) => (
           <>
             <SegmentationToolbox servicesManager={this.props.servicesManager} />
-            <MonaiSegmentation
+            {/* <MonaiSegmentation
               servicesManager={this.props.servicesManager}
               extensionManager={this.props.extensionManager}
               commandsManager={this.props.commandsManager}
-            />
+            /> */}
           </>
         ))}
       </div>
