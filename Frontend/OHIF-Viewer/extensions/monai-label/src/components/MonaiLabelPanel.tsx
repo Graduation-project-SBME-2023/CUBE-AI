@@ -576,11 +576,11 @@ export default class MonaiLabelPanel extends Component {
         {this.state.segmentations?.map((segmentation) => (
           <>
             <SegmentationToolbox servicesManager={this.props.servicesManager} />
-            <MonaiSegmentation
+            {/* <MonaiSegmentation
               servicesManager={this.props.servicesManager}
               extensionManager={this.props.extensionManager}
               commandsManager={this.props.commandsManager}
-            />
+            /> */}
           </>
         ))}
       </div>

@@ -13,6 +13,12 @@
   color: rgb(255, 255, 255);
   border-color:rgb(72, 193, 230);
 }
+.box_button:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  background-color: #ccc !important;
+  pointer-events: none !important;
+}
 .add_object {
     padding: 8px 14px;
     border-radius: 6px;

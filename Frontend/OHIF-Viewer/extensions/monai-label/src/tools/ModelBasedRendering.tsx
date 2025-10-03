@@ -16,21 +16,32 @@ const BoxButton = ({ onClick, disabled }) => {
 
   );
 };
-
+const DEFAULT_COLOR_LUT = [
+  [200, 0, 0, 255],     // red
+  [0, 200, 0, 255],     // green
+  [0, 0, 200, 255],     // blue
+  [200, 200, 0, 255],   // yellow
+  [200, 0, 200, 255],   // magenta
+  [0, 200, 200, 255],   // cyan
+  [255, 127, 0, 255],   // orange
+  [127, 0, 255, 255],   // purple
+  [0, 127, 255, 255],   // sky blue
+  [127, 127, 127, 255], // gray
+];
 
 const PositiveButton = ({ onClick, disabled }) => {
-  if (disabled) return null; 
+  // if (disabled) return null; 
   return(
-  <button className="box_button" onClick={onClick} title="Add Postive point">
+  <button className="box_button" onClick={onClick} title="Add Postive point" disabled ={disabled} >
     <TbPointerPlus size={20} />
   </button>
 );
 };
 
 const NegativeButton = ({ onClick, disabled }) => {
-  if (disabled) return null; 
+  // if (disabled) return null; 
   return(
-  <button onClick={onClick}  className="box_button" title="Add Negative point">
+  <button onClick={onClick}  className="box_button" title="Add Negative point" disabled ={disabled}>
     <GoXCircleFill size={20}/>
     
   </button>
@@ -87,6 +98,7 @@ const MODE_CONFIG = {
   },
 };
 
+
 export default class ModelBasedRendering extends Component {
   state = {
     objects: [
@@ -94,11 +106,24 @@ export default class ModelBasedRendering extends Component {
     ],
     selectedId: 1,
   };
-
+  rgbaToHex=(r, g, b, a = 255) =>{
+    return (
+      "#" +
+      [r, g, b, a]
+        .map((x) => {
+          const hex = x.toString(16);
+          return hex.length === 1 ? "0" + hex : hex;
+        })
+        .join("")
+    );
+  }
   // Add another object
   handleAddObject = () => {
+
     const nextId = this.state.objects.length + 1;
-    const randomColor = `#${Math.floor(Math.random() * 16777215).toString(16)}`;
+    const [r, g, b, a] = DEFAULT_COLOR_LUT[(nextId-1) % DEFAULT_COLOR_LUT.length];
+    const randomColor = this.rgbaToHex (r,g,b,a);
+    // const randomColor = `#${Math.floor(Math.random() * 16777215).toString(16)}`;
     this.setState((prev) => ({
       objects: [...prev.objects, { id: nextId, color: randomColor }],
     }));
@@ -131,8 +156,8 @@ renderRow1(config = {}) {
       >
         {/* <span style={{ fontWeight: "bold", fontSize: "14px" }}>1:</span> */}
         {config.box && <BoxButton onClick={() => this.props.onBoxClick("1")} />}
-        {config.pos && <PositiveButton onClick={() => this.props.onPositiveClick("1")} />}
-        {config.neg && <NegativeButton onClick={() => this.props.onNegativeClick("1")} />}
+        {config.pos && <PositiveButton onClick={() => this.props.onPositiveClick("1")} disabled={this.props.positiveDisabled} />}
+        {config.neg && <NegativeButton onClick={() => this.props.onNegativeClick("1")} disabled={this.props.negativeDisabled}/>}
         {config.reset && <ResetButton onClick={() => this.props.onResetClick("1")} />}
         {config.color && (
           <div
@@ -172,8 +197,8 @@ renderRow1(config = {}) {
             {obj.id}:
           </span>
           {config.box && <BoxButton onClick={() => this.props.onBoxClick(obj.id)} />}
-          {config.pos && <PositiveButton onClick={() => this.props.onPositiveClick(obj.id)} />}
-          {config.neg && <NegativeButton onClick={() => this.props.onNegativeClick(obj.id)} />}
+          {config.pos && <PositiveButton onClick={() => this.props.onPositiveClick(obj.id)} disabled={this.props.positiveDisabled} />}
+          {config.neg && <NegativeButton onClick={() => this.props.onNegativeClick(obj.id)} disabled={this.props.negativeDisabled} />}
           {config.reset && <ResetButton onClick={() => this.props.onResetClick(obj.id)} />}
           {config.color && (
             <div
@@ -215,6 +240,10 @@ renderRow1(config = {}) {
   render() {
     const { mode } = this.props;
     const config = MODE_CONFIG[mode] || { row1: {}, row2: {}, row3: {} };
+  console.log('ModelBasedRendering render - props:', {
+    positiveDisabled: this.props.positiveDisabled,
+    negativeDisabled: this.props.negativeDisabled
+  });
 
     return (
       <div style={{ padding: "10px" }}>

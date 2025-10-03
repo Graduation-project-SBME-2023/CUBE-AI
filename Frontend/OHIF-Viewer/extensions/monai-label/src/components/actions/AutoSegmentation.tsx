@@ -65,12 +65,12 @@ export default class AutoSegmentation extends BaseTab {
       drawingMode: 'none',
 
       //Tack if image embeddings are being calculated
-      isCalculatingEmbeddings: false,
+      isCalculatingEmbeddings: true,
 
       //Tack if image embeddings already calculated or not
-      volumeEmbeddingsCalculated: false,
+      volumeEmbeddingsCalculated: true,
 
-      sam2CalculateImageEmbeddingsSessionID: "",
+      // sam2CalculateImageEmbeddingsSessionID: "",
 
       vistaMode: 'automatic', // 'automatic' or 'interactive'
       vistaSelectedClass: vistaClasses[0] || { name: 'liver', value: 1 }, // default to first class
@@ -84,6 +84,10 @@ export default class AutoSegmentation extends BaseTab {
       nnInteractivePrompts: { points: [], labels: [], },
       nnInteractiveDrawingMode: false,
       resetInteractions:false,
+      // prev mask
+      prevMask2Refine:null,
+      prevLabeL:[],
+      buttonClicked : false,
     };
 
     //initialize a viewportGridService for sam2 functionalities
@@ -574,56 +578,56 @@ export default class AutoSegmentation extends BaseTab {
     }
   };
   // Helper function to calculate image embeddings
-  static async calculateImageEmbeddings(checkModel = false) {
-    console.log("calculateImageEmbeddings Entered...");
-    if (!AutoSegmentation.instance) {
-      console.error('AutoSegmentation instance is not available.');
-      return;
-    }
+  // static async calculateImageEmbeddings(checkModel = false) {
+  //   console.log("calculateImageEmbeddings Entered...");
+  //   if (!AutoSegmentation.instance) {
+  //     console.error('AutoSegmentation instance is not available.');
+  //     return;
+  //   }
 
-    //Get class instance (as this function is global)
-    const instance = AutoSegmentation.instance;
+  //   //Get class instance (as this function is global)
+  //   const instance = AutoSegmentation.instance;
 
-    // Check if embeddings are already being calculated
-    if (instance.state.isCalculatingEmbeddings) {
-      console.log("Embeddings calculation is already in progress.");
-      return;
+  //   // Check if embeddings are already being calculated
+  //   if (instance.state.isCalculatingEmbeddings) {
+  //     console.log("Embeddings calculation is already in progress.");
+  //     return;
 
-    } else {
+  //   } else {
 
-      let isCalculate = true
-      console.log("Calculating image embeddings...");
+  //     let isCalculate = true
+  //     console.log("Calculating image embeddings...");
 
 
-      if (checkModel) {
+  //     if (checkModel) {
 
-        //Get current selected model in model bank
-        const model = instance.state.currentModel;
-        console.log("model...", model)
+  //       //Get current selected model in model bank
+  //       const model = instance.state.currentModel;
+  //       console.log("model...", model)
 
-        isCalculate = (model == 'sam');
-      }
+  //       isCalculate = (model == 'sam');
+  //     }
 
-      // If sam then calc volume embeddings
-      if (isCalculate) {
-        console.log("Enter isCalculate block...");
+  //     // If sam then calc volume embeddings
+  //     if (isCalculate) {
+  //       console.log("Enter isCalculate block...");
 
-        // Set the state to indicate that embeddings are being calculated
-        instance.setState({ isCalculatingEmbeddings: true });
+  //       // Set the state to indicate that embeddings are being calculated
+  //       instance.setState({ isCalculatingEmbeddings: true });
 
-        try {
-          await instance.sam2CalcImageEmbeddings('sam');
-        } catch (error) {
-          console.error('Error calculating image embeddings:', error);
-        } finally {
-          // Reset the state after calculation is complete
-          instance.setState({ isCalculatingEmbeddings: false });
-        }
-      }
-      else {
-      }
-    }
-  };
+  //       try {
+  //         await instance.sam2CalcImageEmbeddings('sam');
+  //       } catch (error) {
+  //         console.error('Error calculating image embeddings:', error);
+  //       } finally {
+  //         // Reset the state after calculation is complete
+  //         instance.setState({ isCalculatingEmbeddings: false });
+  //       }
+  //     }
+  //     else {
+  //     }
+  //   }
+  // };
 
   /*
   Global function to clear dictionaries carrying sam2 ui compontets: points and boxes
@@ -637,6 +641,8 @@ export default class AutoSegmentation extends BaseTab {
     // Access the instance and clear its prompts state
     if (AutoSegmentation.instance) {
       AutoSegmentation.instance.setState({ prompts: {} });
+      AutoSegmentation.instance.setState({prevMask2Refine : null});
+      AutoSegmentation.instance.setState({buttonClicked : false});
       AutoSegmentation.instance.setState({ volumeEmbeddingsCalculated: false });
     }
   };
@@ -647,12 +653,13 @@ export default class AutoSegmentation extends BaseTab {
   generateUniqueColor(objectId) {
     const colors = [
       '#FF4C4C',
-      '#56C04E',
-      '#4558D1',
-      '#D5DD45',
-      '#B54A80',
+      '#37bb2dff',
       '#9F47E0',
+      '#D5DD45',
       '#47B3A9',
+      '#f5a8cfff',
+      '#a6f13cff',
+  
     ];
     return colors[(objectId - 1) % colors.length]; // Cycle through colors
   }
@@ -672,6 +679,17 @@ export default class AutoSegmentation extends BaseTab {
       pointType: '+',
       boxes: [],
     };
+  //       const newPrompt = {
+  //     ...this.state.prompts,
+  //     [objectId]: {
+  //       points: [[], []],
+  //       pointType: '+',
+  //       boxes: [],
+  //     }
+  //   };
+  // this.setState({ prompts: newPrompt });
+
+    
     // Generate a unique color
     const color = this.generateUniqueColor(objectId); // Generate a unique color
 
@@ -1643,7 +1661,18 @@ Update the ui based on sam2 points
   }
 
   onSelectModel = (model) => {
-    this.setState({ currentModel: model });
+    Point_ui = {};
+    Box = {};
+    VistaPoints = {};
+    nnInteractivePoints = {}
+
+    this.setState(
+      {
+        currentModel: model
+      },);
+    if (model !=='sam'){
+      this.setState({prevMask2Refine : null, buttonClicked : false});
+    }
 
   };
 
@@ -1654,6 +1683,93 @@ Update the ui based on sam2 points
     this.setState({ selectedQueue });
   };
 
+
+  handleRefineBySAM = async () => {
+
+    console.log('Refine by SAM clicked');
+
+    await new Promise((resolve) => {
+      this.setState({
+        prompts: {},
+        buttonClicked: true,
+        // uiComponents: [],
+      }, () => {
+        console.log("cleared old prompts");
+        this.onSelectModel("sam");
+        const filteredLabels = this.state.prevLabeL.filter(label => label !== 0);
+        console.log("filtered labels is ,", filteredLabels);
+        for (let i = 0; i < filteredLabels.length; i++) {
+          this.handleAddObject();
+        }
+        resolve();
+      });
+    });
+
+    // Now that state updated, do embedding calculation
+  //  await this.sam2CalcImageEmbeddings('sam');
+
+    const nid = this.notification.show({
+      title: 'MONAI Label',
+      message: 'For Refinement use Prompts',
+      type: 'info',
+      duration: 10000,
+    });
+
+    // const { info, viewConstants } = this.props;
+    // const image = viewConstants.SeriesInstanceUID;
+    // const model = this.modelSelector.current.currentModel();
+    // const config = this.props.onOptionsConfig();
+    // const params =
+    //   config && config.infer && config.infer[model] ? { ...config.infer[model] } : {};
+
+    // params.State = "Mask";
+    // params.Mask = this.state.prevMask2Refine;
+    // console.log("mask has been sent to sam",this.state.prevMask2Refine );
+    // params.LabelMask = this.state.prevLabel; // to get the id based on this label
+    // console.log("label has been sent to sam from prev mask");
+
+    // const labels = info.models[model].labels;
+
+    // try {
+    //   const response = await this.props.client().segmentation(model, image, params);
+
+    //   if (!nid) {
+    //     window.snackbar.hideAll();
+    //   } else {
+    //     this.notification.hide(nid);
+    //   }
+
+    //   if (response.status !== 200) {
+    //     this.notification.show({
+    //       title: 'MONAI Label',
+    //       message: 'Failed to Enhance Input Mask',
+    //       type: 'error',
+    //       duration: 5000,
+    //     });
+    //   } else {
+    //     this.notification.show({
+    //       title: 'MONAI Label',
+    //       message: 'Mask is Refined Successfully',
+    //       type: 'success',
+    //       duration: 10000,
+    //     });
+
+    //     await this.props.updateView(response, labels, model);
+    //   }
+    // } catch (error) {
+    //   if (!nid) {
+    //     window.snackbar.hideAll();
+    //   } else {
+    //     this.notification.hide(nid);
+    //   }
+    //   this.notification.show({
+    //     title: 'MONAI Label',
+    //     message: `Error during refinement: ${error.message || error}`,
+    //     type: 'error',
+    //     duration: 5000,
+    //   });
+    // }
+  };
 
   /*
   Segment sam in 2d
@@ -1676,18 +1792,26 @@ Update the ui based on sam2 points
 
     //Sepecfic configuration for sam
     params.sam2config = this.state.prompts;
-    params.SliceIndex = slice
+    if (this.state.buttonClicked === true){
+    params.Mask = this.state.prevMask2Refine ;
+    console.log("mask has been sent to sam");   
+}
+    else{
+    params.Mask = null ;
+    }
+    params.SliceIndex = slice;
 
     if (auxillaryBox) {
       params.State = "Auxillary_Box";
       params.Auxillary_Box = auxillaryBox;
       params.Auxillary_Id = auxillaryID; // obj_id
     } else {
-      params.State = "2d"
+      params.State = "2d";
     }
 
+    console.log("the parameters are ",params);
+
     const labels = info.models[model].labels;
-    console.log("Sam Params: ", params);
     const response = await this.props
       .client()
       .segmentation(model, image, params);
@@ -1725,66 +1849,128 @@ Update the ui based on sam2 points
   /*
   Calculate image embeddings for sam
   */
-  sam2CalcImageEmbeddings = async (model) => {
+  // sam2CalcImageEmbeddings = async (model) => {
 
-    this.setState({
-      isCalculatingEmbeddings: true,
-      volumeEmbeddingsCalculated: false
-    });
+  //   this.setState({
+  //     isCalculatingEmbeddings: true,
+  //     volumeEmbeddingsCalculated: false
+  //   });
 
-    window.snackbar.hideAll();
-    const nid = this.notification.show({
-      title: 'MONAI Label',
-      message: 'Wait for volume processing',
-      type: 'info',
-      duration: 600000,
-    });
+  //   window.snackbar.hideAll();
+  //   const nid = this.notification.show({
+  //     title: 'MONAI Label',
+  //     message: 'Wait for volume processing',
+  //     type: 'info',
+  //     duration: 600000,
+  //   });
 
-    //Extract paramters for inference api request
-    const { info, viewConstants } = this.props;
-    const image = viewConstants.SeriesInstanceUID;
-    const config = this.props.onOptionsConfig();
-    const params =
-      config && config.infer && config.infer[model] ? config.infer[model] : {};
+  //   //Extract paramters for inference api request
+  //   const { info, viewConstants } = this.props;
+  //   const image = viewConstants.SeriesInstanceUID;
+  //   const config = this.props.onOptionsConfig();
+  //   const params =
+  //     config && config.infer && config.infer[model] ? config.infer[model] : {};
 
-    //Specific congiguration for sam
-    params.State = "ProcessVolume"
+  //   //Specific congiguration for sam
+  //   params.State = "ProcessVolume"
 
-    const labels = info.models[model].labels;
+  //   const labels = info.models[model].labels;
 
-    // try {
-    //   const response = await this.props
-    //     .client()
-    //     .segmentation(model, image, params);
+  //   try {
+  //     const response = await this.props
+  //       .client()
+  //       .segmentation(model, image, params);
 
-    //   window.snackbar.hideAll();
+  //     window.snackbar.hideAll();
 
-    //   if (response.status !== 200) {
-    //     this.notification.show({
-    //       title: 'MONAI Label',
-    //       message: 'Failed to process the volume',
-    //       type: 'error',
-    //       duration: 30000,
-    //     });
-    //   } else {
-    //     this.notification.show({
-    //       title: 'MONAI Label',
-    //       message: 'Volume processed successfully',
-    //       type: 'success',
-    //       duration: 10000,
-    //     });
+  //     if (response.status !== 200) {
+  //       this.notification.show({
+  //         title: 'MONAI Label',
+  //         message: 'Failed to process the volume',
+  //         type: 'error',
+  //         duration: 30000,
+  //       });
+  //     } else {
+  //       this.notification.show({
+  //         title: 'MONAI Label',
+  //         message: 'Volume processed successfully',
+  //         type: 'success',
+  //         duration: 10000,
+  //       });
 
-    //     this.setState({ volumeEmbeddingsCalculated: true });
+  //       this.setState({ volumeEmbeddingsCalculated: true });
 
-    //   }
-    // } catch (error) {
-    //   console.error('Unexpected error:', error);
-    // } finally {
-    //   this.setState({ isCalculatingEmbeddings: false });
-    // }
+  //     }
+  //   } catch (error) {
+  //     console.error('Unexpected error:', error);
+  //   } finally {
+  //     this.setState({ isCalculatingEmbeddings: false });
+  //   }
 
+  // };
+
+
+  //parse multipart form data and extract the mask
+  extractMaskFromResponse = async (response) => {
+    try {
+      
+      const contentType = response.headers['content-type'];
+      const boundaryMatch = contentType.match(/boundary=(.+)/);
+      if (!boundaryMatch) {
+        throw new Error('No boundary found in content-type header');
+      }
+      const boundary = boundaryMatch[1];
+      
+      //  arrayBuffer to string to parse multipart data
+      const arrayBuffer = response.data;
+      const uint8Array = new Uint8Array(arrayBuffer);
+      const textDecoder = new TextDecoder('utf-8');
+      const responseText = textDecoder.decode(uint8Array);
+      const parts = responseText.split(`--${boundary}`);
+      
+      let maskData = null;
+      let jsonData = null;
+      
+      for (const part of parts) {
+        if (part.trim() === '' || part.trim() === '--') continue;
+        
+        const [headerSection, ...bodyParts] = part.split('\r\n\r\n');
+        const body = bodyParts.join('\r\n\r\n');
+        
+        if (!headerSection || !body) continue;
+        
+  
+        if (headerSection.includes('application/json')) {
+          try {
+            jsonData = JSON.parse(body.trim());
+          } catch (e) {
+            console.warn('Failed to parse JSON part:', e);
+          }
+        }
+        
+        if (headerSection.includes('application/octet-stream') || 
+            headerSection.includes('name="pred"') ||
+            headerSection.includes('filename')) {
+          const binaryBody = body.trim();
+          const binaryArray = new Uint8Array(binaryBody.length);
+          for (let i = 0; i < binaryBody.length; i++) {
+            binaryArray[i] = binaryBody.charCodeAt(i);
+          }
+          maskData = binaryArray;
+        }
+      }
+      
+      return {
+        mask: maskData,
+        metadata: jsonData,
+        fullData: jsonData 
+      };
+      
+    } catch (error) {
+      console.error('Error extracting mask from response:', error);
+      throw error;
+    }
   };
-
   onSegmentation = async (samCheck = true) => {
 
     // TODO:: Fix Image ID...
@@ -1796,8 +1982,8 @@ Update the ui based on sam2 points
       config && config.infer && config.infer[model] ? config.infer[model] : {};
 
     if (model == 'sam') {
-      params.samc2onfig = this.state.prompts;
-      params.State = "3d"
+      params.sam2config = this.state.prompts;
+      params.State = "3d";
 
       if (samCheck) {
 
@@ -1818,18 +2004,21 @@ Update the ui based on sam2 points
     //if vista
     if (model == 'vista') {
       //get the mode
-      params.Mode = this.state.vistaMode
-      console.log("params.Mode", params.Mode)
+      params.Mode = this.state.vistaMode;
+      console.log("params.Mode", params.Mode);
       if (params.Mode == 'automatic') {
         //send class value
-        params.Class = this.state.vistaSelectedClass.value
-        console.log("params.Class", params.Class)
+        params.Class = this.state.vistaSelectedClass.value;
+        console.log("params.Class", params.Class);
       }
       else {
         //send points and labels
-        params.Class = 133
+        params.Class = 133;
 
-        params.Points = this.state.vistaPrompts
+        params.Points = this.state.vistaPrompts;
+        // params.Mask = this.state.prevMask2Refine;
+        // console.log("mask has been sent to vista",this.state.prevMask2Refine );
+        
       }
     }
     // if nnInteractive
@@ -1843,8 +2032,20 @@ Update the ui based on sam2 points
     const response = await this.props
       .client()
       .segmentation(model, image, params);
+    console.log("the parameters for model autoseg run", params);
+    if (model != 'sam'){ 
+    const extractedData = await this.extractMaskFromResponse(response);
+    this.setState({
+      prevMask2Refine: extractedData.mask,
+      prevLabeL: Object.values(extractedData.metadata.label_names),
+    });
+    
+    console.log('Extracted mask:', extractedData.mask);
+    console.log('Metadata:', extractedData.metadata);
+    console.log('labels of this mask  is :', this.state.prevLabeL); };
+    console.log("length of the labels is ", this.state.prevLabeL.length);
 
-    // Bug:: Notification Service on show doesn't return id
+    // Bug:: Notification Service on show doesn't return idprevLabeL
     if (!nid) {
       window.snackbar.hideAll();
     } else {
@@ -2372,6 +2573,28 @@ Update the ui based on sam2 points
               ))}
             </div>
           )}
+          {/* {!['sam', 'vista', 'nninteractive'].includes(this.state.currentModel) && (
+            <div style={{ textAlign: 'center', marginTop: '20px' }}>
+              <button
+                onClick={this.handleRefineBySAM} // You can define this method
+                style={{
+                  padding: '8px 15px',
+                  backgroundColor: '#007BFF',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '20px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  // fontWeight: 'bold',
+                  marginLeft: '10px',
+                  marginBottom: '10px',
+                }}
+              >
+                Refine By SAM
+              </button>
+            </div>
+           )} */}
+
         </div>
       </div>
     );
