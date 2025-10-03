@@ -545,6 +545,10 @@ export default class InteractiveSegmentation extends BaseTab {
     this.props.updateView(response, labels, model);
   }
 
+  correct_xy_format = (point) => {
+    return [point[1], point[0], point[2]];
+  }
+
   onRunInference = async () => {
     console.log(' run inference start');
     const { currentModel, currentObject, clickPoints, flagNninteractive } = this.state;
@@ -603,13 +607,13 @@ export default class InteractiveSegmentation extends BaseTab {
       for (const neg_annotation in negative_annotations) {
         console.log(neg_annotation);
         const pt = negative_annotations[neg_annotation].data.handles.points[0];
-        negative_points[object_id].push(worldToIndex(pt).map(Math.round));
+        negative_points[object_id].push(this.correct_xy_format(worldToIndex(pt).map(Math.round)));
       }
 
       positive_points[object_id] = [];
       for (const pos_annotation in positive_annotations) {
         const pt = positive_annotations[pos_annotation].data.handles.points[0];
-        positive_points[object_id].push(worldToIndex(pt).map(Math.round));
+        positive_points[object_id].push(this.correct_xy_format(worldToIndex(pt).map(Math.round)));
       }
 
       boxes[object_id] = [];
@@ -617,8 +621,8 @@ export default class InteractiveSegmentation extends BaseTab {
         const pt1 = box_annotations[box_annotation].data.handles.points[0];
         const pt2 = box_annotations[box_annotation].data.handles.points[3];
         boxes[object_id].push([
-          worldToIndex(pt1).map(Math.round),
-          worldToIndex(pt2).map(Math.round),
+          this.correct_xy_format(worldToIndex(pt1).map(Math.round)),
+          this.correct_xy_format(worldToIndex(pt2).map(Math.round)),
         ]);
       }
       object_ids.push(object_id);
