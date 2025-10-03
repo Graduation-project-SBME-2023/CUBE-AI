@@ -10,11 +10,13 @@ import Select from '../Select';
 import SegmentationQueue from '../../../../../extensions/monai-label/src/components/SegmentationQueue';
 import QueueOptionsManager from '../QueueOptionsManager';
 import AutoSegmentation from '../../../../../extensions/monai-label/src/components/actions/AutoSegmentation';
+import InteractiveSegmentation from '../../../../../extensions/monai-label/src/components/actions/InteractiveSegmentation';
 
 const StudyListPagination = ({ onChangePage, currentPage, perPage, onChangePerPage }) => {
   AutoSegmentation.clearSam2UIContrainers();
   AutoSegmentation.clearVistaPoints();
   AutoSegmentation.clearNnInteractivePoints();
+  // InteractiveSegmentation.clearINteractiveComponents();
 
   const { t } = useTranslation('StudyList');
 
