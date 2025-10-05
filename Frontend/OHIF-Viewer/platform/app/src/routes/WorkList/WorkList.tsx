@@ -170,13 +170,16 @@ function WorkList({
     );
 
     try {
-      const response = await fetch('http://localhost:8000/workflow/add', {
+      const url = `http://localhost:8000/workflow/${encodeURIComponent(
+        selectedWorkflow.workflowName
+      )}/add`;
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          case_id: studyUID,
+          study_uid: studyUID,
           task_name: selectedWorkflow.workflowName,
           series_instance_uid: '',
           instance_uid: '',
@@ -184,15 +187,26 @@ function WorkList({
         }),
       });
 
-      if (!response.ok) {
+      if (response.status === 409) {
+        notification.show({
+          title: 'Conflict',
+          message: `Study ${studyUID} already exists in workflow ${selectedWorkflow.workflowName}`,
+          type: 'warning',
+          duration: 4000,
+        });
+        throw new Error('Study already exists for the given task');
+      }
+      else if (!response.ok) {
         throw new Error(`Error: ${response.status}`);
       }
-      notification.show({
-        title: 'Study Added',
-        message: `Study ${studyUID} is added to workflow${selectedWorkFlowList.label} successfully`,
-        type: 'success',
-        duration: 3000,
-      });
+      else {
+        notification.show({
+          title: 'Study Added',
+          message: `Study ${studyUID} is added to workflow ${selectedWorkflow.workflowName} successfully`,
+          type: 'success',
+          duration: 3000,
+        });
+      }
       const result = await response.json();
     } catch (error) {
       console.error('Failed to add workflow record:', error);
