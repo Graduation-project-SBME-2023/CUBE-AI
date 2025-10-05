@@ -217,10 +217,12 @@ function WorkflowDetailPage({
   useEffect(() => {
     const fetchAnnotationStatus = async () => {
       try {
-        const response = await fetch('http://localhost:8000/workflow/filter-annotated', {
+        const url = `http://localhost:8000/workflow/${encodeURIComponent(
+          workflowName
+        )}/filter-annotated`;
+        const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ task_name: workflowName }),
         });
 
         if (!response.ok) {
@@ -375,10 +377,9 @@ function WorkflowDetailPage({
 
   const fetchTrainFlag = async (taskName, caseId) => {
     try {
+      const url = `http://localhost:8000/workflow/${encodeURIComponent(taskName)}/get-train?study_uid=${encodeURIComponent(caseId)}`;
       const response = await fetch(
-        `http://localhost:8000/workflow/get-train?task_name=${encodeURIComponent(
-          taskName
-        )}&case_id=${encodeURIComponent(caseId)}`
+        url
       );
       if (!response.ok) {
         throw new Error('Failed to fetch train flag');
@@ -425,12 +426,11 @@ function WorkflowDetailPage({
 
     try {
       const queryParams = new URLSearchParams({
-        task_name: workflowDetails.workflowName,
-        case_id: studyInstanceUid,
+        study_uid: studyInstanceUid,
         train: trainFlag,
       }).toString();
-      const apiURL = `http://localhost:8000/workflow/update-train?${queryParams}`;
-      const response = await fetch(apiURL, {
+      const url = `http://localhost:8000/workflow/${encodeURIComponent(workflowDetails.workflowName)}/update-train?${queryParams}`;
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -608,8 +608,9 @@ function WorkflowDetailPage({
     setIsTraining(true);
 
     try {
+      const url = `http://localhost:8000/workflow/${encodeURIComponent(workflowName)}/filter`;
       const fetchedWorkflowDataResponse = await fetch(
-        'http://localhost:8000/workflow/filter-workflow',
+        url,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

@@ -8,7 +8,7 @@ class WorkflowManager {
   async refreshDatabase() {
     try {
       // Fetch all task names from the list_workflow API
-      const response = await fetch('http://localhost:8000/workflow/list_workflow');
+      const response = await fetch('http://localhost:8000/workflow/');
 
       if (!response.ok) {
         throw new Error(`Error: ${response.status}`);
@@ -17,13 +17,15 @@ class WorkflowManager {
       const taskRecords = await response.json();
       console.log('Fetched task namess:', taskRecords);
 
-      // Fetch case_ids for each task_name
+      // Fetch study_uids for each task_name
       const workflows = await Promise.all(
         taskRecords.map(async record => {
-          const filterResponse = await fetch('http://localhost:8000/workflow/filter', {
+          const url = `http://localhost:8000/workflow/${encodeURIComponent(
+            record.task_name
+          )}/filter-uid`;
+          const filterResponse = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ task_name: record.task_name }),
           });
 
           if (!filterResponse.ok) {
@@ -46,7 +48,7 @@ class WorkflowManager {
   }
 
   async createWorkflow(workflowName, workflowStudies = [], workflowTrainFlag = false) {
-    const apiUrl = 'http://localhost:8000/workflow/list_workflow/add';
+    const apiUrl = 'http://localhost:8000/workflow/add';
 
     try {
       const response = await fetch(apiUrl, {
