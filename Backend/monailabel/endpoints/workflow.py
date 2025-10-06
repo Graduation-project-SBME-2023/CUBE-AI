@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Query, Path
 from pydantic import BaseModel
+from endpoints.my_endpoints_datastore import download_images, download_labels, prepare_instance_mapping, create_nnunet_dataset
 import asyncpg
 import logging
 from typing import Optional, List
@@ -236,9 +237,9 @@ async def filter_workflow_data(
         return {
             "study_uid": [record["study_uid"] for record in records],
             "series_instance_uid": [
-                record["series_instance_uid"] for record in records
+                record["volume_series_instance_uid"] for record in records
             ],
-            "instance_uid": [record["instance_uid"] for record in records],
+            "instance_uid": [record["label_series_instance_uid"] for record in records],
             "modality": [record["modality"] for record in records],
         }
     except Exception as e:
@@ -338,3 +339,41 @@ async def get_train_flag(
     except Exception as e:
         logger.error(f"Error fetching train flag: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch train flag")
+
+
+@router.post("/{task_name}/train", summary="Start nnUNet training for a specific workflow")
+async def initialize_training(
+    task_name: str = Path(..., description="Task name to start training for"), conn=Depends(get_db_connection)
+):
+    try:
+        logger.info(f"Starting nnUNet training for task: {task_name}")
+        logger.info(f"Steps: 1. Fetch correct studies.")
+        query = """
+        SELECT study_uid, volume_series_instance_uid, label_series_instance_uid, modality, train FROM workflow_details WHERE task_name = $1
+        """
+        records = await conn.fetch(query, task_name)
+        # records = [{"study_uid": "1.2.3", "volume_series_instance_uid": "4.5.6", "label_series_instance_uid": "7.8.9", "modality": "CT", "train": T}, ...]
+        if not records:
+            raise HTTPException(status_code=404, detail="No records found for the given task")
+        
+        logger.info(f"2. Download images and labels to General_Data and Labels directory")
+        download_images([record["volume_series_instance_uid"] for record in records])
+        download_labels([record["label_series_instance_uid"] for record in records])
+
+        logger.info(f"3. Modify/Create Instance_mapping.json")
+        instance_map = prepare_instance_mapping(task_name, records)
+
+        logger.info(f"4. Datastore/process whatever it does")
+        # supposedly aligns lbls and images via z positions by reading the dicom-seg files
+        # not sure if we need it, shouldn't the niftii conversion when downloadin do that already?
+        task_dir, dataset_json_path = create_nnunet_dataset(task_name)
+
+
+        logger.info(f"5. Normalize & Align the files")
+        logger.info(f"6. Create nnUnet training task")
+        logger.info(f"7. Create Model")
+        logger.info(f"8. Start training - can be called from frontend, uses monai's default /train endpoint")
+
+    except Exception as e:
+        logger.error(f"Error starting nnUNet training: {e}")
+        raise HTTPException(status_code=500, detail="Failed to initialize nnUNet training")
