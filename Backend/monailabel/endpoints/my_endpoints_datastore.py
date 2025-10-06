@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 import nibabel as nib
 import numpy as np
 import pydicom
+import SimpleITK as sitk
 
 from monailabel.config import RBAC_ADMIN, RBAC_ANNOTATOR, RBAC_USER, settings
 from monailabel.endpoints.user.auth import RBAC, User
@@ -75,7 +76,7 @@ def download_label(label: str, tag: str, check_only=False):
     instance: MONAILabelApp = app_instance()
     label_path = instance.datastore().get_label_uri(label, tag)
     if not os.path.isfile(label_path):
-        raise HTTPException(status_code=404, detail="Label NOT Found")
+        raise HTTPException(status_code=404, detail=f"Label {label} NOT Found")
 
     if check_only:
         return {}
@@ -299,3 +300,287 @@ async def api_download_images(
         json.dump(instance_mapping, f, indent=2)
 
     return {"message": "Download operation completed.", "downloaded_files": downloaded_files, "skipped_files": skipped_files}
+
+
+def prepare_instance_mapping(task_name, records):
+    
+    NNUNET_DIR = Path(os.getenv("NNUNET_DIR", "/apps/radiology/NN_Unet"))
+    mapping_json_path = NNUNET_DIR / f"{task_name}_instance_mapping.json"
+    NNUNET_DIR.mkdir(parents=True, exist_ok=True)
+
+
+    if mapping_json_path.exists():
+        try:
+            with open(mapping_json_path, "r") as f:
+                instance_mapping = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning("JSON decode error in instance_mapping.json, starting with an empty mapping.")
+            instance_mapping = {}
+    else:
+        instance_mapping = {}
+
+    # Normalize task name to uppercase and replace spaces with underscores
+    prefix = task_name.upper().replace(" ", "_")
+
+    for idx, record in enumerate(records, start=1):
+        entry_id = f"{prefix}_{idx:03d}"
+
+        series_uid = record.get("volume_series_instance_uid")
+        instance_uid = record.get("label_series_instance_uid")
+        modality = record.get("modality", "Unknown")
+        is_training = bool(record.get("train", False))
+
+        # File names follow nnUNet convention
+        image_filename = f"{entry_id}_0000.nii.gz"
+        label_filename = f"{entry_id}.nii.gz" if is_training else None
+
+        instance_mapping[entry_id] = {
+            "task_name": task_name,
+            "series_uid": series_uid,
+            "instance_uid": instance_uid,
+            "modality": modality,
+            "training": is_training,
+            "image_filename": image_filename,
+            "label_filename": label_filename,
+        }
+
+    with open(mapping_json_path, "w") as f:
+        json.dump(instance_mapping, f, indent=4)
+
+    logger.info(f"Instance mapping saved at: {mapping_json_path}")
+    logger.info(f"Total entries: {len(instance_mapping)}")
+
+    return instance_mapping
+
+
+def download_images(images: List[str]):
+    target_dir = os.getenv("GENERAL_DATA_DIR", "/apps/radiology/General_Data") + "/images"
+    target_dir = Path(target_dir)
+    os.makedirs(target_dir, exist_ok=True)
+
+    # download all, only stop the "already exists files" are in the target and nnunet folders
+    for image in images:
+        target_file = target_dir / f"{image}.nii.gz"
+        if target_file.exists():
+            logger.info(f"File already exists in target directory, skipping download: {target_file}")
+            continue
+        file_response = download_image(image)
+        shutil.copy(file_response.path, target_file)
+
+
+def download_labels(labels: List[str]):
+    target_dir = os.getenv("GENERAL_DATA_DIR", "/apps/radiology/General_Data") + "/labels"
+    target_dir = Path(target_dir)
+    os.makedirs(target_dir, exist_ok=True)
+
+    for label in labels:
+        target_file = target_dir / f"{label}.nii.gz"
+        if target_file.exists():
+            logger.info(f"File already exists in target directory, skipping download: {target_file}")
+            continue
+        # file_response = download_label(label, tag="SEG")
+        file_response = download_image(label)  # Assuming labels are stored as images => they are
+        shutil.copy(file_response.path, target_file)
+
+
+
+
+# -----------------------------------------------------------
+# Utility Functions For nnUNet Dataset Creation
+# -----------------------------------------------------------
+
+def ensure_nnunet_dirs(base_dir: Path):
+    """Ensure nnUNet standard folder structure exists."""
+    dirs = {
+        "raw": base_dir / "nnUNet_raw",
+        "preprocessed": base_dir / "nnUNet_preprocessed",
+        "results": base_dir / "nnUNet_results"
+    }
+    for d in dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+    return dirs
+
+
+def load_instance_mapping(mapping_path: Path):
+    """Load and validate instance mapping JSON."""
+    if not mapping_path.exists():
+        raise FileNotFoundError(f"Mapping JSON not found: {mapping_path}")
+
+    try:
+        with open(mapping_path, "r") as f:
+            mapping = json.load(f)
+    except json.JSONDecodeError:
+        raise ValueError(f"Invalid JSON in {mapping_path}")
+
+    if not isinstance(mapping, dict) or len(mapping) == 0:
+        raise ValueError("Instance mapping is empty or malformed")
+
+    logger.info(f"Loaded instance mapping with {len(mapping)} entries")
+    return mapping
+
+
+def determine_task_id(nnunet_raw: Path, task_name: str):
+    """Assign a task ID automatically based on existing folders."""
+    existing = [p for p in nnunet_raw.glob(f"Task*_{task_name}")]
+    if existing:
+        # Extract the max task ID
+        ids = [int(p.name.split('_')[0].replace('Task', '')) for p in existing]
+        new_id = f"{max(ids) + 1:03d}"
+        logger.info(f"Existing tasks found. Assigned new Task ID: {new_id}")
+    else:
+        new_id = "001"
+        logger.info(f"No existing task found for '{task_name}'. Assigned Task ID: {new_id}")
+    return new_id
+
+
+def resample_label_to_image(image_path: Path, label_path: Path, output_path: Path):
+    """Resample label to match image spacing, size, and orientation."""
+    image = sitk.ReadImage(str(image_path))
+    label = sitk.ReadImage(str(label_path))
+
+    needs_resample = (
+        image.GetSize() != label.GetSize()
+        or image.GetSpacing() != label.GetSpacing()
+        or image.GetOrigin() != label.GetOrigin()
+        or image.GetDirection() != label.GetDirection()
+    )
+
+    if needs_resample:
+        logger.info(f"Resampling label: {label_path.name} to match image: {image_path.name}")
+        resample = sitk.ResampleImageFilter()
+        resample.SetReferenceImage(image)
+        resample.SetInterpolator(sitk.sitkNearestNeighbor)
+        resample.SetTransform(sitk.Transform())
+        resample.SetDefaultPixelValue(0)
+        resampled_label = resample.Execute(label)
+        resampled_label = sitk.Cast(resampled_label, sitk.sitkInt16)
+        sitk.WriteImage(resampled_label, str(output_path))
+    else:
+        shutil.copy(label_path, output_path)
+        logger.info(f"No resampling needed: {label_path.name}")
+
+
+def prepare_nnunet_task_dirs(nnunet_raw: Path, task_id: str, task_name: str):
+    """Create Task directory structure."""
+    task_dir = nnunet_raw / f"Task{task_id}_{task_name}"
+    imagesTr = task_dir / "imagesTr"
+    labelsTr = task_dir / "labelsTr"
+    for d in [task_dir, imagesTr, labelsTr]:
+        d.mkdir(parents=True, exist_ok=True)
+    return task_dir, imagesTr, labelsTr
+
+def process_images_and_labels(mapping, images_dir, labels_dir, imagesTr, labelsTr, task_name):
+    """
+    Process and copy image/label pairs into nnUNet format.
+    Handles filtering for training samples, alignment, and resampling.
+    """
+    counter = 0
+
+    for case_id, entry in mapping.items():
+        if not isinstance(entry, dict):
+            logger.warning(f"Invalid entry format for {case_id}, skipping.")
+            continue
+
+        if not entry.get("training", False):
+            logger.info(f"Skipping non-training case: {case_id}")
+            continue
+
+        series_uid = entry.get("series_uid")
+        instance_uid = entry.get("instance_uid")
+
+        if not series_uid or not instance_uid:
+            logger.warning(f"Missing UIDs for {case_id}, skipping.")
+            continue
+
+        # Find files by UID
+        image_path = images_dir / f"{series_uid}.nii.gz"
+        label_path = labels_dir / f"{instance_uid}.nii.gz"
+
+        if not image_path.exists():
+            logger.error(f"Missing image file for {case_id}: {image_path}")
+            continue
+        if not label_path.exists():
+            logger.error(f"Missing label file for {case_id}: {label_path}")
+            continue
+
+        # Target file names in nnUNet format
+        image_dest = imagesTr / f"{task_name}_{counter:04d}_0000.nii.gz"
+        label_dest = labelsTr / f"{task_name}_{counter:04d}.nii.gz"
+
+        # Resample labels if needed, then copy image
+        resample_label_to_image(image_path, label_path, label_dest)
+        shutil.copy(image_path, image_dest)
+
+        logger.info(f"Added training sample {case_id}: {image_dest.name}")
+        counter += 1
+
+    logger.info(f"Processed {counter} valid training image/label pairs.")
+    return counter
+
+
+def create_dataset_json(task_dir, task_name, mapping, num_samples):
+    """Generate nnUNet dataset.json file using mapping info."""
+    dataset_json = {
+        "name": task_name,
+        "description": mapping.get("description", f"{task_name} dataset for nnUNet training"),
+        "tensorImageSize": mapping.get("tensorImageSize", "3D"),
+        "reference": mapping.get("reference", "Auto-generated"),
+        "licence": mapping.get("license", "Unknown"),
+        "release": mapping.get("release", "1.0"),
+        "modality": mapping.get("modality", {"0": "CT"}),
+        "labels": mapping.get("labels", {"0": "background", "1": "organ"}),
+        "numTraining": num_samples,
+        "numTest": 0,
+        "training": [
+            {
+                "image": f"./imagesTr/{task_name}_{i:04d}_0000.nii.gz",
+                "label": f"./labelsTr/{task_name}_{i:04d}.nii.gz"
+            } for i in range(num_samples)
+        ],
+        "test": []
+    }
+
+    json_path = task_dir / "dataset.json"
+    with open(json_path, "w") as f:
+        json.dump(dataset_json, f, indent=4)
+
+    logger.info(f"Created dataset.json at: {json_path}")
+    return json_path
+
+
+# -----------------------------------------------------------
+# Main Function
+# -----------------------------------------------------------
+
+def create_nnunet_dataset(task_name):
+ 
+    NNUNET_DIR = Path(os.getenv("NNUNET_DIR", "/apps/radiology/NN_Unet"))
+    GENERAL_DATA_DIR = Path(os.getenv("GENERAL_DATA_DIR", "/apps/radiology/General_Data"))
+
+    images_dir = GENERAL_DATA_DIR / "images"
+    labels_dir = GENERAL_DATA_DIR / "labels"
+
+    logger.info(f"Creating nnUNet dataset for task: {task_name}")
+
+    # Step 1: Ensure base dirs exist
+    dirs = ensure_nnunet_dirs(NNUNET_DIR)
+
+    # Step 2: Load mapping JSON
+    mapping_path = NNUNET_DIR / f"{task_name}_instance_mapping.json"
+    mapping = load_instance_mapping(mapping_path)
+
+    # Step 3: Assign Task ID
+    task_id = determine_task_id(dirs["raw"], task_name)
+
+    # Step 4: Prepare task folder structure
+    task_dir, imagesTr, labelsTr = prepare_nnunet_task_dirs(dirs["raw"], task_id, task_name)
+
+    # Step 5: Process pairs
+    num_samples = process_images_and_labels(mapping, images_dir, labels_dir, imagesTr, labelsTr, task_name)
+
+    # Step 6: Create dataset.json
+    dataset_json_path = create_dataset_json(task_dir, task_name, mapping, num_samples)
+
+    logger.info(f"nnUNet dataset created successfully at: {task_dir}")
+    return task_dir, dataset_json_path
+
