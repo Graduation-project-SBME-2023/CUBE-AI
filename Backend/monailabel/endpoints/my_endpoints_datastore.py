@@ -561,24 +561,12 @@ def create_nnunet_dataset(task_name):
     labels_dir = GENERAL_DATA_DIR / "labels"
 
     logger.info(f"Creating nnUNet dataset for task: {task_name}")
-
-    # Step 1: Ensure base dirs exist
     dirs = ensure_nnunet_dirs(NNUNET_DIR)
-
-    # Step 2: Load mapping JSON
     mapping_path = NNUNET_DIR / f"{task_name}_instance_mapping.json"
     mapping = load_instance_mapping(mapping_path)
-
-    # Step 3: Assign Task ID
     task_id = determine_task_id(dirs["raw"], task_name)
-
-    # Step 4: Prepare task folder structure
     task_dir, imagesTr, labelsTr = prepare_nnunet_task_dirs(dirs["raw"], task_id, task_name)
-
-    # Step 5: Process pairs
     num_samples = process_images_and_labels(mapping, images_dir, labels_dir, imagesTr, labelsTr, task_name)
-
-    # Step 6: Create dataset.json
     dataset_json_path = create_dataset_json(task_dir, task_name, mapping, num_samples)
 
     logger.info(f"nnUNet dataset created successfully at: {task_dir}")
