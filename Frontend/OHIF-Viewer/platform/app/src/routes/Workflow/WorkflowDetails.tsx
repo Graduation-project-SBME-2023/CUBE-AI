@@ -608,7 +608,7 @@ function WorkflowDetailPage({
     setIsTraining(true);
 
     try {
-      const url = `http://localhost:8000/workflow/${encodeURIComponent(workflowName)}/filter`;
+      const url = `http://localhost:8000/workflow/${encodeURIComponent(workflowName)}/train`;
       const fetchedWorkflowDataResponse = await fetch(
         url,
         {
@@ -621,166 +621,42 @@ function WorkflowDetailPage({
       if (!fetchedWorkflowDataResponse.ok) {
         throw new Error(`Error: ${fetchedWorkflowDataResponse.status}`);
       }
-      try {
-        const queryParams = new URLSearchParams({
-          task_name: workflowDetails.workflowName,
-        }).toString();
-        const response = await fetch(`http://localhost:8000/datastore/images?${queryParams}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(fetchedData['series_instance_uid']),
-        });
-        if (!response.ok) {
-          throw new Error(`Error: ${response.status}`);
-        }
-        const result = await response.json();
-        notification.show({
-          title: 'Data Status',
-          message: 'Data is Fetched Successfully',
-          type: 'success',
-          duration: 5000,
-        });
-      } catch (error) {
-        console.error('Error Downloading Series:', error);
-      }
-      try {
-        const queryParams = new URLSearchParams({
-          task_name: workflowDetails.workflowName,
-        }).toString();
-        const response = await fetch(`http://localhost:8000/datastore/labels?${queryParams}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(fetchedData['instance_uid']),
-        });
-        if (!response.ok) {
-          throw new Error(`Error: ${response.status}`);
-        }
-        const result = await response.json();
-        notification.show({
-          title: 'Labels Status',
-          message: 'Labels are Fetched Successfully!',
-          type: 'success',
-          duration: 5000,
-        });
-      } catch (error) {
-        console.error('Error downloading labels:', error);
-      }
 
-      // Extract unique modality values
-      const uniqueModalities = [...new Set(fetchedData['modality'])];
 
-      // Store them in a dictionary with index as key
-      const modalityDict = uniqueModalities.reduce((acc, modality, index) => {
-        acc[modality] = index.toString();
-        return acc;
-      }, {});
-
-      const images = fetchedData['series_instance_uid'].reduce((acc, seriesUID, index) => {
-        const studyUID = fetchedData['case_id'][index];
-        const trainValidationEntry = trainValStudies.find(
-          study => study.studyInstanceUid === studyUID
-        );
-
-        acc[seriesUID] = {
-          instance_uid: fetchedData['instance_uid'][index], // Matching instance UID
-          modality: fetchedData['modality'][index], // Matching modality
-          training: trainValidationEntry ? trainValidationEntry.trainValidation === 'Train' : false,
-        };
-        return acc;
-      }, {});
-
-      try {
-        const labelMapping = fetchedData['series_instance_uid'].reduce((acc, seriesUID, index) => {
-          acc[seriesUID] = fetchedData['instance_uid'][index];
-          return acc;
-        }, {});
-
-        const apiUrl = 'http://localhost:8000/datastore/process';
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(labelMapping),
-        });
-        if (!response.ok) throw new Error('Failed to process labels');
-        const data = await response.json();
-        console.log('Process Result:', data);
-
-      } catch (error) {
-        console.log('Error Processing Labels:', error);
-      }
-
-      try {
-        const apiURL = 'http://localhost:8000/normalize&align/normalize-labels';
-        const response = await fetch(apiURL);
-        if (!response.ok) {
-          throw new Error(`Error: ${response.status}`);
-        }
-        const result = await response.json();
-        console.log('Normalize Labels Response:', result);
-      } catch (error) {
-        console.log('Error Normalizing Labels:', error);
-      }
-
-      try {
-        const labelMapping = fetchedData['series_instance_uid'].reduce((acc, seriesUID, index) => {
-          acc[seriesUID] = fetchedData['instance_uid'][index]; // Assign corresponding label
-          return acc;
-        }, {});
-        const apiUrl = 'http://localhost:8000/normalize&align/align-labels';
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(labelMapping),
-        });
-        if (!response.ok) throw new Error('Failed to align labels');
-        const data = await response.json();
-        console.log('Alignment Result:', data);
-      } catch (error) {
-        console.log('Error Aligning Labels:', error);
-      }
-
-      try {
-        const apiUrl = 'http://localhost:8000/NN_UNet/create_task';
-        const body = {
-          task_name: workflowDetails.workflowName,
-          channel_names: modalityDict,
-          labels: labelsDictionary,
-          images: images,
-        };
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            task_name: body.task_name,
-            channel_names: body.channel_names,
-            labels: body.labels,
-            images: body.images,
-          }),
-        });
-        if (!response.ok) {
-          throw new Error(`Error: ${response.status}`);
-        }
-        const result = await response.json();
-        console.log('Process Data Response:', result);
-        notification.show({
-          title: 'Process Status',
-          message: 'Data is Processed Successfully',
-          type: 'success',
-          duration: 5000,
-        });
-      } catch (error) {
-        console.error('Error processing data:', error);
-      }
+      // try {
+      //   const apiUrl = 'http://localhost:8000/NN_UNet/create_task';
+      //   const body = {
+      //     task_name: workflowDetails.workflowName,
+      //     channel_names: modalityDict,
+      //     labels: labelsDictionary,
+      //     images: images,
+      //   };
+      //   const response = await fetch(apiUrl, {
+      //     method: 'POST',
+      //     headers: {
+      //       'Content-Type': 'application/json',
+      //     },
+      //     body: JSON.stringify({
+      //       task_name: body.task_name,
+      //       channel_names: body.channel_names,
+      //       labels: body.labels,
+      //       images: body.images,
+      //     }),
+      //   });
+      //   if (!response.ok) {
+      //     throw new Error(`Error: ${response.status}`);
+      //   }
+      //   const result = await response.json();
+      //   console.log('Process Data Response:', result);
+      //   notification.show({
+      //     title: 'Process Status',
+      //     message: 'Data is Processed Successfully',
+      //     type: 'success',
+      //     duration: 5000,
+      //   });
+      // } catch (error) {
+      //   console.error('Error processing data:', error);
+      // }
 
       try {
         // Construct query string
