@@ -33,11 +33,10 @@ class GenericSegmentation(TaskConfig):
         self.epistemic_samples = None
 
         # Dynamically set the root directory (go up two levels from the script's location)
-
-        BASE_DIR = Path(__file__).resolve().parents[2]    
-        self.root_nnunet_dir = os.path.join(BASE_DIR, "NN_Unet")
+ 
+        self.root_nnunet_dir = os.getenv("nnUnet_folders", default="/NN_Unet")
         
-        self.model_name=model_name
+        self.model_name = model_name
         self.plan_type=plan_type
         self.labels = labels
         self.fold = fold
@@ -70,6 +69,7 @@ class GenericSegmentation(TaskConfig):
             preload=strtobool(self.conf.get("preload", "false")),
         )
         logger.info("generic segmentation inference task instance made")
+        logger.info(task)
         return task
 
     def trainer(self) -> Optional[TrainTask]:
@@ -90,6 +90,8 @@ class GenericSegmentation(TaskConfig):
             root_nnunet_dir=self.root_nnunet_dir,
 
         )
+        logger.info("generic segmentation training task instance made")
+        logger.info(task)
         return task
         
     def strategy(self) -> Union[None, Strategy, Dict[str, Strategy]]:
