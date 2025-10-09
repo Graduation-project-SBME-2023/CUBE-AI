@@ -462,7 +462,7 @@ def resample_label_to_image(image_path: Path, label_path: Path, output_path: Pat
 
 def prepare_nnunet_task_dirs(nnunet_raw: Path, task_id: str, task_name: str):
     """Create Task directory structure."""
-    task_dir = nnunet_raw / f"Task{task_id}_{task_name}"
+    task_dir = nnunet_raw / f"Dataset{task_id}_{task_name}"
     imagesTr = task_dir / "imagesTr"
     labelsTr = task_dir / "labelsTr"
     for d in [task_dir, imagesTr, labelsTr]:
@@ -472,50 +472,123 @@ def prepare_nnunet_task_dirs(nnunet_raw: Path, task_id: str, task_name: str):
 def process_images_and_labels(mapping, images_dir, labels_dir, imagesTr, labelsTr, task_name):
     """
     Process and copy image/label pairs into nnUNet format.
-    Handles filtering for training samples, alignment, and resampling.
+    Handles filtering for training samples, alignment, resampling, and label normalization.
+    Logs detailed INFO-level checks for validation and debugging.
     """
     counter = 0
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+
+    logger.info(f"=== Starting processing for task '{task_name}' ===")
+    logger.info(f"Input dirs: images={images_dir}, labels={labels_dir}")
+    logger.info(f"Output dirs: imagesTr={imagesTr}, labelsTr={labelsTr}")
+    logger.info(f"Total mapping entries: {len(mapping)}\n")
 
     for case_id, entry in mapping.items():
+        logger.info(f"--- Processing case: {case_id} ---")
+
         if not isinstance(entry, dict):
-            logger.warning(f"Invalid entry format for {case_id}, skipping.")
+            logger.info(f"Invalid entry format for {case_id}, skipping.\n")
             continue
 
         if not entry.get("training", False):
-            logger.info(f"Skipping non-training case: {case_id}")
+            logger.info(f"Skipping non-training case: {case_id}\n")
             continue
 
         series_uid = entry.get("series_uid")
         instance_uid = entry.get("instance_uid")
+        logger.info(f"Series UID: {series_uid}, Instance UID: {instance_uid}")
 
         if not series_uid or not instance_uid:
-            logger.warning(f"Missing UIDs for {case_id}, skipping.")
+            logger.info(f"Missing UIDs for {case_id}, skipping.\n")
             continue
 
-        # Find files by UID
+        # Paths
         image_path = images_dir / f"{series_uid}.nii.gz"
         label_path = labels_dir / f"{instance_uid}.nii.gz"
+        logger.info(f"Image path: {image_path}")
+        logger.info(f"Label path: {label_path}")
 
         if not image_path.exists():
-            logger.error(f"Missing image file for {case_id}: {image_path}")
+            logger.info(f"❌ Missing image file for {case_id}: {image_path}\n")
             continue
         if not label_path.exists():
-            logger.error(f"Missing label file for {case_id}: {label_path}")
+            logger.info(f"❌ Missing label file for {case_id}: {label_path}\n")
             continue
 
-        # Target file names in nnUNet format
-        image_dest = imagesTr / f"{task_name}_{counter:04d}_0000.nii.gz"
-        label_dest = labelsTr / f"{task_name}_{counter:04d}.nii.gz"
+        # Destination paths
+        image_dest = imagesTr / f"{task_name}_{counter:03d}_0000.nii.gz"
+        label_dest = labelsTr / f"{task_name}_{counter:03d}.nii.gz"
+        logger.info(f"Destination → image={image_dest.name}, label={label_dest.name}")
 
-        # Resample labels if needed, then copy image
-        resample_label_to_image(image_path, label_path, label_dest)
-        shutil.copy(image_path, image_dest)
+        # Step 1: Resample label
+        logger.info(f"Resampling label to match image for case {case_id} ...")
+        try:
+            resample_label_to_image(image_path, label_path, label_dest)
+            logger.info(f"Resampling completed successfully.")
+        except Exception as e:
+            logger.info(f"❌ Resampling failed for {case_id}: {e}\n")
+            continue
 
-        logger.info(f"Added training sample {case_id}: {image_dest.name}")
+        # Step 1.5: Verify shapes, spacing, and value ranges
+        try:
+            img = nib.load(image_path)
+            lbl = nib.load(label_dest)
+            img_data = img.get_fdata(dtype=np.float32)
+            lbl_data = lbl.get_fdata(dtype=np.float32)
+
+            img_shape, lbl_shape = img.shape, lbl.shape
+            img_spacing, lbl_spacing = img.header.get_zooms(), lbl.header.get_zooms()
+            logger.info(f"Image shape: {img_shape}, spacing: {img_spacing}")
+            logger.info(f"Label shape: {lbl_shape}, spacing: {lbl_spacing}")
+
+            if img_shape != lbl_shape:
+                logger.info(f"⚠️ Shape mismatch after resampling: {img_shape} vs {lbl_shape}")
+
+            # Check voxel validity
+            if np.isnan(img_data).any() or np.isinf(img_data).any():
+                logger.info(f"⚠️ Image {case_id} contains NaN/Inf values.")
+            if np.isnan(lbl_data).any() or np.isinf(lbl_data).any():
+                logger.info(f"⚠️ Label {case_id} contains NaN/Inf values.")
+
+            # Range and unique values
+            img_min, img_max = float(np.nanmin(img_data)), float(np.nanmax(img_data))
+            lbl_unique = np.unique(lbl_data)
+            logger.info(f"Image intensity range: [{img_min:.2f}, {img_max:.2f}]")
+            logger.info(f"Unique label values before normalization: {lbl_unique}")
+
+        except Exception as e:
+            logger.info(f"❌ Failed to verify image/label metadata for {case_id}: {e}\n")
+            continue
+
+        # Step 2: Normalize labels
+        logger.info(f"Normalizing label values for {case_id} ...")
+        try:
+            label_data = np.where(lbl_data > 0, 1, 0).astype(np.uint8)
+            unique_after = np.unique(label_data)
+            logger.info(f"Unique label values after normalization: {unique_after}")
+
+            nib.save(nib.Nifti1Image(label_data, lbl.affine, lbl.header), label_dest)
+            logger.info(f"Label normalization done for {case_id}.")
+        except Exception as e:
+            logger.info(f"❌ Failed to normalize label for {case_id}: {e}\n")
+            continue
+
+        # Step 3: Copy image
+        logger.info(f"Copying image to output folder ...")
+        try:
+            shutil.copy(image_path, image_dest)
+            logger.info(f"Image copied successfully to {image_dest.name}")
+        except Exception as e:
+            logger.info(f"❌ Failed to copy image for {case_id}: {e}\n")
+            continue
+
         counter += 1
+        logger.info(f"✅ Added training sample {case_id} (index={counter-1})\n")
 
-    logger.info(f"Processed {counter} valid training image/label pairs.")
+    logger.info(f"=== Processing completed. Total valid training pairs: {counter} ===\n")
     return counter
+
 
 
 def create_dataset_json(task_dir, task_name, mapping, num_samples):
@@ -528,13 +601,15 @@ def create_dataset_json(task_dir, task_name, mapping, num_samples):
         "licence": mapping.get("license", "Unknown"),
         "release": mapping.get("release", "1.0"),
         "modality": mapping.get("modality", {"0": "CT"}),
-        "labels": mapping.get("labels", {"0": "background", "1": "organ"}),
+        "channel_names": mapping.get("channel_names", {"0": "CT"}),
+        "file_ending": mapping.get("file_ending", ".nii.gz"),
+        "labels": mapping.get("labels", {"background": 0,"organ": 1}),
         "numTraining": num_samples,
         "numTest": 0,
         "training": [
             {
-                "image": f"./imagesTr/{task_name}_{i:04d}_0000.nii.gz",
-                "label": f"./labelsTr/{task_name}_{i:04d}.nii.gz"
+                "image": f"./imagesTr/{task_name}_{i:03d}_0000.nii.gz",
+                "label": f"./labelsTr/{task_name}_{i:03d}.nii.gz"
             } for i in range(num_samples)
         ],
         "test": []

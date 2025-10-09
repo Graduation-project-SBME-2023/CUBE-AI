@@ -5,6 +5,7 @@ import asyncpg
 import logging
 from typing import Optional, List
 import os
+from monailabel.interfaces.utils.app import app_instance
 
 
 logger = logging.getLogger(__name__)
@@ -358,7 +359,7 @@ async def initialize_training(
         
         logger.info(f"2. Download images and labels to General_Data and Labels directory")
         download_images([record["volume_series_instance_uid"] for record in records])
-        download_labels([record["label_series_instance_uid"] for record in records])
+        download_labels([record["label_series_instance_uid"] for record     in records])
 
         logger.info(f"3. Modify/Create Instance_mapping.json")
         instance_map = prepare_instance_mapping(task_name, records)

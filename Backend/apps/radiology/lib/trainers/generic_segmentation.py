@@ -39,17 +39,9 @@ class GenericSegmentation(BasicTrainTask):
         self.model_name = model_name
         self.fold = fold
         self.trainer_class = trainer_class
-        self.model_dir=model_dir
+        self.model_dir = model_dir
         self.plan_type = plan_type
         self.root_nnunet_dir = root_nnunet_dir
-
-        # TODO : remove this hardcoding
-
-        # self.root_nnunet_dir = r"C:\Users\Lenovo\Desktop\Grad\Monai\radiology\nnunet"
-
-
-
-
 
         os.environ["nnUNet_raw"] = os.path.join(self.root_nnunet_dir, "nnUNet_raw")
         os.environ["nnUNet_preprocessed"] = os.path.join(self.root_nnunet_dir, "nnUNet_preprocessed")
@@ -58,8 +50,6 @@ class GenericSegmentation(BasicTrainTask):
         logger.info(f"nnUNet_raw: {os.environ['nnUNet_raw']}")
         logger.info(f"nnUNet_preprocessed: {os.environ['nnUNet_preprocessed']}")
         logger.info(f"nnUNet_results: {os.environ['nnUNet_results']}")
-
-
 
         # Extract the dataset name from the model name
         self.task_name = self.get_data_name_from_model_name(self.model_name)
@@ -121,7 +111,7 @@ class GenericSegmentation(BasicTrainTask):
             subprocess.run(command, check=True)
         except subprocess.CalledProcessError as e:
             logger.error(f"Preprocessing failed with error: {e}")
-            raise RuntimeError(f"Preprocessing failed for dataset {self.task_name}","error: {e}")
+            raise RuntimeError(f"Preprocessing failed for dataset {self.task_name} error: {e}")
 
         logger.info(f"Preprocessed data saved to: {preprocessed_data_path}")
 
@@ -218,3 +208,6 @@ class GenericSegmentation(BasicTrainTask):
     def val_post_transforms(self, context: Context):
         # nnUNet handles its own validation postprocessing.
         return None  # nnUNet handles postprocessing internally
+    
+    def pre_process(self, request, datastore):
+        return None
