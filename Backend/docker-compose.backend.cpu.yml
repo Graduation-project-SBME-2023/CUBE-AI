@@ -6,6 +6,7 @@ services:
 #      dockerfile: ${COMPOSE_PROJECT_DIR}/Backend/Dockerfile
     image: cubeai1/custom-monailabel:0.2
     container_name: monailabel-backend
+    shm_size: 8G # change if needed
     ports:
       - '8000:8000'
     environment:

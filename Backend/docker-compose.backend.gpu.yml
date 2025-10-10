@@ -1,12 +1,13 @@
 name: CUBE.AI
 services:
   monailabel:
-#    build:
-#      context: ${COMPOSE_PROJECT_DIR}/Backend/
-#      dockerfile: ${COMPOSE_PROJECT_DIR}/Backend/Dockerfile
-    image: cubeai1/custom-monailabel:0.2
+    # build:
+    #  context: ${COMPOSE_PROJECT_DIR}/Backend/
+    #  dockerfile: ${COMPOSE_PROJECT_DIR}/Backend/Dockerfile
+    image: cubeai1/custom-monailabel:0.2.1
     container_name: monailabel-backend
     runtime: nvidia
+    shm_size: 8G # change if needed
     ports:
       - '8000:8000'
     command: ["python", "/monailabel/server_start.py"]
@@ -36,8 +37,10 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: all
+              # count: all
               capabilities: [gpu]
+              # only for the workstation, gpu (rtx 3060) with specific id
+              device_ids: ["0"]
 
   orthanc:
     image: jodogne/orthanc-plugins
