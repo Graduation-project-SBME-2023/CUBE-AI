@@ -25,7 +25,7 @@ class GenericSegmentation(BasicTrainTask):
         root_nnunet_dir,
         fold=0,
         plan_type="2d",
-        trainer_class="nnUNetTrainer",
+        trainer_class="CustomNnUnetTrainer",
         description="Train and infer using nnUNet for segmentation",
         **kwargs,
     ):
