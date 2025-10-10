@@ -58,7 +58,7 @@ class GenericSegmentation(BasicTrainTask):
         # Extract the numeric part from the task name
         self.task_id = ''.join(filter(str.isdigit, self.task_name))
 
-        super().__init__(model_dir, description, **kwargs)
+        super().__init__(model_dir, description, config={"multi_gpu": False}, **kwargs)
 
     # get data name from nnUnet directory by extracting the numeric part from the task name
     def get_data_name_from_model_name(self, model_name):
@@ -102,10 +102,11 @@ class GenericSegmentation(BasicTrainTask):
         command = [    # change
             "nnUNetv2_plan_and_preprocess",
             "-d", self.task_id,
-            "--verify_dataset_integrity"
+            "--verify_dataset_integrity",
+            "-np", "3"
         ]
 
-        logger.info(f"Running command: {{' '.join(command)}}")
+        logger.info(f"Running command: {' '.join(command)}")
 
         try:
             subprocess.run(command, check=True)
