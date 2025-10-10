@@ -33,6 +33,7 @@ class GenericSegmentation(BasicInferTask):
         plan_type="2d",
         fold=0,
         dimension=2,
+        trainer_class="CustomNnUnetTrainer",
         description="A pre-trained NnUnet model for volumetric segmentation ",
         **kwargs,
     ):
@@ -51,7 +52,7 @@ class GenericSegmentation(BasicInferTask):
         self.plan_type = plan_type
         self.fold = fold
         self.root_nnunet_dir = root_nnunet_dir
-
+        self.trainer_class = trainer_class
 
 
         self.temp_path = "/temp"
@@ -111,7 +112,7 @@ class GenericSegmentation(BasicInferTask):
         predictor.initialize_from_trained_model_folder(    
             join(
                 os.environ["nnUNet_results"],
-                f"{self.task_name}\\nnUNetTrainer__nnUNetPlans__{self.plan_type}",
+                f"{self.task_name}/{self.trainer_class}__nnUNetPlans__{self.plan_type}",
             ),
             use_folds=(self.fold,), 
             checkpoint_name="checkpoint_best.pth",
@@ -132,18 +133,31 @@ class GenericSegmentation(BasicInferTask):
         if device.startswith("cuda"):
             torch.cuda.empty_cache()
 
-        file_ending = ".nii"
-        basename = (
-            os.path.basename(data[self.input_key])[: -(len(file_ending) + 5)]
-            + file_ending
-        )
+        basename = os.path.basename(data[self.input_key])
         output_path = join(self.temp_path, basename)
+        logger.info(f"[DEBUG] Expected output path: {output_path}")
 
-        if os.path.exists(output_path): 
-        # if output_path: 
-            outputs = nib.load(output_path).get_fdata()
+        # List all files produced by the predictor
+        logger.info(f"[DEBUG] Files in temp_path: {os.listdir(self.temp_path)}")
+
+        # Try to find .nii.gz output if the exact basename doesn't exist
+        output_file = None
+        for f in os.listdir(self.temp_path):
+            if f.endswith(".nii.gz"):
+                output_file = join(self.temp_path, f)
+                break
+
+        if output_file and os.path.exists(output_file):
+            logger.info(f"[DEBUG] Loading segmentation from: {output_file}")
+            outputs = nib.load(output_file).get_fdata()
             outputs = torch.from_numpy(outputs)
-            os.remove(output_path)
+            os.remove(output_file)
+        else:
+            raise FileNotFoundError(
+                f"No .nii.gz output file found in {self.temp_path}. "
+                "Check predictor output or verify checkpoint path."
+            )
+
 
         data[self.output_label_key] = outputs
 

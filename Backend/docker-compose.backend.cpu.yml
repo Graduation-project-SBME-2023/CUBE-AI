@@ -25,6 +25,7 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/models:/models
       - nnUnet_folders:/NN_Unet
       - General_Data:/General_Data
+      - ${COMPOSE_PROJECT_DIR}/Backend/CustomNnUnetTrainer.py:/usr/local/lib/python3.10/dist-packages/nnunetv2/training/nnUNetTrainer/CustomNnUnetTrainer.py
     command: ["python", "/monailabel/server_start.py"]
     depends_on:
       - postgres

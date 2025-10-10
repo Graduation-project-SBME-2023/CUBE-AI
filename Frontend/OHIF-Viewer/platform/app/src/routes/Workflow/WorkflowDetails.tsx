@@ -682,43 +682,43 @@ function WorkflowDetailPage({
         const result = await response.json();
         console.log('Model creation response:', result);
 
-      //   notification.show({
-      //     title: 'Success',
-      //     message: 'Model Created Successfully!',
-      //     type: 'success',
-      //     duration: 3000,
-      //   });
-      //   try {
-      //     const queryParams = new URLSearchParams({
-      //       model_name: workflowDetails.workflowName,
-      //     }).toString();
-      //     const response = await fetch(`http://localhost:8000/train/${workflowName}`, {
-      //       method: 'POST',
-      //       headers: {
-      //         'Content-Type': 'application/json',
-      //       },
-      //     });
-      //     if (!response.ok) {
-      //       throw new Error(`Error: ${response.status}`);
-      //     }
-      //     const result = await response.json();
-      //     console.log('Model train response:', result);
-      //     notification.show({
-      //       title: 'Success',
-      //       message: 'Model is Training!',
-      //       type: 'success',
-      //       duration: 5000,
-      //     });
-      //   } catch (error) {
-      //     console.error('Error training model:', error);
+        notification.show({
+          title: 'Success',
+          message: 'Model Created Successfully!',
+          type: 'success',
+          duration: 3000,
+        });
+        try {
+          const queryParams = new URLSearchParams({
+            model_name: workflowDetails.workflowName,
+          }).toString();
+          const response = await fetch(`http://localhost:8000/train/${workflowName}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+          if (!response.ok) {
+            throw new Error(`Error: ${response.status}`);
+          }
+          const result = await response.json();
+          console.log('Model train response:', result);
+          notification.show({
+            title: 'Success',
+            message: 'Model is Training!',
+            type: 'success',
+            duration: 5000,
+          });
+        } catch (error) {
+          console.error('Error training model:', error);
 
-      //     notification.show({
-      //       title: 'Error',
-      //       message: `Failed to train model: ${error.message}`,
-      //       type: 'error',
-      //       duration: 3000,
-      //     });
-      //   }
+          notification.show({
+            title: 'Error',
+            message: `Failed to train model: ${error.message}`,
+            type: 'error',
+            duration: 3000,
+          });
+        }
       } catch (error) {
         console.error('Error creating model:', error);
 
