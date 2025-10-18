@@ -1,5 +1,13 @@
-from typing import Optional, Dict, Any
+import os
+import json
+import nibabel as nib
+import numpy as np
+import matplotlib.pyplot as plt
+from typing import Dict
+from datetime import datetime
 from . import mcp
+
+from radiomics_analysis import extract_radiomics_features, compute_voxel_spacing_mm, compute_3d_shape_features
 
 @mcp.tool()
 async def characterize_tumor(
@@ -24,6 +32,8 @@ async def characterize_tumor(
     Returns:
         A structured tumor characterization report in the specified format.
     """
+
+
     return await _characterize_tumor_impl(
         segmented_volume,
         metadata,
@@ -34,7 +44,10 @@ async def characterize_tumor(
     )
 
 
-# --- Internal implementation ---
+# --------------------------
+# INTERNAL IMPLEMENTATION
+# --------------------------
+
 async def _characterize_tumor_impl(
     segmented_volume: str | None,
     metadata: dict | None,
@@ -43,66 +56,102 @@ async def _characterize_tumor_impl(
     include_summary: bool,
     ctx: Dict | None,
 ) -> str:
-    """
-    Internal function implementing tumor characterization logic.
-    """
 
-    # TODO: Compute morphological features
-    # - Volume, surface area, compactness, sphericity
-    # - 3D shape descriptors to understand tumor geometry
-    # - Use connected component analysis if multiple regions exist
+    if segmented_volume is None or not os.path.exists(segmented_volume):
+        raise FileNotFoundError("Segmented tumor volume not found or not provided.")
 
-    # TODO: Compute intensity-based metrics
-    # - Mean, median, min, max, and standard deviation of voxel intensities
-    # - Histogram-based features (skewness, kurtosis, entropy)
-    # - Can reveal heterogeneity or necrosis within the tumor
+    print(f"Processing: {segmented_volume}")
 
-    # TODO: Compute functional metrics (if multimodal data available)
-    # - PET SUVmax, SUVmean, TBR (tumor-to-background ratio)
-    # - DCE-MRI kinetic parameters (Ktrans, Kep, Ve)
-    # - DWI ADC values (apparent diffusion coefficient)
+    # --- Load data ---
+    img = nib.load(segmented_volume).get_fdata()
+    mask = img > 0  # assume the provided volume is already segmented
 
-    # TODO: Compute anatomical context metrics
-    # - Distance of tumor from critical organs or vessels
-    # - Location relative to anatomical landmarks
-    # - Overlap with atlas regions (brain, liver, adrenal, etc.)
+    # --- Compute features ---
+    voxel_spacing = compute_voxel_spacing_mm(segmented_volume)
+    shape_features = compute_3d_shape_features(mask, voxel_spacing)
 
-    # TODO: Compute temporal dynamics (if longitudinal data available)
-    # - Track growth rate, doubling time, or regression
-    # - Useful for therapy response and prognosis
+    # Radiomics-style intensity features
+    intensity_features = {}
+    values = img[mask]
+    if values.size > 0:
+        hist, _ = np.histogram(values, bins=32)
+        hist = hist + 1e-12
+        hist = hist / hist.sum()
+        intensity_features = {
+            "mean": float(np.mean(values)),
+            "std": float(np.std(values)),
+            "min": float(np.min(values)),
+            "max": float(np.max(values)),
+            "median": float(np.median(values)),
+            "entropy": float(-np.sum(hist * np.log2(hist))),
+            "skewness": float(((values - np.mean(values)) ** 3).mean() / (np.std(values) ** 3 + 1e-9)),
+            "kurtosis": float(((values - np.mean(values)) ** 4).mean() / (np.std(values) ** 4 + 1e-9)),
+        }
 
-    # TODO: Integrate clinical metadata (if provided)
-    # - Age, stage, histology subtype, biomarkers
-    # - Combine with quantitative imaging features
+    # --- Visualization (optional) ---
+    visualization_path = None
+    if include_visualization:
+        mid_slice = img.shape[2] // 2
+        plt.figure(figsize=(6, 6))
+        plt.imshow(img[:, :, mid_slice], cmap="gray")
+        plt.contour(mask[:, :, mid_slice], colors="r", linewidths=0.7)
+        plt.title("Tumor Segmentation (Mid Slice)")
+        visualization_path = os.path.join(
+            "./results/characterization_visuals",
+            f"tumor_vis_{os.path.basename(segmented_volume).replace('.nii.gz', '')}.png"
+        )
+        os.makedirs(os.path.dirname(visualization_path), exist_ok=True)
+        plt.axis("off")
+        plt.savefig(visualization_path, bbox_inches="tight", dpi=120)
+        plt.close()
 
-    # TODO: Generate structured report
-    # - Compile extracted features into a dictionary or DataFrame
-    # - Include summary stats and visualization hooks
-
-    # --- Placeholder result ---
+    # --- Build report ---
     report = {
-        "morphology": {},
-        "intensity": {},
-        "functional": {},
-        "anatomical": {},
-        "temporal": {},
+        "file": segmented_volume,
+        "timestamp": datetime.now().isoformat(),
         "metadata": metadata or {},
-        "summary": "Tumor characterization pipeline executed (mock implementation).",
+        "morphology": shape_features,
+        "intensity": intensity_features,
+        "functional": {},   # placeholder for PET/DCE/DWI metrics
+        "anatomical": {},   # placeholder for distances or atlas overlap
+        "temporal": {},     # placeholder for longitudinal data
+        "visualization": visualization_path if include_visualization else None,
     }
 
+    if include_summary:
+        report["summary"] = {
+            "tumor_volume_mm3": shape_features.get("volume_mm3", None),
+            "mean_intensity": intensity_features.get("mean", None),
+            "sphericity": shape_features.get("sphericity", None),
+        }
+
+    # --- Save JSON ---
+    out_dir = "./results/characterization_reports"
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{os.path.basename(segmented_volume).replace('.nii.gz', '')}_report.json")
+    with open(out_path, "w") as f:
+        json.dump(report, f, indent=2)
+
+    print(f"Report saved to: {out_path}")
+
+    # --- Return formatted output ---
     if output_format == "json":
-        import json
         return json.dumps(report, indent=2)
-
     elif output_format == "markdown":
-        md = "## Tumor Characterization Report\n"
-        md += f"- Segmented volume: {segmented_volume}\n"
-        md += f"- Summary: {report['summary']}\n"
+        md = f"## Tumor Characterization Report\n\n"
+        md += f"**File:** {segmented_volume}\n\n"
+        md += f"**Volume:** {shape_features.get('volume_mm3', 'N/A')} mm³\n"
+        md += f"**Sphericity:** {shape_features.get('sphericity', 'N/A')}\n"
+        md += f"**Mean Intensity:** {intensity_features.get('mean', 'N/A')}\n"
+        if visualization_path:
+            md += f"\n![Tumor Visualization]({visualization_path})\n"
         return md
-
     elif output_format == "html":
-        return f"<h2>Tumor Characterization Report</h2><p>{report['summary']}</p>"
+        html = f"<h2>Tumor Characterization Report</h2>"
+        html += f"<p><b>File:</b> {segmented_volume}</p>"
+        html += f"<p><b>Volume:</b> {shape_features.get('volume_mm3', 'N/A')} mm³</p>"
+        if visualization_path:
+            html += f'<img src="{visualization_path}" width="400"/>'
+        return html
 
     return str(report)
-
-
