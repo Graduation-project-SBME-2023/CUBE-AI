@@ -1,8 +1,7 @@
 from fastapi import FastAPI
 import uvicorn
 
-from tools import mcp  # Your FastMCP instance
-# from tools import *  # modules decorated with @mcp.tool() now attach to the right instance
+from tools import mcp  
 from typing import Optional, Dict, Any
 
 
@@ -11,8 +10,6 @@ api = FastAPI(title="MCP Server API", version="1.0.0")
 
 
 
-# # Register all tools on startup
-# register_tools_from_directory()
 
 
 # ----------------------
@@ -54,40 +51,6 @@ async def list_tools():
         return {"error": str(e), "tools": []}
 
     return {"tools": tools_list, "count": len(tools_list)}
-
-
-
-    # @mcp.tool()
-    # async def characterize_tumor(
-    #     segmented_volume: str | None = None,
-    #     metadata: dict | None = None,
-    #     output_format: str = "json",
-    #     include_visualization: bool = True,
-    #     include_summary: bool = True,
-    #     ctx: Dict | None = None,
-    # ) -> str:
-    #     """
-    #     Characterize a segmented tumor using multiple complementary analysis techniques beyond radiomics.
-
-    #     Args:
-    #         segmented_volume: Path or identifier of the segmented 3D tumor volume.
-    #         metadata: Optional dictionary of patient or imaging metadata.
-    #         output_format: Format of the output report ('json', 'markdown', 'html').
-    #         include_visualization: Whether to include visualization hooks or previews.
-    #         include_summary: Whether to include summary statistics in the report.
-    #         ctx: Optional MCP context (provided automatically when invoked as a tool).
-
-    #     Returns:
-    #         A structured tumor characterization report in the specified format.
-    #     """
-    #     return await _characterize_tumor_impl(
-    #         segmented_volume,
-    #         metadata,
-    #         output_format,
-    #         include_visualization,
-    #         include_summary,
-    #         ctx,
-    #     )
 
 
 
