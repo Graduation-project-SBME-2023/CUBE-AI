@@ -43,9 +43,23 @@ alter table patients
 create index idx_patients_patient_id
     on patients (patient_id);
 
+CREATE TABLE models
+(
+    model_id SERIAL PRIMARY KEY,
+    model_name VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    configuration JSONB NOT NULL
+        CONSTRAINT models_configuration_check
+            CHECK (jsonb_typeof(configuration) = 'object'::text),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+alter table models
+    owner to workflow_user;
 create table studies
 (
-    study_instance_uid text    not null
+    study_UID text    not null
         primary key,
     patient_id         integer not null
         references patients
@@ -63,9 +77,9 @@ create index idx_studies_patient_id
 
 create table volume_series
 (
-    series_instance_uid text                                not null
+    volume_series_instance_UID text                                not null
         primary key,
-    study_instance_uid  text                                not null
+    study_UID  text                                not null
         references studies
             on delete cascade,
     series_description  text,
@@ -80,32 +94,35 @@ alter table volume_series
     owner to workflow_user;
 
 create index idx_series_study_id
-    on volume_series (study_instance_uid);
+    on volume_series (study_UID);
 
-create table segmentations
+CREATE TABLE segmentations
 (
-    segmentation_id     serial
-        primary key,
-    series_instance_uid text not null
-        references volume_series
-            on delete cascade,
-    segmentation_type   text not null,
-    method              varchar(255),
-    model               varchar(255),
-    created_at          timestamp default CURRENT_TIMESTAMP
+    label_series_instance_UID TEXT PRIMARY KEY,
+    volume_series_instance_UID TEXT NOT NULL
+        REFERENCES volume_series
+            ON DELETE CASCADE,
+    segmentation_type TEXT NOT NULL,
+    method VARCHAR(255),
+    model_name VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_segmentation_model
+        FOREIGN KEY (model_name)
+        REFERENCES models(model_name)
+            ON DELETE SET NULL
 );
 
 alter table segmentations
     owner to workflow_user;
 
 create index idx_segmentations_series_method
-    on segmentations (series_instance_uid, method);
+    on segmentations (volume_series_instance_UID, method);
 
 create table radiomics_features
 (
     id              serial
         primary key,
-    segmentation_id integer not null
+    label_series_instance_UID     text                               not null
         references segmentations
             on delete cascade,
     features        jsonb   not null
@@ -118,13 +135,13 @@ alter table radiomics_features
     owner to workflow_user;
 
 create index idx_radiomics_segmentation_id
-    on radiomics_features (segmentation_id);
+    on radiomics_features (label_series_instance_UID);
 
 create table chat_sessions
 (
     chat_id            serial
         primary key,
-    study_instance_uid text not null
+    study_UID text not null
         references studies
             on delete cascade,
     title              varchar(255),
@@ -140,23 +157,40 @@ alter table chat_sessions
     owner to workflow_user;
 
 create index idx_chat_study_active
-    on chat_sessions (study_instance_uid, is_active);
+    on chat_sessions (study_UID, is_active);
 
-create table models
-(
-    model_id      serial
-        primary key,
-    name          varchar(100) not null
-        unique,
-    description   text,
-    configuration jsonb        not null
-        constraint models_configuration_check
-            check (jsonb_typeof(configuration) = 'object'::text),
-    created_at    timestamp default CURRENT_TIMESTAMP
+
+                
+
+CREATE TABLE  IF NOT EXISTS public.workflow (
+    task_name text NOT NULL ,
+    CONSTRAINT workflow_pkey PRIMARY KEY (task_name)
 );
 
-alter table models
-    owner to workflow_user;
+
+ALTER TABLE public.workflow OWNER TO workflow_user;
+
+--
+-- TOC entry 218 (class 1259 OID 16402)
+-- Name: workflow_details; Type: TABLE; Schema: public; Owner: workflow_user
+--
+
+CREATE TABLE IF NOT EXISTS public.workflow_details (
+    task_name text NOT NULL,
+    study_UID text NOT NULL,
+    volume_series_instance_UID text NOT NULL,
+    label_series_instance_UID text,
+    annotated boolean DEFAULT false,
+    train boolean DEFAULT true,
+    modality text,
+    CONSTRAINT workflow_details_pkey PRIMARY KEY (task_name, study_UID, volume_series_instance_UID),
+    CONSTRAINT fk_task_name FOREIGN KEY (task_name) REFERENCES public.workflow(task_name) ON DELETE CASCADE
+);
+
+
+ALTER TABLE public.workflow_details OWNER TO workflow_user;
+
+
 
         """)    
     
@@ -171,6 +205,6 @@ def downgrade() -> None:
         DROP TABLE IF EXISTS volume_series CASCADE;
         DROP TABLE IF EXISTS studies CASCADE;
         DROP TABLE IF EXISTS patients CASCADE;
-        DROP TABLE IF EXISTS list_workflows CASCADE;
+        DROP TABLE IF EXISTS workflow_details CASCADE;
         DROP TABLE IF EXISTS workflows CASCADE;
     """)
