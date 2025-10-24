@@ -8,5 +8,5 @@ services:
       MONAI_SERVER_PORT: 8000
       MONAI_LABEL_STUDIES: http://orthanc:8042/dicom-web
       MONAI_LABEL_RELOAD: "true"
-      DATABASE_URL: postgresql://workflow_user:password@postgres:5432/workflow_db
+      DATABASE_URL: postgresql+asyncpg://workflow_user:password@postgres:5432/workflow_db
       MODELS_DIR: /models
