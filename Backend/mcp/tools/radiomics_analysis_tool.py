@@ -4,7 +4,7 @@ import os
 import json
 import nibabel as nib
 import numpy as np
-from radiomics_analysis import extract_radiomics_features  # import your implementation
+from tools.radiomics_analysis import extract_radiomics_features  # import your implementation
 
 
 @mcp.tool()

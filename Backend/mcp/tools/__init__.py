@@ -26,4 +26,4 @@ def register_tools_from_directory(tools_dir: str = "tools"):
         except Exception as e:
             print(f"✗ Error loading {module_name}: {e}")
 
-register_tools_from_directory()
+# register_tools_from_directory()
