@@ -7,7 +7,7 @@ from typing import Dict
 from datetime import datetime
 from . import mcp
 
-from radiomics_analysis import extract_radiomics_features, compute_voxel_spacing_mm, compute_3d_shape_features
+from tools.radiomics_analysis import extract_radiomics_features, compute_voxel_spacing_mm, compute_3d_shape_features
 
 @mcp.tool()
 async def characterize_tumor(
