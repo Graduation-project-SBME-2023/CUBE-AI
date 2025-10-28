@@ -1,0 +1,51 @@
+{
+  "population_definition": {
+    "name": "Population Definition",
+    "description": "Defines the study population and determines inclusion and exclusion criteria. It identifies patients or subjects that match the target group described in the clinical hypothesis."
+  },
+
+  "imaging_protocol": {
+    "name": "Imaging Protocol Definition",
+    "description": "Specifies or validates the imaging acquisition protocol. This includes imaging modality (CT, MRI, etc.), acquisition parameters such as contrast phase, slice thickness, timing, and scanner type. If imaging data already exist, this module filters subjects that meet these criteria."
+  },
+
+  "segmentation": {
+    "name": "Image Segmentation",
+    "description": "Generates or loads segmentation masks that delineate the region of interest (e.g., tumor or organ) in the imaging data. Supports both manual and automated segmentation workflows."
+  },
+
+  "feature_extraction": {
+    "name": "Radiomic Feature Extraction",
+    "description": "Extracts quantitative imaging features from segmented regions. Computes intensity-based, shape-based, and texture features such as GLCM, GLRLM, GLSZM, and wavelet-filtered statistics."
+  },
+
+  "outcome_definition": {
+    "name": "Outcome Definition",
+    "description": "Defines the target variable or clinical endpoint based on available clinical data. Examples include survival status, disease progression, biomarker positivity, or histopathological classification."
+  },
+
+  "data_preprocessing": {
+    "name": "Data Preprocessing and Harmonization",
+    "description": "Prepares imaging and clinical data for modeling. Handles normalization, resampling, scaling, feature selection, and harmonization across scanners or centers if applicable."
+  },
+
+  "modeling": {
+    "name": "Modeling and Prediction",
+    "description": "Builds and trains predictive or diagnostic models using extracted features. Supports various machine learning algorithms such as LASSO regression, random forest, or gradient boosting, and adjusts for clinical covariates."
+  },
+
+  "validation": {
+    "name": "Model Validation",
+    "description": "Performs internal and external validation of the trained model. Includes cross-validation, bootstrap resampling, and testing on independent datasets or external sites."
+  },
+
+  "report_generation": {
+    "name": "Study Report Generation",
+    "description": "Generates structured summaries and reports for the study, including performance metrics, validation results, feature importance, and study workflow documentation."
+  },
+
+  "user_input_agent": {
+    "name": "User Input and Validation",
+    "description": "Interacts with the user when a running module requires additional information or confirmation. It validates user responses and sends them back to the requesting module."
+  }
+}
