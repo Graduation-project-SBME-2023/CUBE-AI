@@ -1,39 +1,35 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from monailabel import models, schemas
+from models.workflow import Workflow
+from schemas.workflow import WorkflowCreate
 
-async def create_workflow(db: AsyncSession, data: schemas.WorkflowCreate):
-    db_workflow = models.Workflow(
-        **data.dict()
-    )
+# CREATE
+async def create_workflow(db: AsyncSession, data: WorkflowCreate):
+    db_workflow = Workflow(**data.dict())
     db.add(db_workflow)
     await db.commit()
     await db.refresh(db_workflow)
     return db_workflow
+
+
+# GET ONE
+async def get_workflow(db: AsyncSession, task_name: str):
     result = await db.execute(
-        select(models.Workflow).where(
-            models.Workflow.case_id == case_id,
-            models.Workflow.task_name == task_name
-        )
+        select(Workflow).where(Workflow.task_name == task_name)
     )
-    workflow = result.scalar_one_or_none()
-    if not workflow:
-        return None
+    return result.scalar_one_or_none()
 
-    for field, value in data.dict(exclude_unset=True).items():
-        setattr(workflow, field, value)
-    if data.instance_uid is not None:
-        workflow.annotated = True
 
-    await db.commit()
-    await db.refresh(workflow)
-    return workflow
+# GET ALL
+async def get_workflows(db: AsyncSession, skip: int = 0, limit: int = 100):
+    result = await db.execute(select(Workflow).offset(skip).limit(limit))
+    return result.scalars().all()
 
+
+# DELETE
 async def delete_workflow(db: AsyncSession, task_name: str):
     result = await db.execute(
-        select(models.Workflow).where(
-            models.Workflow.task_name == task_name
-        )
+        select(Workflow).where(Workflow.task_name == task_name)
     )
     workflow = result.scalar_one_or_none()
     if not workflow:

@@ -4,7 +4,8 @@ from core.database import Base
 class Model(Base):
     __tablename__ = 'models'
 
-    model_id = Column(Integer, primary_key=True, index=True)
+    model_id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+
     model_name = Column(String, nullable=False)
     description = Column(String, nullable=True)
     configuration = Column(JSON, nullable=True)
