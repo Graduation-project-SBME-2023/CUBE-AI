@@ -4,7 +4,8 @@ from core.database import Base
 class Patient(Base):
     __tablename__ = 'patients'
 
-    patient_id = Column(Integer, primary_key=True, index=True)
+    patient_id =  Column(Integer, primary_key=True, index=True, autoincrement=True)
+
     name = Column(String, nullable=False)
     birth_date = Column(DateTime, nullable=False)
     gender = Column(String, nullable=True)
