@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from pyparsing import Optional
+from typing import Optional
 
 class PatientBase(BaseModel):
     name: str

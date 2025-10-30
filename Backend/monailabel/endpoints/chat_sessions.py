@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from monailabel.schemas import chat_sessions as schemas
-from monailabel.crud import chat_sessions as crud
+from schemas import chat_sessions as schemas
+from crud import chat_sessions as crud
 from core.database import get_db
 
 router = APIRouter(prefix="/chat_sessions", tags=["Chat Sessions"])
