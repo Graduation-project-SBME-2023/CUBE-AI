@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from datetime import datetime
 
 class RadiomicsBase(BaseModel):
    
@@ -10,7 +11,7 @@ class RadiomicsCreate(RadiomicsBase):
 
 class Radiomics(RadiomicsBase):
     id: int
-    created_at: str | None = None  # ISO format date-time
+    created_at: datetime | None = None  # ISO format date-time
 
     class Config:
         orm_mode = True

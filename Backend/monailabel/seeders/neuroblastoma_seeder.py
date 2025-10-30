@@ -1,5 +1,5 @@
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from core.database import Base
 from core.config import Settings
 from sqlalchemy import create_engine
@@ -14,7 +14,7 @@ sync_engine = create_engine(sync_url)
 SessionLocal = sessionmaker(bind=sync_engine, autoflush=False, autocommit=False)
 
 def rand_date(days_ago=1000):
-    return datetime.now() - timedelta(days=random.randint(0, days_ago))
+    return (datetime.now() - timedelta(days=random.randint(0, days_ago))).date()
 
 def create_dummy_data():
     Base.metadata.create_all(bind=sync_engine)
@@ -93,13 +93,14 @@ def create_dummy_data():
 
 # --- 5. Segmentations ---
     segmentations = []
+    series = db.query(volume.Volume)
     for s in series:
         seg = segmentation.Segmentation(
             label_series_instance_uid=f"{s.study_uid}.{random.randint(100,999)}",
             volume_series_instance_uid=s.volume_series_instance_uid,
             segmentation_type="Tumor Mask",
             method="Automatic",
-            model_name=random.choice(["NeuroNet v1", "Manual"]),
+            model_name="NeuroNet v1",
             created_at=rand_date(),
         )
         segmentations.append(seg)

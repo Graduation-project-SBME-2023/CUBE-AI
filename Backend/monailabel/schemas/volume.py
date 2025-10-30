@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from datetime import date, datetime
 
 class VolumeBase(BaseModel):
     volume_series_instance_uid: str
@@ -6,7 +7,7 @@ class VolumeBase(BaseModel):
     series_description: str | None = None
     modality: str | None = None
     num_slices: int | None = None
-    created_at: str | None = None  # ISO format date-time
+    created_at: date | None = None  # ISO format date-time
 
 class VolumeCreate(VolumeBase):
     pass
