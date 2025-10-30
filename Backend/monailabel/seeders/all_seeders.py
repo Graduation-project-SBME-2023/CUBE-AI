@@ -2,4 +2,4 @@ from .neuroblastoma_seeder import create_dummy_data, create_dummy_neuroblastoma_
 
 def all_seeders():
     create_dummy_data()
-    create_dummy_neuroblastoma_cases
+    create_dummy_neuroblastoma_cases()
