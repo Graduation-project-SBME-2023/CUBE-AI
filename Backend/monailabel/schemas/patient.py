@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from pyparsing import Optional
 
 class PatientBase(BaseModel):
     name: str
@@ -7,6 +8,12 @@ class PatientBase(BaseModel):
 
 class PatientCreate(PatientBase):
     pass
+
+class PatientUpdate(BaseModel):
+    name: Optional[str] = None
+    birth_date: Optional[str] = None
+    gender: Optional[str] = None
+
 
 class Patient(PatientBase):
     patient_id: int

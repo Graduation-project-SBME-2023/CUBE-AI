@@ -134,3 +134,16 @@ async def delete_chat_session(db: AsyncSession, chat_id: int):
     await db.delete(session)
     await db.commit()
     return True
+
+async def add_hypothesis_note(db: AsyncSession, chat_id: int, note: str):
+    session = await get_chat_session(db, chat_id)
+    if not session:
+        return None
+    if session.summary:
+        session.summary += f"\n{note}"
+    else:
+        session.summary = note
+    session.last_activity = datetime.utcnow()
+    await db.commit()
+    await db.refresh(session)
+    return session

@@ -10,6 +10,11 @@ class StudyBase(BaseModel):
 class StudyCreate(StudyBase):
     pass
 
+class StudyUpdate(BaseModel):
+    description: str | None = None
+    modality: str | None = None
+    created_at: str | None = None  # ISO format date-time
+
 class Study(StudyBase):
     class Config:
         orm_mode = True
