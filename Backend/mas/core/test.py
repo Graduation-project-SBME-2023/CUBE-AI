@@ -1,44 +1,39 @@
 import os
-import json
-from autogen import AssistantAgent, UserProxyAgent, config_list_from_json
+from autogen import AssistantAgent, UserProxyAgent
 
-# Load configuration
-config_path = os.path.join(os.path.dirname(__file__), "config.json")
-try:
-    config_list = config_list_from_json(config_path)
-except Exception as e:
-    # Fallback to environment variable
-    if "OPENAI_API_KEY" not in os.environ:
-        raise ValueError(
-            "Please either create a config.json file or set OPENAI_API_KEY environment variable"
-        )
-    config_list = [
+# ✅ Set your Groq API key in environment variable:
+# On Windows PowerShell: setx GROQ_API_KEY "your_key_here"
+# On Linux/Mac: export GROQ_API_KEY="your_key_here"
+
+# ---- 1. AutoGen LLM Configuration ----
+llm_config = {
+    "config_list": [
         {
-            "model": "gpt-3.5-turbo",
-            "api_key": os.environ["OPENAI_API_KEY"]
-        }
-    ]
+            "model": "openai/gpt-oss-20b",               # Groq model name
+            "api_key": "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", # Your Groq key
+            "base_url": "https://api.groq.com/openai/v1",
+            "tool_choice": "none",
+                            # tells AutoGen to use OpenAI API format
+        },
+    ],
+    "temperature": 0.7,
+    "timeout": 300,
+}
 
-# Create our planner assistant
-planner = AssistantAgent(
-    name="planner",
-    system_message="You are a clinical study planner specialized in designing research protocols.",
-    llm_config={
-        "config_list": config_list,
-    }
-    
+# ---- 2. Initialize the Agents ----
+assistant = AssistantAgent(
+    name="groq_assistant",
+    llm_config=llm_config,
+    code_execution_config={"use_docker": False},  # avoid docker runtime errors
 )
 
-# Create a user proxy that never requests human input
 user = UserProxyAgent(
     name="user",
-    human_input_mode="NEVER"
+    code_execution_config={"use_docker": False},
 )
 
-# Test basic planning capabilities
-test_query = """A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma."""
-
+# ---- 3. Start Conversation ----
 user.initiate_chat(
-    planner,
-    message=f"Design a study plan to investigate this hypothesis: {test_query}"
+    assistant,
+    message="Hello! Please confirm you're using Groq and tell me your model name.",
 )
