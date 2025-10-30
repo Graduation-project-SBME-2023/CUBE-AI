@@ -1,0 +1,103 @@
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 280px;
+  border: 1px solid rgb(0, 6, 46);
+  border-radius: 8px;
+  padding: 10px;
+  background-color: rgb(0, 6, 46);
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+
+/* Message styles */
+.message {
+  max-width: 75%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  margin: 4px 0;
+  word-wrap: break-word;
+  transition: all 0.3s ease-in;
+  backdrop-filter: blur(4px);
+}
+
+.message.user {
+  align-self: flex-end;
+  background-color: rgba(25, 106, 188, 25);
+  color: #fff;
+}
+
+.message.agent {
+  align-self: flex-start;
+  background-color: rgba(188, 204, 215, 0.25);
+  color: #ddd;
+
+}
+
+/* Input area */
+.input-area {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgb(0, 6, 46); 
+  border: 1px solid #444;
+  border-radius: 9999px; 
+  padding: 6px 12px;
+  margin: 10px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  position: relative; /* ensures button stays visible */
+}
+
+.input-area input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  padding: 8px 10px;
+  background: transparent;
+  color: #fff;
+  min-width: 0; /* prevents flex overflow clipping */
+}
+
+.input-area button {
+  background-color: rgba(7, 115, 187, 0.25);
+  color: rgb(212, 208, 208);
+  border: none;
+  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0; /* prevents disappearing on resize */
+  transition: background-color 0.2s;
+  margin-left: 6px;
+  z-index: 2; /* make sure it's above input */
+}
+
+.input-area button:hover {
+  background-color: #0d6efd;
+}
+
+
+/* Animation */
+.fade-enter {
+  opacity: 0.01;
+  transform: translateY(10px);
+}
+
+.fade-enter-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: all 300ms ease-in;
+}
+
+.fade-exit {
+  opacity: 1;
+}
+
+.fade-exit-active {
+  opacity: 0.01;
+  transition: opacity 300ms ease-in;
+}
