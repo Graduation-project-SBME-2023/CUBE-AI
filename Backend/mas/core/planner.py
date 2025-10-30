@@ -2,8 +2,18 @@ import asyncio
 import json
 import uuid
 import re
+import logging
+from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Union
 from pydantic import BaseModel, Field
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 from autogen_agentchat.agents import AssistantAgent
 from autogen_ext.models.ollama import OllamaChatCompletionClient
@@ -54,7 +64,14 @@ def clean_markdown_json(text: str) -> str:
     return text
 
 class Planner:
-    def __init__(self, hypothesis: Optional[ClinicalHypothesis] = None):
+    def __init__(
+        self,
+        config_path: str = "config.json",
+        log_path: str = "system.log",
+        hypothesis: Optional[ClinicalHypothesis] = None
+    ):
+        self.config_path = Path(config_path)
+        self.log_path = Path(log_path)
         self.hypothesis = hypothesis or ClinicalHypothesis(
             id=str(uuid.uuid4()),
             population="",
@@ -66,7 +83,9 @@ class Planner:
             study_goal=f"Investigate the hypothesis: {self.hypothesis.title}"
         )
         self.model_client = ollama_client
-
+        self.status = "idle"
+        self._initialize_logging()
+        
         # Agents
         self.hypothesis_extractor = AssistantAgent(
             name="HypothesisExtractor",
@@ -108,11 +127,66 @@ class Planner:
             model_client=self.model_client,
         )
 
+
+    def _initialize_logging(self):
+        """Set up file logging"""
+        logger = logging.getLogger(__name__)
+        file_handler = logging.FileHandler(self.log_path)
+        file_handler.setFormatter(
+            logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        )
+        logger.addHandler(file_handler)
+        
+    def save_to_config(self):
+        """Save current plan and hypothesis to config file"""
+        try:
+            config = {}
+            if self.config_path.exists():
+                with open(self.config_path) as f:
+                    config = json.load(f)
+            
+            config['current_plan'] = self.plan.model_dump()
+            config['current_hypothesis'] = self.hypothesis.model_dump()
+            config['planner_status'] = self.status
+            
+            with open(self.config_path, 'w') as f:
+                json.dump(config, f, indent=2)
+                
+            logger.info("Saved plan and hypothesis to config file")
+        except Exception as e:
+            logger.error(f"Failed to save to config: {e}")
+            
+    def load_from_config(self):
+        """Load saved plan and hypothesis from config"""
+        try:
+            if self.config_path.exists():
+                with open(self.config_path) as f:
+                    config = json.load(f)
+                    if 'current_plan' in config:
+                        self.plan = StudyPlan(**config['current_plan'])
+                    if 'current_hypothesis' in config:
+                        self.hypothesis = ClinicalHypothesis(**config['current_hypothesis'])
+                    self.status = config.get('planner_status', 'idle')
+                    logger.info("Loaded plan and hypothesis from config file")
+        except Exception as e:
+            logger.error(f"Failed to load from config: {e}")
+            
+    async def request_user_input(self, description: str) -> str:
+        """Request user input during planning"""
+        self.status = "waiting_input"
+        self.save_to_config()
+        # This will be handled by the orchestrator and user input handler
+        return ""
+
     async def run(self, user_query: str, tools_doc: str):
+        """Run the planning process with proper state management"""
         self.status = "running"
+        self.save_to_config()
+        
+        logger.info(f"Starting planning process for query: {user_query}")
 
         # ---------------- Step 1: Hypothesis Extraction ----------------
-        print("\n[1️⃣] Extracting clinical hypothesis...")
+        logger.info("Extracting clinical hypothesis...")
         hypo_response = await self.hypothesis_extractor.run(task=user_query)
         hypo_content = clean_markdown_json(hypo_response.messages[-1].content)
 
@@ -168,14 +242,36 @@ class Planner:
         eval_response = await self.evaluator.run(task=json.dumps(self.plan.model_dump(), indent=2))
         eval_content = eval_response.messages[-1].content
 
-        print("✅ Study plan evaluation complete.\n")
+        logger.info("Study plan evaluation complete")
         self.status = "finished"
+        self.save_to_config()
 
-        return {
+        result = {
             "hypothesis": self.hypothesis.model_dump(),
             "plan": self.plan.model_dump(),
-            "evaluation": eval_content
+            "evaluation": eval_content,
+            "status": self.status
         }
+        
+        # Save the complete result to history
+        history_path = Path("memory/history/hypo.json")
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        history = []
+        if history_path.exists():
+            with open(history_path) as f:
+                history = json.load(f)
+                
+        history.append({
+            "timestamp": datetime.now().isoformat(),
+            "query": user_query,
+            "result": result
+        })
+        
+        with open(history_path, "w") as f:
+            json.dump(history, f, indent=2)
+            
+        return result
 
 # ============================== MAIN ==============================
 
