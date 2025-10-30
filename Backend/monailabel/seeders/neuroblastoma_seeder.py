@@ -132,6 +132,12 @@ def create_dummy_neuroblastoma_cases():
     Base.metadata.create_all(bind=sync_engine)
     db = SessionLocal()
 
+    ct_exists = db.query(study.Study).filter(study.Study.modality == "CT").first()
+    if ct_exists:
+        print("CT studies already exist. Skipping seeding.")
+        db.close()
+        return
+
     studies = []
     patients = db.query(patient.Patient)
     for p in patients:
