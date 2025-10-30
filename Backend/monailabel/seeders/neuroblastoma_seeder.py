@@ -74,6 +74,7 @@ def create_dummy_data():
 
 # --- 4. Volume Series ---
     series = []
+    studies = db.query(study.Study)
     for s in studies:
         for m in ["T1", "T2", "T2-FLAIR"]:
             series.append(
@@ -86,7 +87,7 @@ def create_dummy_data():
                     volume_series_instance_uid=f"{s.study_uid}.{random.randint(100,999)}",
                 )
             )
-    if db.query(study.Study).count() == 0:
+    if db.query(volume.Volume).count() == 0:
         db.add_all(series)
         db.commit()
 
