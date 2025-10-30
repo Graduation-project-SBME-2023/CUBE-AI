@@ -27,14 +27,19 @@ async def main() -> None:
         name="radiologist",
         model_client=model_client,
         tools=tools,
-        system_message="you are a radiologist assistant, put a plan how to use your tools then run them",
+        max_tool_iterations= 5,
+        system_message="""You are the study population selector.you will be given a hypothesis and you will use 
+        the tools provided to get all the information about the patients and studies and then 
+        you need to select what is the population that will be used to continue the study. if the data not available
+        you should provide the imaging protocol needed and its specifications""",
     )
 
     # Let the agent translate some text
     await Console(
-        agent.run_stream(task="this is a 3d ct case, my hypothesis is that this case has a tumer in the liver", cancellation_token=CancellationToken())
+        agent.run_stream(task="A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma",
+                         cancellation_token=CancellationToken())
     )
-    print(tools)
+    # print(tools)
 
 if __name__ == "__main__":
     asyncio.run(main())
