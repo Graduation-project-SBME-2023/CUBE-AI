@@ -127,3 +127,40 @@ def create_dummy_data():
 
     print("✅ Dummy Neuroblastoma data seeded successfully!")
     db.close()
+
+def create_dummy_neuroblastoma_cases():
+    Base.metadata.create_all(bind=sync_engine)
+    db = SessionLocal()
+
+    studies = []
+    patients = db.query(patient.Patient)
+    for p in patients:
+        for s in range(2):  # 2 studies per patient
+            studies.append(
+                study.Study(
+                    patient_id=p.patient_id,
+                    description=f"CT study, {random.choice(['Venous', 'Arterial'])}, Suspicion of Neuroblastoma",
+                    modality="CT",
+                    created_at=rand_date(),
+                    study_uid=f"1.2.840.113619.{p.patient_id}{s}{random.randint(1000, 1999)}",
+                )
+            )
+    db.add_all(studies)
+    db.commit()
+
+    series = []
+    studies = db.query(study.Study).filter(study.Study.modality == "CT").all()
+    for s in studies:
+        for m in ["Arterial", "Venous", "Contrast"]:
+            series.append(
+                volume.Volume(
+                    study_uid=s.study_uid,
+                    series_description=m,
+                    modality="CT",
+                    num_slices=random.randint(100, 300),
+                    created_at=rand_date(),
+                    volume_series_instance_uid=f"{s.study_uid}.{random.randint(100,999)}",
+                )
+            )
+    db.add_all(series)
+    db.commit()
