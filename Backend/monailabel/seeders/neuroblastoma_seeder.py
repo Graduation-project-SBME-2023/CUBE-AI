@@ -117,7 +117,7 @@ def create_dummy_data():
                 "glcm_contrast": round(random.uniform(0, 50), 3),
             }
             rf = radiomics.Radiomics(
-                segmentation_id=seg.label_series_instance_uid,
+                label_series_instance_uid=seg.label_series_instance_uid,
                 features=features,
                 created_at=datetime.now(),
             )
