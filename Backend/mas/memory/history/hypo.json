@@ -1,0 +1,143 @@
+{
+  "hypothesis": {
+    "id": "7d992245-06ac-45bd-899d-3333dc3681a6",
+    "title": "CT-based radiomics signature predicts high-risk neuroblastoma",
+    "population": "Patients (children) diagnosed with neuroblastoma",
+    "intervention": "Radiomics-derived imaging signature extracted from diagnostic CT scans",
+    "outcome": "Accurate prediction of high-risk disease status",
+    "clinical_context": "Risk stratification in newly diagnosed neuroblastoma to guide treatment intensity",
+    "relationship_type": "Predictive"
+  },
+  "plan": {
+    "hypothesis_id": "c13d031f-4789-4b5a-b803-207099d9a934",
+    "study_goal": "Investigate the hypothesis: ",
+    "steps": [
+      {
+        "name": "Define Study Objectives and Endpoints",
+        "description": "Formulate the primary objective: to assess the ability of a CT\u2011based radiomics signature to predict high\u2011risk neuroblastoma at diagnosis. Define primary endpoint (prediction accuracy measured by AUC) and secondary endpoints (sensitivity, specificity, positive/negative predictive values, calibration, and impact on treatment decision\u2011making).",
+        "matched_module": null,
+        "status": "pending"
+      },
+      {
+        "name": "Form a Multidisciplinary Steering Committee",
+        "description": "Assemble pediatric oncologists, radiologists, medical physicists, data scientists, biostatisticians, ethicists, and patient advocates. The committee will oversee protocol development, data governance, and interim monitoring.",
+        "matched_module": null,
+        "status": "pending"
+      },
+      {
+        "name": "Develop a Detailed Study Protocol",
+        "description": "Write a protocol that includes study design (prospective, multi\u2011center observational cohort), inclusion/exclusion criteria, sample size justification, imaging acquisition standards, radiomics workflow, statistical analysis plan, and data management procedures. Register the protocol on ClinicalTrials.gov before enrollment.",
+        "matched_module": null,
+        "status": "pending"
+      },
+      {
+        "name": "Ethics and Regulatory Approvals",
+        "description": "Submit the protocol to the Institutional Review Boards (IRBs) of each participating center. Obtain informed\u2011consent forms appropriate for minors (parental consent and child assent). Secure data\u2011use agreements and comply with GDPR, HIPAA, and local regulations.",
+        "matched_module": null,
+        "status": "pending"
+      },
+      {
+        "name": "Site Selection and Training",
+        "description": "Identify 8\u201110 high\u2011volume pediatric oncology centers worldwide. Conduct standardized training webinars on CT acquisition parameters, DICOM handling, and radiomics pipeline to ensure uniformity across sites.",
+        "matched_module": null,
+        "status": "pending"
+      },
+      {
+        "name": "Define Imaging Acquisition Parameters",
+        "description": "Standardize diagnostic CT scans: slice thickness\u202f\u2265\u202f1.25\u202fmm, 120\u202fkVp, automatic exposure control, use of intravenous contrast per protocol, and breath\u2011hold or sedation as needed. Document scanner model, reconstruction algorithm, and kernel for later harmonization.",
+        "matched_module": "ImagingProtocolDesigner",
+        "status": "pending"
+      },
+      {
+        "name": "Patient Enrollment",
+        "description": "Prospectively enroll consecutive children\u202f\u2265\u202f18\u202fyears newly diagnosed with neuroblastoma, prior to any systemic therapy. Record baseline demographics, clinical stage, MYCN status, serum markers, and standard risk classification (INRG). Target N\u202f\u2265\u202f500 patients to achieve >90\u202f% power to detect an AUC difference of 0.05 compared with the standard model.",
+        "matched_module": "PopulationSelector",
+        "status": "pending"
+      },
+      {
+        "name": "Image Collection and Centralized Storage",
+        "description": "Upload raw DICOM CT scans to a secure, cloud\u2011based repository (e.g., REDCap\u2011Imaging or XNAT). Apply de\u2011identification pipelines and assign unique study IDs. Ensure backup and audit trails.",
+        "matched_module": null,
+        "status": "pending"
+      },
+      {
+        "name": "Radiomics Feature Extraction Pipeline",
+        "description": "Develop a reproducible pipeline using IBSI\u2011validated software (e.g., PyRadiomics). Steps: (1) tumor segmentation\u202f\u2013\u202fsemi\u2011automatic 3\u2011D contour by two independent radiologists; (2) apply image resampling, intensity normalization, and discretization; (3) extract first\u2011order, shape, texture (GLCM, GLRLM, GLSZM, NGTDM), and wavelet features; (4) assess inter\u2011observer agreement (ICC>0.80) and retain robust features.",
+        "matched_module": "RadiomicsExtractor",
+        "status": "pending"
+      },
+      {
+        "name": "Data Harmonization and Feature Reduction",
+        "description": "Apply ComBat or similar batch\u2011effect correction to mitigate scanner\u2011related variability. Perform dimensionality reduction: remove highly correlated features (r>0.9), then use supervised methods (LASSO, Elastic Net) within a nested cross\u2011validation framework to select the predictive signature.",
+        "matched_module": null,
+        "status": "pending"
+      },
+      {
+        "name": "Model Development",
+        "description": "Combine the selected radiomics features with clinical variables (age, stage, MYCN) in logistic regression, random forest, and gradient boosting models. Use 5\u2011fold inner cross\u2011validation for hyper\u2011parameter tuning and outer 5\u2011fold cross\u2011validation for performance estimation.",
+        "matched_module": "ModelingModule",
+        "status": "pending"
+      },
+      {
+        "name": "Internal Validation",
+        "description": "Assess discrimination (AUC, ROC curves) and calibration (calibration plots, Hosmer\u2011Lemeshow test) in the cross\u2011validated training cohort. Conduct decision\u2011curve analysis to evaluate clinical net benefit across risk thresholds.",
+        "matched_module": "ValidationModule",
+        "status": "pending"
+      },
+      {
+        "name": "External Validation Cohort",
+        "description": "After the model is locked, test it on an independent cohort of \u2265200 patients accrued at a subset of sites not involved in model training, following identical imaging and preprocessing steps. Report external AUC, sensitivity, specificity, and compare to the standard INRG risk classification.",
+        "matched_module": "ValidationModule",
+        "status": "pending"
+      },
+      {
+        "name": "Statistical Analysis Plan Execution",
+        "description": "Use R or Python for all analyses. Compute confidence intervals for AUC via bootstrapping (2000 repetitions). Perform net reclassification improvement (NRI) and integrated discrimination improvement (IDI) versus the current risk model. Adjust for potential confounders (e.g., center) using mixed\u2011effects models.",       
+        "matched_module": "ValidationModule",
+        "status": "pending"
+      },
+      {
+        "name": "Safety Monitoring and Interim Analyses",
+        "description": "Although the study is observational, convene a Data Safety Monitoring Board (DSMB) to review enrollment rates, data completeness, and any unforeseen risks (e.g., excessive radiation exposure). No stopping rules are anticipated.",        
+        "matched_module": null,
+        "status": "pending"
+      },
+      {
+        "name": "Interpretation and Clinical Integration Workshop",
+        "description": "Organize a stakeholder workshop to discuss model results, usability in the clinic, and pathways for integrating the radiomics signature into multidisciplinary tumor boards. Develop a risk\u2011calculator web app for real\u2011time use.",        "matched_module": null,
+        "status": "pending"
+      },
+      {
+        "name": "Manuscript Preparation and Dissemination",
+        "description": "Draft manuscripts for peer\u2011reviewed journals covering (1) development and internal validation, (2) external validation, and (3) health\u2011economic impact. Present findings at international pediatric oncology conferences (SIOP, ASCO\u2011Pediatric).",
+        "matched_module": null,
+        "status": "pending"
+      },
+      {
+        "name": "Regulatory and Implementation Planning",
+        "description": "Engage with regulatory bodies (e.g., FDA, EMA) early to discuss qualification of the radiomics signature as a prognostic biomarker. Outline steps for prospective clinical utility trials where treatment intensity is guided by the signature.",
+        "matched_module": null,
+        "status": "pending"
+      },
+      {
+        "name": "Long\u2011Term Follow\u2011up and Model Updating",
+        "description": "Continue to collect outcome data (event\u2011free survival, overall survival) for up to 5\u202fyears post\u2011diagnosis. Periodically recalibrate the model using new data (model updating) to maintain performance over time.",
+        "matched_module": "ModelingModule",
+        "status": "pending"
+      }
+    ]
+  },
+  "evaluation": "**Overall impression** \u2013 The protocol is a well\u2011structured, contemporary radiomics\u2011biomarker development plan that touches on every major pillar (governance, ethics, imaging standardisation, feature extraction, modelling, validation, dissemination and regulatory pathway). If the few gaps are closed, the study would be scientifically robust and practically executable.\n\n---\n\n## Strengths  \n\n| Domain | What the plan does well |\n|--------|------------------------|\n| **Governance & 
+oversight** | Multidisciplinary steering committee, DSMB, and explicit registration on 
+ClinicalTrials.gov. |\n| **Ethics & data protection** | Dedicated IRB, parental consent/child assent, GDPR/HIPAA compliance, de\u2011identification pipeline. |\n| **Multi\u2011centre design** | 8\u201110 high\u2011volume pediatric oncology centres, centralized 
+cloud storage, uniform training webinars. |\n| **Imaging harmonisation** | Detailed CT 
+acquisition parameters, documentation of scanner/kernels, planned ComBat batch\u2011effect correction. |\n| **Radiomics workflow** | IBSI\u2011validated software (PyRadiomics), semi\u2011automatic 3\u2011D segmentation by two readers, ICC\u202f>\u202f0.80 requirement, robust feature\u2011selection pipeline. |\n| **Statistical rigour** | Nested cross\u2011validation, LASSO/Elastic\u2011Net feature selection, internal & external validation, calibration, decision\u2011curve analysis, bootstrapped CIs, NRI/IDI, mixed\u2011effects for centre\u2011level clustering. |\n| **Clinical integration** | Planned stakeholder workshop, web\u2011based risk calculator, pathway to FDA/EMA qualification, health\u2011economic manuscript. |\n| **Long\u2011term sustainability** | 5\u2011year outcome follow\u2011up and model updating strategy. |\n\n---\n\n## Weaknesses / Gaps  \n\n| Issue | Why it matters | Suggested remedy |\n|-------|----------------|------------------|\n| **Missing hypothesis statement** | The \u201cstudy_goal\u201d field is blank, 
+leaving reviewers unclear on the exact predictive claim. | Add a concise hypothesis, e.g., \u201cA CT\u2011based radiomics signature combined with clinical variables predicts high\u2011risk neuroblastoma at diagnosis with an AUC\u202f\u2265\u202f0.85, outperforming the INRG model.\u201d |\n| **Age inclusion criterion typo** | \u201c\u2265\u202f18\u202fyears\u201d contradicts pediatric neuroblastoma (most cases <\u202f5\u202fy). | Correct to \u201c\u2264\u202f18\u202fyears\u201d or specify exact pediatric age range (e.g., 0\u202f\u2013\u202f18\u202fy). |\n| **Sample\u2011size justification is superficial** | Power calculation for a 0.05 AUC improvement may be optimistic for a rare disease; no event\u2011per\u2011variable (EPV) considerations. | Provide a detailed calculation (e.g., using Obuchowski method), report expected number of high\u2011risk events, and cap the number of candidate predictors to maintain EPV\u202f\u2265\u202f10. |\n| **Recruitment feasibility** | 500 patients across 8\u201110 centres assumes ~50\u201360 new 
+neuroblastoma cases per centre per year; realistic only for very high\u2011volume sites. | Include a realistic accrual timeline (e.g., 3\u202fyears), consider adding more sites or widening inclusion to international cooperative groups (COG, SIOPEN). |\n| **Radiation safety monitoring** | Although observational, repeated CTs may increase dose, especially if protocol mandates contrast or repeat scans. | Explicitly state that only the standard diagnostic CT required for staging is used; add a radiation\u2011dose monitoring sub\u2011committee. |\n| **Segmentation reproducibility** | Semi\u2011automatic contouring by two radiologists is good, but inter\u2011observer variability can still be high in small tumours. | Add a third \u201cadjudicator\u201d read for discordant cases, 
+and consider a deep\u2011learning assisted pre\u2011segmentation to reduce workload. |\n| **Harmonisation limits** | ComBat assumes linear batch effects; scanner differences 
+(iterative reconstruction, DECT) may be non\u2011linear. | Complement ComBat with phantom\u2011based calibration or voxel\u2011size\u2013standardised image resampling before 
+feature extraction. |\n| **Missing data handling** | No plan for imputation or sensitivity analyses if some clinical or imaging data are absent. | Pre\u2011specify multiple imputation (e.g., chained equations) and conduct complete\u2011case vs imputed comparisons. |\n| **Model interpretability** | Complex ML models (RF, GBM) may be hard to translate into a bedside calculator. | Reserve a parsimonious logistic\u2011regression model 
+for the final clinical tool; provide SHAP or variable\u2011importance plots for transparency. |\n| **Regulatory pathway details** | \u201cEngage early with FDA/EMA\u201d is vague; qualification as a companion diagnostic will need a prospective clinical\u2011utility trial. | Outline a step\u2011wise regulatory roadmap (e.g., FDA\u2019s \u201cBiomarker Qualification Program\u201d submission timeline, pre\u2011IDE meeting). |\n| **Health\u2011economic analysis** | Mentioned only in manuscript planning; no analytical framework. | Define data elements (cost of CT, treatment de\u2011escalation, downstream imaging) and a decision\u2011analytic model (Markov) to be built alongside the validation phase. |\n\n---\n\n## Feasibility Rating  \n\n* **Operational feasibility:** **High** 
+\u2013 the plan lists concrete modules (ImagingProtocolDesigner, RadiomicsExtractor, ModelingModule, etc.) and realistic central data infrastructure. Minor adjustments to training depth and QC metrics will smooth execution.  \n* **Statistical feasibility:** **Moderate\u2011High** \u2013 nested CV and external validation are appropriate; the main 
+risk is over\u2011parameterisation relative to event numbers. Tightening the feature\u2011selection step and EPV calculations will mitigate this.  \n* **Regulatory/ethical feasibility:** **High** \u2013 comprehensive consent, GDPR/HIPAA compliance, and DSMB coverage are already built in.  \n\nOverall, with clarification of the hypothesis, correction of the age criterion, a more detailed sample\u2011size/EPV justification, and the added safeguards listed above, the study plan is both **scientifically sound** and **practically implementable**."
+}
