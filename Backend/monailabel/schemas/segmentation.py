@@ -11,6 +11,12 @@ class SegmentationBase(BaseModel):
 class SegmentationCreate(SegmentationBase):
     pass
 
+class SegmentationUpdate(BaseModel):
+    segmentation_type: str | None = None
+    method: str | None = None
+    model_name: str | None = None
+    created_at: str | None = None  # ISO format date-time
+
 class Segmentation(SegmentationBase):
     class Config:
         orm_mode = True
