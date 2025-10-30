@@ -3,8 +3,8 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from datetime import datetime
-from monailabel.models import chat_sessions as models
-from monailabel.schemas import chat_sessions as schemas
+from models import chat_sessions as models
+from schemas import chat_sessions as schemas
 
 
 # ---------------------------
