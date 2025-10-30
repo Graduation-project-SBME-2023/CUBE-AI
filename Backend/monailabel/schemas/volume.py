@@ -11,6 +11,12 @@ class VolumeBase(BaseModel):
 class VolumeCreate(VolumeBase):
     pass
 
+class VolumeUpdate(BaseModel):
+    series_description: str | None = None
+    # modality: str | None = None
+    # num_slices: int | None = None
+
+
 class Volume(VolumeBase):
     class Config:
         orm_mode = True
