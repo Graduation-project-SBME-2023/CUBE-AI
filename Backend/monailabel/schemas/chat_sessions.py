@@ -1,6 +1,7 @@
 # schemas/chat_session.py
 from pydantic import BaseModel
 from typing import Optional
+from datetime import date, datetime
 
 class ChatSessionBase(BaseModel):
     study_UID: str
@@ -18,8 +19,8 @@ class ChatSessionUpdate(BaseModel):
 
 class ChatSession(ChatSessionBase):
     chat_id: int
-    started_at: Optional[str] = None
-    last_activity: Optional[str] = None
+    started_at: datetime = None
+    last_activity: datetime = None
 
     class Config:
         orm_mode = True

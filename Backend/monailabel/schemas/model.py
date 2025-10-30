@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from datetime import datetime
 
 class ModelBase(BaseModel):
     
@@ -12,6 +13,6 @@ class ModelCreate(ModelBase):
 
 class Model(ModelBase):
     model_id: int
-    created_at: str | None = None
+    created_at: datetime | None = None
     class Config:
         orm_mode = True
