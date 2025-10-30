@@ -2,10 +2,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 import crud, schemas
 from core.database import get_db
-from schemas.patient import PatientCreate, PatientUpdate
+from schemas.patient import PatientCreate, PatientUpdate, Patient
+from datetime import date
 
 
 router = APIRouter(prefix="/patients", tags=["patients"])
+
+def calculate_age(dob: date) -> int:
+    today = date.today()
+    return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
 
 @router.post("/", response_model=schemas.Patient)
 def create_patient(patient: schemas.PatientCreate, db: Session = Depends(get_db)):
@@ -14,11 +19,15 @@ def create_patient(patient: schemas.PatientCreate, db: Session = Depends(get_db)
 @router.get("/", response_model=list[schemas.Patient])
 async def read_patients(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     patients = await crud.get_patients(db, skip=skip, limit=limit)
+    for p in patients:
+        p.age = calculate_age(p.birth_date)
     return patients
 
 @router.get("/{patient_id}", response_model=schemas.Patient)
 async def read_patient(patient_id: int, db: Session = Depends(get_db)):
-    return await crud.get_patient(db, patient_id)
+    p = await crud.get_patient(db, patient_id)
+    p.age = calculate_age(p.birth_date)
+    return p
 
 
 @router.put("/{patient_id}", response_model=schemas.Patient)
