@@ -514,35 +514,35 @@ export default class InteractiveSegmentation extends BaseTab {
     console.log("the parameters are ",params);
 
     
-    const response = await this.props
-      .client()
-      .infer('sam', displaySet.SeriesInstanceUID, params);
-    const labels = info.models['sam'].labels;
-    console.log(response);
+    // const response = await this.props
+    //   .client()
+    //   .infer('sam', displaySet.SeriesInstanceUID, params);
+    // const labels = info.models['sam'].labels;
+    // console.log(response);
 
-    if (!nid) {
-      window.snackbar.hideAll();
-    } else {
-      this.notification.hide(nid);
-    }
+    // if (!nid) {
+    //   window.snackbar.hideAll();
+    // } else {
+    //   this.notification.hide(nid);
+    // }
 
-    if (response.status !== 200) {
-      this.notification.show({
-        title: 'MONAI Label',
-        message: 'Failed to Run Segmentation',
-        type: 'error',
-        duration: 5000,
-      });
-    } else {
-      this.notification.show({
-        title: 'MONAI Label',
-        message: 'Run SAM Segmentation Successfully',
-        type: 'success',
-        duration: 10000,
-      });
-    }
+    // if (response.status !== 200) {
+    //   this.notification.show({
+    //     title: 'MONAI Label',
+    //     message: 'Failed to Run Segmentation',
+    //     type: 'error',
+    //     duration: 5000,
+    //   });
+    // } else {
+    //   this.notification.show({
+    //     title: 'MONAI Label',
+    //     message: 'Run SAM Segmentation Successfully',
+    //     type: 'success',
+    //     duration: 10000,
+    //   });
+    // }
 
-    this.props.updateView(response, labels, model);
+    // this.props.updateView(response, labels, model);
   }
 
   correct_xy_format = (point) => {
@@ -689,32 +689,32 @@ export default class InteractiveSegmentation extends BaseTab {
       return;
     }
 
-    const response = await this.props
-      .client()
-      .infer(model, displaySet.SeriesInstanceUID, params);
-    const labels = info.models[model].labels;
-    console.log(response);
-    console.log("the parameters for model interactive run", params);
+    // const response = await this.props
+    //   .client()
+    //   .infer(model, displaySet.SeriesInstanceUID, params);
+    // const labels = info.models[model].labels;
+    // console.log(response);
+    // console.log("the parameters for model interactive run", params);
 
 
-    if (response.status !== 200) {
-      this.notification.show({
-        title: 'MONAI Label - ' + model,
-        message: 'Failed to Run Inference for Point Prompts',
-        type: 'error',
-        duration: 6000,
-      });
-      return;
-    }
+    // if (response.status !== 200) {
+    //   this.notification.show({
+    //     title: 'MONAI Label - ' + model,
+    //     message: 'Failed to Run Inference for Point Prompts',
+    //     type: 'error',
+    //     duration: 6000,
+    //   });
+    //   return;
+    // }
 
-    this.notification.show({
-      title: 'MONAI Label - ' + model,
-      message: 'Running Inference for Point Prompts - Successful',
-      type: 'success',
-      duration: 4000,
-    });
+    // this.notification.show({
+    //   title: 'MONAI Label - ' + model,
+    //   message: 'Running Inference for Point Prompts - Successful',
+    //   type: 'success',
+    //   duration: 4000,
+    // });
 
-    this.props.updateView(response, labels, model);
+    // this.props.updateView(response, labels, model);
   };
 
   // initPoints = () => {

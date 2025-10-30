@@ -13,6 +13,7 @@ import MonaiLabelClient from '../services/MonaiLabelClient';
 import SegmentationReader from '../utils/SegmentationReader';
 import MonaiSegmentation from './MonaiSegmentation';
 import SegmentationToolbox from './SegmentationToolbox';
+import AgentChat from './actions/AgentChat';;
 
 import { createReportAsync } from '@ohif/extension-default';
 import { servicesManager } from 'platform/app/src/App';
@@ -522,6 +523,20 @@ export default class MonaiLabelPanel extends Component {
                 getActiveViewportInfo={this.getActiveViewportInfo}
                 commandsManager={this.props.commandsManager}
               />
+              <AgentChat 
+                ref={this.actions['AgentChat']}
+                tabIndex={3}
+                activeTab={this.state.activeTab}
+                info={this.state.info}
+                servicesManager={this.props.servicesManager}
+                client={this.client}
+                notification={this.notification}
+                updateView={this.updateView}
+                onSelectActionTab={this.onSelectActionTab}
+                onOptionsConfig={this.onOptionsConfig}
+                getActiveViewportInfo={this.getActiveViewportInfo}
+                commandsManager={this.props.commandsManager}
+              />
 
               {/* <SmartEdit
               ref={this.actions['smartedit']}
@@ -581,6 +596,7 @@ export default class MonaiLabelPanel extends Component {
               extensionManager={this.props.extensionManager}
               commandsManager={this.props.commandsManager}
             /> */}
+         
           </>
         ))}
       </div>
