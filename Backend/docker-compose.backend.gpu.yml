@@ -13,8 +13,8 @@ services:
         sh -c "
         pip install psycopg2-binary &&
         alembic -c /alembic/alembic.ini upgrade head &&
+        python /monailabel/seeders/all_seeders.py &&
         python /monailabel/server_start.py
-        
         "
     environment:
       NVIDIA_VISIBLE_DEVICES: all
