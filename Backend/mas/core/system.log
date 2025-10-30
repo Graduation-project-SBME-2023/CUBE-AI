@@ -9,3 +9,52 @@
 2025-10-30 18:22:44,717 - __main__ - INFO - Extracting clinical hypothesis...
 2025-10-30 18:23:40,269 - __main__ - INFO - Study plan evaluation complete
 2025-10-30 18:23:40,273 - __main__ - INFO - Saved plan and hypothesis to config file
+
+
+
+
+'''
+given the executer 
+and planner I want to implement the orch and the user inputhandler 
+
+'''
+executor reads the current plan and start it 
+
+it's a simple class has an attribut of steps it runs these steps
+we pass the user input agent to it and 
+
+it's stateful 
+---> ||
+Orch
+" The main application that has an instance from every step "
+Has planner, Excuter, User input handler, and any needed module
+Each instance has access to common log file and common config file to share knowledge
+
+
+- Planner:
+    - Takes an input the user prompt of the task/hypothesis
+    - Write the output/steps/ plan to the config file 
+    
+- Executer:
+    - Reads the plan from the config file
+    - list the modules that will be excuted and make instanse of each module
+    - start excuting them one after other each module will write in the config file and the log
+    - no moving from module to the next until it returns a finish flag
+    - 
+    
+- User input handler:
+    - the planner or the excuter may need user input/ confirmation on steps
+    - each module inside the excuter may return a flag for needed input with description which will be passed to the user input handler to process and then send the user input again to the current phase or module and continue
+
+
+- user send a hypothesis and it's sent to the planner
+-  the planner do starts it its process until finishing it.
+    - if the planner status is required_input the user input handler take this and aquire the input then run the planner again
+    - if the planner finished the data is logged and config is changed
+    
+- the executer starts the phase of excution and read from the config file the steps , initalize the modules and keep their status and run them inorder each module may need to raise an input required flag or keep unitl finshing the steps
+- till it finishes and report ever thing
+    
+'''
+
+'''

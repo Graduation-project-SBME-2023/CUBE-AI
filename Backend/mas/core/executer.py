@@ -92,6 +92,8 @@ class Executer:
             logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         )
         logger.addHandler(file_handler)
+        
+        
 
     async def initialize_modules(self):
         """Initialize all modules needed for execution"""
