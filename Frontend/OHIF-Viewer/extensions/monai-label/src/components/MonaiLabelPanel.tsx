@@ -571,7 +571,7 @@ _update = async (response, labelNames) => {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              case_id: this.StudyInstanceUID,
+              study_uid: this.StudyInstanceUID,
               task_name: this.workflowName,
               series_instance_uid: this.SeriesInstanceUID,
               instance_uid: naturalizedReport.SeriesInstanceUID,

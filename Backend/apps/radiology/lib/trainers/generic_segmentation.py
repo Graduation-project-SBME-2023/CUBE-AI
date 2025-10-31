@@ -25,7 +25,7 @@ class GenericSegmentation(BasicTrainTask):
         root_nnunet_dir,
         fold=0,
         plan_type="2d",
-        trainer_class="nnUNetTrainer",
+        trainer_class="CustomNnUnetTrainer",
         description="Train and infer using nnUNet for segmentation",
         **kwargs,
     ):
@@ -39,17 +39,9 @@ class GenericSegmentation(BasicTrainTask):
         self.model_name = model_name
         self.fold = fold
         self.trainer_class = trainer_class
-        self.model_dir=model_dir
+        self.model_dir = model_dir
         self.plan_type = plan_type
         self.root_nnunet_dir = root_nnunet_dir
-
-        # TODO : remove this hardcoding
-
-        # self.root_nnunet_dir = r"C:\Users\Lenovo\Desktop\Grad\Monai\radiology\nnunet"
-
-
-
-
 
         os.environ["nnUNet_raw"] = os.path.join(self.root_nnunet_dir, "nnUNet_raw")
         os.environ["nnUNet_preprocessed"] = os.path.join(self.root_nnunet_dir, "nnUNet_preprocessed")
@@ -59,8 +51,6 @@ class GenericSegmentation(BasicTrainTask):
         logger.info(f"nnUNet_preprocessed: {os.environ['nnUNet_preprocessed']}")
         logger.info(f"nnUNet_results: {os.environ['nnUNet_results']}")
 
-
-
         # Extract the dataset name from the model name
         self.task_name = self.get_data_name_from_model_name(self.model_name)
 
@@ -68,7 +58,7 @@ class GenericSegmentation(BasicTrainTask):
         # Extract the numeric part from the task name
         self.task_id = ''.join(filter(str.isdigit, self.task_name))
 
-        super().__init__(model_dir, description, **kwargs)
+        super().__init__(model_dir, description, config={"multi_gpu": False}, **kwargs)
 
     # get data name from nnUnet directory by extracting the numeric part from the task name
     def get_data_name_from_model_name(self, model_name):
@@ -112,16 +102,17 @@ class GenericSegmentation(BasicTrainTask):
         command = [    # change
             "nnUNetv2_plan_and_preprocess",
             "-d", self.task_id,
-            "--verify_dataset_integrity"
+            "--verify_dataset_integrity",
+            "-np", "3"
         ]
 
-        logger.info(f"Running command: {{' '.join(command)}}")
+        logger.info(f"Running command: {' '.join(command)}")
 
         try:
             subprocess.run(command, check=True)
         except subprocess.CalledProcessError as e:
             logger.error(f"Preprocessing failed with error: {e}")
-            raise RuntimeError(f"Preprocessing failed for dataset {self.task_name}","error: {e}")
+            raise RuntimeError(f"Preprocessing failed for dataset {self.task_name} error: {e}")
 
         logger.info(f"Preprocessed data saved to: {preprocessed_data_path}")
 
@@ -218,3 +209,6 @@ class GenericSegmentation(BasicTrainTask):
     def val_post_transforms(self, context: Context):
         # nnUNet handles its own validation postprocessing.
         return None  # nnUNet handles postprocessing internally
+    
+    def pre_process(self, request, datastore):
+        return None

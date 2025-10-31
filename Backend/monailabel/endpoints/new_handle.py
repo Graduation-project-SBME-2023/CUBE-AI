@@ -36,7 +36,7 @@ def ensure_all_task_folders(task_name: str) -> Tuple[Path, Path, Path]:
     """
     print('enter the ensure_all_task_folders')
     index = len(list(NNUNET_RAW.glob("Dataset*"))) + 1
-    dataset_name = f"Dataset{index:03d}_{task_name}"
+    dataset_name = f"Task{index:03d}_{task_name}"
 
     raw_folder = NNUNET_RAW / dataset_name
     preprocessed_folder = NNUNET_PREPROCESSED / dataset_name
