@@ -1,9 +1,7 @@
-
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
 
 import './ModelSelector.css';
-import AutoSegmentation from '../components/actions/AutoSegmentation';
 
 
 export default class ModelSelector extends Component {
@@ -52,16 +50,14 @@ export default class ModelSelector extends Component {
 
     if (this.props.isDisabled) return; // Disable model change if isDisabled is true
 
-    console.log("evt.target.value....", evt.target.value);
-    console.log("I am here");
     this.setState({ currentModel: evt.target.value });
-    AutoSegmentation.clearSam2UIContrainers();
+    // AutoSegmentation.clearSam2UIContrainers();
 
-    if (evt.target.value == 'sam') {
-      // calc image embedding(if SAM model)
-      // console.log("Calculating image embeddings for SAM model...");
-      // AutoSegmentation.calculateImageEmbeddings(false);
-    }
+    // if (evt.target.value == 'sam') {
+    //   // calc image embedding(if SAM model)
+    //   console.log("Calculating image embeddings for SAM model...");
+    //   AutoSegmentation.calculateImageEmbeddings(false);
+    // }
 
     if (this.props.onSelectModel) this.props.onSelectModel(evt.target.value);
   };
@@ -127,6 +123,8 @@ export default class ModelSelector extends Component {
                     display: this.props.onClick ? 'block' : 'none',
                     fontSize: '12px',
                     padding: '2px 15px',
+                    background: "#010839ff",
+                    color: "#7bcfe9ff"
                   }}
                 >
                   {buttonText}

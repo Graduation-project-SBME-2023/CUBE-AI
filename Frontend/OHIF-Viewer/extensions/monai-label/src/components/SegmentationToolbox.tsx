@@ -344,7 +344,7 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
   //     ]}
   //   />
   // );
-  return null ;
+  return null;
 }
 
 function _getToolNamesFromCategory(category) {

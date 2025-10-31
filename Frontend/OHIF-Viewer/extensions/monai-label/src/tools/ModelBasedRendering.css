@@ -1,0 +1,35 @@
+.box_button {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 2px solid #010839ff;
+  background: #010839ff;
+  color: #7bcfe9ff;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.box_button:hover {
+  background: rgb(72, 193, 230);
+  color: rgb(255, 255, 255);
+  border-color:rgb(72, 193, 230);
+}
+.box_button:disabled {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+  background-color: #ccc !important;
+  pointer-events: none !important;
+}
+.add_object {
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 2px solid #010839ff;
+    background: #010839ff;
+    color: #7bcfe9ff;
+    font-weight: bold;
+    cursor:  pointer;
+}
+.add_object:hover{
+  background: rgb(72, 193, 230);
+  color: rgb(255, 255, 255);
+  border-color:rgb(72, 193, 230);
+}

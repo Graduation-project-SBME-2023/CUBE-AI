@@ -14,6 +14,9 @@ Backend/apps/radiology/sam2/checkpoints/sam2.1_hiera_large.pt
 **.pth
 Backend/models
 
+# Saved Data - will change this after fixing the env variables for all data directories
+*.nii.gz
+
 Backend/apps/radiology/logs/app.log
 
 # Docker volumes

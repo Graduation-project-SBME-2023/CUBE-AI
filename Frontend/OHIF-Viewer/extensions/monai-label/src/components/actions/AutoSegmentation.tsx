@@ -1791,7 +1791,7 @@ Update the ui based on sam2 points
       config && config.infer && config.infer[model] ? config.infer[model] : {};
 
     //Sepecfic configuration for sam
-    params.samc2onfig = this.state.prompts;
+    params.sam2config = this.state.prompts;
     if (this.state.buttonClicked === true){
     params.Mask = this.state.prevMask2Refine ;
     console.log("mask has been sent to sam");   
@@ -1808,6 +1808,8 @@ Update the ui based on sam2 points
     } else {
       params.State = "2d";
     }
+
+    console.log("the parameters are ",params);
 
     const labels = info.models[model].labels;
     const response = await this.props
@@ -1980,7 +1982,7 @@ Update the ui based on sam2 points
       config && config.infer && config.infer[model] ? config.infer[model] : {};
 
     if (model == 'sam') {
-      params.samc2onfig = this.state.prompts;
+      params.sam2config = this.state.prompts;
       params.State = "3d";
 
       if (samCheck) {
@@ -2030,6 +2032,7 @@ Update the ui based on sam2 points
     const response = await this.props
       .client()
       .segmentation(model, image, params);
+    console.log("the parameters for model autoseg run", params);
     if (model != 'sam'){ 
     const extractedData = await this.extractMaskFromResponse(response);
     this.setState({

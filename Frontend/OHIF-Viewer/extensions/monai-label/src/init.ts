@@ -2,7 +2,9 @@ import {
   addTool,
 } from '@cornerstonejs/tools';
 import { Types } from '@ohif/core';
-import ProbeMONAILabelTool from './tools/ProbeMONAILabelTool';
+import ProbeMONAILabelToolPos from './tools/ProbeMONAILabelToolPos';
+import ProbeMONAILabelToolNeg from './tools/ProbeMONAILabelToolNeg';
+import RecROIToolMONAILabel from './tools/RecROIToolMONAILabel';
 
 /**
  * @param {object} configuration
@@ -11,5 +13,7 @@ export default function init({
   servicesManager,
   configuration = {},
 }: Types.Extensions.ExtensionParams): void {
-  addTool(ProbeMONAILabelTool);
+  addTool(ProbeMONAILabelToolPos);
+  addTool(ProbeMONAILabelToolNeg);
+  addTool(RecROIToolMONAILabel);
 }

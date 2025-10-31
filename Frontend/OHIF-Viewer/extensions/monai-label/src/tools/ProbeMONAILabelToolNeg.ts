@@ -1,10 +1,10 @@
-import { Types, metaData, utilities as csUtils } from '@cornerstonejs/core';
 import { ProbeTool, annotation, drawing } from '@cornerstonejs/tools';
+import { getEnabledElement, type Types } from '@cornerstonejs/core';
 
 const { getAnnotations } = annotation.state;
 
-export default class ProbeMONAILabelTool extends ProbeTool {
-  static toolName = 'ProbeMONAILabel';
+export default class ProbeMONAILabelToolNeg extends ProbeTool {
+  static toolName = 'ProbeMONAILabelNeg';
 
   constructor(
     toolProps = {},
@@ -55,9 +55,7 @@ export default class ProbeMONAILabelTool extends ProbeTool {
 
       styleSpecifier.annotationUID = annotationUID;
 
-      const color =
-        this.configuration?.customColor ??
-        this.getStyle('color', styleSpecifier, annotation);
+      const color = 'red';
 
       // If rendering engine has been destroyed while rendering
       if (!viewport.getRenderingEngine()) {
@@ -67,12 +65,23 @@ export default class ProbeMONAILabelTool extends ProbeTool {
 
       const handleGroupUID = '0';
 
-      drawing.drawHandles(
+      const size = 6;
+      const [x, y] = canvasCoordinates;
+      drawing.drawLine(
         svgDrawingHelper,
         annotationUID,
-        handleGroupUID,
-        [canvasCoordinates],
-        { color }
+        `${annotationUID}-x1`,
+        [x - size, y - size],
+        [x + size, y + size],
+        { color, lineWidth: 2 }
+      );
+      drawing.drawLine(
+        svgDrawingHelper,
+        annotationUID,
+        `${annotationUID}-x2`,
+        [x - size, y + size],
+        [x + size, y - size],
+        { color, lineWidth: 2 }
       );
 
       renderStatus = true;
