@@ -1,0 +1,20 @@
+{
+  "subject_id": {
+    "method": "label",
+    "mapping": {
+      "case_001": 0,
+      "case_002": 1,
+      "case_003": 2,
+      "case_004": 3,
+      "case_005": 4,
+      "case_006": 5,
+      "case_007": 6,
+      "case_008": 7,
+      "case_009": 8,
+      "case_010": 9,
+      "case_021": 10,
+      "case_022": 11,
+      "case_035": 12
+    }
+  }
+}
