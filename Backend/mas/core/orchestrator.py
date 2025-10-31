@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 from planner import Planner, ClinicalHypothesis  # absolute import
 from executer import Executer, ModuleStatus
-
+from user_input_handler import UserInputHandler
 # ----------------------------------------------------------------------
 # Logging (one logger for the whole orchestrator)
 # ----------------------------------------------------------------------
@@ -40,9 +40,9 @@ class Orchestrator:
     """
     Very small orchestrator:
 
-    1️⃣  Run the Planner on the supplied hypothesis.
-    2️⃣  Initialise the Executer with the plan returned by the Planner.
-    3️⃣  Run the Executer and return the combined result.
+        Run the Planner on the supplied hypothesis.
+        Initialise the Executer with the plan returned by the Planner.
+        Run the Executer and return the combined result.
     """
 
     def __init__(
@@ -53,11 +53,12 @@ class Orchestrator:
         self.config_path = Path(config_path)
         self.log_path = Path(log_path)
         self.state = SystemState.IDLE
-
+        self.current_hypothesis = None
         # The Planner does not need any arguments at construction time –
         # it will receive the hypothesis when ``run`` is called.
         self.planner = Planner(config_path=str(self.config_path), log_path=str(self.log_path))
-
+        self.require_input = False
+        self.user_input_handler = UserInputHandler()
     # ------------------------------------------------------------------
     # Helper to persist the orchestrator state (optional – useful for debugging)
     # ------------------------------------------------------------------
@@ -74,10 +75,26 @@ class Orchestrator:
         except Exception as exc:
             logger.error("Failed to persist orchestrator state: %s", exc)
 
+    def run(self):
+        
+        if self.current_hypothesis == None or self.require_input == True :
+                 result = self.user_input_handler.handle_user_input()
+                 if result['finished'] == True:
+                     return result
+        else:
+            result = self.process_hypothesis(hypothesis_text= self.current_hypothesis)
+            if result['status'] == "require_input":
+                self.require_input == True
+                
+            
+        
+       
+   
     # ------------------------------------------------------------------
     # Core method – receives a hypothesis string (or ClinicalHypothesis) and
     # runs the whole pipeline.
     # ------------------------------------------------------------------
+    
     async def process_hypothesis(
         self,
         hypothesis_text: str,
@@ -89,9 +106,9 @@ class Orchestrator:
         Parameters
         ----------
         hypothesis_text : str
-            Free‑form description of the clinical hypothesis.
+            Free-form description of the clinical hypothesis.
         tools_doc : str, optional
-            Documentation of the available modules – passed straight to the
+            Documentation of the available modules - passed straight to the
             Planner (the default empty string works because the Planner
             already knows the module list via the agent registry).
 
