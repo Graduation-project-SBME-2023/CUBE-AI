@@ -6,7 +6,65 @@ from typing import Optional, Dict, Any
 
 
 
+
 api = FastAPI(title="MCP Server API", version="1.0.0")
+
+
+
+
+
+'''
+
+Retrive inputs
+
+Segmentation and send inputs
+
+
+
+
+function 
+
+agent (tool = function)
+
+task == 
+agent.run()
+----
+
+return
+{ 
+    "data : tools >> tool x"
+    "function: call" 
+    "tools: (paramters)"
+}
+
+context
+retreive
+
+tool get_current_dataset()
+
+utils:
+
+ag y:
+- 
+
+paramter: json
+memory: dataset.json
+
+
+'''
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
