@@ -1,0 +1,23 @@
+featureClass:
+  firstorder: []
+  glcm: []
+  gldm: []
+  glrlm: []
+  glszm: []
+  ngtdm: []
+  shape: []
+imageType:
+  Original: {}
+setting:
+  binWidth: 25.0
+  correctMask: true
+  force2D: false
+  interpolator: sitkBSpline
+  normalize: true
+  normalizeScale: 100
+  padDistance: 10
+  removeOutliers: 3
+  resampledPixelSpacing:
+  - 1.0
+  - 1.0
+  - 1.0
