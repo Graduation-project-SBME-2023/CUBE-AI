@@ -9,4 +9,4 @@ async def get_all_patients_info():
     specifying the population that is targeted in the study
     """
     response = requests.get("http://localhost:8000/patients")
-    return response
+    return response.json()

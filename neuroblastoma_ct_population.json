@@ -1,0 +1,50 @@
+{
+    "IncludedData": [
+        {
+            "age": 13,
+            "ct_study_uids": [
+                "1.2.840.113619.101617",
+                "1.2.840.113619.111405"
+            ],
+            "gender": "F",
+            "patient_id": 1
+        },
+        {
+            "age": 13,
+            "ct_study_uids": [
+                "1.2.840.113619.201942",
+                "1.2.840.113619.211373"
+            ],
+            "gender": "F",
+            "patient_id": 2
+        },
+        {
+            "age": 11,
+            "ct_study_uids": [
+                "1.2.840.113619.301847",
+                "1.2.840.113619.311762"
+            ],
+            "gender": "F",
+            "patient_id": 3
+        },
+        {
+            "age": 11,
+            "ct_study_uids": [
+                "1.2.840.113619.401375",
+                "1.2.840.113619.411385"
+            ],
+            "gender": "M",
+            "patient_id": 4
+        },
+        {
+            "age": 15,
+            "ct_study_uids": [
+                "1.2.840.113619.501927",
+                "1.2.840.113619.511483"
+            ],
+            "gender": "M",
+            "patient_id": 5
+        }
+    ],
+    "Rationale": "All five patients have CT studies explicitly described as 'Suspicion of Neuroblastoma'. Neuroblastoma primarily affects children, and all patients are within the pediatric age range (11‑15 years). Therefore, the entire cohort is appropriate for evaluating a radiomics-derived CT imaging signature to predict high‑risk neuroblastoma."
+}
