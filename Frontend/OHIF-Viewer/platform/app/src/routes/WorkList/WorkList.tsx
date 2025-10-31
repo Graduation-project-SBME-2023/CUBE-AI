@@ -37,6 +37,7 @@ import {
 import i18n from '@ohif/i18n';
 import { set } from 'lodash';
 import { use } from 'i18next';
+import { Color } from 'platform/ui/src/storybook/color/color.js';
 
 const { sortBySeriesDate } = utils;
 
@@ -700,6 +701,7 @@ function WorkList({
                 <EmptyStudies />
               )}
             </div>
+          
           )}
         </div>
         <div className="w-1/4 flex-shrink-0 bg-black p-4 text-white" style={{ paddingTop: 0}}>
