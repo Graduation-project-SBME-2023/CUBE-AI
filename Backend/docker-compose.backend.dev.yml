@@ -10,3 +10,5 @@ services:
       MONAI_LABEL_RELOAD: "true"
       DATABASE_URL: postgresql+asyncpg://workflow_user:password@postgres:5432/workflow_db
       MODELS_DIR: /models
+      NNUNET_DIR: /NN_Unet
+      GENERAL_DATA_DIR: /General_Data

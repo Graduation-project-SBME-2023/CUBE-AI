@@ -171,7 +171,10 @@ class MyApp(MONAILabelApp):
 
     def create_task(self, model_name, labels,fold, plan_type):
         # Update JSON file for persistence
+        logging.info(f"Creating model '{model_name}' with labels: {labels}, fold: {fold}, plan_type: {plan_type}")
+        logging.info("updating json file")
         self.update_jsonfile(model_name, labels, fold, plan_type)
+        logging.info("json file updated")
 
         # Initialize the TaskConfig (GenericSegmentation)
         model_config = Gconf(
