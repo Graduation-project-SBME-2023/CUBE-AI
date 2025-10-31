@@ -57,4 +57,379 @@ Each instance has access to common log file and common config file to share know
     
 '''
 
-'''
+'''2025-10-30 23:37:07,669 - planner - INFO - Saved plan and hypothesis to config file
+2025-10-30 23:37:07,671 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-10-30 23:37:07,672 - planner - INFO - Extracting clinical hypothesis...
+2025-10-30 23:39:59,735 - planner - INFO - Saved plan and hypothesis to config file
+2025-10-30 23:39:59,736 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-10-30 23:39:59,736 - planner - INFO - Extracting clinical hypothesis...
+2025-10-30 23:40:57,281 - planner - INFO - Saved plan and hypothesis to config file
+2025-10-30 23:40:57,281 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-10-30 23:40:57,282 - planner - INFO - Extracting clinical hypothesis...
+2025-10-31 00:00:28,024 - planner - INFO - Saved plan and hypothesis to config file
+2025-10-31 00:00:28,025 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-10-31 00:00:28,026 - planner - INFO - Extracting clinical hypothesis...
+2025-10-31 00:01:23,214 - planner - INFO - Study plan evaluation complete
+2025-10-31 00:01:23,216 - planner - INFO - Saved plan and hypothesis to config file
+2025-10-31 00:10:55,582 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:10:55,582 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:11:37,836 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:11:37,837 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:12:03,950 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:12:03,951 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:12:28,408 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:12:28,408 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:12:54,834 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:12:54,835 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:12:54,835 - __main__ - WARNING - Step 'Define Study Objectives and Endpoints' has no matched module
+2025-10-31 00:12:54,835 - __main__ - WARNING - Step 'Form a Multidisciplinary Steering Committee' has no matched module
+2025-10-31 00:12:54,835 - __main__ - WARNING - Step 'Develop a Detailed Study Protocol' has no matched module
+2025-10-31 00:12:54,836 - __main__ - WARNING - Step 'Ethics and Regulatory Approvals' has no matched module
+2025-10-31 00:12:54,836 - __main__ - WARNING - Step 'Site Selection and Training' has no matched module
+2025-10-31 00:14:46,204 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:14:46,204 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:14:46,204 - __main__ - WARNING - Step 'Define Study Objectives and Endpoints' has no matched module
+2025-10-31 00:14:46,204 - __main__ - WARNING - Step 'Form a Multidisciplinary Steering Committee' has no matched module
+2025-10-31 00:14:46,205 - __main__ - WARNING - Step 'Develop a Detailed Study Protocol' has no matched module
+2025-10-31 00:14:46,205 - __main__ - WARNING - Step 'Ethics and Regulatory Approvals' has no matched module
+2025-10-31 00:14:46,205 - __main__ - WARNING - Step 'Site Selection and Training' has no matched module
+2025-10-31 00:14:46,446 - __main__ - ERROR - Failed to initialize module ImagingProtocolDesigner: ImagingProtocolDesigner.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:14:46,446 - __main__ - ERROR - Failed to initialize module PopulationSelector: PopulationSelector.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:14:46,446 - __main__ - WARNING - Step 'Image Collection and Centralized Storage' has no matched module
+2025-10-31 00:14:46,446 - __main__ - ERROR - Failed to initialize module RadiomicsExtractor: RadiomicsExtractor.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:14:46,446 - __main__ - WARNING - Step 'Data Harmonization and Feature Reduction' has no matched module
+2025-10-31 00:14:46,447 - __main__ - ERROR - Failed to initialize module ModelingModule: ModelingModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:14:46,447 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:14:46,447 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:14:46,448 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:14:46,448 - __main__ - WARNING - Step 'Safety Monitoring and Interim Analyses' has no matched module
+2025-10-31 00:14:46,448 - __main__ - WARNING - Step 'Interpretation and Clinical Integration Workshop' has no matched module
+2025-10-31 00:14:46,448 - __main__ - WARNING - Step 'Manuscript Preparation and Dissemination' has no matched module
+2025-10-31 00:14:46,448 - __main__ - WARNING - Step 'Regulatory and Implementation Planning' has no matched module
+2025-10-31 00:14:46,449 - __main__ - ERROR - Failed to initialize module ModelingModule: ModelingModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:14:46,451 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:14:46,452 - __main__ - ERROR - Execution failed: 'dict' object has no attribute 'steps'
+2025-10-31 00:14:46,482 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:15:31,312 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:15:31,312 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:15:31,312 - __main__ - WARNING - Step 'Define Study Objectives and Endpoints' has no matched module
+2025-10-31 00:15:31,313 - __main__ - WARNING - Step 'Form a Multidisciplinary Steering Committee' has no matched module
+2025-10-31 00:15:31,313 - __main__ - WARNING - Step 'Develop a Detailed Study Protocol' has no matched module
+2025-10-31 00:15:31,313 - __main__ - WARNING - Step 'Ethics and Regulatory Approvals' has no matched module
+2025-10-31 00:15:31,314 - __main__ - WARNING - Step 'Site Selection and Training' has no matched module
+2025-10-31 00:15:31,555 - __main__ - ERROR - Failed to initialize module ImagingProtocolDesigner: ImagingProtocolDesigner.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:31,555 - __main__ - ERROR - Failed to initialize module PopulationSelector: PopulationSelector.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:31,555 - __main__ - WARNING - Step 'Image Collection and Centralized Storage' has no matched module
+2025-10-31 00:15:31,556 - __main__ - ERROR - Failed to initialize module RadiomicsExtractor: RadiomicsExtractor.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:31,556 - __main__ - WARNING - Step 'Data Harmonization and Feature Reduction' has no matched module
+2025-10-31 00:15:31,556 - __main__ - ERROR - Failed to initialize module ModelingModule: ModelingModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:31,556 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:31,556 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:31,557 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:31,557 - __main__ - WARNING - Step 'Safety Monitoring and Interim Analyses' has no matched module
+2025-10-31 00:15:31,557 - __main__ - WARNING - Step 'Interpretation and Clinical Integration Workshop' has no matched module
+2025-10-31 00:15:31,557 - __main__ - WARNING - Step 'Manuscript Preparation and Dissemination' has no matched module
+2025-10-31 00:15:31,557 - __main__ - WARNING - Step 'Regulatory and Implementation Planning' has no matched module
+2025-10-31 00:15:31,557 - __main__ - ERROR - Failed to initialize module ModelingModule: ModelingModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:31,559 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:15:31,559 - __main__ - ERROR - Execution failed: 'dict' object has no attribute 'name'
+2025-10-31 00:15:31,583 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:15:55,415 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:15:55,415 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:15:55,415 - __main__ - WARNING - Step 'Define Study Objectives and Endpoints' has no matched module
+2025-10-31 00:15:55,416 - __main__ - WARNING - Step 'Form a Multidisciplinary Steering Committee' has no matched module
+2025-10-31 00:15:55,416 - __main__ - WARNING - Step 'Develop a Detailed Study Protocol' has no matched module
+2025-10-31 00:15:55,416 - __main__ - WARNING - Step 'Ethics and Regulatory Approvals' has no matched module
+2025-10-31 00:15:55,416 - __main__ - WARNING - Step 'Site Selection and Training' has no matched module
+2025-10-31 00:15:55,647 - __main__ - ERROR - Failed to initialize module ImagingProtocolDesigner: ImagingProtocolDesigner.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:55,647 - __main__ - ERROR - Failed to initialize module PopulationSelector: PopulationSelector.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:55,647 - __main__ - WARNING - Step 'Image Collection and Centralized Storage' has no matched module
+2025-10-31 00:15:55,648 - __main__ - ERROR - Failed to initialize module RadiomicsExtractor: RadiomicsExtractor.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:55,648 - __main__ - WARNING - Step 'Data Harmonization and Feature Reduction' has no matched module
+2025-10-31 00:15:55,648 - __main__ - ERROR - Failed to initialize module ModelingModule: ModelingModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:55,648 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:55,649 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:55,649 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:55,649 - __main__ - WARNING - Step 'Safety Monitoring and Interim Analyses' has no matched module
+2025-10-31 00:15:55,649 - __main__ - WARNING - Step 'Interpretation and Clinical Integration Workshop' has no matched module
+2025-10-31 00:15:55,650 - __main__ - WARNING - Step 'Manuscript Preparation and Dissemination' has no matched module
+2025-10-31 00:15:55,650 - __main__ - WARNING - Step 'Regulatory and Implementation Planning' has no matched module
+2025-10-31 00:15:55,650 - __main__ - ERROR - Failed to initialize module ModelingModule: ModelingModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:15:55,652 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:15:55,652 - __main__ - WARNING - Skipping step Define Study Objectives and Endpoints - no matched module
+2025-10-31 00:15:55,652 - __main__ - WARNING - Skipping step Form a Multidisciplinary Steering Committee - no matched module
+2025-10-31 00:15:55,652 - __main__ - WARNING - Skipping step Develop a Detailed Study Protocol - no matched module
+2025-10-31 00:15:55,652 - __main__ - WARNING - Skipping step Ethics and Regulatory Approvals - no matched module
+2025-10-31 00:15:55,653 - __main__ - WARNING - Skipping step Site Selection and Training - no matched module
+2025-10-31 00:15:55,653 - __main__ - ERROR - Module ImagingProtocolDesigner failed, stopping execution
+2025-10-31 00:15:55,674 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:43:12,829 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:43:12,830 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:43:12,830 - __main__ - WARNING - Step 'Define Study Objectives and Endpoints' has no matched module
+2025-10-31 00:43:12,830 - __main__ - WARNING - Step 'Form a Multidisciplinary Steering Committee' has no matched module
+2025-10-31 00:43:12,830 - __main__ - WARNING - Step 'Develop a Detailed Study Protocol' has no matched module
+2025-10-31 00:43:12,831 - __main__ - WARNING - Step 'Ethics and Regulatory Approvals' has no matched module
+2025-10-31 00:43:12,831 - __main__ - WARNING - Step 'Site Selection and Training' has no matched module
+2025-10-31 00:43:13,066 - __main__ - ERROR - Failed to initialize module ImagingProtocolDesigner: ImagingProtocolDesigner.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:43:13,067 - __main__ - ERROR - Failed to initialize module PopulationSelector: PopulationSelector.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:43:13,067 - __main__ - WARNING - Step 'Image Collection and Centralized Storage' has no matched module
+2025-10-31 00:43:13,067 - __main__ - ERROR - Failed to initialize module RadiomicsExtractor: RadiomicsExtractor.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:43:13,068 - __main__ - WARNING - Step 'Data Harmonization and Feature Reduction' has no matched module
+2025-10-31 00:43:13,068 - __main__ - ERROR - Failed to initialize module ModelingModule: ModelingModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:43:13,068 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:43:13,068 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:43:13,069 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:43:13,069 - __main__ - WARNING - Step 'Safety Monitoring and Interim Analyses' has no matched module
+2025-10-31 00:43:13,069 - __main__ - WARNING - Step 'Interpretation and Clinical Integration Workshop' has no matched module
+2025-10-31 00:43:13,069 - __main__ - WARNING - Step 'Manuscript Preparation and Dissemination' has no matched module
+2025-10-31 00:43:13,070 - __main__ - WARNING - Step 'Regulatory and Implementation Planning' has no matched module
+2025-10-31 00:43:13,070 - __main__ - ERROR - Failed to initialize module ModelingModule: ModelingModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:43:13,074 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:43:13,074 - __main__ - WARNING - Skipping step Define Study Objectives and Endpoints - no matched module
+2025-10-31 00:43:13,074 - __main__ - WARNING - Skipping step Form a Multidisciplinary Steering Committee - no matched module
+2025-10-31 00:43:13,075 - __main__ - WARNING - Skipping step Develop a Detailed Study Protocol - no matched module
+2025-10-31 00:43:13,075 - __main__ - WARNING - Skipping step Ethics and Regulatory Approvals - no matched module
+2025-10-31 00:43:13,075 - __main__ - WARNING - Skipping step Site Selection and Training - no matched module
+2025-10-31 00:43:13,075 - __main__ - ERROR - Module ImagingProtocolDesigner previously failed, stopping execution
+2025-10-31 00:43:13,091 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:44:16,596 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:44:16,596 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:44:16,597 - __main__ - WARNING - Step 'Define Study Objectives and Endpoints' has no matched module
+2025-10-31 00:44:16,597 - __main__ - WARNING - Step 'Form a Multidisciplinary Steering Committee' has no matched module
+2025-10-31 00:44:16,597 - __main__ - WARNING - Step 'Develop a Detailed Study Protocol' has no matched module
+2025-10-31 00:44:16,597 - __main__ - WARNING - Step 'Ethics and Regulatory Approvals' has no matched module
+2025-10-31 00:44:16,598 - __main__ - WARNING - Step 'Site Selection and Training' has no matched module
+2025-10-31 00:44:16,827 - __main__ - ERROR - Failed to initialize module ImagingProtocolDesigner: ImagingProtocolDesigner.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:44:16,828 - __main__ - ERROR - Failed to initialize module PopulationSelector: PopulationSelector.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:44:16,828 - __main__ - WARNING - Step 'Image Collection and Centralized Storage' has no matched module
+2025-10-31 00:44:16,828 - __main__ - ERROR - Failed to initialize module RadiomicsExtractor: RadiomicsExtractor.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:44:16,828 - __main__ - WARNING - Step 'Data Harmonization and Feature Reduction' has no matched module
+2025-10-31 00:44:16,828 - __main__ - ERROR - Failed to initialize module ModelingModule: ModelingModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:44:16,829 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:44:16,829 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:44:16,829 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:44:16,829 - __main__ - WARNING - Step 'Safety Monitoring and Interim Analyses' has no matched module
+2025-10-31 00:44:16,830 - __main__ - WARNING - Step 'Interpretation and Clinical Integration Workshop' has no matched module
+2025-10-31 00:44:16,830 - __main__ - WARNING - Step 'Manuscript Preparation and Dissemination' has no matched module
+2025-10-31 00:44:16,830 - __main__ - WARNING - Step 'Regulatory and Implementation Planning' has no matched module
+2025-10-31 00:44:16,830 - __main__ - ERROR - Failed to initialize module ModelingModule: ModelingModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:44:16,832 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:44:16,835 - __main__ - WARNING - Skipping step Define Study Objectives and Endpoints - no matched module
+2025-10-31 00:44:16,835 - __main__ - WARNING - Skipping step Form a Multidisciplinary Steering Committee - no matched module
+2025-10-31 00:44:16,835 - __main__ - WARNING - Skipping step Develop a Detailed Study Protocol - no matched module
+2025-10-31 00:44:16,836 - __main__ - WARNING - Skipping step Ethics and Regulatory Approvals - no matched module
+2025-10-31 00:44:16,836 - __main__ - WARNING - Skipping step Site Selection and Training - no matched module
+2025-10-31 00:44:16,836 - __main__ - ERROR - Module ImagingProtocolDesigner previously failed, stopping execution
+2025-10-31 00:44:16,862 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:47:18,297 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:47:18,298 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:47:18,298 - __main__ - WARNING - Step 'Define Study Objectives and Endpoints' has no matched module
+2025-10-31 00:47:18,298 - __main__ - WARNING - Step 'Form a Multidisciplinary Steering Committee' has no matched module
+2025-10-31 00:47:18,299 - __main__ - WARNING - Step 'Develop a Detailed Study Protocol' has no matched module
+2025-10-31 00:47:18,299 - __main__ - WARNING - Step 'Ethics and Regulatory Approvals' has no matched module
+2025-10-31 00:47:18,299 - __main__ - WARNING - Step 'Site Selection and Training' has no matched module
+2025-10-31 00:47:18,312 - __main__ - ERROR - Failed to initialize module ImagingProtocolDesigner: ImagingProtocolDesigner.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:47:18,312 - __main__ - ERROR - Failed to initialize module PopulationSelector: PopulationSelector.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:47:18,313 - __main__ - WARNING - Step 'Image Collection and Centralized Storage' has no matched module
+2025-10-31 00:47:18,313 - __main__ - ERROR - Failed to initialize module RadiomicsExtractor: RadiomicsExtractor.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:47:18,313 - __main__ - WARNING - Step 'Data Harmonization and Feature Reduction' has no matched module
+2025-10-31 00:47:18,313 - __main__ - ERROR - Failed to initialize module ModelingModule: ModelingModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:47:18,314 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:47:18,314 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:47:18,314 - __main__ - ERROR - Failed to initialize module ValidationModule: ValidationModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:47:18,314 - __main__ - WARNING - Step 'Safety Monitoring and Interim Analyses' has no matched module
+2025-10-31 00:47:18,314 - __main__ - WARNING - Step 'Interpretation and Clinical Integration Workshop' has no matched module
+2025-10-31 00:47:18,315 - __main__ - WARNING - Step 'Manuscript Preparation and Dissemination' has no matched module
+2025-10-31 00:47:18,315 - __main__ - WARNING - Step 'Regulatory and Implementation Planning' has no matched module
+2025-10-31 00:47:18,315 - __main__ - ERROR - Failed to initialize module ModelingModule: ModelingModule.__init__() got an unexpected keyword argument 'workspace_path'
+2025-10-31 00:47:18,317 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:47:18,318 - __main__ - INFO - Discovered modules (ordered): ['mas.agents.feature_extraction_agent', 'mas.agents.imaging_agent', 'mas.agents.modeling_agent', 'mas.agents.outcome_agent', 'mas.agents.population_agent', 'mas.agents.qa_agent', 'mas.agents.reporting_agent', 'mas.agents.segmentation_agent', 'mas.agents.validation_agent']
+2025-10-31 00:47:18,318 - __main__ - INFO - Running module: mas.agents.feature_extraction_agent
+2025-10-31 00:47:18,319 - __main__ - ERROR - Execution failed: "ExecutionState" object has no field "current_module"
+2025-10-31 00:47:18,333 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:51:12,102 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:51:12,102 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:51:12,103 - __main__ - WARNING - Step 'Define Study Objectives and Endpoints' has no matched module
+2025-10-31 00:51:12,103 - __main__ - WARNING - Step 'Form a Multidisciplinary Steering Committee' has no matched module
+2025-10-31 00:51:12,103 - __main__ - WARNING - Step 'Develop a Detailed Study Protocol' has no matched module
+2025-10-31 00:51:12,103 - __main__ - WARNING - Step 'Ethics and Regulatory Approvals' has no matched module
+2025-10-31 00:51:12,104 - __main__ - WARNING - Step 'Site Selection and Training' has no matched module
+2025-10-31 00:51:12,116 - __main__ - ERROR - Failed to initialize module ImagingProtocolDesigner: "ModuleState" object has no field "instance"
+2025-10-31 00:51:12,116 - __main__ - ERROR - Failed to initialize module PopulationSelector: "ModuleState" object has no field "instance"
+2025-10-31 00:51:12,117 - __main__ - WARNING - Step 'Image Collection and Centralized Storage' has no matched module
+2025-10-31 00:51:12,117 - __main__ - ERROR - Failed to initialize module RadiomicsExtractor: "ModuleState" object has no field "instance"
+2025-10-31 00:51:12,117 - __main__ - WARNING - Step 'Data Harmonization and Feature Reduction' has no matched module
+2025-10-31 00:51:12,117 - __main__ - ERROR - Failed to initialize module ModelingModule: "ModuleState" object has no field "instance"
+2025-10-31 00:51:12,118 - __main__ - ERROR - Failed to initialize module ValidationModule: "ModuleState" object has no field "instance"
+2025-10-31 00:51:12,118 - __main__ - ERROR - Failed to initialize module ValidationModule: "ModuleState" object has no field "instance"
+2025-10-31 00:51:12,118 - __main__ - ERROR - Failed to initialize module ValidationModule: "ModuleState" object has no field "instance"
+2025-10-31 00:51:12,118 - __main__ - WARNING - Step 'Safety Monitoring and Interim Analyses' has no matched module
+2025-10-31 00:51:12,119 - __main__ - WARNING - Step 'Interpretation and Clinical Integration Workshop' has no matched module
+2025-10-31 00:51:12,119 - __main__ - WARNING - Step 'Manuscript Preparation and Dissemination' has no matched module
+2025-10-31 00:51:12,119 - __main__ - WARNING - Step 'Regulatory and Implementation Planning' has no matched module
+2025-10-31 00:51:12,119 - __main__ - ERROR - Failed to initialize module ModelingModule: "ModuleState" object has no field "instance"
+2025-10-31 00:51:12,123 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:51:12,124 - __main__ - INFO - Discovered modules (ordered): ['mas.agents.feature_extraction_agent', 'mas.agents.imaging_agent', 'mas.agents.modeling_agent', 'mas.agents.outcome_agent', 'mas.agents.population_agent', 'mas.agents.qa_agent', 'mas.agents.reporting_agent', 'mas.agents.segmentation_agent', 'mas.agents.validation_agent']
+2025-10-31 00:51:12,125 - __main__ - INFO - Running module: mas.agents.feature_extraction_agent
+2025-10-31 00:51:12,125 - __main__ - ERROR - Execution failed: "ExecutionState" object has no field "current_module"
+2025-10-31 00:51:12,142 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:53:14,222 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:53:14,222 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:53:14,223 - __main__ - WARNING - Step 'Define Study Objectives and Endpoints' has no matched module
+2025-10-31 00:53:14,223 - __main__ - WARNING - Step 'Form a Multidisciplinary Steering Committee' has no matched module
+2025-10-31 00:53:14,223 - __main__ - WARNING - Step 'Develop a Detailed Study Protocol' has no matched module
+2025-10-31 00:53:14,223 - __main__ - WARNING - Step 'Ethics and Regulatory Approvals' has no matched module
+2025-10-31 00:53:14,224 - __main__ - WARNING - Step 'Site Selection and Training' has no matched module
+2025-10-31 00:53:14,233 - __main__ - ERROR - Failed to initialize module ImagingProtocolDesigner: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:14,233 - __main__ - ERROR - Failed to initialize module PopulationSelector: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:14,234 - __main__ - WARNING - Step 'Image Collection and Centralized Storage' has no matched module
+2025-10-31 00:53:14,234 - __main__ - ERROR - Failed to initialize module RadiomicsExtractor: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:14,234 - __main__ - WARNING - Step 'Data Harmonization and Feature Reduction' has no matched module
+2025-10-31 00:53:14,234 - __main__ - ERROR - Failed to initialize module ModelingModule: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:14,235 - __main__ - ERROR - Failed to initialize module ValidationModule: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:14,235 - __main__ - ERROR - Failed to initialize module ValidationModule: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:14,235 - __main__ - ERROR - Failed to initialize module ValidationModule: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:14,235 - __main__ - WARNING - Step 'Safety Monitoring and Interim Analyses' has no matched module
+2025-10-31 00:53:14,235 - __main__ - WARNING - Step 'Interpretation and Clinical Integration Workshop' has no matched module
+2025-10-31 00:53:14,236 - __main__ - WARNING - Step 'Manuscript Preparation and Dissemination' has no matched module
+2025-10-31 00:53:14,236 - __main__ - WARNING - Step 'Regulatory and Implementation Planning' has no matched module
+2025-10-31 00:53:14,236 - __main__ - ERROR - Failed to initialize module ModelingModule: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:14,239 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:53:14,240 - __main__ - INFO - Discovered modules (ordered): ['mas.agents.feature_extraction_agent', 'mas.agents.imaging_agent', 'mas.agents.modeling_agent', 'mas.agents.outcome_agent', 'mas.agents.population_agent', 'mas.agents.qa_agent', 'mas.agents.reporting_agent', 'mas.agents.segmentation_agent', 'mas.agents.validation_agent']
+2025-10-31 00:53:14,241 - __main__ - INFO - Running module: mas.agents.feature_extraction_agent
+2025-10-31 00:53:14,241 - __main__ - ERROR - Execution failed: "ExecutionState" object has no field "current_module"
+2025-10-31 00:53:14,259 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:53:45,952 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:53:45,952 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:53:45,953 - __main__ - WARNING - Step 'Define Study Objectives and Endpoints' has no matched module
+2025-10-31 00:53:45,953 - __main__ - WARNING - Step 'Form a Multidisciplinary Steering Committee' has no matched module
+2025-10-31 00:53:45,953 - __main__ - WARNING - Step 'Develop a Detailed Study Protocol' has no matched module
+2025-10-31 00:53:45,953 - __main__ - WARNING - Step 'Ethics and Regulatory Approvals' has no matched module
+2025-10-31 00:53:45,954 - __main__ - WARNING - Step 'Site Selection and Training' has no matched module
+2025-10-31 00:53:45,965 - __main__ - ERROR - Failed to initialize module ImagingProtocolDesigner: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:45,966 - __main__ - ERROR - Failed to initialize module PopulationSelector: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:45,966 - __main__ - WARNING - Step 'Image Collection and Centralized Storage' has no matched module
+2025-10-31 00:53:45,966 - __main__ - ERROR - Failed to initialize module RadiomicsExtractor: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:45,966 - __main__ - WARNING - Step 'Data Harmonization and Feature Reduction' has no matched module
+2025-10-31 00:53:45,967 - __main__ - ERROR - Failed to initialize module ModelingModule: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:45,967 - __main__ - ERROR - Failed to initialize module ValidationModule: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:45,967 - __main__ - ERROR - Failed to initialize module ValidationModule: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:45,968 - __main__ - ERROR - Failed to initialize module ValidationModule: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:45,968 - __main__ - WARNING - Step 'Safety Monitoring and Interim Analyses' has no matched module
+2025-10-31 00:53:45,968 - __main__ - WARNING - Step 'Interpretation and Clinical Integration Workshop' has no matched module
+2025-10-31 00:53:45,968 - __main__ - WARNING - Step 'Manuscript Preparation and Dissemination' has no matched module
+2025-10-31 00:53:45,969 - __main__ - WARNING - Step 'Regulatory and Implementation Planning' has no matched module
+2025-10-31 00:53:45,969 - __main__ - ERROR - Failed to initialize module ModelingModule: 'ModuleState' object does not support item assignment
+2025-10-31 00:53:45,972 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:53:45,973 - __main__ - INFO - Discovered modules (ordered): ['mas.agents.feature_extraction_agent', 'mas.agents.imaging_agent', 'mas.agents.modeling_agent', 'mas.agents.outcome_agent', 'mas.agents.population_agent', 'mas.agents.qa_agent', 'mas.agents.reporting_agent', 'mas.agents.segmentation_agent', 'mas.agents.validation_agent']
+2025-10-31 00:53:45,973 - __main__ - INFO - Running module: mas.agents.feature_extraction_agent
+2025-10-31 00:53:45,973 - __main__ - ERROR - Execution failed: 'ExecutionState' object does not support item assignment
+2025-10-31 00:53:45,989 - __main__ - INFO - Saved execution state to config file
+2025-10-31 00:57:25,842 - __main__ - INFO - Starting execution of plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:57:25,842 - __main__ - INFO - Initializing modules for plan c13d031f-4789-4b5a-b803-207099d9a934
+2025-10-31 00:57:25,842 - __main__ - WARNING - Step 'Define Study Objectives and Endpoints' has no matched module
+2025-10-31 00:57:25,843 - __main__ - WARNING - Step 'Form a Multidisciplinary Steering Committee' has no matched module
+2025-10-31 00:57:25,843 - __main__ - WARNING - Step 'Develop a Detailed Study Protocol' has no matched module
+2025-10-31 00:57:25,843 - __main__ - WARNING - Step 'Ethics and Regulatory Approvals' has no matched module
+2025-10-31 00:57:25,843 - __main__ - WARNING - Step 'Site Selection and Training' has no matched module
+2025-10-31 00:57:25,852 - __main__ - INFO - Initialized module: ImagingProtocolDesigner
+2025-10-31 00:57:25,853 - __main__ - INFO - Initialized module: PopulationSelector
+2025-10-31 00:57:25,853 - __main__ - WARNING - Step 'Image Collection and Centralized Storage' has no matched module
+2025-10-31 00:57:25,853 - __main__ - INFO - Initialized module: RadiomicsExtractor
+2025-10-31 00:57:25,854 - __main__ - WARNING - Step 'Data Harmonization and Feature Reduction' has no matched module
+2025-10-31 00:57:25,854 - __main__ - INFO - Initialized module: ModelingModule
+2025-10-31 00:57:25,854 - __main__ - INFO - Initialized module: ValidationModule
+2025-10-31 00:57:25,855 - __main__ - INFO - Initialized module: ValidationModule
+2025-10-31 00:57:25,855 - __main__ - INFO - Initialized module: ValidationModule
+2025-10-31 00:57:25,855 - __main__ - WARNING - Step 'Safety Monitoring and Interim Analyses' has no matched module
+2025-10-31 00:57:25,855 - __main__ - WARNING - Step 'Interpretation and Clinical Integration Workshop' has no matched module
+2025-10-31 00:57:25,856 - __main__ - WARNING - Step 'Manuscript Preparation and Dissemination' has no matched module
+2025-10-31 00:57:25,856 - __main__ - WARNING - Step 'Regulatory and Implementation Planning' has no matched module
+2025-10-31 00:57:25,856 - __main__ - INFO - Initialized module: ModelingModule
+2025-10-31 00:57:25,859 - __main__ - ERROR - Failed to save state: Object of type ImagingProtocolDesigner is not JSON serializable
+2025-10-31 00:57:25,860 - __main__ - INFO - Modules to run (ordered, unique): ['ImagingProtocolDesigner', 'PopulationSelector', 'RadiomicsExtractor', 'ModelingModule', 'ValidationModule']
+2025-10-31 00:57:25,860 - __main__ - INFO - Running module [0]: ImagingProtocolDesigner
+2025-10-31 00:57:25,873 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,875 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,875 - __main__ - INFO - Module ImagingProtocolDesigner completed successfully.
+2025-10-31 00:57:25,876 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,876 - __main__ - INFO - Running module [1]: PopulationSelector
+2025-10-31 00:57:25,877 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,878 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,878 - __main__ - INFO - Module PopulationSelector completed successfully.
+2025-10-31 00:57:25,879 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,879 - __main__ - INFO - Running module [2]: RadiomicsExtractor
+2025-10-31 00:57:25,880 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,880 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,881 - __main__ - ERROR - Error while running module RadiomicsExtractor: RadiomicsExtractor.run() missing 1 required positional argument: 'mask_path'
+2025-10-31 00:57:25,881 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,881 - __main__ - INFO - Running module [3]: ModelingModule
+2025-10-31 00:57:25,882 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,883 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,883 - __main__ - INFO - Module ModelingModule completed successfully.
+2025-10-31 00:57:25,884 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,884 - __main__ - INFO - Running module [4]: ValidationModule
+2025-10-31 00:57:25,884 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,885 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,885 - __main__ - ERROR - Error while running module ValidationModule: ValidationModule.run() missing 1 required positional argument: 'ground_truth'
+2025-10-31 00:57:25,886 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 00:57:25,886 - __main__ - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:00:46,449 - planner - ERROR - Failed to save to config: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:00:46,490 - planner - INFO - Extracting clinical hypothesis...
+2025-10-31 01:01:48,723 - planner - INFO - Study plan evaluation complete
+2025-10-31 01:01:48,724 - planner - ERROR - Failed to save to config: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,745 - executer - INFO - Starting execution of plan 1467f513-c1c0-4dfd-b128-2a2d1fc8dfe1
+2025-10-31 01:01:48,745 - executer - INFO - Initializing modules for plan 1467f513-c1c0-4dfd-b128-2a2d1fc8dfe1
+2025-10-31 01:01:48,745 - executer - WARNING - Step 'Define Study Objectives and Hypotheses' has no matched module
+2025-10-31 01:01:48,746 - executer - WARNING - Step 'Form a Multicenter Consortium and Obtain Ethical Approvals' has no matched module
+2025-10-31 01:01:48,746 - executer - WARNING - Step 'Develop a Detailed Study Protocol' has no matched module
+2025-10-31 01:01:48,746 - executer - WARNING - Step 'Calculate Sample Size and Power' has no matched module
+2025-10-31 01:01:48,747 - executer - INFO - Initialized module: PopulationSelector
+2025-10-31 01:01:48,747 - executer - INFO - Initialized module: ImagingProtocolDesigner
+2025-10-31 01:01:48,747 - executer - INFO - Initialized module: RadiomicsExtractor
+2025-10-31 01:01:48,747 - executer - INFO - Initialized module: ModelingModule
+2025-10-31 01:01:48,748 - executer - INFO - Initialized module: ValidationModule
+2025-10-31 01:01:48,748 - executer - INFO - Initialized module: ValidationModule
+2025-10-31 01:01:48,748 - executer - INFO - Initialized module: ReportingAgent
+2025-10-31 01:01:48,748 - executer - INFO - Initialized module: QAAgent
+2025-10-31 01:01:48,748 - executer - INFO - Initialized module: ReportingAgent
+2025-10-31 01:01:48,753 - executer - INFO - Initialized module: ReportingAgent
+2025-10-31 01:01:48,753 - executer - INFO - Initialized module: ReportingAgent
+2025-10-31 01:01:48,754 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,754 - executer - INFO - Modules to run (ordered, unique): ['PopulationSelector', 'ImagingProtocolDesigner', 'RadiomicsExtractor', 'ModelingModule', 'ValidationModule', 'ReportingAgent', 'QAAgent']
+2025-10-31 01:01:48,754 - executer - INFO - Running module [0]: PopulationSelector
+2025-10-31 01:01:48,754 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,755 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,755 - executer - INFO - Module PopulationSelector completed successfully.
+2025-10-31 01:01:48,756 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,756 - executer - INFO - Running module [1]: ImagingProtocolDesigner
+2025-10-31 01:01:48,756 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,757 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,758 - executer - INFO - Module ImagingProtocolDesigner completed successfully.
+2025-10-31 01:01:48,758 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,759 - executer - INFO - Running module [2]: RadiomicsExtractor
+2025-10-31 01:01:48,760 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,761 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,761 - executer - ERROR - Error while running module RadiomicsExtractor: RadiomicsExtractor.run() missing 1 required positional argument: 'mask_path'
+2025-10-31 01:01:48,763 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,764 - executer - INFO - Running module [3]: ModelingModule
+2025-10-31 01:01:48,765 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,765 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,766 - executer - INFO - Module ModelingModule completed successfully.
+2025-10-31 01:01:48,766 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,767 - executer - INFO - Running module [4]: ValidationModule
+2025-10-31 01:01:48,767 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,768 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,768 - executer - ERROR - Error while running module ValidationModule: ValidationModule.run() missing 1 required positional argument: 'ground_truth'
+2025-10-31 01:01:48,769 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,769 - executer - INFO - Running module [5]: ReportingAgent
+2025-10-31 01:01:48,770 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,770 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,771 - executer - INFO - Module ReportingAgent completed successfully.
+2025-10-31 01:01:48,772 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,772 - executer - INFO - Running module [6]: QAAgent
+2025-10-31 01:01:48,773 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,775 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,775 - executer - INFO - Module QAAgent completed successfully.
+2025-10-31 01:01:48,776 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-10-31 01:01:48,778 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)

@@ -19,6 +19,8 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 import os
 
+from agent_registry import agents_description_for_prompt
+
 # ============================== CLIENT ==============================
 
 ollama_client = OllamaChatCompletionClient(
@@ -215,14 +217,7 @@ class Planner:
         print("[3️⃣] Matching study steps to available modules...")
         match_prompt = {
             "study_plan": self.plan.model_dump(),
-            "available_modules":"""
-                                - PopulationSelector: defines patient inclusion/exclusion.
-                                - ImagingProtocolDesigner: designs imaging acquisition settings.
-                                - SegmentationModule: automates ROI segmentation.
-                                - RadiomicsExtractor: extracts features.
-                                - ModelingModule: trains ML models for prediction.
-                                - ValidationModule: performs internal/external validation.
-                            """
+            "available_modules": agents_description_for_prompt()
         }
         match_response = await self.steps_matcher.run(task=json.dumps(match_prompt, indent=2))
         match_content = clean_markdown_json(match_response.messages[-1].content)

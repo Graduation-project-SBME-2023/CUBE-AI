@@ -13,6 +13,17 @@ from pydantic import BaseModel, Field
 
 from planner import StudyPlan, StudyStep
 
+from agent_registry import get_agent
+
+import inspect
+import importlib
+import pkgutil
+import logging
+from mas import agents  # assuming modules are in mas/agents
+
+logger = logging.getLogger(__name__)
+
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -51,6 +62,8 @@ class ModuleState(BaseModel):
     error_message: Optional[str] = None
     requires_input: bool = False
     input_description: Optional[str] = None
+    # Add a place to keep the live module instance (not serialized ideally, but kept here for convenience)
+    instance: Optional[Any] = None
 
 class ExecutionState(BaseModel):
     """Overall execution state tracking"""
@@ -75,14 +88,14 @@ class Executer:
     
     def __init__(
         self,
-        study_plan: StudyPlan,
+        study_plan: dict,
         config_path: str = "config.json",
         log_path: str = "system.log"
     ):
         self.plan = study_plan
         self.config_path = Path(config_path)
         self.log_path = Path(log_path)
-        self.state = ExecutionState(plan_id=study_plan.hypothesis_id)
+        self.state = ExecutionState(plan_id=study_plan['hypothesis_id'])
         self._initialize_logging()
         
     def _initialize_logging(self):
@@ -97,62 +110,45 @@ class Executer:
 
     async def initialize_modules(self):
         """Initialize all modules needed for execution"""
-        logger.info(f"Initializing modules for plan {self.plan.hypothesis_id}")
-        
-        # Module mapping
-        MODULE_CLASSES = {
-            "PopulationSelector": "mas.modules.population.PopulationSelector",
-            "ImagingProtocolDesigner": "mas.modules.imaging.ProtocolDesigner",
-            "SegmentationModule": "mas.modules.segmentation.SegmentationModule",
-            "RadiomicsExtractor": "mas.modules.radiomics.RadiomicsExtractor",
-            "ModelingModule": "mas.modules.modeling.ModelingModule",
-            "ValidationModule": "mas.modules.validation.ValidationModule"
-        }
-        
-        for step in self.plan.steps:
-            if not step.matched_module:
-                logger.warning(f"Step '{step.name}' has no matched module")
+        logger.info(f"Initializing modules for plan {self.plan['hypothesis_id']}")
+
+        for step in self.plan['steps']:
+            if not step.get('matched_module'):
+                logger.warning(f"Step '{step['name']}' has no matched module")
                 continue
-                
-            self.state.modules[step.matched_module] = ModuleState(
-                name=step.matched_module,
+
+            module_name = step['matched_module']
+            # create ModuleState and store it
+            self.state.modules[module_name] = ModuleState(
+                name=module_name,
                 status=ModuleStatus.INITIALIZING,
                 total_steps=1
             )
-            
+
             try:
-                # Dynamic module import and initialization
-                if step.matched_module in MODULE_CLASSES:
-                    module_path = MODULE_CLASSES[step.matched_module]
-                    module_parts = module_path.split('.')
-                    
-                    # Import the module class
-                    mod = __import__('.'.join(module_parts[:-1]), fromlist=[module_parts[-1]])
-                    ModuleClass = getattr(mod, module_parts[-1])
-                    
-                    # Initialize the module
-                    module_instance = ModuleClass(
-                        config_path=str(self.config_path),
-                        workspace_path="memory/workspace"
-                    )
-                    
-                    # Store the instance
-                    self.state.modules[step.matched_module].instance = module_instance
-                    
-                    # Initialize the module
-                    if await module_instance.initialize():
-                        self.state.modules[step.matched_module].status = ModuleStatus.PENDING
-                        logger.info(f"Initialized module: {step.matched_module}")
-                    else:
-                        raise RuntimeError(f"Module {step.matched_module} failed to initialize")
-                        
+                agent_info = get_agent(module_name)
+                if not agent_info:
+                    raise ValueError(f"Unknown module type: {module_name}")
+
+                module_instance = agent_info.cls(
+                    config_path=str(self.config_path)
+                )
+
+                # store instance on the ModuleState *using attribute access*
+                self.state.modules[module_name].instance = module_instance
+
+                # initialize instance
+                if await module_instance.initialize():
+                    self.state.modules[module_name].status = ModuleStatus.PENDING
+                    logger.info(f"Initialized module: {module_name}")
                 else:
-                    raise ValueError(f"Unknown module type: {step.matched_module}")
-                    
+                    raise RuntimeError(f"Module {module_name} failed to initialize")
+
             except Exception as e:
-                logger.error(f"Failed to initialize module {step.matched_module}: {e}")
-                self.state.modules[step.matched_module].status = ModuleStatus.FAILED
-                self.state.modules[step.matched_module].error_message = str(e)
+                logger.error(f"Failed to initialize module {module_name}: {e}")
+                self.state.modules[module_name].status = ModuleStatus.FAILED
+                self.state.modules[module_name].error_message = str(e)
+
 
     def save_state(self):
         """Save current execution state to config file"""
@@ -203,73 +199,171 @@ class Executer:
 
     async def run(self):
         """
-        Execute the study plan modules in sequence.
-        Handles state transitions and user input requirements.
+        Execute all discovered modules in sequence (ordered, unique).
         """
-        logger.info(f"Starting execution of plan {self.plan.hypothesis_id}")
+        logger.info(f"Starting execution of plan {self.plan['hypothesis_id']}")
         self.state.status = ModuleStatus.RUNNING
-        
+
+        # Initialize all modules referenced by the plan
         await self.initialize_modules()
         self.save_state()
-        
+
         try:
-            current_step = 0
-            while current_step < len(self.plan.steps):
-                step = self.plan.steps[current_step]
-                if not step.matched_module:
-                    logger.warning(f"Skipping step {step.name} - no matched module")
-                    current_step += 1
-                    continue
-                
-                module = self.state.modules[step.matched_module]
-                
-                if module.status == ModuleStatus.FAILED:
-                    logger.error(f"Module {step.matched_module} failed, stopping execution")
+            # Build ordered, deduplicated module list from the plan's steps (prefer planner order)
+            ordered_modules = []
+            for step in self.plan['steps']:
+                m = step.get('matched_module')
+                if m:
+                    ordered_modules.append(m)
+
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_ordered_modules = []
+            for m in ordered_modules:
+                if m not in seen:
+                    unique_ordered_modules.append(m)
+                    seen.add(m)
+
+            logger.info(f"Modules to run (ordered, unique): {unique_ordered_modules}")
+
+            # Run each module sequentially
+            for idx, module_name in enumerate(unique_ordered_modules):
+                logger.info(f"Running module [{idx}]: {module_name}")
+                # update index
+                self.state.current_module_index = idx
+                self.save_state()
+
+                # Ensure ModuleState exists
+                module_state = self.state.modules.get(module_name)
+                if module_state is None:
+                    # create a ModuleState if initialize_modules skipped it
+                    module_state = ModuleState(name=module_name, status=ModuleStatus.PENDING, total_steps=1)
+                    self.state.modules[module_name] = module_state
+
+                if module_state.status == ModuleStatus.FAILED:
+                    logger.error(f"Module {module_name} previously failed, stopping execution")
                     self.state.status = ModuleStatus.FAILED
                     break
-                    
-                if module.status == ModuleStatus.WAITING_INPUT:
-                    # We need user input, pause execution
-                    logger.info(f"Waiting for user input: {module.input_description}")
+
+                if module_state.status == ModuleStatus.WAITING_INPUT:
+                    logger.info(f"Waiting for user input for {module_name}: {module_state.input_description}")
                     break
-                
-                if module.status in [ModuleStatus.PENDING, ModuleStatus.RUNNING]:
-                    logger.info(f"Running module: {step.matched_module}")
-                    # Here we would run the actual module
-                    # For now, we just simulate completion
-                    module.status = ModuleStatus.COMPLETED
+
+                # Run if pending or running
+                if module_state.status in (ModuleStatus.PENDING, ModuleStatus.RUNNING, ModuleStatus.INITIALIZING):
+                    module_state.status = ModuleStatus.RUNNING
                     self.save_state()
-                
-                if module.status == ModuleStatus.COMPLETED:
-                    current_step += 1
-                    self.state.current_module_index = current_step
+
+                    try:
+                        module_instance = module_state.instance
+                        if module_instance is None:
+                            # Attempt to obtain via registry if missing
+                            agent_info = get_agent(module_name)
+                            if not agent_info:
+                                raise RuntimeError(f"No agent info for {module_name}")
+                            module_instance = agent_info.cls(config_path=str(self.config_path))
+                            # optional: initialize newly created instance
+                            if hasattr(module_instance, "initialize") and inspect.iscoroutinefunction(module_instance.initialize):
+                                await module_instance.initialize()
+                            module_state.instance = module_instance
+
+                        # call run; modules expect the plan/hypothesis
+                        # if module.run is async, await it; otherwise call it normally
+                        run_coro = getattr(module_instance, "run", None)
+                        if run_coro is None:
+                            raise RuntimeError(f"Module {module_name} has no run()")
+
+                        # support both async and sync run()
+                        if inspect.iscoroutinefunction(run_coro):
+                            result = await run_coro(self.plan)
+                        else:
+                            result = run_coro(self.plan)
+
+                        # detect a request for interactive input
+                        if isinstance(result, dict) and result.get("requires_input"):
+                            module_state.status = ModuleStatus.WAITING_INPUT
+                            module_state.requires_input = True
+                            module_state.input_description = result.get("description", "User input required.")
+                            module_state.results = result
+                            logger.info(f"Module {module_name} is waiting for user input.")
+                            self.save_state()
+                            # pause execution so external caller can supply input
+                            break
+
+                        # Save successful results to ModuleState (keep ModuleState typed)
+                        module_state.results = result if isinstance(result, dict) else {"output": result}
+                        module_state.status = ModuleStatus.COMPLETED
+                        logger.info(f"Module {module_name} completed successfully.")
+
+                    except Exception as exc:
+                        module_state.status = ModuleStatus.FAILED
+                        module_state.error_message = str(exc)
+                        logger.error(f"Error while running module {module_name}: {exc}")
+
+                    # persist after each module
                     self.save_state()
-            
-            if current_step == len(self.plan.steps):
-                logger.info("All modules completed successfully")
+
+            # If we finished the loop without breaks due to waiting/input or failures:
+            all_completed = all(
+                (m.status == ModuleStatus.COMPLETED) for m in self.state.modules.values()
+            )
+            if all_completed:
+                logger.info("✅ All modules processed and completed.")
                 self.state.status = ModuleStatus.COMPLETED
-            
+
         except Exception as e:
             logger.error(f"Execution failed: {e}")
             self.state.status = ModuleStatus.FAILED
             raise
-        
+
         finally:
             self.save_state()
-        
+
         return self.state
 
+def _load_json_file(file_path: str) -> Dict[str, Any]:
+    """
+    Load a JSON file and return its contents as a Python dict.
+
+    Parameters
+    ----------
+    file_path: str
+        Path to the JSON file.  Can be a raw string or a normal string
+        with escaped back‑slashes.
+
+    Returns
+    -------
+    dict
+        Parsed JSON content.
+    """
+    # Use a raw string when calling the helper, or double‑escape the path.
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.error("JSON file not found: %s", file_path)
+        raise
+    except json.JSONDecodeError as exc:
+        logger.error("Invalid JSON in %s: %s", file_path, exc)
+        raise
+    
+    
+    
 async def main():
     """Example usage"""
-    from .planner import Planner
+    from planner import Planner
     
     # Create a plan first
-    planner = Planner()
-    hypothesis = "A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma."
-    plan_result = await planner.run(hypothesis, "")
+    # planner = Planner()
+    # hypothesis = "A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma."
+    # plan_result = await planner.run(hypothesis, "")
     
+    json_path = r"D:\SBME\GP\OHIF-Standalone\Backend\mas\memory\history\hypo.json"
+    plan_result = _load_json_file(json_path)
+    plan_result = plan_result["plan"]
+
     # Initialize and run executor
-    executer = Executer(plan_result['plan'])
+    executer = Executer(plan_result)
     state = await executer.run()
     
     print("\n🔄 Execution completed with status:", state.status)
