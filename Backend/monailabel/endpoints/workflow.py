@@ -18,7 +18,7 @@ router = APIRouter(
 )
 
 # Database connection settings
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://workflow_user:password@postgres:5432/workflow_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://workflow_user:password@postgres:5432/workflow_db").replace("+asyncpg", "")
 
 
 # Define the Pydantic model for validation
