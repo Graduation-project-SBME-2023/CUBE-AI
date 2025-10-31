@@ -521,7 +521,6 @@ _update = async (response, labelNames) => {
     console.log('model', model);
     const datasources = extensionManager.getActiveDataSource();
     console.log('datasources', datasources);
-    const segmentationId = '1';
     console.log('segmentationId', segmentationId);
     // Ensure dataSource is available
     // Call storeSegmentation from tzhe command module
@@ -544,7 +543,7 @@ _update = async (response, labelNames) => {
     console.log(`update_view: response ${response} `)
     const { data, centroids } = this.parseResponse(response);
     this._update({ data, centroids }, labelNames);
-    this.saveSegemntation(model);
+    this.saveSegemntation(model, '1');
   };
 
   uploadLabels = async () => {
