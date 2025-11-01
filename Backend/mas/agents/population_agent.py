@@ -1,10 +1,14 @@
 """
-PopulationSelector – defines patient inclusion / exclusion criteria.
+PopulationSelector  defines patient inclusion / exclusion criteria.
 
 This agent is responsible for:
 * Receiving a clinical hypothesis and any demographic constraints.
 * Producing a structured list of inclusion and exclusion rules that can be
   consumed by downstream modules (e.g., imaging protocol design, recruitment).
+  
+  It also Given a hypothesis and population criteria, this agent proposes the
+appropriate imaging modality, acquisition parameters, and any required
+contrast agents.
 """
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 import asyncio
@@ -19,6 +23,8 @@ import requests
 import datetime
 import json
 import asyncio
+
+from pathlib import Path
 
 async def get_all_studies_info():
     """
@@ -49,13 +55,17 @@ async def save_final_output(data: dict, filename: str = None):
     """
     if filename is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"final_output_{timestamp}.json"
+        
+        current_dir = Path(__file__).resolve().parent
+        json_path = current_dir.parent / "memory" / "workspace" / "dataset.json"
+        file_name = json_path      
+        
 
     # Ensure it's serializable
-    with open(filename, "w", encoding="utf-8") as f:
+    with open(json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
-    return {"status": "success", "file": filename}
+    return {"status": "success", "file": json_path}
 
 
 class IncludedData(BaseModel):
@@ -74,7 +84,10 @@ class IncludedData(BaseModel):
 class PopulationSelector:
     """Placeholder for the population‑selection module."""
 
-    def __init__(self, config_path: str = "config.json"):
+    def __init__(self):
+        current_dir = Path(__file__).resolve().parent
+        config_path = current_dir.parent / "memory" / "workspace" / "state.json"
+                 
         self.config_path = config_path
         self.rules: Dict[str, Any] = {}
         self.model_client = OllamaChatCompletionClient(
@@ -128,11 +141,12 @@ class PopulationSelector:
         """,
         )
 
-    # Let the agent translate some text
-        await Console(
-        agent.run_stream(task="A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma",
-                         cancellation_token=CancellationToken())
-        )
+    # # Let the agent translate some text
+    #     await Console(
+    #     agent.run_stream(task="A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma",
+    #                      cancellation_token=CancellationToken())
+    #     )
+
         # Placeholder logic – just echo back empty lists
         self.rules = {"inclusion": [], "exclusion": []}
         return self.rules

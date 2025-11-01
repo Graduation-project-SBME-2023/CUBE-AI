@@ -1,5 +1,5 @@
 """
-Simple orchestrator – receives a hypothesis, runs the Planner,
+Simple orchestrator  receives a hypothesis, runs the Planner,
 then runs the Executer on the generated study plan.
 """
 
@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 from planner import Planner, ClinicalHypothesis  # absolute import
 from executer import Executer, ModuleStatus
-from user_input_handler import UserInputHandler
+from user_input_handler import FeedbackAgent, OutputFormattingAgent
 # ----------------------------------------------------------------------
 # Logging (one logger for the whole orchestrator)
 # ----------------------------------------------------------------------
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 class SystemState(str, Enum):
     IDLE = "idle"
     PLANNING = "planning"
+    CHATTING = "chatting"
     EXECUTING = "executing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -58,7 +59,8 @@ class Orchestrator:
         # it will receive the hypothesis when ``run`` is called.
         self.planner = Planner(config_path=str(self.config_path), log_path=str(self.log_path))
         self.require_input = False
-        self.user_input_handler = UserInputHandler()
+        self.user_input_handler = FeedbackAgent()
+        self.output_formatter = OutputFormattingAgent()
     # ------------------------------------------------------------------
     # Helper to persist the orchestrator state (optional – useful for debugging)
     # ------------------------------------------------------------------
@@ -125,31 +127,49 @@ class Orchestrator:
             # --------------------------------------------------------------
             # 1️⃣  Planning phase
             # --------------------------------------------------------------
+    
             self.state = SystemState.PLANNING
             self._save_state()
             logger.info("Starting planning phase")
-
+            
             planner_result = await self.planner.run(hypothesis_text, tools_doc)
 
             if planner_result.get("status") != "finished":
                 raise RuntimeError(
                     f"Planner finished with unexpected status: {planner_result.get('status')}"
                 )
+                
+            if planner_result.get("status") == "finished" and self.state == SystemState.PLANNING:
+                self.state == SystemState.CHATTING
+                return await self.output_formatter.format_output(planner_result)
 
             # --------------------------------------------------------------
-            # 2️⃣  Execution phase
+            #  FeedBack phase
             # --------------------------------------------------------------
-            self.state = SystemState.EXECUTING
-            self._save_state()
-            logger.info("Starting execution phase")
+            if self.state == SystemState.CHATTING:
+                feedback = await FeedbackAgent.chat()
+                
+                if feedback.status == 'pending':
+                    
+                    return await self.output_formatter.format_output(feedback)
+                
+                elif feedback.status == 'finished':
+                    self.status = SystemState.EXECUTING
 
-            # ``planner_result['plan']`` is a plain dict – the Executer expects that.
-            executer = Executer(
-                study_plan=planner_result["plan"],
-                config_path=str(self.config_path),
-                log_path=str(self.log_path),
-            )
-            execution_state = await executer.run()
+            # --------------------------------------------------------------
+            #  Execution phase
+            # --------------------------------------------------------------
+            if self.state == SystemState.EXECUTING:
+                self._save_state()
+                logger.info("Starting execution phase")
+
+                # ``planner_result['plan']`` is a plain dict – the Executer expects that.
+                executer = Executer(
+                    study_plan=planner_result["plan"],
+                    config_path=str(self.config_path),
+                    log_path=str(self.log_path),
+                )
+                execution_state = await executer.run()
 
             # --------------------------------------------------------------
             # 3️⃣  Final status

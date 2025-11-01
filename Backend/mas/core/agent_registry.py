@@ -85,13 +85,8 @@ def _load_agent_module(module_name: str) -> Optional[AgentInfo]:
     # Heuristic mapping for the few known agents
     heuristic_map = {
         "population": "PopulationSelector",
-        "imaging": "ImagingProtocolDesigner",
-        "segmentation": "SegmentationModule",
-        "feature_extraction": "RadiomicsExtractor",
-        "modeling": "ModelingModule",
-        "validation": "ValidationModule",
-        "outcome": "OutcomeAgent",
-        "qa": "QAAgent",
+        "feature_extraction": "RadiomicFeatureExtractorAndModellingAgent",
+
         "reporting": "ReportingAgent",
     }
     expected_class_name = heuristic_map.get(core, core.title().replace("_", ""))

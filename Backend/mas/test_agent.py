@@ -1,6 +1,6 @@
 import sys
 import asyncio
-from mas.agents.feature_extraction_agent import RadiomicFeatureExtractorAndModellingAgent
+from Backend.mas.agents.feature_extraction import RadiomicFeatureExtractorAndModellingAgent
 
 async def main():
     # # read instruction from command-line argument

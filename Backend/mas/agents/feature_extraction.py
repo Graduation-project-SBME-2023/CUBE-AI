@@ -1,3 +1,13 @@
+"""
+RadiomicsExtractor  extracts quantitative imaging features.
+
+Given a segmentation mask and the original volume, this agent computes
+radiomics (texture, shape, intensity, wavelet, etc.) using a library such
+as PyRadiomics.
+
+It Perfroms modeling, feature selectiong, training of ai models and validation.
+"""
+
 import os
 import json
 import logging
@@ -29,6 +39,7 @@ class RadiomicFeatureExtractorAndModellingAgent(BaseAgent):
                 "structured_output": False
             }
         )
+        
         # tools : 
         self.radiomics_tool = PyRadiomicsFeatureExtractionTool()
         self.feature_importance_tool = FeatureImportanceAnalysisTool()

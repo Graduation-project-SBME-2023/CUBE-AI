@@ -1,5 +1,5 @@
 """
-OutcomeAgent – handles outcome definitions and ground‑truth extraction.
+OutcomeAgent  handles outcome definitions and ground truth extraction.
 
 In a full system this would map clinical outcomes (e.g., survival,
 progression) to the imaging cohort.
