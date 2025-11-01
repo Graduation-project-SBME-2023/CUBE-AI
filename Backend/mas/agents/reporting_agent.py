@@ -15,33 +15,35 @@ import json
 import pandas as pd
 import logging
 import asyncio
+import re
 
-#from autogen_ext.models.ollama import OllamaChatCompletionClient
-import asyncio
-from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
 from autogen_agentchat.agents import AssistantAgent
-from autogen_agentchat.ui import Console
-from autogen_core import CancellationToken
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 
-
+def clean_markdown_json(text: str) -> str:
+    """Remove ```json ``` or ``` wrapping from LLM output."""
+    text = text.strip()
+    text = re.sub(r"^```json\s*", "", text)
+    text = re.sub(r"^```", "", text)
+    text = re.sub(r"```$", "", text)
+    return text
 class ReportingAgent:
     """Extended reporting agent that summarizes and evaluates pipeline outputs."""
 
-    def __init__(self, config_path: str = "config.json", model_name: str = "qwen2.5-32b-instruct"):
-        self.config_path = config_path
+    def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
 
         # LLM client for reasoning and decision generation
         self.model_client = OllamaChatCompletionClient(
-            model=model_name,
-            model_info={
-                "vision": False,
-                "function_calling": True,
-                "json_output": True,
-                "structured_output": True,
-            }
-        )
+                model="gpt-oss:120b-cloud",
+                model_info={
+                    "vision": False,
+                    "function_calling": True,
+                    "json_output": True
+                },
+                api_key="cf8ed2bae88d4d659602bc340b4b2bcf.mEvRr0YQ54A_OKfTT2Z92rge"
+            )
+                                    
 
         # Specialized report generation agent
         self.reporting_agent = AssistantAgent(
@@ -74,80 +76,119 @@ class ReportingAgent:
         """Stub for loading templates or preparing the environment."""
         return True
 
-    async def _read_csv_summary(self, csv_path: Optional[str], n_rows: int = 5) -> str:
-        """Summarize a CSV file by showing its head and describing numeric stats."""
-        if not csv_path or not Path(csv_path).exists():
-            return f"File not found: {csv_path}"
-
+    def _load_json(self, path: Path) -> Optional[dict]:
+        """Safely load a JSON file."""
+        if not path.exists():
+            self.logger.warning(f"Missing JSON file: {path}")
+            return None
         try:
-            df = pd.read_csv(csv_path)
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            self.logger.error(f"Error reading JSON {path}: {e}")
+            return None
+
+    def _load_csv(self, path: Path) -> Optional[pd.DataFrame]:
+        """Safely load a CSV file."""
+        if not path.exists():
+            self.logger.warning(f"Missing CSV file: {path}")
+            return None
+        try:
+            return pd.read_csv(path)
+        except Exception as e:
+            self.logger.error(f"Error reading CSV {path}: {e}")
+            return None
+
+    async def _summarize_csv(self, df: Optional[pd.DataFrame], name: str, n_rows: int = 5) -> str:
+        """Return a summary (head + stats) of a CSV as a string."""
+        if df is None or df.empty:
+            return f"No data found for {name}."
+        try:
             head = df.head(n_rows).to_dict(orient="records")
             stats = df.describe(include="all").to_dict()
-            return json.dumps({
-                "path": csv_path,
-                "preview_rows": head,
-                "statistics": stats
-            }, indent=2)
+            return json.dumps({"name": name, "preview_rows": head, "statistics": stats}, indent=2)
         except Exception as e:
-            return f"Error reading {csv_path}: {str(e)}"
+            return f"Error summarizing {name}: {e}"
 
     async def run(self, result_bundle: Dict[str, Any]) -> str:
         """
         Generates a structured report using CSV data and metadata.
         Saves the final JSON report to disk.
-        """        
-        current_dir = Path(__file__).resolve().parent
-        state_path = current_dir.parent / "memory" / "workspace" / "stat.json"
-        config_path = current_dir.parent / "memory" / "config.json"
-        top_features_path = current_dir.parent / "memory" / "workspace" / "top_10_features.csv"
-        model_results_path = current_dir.parent / "memory" / "workspace" / "models" / "tuned_model_1"/ "tuned_model_1_results.csv"
-        # Backend\mas\memory\workspace\models\tuned_model_1\tuned_model_1_results.csv
-        # Backend\mas\memory\workspace\models\tuned_model_1\independent_eval_results_tuned_model_1.csv
-        model_val_path = current_dir.parent / "memory" / "workspace" / "models" / "tuned_model_1"/ "independent_eval_results_tuned_model_1.csv"
+        """
         try:
-            
-            
             self.logger.info("Starting ReportingAgent...")
-            hypothesis = result_bundle.get("hypothesis", "N/A")
-            plan = result_bundle.get("plan", {}).get("steps", [])
-            dataset_info = result_bundle.get("dataset_info", {})
-            important_features_csv = result_bundle.get("important_features_csv")
-            model_results_csv = result_bundle.get("model_results_csv")
 
-            # Summarize CSVs
-            important_features_summary = await self._read_csv_summary(important_features_csv)
-            model_results_summary = await self._read_csv_summary(model_results_csv)
+            # === Define all paths ===
+            current_dir = Path(__file__).resolve().parent
+            state_path = current_dir.parent / "memory" / "workspace" / "state.json"
+            config_path = current_dir.parent / "memory" / "config.json"
+            top_features_path = current_dir.parent / "memory" / "workspace" / "top_10_features.csv"
+            model_results_path = current_dir.parent / "memory" / "workspace" / "models" / "tuned_model_1" / "tuned_model_1_results.csv"
+            model_val_path = current_dir.parent / "memory" / "workspace" / "models" / "tuned_model_1" / "independent_eval_results_tuned_model_1.csv"
 
-            # Construct reporting prompt
+            # === Load data ===
+            state_data = self._load_json(state_path)
+            config_data = self._load_json(config_path)
+            features_df = self._load_csv(top_features_path)
+            model_results_df = self._load_csv(model_results_path)
+            val_results_df = self._load_csv(model_val_path)
+
+            # === Summarize data ===
+            features_summary = await self._summarize_csv(features_df, "Top Features")
+            model_results_summary = await self._summarize_csv(model_results_df, "Model Results")
+            val_results_summary = await self._summarize_csv(val_results_df, "Independent Evaluation")
+
+            # === Extract essential metadata ===
+            hypothesis = (state_data or {}).get("hypothesis", {})
+            plan = (state_data or {}).get("plan", {}).get("steps", [])
+            dataset_info = (config_data or {}).get("dataset", {})
+
+            # === Build the report generation prompt ===
             prompt = (
-                f"=== STUDY HYPOTHESIS ===\n{hypothesis}\n\n"
+                f"=== STUDY HYPOTHESIS ===\n{json.dumps(hypothesis, indent=2)}\n\n"
                 f"=== STUDY PLAN ===\n{json.dumps(plan, indent=2)}\n\n"
                 f"=== DATASET INFO ===\n{json.dumps(dataset_info, indent=2)}\n\n"
-                f"=== IMPORTANT FEATURES SUMMARY ===\n{important_features_summary}\n\n"
+                f"=== IMPORTANT FEATURES SUMMARY ===\n{features_summary}\n\n"
                 f"=== MODEL RESULTS SUMMARY ===\n{model_results_summary}\n\n"
-                "Please generate a concise scientific report and decision."
+                f"=== VALIDATION RESULTS SUMMARY ===\n{val_results_summary}\n\n"
+                "Please generate a concise scientific report and decide whether the hypothesis should be accepted or rejected."
             )
 
-            # Generate final structured report from LLM
+            # === Generate structured report ===
             report_response = await self.reporting_agent.run(task=prompt)
-
-            # Convert to Python dict
+            report_response = clean_markdown_json(report_response.messages[-1].content)
+            # === Parse LLM response ===
             if isinstance(report_response, str):
                 report_data = json.loads(report_response)
             else:
                 report_data = report_response
 
-            # Save the report
-            output_path = Path(self.config_path).with_name("final_report.json")
+            # === Save report ===
+            output_path = current_dir.parent / "memory" / "workspace" / "final_report.json"
             with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(report_data, f, indent=2)
 
             self.logger.info(f"Report saved at {output_path}")
-            return json.dumps({"status": "success", "message": "Report generated and saved.", "path": str(output_path)}, indent=2)
+            return json.dumps({
+                "status": "success",
+                "message": "Report generated and saved successfully.",
+                "path": str(output_path)
+            }, indent=2)
 
         except Exception as e:
             self.logger.error(f"ReportingAgent error: {e}", exc_info=True)
-            return json.dumps({"status": "failed", "message": str(e)}, indent=2)
+            return json.dumps({
+                "status": "failed",
+                "message": str(e)
+            }, indent=2)
 
 
-__all__ = ["ReportingAgent"]
+# === Run test simulation ===
+if __name__ == "__main__":
+    async def main():
+        agent = ReportingAgent()
+        dummy_result_bundle = {}
+        result = await agent.run(dummy_result_bundle)
+        print(result)
+
+    asyncio.run(main())
