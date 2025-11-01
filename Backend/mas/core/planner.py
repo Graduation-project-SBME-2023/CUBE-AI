@@ -142,19 +142,21 @@ class Planner:
     def save_to_config(self):
         """Save current plan and hypothesis to config file"""
         try:
-            config = {}
-            if self.config_path.exists():
-                with open(self.config_path) as f:
-                    config = json.load(f)
+            current_dir = Path(__file__).resolve().parent
+            json_path = current_dir.parent / "memory" / "workspace" / "state.json"
+            # Save the complete result to history
             
-            config['current_plan'] = self.plan.model_dump()
-            config['current_hypothesis'] = self.hypothesis.model_dump()
-            config['planner_status'] = self.status
-            
-            with open(self.config_path, 'w') as f:
-                json.dump(config, f, indent=2)
+            with open(json_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+
+                state['plan'] = self.plan.model_dump()
+                state['hypothesis'] = self.hypothesis.model_dump()
+                state['planner_status'] = self.status
                 
-            logger.info("Saved plan and hypothesis to config file")
+                with open(json_path, 'w') as f:
+                    json.dump(state, f, indent=2)
+                    
+            logger.info("Saved plan and hypothesis to state file")
         except Exception as e:
             logger.error(f"Failed to save to config: {e}")
             
@@ -199,10 +201,10 @@ class Planner:
         except Exception as e:
             raise ValueError(f"Failed to parse hypothesis output: {e}\nRaw: {hypo_content}")
 
-        print(f"✅ Hypothesis structured:\n{json.dumps(self.hypothesis.model_dump(), indent=2)}\n")
+        print(f"Hypothesis structured:\n{json.dumps(self.hypothesis.model_dump(), indent=2)}\n")
 
         # ---------------- Step 2: Study Plan ----------------
-        print("[2️⃣] Designing study plan...")
+        print("Designing study plan...")
         plan_response = await self.study_planner.run(task=json.dumps(self.hypothesis.model_dump(), indent=2))
         plan_content = clean_markdown_json(plan_response.messages[-1].content)
 
@@ -212,9 +214,9 @@ class Planner:
         except Exception as e:
             raise ValueError(f"Failed to parse study plan output: {e}\nRaw: {plan_content}")
 
-        print(f"✅ Study plan created with {len(self.plan.steps)} steps.\n")
+        print(f"Study plan created with {len(self.plan.steps)} steps.\n")
         # ---------------- Step 3: Module Matching ----------------
-        print("[3️⃣] Matching study steps to available modules...")
+        print("Matching study steps to available modules...")
         match_prompt = {
             "study_plan": self.plan.model_dump(),
             "available_modules": agents_description_for_prompt()
@@ -230,10 +232,10 @@ class Planner:
         except Exception as e:
             raise ValueError(f"Failed to parse matched modules: {e}\nRaw: {match_content}")
 
-        print("✅ Modules matched successfully.\n")
+        print("Modules matched successfully.\n")
 
         # ---------------- Step 4: Evaluation ----------------
-        print("[4️⃣] Evaluating study plan quality...")
+        print("Evaluating study plan quality...")
         eval_response = await self.evaluator.run(task=json.dumps(self.plan.model_dump(), indent=2))
         eval_content = eval_response.messages[-1].content
 
@@ -247,24 +249,7 @@ class Planner:
             "evaluation": eval_content,
             "status": self.status
         }
-        
-        # Save the complete result to history
-        history_path = Path("memory/history/hypo.json")
-        history_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        history = []
-        if history_path.exists():
-            with open(history_path) as f:
-                history = json.load(f)
-                
-        history.append({
-            "timestamp": datetime.now().isoformat(),
-            "query": user_query,
-            "result": result
-        })
-        
-        with open(history_path, "w") as f:
-            json.dump(history, f, indent=2)
+
             
         return result
 
@@ -282,7 +267,7 @@ async def main():
     - ValidationModule: performs internal/external validation.
     """
     result = await planner.run(user_query, tools_doc)
-    print("\n🎯 Final Output:")
+    print("\nFinal Output:")
     print(json.dumps(result, indent=2))
 
 
