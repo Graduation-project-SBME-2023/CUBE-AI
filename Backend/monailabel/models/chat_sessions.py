@@ -1,9 +1,9 @@
-
-from sqlalchemy import Column, Integer, String, Boolean, Text, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from core.database import Base  
 from .chat_link_study import chat_study_association
+
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
@@ -14,9 +14,8 @@ class ChatSession(Base):
     is_active = Column(Boolean, server_default="true")
     summary = Column(Text)
 
-   # Many-to-many relationship with Study
     studies = relationship(
-        "Study",
+        "Study",  # ← string reference
         secondary=chat_study_association,
         back_populates="chat_sessions",
         lazy="joined"

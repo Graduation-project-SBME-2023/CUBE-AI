@@ -13,6 +13,7 @@ from endpoints import (
     model,
     radiomics,
     chat_sessions,
+    sync,
     
 
 )
@@ -29,3 +30,4 @@ monai_server_app.include_router(volume.router)
 monai_server_app.include_router(model.router)
 monai_server_app.include_router(radiomics.router)
 monai_server_app.include_router(chat_sessions.router)
+monai_server_app.include_router(sync.router)
