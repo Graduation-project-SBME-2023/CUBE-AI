@@ -100,7 +100,6 @@ class Orchestrator:
     async def process_hypothesis(
         self,
         hypothesis_text: str,
-        tools_doc: str = "",
     ) -> Dict[str, Any]:
         """
         Run the full pipeline.
@@ -132,7 +131,7 @@ class Orchestrator:
             self._save_state()
             logger.info("Starting planning phase")
             
-            planner_result = await self.planner.run(hypothesis_text, tools_doc)
+            planner_result = await self.planner.run(hypothesis_text)
 
             if planner_result.get("status") != "finished":
                 raise RuntimeError(
@@ -176,8 +175,15 @@ class Orchestrator:
             # --------------------------------------------------------------
             if execution_state.status == ModuleStatus.COMPLETED:
                 self.state = SystemState.COMPLETED
+                
+
+                current_dir = Path(__file__).resolve().parent
+                report_path = current_dir.parent / "memory" / "workspace" / "final_report.json"
+                report = json.load(report_path)
+                return await self.output_formatter.format_output(report)
             else:
                 self.state = SystemState.FAILED
+                
 
             self._save_state()
 
@@ -206,18 +212,11 @@ async def main():
 
     # You can optionally provide a tools description – the Planner already has a
     # built‑in fallback that lists the agents, so an empty string works.
-    tools_doc = """
-    - PopulationSelector: defines patient inclusion/exclusion.
-    - ImagingProtocolDesigner: designs imaging acquisition settings.
-    - SegmentationModule: automates ROI segmentation.
-    - RadiomicsExtractor: extracts features.
-    - ModelingModule: trains ML models for prediction.
-    - ValidationModule: performs internal/external validation.
-    """
 
-    result = await orchestrator.process_hypothesis(hypothesis, tools_doc)
 
-    print("\n🎯 Pipeline finished – overall system state:", result["system_state"])
+    result = await orchestrator.process_hypothesis(hypothesis)
+
+    print("\n🎯 Pipeline finished – overall system state:")
     print("\nPlanner output (truncated):")
     print(json.dumps(result["planner_result"], indent=2)[:500] + " ...")
     print("\nExecution summary:")
