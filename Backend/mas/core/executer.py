@@ -296,6 +296,7 @@ class Executer:
             if all_completed:
                 logger.info(" All modules processed and completed.")
                 self.state.status = ModuleStatus.COMPLETED
+                
 
         except Exception as e:
             logger.error(f"Execution failed: {e}")

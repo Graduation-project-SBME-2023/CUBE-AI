@@ -182,7 +182,7 @@ class Planner:
         # This will be handled by the orchestrator and user input handler
         return ""
 
-    async def run(self, user_query: str, tools_doc: str):
+    async def run(self, user_query: str):
         """Run the planning process with proper state management"""
         self.status = "running"
         self.save_to_config()
@@ -266,7 +266,7 @@ async def main():
     - ModelingModule: trains ML models for prediction.
     - ValidationModule: performs internal/external validation.
     """
-    result = await planner.run(user_query, tools_doc)
+    result = await planner.run(user_query)
     print("\nFinal Output:")
     print(json.dumps(result, indent=2))
 

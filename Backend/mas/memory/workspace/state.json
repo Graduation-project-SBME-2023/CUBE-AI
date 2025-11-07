@@ -1,0 +1,114 @@
+{
+  "hypothesis": {
+    "id": "41a5ca57-e3c7-4dcd-ad47-0efd3cbe6f39",
+    "title": "Radiomics-derived CT imaging signature predicts high-risk neuroblastoma patients",
+    "population": "Patients diagnosed with neuroblastoma (typically children and adolescents)",
+    "intervention": "Application of a radiomics-derived imaging signature extracted from CT scans",
+    "outcome": "Accurate identification of high\u2011risk neuroblastoma status",
+    "clinical_context": "Use of CT\u2011based radiomic analysis for risk stratification in neuroblastoma to guide treatment intensity",
+    "relationship_type": "predictive"
+  },
+  "plan": {
+    "hypothesis_id": "355d8317-23dd-44cf-a706-2619b82afe52",
+    "study_goal": "Investigate the hypothesis: ",
+    "steps": [
+      {
+        "name": "Comprehensive Literature Review & Feasibility Assessment",
+        "description": "Gather existing evidence on CT\u2011based radiomics in neuroblastoma, identify prior imaging signatures, assess technical feasibility across participating centers, and define gaps that the current study will address.",
+        "matched_module": "ReportingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Define Study Objectives & Hypothesis",
+        "description": "Formally articulate the primary hypothesis: a pre\u2011defined radiomics\u2011derived CT signature can accurately identify high\u2011risk neuroblastoma patients. Specify secondary objectives such as correlation with overall survival, progression\u2011free survival, and comparison with current risk stratification methods.",
+        "matched_module": "ReportingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Develop Detailed Study Protocol",
+        "description": "Create a protocol that includes study design (multicenter retrospective\u2011prospective cohort), inclusion/exclusion criteria, sample size justification (power analysis targeting \u226585% power to detect an AUC increase from 0.70 to 0.85), imaging acquisition standards, radiomics pipeline, statistical analysis plan, and data management procedures.",
+        "matched_module": "ReportingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Obtain Regulatory & Ethics Approvals",
+        "description": "Submit the protocol to Institutional Review Boards (IRBs) at each participating site, secure informed\u2011consent templates (or waiver for retrospective data), and register the trial on ClinicalTrials.gov or an equivalent registry.",
+        "matched_module": "ReportingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Select and Qualify Participating Centers",
+        "description": "Identify pediatric oncology centers with high neuroblastoma case volumes and capable CT imaging infrastructure. Conduct site qualification visits to ensure compliance with imaging protocols, data security, and personnel training.",
+        "matched_module": "ReportingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Standardize CT Imaging Acquisition Parameters",
+        "description": "Define a harmonized CT protocol (e.g., scanner type, slice thickness \u22651\u202fmm, tube voltage 120\u202fkV, standardized contrast timing). Provide a detailed imaging manual and conduct phantom studies to verify inter\u2011scanner consistency.",
+        "matched_module": "ReportingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Develop Radiomics Extraction Pipeline",
+        "description": "Implement a reproducible pipeline using open\u2011source tools (e.g., PyRadiomics) with steps for tumor segmentation (manual or semi\u2011automatic), image pre\u2011processing (resampling, intensity normalization), feature extraction (first\u2011order, shape, texture), and feature harmonization (ComBat). Validate pipeline robustness on a pilot dataset.",
+        "matched_module": "FeatureExtractionAndModelingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Training Cohort Assembly & Signature Derivation",
+        "description": "Collect retrospective CT scans and clinical data from ~200 patients (\u224830% high\u2011risk) across sites. Perform tumor segmentation, extract radiomic features, and apply dimensionality reduction (e.g., LASSO, Elastic Net). Derive the predictive signature using machine\u2011learning classifiers (e.g., logistic regression, random forest) and optimize via cross\u2011validation.",
+        "matched_module": "FeatureExtractionAndModelingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Internal Validation & Model Calibration",
+        "description": "Assess model performance on an internal hold\u2011out set (e.g., 20% of training data). Compute discrimination metrics (AUC, sensitivity, specificity) and calibration plots. Refine the model if needed.",
+        "matched_module": "FeatureExtractionAndModelingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Prospective Validation Cohort Enrollment",
+        "description": "Enroll a separate prospective cohort of ~150 newly diagnosed patients across the same centers. Apply the pre\u2011defined imaging protocol, segment tumors, extract features using the locked pipeline, and calculate the signature score without any retraining.",
+        "matched_module": "FeatureExtractionAndModelingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Primary Statistical Analysis",
+        "description": "Compare the signature\u2019s ability to predict high\u2011risk status (as defined by INRG or COG criteria) against the standard clinical risk model. Use ROC analysis, DeLong test for AUC comparison, net reclassification improvement (NRI), and decision\u2011curve analysis to evaluate clinical utility.",
+        "matched_module": "FeatureExtractionAndModelingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Secondary & Exploratory Analyses",
+        "description": "Investigate associations between signature scores and survival outcomes (overall survival, event\u2011free survival) using Kaplan\u2011Meier curves and Cox regression. Explore whether the signature adds prognostic value beyond MYCN amplification, age, stage, and serum markers.",
+        "matched_module": "FeatureExtractionAndModelingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Quality Assurance & Data Monitoring",
+        "description": "Implement centralized data monitoring for completeness, image quality, and segmentation reproducibility (inter\u2011observer ICC >0.80). Conduct periodic audits and interim analyses to ensure planned sample size and event rates are being met.",
+        "matched_module": "ReportingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Data Management & Confidentiality",
+        "description": "Store de\u2011identified imaging and clinical data in a secure, HIPAA\u2011compliant cloud repository. Establish a data\u2011sharing agreement and maintain a data\u2011dictionary for all variables.",
+        "matched_module": "ReportingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Manuscript Preparation & Dissemination",
+        "description": "Draft manuscripts detailing methodology, validation results, and clinical implications. Present findings at pediatric oncology and radiology conferences. Share the radiomics pipeline code and anonymized dataset (where permissible) to promote reproducibility.",
+        "matched_module": "ReportingAgent",
+        "status": "pending"
+      },
+      {
+        "name": "Regulatory Submission & Implementation Planning",
+        "description": "If the signature meets predefined performance thresholds (e.g., AUC \u22650.85, NRI >0.10), prepare a regulatory brief for FDA/EMA (as a diagnostic device) and develop a clinical implementation roadmap, including integration into radiology PACS and decision\u2011support tools.",
+        "matched_module": "ReportingAgent",
+        "status": "pending"
+      }
+    ]
+  },
+  "planner_status": "finished"
+}
