@@ -1,5 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy.orm import relationship
 from core.database import Base
+from .chat_link_study import chat_study_association
 
 class Study(Base):
     __tablename__ = 'studies'
@@ -8,4 +10,10 @@ class Study(Base):
     patient_id = Column(Integer, ForeignKey('patients.patient_id'), index=True)
     description = Column(String, nullable=True)
     modality = Column(String, nullable=True)
-    created_at = Column(DateTime, nullable=True)  # ISO format date-time
+    created_at = Column(DateTime, nullable=True)
+
+    chat_sessions = relationship(
+        "ChatSession",  # ← string reference
+        secondary=chat_study_association,
+        back_populates="studies",
+    )
