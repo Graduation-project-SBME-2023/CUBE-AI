@@ -94,26 +94,8 @@ class FeedbackAgent:
         except json.JSONDecodeError:
             response = {"status": "pending", "message": result_text}
 
-        # Simulated chat loop
-        while response["status"] != "finished":
-            print(json.dumps(response, indent=4))
-            user_input = input("\n👤 You: ")
-
-            if user_input.lower() in {"confirm", "yes", "ok"}:
-                user_message = "{'status': 'finished', 'message': 'User confirmed the plan.'}"
-            else:
-                user_message = user_input
-
-            result = await self.user_feedback_agent.run(task=user_message)
-            result_text = clean_markdown_json(result.messages[-1].content)
-
-            try:
-                response = json.loads(result_text)
-            except json.JSONDecodeError:
-                response = {"status": "pending", "message": result_text}
 
         print(json.dumps(response, indent=4))
-        logger.info("Feedback session completed.")
         return response
 
 
