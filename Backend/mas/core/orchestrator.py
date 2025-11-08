@@ -143,7 +143,7 @@ class Orchestrator:
             self.state = SystemState.PLANNING
             self._save_state()
             logger.info("Starting planning phase")
-            if self.current_hypothesis == None:
+            if self.current_hypothesis['title'] == "":
                 planner_result = await self.planner.run(hypothesis_text)
 
 
