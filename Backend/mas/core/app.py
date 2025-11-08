@@ -25,6 +25,8 @@ from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+import traceback
+from fastapi import WebSocket, WebSocketDisconnect
 
 # ----------------------------------------------------------------------
 # Import the orchestrator (absolute import works because ``mas.core`` is a
@@ -55,10 +57,7 @@ app.add_middleware(
 # ----------------------------------------------------------------------
 class RunRequest(BaseModel):
     hypothesis: str = Field(..., description="Free form clinical hypothesis")
-    tools_doc: Optional[str] = Field(
-        None,
-        description="Optional description of the available modules. If omitted the orchestrator will use its built‑in fallback.",
-    )
+
 
 
 # ----------------------------------------------------------------------
@@ -88,7 +87,6 @@ async def run_pipeline(request: RunRequest):
     try:
         result = await orchestrator.process_hypothesis(
             hypothesis_text=request.hypothesis,
-            tools_doc=request.tools_doc or "",
         )
     except Exception as exc:
         # Log the error and return a proper HTTP 500 response
@@ -103,6 +101,51 @@ async def run_pipeline(request: RunRequest):
 # ----------------------------------------------------------------------
 # Optional: run the API with ``python app.py`` for quick local testing
 # ----------------------------------------------------------------------
+
+    
+    
+    # Add these imports near the top of your file
+
+# --- WebSocket endpoint for streaming / real-time updates ---
+@app.websocket("/ws")
+async def websocket_run_pipeline(websocket: WebSocket):
+    await websocket.accept()
+
+    async def send_message(msg_type, payload):
+        try:
+            await websocket.send_text(json.dumps({
+                "type": msg_type,
+                "payload": payload
+            }, default=str))
+        except Exception:
+            # client disconnected or closed
+            return
+
+    try:
+        data = await websocket.receive_text()
+        msg = json.loads(data)
+        hypothesis = msg.get("hypothesis")
+        tools_doc = msg.get("tools_doc", "")
+
+        orchestrator = Orchestrator()
+
+        # Run the orchestrator in background
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,  # default ThreadPoolExecutor
+            lambda: asyncio.run(orchestrator.process_hypothesis(hypothesis))
+        )
+
+        await send_message("final", result)
+    except WebSocketDisconnect:
+        print("❌ Client disconnected")
+    finally:
+        try:
+            await websocket.close()
+        except RuntimeError:
+            pass
+
+
 if __name__ == "__main__":
     import uvicorn
 
@@ -118,3 +161,4 @@ if __name__ == "__main__":
         port=8000,
         reload=True,  # auto‑reload on code changes (development only)
     )
+    

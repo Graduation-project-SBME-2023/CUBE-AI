@@ -203,6 +203,8 @@ class OutputFormattingAgent:
 
             result_text = clean_markdown_json(result.messages[-1].content)
             parsed = json.loads(result_text)
+            
+            print(" --------------------- \n",parsed)
 
             if "status" not in parsed:
                 parsed["status"] = "success"
