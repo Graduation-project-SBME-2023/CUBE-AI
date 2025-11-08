@@ -130,18 +130,18 @@ class Orchestrator:
             self.state = SystemState.PLANNING
             self._save_state()
             logger.info("Starting planning phase")
-            
-            planner_result = await self.planner.run(hypothesis_text)
+            if self.current_hypothesis == None:
+                planner_result = await self.planner.run(hypothesis_text)
 
 
-            if planner_result.get("status") != "finished":
-                raise RuntimeError(
-                    f"Planner finished with unexpected status: {planner_result.get('status')}"
-                )
-                
-            if planner_result.get("status") == "finished" and self.state == SystemState.PLANNING:
-                self.state == SystemState.CHATTING
-                return await self.output_formatter.format_output(planner_result)
+                if planner_result.get("status") != "finished":
+                    raise RuntimeError(
+                        f"Planner finished with unexpected status: {planner_result.get('status')}"
+                    )
+                    
+                if planner_result.get("status") == "finished" and self.state == SystemState.PLANNING:
+                    self.state == SystemState.CHATTING
+                    return await self.output_formatter.format_output(planner_result)
 
             # --------------------------------------------------------------
             #  FeedBack phase
@@ -150,7 +150,7 @@ class Orchestrator:
                 feedback = await FeedbackAgent.chat()
                 
                 if feedback.status == 'pending':
-                    
+                    print("feedback", feedback)
                     return await self.output_formatter.format_output(feedback)
                 
                 elif feedback.status == 'finished':
