@@ -51,12 +51,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 # ----------------------------------------------------------------------
 # Request model – what the client must send
 # ----------------------------------------------------------------------
 class RunRequest(BaseModel):
-    hypothesis: str = Field(..., description="Free form clinical hypothesis")
+    task: str = Field(..., description="Free form clinical hypothesis")
 
 
 
@@ -85,9 +84,10 @@ async def run_pipeline(request: RunRequest):
     #     ``process_hypothesis`` method.
     # ------------------------------------------------------------------
     try:
-        result = await orchestrator.process_hypothesis(
-            hypothesis_text=request.hypothesis,
+         result = await orchestrator.process_hypothesis(
+            hypothesis_text=request.task,
         )
+        
     except Exception as exc:
         # Log the error and return a proper HTTP 500 response
         raise HTTPException(status_code=500, detail=str(exc))
@@ -96,7 +96,6 @@ async def run_pipeline(request: RunRequest):
     # 3️⃣  Return the result as JSON
     # ------------------------------------------------------------------
     return result
-
 
 # ----------------------------------------------------------------------
 # Optional: run the API with ``python app.py`` for quick local testing
@@ -158,7 +157,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
-        port=8000,
+        port=8150,
         reload=True,  # auto‑reload on code changes (development only)
     )
     
