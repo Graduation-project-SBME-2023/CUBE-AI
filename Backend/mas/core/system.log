@@ -433,3 +433,227 @@ Each instance has access to common log file and common config file to share know
 2025-10-31 01:01:48,775 - executer - INFO - Module QAAgent completed successfully.
 2025-10-31 01:01:48,776 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
 2025-10-31 01:01:48,778 - executer - ERROR - Failed to save state: Expecting value: line 183 column 21 (char 12521)
+2025-11-08 09:46:12,558 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 09:46:12,560 - planner - INFO - Starting planning process for query: Give me a plan to investigate shortness of breath in a pediatric patient.
+2025-11-08 09:46:12,560 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 09:47:10,054 - planner - INFO - Study plan evaluation complete
+2025-11-08 09:47:10,073 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 09:48:40,914 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 09:48:40,914 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 09:48:40,914 - planner - INFO - Starting planning process for query: Give me a plan to investigate shortness of breath in a pediatric patient.
+2025-11-08 09:48:40,914 - planner - INFO - Starting planning process for query: Give me a plan to investigate shortness of breath in a pediatric patient.
+2025-11-08 09:48:40,914 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 09:48:40,914 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 09:55:20,115 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 09:55:20,116 - planner - INFO - Starting planning process for query: Give me a plan to investigate shortness of breath in a pediatric patient.
+2025-11-08 09:55:20,116 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 09:56:33,176 - planner - INFO - Study plan evaluation complete
+2025-11-08 09:56:33,190 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:00:40,701 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:00:40,701 - planner - INFO - Starting planning process for query: Testing the application
+2025-11-08 10:00:40,701 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:01:13,120 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:01:13,120 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:01:13,121 - planner - INFO - Starting planning process for query: covid 19 causes cough
+2025-11-08 10:01:13,121 - planner - INFO - Starting planning process for query: covid 19 causes cough
+2025-11-08 10:01:13,122 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:01:13,122 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:03:33,005 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:03:33,005 - planner - INFO - Starting planning process for query: covid 19 kills elderies
+2025-11-08 10:03:33,006 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:04:31,489 - planner - INFO - Study plan evaluation complete
+2025-11-08 10:04:31,504 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:06:51,806 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:06:51,806 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:06:51,806 - planner - INFO - Starting planning process for query: yes
+2025-11-08 10:06:51,806 - planner - INFO - Starting planning process for query: yes
+2025-11-08 10:06:51,806 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:06:51,806 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:07:15,093 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:07:15,093 - planner - INFO - Starting planning process for query: no
+2025-11-08 10:07:15,094 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:09:06,116 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:09:06,116 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:09:06,116 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:09:06,116 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:09:06,127 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:09:06,127 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:10:25,590 - planner - INFO - Study plan evaluation complete
+2025-11-08 10:10:25,590 - planner - INFO - Study plan evaluation complete
+2025-11-08 10:10:25,603 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:10:25,603 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:15:39,081 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:15:39,081 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:15:39,081 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:15:39,081 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:15:39,081 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:15:39,081 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:15:39,081 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:15:39,081 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:15:39,081 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:16:40,217 - planner - INFO - Study plan evaluation complete
+2025-11-08 10:16:40,217 - planner - INFO - Study plan evaluation complete
+2025-11-08 10:16:40,217 - planner - INFO - Study plan evaluation complete
+2025-11-08 10:16:40,229 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:16:40,229 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:16:40,229 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:18:03,231 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:18:03,231 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:18:03,231 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:18:03,231 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:18:03,232 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:18:03,232 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:18:03,232 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:18:03,232 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:18:03,232 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:18:03,232 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:18:03,232 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:18:03,232 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:19:13,839 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:19:13,839 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:19:13,839 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:20:31,979 - planner - INFO - Study plan evaluation complete
+2025-11-08 10:20:31,991 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:21:51,987 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:21:51,987 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:21:51,987 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:21:51,987 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:21:51,988 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:21:51,988 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:23:02,078 - planner - INFO - Study plan evaluation complete
+2025-11-08 10:23:02,078 - planner - INFO - Study plan evaluation complete
+2025-11-08 10:23:02,103 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:23:02,103 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:23:12,877 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:23:12,877 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:23:12,877 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:23:12,878 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:23:12,878 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:23:12,878 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 10:23:12,878 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:23:12,878 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:23:12,878 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 10:24:36,056 - planner - INFO - Study plan evaluation complete
+2025-11-08 10:24:36,056 - planner - INFO - Study plan evaluation complete
+2025-11-08 10:24:36,056 - planner - INFO - Study plan evaluation complete
+2025-11-08 10:24:36,067 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:24:36,067 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 10:24:36,067 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:35:48,216 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:35:48,218 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:35:48,219 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:37:25,369 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:37:25,369 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:37:25,369 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:37:25,369 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:37:25,369 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:37:25,369 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:38:10,794 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:38:10,794 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:38:10,811 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:38:10,811 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:40:02,942 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:40:02,942 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:40:02,942 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:40:02,942 - planner - INFO - Starting planning process for query: hello how can you help me
+2025-11-08 11:40:02,942 - planner - INFO - Starting planning process for query: hello how can you help me
+2025-11-08 11:40:02,942 - planner - INFO - Starting planning process for query: hello how can you help me
+2025-11-08 11:40:02,943 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:40:02,943 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:40:02,943 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:49:16,890 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:49:16,890 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:49:16,890 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:49:16,890 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:49:16,890 - planner - INFO - Starting planning process for query: hello how can you help me
+2025-11-08 11:49:16,890 - planner - INFO - Starting planning process for query: hello how can you help me
+2025-11-08 11:49:16,890 - planner - INFO - Starting planning process for query: hello how can you help me
+2025-11-08 11:49:16,890 - planner - INFO - Starting planning process for query: hello how can you help me
+2025-11-08 11:49:16,891 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:49:16,891 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:49:16,891 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:49:16,891 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:49:32,691 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:49:32,691 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:49:32,691 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:49:32,691 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:49:32,701 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:49:32,701 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:49:32,701 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:49:32,701 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:53:07,062 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:53:07,062 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:53:07,062 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:53:07,062 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:53:07,062 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:53:07,063 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:53:07,063 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:53:07,063 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:53:07,063 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:53:07,063 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:53:07,063 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:53:07,063 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:53:07,063 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:53:07,063 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:53:07,063 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:54:04,043 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:54:04,043 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:54:04,043 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:54:04,043 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:54:04,043 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:54:04,059 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:54:04,059 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:54:04,059 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:54:04,059 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:54:04,059 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:56:02,141 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:56:02,141 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:56:02,141 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:56:02,141 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:56:02,141 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:56:02,141 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:56:02,142 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:56:02,142 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:56:02,142 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:56:02,142 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:56:02,142 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:56:02,142 - planner - INFO - Starting planning process for query: A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.
+2025-11-08 11:56:02,143 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:56:02,143 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:56:02,143 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:56:02,143 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:56:02,143 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:56:02,143 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 11:56:52,148 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:56:52,148 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:56:52,148 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:56:52,148 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:56:52,148 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:56:52,148 - planner - INFO - Study plan evaluation complete
+2025-11-08 11:56:52,166 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:56:52,166 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:56:52,166 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:56:52,166 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:56:52,166 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 11:56:52,166 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 12:00:02,552 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 12:00:02,552 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 12:00:02,552 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 12:00:02,552 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 12:00:02,552 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 12:00:02,552 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 12:00:02,552 - planner - INFO - Saved plan and hypothesis to state file
+2025-11-08 12:00:02,553 - planner - INFO - Starting planning process for query: explain to me the population chosen
+2025-11-08 12:00:02,553 - planner - INFO - Starting planning process for query: explain to me the population chosen
+2025-11-08 12:00:02,553 - planner - INFO - Starting planning process for query: explain to me the population chosen
+2025-11-08 12:00:02,553 - planner - INFO - Starting planning process for query: explain to me the population chosen
+2025-11-08 12:00:02,553 - planner - INFO - Starting planning process for query: explain to me the population chosen
+2025-11-08 12:00:02,553 - planner - INFO - Starting planning process for query: explain to me the population chosen
+2025-11-08 12:00:02,553 - planner - INFO - Starting planning process for query: explain to me the population chosen
+2025-11-08 12:00:02,554 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 12:00:02,554 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 12:00:02,554 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 12:00:02,554 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 12:00:02,554 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 12:00:02,554 - planner - INFO - Extracting clinical hypothesis...
+2025-11-08 12:00:02,554 - planner - INFO - Extracting clinical hypothesis...

@@ -133,6 +133,7 @@ class Orchestrator:
             
             planner_result = await self.planner.run(hypothesis_text)
 
+
             if planner_result.get("status") != "finished":
                 raise RuntimeError(
                     f"Planner finished with unexpected status: {planner_result.get('status')}"
@@ -216,7 +217,7 @@ async def main():
 
     result = await orchestrator.process_hypothesis(hypothesis)
 
-    print("\n🎯 Pipeline finished – overall system state:")
+    print("\n Pipeline finished – overall system state:")
     print("\nPlanner output (truncated):")
     print(json.dumps(result["planner_result"], indent=2)[:500] + " ...")
     print("\nExecution summary:")
