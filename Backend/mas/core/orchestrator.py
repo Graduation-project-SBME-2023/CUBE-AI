@@ -54,7 +54,20 @@ class Orchestrator:
         self.config_path = Path(config_path)
         self.log_path = Path(log_path)
         self.state = SystemState.IDLE
-        self.current_hypothesis = None
+        
+        current_dir = Path(__file__).resolve().parent
+        json_path = current_dir.parent / "memory" / "workspace" / "state.json"
+
+        if not json_path.exists():
+            logger.warning(f"State file not found at {json_path}")
+            raise FileNotFoundError(f"Missing state.json at {json_path}")
+
+        # Load stored hypothesis and plan
+        with open(json_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        self.current_hypothesis = config.get("hypothesis", "")
+        self.current_study_plan = config.get("plan", "")
         # The Planner does not need any arguments at construction time –
         # it will receive the hypothesis when ``run`` is called.
         self.planner = Planner(config_path=str(self.config_path), log_path=str(self.log_path))
@@ -146,7 +159,7 @@ class Orchestrator:
             # --------------------------------------------------------------
             #  FeedBack phase
             # --------------------------------------------------------------
-            if self.state == SystemState.CHATTING:
+            if self.current_hypothesis != None:
                 feedback = await FeedbackAgent.chat()
                 
                 if feedback.status == 'pending':
