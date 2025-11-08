@@ -160,9 +160,9 @@ class Orchestrator:
             #  FeedBack phase
             # --------------------------------------------------------------
             if self.current_hypothesis != None:
-                feedback = await FeedbackAgent.chat()
+                feedback = await self.user_input_handler.chat()
                 
-                if feedback.status == 'pending':
+                if feedback['status'] == 'pending':
                     print("feedback", feedback)
                     return await self.output_formatter.format_output(feedback)
                 
