@@ -253,8 +253,8 @@ async def sync_all_from_orthanc(db: AsyncSession):
     """
     print("[INFO] 🔄 Starting initial full sync from Orthanc...")
     
-    async with aiohttp.ClientSession(auth=AUTH) as session:
-        try:
+    try:
+        async with aiohttp.ClientSession(auth=AUTH) as session:
             # Get all studies from Orthanc
             async with session.get(f"{ORTHANC_URL}/studies") as resp:
                 if resp.status != 200:
@@ -284,11 +284,11 @@ async def sync_all_from_orthanc(db: AsyncSession):
                     failed += 1
             
             print(f"[INFO] ✅ Initial sync completed: {synced} synced, {failed} failed")
-            
-        except Exception as e:
-            print(f"[ERROR] Initial sync failed: {e}")
-            import traceback
-            traceback.print_exc()
+                
+    except Exception as e:
+        print(f"[ERROR] Initial sync failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 # ----------------------------------------------------------------------
 # SYNC FUNCTIONS

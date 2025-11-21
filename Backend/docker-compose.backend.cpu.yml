@@ -30,7 +30,7 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/migrations:/alembic/migrations
     command: >
         sh -c "
-        pip install psycopg2-binary &&
+        pip install psycopg2-binary aiohttp &&
         alembic -c /alembic/alembic.ini upgrade head &&
         python /monailabel/server_start.py
         "

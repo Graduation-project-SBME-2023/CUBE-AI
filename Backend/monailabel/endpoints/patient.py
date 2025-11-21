@@ -9,8 +9,12 @@ from datetime import date
 router = APIRouter(prefix="/patients", tags=["patients"])
 
 def calculate_age(dob: date) -> int:
-    today = date.today()
-    return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    try:
+        today = date.today()
+        age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+    except AttributeError:
+        return None
+    return age
 
 @router.post("/", response_model=schemas.Patient)
 def create_patient(patient: schemas.PatientCreate, db: Session = Depends(get_db)):
