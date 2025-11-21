@@ -12,8 +12,7 @@ services:
       - '8000:8000'
     command: >
         sh -c "
-        pip install psycopg2-binary &&
-        pip install aiohttp &&
+        pip install psycopg2-binary aiohttp &&
         alembic -c /alembic/alembic.ini upgrade head &&
         python /monailabel/server_start.py
         "
