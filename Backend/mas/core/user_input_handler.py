@@ -16,13 +16,15 @@ logger = logging.getLogger("FeedbackAgent")
 
 # ============================== HELPERS ==============================
 
+# ============================== HELPERS ==============================
 def clean_markdown_json(text: str) -> str:
-    """Remove markdown formatting (```json ... ```) from LLM responses."""
+    """Remove ```json ... ``` wrappers from model responses."""
     text = text.strip()
     text = re.sub(r"^```json\s*", "", text)
     text = re.sub(r"^```", "", text)
     text = re.sub(r"```$", "", text)
     return text
+
 
 # ============================== FEEDBACK AGENT ==============================
 
@@ -80,6 +82,8 @@ class FeedbackAgent:
         system_prompt = (
             f"Discuss this study plan with the user:\n\nHypothesis:\n{self.hypothesis}\n\nPlan:\n{json.dumps(self.study_plan, indent=2)}"
         )
+        
+        print(f"hypothesis {self.hypothesis}")
 
         # Run first turn
         result = await self.user_feedback_agent.run(task=system_prompt)
@@ -90,26 +94,8 @@ class FeedbackAgent:
         except json.JSONDecodeError:
             response = {"status": "pending", "message": result_text}
 
-        # Simulated chat loop
-        while response["status"] != "finished":
-            print(json.dumps(response, indent=4))
-            user_input = input("\n👤 You: ")
-
-            if user_input.lower() in {"confirm", "yes", "ok"}:
-                user_message = "{'status': 'finished', 'message': 'User confirmed the plan.'}"
-            else:
-                user_message = user_input
-
-            result = await self.user_feedback_agent.run(task=user_message)
-            result_text = clean_markdown_json(result.messages[-1].content)
-
-            try:
-                response = json.loads(result_text)
-            except json.JSONDecodeError:
-                response = {"status": "pending", "message": result_text}
 
         print(json.dumps(response, indent=4))
-        logger.info("Feedback session completed.")
         return response
 
 
@@ -128,14 +114,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("OutputFormattingAgent")
 
-# ============================== HELPERS ==============================
-def clean_markdown_json(text: str) -> str:
-    """Remove ```json ... ``` wrappers from model responses."""
-    text = text.strip()
-    text = re.sub(r"^```json\s*", "", text)
-    text = re.sub(r"^```", "", text)
-    text = re.sub(r"```$", "", text)
-    return text
 
 
 # ============================== OUTPUT FORMATTING AGENT ==============================
