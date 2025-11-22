@@ -45,7 +45,7 @@
 
 <script>
 (() => {
-  const WS_URL_DEFAULT = (location.protocol === "https:" ? "wss://" : "ws://") + location.hostname + ":8000/ws";
+  const WS_URL_DEFAULT = (location.protocol === "https:" ? "wss://" : "ws://") + "localhost"+ ":8150/ws";
   // change above if server is on different host/port:
   const wsUrl = WS_URL_DEFAULT;
 
