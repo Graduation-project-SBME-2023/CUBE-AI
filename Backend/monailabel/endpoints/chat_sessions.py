@@ -19,20 +19,6 @@ async def create_chat_session(data: schemas.ChatSessionCreate, db: AsyncSession 
     return await crud.create_chat_session(db, data)
 
 
-
-# ---------------------------------------------------------
-# GET CHAT SESSION BY ID
-# ---------------------------------------------------------
-@router.get("/{chat_id}", response_model=schemas.ChatSession)
-async def get_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
-    """
-    Retrieve a chat session by its unique chat_id.
-    """
-    session = await crud.get_chat_session(db, chat_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
-    return session
-
 # ---------------------------------------------------------
 # GET ALL CHAT SESSIONS
 # ---------------------------------------------------------
@@ -50,6 +36,20 @@ async def get_chat_sessions(
     - active_only=True (get only active sessions)
     """
     return await crud.get_chat_sessions(db, study_UID=study_UID, active_only=active_only)
+# ---------------------------------------------------------
+# GET CHAT SESSION BY ID
+# ---------------------------------------------------------
+@router.get("/{chat_id}", response_model=schemas.ChatSession)
+async def get_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Retrieve a chat session by its unique chat_id.
+    """
+    session = await crud.get_chat_session(db, chat_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return session
+
+
 # ---------------------------------------------------------
 # UPDATE CHAT SESSION (title, summary, etc.)
 # ---------------------------------------------------------
