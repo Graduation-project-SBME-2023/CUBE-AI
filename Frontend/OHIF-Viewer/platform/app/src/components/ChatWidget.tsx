@@ -47,7 +47,7 @@ const ChatWidget: React.FC = () => {
       return data.response || "No response from agent.";
     } catch (error) {
       console.error("Error connecting to backend:", error);
-      return "⚠️ Could not reach the radiologist assistant server.";
+      return " Could not reach the radiologist assistant server.";
     }
   };
 
