@@ -27,6 +27,7 @@ const CustomChatWidget: React.FC = () => {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   // Load local sessions
   useEffect(() => {
@@ -265,24 +266,42 @@ const CustomChatWidget: React.FC = () => {
                     <ul className="space-y-2">
                       {sortedSessions.map((s) => (
                         <li
-                            key={s.chat_id}
-                            className={`p-2 rounded-lg cursor-pointer flex justify-between items-start
-                              ${s.chat_id === activeSessionId ? "bg-sky-500 shadow-md font-semibold" : "hover:bg-gray-50"}`}
-                          >
-                            <div onClick={() => openSession(s.chat_id)} className="flex-1">
-                              <div className="text-sm font-medium truncate" style={{ maxWidth: 160 }}>{s.title}</div>
-                              <div className="text-xs text-gray-500 truncate" style={{ maxWidth: 160 }}>
+                              key={s.chat_id}
+                              className={`p-2 rounded-lg flex items-center justify-between cursor-pointer
+                                ${s.chat_id === activeSessionId ? "bg-gray-400 shadow-md" : "hover:bg-gray-50"}`}
+                            >
+
+                            {/* LEFT SIDE — Text */}
+                            <div
+                              onClick={() => openSession(s.chat_id)}
+                              className="flex-1"
+                            >
+                              <div className="text-sm font-medium truncate w-[150px]">{s.title}</div>
+                              <div className={`text-xs truncate w-[150px] ${s.chat_id === activeSessionId ? "text-black" : "text-gray-500"}`}>
                                 {s.summary ?? s.messages[s.messages.length - 1]?.text?.slice(0, 60) ?? ""}
                               </div>
                             </div>
+
+                            {/* RIGHT SIDE — Delete button */}
                             <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDeleteId(s.chat_id);
+                              }}
+                              className="ml-3 flex-shrink-0 p-1 rounded-md hover:bg-red-100 group"
                               title="Delete"
-                              onClick={(e) => { e.stopPropagation(); deleteSession(s.chat_id); }}
-                              className="ml-2 text-xs text-red-500 hover:text-red-700"
                             >
-                              🗑️
+                              <svg xmlns="http://www.w3.org/2000/svg"
+                                className="w-4 h-4 text-red-500 group-hover:text-red-700"
+                                viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                              >
+                                <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                                  d="M3 6h18M9 6v12m6-12v12M4 6l1 14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2l1-14M10 6a2 2 0 0 1 4 0" />
+                              </svg>
                             </button>
                           </li>
+
+
 
                       ))}
                     </ul>
@@ -298,7 +317,7 @@ const CustomChatWidget: React.FC = () => {
                   messagesWithSummary.map((m) => (
                     <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                       <div className="overflow-x-auto max-w-full">
-                        <div className={`${m.role === "user" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-900"} p-3 rounded-lg shadow break-words whitespace-pre-wrap inline-block`} style={{ overflowWrap: "anywhere", minWidth: "fit-content" }}>
+                        <div className={`${m.role === "user" ? "bg-blue-600 text-white" : "bg-gray-200 text-gray-900"} p-3 rounded-lg shadow break-words whitespace-pre-wrap inline-block`} style={{ overflowWrap: "anywhere", minWidth: "fit-content" }}>
                           {m.text}
                         </div>
                       </div>
@@ -336,6 +355,39 @@ const CustomChatWidget: React.FC = () => {
           </div>
         </div>
       )}
+      {/* Delete Confirmation Modal */}
+{confirmDeleteId !== null && (
+  <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div className="bg-white p-5 rounded-lg shadow-lg w-64">
+      <div className="font-semibold text-center mb-3">
+        Delete this chat?
+      </div>
+      <div className="text-xs text-gray-600 text-center mb-4">
+        This action cannot be undone.
+      </div>
+
+      <div className="flex justify-between">
+        <button
+          onClick={() => setConfirmDeleteId(null)}
+          className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-sm"
+        >
+          Cancel
+        </button>
+
+        <button
+          onClick={() => {
+            deleteSession(confirmDeleteId);
+            setConfirmDeleteId(null);
+          }}
+          className="px-3 py-1 rounded bg-red-600 hover:bg-red-700 text-white text-sm"
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
     </div>
   );
 };
