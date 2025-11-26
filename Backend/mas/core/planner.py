@@ -5,7 +5,7 @@ import re
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 from pydantic import BaseModel, Field
 
 # Configure logging
@@ -68,6 +68,24 @@ def clean_markdown_json(text: str) -> str:
     text = re.sub(r"```$", "", text)
     return text
 
+def format_plan(plan: StudyPlan) -> Dict:
+    """
+    Converts a StudyPlan object into the frontend schema with:
+    - id: unique id (can use step index or UUID)
+    - title: mapped from step.name
+    - description: mapped from step.description
+    """
+    formatted_steps = []
+
+    for idx, step in enumerate(plan.steps, start=1):
+        formatted_steps.append({
+            "id": f"s{idx}",          # or str(uuid4()) if you want unique ids
+            "title": step.name,
+            "description": step.description
+        })
+
+    return {"steps": formatted_steps}
+    
 class Planner:
     def __init__(
         self,
@@ -99,7 +117,12 @@ class Planner:
             study_goal="",
             state = "not_confirmed"
         ))
-        self.plan = StudyPlan(**plan)   
+# Validate and assign
+        if isinstance(plan, dict):
+            self.plan = StudyPlan(**plan)  # unpack dictionary
+        elif isinstance(plan, StudyPlan):
+            self.plan = plan 
+
         self.model_client = ollama_client
         self.status = "idle"
         self._initialize_logging()
@@ -245,15 +268,15 @@ class Planner:
         if  self.hypothesis.id== "":
             await send_ws_message("info", "Processing your message!")
             message = await self.create_hypothesis(user_query)
-            await send_ws_message("hypothesis_created", self.hypothesis.model_dump())
-            await send_ws_message("info", message)
+            await send_ws_message("info", self.hypothesis.model_dump())
+            await send_ws_message("msg", message)
             
              
         
         if self.hypothesis.state == "not_confirmed" and self.hypothesis.title :
             # format the the hypothesis and send it
             while self.hypothesis.state == "not_confirmed":
-                await send_ws_message("info", "Please confirm the hypothesis or ask me to modify or explain it")
+                await send_ws_message("msg", "Please confirm the hypothesis or ask me to modify or explain it")
             
                 user_confirmation = await wait_for_user_message("user_confirmation")
                 print(user_confirmation)
@@ -262,8 +285,8 @@ class Planner:
                 message = await self.process_hypothesis(user_confirmation)
                 print(self.hypothesis.state)
                 
-                await send_ws_message("hypothesis", self.hypothesis.model_dump())
-                await send_ws_message("info", message)
+                await send_ws_message("info", self.hypothesis.model_dump())
+                await send_ws_message("msg", message)
                     
             if self.hypothesis.state == "confirmed":
                 self.save_to_config()                
@@ -273,10 +296,10 @@ class Planner:
         if self.plan.hypothesis_id == '':
             
             ## create plan
-            await send_ws_message("info", "Designing study plan from hypothesis...")
+            await send_ws_message("msg", "Designing study plan from hypothesis...")
             message = await self.create_study_plan()
-            await send_ws_message("plan_created", self.plan.model_dump())
-            await send_ws_message("info", message)
+            await send_ws_message("plan", format_plan(self.plan.model_dump()))
+            await send_ws_message("msg", message)
 
             # Match steps to available modules
             match_prompt = {
@@ -296,14 +319,14 @@ class Planner:
 
             # Ask user to confirm / modify the plan until confirmed
             while self.plan.state == "not_confirmed":
-                await send_ws_message("info", "Please review and confirm the study plan or request modifications.")
+                await send_ws_message("msg", "Please review and confirm the study plan or request modifications.")
                 user_msg = await wait_for_user_message("plan_confirmation")
                 print(user_msg)
-                await send_ws_message("info", "Processing your message!")
+                await send_ws_message("msg", "Processing your message!")
                 msg = await self.process_study_plan(user_msg)
                 print(msg)
-                await send_ws_message("plan", self.plan.model_dump())
-                await send_ws_message("info", msg)
+                await send_ws_message("plan", format_plan(self.plan.model_dump()))
+                await send_ws_message("msg", msg)
 
             if self.plan.state == "confirmed":
                 self.save_to_config()                

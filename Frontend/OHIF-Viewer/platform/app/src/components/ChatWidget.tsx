@@ -8,31 +8,10 @@ import {
 } from "react-chat-widget";
 import "react-chat-widget/lib/styles.css";
 import "./ChatWidget.css";
-
-const ChatWidget: React.FC = () => {
-  const [isOpen, setIsOpen] = useState(false);
-  const location = useLocation();
+import websocketService from '../utils/WebsocketService';
 
 
-    useEffect(() => {
-    console.log("Current route:", location.pathname);
-  }, [location]);
-
-    // hide the default launcher button
-  useEffect(() => {
-    const style = document.createElement("style");
-    style.innerHTML = `
-      .rcw-launcher {
-        display: none !important;
-      }
-    `;
-    document.head.appendChild(style);
-
-    return () => {
-      document.head.removeChild(style);
-    };
-  }, []);
-
+  
 const mockAgentResponse = async (text: string) => {
   try {
     const response = await fetch("http://localhost:8150/run", {
@@ -57,15 +36,66 @@ const mockAgentResponse = async (text: string) => {
 };
 
 
-  const handleNewUserMessage = async (message: string) => {
-    console.log("User message:", message);
+const ChatWidget: React.FC = () => {
+  const [isOpen, setIsOpen] = useState(false);
+  const location = useLocation();
 
-    // add "thinking..." placeholder
-    addResponseMessage("💭 Thinking...");
 
-    const response = await mockAgentResponse(message);
-    deleteMessages(1); // removes the last bot message (the thinking one) and add the real response :)
-    addResponseMessage(response);
+    useEffect(() => {
+    console.log("Current route:", location.pathname);
+  }, [location]);
+
+  useEffect(() => {
+    //  Hide default launcher button
+    const style = document.createElement("style");
+    style.innerHTML = `
+      .rcw-launcher {
+        display: none !important;
+      }
+    `;
+    document.head.appendChild(style);
+
+    // Connect WebSocket & subscribe to backend messages
+    websocketService.connect();
+    console.log("WebSocket connected from ChatWidget");
+    const unsubscribe = websocketService.subscribe((msg) => {
+      console.log("Received WebSocket message in ChatWidget:", msg);
+      if (msg.type === 'msg') {
+        deleteMessages(1); // remove "Thinking..."
+        addResponseMessage(msg.payload);
+      }
+    });
+
+    // Cleanup on unmount
+    return () => {
+      document.head.removeChild(style);
+      unsubscribe();
+    };
+  }, []);
+
+
+
+
+  // const handleNewUserMessage = async (message: string) => {
+  //   console.log("User message:", message);
+
+  //   // add "thinking..." placeholder
+  //   addResponseMessage("💭 Thinking...");
+
+  //   const response = await mockAgentResponse(message);
+  //   deleteMessages(1); // removes the last bot message (the thinking one) and add the real response :)
+  //   addResponseMessage(response);
+  // };
+
+  const handleNewUserMessage = (message: string) => {
+    if (!message.trim()) return;
+
+    addResponseMessage("Thinking...");
+
+    websocketService.sendMessage({
+      type: 'user_message',
+      payload: message,
+    });
   };
 
   const handleToggle = () => {

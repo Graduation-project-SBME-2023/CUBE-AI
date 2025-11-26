@@ -1,16 +1,17 @@
 import React, { useEffect, useState, useCallback} from "react";
 import PlaygroundCanvas from "../../components/PlaygroundCanvas";
 import { MarkerType } from "@xyflow/react";
+import websocketService from "../../utils/WebsocketService";
 
 // mock for testing
 const mockResponse = {
   steps: [
-    { id: "s1", title: "Population query", description: "Collect raw data from multiple sources including surveys and APIs." },
-    { id: "s2", title: "imaging protocols", description: "Remove duplicates and handle missing values." },
-    { id: "s3", title: "segmentation ", description: "Train ML models to predict outcomes based on clean data." },
-    { id: "s4", title: "Radiomics Feature", description: "Evaluate model accuracy and performance." },
-    { id: "s5", title: "modelling", description: "Train ML models to predict outcomes based on clean data."},
-    { id: "s6", title: "Validation", description: "Evaluate model accuracy and performance."}
+    { id: "s1", name: "Population query", description: "Collect raw data from multiple sources including surveys and APIs." },
+    { id: "s2", name: "imaging protocols", description: "Remove duplicates and handle missing values." },
+    { id: "s3", name: "segmentation ", description: "Train ML models to predict outcomes based on clean data." },
+    { id: "s4", name: "Radiomics Feature", description: "Evaluate model accuracy and performance." },
+    { id: "s5", name: "modelling", description: "Train ML models to predict outcomes based on clean data."},
+    { id: "s6", name: "Validation", description: "Evaluate model accuracy and performance."}
 
   ],
 };
@@ -31,7 +32,7 @@ const buildGraph = (data, handleDeleteNode, editMode) => {
     position: { x: index * 220, y: 100 },
     type: "agent",
     data: {
-      name: step.title,
+      name: step.name,
       description: step.description,
       onDelete: handleDeleteNode, 
       editable: editMode,  
@@ -64,16 +65,14 @@ function AgentsPlayground() {
   const [editMode, setEditMode] = useState(false);
   const [loading, setLoading] = useState(true);
 
-
+// Initial load of plan
+useEffect(() => {
   const fetchPlan = async () => {
     setLoading(true);
     try {
       await new Promise((resolve) => setTimeout(resolve, 500));
-      const response = mockResponse; // Replace with: await fetch("/api/plan").then(res => res.json());
+      const response = mockResponse; // replace with backend fetch if needed
       setOriginalData(response);
-      const { nodes, edges } = buildGraph(response, handleDeleteNode, editMode);
-      setNodes(nodes);
-      setEdges(edges);
     } catch (err) {
       console.error("Error fetching plan:", err);
     } finally {
@@ -81,36 +80,51 @@ function AgentsPlayground() {
     }
   };
 
-  useEffect(() => {
-    fetchPlan();
-  }, []);
+  fetchPlan();
+}, []);
 
-  const handleDeleteNode = useCallback((nodeId) => {
-    setOriginalData((prevData) => {
-      if (!prevData) return prevData;
-      
-      const updatedSteps = prevData.steps.filter((step) => step.id !== nodeId);
-      const newData = { steps: updatedSteps };
-      
-      return newData; // Just return the new data, don't rebuild here
-    });
-  }, []);
+// Delete node handler
+const handleDeleteNode = useCallback((nodeId) => {
+  setOriginalData((prevData) => {
+    if (!prevData) return prevData;
 
-  // Add a separate useEffect to rebuild the graph when originalData changes
-  useEffect(() => {
-    if (originalData) {
-      const { nodes: newNodes, edges: newEdges } = buildGraph(
-        originalData,
-        handleDeleteNode,
-        editMode
-      );
-      setNodes(newNodes);
-      setEdges(newEdges);
+    const updatedSteps = prevData.steps.filter((step) => step.id !== nodeId);
+    return { steps: updatedSteps };
+  });
+}, []);
+
+// Rebuild graph whenever originalData changes
+useEffect(() => {
+  if (originalData) {
+    const { nodes: newNodes, edges: newEdges } = buildGraph(
+      originalData,
+      handleDeleteNode,
+      editMode
+    );
+    setNodes(newNodes);
+    setEdges(newEdges);
+  }
+}, [originalData, editMode, handleDeleteNode]);
+
+// WebSocket subscription for plan updates
+useEffect(() => {
+  websocketService.connect();
+
+  const unsubscribe = websocketService.subscribe((msg) => {
+    if (msg.type === "plan") {
+      console.log("Received plan update:", msg.payload);
+
+      setOriginalData(msg.payload);
     }
-  }, [originalData, editMode, handleDeleteNode]);
 
+    if (msg.type === "final") {
+      console.log("Planner finished:", msg.payload);
+    }
+  });
 
-  // 
+  return () => unsubscribe();
+}, []);
+
   const handleCancelEdit = () => {
     if (originalData) {
       const { nodes, edges } = buildGraph(originalData, handleDeleteNode, false);
@@ -128,6 +142,8 @@ function AgentsPlayground() {
       setEdges(edges);
     }
   };
+
+
   // Approved (send to backend → get updated plan) , i think if approved the planner should start working
   const handleApprove = async () => {
     try {
