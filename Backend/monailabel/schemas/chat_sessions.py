@@ -6,6 +6,8 @@ from datetime import date, datetime
 
         # from Backend.monailabel.models.chat_messages import ChatMessage
 from .chat_messages import ChatMessage
+
+
 class StudyRef(BaseModel):
     study_uid: str
     class Config:

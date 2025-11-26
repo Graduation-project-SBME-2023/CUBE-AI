@@ -12,10 +12,8 @@ type ChatSession = {
   title: string;
   messages: Message[];
   summary?: string;
-  last_activity?: number; // store timestamp of last activity
+  last_activity?: number;
 };
-
-const STORAGE_KEY = "custom_chat_widget_sessions_v1";
 
 const makeId = (prefix = "id") => `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 
@@ -29,49 +27,18 @@ const CustomChatWidget: React.FC = () => {
   const listRef = useRef<HTMLDivElement | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
-  // Load local sessions
-  useEffect(() => {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      try {
-        const parsed: ChatSession[] = JSON.parse(raw);
-        setSessions(parsed);
-        if (parsed.length > 0) setActiveSessionId(parsed[0].chat_id);
-      } catch (e) {
-        console.warn("Failed to parse local sessions", e);
-      }
-    }
-  }, []);
-
-  // Persist sessions
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
-  }, [sessions]);
-
-  // Scroll to bottom
-  useEffect(() => {
-    if (!listRef.current) return;
-    listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [sessions, activeSessionId, open, drawerOpen]);
-
   const activeSession = sessions.find((s) => s.chat_id === activeSessionId) || null;
 
-  // Messages with pinned summary at top
   const messagesWithSummary = activeSession
     ? activeSession.summary
       ? [
-          {
-            id: "summary",
-            role: "assistant",
-            text: activeSession.summary,
-            ts: 0, // pinned at top
-          },
+          { id: "summary", role: "assistant", text: activeSession.summary, ts: 0 },
           ...activeSession.messages,
         ]
       : activeSession.messages
     : [];
 
-  // Backend integration
+  // --- Backend calls ---
   const fetchChatSessions = async () => {
     try {
       const r = await fetch("http://localhost:8000/chat_sessions/");
@@ -84,19 +51,37 @@ const CustomChatWidget: React.FC = () => {
         summary: s.summary,
         last_activity: s.last_activity ? new Date(s.last_activity).getTime() : 0,
       }));
-      setSessions((prev) => {
-        const existingIds = new Set(prev.map((p) => p.chat_id));
-        const newSessions = mapped.filter((m) => !existingIds.has(m.chat_id));
-        return [...prev, ...newSessions];
-      });
-    } catch (e) {
-      console.warn("Failed to fetch sessions from backend", e);
+      setSessions(mapped);
+      if (mapped.length && !activeSessionId) setActiveSessionId(mapped[0].chat_id);
+    } catch (err) {
+      console.warn("Failed to fetch sessions from backend", err);
     }
   };
 
-  useEffect(() => {
-    fetchChatSessions();
-  }, []);
+  const fetchMessagesForSession = async (chat_id: number) => {
+    try {
+      const res = await fetch(`http://localhost:8000/chat_messages/${chat_id}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const msgs: any[] = await res.json();
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.chat_id === chat_id
+            ? {
+                ...s,
+                messages: msgs.map((m) => ({
+                  id: `db_${m.message_id}`,
+                  role: m.role,
+                  text: m.text,
+                  ts: new Date(m.timestamp).getTime(),
+                })),
+              }
+            : s
+        )
+      );
+    } catch (err) {
+      console.warn("Failed to fetch messages for session", err);
+    }
+  };
 
   const createNewSession = async (title?: string) => {
     try {
@@ -108,20 +93,24 @@ const CustomChatWidget: React.FC = () => {
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
+
       const newSession: ChatSession = {
         chat_id: Number(data.chat_id),
         title: data.title || payload.title,
         messages: [
-          {
-            id: makeId("sys"),
-            role: "system",
-            text: "Hello Doctor! I am your radiologist assistant.",
-            ts: Date.now(),
-          },
+          { id: makeId("sys"), role: "system", text: "Hello Doctor! I am your radiologist assistant.", ts: Date.now() },
         ],
         summary: data.summary,
         last_activity: Date.now(),
       };
+
+      // Save initial system message to backend
+      await fetch(`http://localhost:8000/chat_messages/${newSession.chat_id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "system", text: newSession.messages[0].text }),
+      });
+
       setSessions((s) => [newSession, ...s]);
       setActiveSessionId(newSession.chat_id);
       setDrawerOpen(false);
@@ -138,11 +127,8 @@ const CustomChatWidget: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ last_activity: new Date().toISOString() }),
       });
-      // update locally too
       setSessions((prev) =>
-        prev.map((s) =>
-          s.chat_id === chat_id ? { ...s, last_activity: Date.now() } : s
-        )
+        prev.map((s) => (s.chat_id === chat_id ? { ...s, last_activity: Date.now() } : s))
       );
     } catch (err) {
       console.warn("Failed to update last_activity", err);
@@ -181,16 +167,23 @@ const CustomChatWidget: React.FC = () => {
 
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
-
     if (!activeSessionId) await createNewSession();
-
-    const sessionId = activeSessionId ?? sessions[0]?.chat_id ?? null;
+    const sessionId = activeSessionId ?? sessions[0]?.chat_id;
     if (!sessionId) return;
 
     const userMsg: Message = { id: makeId("u"), role: "user", text, ts: Date.now() };
     setSessions((prev) =>
-      prev.map((s) => (s.chat_id === sessionId ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() } : s))
+      prev.map((s) =>
+        s.chat_id === sessionId ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() } : s
+      )
     );
+
+    // Save user message to backend
+    await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "user", text }),
+    });
 
     setInput("");
     setIsTyping(true);
@@ -199,8 +192,17 @@ const CustomChatWidget: React.FC = () => {
       const replyText = await mockAgentResponse(text);
       const assistantMsg: Message = { id: makeId("a"), role: "assistant", text: replyText, ts: Date.now() };
       setSessions((prev) =>
-        prev.map((s) => (s.chat_id === sessionId ? { ...s, messages: [...s.messages, assistantMsg], last_activity: Date.now() } : s))
+        prev.map((s) =>
+          s.chat_id === sessionId ? { ...s, messages: [...s.messages, assistantMsg], last_activity: Date.now() } : s
+        )
       );
+
+      // Save assistant message to backend
+      await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "assistant", text: replyText }),
+      });
     } catch (err) {
       console.warn("Assistant reply failed", err);
     } finally {
@@ -213,11 +215,21 @@ const CustomChatWidget: React.FC = () => {
     setActiveSessionId(chat_id);
     setOpen(true);
     setDrawerOpen(false);
-    
+    await fetchMessagesForSession(chat_id);
   };
 
-  // Sort sessions by last_activity descending
+  useEffect(() => {
+    fetchChatSessions();
+  }, []);
+
   const sortedSessions = [...sessions].sort((a, b) => (b.last_activity || 0) - (a.last_activity || 0));
+
+  // --- Scroll to bottom ---
+  useEffect(() => {
+    if (!listRef.current) return;
+    listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [sessions, activeSessionId, open, drawerOpen]);
+
 
   return (
     <div className="fixed bottom-6 right-6 z-50">
