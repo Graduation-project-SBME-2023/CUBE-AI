@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import date, datetime
 
+        # from Backend.monailabel.models.chat_messages import ChatMessage
+from .chat_messages import ChatMessage
 class StudyRef(BaseModel):
     study_uid: str
     class Config:
@@ -26,5 +28,7 @@ class ChatSession(ChatSessionBase):
     started_at: datetime = None
     last_activity: datetime = None
     studies: List[StudyRef] = []
+    messages: List[ChatMessage] = []
+
     class Config:
         orm_mode = True
