@@ -1,138 +1,26 @@
 {
   "hypothesis": {
-    "id": "c437fdce-7264-4c14-8342-ec15952a058b",
-    "title": "CT Radiomics Signature Predicts High\u2011Risk Neuroblastoma",
-    "population": "Patients diagnosed with neuroblastoma (typically pediatric)",
-    "intervention": "Application of a radiomics\u2011derived imaging signature extracted from diagnostic CT scans",
+    "id": "c8508c9b-fbed-435c-9400-907b295add1c",
+    "title": "Radiomics-derived CT imaging signature predicts high\u2011risk neuroblastoma patients",
+    "population": "Children diagnosed with neuroblastoma",
+    "intervention": "Application of a radiomics\u2011derived imaging signature derived from CT scans",
     "outcome": "Accurate prediction of high\u2011risk disease status",
-    "clinical_context": "Use of advanced CT radiomics analysis as a non\u2011invasive prognostic tool in neuroblastoma management",
-    "relationship_type": "predictive"
+    "clinical_context": "Risk stratification to guide treatment intensity in neuroblastoma patients",
+    "relationship_type": "predictive",
+    "state": "confirmed"
   },
+  "planner_status": "idle",
   "plan": {
-    "hypothesis_id": "fe57593e-f2cc-4b75-9576-79a75120b6d8",
-    "study_goal": "Investigate the hypothesis: ",
+    "hypothesis_id": "c8508c9b-fbed-435c-9400-907b295add1c",
+    "study_goal": "Radiomics-derived CT imaging signature predicts high\u2011risk neuroblastoma patients",
     "steps": [
       {
-        "name": "Formulate Research Question & Objectives",
-        "description": "Define the primary hypothesis that a CT\u2011derived radiomics signature can accurately predict high\u2011risk neuroblastoma. Specify secondary objectives (e.g., comparison with current histopathologic risk stratification, assessment of inter\u2011observer reproducibility, evaluation of added clinical value).",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Comprehensive Literature Review",
-        "description": "Search PubMed, Embase, and Scopus for prior radiomics studies in neuroblastoma and related pediatric solid tumors. Summarize existing imaging protocols, feature extraction pipelines, and predictive modeling approaches to inform study design.",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Study Design Selection",
-        "description": "Choose a multicenter, retrospective\u2011prospective cohort design. The retrospective arm will provide initial model training using existing CT datasets; the prospective arm will validate the signature in real\u2011time clinical workflow.",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Develop Detailed Protocol",
-        "description": "Write a protocol covering inclusion/exclusion criteria, sample size calculation, CT acquisition parameters, radiomics pipeline, reference standard for high\u2011risk status (International Neuroblastoma Risk Group criteria), statistical analysis plan, and data management procedures.",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Ethics & Regulatory Approvals",
-        "description": "Submit the protocol to Institutional Review Boards (IRBs) at each participating site. Obtain parental consent/child assent for prospective enrollment and data use agreements for retrospective data sharing.",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Site Selection & Training",
-        "description": "Identify 4\u20116 pediatric oncology centers with standardized diagnostic CT scanners. Conduct webinars and hands\u2011on workshops to train radiologists, technologists, and data scientists on uniform image acquisition, de\u2011identification, and radiomics feature extraction.",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Define Inclusion/Exclusion Criteria",
-        "description": "Inclusion: patients \u2264 18\u202fyears with histologically confirmed neuroblastoma and a diagnostic contrast\u2011enhanced CT performed <\u202f30\u202fdays before treatment. Exclusion: prior chemotherapy/radiation before baseline CT, poor\u2011quality CT (motion artifacts), incomplete clinical data.",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Sample Size Determination",
-        "description": "Estimate based on expected AUC\u202f\u2265\u202f0.80 for the radiomics model, prevalence of high\u2011risk disease (~40\u202f%). Using an alpha of 0.05 and power\u202f=\u202f0.90, calculate a required cohort of \u2248250 patients (\u2248150 for training, 100 for validation).",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Retrospective Data Collection",
-        "description": "Gather de\u2011identified DICOM CT scans, pathology reports, and clinical variables (age, stage, MYCN status, serum markers). Store in a secure, centralized repository with a unique study ID for each patient.",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Standardize CT Acquisition & Pre\u2011processing",
-        "description": "Harmonize voxel spacing (e.g., resample to 1\u202fmm\u00b3), apply intensity normalization, and segment primary tumor volume using semi\u2011automated software supervised by two pediatric radiologists. Record inter\u2011observer Dice coefficient.",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Radiomics Feature Extraction",
-        "description": "Use an open\u2011source toolbox (e.g., PyRadiomics) to extract first\u2011order statistics, shape descriptors, texture matrices (GLCM, GLRLM, GLSZM, NGTDM), and wavelet\u2011filtered features. Apply feature reproducibility filters (ICC\u202f\u2265\u202f0.80).",
-        "matched_module": "FeatureExtractionAndModelingAgent",
-        "status": "pending"
-      },
-      {
-        "name": "Feature Selection & Model Development",
-        "description": "Split retrospective cohort into training (70\u202f%) and internal test (30\u202f%) sets. Perform dimensionality reduction using variance thresholding, correlation analysis (remove r\u202f>\u202f0.9), and regularized methods (LASSO). Build predictive models (logistic regression, random forest, gradient boosting) and select the best based on cross\u2011validated AUC.",
-        "matched_module": "FeatureExtractionAndModelingAgent",
-        "status": "pending"
-      },
-      {
-        "name": "Model Calibration & Decision Curve Analysis",
-        "description": "Assess calibration with Hosmer\u2011Lemeshow test and calibration plots. Conduct decision curve analysis to quantify net clinical benefit across risk thresholds.",
-        "matched_module": "FeatureExtractionAndModelingAgent",
-        "status": "pending"
-      },
-      {
-        "name": "Prospective Validation",
-        "description": "Enroll new patients meeting inclusion criteria across sites. Apply the finalized radiomics signature in a blinded fashion to their baseline CTs. Compare model predictions with the reference standard high\u2011risk classification determined after complete diagnostic work\u2011up.",
-        "matched_module": "FeatureExtractionAndModelingAgent",
-        "status": "pending"
-      },
-      {
-        "name": "Statistical Evaluation of Predictive Performance",
-        "description": "Compute sensitivity, specificity, positive/negative predictive values, accuracy, and AUC for the prospective cohort. Use DeLong\u2019s test to compare radiomics AUC against traditional clinical risk models. Perform subgroup analyses (age groups, tumor site).",
-        "matched_module": "FeatureExtractionAndModelingAgent",
-        "status": "pending"
-      },
-      {
-        "name": "Assess Added Value Over Standard Risk Factors",
-        "description": "Create multivariable logistic regression models incorporating clinical variables (age, stage, MYCN, ferritin, LDH) with and without the radiomics signature. Evaluate improvement via net reclassification index (NRI) and integrated discrimination improvement (IDI).",
-        "matched_module": "FeatureExtractionAndModelingAgent",
-        "status": "pending"
-      },
-      {
-        "name": "Health\u2011Economic Impact Modelling",
-        "description": "Model potential cost savings from earlier identification of high\u2011risk patients (e.g., reduced need for invasive biopsies, optimized chemotherapy intensity). Use a decision\u2011analytic framework to estimate incremental cost\u2011effectiveness ratios.",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Data Quality Auditing & Monitoring",
-        "description": "Implement periodic data audits to verify completeness, correct labeling of risk status, and adherence to imaging protocols. Resolve discrepancies through centralized query management.",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Manuscript Preparation & Dissemination",
-        "description": "Prepare a STROBE\u2011compliant manuscript describing methods, results, and implications. Submit to a high\u2011impact oncology or radiology journal. Present findings at pediatric oncology conferences and share the radiomics pipeline (code and configuration) on an open\u2011source repository.",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Regulatory & Clinical Implementation Planning",
-        "description": "Engage with health authorities to discuss qualification of the radiomics signature as a diagnostic decision support tool. Develop clinical workflow integration guidelines (e.g., PACS plug\u2011in) and educational material for clinicians.",
-        "matched_module": null,
+        "name": "Study Design Specification",
+        "description": "Choose a multicenter, retrospective\u2011prospective cohort design. Retrospectively gather CT scans and clinical data from diagnosed patients (training cohort) and prospectively enroll a new cohort for external validation. Define inclusion criteria (e.g., age\u202f<\u202f18\u202fyears, histologically confirmed neuroblastoma, baseline contrast\u2011enhanced CT within 30\u202fdays of diagnosis) and exclusion criteria (e.g., poor\u2011quality scans, prior therapy before imaging).",
+        "matched_module": "PopulationSelector",
         "status": "pending"
       }
-    ]
-  },
-  "planner_status": "finished"
+    ],
+    "state": "confirmed"
+  }
 }
