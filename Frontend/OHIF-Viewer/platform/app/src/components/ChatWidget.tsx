@@ -68,7 +68,6 @@ const mockAgentResponse = async (text: string) => {
     addResponseMessage(response);
   };
 
- 
   const handleToggle = () => {
     toggleWidget();
     setIsOpen(!isOpen);
