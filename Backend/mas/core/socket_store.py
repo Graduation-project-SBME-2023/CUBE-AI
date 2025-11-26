@@ -4,51 +4,59 @@ from fastapi import WebSocket
 import json
 import asyncio
 
-_active_socket: WebSocket | None = None
+# Thread-safe set of connected WebSocket clients
+_active_sockets: set[WebSocket] = set()
+_lock = asyncio.Lock()
 
 
-def set_socket(ws: WebSocket | None):
-    global _active_socket
-    _active_socket = ws
+async def set_socket(ws: WebSocket):
+    async with _lock:
+        _active_sockets.add(ws)
+
+async def remove_socket(ws: WebSocket):
+    async with _lock:
+        if ws in _active_sockets:
+            _active_sockets.remove(ws)
 
 
-def get_socket() -> WebSocket | None:
-    return _active_socket
+async def get_socket() -> list[WebSocket]:
+    async with _lock:
+        return list(_active_sockets)
+
+
 
 
 async def send_ws_message(msg_type: str, payload):
-    ws = get_socket()
-    if ws is None:
-        return
+    message = json.dumps({
+        "type": msg_type,
+        "payload": payload,
+    }, default=str)
 
+    async with _lock:
+        dead_sockets = []
+
+        for ws in _active_sockets:
+            try:
+                await ws.send_text(message)
+            except Exception:
+                dead_sockets.append(ws)
+        
+        # Remove disconnected sockets
+        for ws in dead_sockets:
+            _active_sockets.remove(ws)
+
+
+async def wait_for_user_message(ws: WebSocket):
     try:
-        await ws.send_text(json.dumps({
-            "type": msg_type,
-            "payload": payload,
-        }, default=str))
+        data = await ws.receive_text()
+        return json.loads(data)
     except Exception:
-        set_socket(None)
+        await remove_socket(ws)
+        return None
+    
 
-
-async def wait_for_user_message(expected_type: str | None = None):
-    ws = get_socket()
-    if ws is None:
-        raise RuntimeError("No active WebSocket connection")
-
-    while True:
-        try:
-            raw = await ws.receive_text()
-            msg = json.loads(raw)   
-
-            return msg
-
-        except Exception:
-            # connection closed by client
-            set_socket(None)
-            return None
-
-async def close_ws():
-    ws = get_socket()
-    if ws is not None:
+async def close_ws(ws: WebSocket):
+    try:
         await ws.close()
-        set_socket(None)
+    finally:
+        await remove_socket(ws)

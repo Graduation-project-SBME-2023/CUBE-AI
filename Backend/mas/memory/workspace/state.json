@@ -1,26 +1,7 @@
 {
   "hypothesis": {
-    "id": "c8508c9b-fbed-435c-9400-907b295add1c",
-    "title": "Radiomics-derived CT imaging signature predicts high\u2011risk neuroblastoma patients",
-    "population": "Children diagnosed with neuroblastoma",
-    "intervention": "Application of a radiomics\u2011derived imaging signature derived from CT scans",
-    "outcome": "Accurate prediction of high\u2011risk disease status",
-    "clinical_context": "Risk stratification to guide treatment intensity in neuroblastoma patients",
-    "relationship_type": "predictive",
-    "state": "confirmed"
-  },
-  "planner_status": "idle",
-  "plan": {
-    "hypothesis_id": "c8508c9b-fbed-435c-9400-907b295add1c",
-    "study_goal": "Radiomics-derived CT imaging signature predicts high\u2011risk neuroblastoma patients",
-    "steps": [
-      {
-        "name": "Study Design Specification",
-        "description": "Choose a multicenter, retrospective\u2011prospective cohort design. Retrospectively gather CT scans and clinical data from diagnosed patients (training cohort) and prospectively enroll a new cohort for external validation. Define inclusion criteria (e.g., age\u202f<\u202f18\u202fyears, histologically confirmed neuroblastoma, baseline contrast\u2011enhanced CT within 30\u202fdays of diagnosis) and exclusion criteria (e.g., poor\u2011quality scans, prior therapy before imaging).",
-        "matched_module": "PopulationSelector",
-        "status": "pending"
-      }
-    ],
-    "state": "confirmed"
+    "id": "",
+    "title": ""
   }
+  
 }

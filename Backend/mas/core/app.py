@@ -71,26 +71,28 @@ async def run_pipeline(request: RunRequest):
 async def websocket_run_pipeline(websocket: WebSocket):
     await websocket.accept()
 
-    # 🔥 store globally
-    set_socket(websocket)
+    # store globally
+    await set_socket(websocket)
 
     try:
         # First message from client (contains hypothesis)
         data = await websocket.receive_text()
+        print("Received data:", data)
         msg = json.loads(data)
-        hypothesis = msg.get("hypothesis")
+        data = msg.get("payload")
 
         # Let the planner run
     
         # If your planner wants to stream messages:
         #    it can now call send_ws_message("step", "...") internally
-        result = await planner.run(hypothesis)
-
-        # Send final response
+        result = await planner.run(data)
+        # await send_ws_message("msg", "Starting pipeline...")
+        # await send_ws_message("plan", {"steps": [{"id": "s1", "name": "Step 1", "description": "Description of step 1"}]})
+        # # Send final response
         await send_ws_message("final", "Pipeline completed")
 
     except WebSocketDisconnect:
-        print("❌ Client disconnected")
+        print("Client disconnected")
     finally:
         # remove socket when closed
         set_socket(None)
