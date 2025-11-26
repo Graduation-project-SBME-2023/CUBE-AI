@@ -33,23 +33,29 @@ const ChatWidget: React.FC = () => {
     };
   }, []);
 
-  const mockAgentResponse = async (text: string) => {
-    try {
-      const response = await fetch("http://localhost:8150/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: text }),
-      });
+const mockAgentResponse = async (text: string) => {
+  try {
+    const response = await fetch("http://localhost:8150/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task: text }),
+    });
 
-      if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
 
-      const data = await response.json();
-      return data.response || "No response from agent.";
-    } catch (error) {
-      console.error("Error connecting to backend:", error);
-      return "⚠️ Could not reach the radiologist assistant server.";
-    }
-  };
+    const data = await response.json();
+    console.log("raw response", response)
+    console.log("Backend data:", data);
+    console.log("markdown", data['markdown'])
+
+
+    return data['markdown'];
+  } catch (error) {
+    console.error("Error connecting to backend:", error);
+    return "⚠️ Could not reach the radiologist assistant server.";
+  }
+};
+
 
   const handleNewUserMessage = async (message: string) => {
     console.log("User message:", message);
