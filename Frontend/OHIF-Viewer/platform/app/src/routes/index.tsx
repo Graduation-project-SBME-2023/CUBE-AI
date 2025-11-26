@@ -10,6 +10,7 @@ import Debug from './Debug';
 import NotFound from './NotFound';
 import buildModeRoutes from './buildModeRoutes';
 import WorkflowDetailPage from './Workflow/WorkflowDetails';
+import AgentsPlayground from './Playground/AgentsPlayground';
 import PrivateRoute from './PrivateRoute';
 import PropTypes from 'prop-types';
 import { Link } from 'react-router-dom';
@@ -109,6 +110,13 @@ const createRoutes = ({
     },
   ];
 
+  const playgroundRoutes = [
+    {
+      path: '/playground/:chat_id',
+      children: AgentsPlayground,
+    }
+  ]
+
   const { customizationService } = servicesManager.services;
 
   const WorkListRoute = {
@@ -127,6 +135,7 @@ const createRoutes = ({
     ...(customRoutes?.routes || []),
     ...bakedInRoutes,
     customRoutes?.notFoundRoute || notFoundRoute,
+    ...playgroundRoutes,
   ];
 
   function RouteWithErrorBoundary({ route, ...rest }) {
