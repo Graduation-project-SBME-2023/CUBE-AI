@@ -107,7 +107,7 @@ async def activate_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)
 # ---------------------------------------------------------
 # DELETE CHAT SESSION
 # ---------------------------------------------------------
-@router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{chat_id}", status_code=status.HTTP_200_OK)
 async def delete_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
     """
     Delete a chat session permanently.

@@ -18,6 +18,7 @@ from endpoints import (
     radiomics,
     chat_sessions,
     sync,
+    segmentation,
     
 
 )
@@ -35,6 +36,7 @@ monai_server_app.include_router(model.router)
 monai_server_app.include_router(radiomics.router)
 monai_server_app.include_router(chat_sessions.router)
 monai_server_app.include_router(sync.router)
+monai_server_app.include_router(segmentation.router)
 
 @asynccontextmanager
 async def lifespan(app):

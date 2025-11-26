@@ -2,18 +2,25 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, BackgroundTasks
 from core.database import get_db, AsyncSessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
-from crud.orthanc_sync import sync_study_to_db, sync_series_to_db, sync_all_from_orthanc, AUTH, ORTHANC_URL
+from sqlalchemy.future import select
+import aiohttp
+
+from crud.orthanc_sync import (
+    sync_study_to_db,
+    sync_series_to_db,
+    sync_all_from_orthanc,
+    AUTH,
+    ORTHANC_URL
+)
 from models.patient import Patient
 from models.study import Study
 from models.volume import Volume
 from models.segmentation import Segmentation
-from sqlalchemy.future import select
-import aiohttp
-from pydantic import BaseModel
-from fastapi import APIRouter, Depends, BackgroundTasks
-from core.database import get_db
 
 router = APIRouter(prefix="/sync", tags=["orthanc"])
+
+
+# ----------------- Pydantic Payload -----------------
 
 class OrthancWebhookPayload(BaseModel):
     change_type: str
@@ -23,16 +30,14 @@ class OrthancWebhookPayload(BaseModel):
     series_uid: str | None = None
     study_uid: str | None = None
 
-# ----------------------------------------------------------------------
-# MANUAL SYNC ENDPOINT (for initial sync or re-sync)
-# ----------------------------------------------------------------------
+
+# ----------------- MANUAL FULL SYNC -----------------
 
 @router.post("/sync-all")
 async def manual_full_sync(background_tasks: BackgroundTasks):
     """
     Manually trigger a full sync of all Orthanc data.
-    This runs in the background and returns immediately.
-    Use this endpoint if you need to re-sync all data or if startup sync failed.
+    Runs in the background and returns immediately.
     """
     print("[INFO] Manual full sync requested")
     background_tasks.add_task(run_full_sync_background)
@@ -41,6 +46,7 @@ async def manual_full_sync(background_tasks: BackgroundTasks):
         "message": "Full sync started in background. Check logs for progress."
     }
 
+
 @router.get("/sync-status")
 async def get_sync_status(db: AsyncSession = Depends(get_db)):
     """
@@ -48,18 +54,18 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
     """
     try:
         from sqlalchemy import func
-        
+
         # Count records in database
         patients_count = (await db.execute(select(func.count()).select_from(Patient))).scalar()
         studies_count = (await db.execute(select(func.count()).select_from(Study))).scalar()
         volumes_count = (await db.execute(select(func.count()).select_from(Volume))).scalar()
         segs_count = (await db.execute(select(func.count()).select_from(Segmentation))).scalar()
-        
+
         # Get counts from Orthanc
         async with aiohttp.ClientSession(auth=AUTH) as session:
             async with session.get(f"{ORTHANC_URL}/statistics") as resp:
                 orthanc_stats = await resp.json() if resp.status == 200 else {}
-        
+
         return {
             "database": {
                 "patients": patients_count or 0,
@@ -81,19 +87,17 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
             "message": "Failed to get sync status"
         }
 
+
+# ----------------- BACKGROUND TASKS -----------------
+
 async def run_full_sync_background():
     """Background task for full sync"""
-    
     async with AsyncSessionLocal() as db:
         await sync_all_from_orthanc(db)
 
-# ----------------------------------------------------------------------
-# WEBHOOK ENDPOINTS
-# ----------------------------------------------------------------------
 
 async def process_webhook_background(change_type: str, resource_id: str):
-    """Process webhook in background to avoid timeout"""
-    
+    """Process webhook changes in background"""
     print(f"[INFO] Background processing started for {change_type}: {resource_id}")
 
     async with AsyncSessionLocal() as db:
@@ -102,37 +106,42 @@ async def process_webhook_background(change_type: str, resource_id: str):
                 await sync_study_to_db(db, resource_id)
                 await db.commit()
                 print(f"[INFO] ✅ Background sync completed for study {resource_id}")
+
             elif change_type == "stable_series":
                 await sync_series_to_db(db, resource_id)
                 await db.commit()
                 print(f"[INFO] ✅ Background sync completed for series {resource_id}")
+
         except Exception as e:
             print(f"[ERROR] ❌ Background sync failed for {change_type} {resource_id}: {e}")
             import traceback
             traceback.print_exc()
             await db.rollback()
 
+
+# ----------------- ORTHANC WEBHOOK -----------------
+
 @router.post("/orthanc-webhook")
 async def orthanc_webhook(payload: OrthancWebhookPayload, background_tasks: BackgroundTasks):
     """
     Webhook endpoint that responds immediately and processes in background.
-    This prevents Orthanc from timing out.
+    Supports hybrid incremental sync.
     """
     print(f"[INFO] Received webhook: {payload.change_type} for resource {payload.resource_id}")
-    
+
     if payload.change_type in ["stable_study", "stable_series"]:
-        # Add to background tasks and return immediately
+        # Add task to background queue and return immediately
         background_tasks.add_task(
             process_webhook_background,
             payload.change_type,
             payload.resource_id
         )
-        # Respond immediately so Orthanc doesn't timeout
         return {
             "status": "accepted",
             "message": f"Processing {payload.change_type} {payload.resource_id} in background"
         }
-    
+
+    # Ignore other change types
     return {
         "status": "ignored",
         "message": f"No action for change_type={payload.change_type}"

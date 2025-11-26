@@ -5,34 +5,48 @@ from typing import List, Optional, Dict, Any
 
 from models.radiomics import Radiomics
 from schemas.radiomics import RadiomicsCreate
-
+from sqlalchemy.exc import SQLAlchemyError
+from fastapi import HTTPException
 
 # ----------------------------------------------------------------------
 # Get by ID
 # ----------------------------------------------------------------------
 async def get_radiomics(db: AsyncSession, radiomics_id: int) -> Optional[Radiomics]:
-    result = await db.execute(
-        select(Radiomics).where(Radiomics.id == radiomics_id)
-    )
-    return result.scalar_one_or_none()
-
+    try:
+        result = await db.execute(
+            select(Radiomics).where(Radiomics.id == radiomics_id)
+        )
+        radiomic = result.scalar_one_or_none()
+        if not radiomic:
+            raise HTTPException(status_code=404, detail=f"Radiomics {radiomics_id} not found")
+        return radiomic
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # ----------------------------------------------------------------------
 # Get by label UID
 # ----------------------------------------------------------------------
 async def get_radiomics_by_label(db: AsyncSession, label_uid: str) -> Optional[Radiomics]:
-    result = await db.execute(
-        select(Radiomics).where(Radiomics.label_series_instance_uid == label_uid)
-    )
-    return result.scalar_one_or_none()
-
+    try:
+        result = await db.execute(
+            select(Radiomics).where(Radiomics.label_series_instance_uid == label_uid)
+        )
+        radiomic = result.scalar_one_or_none()
+        if not radiomic:
+            raise HTTPException(status_code=404, detail=f"Radiomics with label UID {label_uid} not found")
+        return radiomic
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # ----------------------------------------------------------------------
 # List all (paginated)
 # ----------------------------------------------------------------------
 async def get_radiomics_list(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[Radiomics]:
-    result = await db.execute(select(Radiomics).offset(skip).limit(limit))
-    return result.scalars().all()
+    try:
+        result = await db.execute(select(Radiomics).offset(skip).limit(limit))
+        return result.scalars().all()
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
 # ----------------------------------------------------------------------
@@ -41,10 +55,13 @@ async def get_radiomics_list(db: AsyncSession, skip: int = 0, limit: int = 100) 
 async def create_radiomics(db: AsyncSession, radiomics: RadiomicsCreate) -> Radiomics:
     db_radiomics = Radiomics(**radiomics.dict())
     db.add(db_radiomics)
-    await db.commit()
-    await db.refresh(db_radiomics)
-    return db_radiomics
-
+    try:
+        await db.commit()
+        await db.refresh(db_radiomics)
+        return db_radiomics
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=f"Failed to create radiomics: {str(e)}")
 
 
 
@@ -52,36 +69,49 @@ async def create_radiomics(db: AsyncSession, radiomics: RadiomicsCreate) -> Radi
 # Delete
 # ----------------------------------------------------------------------
 async def delete_radiomics(db: AsyncSession, radiomics_id: int) -> bool:
-    db_radiomics = await get_radiomics(db, radiomics_id)
-    if not db_radiomics:
-        return False
-    await db.delete(db_radiomics)
-    await db.commit()
-    return True
+    try:
+        db_radiomics = await get_radiomics(db, radiomics_id)
+        if not db_radiomics:
+            raise HTTPException(status_code=404, detail=f"Radiomics {radiomics_id} not found")
+        await db.delete(db_radiomics)
+        await db.commit()
+        return {"detail": f"Radiomics {radiomics_id} deleted successfully"}
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=f"Failed to delete radiomics: {str(e)}")
 
 
-# ----------------------------------------------------------------------
-# Search / Filter (by feature key or value)
-# ----------------------------------------------------------------------
+from sqlalchemy import func, cast, String
+from sqlalchemy.dialects.postgresql import JSONB
+
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import cast, String, select, func
+
 async def search_radiomics(
     db: AsyncSession,
     feature_key: Optional[str] = None,
     feature_value: Optional[str] = None,
     skip: int = 0,
     limit: int = 100,
-) -> List[Radiomics]:
+) -> list[Radiomics]:
     """
-    Simple search for radiomics entries containing a specific feature key/value.
-    Note: Requires database JSON support (e.g. PostgreSQL JSONB)
+    Search radiomics entries containing a specific feature key/value.
+    Works with PostgreSQL JSONB.
     """
-    query = select(Radiomics)
-    if feature_key:
-        query = query.where(Radiomics.features.has_key(feature_key))  # type: ignore
-    if feature_value:
-        query = query.where(
-            func.cast(Radiomics.features[feature_key], func.TEXT).ilike(f"%{feature_value}%")  # type: ignore
-        )
-    result = await db.execute(query.offset(skip).limit(limit))
-    return result.scalars().all()
+    try:
+        query = select(Radiomics)
 
+        if feature_key:
+            # Use PostgreSQL JSONB key existence operator '?'
+            query = query.where(Radiomics.features.op("?")(feature_key))
 
+        if feature_value and feature_key:
+            # Compare value (cast to text first)
+            query = query.where(
+                cast(Radiomics.features[feature_key], String).ilike(f"%{feature_value}%")
+            )
+
+        result = await db.execute(query.offset(skip).limit(limit))
+        return result.scalars().all()
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
