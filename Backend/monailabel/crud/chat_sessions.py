@@ -23,9 +23,9 @@ async def create_chat_session(db: AsyncSession, data: schemas.ChatSessionCreate)
             summary=data.summary,
         )
 
-        if data.study_UIDs:
+        if data.study_uid:
             studies = (await db.execute(
-                select(Study).where(Study.study_uid.in_(data.study_UIDs))
+                select(Study).where(Study.study_uid.in_(data.study_uid))
             )).scalars().all()
             new_session.studies = studies
 
@@ -90,12 +90,13 @@ async def update_chat_session(db: AsyncSession, chat_id: int, data: schemas.Chat
 
         update_data = data.dict(exclude_unset=True)
 
-        if "study_UIDs" in update_data and update_data["study_UIDs"] is not None:
+        if data.study_uid:
             studies = (await db.execute(
-                select(Study).where(Study.study_uid.in_(update_data["study_UIDs"]))
+                select(Study).where(Study.study_uid.in_(data.study_uid))
             )).scalars().all()
-            session.studies = studies
-            del update_data["study_UIDs"]
+            for study in studies:
+                if study not in session.studies:
+                    session.studies.append(study)
 
         for field, value in update_data.items():
             setattr(session, field, value)
