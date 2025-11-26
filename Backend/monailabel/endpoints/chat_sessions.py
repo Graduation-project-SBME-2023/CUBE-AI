@@ -16,7 +16,10 @@ async def create_chat_session(data: schemas.ChatSessionCreate, db: AsyncSession 
     """
     Create a new chat session and optionally link it to one or more study UIDs.
     """
-    return await crud.create_chat_session(db, data)
+    session = await crud.create_chat_session(db, data)
+    # eager load relationships to avoid MissingGreenlet
+    await db.refresh(session)
+    return session
 
 
 # ---------------------------------------------------------

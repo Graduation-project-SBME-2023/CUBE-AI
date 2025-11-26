@@ -6,9 +6,10 @@ from fastapi import HTTPException
 from models import chat_sessions as models
 from models.study import Study
 from schemas import chat_sessions as schemas
+from sqlalchemy.orm import selectinload
 
 def ensure_last_activity(session):
-    if session and session.last_activity is None:
+    if session or session.last_activity is None:
         session.last_activity = session.started_at
     return session
 
@@ -45,7 +46,12 @@ async def create_chat_session(db: AsyncSession, data: schemas.ChatSessionCreate)
 async def get_chat_session(db: AsyncSession, chat_id: int):
     try:
         result = await db.execute(
-            select(models.ChatSession).where(models.ChatSession.chat_id == chat_id)
+            select(models.ChatSession)
+            .options(
+                selectinload(models.ChatSession.messages),
+                selectinload(models.ChatSession.studies)
+            )
+            .where(models.ChatSession.chat_id == chat_id)
         )
         row = result.unique().one_or_none()
         session = row[0] if row else None
@@ -60,7 +66,10 @@ async def get_chat_session(db: AsyncSession, chat_id: int):
 # ---------------------------
 async def get_chat_sessions(db: AsyncSession, study_UID: str = None, active_only: bool = False):
     try:
-        query = select(models.ChatSession)
+        query = select(models.ChatSession).options(
+                    selectinload(models.ChatSession.messages),
+                    selectinload(models.ChatSession.studies)
+                )
 
         # Filter by study_UID (through the association)
         if study_UID:
