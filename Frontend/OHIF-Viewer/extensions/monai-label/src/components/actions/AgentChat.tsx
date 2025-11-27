@@ -40,18 +40,18 @@ export default class AgentChat extends BaseTab {
 // the agent connection to the server 
   mockAgentResponse = async (text, image) => {
     try {
-      const response = await fetch("http://localhost:8150/chat", {
+      const response = await fetch("http://localhost:8150/run", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ task: text }),
+        body: JSON.stringify({  task: text }),
       });
 
       if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
 
       const data = await response.json();
-      return data.response || "No response from agent.";
+      return data['markdown']|| "No response from agent.";
     } catch (error) {
       console.error("Error connecting to backend:", error);
       return " Could not reach the radiologist assistant server.";

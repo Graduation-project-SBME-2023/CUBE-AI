@@ -6,6 +6,7 @@ import { I18nextProvider } from 'react-i18next';
 import { BrowserRouter } from 'react-router-dom';
 import Compose from './routes/Mode/Compose';
 import ChatWidget from "./components/ChatWidget";
+import websocketService from './utils/WebsocketService';
 import { ServicesManager, ExtensionManager, CommandsManager, HotkeysManager } from '@ohif/core';
 import {
   DialogProvider,
@@ -36,7 +37,7 @@ function App({ config, defaultExtensions, defaultModes }) {
     const run = async () => {
       appInit(config, defaultExtensions, defaultModes).then(setInit).catch(console.error);
     };
-
+    websocketService.connect();
     run();
   }, []);
 

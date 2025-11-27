@@ -1,17 +1,7 @@
 {
   "hypothesis": {
-    "id": "f00ecb56-cbb4-4cbc-b3cd-c91dddc75dfe",
-    "title": "",
-    "population": "",
-    "intervention": "",
-    "outcome": "",
-    "clinical_context": "",
-    "relationship_type": ""
-  },
-  "plan": {
-    "hypothesis_id": "f00ecb56-cbb4-4cbc-b3cd-c91dddc75dfe",
-    "study_goal": "Investigate the hypothesis: ",
-    "steps": []
-  },
-  "planner_status": "running"
+    "id": "",
+    "title": ""
+  }
+  
 }
