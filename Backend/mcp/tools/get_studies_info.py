@@ -1,7 +1,6 @@
 from . import mcp
 import requests
 
-
 @mcp.tool()
 async def get_all_studies_info():
     """

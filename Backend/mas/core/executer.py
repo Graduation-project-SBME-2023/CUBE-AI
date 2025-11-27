@@ -11,9 +11,9 @@ from typing import Dict, List, Optional, Any
 from pathlib import Path
 from pydantic import BaseModel, Field
 
-from planner import StudyPlan, StudyStep
+from .planner import StudyPlan, StudyStep
 
-from agent_registry import get_agent
+from .agent_registry import get_agent
 
 import inspect
 import importlib

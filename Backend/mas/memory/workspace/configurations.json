@@ -1,8 +1,12 @@
 {
-  "hypothesis": "i have hypothesis about detecting neuroblastoma using radiomics",
+  "hypothesis": "i have hypothesis about neuroblastoma ",
   "image_dir": "D:\\GP_2026\\Dataset001_Neuroblastoma\\imagesTr",
   "mask_dir": "D:\\GP_2026\\Dataset001_Neuroblastoma\\labelsTr",
   "output_dir": "D:\\GP_2026\\Github\\agenticsystem\\OHIF-Standalone\\Backend\\mas\\memory\\workspace",
   "targets_csv":"D:\\GP_2026\\Dataset001_Neuroblastoma\\outcome2.csv",
-  "target_column":"target"
+  "target_column":"target",
+  "datasetlist": [
+    "1.2.826.0.1.3680043.8.498.26650086247385942403343907544725013406",
+    "1.2.826.0.1.3680043.8.498.64339853570294143216635614093276312532"
+  ]
 }

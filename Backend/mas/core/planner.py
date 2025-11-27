@@ -19,7 +19,7 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 import os
 
-from agent_registry import agents_description_for_prompt
+from .agent_registry import agents_description_for_prompt
 
 # ============================== CLIENT ==============================
 
