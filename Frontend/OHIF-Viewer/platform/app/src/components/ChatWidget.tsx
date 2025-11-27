@@ -8,6 +8,33 @@ import {
 } from "react-chat-widget";
 import "react-chat-widget/lib/styles.css";
 import "./ChatWidget.css";
+import websocketService from '../utils/WebsocketService';
+
+
+  
+const mockAgentResponse = async (text: string) => {
+  try {
+    const response = await fetch("http://localhost:8150/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task: text }),
+    });
+
+    if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+
+    const data = await response.json();
+    console.log("raw response", response)
+    console.log("Backend data:", data);
+    console.log("markdown", data['markdown'])
+
+
+    return data['markdown'];
+  } catch (error) {
+    console.error("Error connecting to backend:", error);
+    return "⚠️ Could not reach the radiologist assistant server.";
+  }
+};
+
 
 const ChatWidget: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -18,8 +45,8 @@ const ChatWidget: React.FC = () => {
     console.log("Current route:", location.pathname);
   }, [location]);
 
-    // hide the default launcher button
   useEffect(() => {
+    //  Hide default launcher button
     const style = document.createElement("style");
     style.innerHTML = `
       .rcw-launcher {
@@ -28,41 +55,49 @@ const ChatWidget: React.FC = () => {
     `;
     document.head.appendChild(style);
 
+    // Connect WebSocket & subscribe to backend messages
+    websocketService.connect();
+    console.log("WebSocket connected from ChatWidget");
+    const unsubscribe = websocketService.subscribe((msg) => {
+      console.log("Received WebSocket message in ChatWidget:", msg);
+      if (msg.type === 'msg') {
+        deleteMessages(1); // remove "Thinking..."
+        addResponseMessage(msg.payload);
+      }
+    });
+
+    // Cleanup on unmount
     return () => {
       document.head.removeChild(style);
+      unsubscribe();
     };
   }, []);
 
-  const mockAgentResponse = async (text: string) => {
-    try {
-      const response = await fetch("http://localhost:8150/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task: text }),
-      });
 
-      if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
 
-      const data = await response.json();
-      return data.response || "No response from agent.";
-    } catch (error) {
-      console.error("Error connecting to backend:", error);
-      return "⚠️ Could not reach the radiologist assistant server.";
-    }
+
+  // const handleNewUserMessage = async (message: string) => {
+  //   console.log("User message:", message);
+
+  //   // add "thinking..." placeholder
+  //   addResponseMessage("💭 Thinking...");
+
+  //   const response = await mockAgentResponse(message);
+  //   deleteMessages(1); // removes the last bot message (the thinking one) and add the real response :)
+  //   addResponseMessage(response);
+  // };
+
+  const handleNewUserMessage = (message: string) => {
+    if (!message.trim()) return;
+
+    addResponseMessage("Thinking...");
+
+    websocketService.sendMessage({
+      type: 'user_message',
+      payload: message,
+    });
   };
 
-  const handleNewUserMessage = async (message: string) => {
-    console.log("User message:", message);
-
-    // add "thinking..." placeholder
-    addResponseMessage("💭 Thinking...");
-
-    const response = await mockAgentResponse(message);
-    deleteMessages(1); // removes the last bot message (the thinking one) and add the real response :)
-    addResponseMessage(response);
-  };
-
- 
   const handleToggle = () => {
     toggleWidget();
     setIsOpen(!isOpen);
