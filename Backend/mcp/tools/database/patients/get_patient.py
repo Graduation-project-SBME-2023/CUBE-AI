@@ -14,8 +14,6 @@ async def get_patient(patient_id: int | None = None, skip:int = 0, limit:int=100
             )
 
         response.raise_for_status()
-
-        # Wrap response in a dict to satisfy MCP expectations
         try:
             data = response.json()
         except ValueError:
