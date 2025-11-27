@@ -28,7 +28,7 @@ class ChatSessionUpdate(BaseModel):
 class ChatSession(ChatSessionBase):
     chat_id: int
     started_at: datetime = None
-    last_activity: datetime = None
+    last_activity: Optional[datetime] = None
     studies: List[StudyRef] = []
     messages: List[ChatMessage] = []
 
