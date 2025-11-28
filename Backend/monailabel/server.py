@@ -15,9 +15,12 @@ from endpoints import (
     study,
     volume,
     model,
+    segmentation,
     radiomics,
     chat_sessions,
+    chat_messages,
     sync,
+    
     
 
 )
@@ -32,8 +35,10 @@ monai_server_app.include_router(patient.router)
 monai_server_app.include_router(study.router)
 monai_server_app.include_router(volume.router)
 monai_server_app.include_router(model.router)
+monai_server_app.include_router(segmentation.router)
 monai_server_app.include_router(radiomics.router)
 monai_server_app.include_router(chat_sessions.router)
+monai_server_app.include_router(chat_messages.router)
 monai_server_app.include_router(sync.router)
 
 @asynccontextmanager

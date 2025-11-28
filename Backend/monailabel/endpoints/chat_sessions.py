@@ -16,22 +16,11 @@ async def create_chat_session(data: schemas.ChatSessionCreate, db: AsyncSession 
     """
     Create a new chat session and optionally link it to one or more study UIDs.
     """
-    return await crud.create_chat_session(db, data)
-
-
-
-# ---------------------------------------------------------
-# GET CHAT SESSION BY ID
-# ---------------------------------------------------------
-@router.get("/{chat_id}", response_model=schemas.ChatSession)
-async def get_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
-    """
-    Retrieve a chat session by its unique chat_id.
-    """
-    session = await crud.get_chat_session(db, chat_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
+    session = await crud.create_chat_session(db, data)
+    # eager load relationships to avoid MissingGreenlet
+    await db.refresh(session)
     return session
+
 
 # ---------------------------------------------------------
 # GET ALL CHAT SESSIONS
@@ -50,6 +39,20 @@ async def get_chat_sessions(
     - active_only=True (get only active sessions)
     """
     return await crud.get_chat_sessions(db, study_UID=study_UID, active_only=active_only)
+# ---------------------------------------------------------
+# GET CHAT SESSION BY ID
+# ---------------------------------------------------------
+@router.get("/{chat_id}", response_model=schemas.ChatSession)
+async def get_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Retrieve a chat session by its unique chat_id.
+    """
+    session = await crud.get_chat_session(db, chat_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return session
+
+
 # ---------------------------------------------------------
 # UPDATE CHAT SESSION (title, summary, etc.)
 # ---------------------------------------------------------
@@ -107,7 +110,7 @@ async def activate_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)
 # ---------------------------------------------------------
 # DELETE CHAT SESSION
 # ---------------------------------------------------------
-@router.delete("/{chat_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{chat_id}", status_code=status.HTTP_200_OK)
 async def delete_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
     """
     Delete a chat session permanently.
