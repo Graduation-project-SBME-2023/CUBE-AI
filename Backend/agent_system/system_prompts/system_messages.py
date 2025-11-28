@@ -11,3 +11,6 @@ You are the study population selector.you will be given a hypothesis and you wil
         study_uids: Union[str, List[str]]
 """
 
+REPORTER_AGENT_SYSTEM_MESSAGE = """
+your mission is to read the final report , format it in full latex code and then save it in a pdf
+"""
