@@ -20,3 +20,5 @@ class ChatSession(Base):
         back_populates="chat_sessions",
         lazy="joined"
     )
+    messages = relationship("ChatMessage", back_populates="chat_session", lazy="selectin",cascade="all, delete-orphan")
+

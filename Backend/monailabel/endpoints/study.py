@@ -34,11 +34,6 @@ async def delete_study_endpoint(study_uid: str, db: Session = Depends(get_db)):
     deleted_study = await delete_study(db, study_uid)
     return deleted_study
 
-@router.get("/by_patient/{patient_id}", response_model=list[Study])
-async def read_studies_by_patient(patient_id: int, db: Session = Depends(get_db)):
-    studies = await get_studies_by_patient(db, patient_id)
-    return studies
-
 @router.get("/search/", response_model=list[Study])
 async def search_studies_endpoint(
     modality: str | None = None,
@@ -46,3 +41,9 @@ async def search_studies_endpoint(
     db: Session = Depends(get_db)
 ):
     return await search_studies(db, modality, keyword)
+@router.get("/by_patient/{patient_id}", response_model=list[Study])
+async def read_studies_by_patient(patient_id: int, db: Session = Depends(get_db)):
+    studies = await get_studies_by_patient(db, patient_id)
+    return studies
+
+
