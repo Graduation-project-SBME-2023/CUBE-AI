@@ -57,6 +57,60 @@ def save_markdown_to_pdf(markdown_text: str, ):
     print(f"✅ PDF saved successfully at: {output_path}")
 
 
+import subprocess
+import tempfile
+import os
+
+def latex_to_pdf(latex_text: str, output_filename: str) -> str:
+    """
+    Compiles LaTeX text into a PDF using pdflatex.
+    
+    Args:
+        latex_text (str): LaTeX source code.
+        output_filename (str): Name of the final PDF to save.
+    
+    Returns:
+        str: Status message.
+    """
+    try:
+        with tempfile.TemporaryDirectory() as temp:
+            tex_path = os.path.join(temp, "document.tex")
+
+            # Write LaTeX to .tex file
+            with open(tex_path, "w", encoding="utf-8") as f:
+                f.write(latex_text)
+
+            # Compile using pdflatex
+            result = subprocess.run(
+                ["pdflatex", "-interaction=nonstopmode", tex_path],
+                cwd=temp,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+
+            # Check for compilation errors
+            if result.returncode != 0:
+                return "❌ LaTeX compilation failed. Check your LaTeX syntax."
+
+            # Read compiled PDF bytes
+            pdf_path = os.path.join(temp, "document.pdf")
+
+            if not os.path.exists(pdf_path):
+                return "❌ PDF was not generated. Possible LaTeX error."
+
+            with open(pdf_path, "rb") as f:
+                pdf_bytes = f.read()
+
+        # Save final PDF
+        with open(output_filename, "wb") as f:
+            f.write(pdf_bytes)
+
+        return f"✅ PDF generated successfully and saved as: {output_filename}"
+
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
 # def save_markdown_to_pdf(markdown_text: str):
 #     """
 #     Convert a Markdown string to a PDF file.
@@ -142,10 +196,10 @@ class PdfParsingModule:
         agent = AssistantAgent(
         name="pdf_maker",
         model_client=self.model_client,
-        tools=[get_final_report, save_markdown_to_pdf],
+        tools=[get_final_report, latex_to_pdf],
         max_tool_iterations= 5,
-        system_message="""your mission is to read the final report , format it in mark down and then save it in a pdf
-        the markdoun only contains headings tags the other text without any thing, no thing eithr this""",
+        system_message="""your mission is to read the final report , format it in full latex code and then save it in a pdf
+        """,
         )
 
     # # Let the agent translate some text

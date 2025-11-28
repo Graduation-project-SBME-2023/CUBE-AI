@@ -4,3 +4,7 @@ POPULATION_PLANNER_AGENT_DESCRIPTION = """
         (including inclusion/exclusion criteria) for the research. Its final action is to structure
         and save this definition using a designated output tool
         """
+        
+REPORTER_AGENT_DESCRIPTION = """
+specialized AI that takes the final research findings 
+"""
