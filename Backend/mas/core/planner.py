@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import List, Optional, Union, Dict
 from pydantic import BaseModel, Field
 
+# We will consider these types of messages (info: general logging - msg: chat witht the user  - plan: for the playground - hypothesis: for also the playground ))
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -266,9 +268,10 @@ class Planner:
         
         #intent classification
         if  self.hypothesis.id== "":
-            await send_ws_message("info", "Processing your message!")
+            await send_ws_message("info", "Processing your message...")
             message = await self.create_hypothesis(user_query)
             await send_ws_message("info", self.hypothesis.model_dump())
+            
             await send_ws_message("msg", message)
             
              
@@ -280,12 +283,12 @@ class Planner:
             
                 user_confirmation = await wait_for_user_message("user_confirmation")
                 print(user_confirmation)
-                await send_ws_message("info", "Processing your message!")
+                await send_ws_message("info", "Processing your message...")
                 
                 message = await self.process_hypothesis(user_confirmation)
                 print(self.hypothesis.state)
                 
-                await send_ws_message("info", self.hypothesis.model_dump())
+                await send_ws_message("hypothesis", self.hypothesis.model_dump())
                 await send_ws_message("msg", message)
                     
             if self.hypothesis.state == "confirmed":
