@@ -1,11 +1,13 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
+from typing import Optional
 
 class ModelBase(BaseModel):
     
     name: str = Field(alias='model_name')
-    description: str | None = None
-    configuration: dict | None = None
+    description: Optional[str] = None
+    configuration: Optional[dict] = None
+    type: str
     
 
 class ModelCreate(ModelBase):

@@ -1,5 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime
-from monailabel.core.database import Base
+from core.database import Base
 
 class Workflow(Base):
     __tablename__ = 'workflow'
