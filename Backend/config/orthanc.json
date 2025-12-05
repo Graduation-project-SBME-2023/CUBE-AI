@@ -5,7 +5,7 @@
   "StorageCompression": false,
   "MaximumStorageSize": 0,
   "MaximumPatientCount": 0,
-  "LuaScripts": [],
+  "LuaScripts": ["/etc/orthanc/lua/on-stable-series.lua"],
   "Plugins": ["/usr/share/orthanc/plugins", "/usr/local/share/orthanc/plugins"],
   "ConcurrentJobs": 2,
   "HttpServerEnabled": true,

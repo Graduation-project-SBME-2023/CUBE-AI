@@ -1,60 +1,85 @@
-import React, { useCallback, useEffect } from 'react';
-import { useParams } from 'react-router';
-import { ReactFlow, Background, Controls, useNodesState, useEdgesState, addEdge } from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
-import { AgentNode, StartNode } from './customNodes';
+import React, { useCallback, useEffect } from "react";
+import { ReactFlow, Background, Controls, useNodesState, useEdgesState, addEdge, MarkerType } from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { AgentNode, StartNode } from "./customNodes";
+import CustomEdge from "./CustomEdge";
 
 const nodeTypes = {
-    start: StartNode,
-    agent: AgentNode,
-}
+  start: StartNode,
+  agent: AgentNode,
+};
 
-function PlaygroundCanvas({ initialNodes = [], initialEdges = [], onNodesChange, onEdgesChange}) {
-    const { chat_id } = useParams();
-    
-    const [nodes, setNodes, handleNodesChange] = useNodesState(initialNodes);
-    const [edges, setEdges, handleEdgesChange] = useEdgesState(initialEdges);
+const edgeTypes = {
+  custom: CustomEdge,
+};
 
-    const onConnect = useCallback(
-        (params) => setEdges((eds) => addEdge({ ...params, animated: true}, eds)),
-        [setEdges]
-    )
+function PlaygroundCanvas({
+  initialNodes = [],
+  initialEdges = [],
+  editMode,
+}) {
+  const [nodes, setNodes, handleNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, handleEdgesChange] = useEdgesState(initialEdges);
 
-    // Sync back to parent when nodes/edges change
+  const onConnect = useCallback(
+    (params) =>
+      setEdges((eds) =>
+        addEdge(
+          {
+            ...params,
+            type: "custom",
+            animated: true,
+            markerEnd: { type: MarkerType.ArrowClosed, color: "#555" },
+          },
+          eds
+        )
+      ),
+    [setEdges]
+  );
+
+  // propagate editMode and delete handler into node data
     useEffect(() => {
-        if (onNodesChange) onNodesChange(nodes);
-    }, [nodes]);
-
-    useEffect(() => {
-        if (onEdgesChange) onEdgesChange(edges);
-    }, [edges]);
-
-    // Sync from patient to child when parent fetches nodes/edges
-    useEffect(() => {
-        setNodes(initialNodes);
+    setNodes(initialNodes);
     }, [initialNodes, setNodes]);
 
     useEffect(() => {
-        setEdges(initialEdges);
+    setEdges(initialEdges);
     }, [initialEdges, setEdges]);
 
-    return (
-        <div style={{ width: '100vw', height: '100vh' }}>
-            <ReactFlow 
-                nodes={nodes}
-                edges={edges}
-                onNodesChange={handleNodesChange}
-                onEdgesChange={handleEdgesChange}
-                onConnect={onConnect}
-                nodeTypes={nodeTypes}
-                nodesDraggable={true}
-                fitView
-            >
-                <Background />
-                <Controls />
-            </ReactFlow>
-        </div>
-    )
+//   useEffect(() => {
+//     if (onNodesChange) onNodesChange(nodes);
+//   }, [nodes]);
+
+//   useEffect(() => {
+//     if (onEdgesChange) onEdgesChange(edges);
+//   }, [edges]);
+
+  useEffect(() => {
+    setNodes(initialNodes);
+  }, [initialNodes]);
+
+  useEffect(() => {
+    setEdges(initialEdges);
+  }, [initialEdges]);
+
+  return (
+    <div style={{ width: "100vw", height: "100vh" }}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={handleNodesChange}
+        onEdgesChange={handleEdgesChange}
+        onConnect={onConnect}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        nodesDraggable={!editMode}
+        fitView
+      >
+        <Background />
+        <Controls />
+      </ReactFlow>
+    </div>
+  );
 }
 
 export default PlaygroundCanvas;

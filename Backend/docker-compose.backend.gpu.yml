@@ -13,6 +13,7 @@ services:
     command: >
         sh -c "
         pip install psycopg2-binary &&
+        pip install aiohttp &&
         alembic -c /alembic/alembic.ini upgrade head &&
         python /monailabel/server_start.py
         "
@@ -58,6 +59,7 @@ services:
       - 8043:8042
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/config/orthanc.json:/etc/orthanc/orthanc.json:ro
+      - ${COMPOSE_PROJECT_DIR}/Backend/orthanc/lua:/etc/orthanc/lua:ro 
       - orthanc-db:/var/lib/orthanc/db/
     restart: unless-stopped
 
