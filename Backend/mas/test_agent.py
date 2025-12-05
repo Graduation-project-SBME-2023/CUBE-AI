@@ -1,8 +1,6 @@
 import sys
 import asyncio
-from mas.agents.segmentation_agent import SegmentationModule
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from Backend.mas.agents.feature_extraction import RadiomicFeatureExtractorAndModellingAgent
 
 async def main():
 

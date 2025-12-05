@@ -88,10 +88,24 @@ class Executer:
     
     def __init__(
         self,
-        study_plan: dict,
         config_path: str = "config.json",
         log_path: str = "system.log"
     ):
+
+        current_dir = Path(__file__).resolve().parent
+        json_path = current_dir.parent / "memory" / "workspace" / "state.json"
+        config_path= current_dir.parent / "memory"/ "config.json"
+        if not json_path.exists():
+            logger.warning(f"State file not found at {json_path}")
+            raise FileNotFoundError(f"Missing state.json at {json_path}")
+
+        # Load stored hypothesis and plan
+        with open(json_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        study_plan = config.get("plan", "")
+        self.hypothesis = config.get("hypothesis", "")
+
         self.plan = study_plan
         self.config_path = Path(config_path)
         self.log_path = Path(log_path)
@@ -179,23 +193,7 @@ class Executer:
         except Exception as e:
             logger.error(f"Failed to load state: {e}")
 
-    async def process_user_input(self, module_name: str, user_input: Any):
-        """Handle user input for a module"""
-        if module_name not in self.state.modules:
-            raise ValueError(f"Unknown module: {module_name}")
-            
-        module = self.state.modules[module_name]
-        if module.status != ModuleStatus.WAITING_INPUT:
-            raise ValueError(f"Module {module_name} is not waiting for input")
-            
-        logger.info(f"Processing user input for module: {module_name}")
-        module.requires_input = False
-        module.input_description = None
-        module.status = ModuleStatus.RUNNING
-        
-        # Here we would pass the input to the actual module
-        # For now, we just update the state
-        self.save_state()
+   
 
     async def run(self):
         """
@@ -245,9 +243,6 @@ class Executer:
                     self.state.status = ModuleStatus.FAILED
                     break
 
-                if module_state.status == ModuleStatus.WAITING_INPUT:
-                    logger.info(f"Waiting for user input for {module_name}: {module_state.input_description}")
-                    break
 
                 # Run if pending or running
                 if module_state.status in (ModuleStatus.PENDING, ModuleStatus.RUNNING, ModuleStatus.INITIALIZING):
@@ -275,20 +270,11 @@ class Executer:
 
                         # support both async and sync run()
                         if inspect.iscoroutinefunction(run_coro):
-                            result = await run_coro(self.plan)
+                            result = await run_coro()
                         else:
-                            result = run_coro(self.plan)
+                            result = run_coro()
 
-                        # detect a request for interactive input
-                        if isinstance(result, dict) and result.get("requires_input"):
-                            module_state.status = ModuleStatus.WAITING_INPUT
-                            module_state.requires_input = True
-                            module_state.input_description = result.get("description", "User input required.")
-                            module_state.results = result
-                            logger.info(f"Module {module_name} is waiting for user input.")
-                            self.save_state()
-                            # pause execution so external caller can supply input
-                            break
+        
 
                         # Save successful results to ModuleState (keep ModuleState typed)
                         module_state.results = result if isinstance(result, dict) else {"output": result}
@@ -308,8 +294,9 @@ class Executer:
                 (m.status == ModuleStatus.COMPLETED) for m in self.state.modules.values()
             )
             if all_completed:
-                logger.info("✅ All modules processed and completed.")
+                logger.info(" All modules processed and completed.")
                 self.state.status = ModuleStatus.COMPLETED
+                
 
         except Exception as e:
             logger.error(f"Execution failed: {e}")

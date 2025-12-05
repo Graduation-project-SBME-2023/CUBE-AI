@@ -1,5 +1,5 @@
 """
-Simple orchestrator – receives a hypothesis, runs the Planner,
+Simple orchestrator  receives a hypothesis, runs the Planner,
 then runs the Executer on the generated study plan.
 """
 
@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional
 
 from planner import Planner, ClinicalHypothesis  # absolute import
 from executer import Executer, ModuleStatus
-from user_input_handler import UserInputHandler
+from user_input_handler import FeedbackAgent, OutputFormattingAgent
 # ----------------------------------------------------------------------
 # Logging (one logger for the whole orchestrator)
 # ----------------------------------------------------------------------
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 class SystemState(str, Enum):
     IDLE = "idle"
     PLANNING = "planning"
+    CHATTING = "chatting"
     EXECUTING = "executing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -53,12 +54,26 @@ class Orchestrator:
         self.config_path = Path(config_path)
         self.log_path = Path(log_path)
         self.state = SystemState.IDLE
-        self.current_hypothesis = None
+        
+        current_dir = Path(__file__).resolve().parent
+        json_path = current_dir.parent / "memory" / "workspace" / "state.json"
+
+        if not json_path.exists():
+            logger.warning(f"State file not found at {json_path}")
+            raise FileNotFoundError(f"Missing state.json at {json_path}")
+
+        # Load stored hypothesis and plan
+        with open(json_path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        self.current_hypothesis = config.get("hypothesis", "")
+        self.current_study_plan = config.get("plan", "")
         # The Planner does not need any arguments at construction time –
         # it will receive the hypothesis when ``run`` is called.
         self.planner = Planner(config_path=str(self.config_path), log_path=str(self.log_path))
         self.require_input = False
-        self.user_input_handler = UserInputHandler()
+        self.user_input_handler = FeedbackAgent()
+        self.output_formatter = OutputFormattingAgent()
     # ------------------------------------------------------------------
     # Helper to persist the orchestrator state (optional – useful for debugging)
     # ------------------------------------------------------------------
@@ -98,7 +113,6 @@ class Orchestrator:
     async def process_hypothesis(
         self,
         hypothesis_text: str,
-        tools_doc: str = "",
     ) -> Dict[str, Any]:
         """
         Run the full pipeline.
@@ -125,39 +139,65 @@ class Orchestrator:
             # --------------------------------------------------------------
             # 1️⃣  Planning phase
             # --------------------------------------------------------------
+    
             self.state = SystemState.PLANNING
             self._save_state()
             logger.info("Starting planning phase")
+            if self.current_hypothesis['title'] == "":
+                planner_result = await self.planner.run(hypothesis_text)
 
-            planner_result = await self.planner.run(hypothesis_text, tools_doc)
 
-            if planner_result.get("status") != "finished":
-                raise RuntimeError(
-                    f"Planner finished with unexpected status: {planner_result.get('status')}"
+                if planner_result.get("status") != "finished":
+                    raise RuntimeError(
+                        f"Planner finished with unexpected status: {planner_result.get('status')}"
+                    )
+                    
+                if planner_result.get("status") == "finished" and self.state == SystemState.PLANNING:
+                    self.state == SystemState.CHATTING
+                    return await self.output_formatter.format_output(planner_result)
+
+            # --------------------------------------------------------------
+            #  FeedBack phase
+            # --------------------------------------------------------------
+            if self.current_hypothesis != None:
+                feedback = await self.user_input_handler.chat()
+                
+                if feedback['status'] == 'pending':
+                    print("feedback", feedback)
+                    return await self.output_formatter.format_output(feedback)
+                
+                elif feedback.status == 'finished':
+                    self.status = SystemState.EXECUTING
+
+            # --------------------------------------------------------------
+            #  Execution phase
+            # --------------------------------------------------------------
+            if self.state == SystemState.EXECUTING:
+                self._save_state()
+                logger.info("Starting execution phase")
+
+                # ``planner_result['plan']`` is a plain dict – the Executer expects that.
+                executer = Executer(
+                    study_plan=planner_result["plan"],
+                    config_path=str(self.config_path),
+                    log_path=str(self.log_path),
                 )
-
-            # --------------------------------------------------------------
-            # 2️⃣  Execution phase
-            # --------------------------------------------------------------
-            self.state = SystemState.EXECUTING
-            self._save_state()
-            logger.info("Starting execution phase")
-
-            # ``planner_result['plan']`` is a plain dict – the Executer expects that.
-            executer = Executer(
-                study_plan=planner_result["plan"],
-                config_path=str(self.config_path),
-                log_path=str(self.log_path),
-            )
-            execution_state = await executer.run()
+                execution_state = await executer.run()
 
             # --------------------------------------------------------------
             # 3️⃣  Final status
             # --------------------------------------------------------------
             if execution_state.status == ModuleStatus.COMPLETED:
                 self.state = SystemState.COMPLETED
+                
+
+                current_dir = Path(__file__).resolve().parent
+                report_path = current_dir.parent / "memory" / "workspace" / "final_report.json"
+                report = json.load(report_path)
+                return await self.output_formatter.format_output(report)
             else:
                 self.state = SystemState.FAILED
+                
 
             self._save_state()
 
@@ -186,18 +226,11 @@ async def main():
 
     # You can optionally provide a tools description – the Planner already has a
     # built‑in fallback that lists the agents, so an empty string works.
-    tools_doc = """
-    - PopulationSelector: defines patient inclusion/exclusion.
-    - ImagingProtocolDesigner: designs imaging acquisition settings.
-    - SegmentationModule: automates ROI segmentation.
-    - RadiomicsExtractor: extracts features.
-    - ModelingModule: trains ML models for prediction.
-    - ValidationModule: performs internal/external validation.
-    """
 
-    result = await orchestrator.process_hypothesis(hypothesis, tools_doc)
 
-    print("\n🎯 Pipeline finished – overall system state:", result["system_state"])
+    result = await orchestrator.process_hypothesis(hypothesis)
+
+    print("\n Pipeline finished – overall system state:")
     print("\nPlanner output (truncated):")
     print(json.dumps(result["planner_result"], indent=2)[:500] + " ...")
     print("\nExecution summary:")

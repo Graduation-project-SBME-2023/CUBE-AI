@@ -85,13 +85,8 @@ def _load_agent_module(module_name: str) -> Optional[AgentInfo]:
     # Heuristic mapping for the few known agents
     heuristic_map = {
         "population": "PopulationSelector",
-        "imaging": "ImagingProtocolDesigner",
-        "segmentation": "SegmentationModule",
-        "feature_extraction": "RadiomicsExtractor",
-        "modeling": "ModelingModule",
-        "validation": "ValidationModule",
-        "outcome": "OutcomeAgent",
-        "qa": "QAAgent",
+        "feature_extraction": "RadiomicFeatureExtractorAndModellingAgent",
+
         "reporting": "ReportingAgent",
     }
     expected_class_name = heuristic_map.get(core, core.title().replace("_", ""))
@@ -182,12 +177,22 @@ def agents_description_for_prompt() -> str:
     - ValidationModule: performs internal/external validation.
     ```
     """
-    lines = []
-    for info in list_agents():
-        # Use the first sentence of the docstring if possible
-        first_sentence = info.description.split("\n")[0].strip()
-        lines.append(f"- {info.name}: {first_sentence}")
-    return "\n".join(lines)
+    # lines = []
+    # for info in list_agents():
+    #     # Use the first sentence of the docstring if possible
+    #     first_sentence = info.description.split("\n")[0].strip()
+    #     lines.append(f"- {info.name}: {first_sentence}")
+        
+    # return "\n".join(lines)
+    tools_doc = """
+    - PopulationSelector: defines patient inclusion/exclusion.
+    - ImagingProtocolDesigner: designs imaging acquisition settings.
+    - SegmentationModule: automates ROI segmentation.
+    - RadiomicsExtractor: extracts radiomics features.
+    - ModelingModule: trains ML models for prediction.
+    - ValidationModule: performs internal/external validation.
+    """
+    return tools_doc
 
 
 # --------------------------------------------------------------

@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 class PatientBase(BaseModel):
     name: str
-    birth_date: date  # ISO format date
+    birth_date: Optional[date] = None  # ISO format date
     gender: str | None = None
 
 class PatientCreate(PatientBase):

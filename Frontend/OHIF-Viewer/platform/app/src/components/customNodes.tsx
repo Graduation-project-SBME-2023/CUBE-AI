@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from "react";
 import { Handle, Position } from '@xyflow/react'
-
+import { X } from "lucide-react";
 
 export function StartNode({ data, isConnectable }) {
     return (
@@ -16,62 +16,72 @@ export function StartNode({ data, isConnectable }) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 fontWeight: 'bold',
+                cursor: "default",
             }}
         >
             {data.label || 'Start'}
             <Handle
                 type="source"
                 position={Position.Right}
-                style={{ background: '#fff' }}
+                style={{background: "transparent" ,border: "none"}}
                 isConnectable={isConnectable}
             />
         </div>
     )
 }
+export function AgentNode({ data, isConnectable, id }) {
+  const { name, description, editable, onDelete} = data;
+  const [hovered, setHovered] = useState(false);
 
-export function AgentNode({ data, isConnectable }) {
-    const { name, role } = data;
-
-    return (
-        <div
-            style={{
-                background: '#1E88E5',
-                color: 'white',
-                padding: 12,
-                borderRadius: 10,
-                width: 180,
-                boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
-            }}
+  return (
+    <div
+      className="relative transition-all duration-300 rounded-xl shadow-md text-white flex flex-col items-center justify-center px-4"
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        background: hovered ? "#2563eb" : "#3b82f6", 
+        width: 180,
+        minHeight: hovered ? 140 : 60,
+        overflow: "hidden",
+        textAlign: "center",
+        cursor: "default",
+      }}
+    >
+      {/* delete button appears in edit mode */}
+      {editable && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete?.(id);
+          }}
+          className="absolute -top-0 -right-0 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 shadow-md"
+          title="Delete step"
         >
-            <Handle
-                type="target"
-                position={Position.Left}
-                style={{ background: '#fff' }}
-                isConnectable={isConnectable}
-            />
-            <div style={{ fontWeight: 'bold', marginBottom: 4 }}>{name}</div>
-            <div style={{ fontSize: 12, opacity: 0.8 }}>{role}</div>
-            <button
-                onClick={() => alert(`Agent ${name} clicked!`)}
-                style={{
-                marginTop: 8,
-                padding: '4px 8px',
-                border: 'none',
-                borderRadius: 4,
-                background: 'white',
-                color: '#1E88E5',
-                fontWeight: 600,
-                cursor: 'pointer',
-                }}
-            >
-                Run Task
-            </button>
-            <Handle
-                type="source"
-                position={Position.Right}
-                style={{ background: '#fff' }}
-                isConnectable={isConnectable}
-            />
+          <X size={12} />
+        </button>
+      )}
+
+      <Handle
+        type="target"
+        position={Position.Left}
+        style={{ background: "transparent", border: "none" }}
+        isConnectable={isConnectable}
+      />
+
+      {!hovered ? (
+        <div className="font-bold text-base">{name}</div>
+      ) : (
+        <div className="text-blue-100 bg-blue-800/30 mt-2 rounded-md text-sm p-2 leading-snug">
+          {description}
         </div>
-    );
+      )}
+
+      <Handle
+        type="source"
+        position={Position.Right}
+        style={{ background: "transparent", border: "none" }}
+        isConnectable={isConnectable}
+      />
+    </div>
+  );
 }
