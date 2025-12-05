@@ -14,9 +14,8 @@ from pydantic import BaseModel, Field
 from orchestrator import Orchestrator, SystemState
 from planner import Planner
 
-# 🔥 NEW: socket store
-from socket_store import set_socket, get_socket, send_ws_message
-
+# NEW: socket storemaset_socket, get_socket, send_ws_message
+from socket_store import manager, send_ws_message
 # ----------------------------------------------------------------------
 # FastAPI app definition
 # ----------------------------------------------------------------------
@@ -68,35 +67,25 @@ async def run_pipeline(request: RunRequest):
 # WebSocket /ws – Streaming interface
 # ----------------------------------------------------------------------
 @app.websocket("/ws")
-async def websocket_run_pipeline(websocket: WebSocket):
-    await websocket.accept()
-
-    # store globally
-    await set_socket(websocket)
+async def websocket_endpoint(websocket: WebSocket):
+    # 1. Register connection
+    await manager.connect(websocket)
+    
+    # 2. Start your Planner Logic (in background)
+    planner = Planner()
+    asyncio.create_task(planner.run("Start"))
 
     try:
-        # First message from client (contains hypothesis)
-        data = await websocket.receive_text()
-        print("Received data:", data)
-        msg = json.loads(data)
-        data = msg.get("payload")
-
-        # Let the planner run
-    
-        # If your planner wants to stream messages:
-        #    it can now call send_ws_message("step", "...") internally
-        result = await planner.run(data)
-        # await send_ws_message("msg", "Starting pipeline...")
-        # await send_ws_message("plan", {"steps": [{"id": "s1", "name": "Step 1", "description": "Description of step 1"}]})
-        # # Send final response
-        await send_ws_message("final", "Pipeline completed")
-
+        while True:
+            # 3. LISTEN LOOP
+            # This is the only place we call receive_text()
+            data = await websocket.receive_text()
+            
+            # 4. Feed the Queue (This wakes up the Planner)
+            await manager.push_to_queue(data)
+            
     except WebSocketDisconnect:
-        print("Client disconnected")
-    finally:
-        # remove socket when closed
-        set_socket(None)
-
+        manager.disconnect(websocket)
 
 # ----------------------------------------------------------------------
 # Run manually (uvicorn)
