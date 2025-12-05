@@ -1,7 +1,8 @@
+from schemas.study import Study
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from schemas.volume import Volume, VolumeCreate, VolumeUpdate
-from crud.volume import count_volumes_by_study, delete_volume, get_volume, get_volumes, create_volume, get_volumes_by_study, search_volumes, search_volumes, update_volume
+from crud.volume import count_volumes_by_study, delete_volume, get_volume, get_volumes, create_volume, get_volumes_by_study, search_volumes, search_volumes, update_volume, get_study_by_volume
 from core.database import get_db
 
 router = APIRouter(prefix="/volumes", tags=["volumes"])
@@ -51,3 +52,12 @@ async def search_volumes_endpoint(
 async def count_volumes(study_uid: str, db: Session = Depends(get_db)):
     return {"study_uid": study_uid, "volume_count": await count_volumes_by_study(db, study_uid)}
 
+@router.get("/{volume_series_instance_uid}/study", response_model=Study)
+async def read_study_by_volume(
+    volume_series_instance_uid: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get the Study associated with a specific volume_series_instance_uid.
+    """
+    return await get_study_by_volume(db, volume_series_instance_uid)
