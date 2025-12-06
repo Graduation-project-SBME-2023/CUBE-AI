@@ -1,5 +1,6 @@
 import asyncio
 import json
+from logging import config
 import uuid
 import re
 import logging
@@ -227,82 +228,97 @@ class Planner:
         logger.addHandler(file_handler)
         
     def save_to_config(self):
-        """Save current plan and hypothesis to config file"""
+        """Save current plan and hypothesis to state file immediately"""
         try:
             current_dir = Path(__file__).resolve().parent
             json_path = current_dir.parent / "memory" / "workspace" / "state.json"
-            # Save the complete result to history
             
             with open(json_path, "r", encoding="utf-8") as f:
                 state = json.load(f)
 
-                state['plan'] = self.plan.model_dump()
-                state['hypothesis'] = self.hypothesis.model_dump()
-                state['planner_status'] = self.status
-                
-                with open(json_path, 'w') as f:
-                    json.dump(state, f, indent=2)
+            state['plan'] = self.plan.model_dump()
+            state['hypothesis'] = self.hypothesis.model_dump()
+            state['planner_status'] = self.status
+            
+            with open(json_path, 'w') as f:
+                json.dump(state, f, indent=2)
                     
             logger.info("Saved plan and hypothesis to state file")
         except Exception as e:
-            logger.error(f"Failed to save to config: {e}")
+            logger.error(f"Failed to save to state: {e}")
             
-    def load_from_config(self):
-        """Load saved plan and hypothesis from config"""
+    def load_from_state(self):
+        """Load saved plan and hypothesis from state"""
         try:
-            if self.config_path.exists():
-                with open(self.config_path) as f:
-                    config = json.load(f)
-                    if 'current_plan' in config:
-                        self.plan = StudyPlan(**config['current_plan'])
-                    if 'current_hypothesis' in config:
-                        self.hypothesis = ClinicalHypothesis(**config['current_hypothesis'])
-                    self.status = config.get('planner_status', 'idle')
-                    logger.info("Loaded plan and hypothesis from config file")
+            if self.state_path.exists():
+                with open(self.state_path) as f:
+                    state = json.load(f)
+                    if 'plan' in state:
+                        self.plan = StudyPlan(**state['plan'])
+                    if 'hypothesis' in state:
+                        self.hypothesis = ClinicalHypothesis(**state['hypothesis'])
+                    self.status = state.get('planner_status', 'idle')
+                    logger.info("Loaded plan and hypothesis from state file")
         except Exception as e:
-            logger.error(f"Failed to load from config: {e}")
+            logger.error(f"Failed to load from state: {e}")
             
     async def run(self, user_query: str):
-        """Run the planning process with proper state management"""
+        """
+        Run the planning process with proper state management.
+        
+        Handles three phases:
+        1. Hypothesis creation (if ID is empty)
+        2. Hypothesis confirmation (if not yet confirmed)
+        3. Study plan creation and confirmation (if plan is empty)
+        """
         
         await manager.send_ws_message("info", "Planner started")
-        if user_query.strip().lower() == "start":
-            user_query = await manager.wait_for_user_message()
-        print(f"User query: {user_query}")
-        #intent classification
-        if  self.hypothesis.id== "":
+        self.load_from_state()
+
+        # ====== PHASE 1: HYPOTHESIS CREATION ======
+        if self.hypothesis.id == "":
             await manager.send_ws_message("info", "Processing your message...")
             message = await self.create_hypothesis(user_query)
             await manager.send_ws_message("info", self.hypothesis.model_dump())
-            
             await manager.send_ws_message("msg", message)
             
-             
-        
-        if self.hypothesis.state == "not_confirmed" and self.hypothesis.title :
-            # format the the hypothesis and send it
-            # while self.hypothesis.state == "not_confirmed":
-            await manager.send_ws_message("msg", "Please confirm the hypothesis or ask me to modify or explain it")
-        
-            user_confirmation = await manager.wait_for_user_message()
-            print(user_confirmation)
-            await manager.send_ws_message("info", "Processing your message...")
+            # Clear user_query so we don't process it again in confirmation phase
+            user_query = None
+         
+        # ====== PHASE 2: HYPOTHESIS CONFIRMATION ======
+        if self.hypothesis.state == "not_confirmed" and self.hypothesis.title != "":
             
-            message = await self.process_hypothesis(user_confirmation)
-            print(self.hypothesis.state)
-            
-            await manager.send_ws_message("hypothesis", self.hypothesis.model_dump())
-            await manager.send_ws_message("msg", message)
-                    
-            if self.hypothesis.state == "confirmed":
-                self.save_to_config()                
+            while self.hypothesis.state == "not_confirmed":
+                
+                # If we have pending user_query (e.g. "Yes confirm"), process it directly
+                if user_query:
+                    current_input = user_query
+                    user_query = None  # Clear after use
+                else:
+                    # Wait for new input via socket
+                    await manager.send_ws_message("msg", "Please confirm the hypothesis or ask me to modify or explain it")
+                    current_input = await manager.wait_for_user_message()
+                
+                if current_input is None:
+                    # Connection dropped or error
+                    logger.warning("User input was None; breaking confirmation loop")
+                    break
 
+                await manager.send_ws_message("info", "Processing your message...")
+                message = await self.process_hypothesis(current_input)
+                
+                await manager.send_ws_message("hypothesis", self.hypothesis.model_dump())
+                await manager.send_ws_message("msg", message)
             
-        ##planning
-        if self.plan.hypothesis_id == '':
+            # Save once confirmed
+            if self.hypothesis.state == "confirmed":
+                self.save_to_config()
+
+        # ====== PHASE 3: STUDY PLAN CREATION & CONFIRMATION ======
+        if self.plan.hypothesis_id == "":
             
-            ## create plan
-            await manager.send_ws_message("msg", "Designing study plan from hypothesis...")
+            # Create initial plan
+            await manager.send_ws_message("info", "Designing study plan from hypothesis...")
             message = await self.create_study_plan()
             await manager.send_ws_message("plan", format_plan(self.plan.model_dump()))
             await manager.send_ws_message("msg", message)
@@ -314,139 +330,110 @@ class Planner:
             }
             match_response = await self.steps_matcher.run(task=json.dumps(match_prompt, indent=2))
             match_content = clean_markdown_json(match_response.messages[-1].content)
+            
             try:
                 match_data = json.loads(match_content)
                 # Expecting structure: {"study_plan": {"steps": [ ... ]}}
                 matched_steps = match_data.get("study_plan", {}).get("steps", [])
                 self.plan.steps = [StudyStep(**s) for s in matched_steps]
                 await manager.send_ws_message("modules_matched", {"steps": [s.model_dump() for s in self.plan.steps]})
+                
+                # Save after matching
+                self.save_to_config()
             except Exception as e:
                 raise ValueError(f"Failed to parse matched modules: {e}\nRaw: {match_content}")
 
-            # Ask user to confirm / modify the plan until confirmed
+            # Clear user_query before plan confirmation loop
+            user_query = None
+
+        # ====== PHASE 4: STUDY PLAN CONFIRMATION ======
+        if self.plan.state == "not_confirmed" and self.plan.hypothesis_id != "":
+            
             while self.plan.state == "not_confirmed":
-                await manager.send_ws_message("msg", "Please review and confirm the study plan or request modifications.")
-                user_msg = await manager.wait_for_user_message()
-                print(user_msg)
-                await manager.send_ws_message("msg", "Processing your message!")
-                msg = await self.process_study_plan(user_msg)
-                print(msg)
+                
+                # If we have pending user_query, process it
+                if user_query:
+                    current_input = user_query
+                    user_query = None  # Clear after use
+                else:
+                    # Wait for new input via socket
+                    await manager.send_ws_message("msg", "Please review and confirm the study plan or request modifications.")
+                    current_input = await manager.wait_for_user_message()
+                
+                if current_input is None:
+                    logger.warning("User input was None; breaking plan confirmation loop")
+                    break
+
+                await manager.send_ws_message("info", "Processing your message...")
+                msg = await self.process_study_plan(current_input)
+                
                 await manager.send_ws_message("plan", format_plan(self.plan.model_dump()))
                 await manager.send_ws_message("msg", msg)
-
+            
+            # Save once confirmed
             if self.plan.state == "confirmed":
-                self.save_to_config()                
-        
-        # self.status = "running"
-        # self.save_to_config()
-        
-        # logger.info(f"Starting planning process for query: {user_query}")
-        
+                self.save_to_config()
 
-        # # ---------------- Step 1: Hypothesis Extraction ----------------
-        # logger.info("Extracting clinical hypothesis...")
-        # hypo_response = await self.hypothesis_extractor.run(task=user_query)
-        # hypo_content = clean_markdown_json(hypo_response.messages[-1].content)
+        # ====== DONE ======
+        return {
+            "status": "finished",
+            "hypothesis": self.hypothesis.model_dump(),
+            "plan": self.plan.model_dump()
+        }
 
-        # try:
-        #     hypo_data = json.loads(hypo_content)
-        #     hypo_data["id"] = str(uuid.uuid4())
-        #     self.hypothesis = ClinicalHypothesis(**hypo_data)
-        # except Exception as e:
-        #     raise ValueError(f"Failed to parse hypothesis output: {e}\nRaw: {hypo_content}")
-
-        # print(f"Hypothesis structured:\n{json.dumps(self.hypothesis.model_dump(), indent=2)}\n")
-
-        # # ---------------- Step 2: Study Plan ----------------
-        # print("Designing study plan...")
-        # plan_response = await self.study_planner.run(task=json.dumps(self.hypothesis.model_dump(), indent=2))
-        # plan_content = clean_markdown_json(plan_response.messages[-1].content)
-
-        # try:
-        #     plan_data = json.loads(plan_content)
-        #     self.plan.steps = [StudyStep(**s) for s in plan_data.get("steps", [])]
-        # except Exception as e:
-        #     raise ValueError(f"Failed to parse study plan output: {e}\nRaw: {plan_content}")
-
-        # print(f"Study plan created with {len(self.plan.steps)} steps.\n")
-        # # ---------------- Step 3: Module Matching ----------------
-        # print("Matching study steps to available modules...")
-        # match_prompt = {
-        #     "study_plan": self.plan.model_dump(),
-        #     "available_modules": agents_description_for_prompt()
-        # }
-        # match_response = await self.steps_matcher.run(task=json.dumps(match_prompt, indent=2))
-        # match_content = clean_markdown_json(match_response.messages[-1].content)
-
-        # try:
-        #     match_data = json.loads(match_content)
-            
-        #     self.plan.steps = [StudyStep(**s) for s in match_data['study_plan']['steps']]
-        #     print( match_data)
-        # except Exception as e:
-        #     raise ValueError(f"Failed to parse matched modules: {e}\nRaw: {match_content}")
-
-        # print("Modules matched successfully.\n")
-
-        # # ---------------- Step 4: Evaluation ----------------
-        # print("Evaluating study plan quality...")
-        # eval_response = await self.evaluator.run(task=json.dumps(self.plan.model_dump(), indent=2))
-        # eval_content = eval_response.messages[-1].content
-
-        # logger.info("Study plan evaluation complete")
-        # self.status = "finished"
-        # self.save_to_config()
-
-        # result = {
-        #     "hypothesis": self.hypothesis.model_dump(),
-        #     "plan": self.plan.model_dump(),
-        #     "evaluation": eval_content,
-        #     "status": self.status
-        # }
-
-            
-        return "result"
+    # ------------------------------------------------------------------
+    # Helper methods
+    # ------------------------------------------------------------------
 
     async def create_hypothesis(self, user_query):
+        """Create hypothesis from user query using HypothesisExtractor agent."""
         task_str = f"this is a user query: {user_query}. Please validate that it is a proper clinical hypothesis and create a clinical hypothesis based on it. "
         logger.info("Extracting clinical hypothesis...")
         hypo_response = await self.hypothesis_extractor.run(task=task_str)
         hypo_content = clean_markdown_json(hypo_response.messages[-1].content)
         
         try:
-            hypo_data = json.loads(hypo_content)
-            
-            hypo_data["id"] = str(uuid.uuid4())
+            hypo_data = json.loads(hypo_content)            
+            hypo_data["id"] = str(uuid.uuid4())            
             message = hypo_data.pop("message", "")
-
+            
             self.hypothesis = ClinicalHypothesis(**hypo_data)
             self.state['hypothesis'] = self.hypothesis.model_dump()
+            
+            # --- PERSIST IMMEDIATELY ---
+            self.save_to_config()
+
         except Exception as e:
             raise ValueError(f"Failed to parse hypothesis output: {e}\nRaw: {hypo_content}")
-        print(f"Hypothesis structured:\n{json.dumps(self.hypothesis.model_dump(), indent=2)}\n")
+        
+        logger.info(f"Hypothesis created:\n{json.dumps(self.hypothesis.model_dump(), indent=2)}\n")
         
         return message
     
     async def process_hypothesis(self, user_query):
+        """Process user feedback about the hypothesis (modify/confirm)."""
         if self.hypothesis.state == "not_confirmed":
-            task_str = f"This is the user query {user_query} and this is the hypothesis {self.hypothesis.model_dump()}. If the user confirmed the hypothesis modify the state to be confirmed and if not yet ask for confirmation and keep it not_confirmed"
-            logger.info("Processing clinical hypothesis...")
+            task_str = f"This is the user query: '{user_query}' and this is the current hypothesis: {json.dumps(self.hypothesis.model_dump(), indent=2)}. If the user confirmed the hypothesis, modify the state to 'confirmed'. If they asked a question or want modifications, answer/update and keep state as 'not_confirmed'."
+            logger.info("Processing clinical hypothesis feedback...")
 
             response = await self.hypothesis_explanator.run(task=task_str)
             hypo_content = clean_markdown_json(response.messages[-1].content)
+            
             try:
                 hypo_data = json.loads(hypo_content)
-                
                 message = hypo_data.pop("message", "")
                 hypo_data["id"] = self.hypothesis.id
 
-                print(hypo_data)
-
                 self.hypothesis = ClinicalHypothesis(**hypo_data)
                 self.state['hypothesis'] = self.hypothesis.model_dump()
+                
+                # --- PERSIST IMMEDIATELY ---
+                self.save_to_config()
+
             except Exception as e:
                 raise ValueError(f"Failed to parse hypothesis output: {e}\nRaw: {hypo_content}")
-            print(f"Hypothesis structured:\n{json.dumps(self.hypothesis.model_dump(), indent=2)}\n")
+            
+            logger.info(f"Hypothesis updated:\n{json.dumps(self.hypothesis.model_dump(), indent=2)}\n")
             
             return message
     
@@ -466,28 +453,32 @@ class Planner:
                 steps=[StudyStep(**s) for s in steps],
                 state=plan_data.get("state", "not_confirmed")
             )
-            # ensure hypothesis linkage
-            # self.plan.hypothesis_id = self.hypothesis.id
+            
             self.state['plan'] = self.plan.model_dump()
-            # self.save_to_config()
+            
+            # --- PERSIST IMMEDIATELY ---
+            self.save_to_config()
+            
             return plan_data.get("message", "Study plan created.")
         except Exception as e:
             raise ValueError(f"Failed to parse study plan output: {e}\nRaw: {plan_content}")
 
     async def process_study_plan(self, user_query):
-        """Process user feedback about the study plan (modify/confirm) using study_plan_explanator."""
+        """Process user feedback about the study plan (modify/confirm)."""
         logger.info("Processing study plan feedback...")
         task_str = json.dumps({
             "user_query": user_query,
             "current_plan": self.plan.model_dump(),
             "hypothesis": self.hypothesis.model_dump()
         }, indent=2)
+        
         response = await self.study_plan_explanator.run(task=task_str)
         content = clean_markdown_json(response.messages[-1].content)
 
         try:
             data = json.loads(content)
-            # Example expected fields: steps (list), state, message
+            
+            # Update plan fields if provided
             steps = data.get("steps")
             if steps is not None:
                 self.plan.steps = [StudyStep(**s) for s in steps]
@@ -495,31 +486,28 @@ class Planner:
                 self.plan.study_goal = data["study_goal"]
             if "state" in data:
                 self.plan.state = data["state"]
-            # persist changes
+            
             self.state['plan'] = self.plan.model_dump()
+            
+            # --- PERSIST IMMEDIATELY ---
             self.save_to_config()
+            
+            logger.info(f"Study plan updated:\n{json.dumps(self.plan.model_dump(), indent=2)}\n")
+            
             return data.get("message", "Plan updated.")
         except Exception as e:
             raise ValueError(f"Failed to parse plan feedback: {e}\nRaw: {content}")
     
     def classify_intent(self, user_query: str) -> str:
         """Classify user query intent"""
-        # we have three intents: "create_plan", "ask_step", "modify", "evaluate
-        
+        # we have three intents: "create_plan", "ask_step", "modify", "evaluate"
         return "plan_study"
+
 # ============================== MAIN ==============================
 
 async def main():
     planner = Planner()
     user_query = "A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma."
-    tools_doc = """
-    - PopulationSelector: defines patient inclusion/exclusion.
-    - ImagingProtocolDesigner: designs imaging acquisition settings.
-    - SegmentationModule: automates ROI segmentation.
-    - RadiomicsExtractor: extracts features.
-    - ModelingModule: trains ML models for prediction.
-    - ValidationModule: performs internal/external validation.
-    """
     result = await planner.run(user_query)
     print("\nFinal Output:")
     print(json.dumps(result, indent=2))
