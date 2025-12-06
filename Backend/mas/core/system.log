@@ -18077,3 +18077,196 @@ Each instance has access to common log file and common config file to share know
 2025-12-06 03:56:59,778 - planner - INFO - Saved plan and hypothesis to state file
 2025-12-06 03:56:59,778 - planner - INFO - Saved plan and hypothesis to state file
 2025-12-06 03:56:59,778 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 05:14:23,319 - planner - ERROR - Failed to load from state: 3 validation errors for ClinicalHypothesis
+population
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+intervention
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+outcome
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+2025-12-06 05:14:23,319 - planner - ERROR - Failed to load from state: 3 validation errors for ClinicalHypothesis
+population
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+intervention
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+outcome
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+2025-12-06 05:14:23,319 - planner - ERROR - Failed to load from state: 3 validation errors for ClinicalHypothesis
+population
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+intervention
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+outcome
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+2025-12-06 05:14:23,320 - planner - INFO - Extracting clinical hypothesis...
+2025-12-06 05:14:23,320 - planner - INFO - Extracting clinical hypothesis...
+2025-12-06 05:14:23,320 - planner - INFO - Extracting clinical hypothesis...
+2025-12-06 05:14:23,333 - planner - ERROR - Failed to load from state: 3 validation errors for ClinicalHypothesis
+population
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+intervention
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+outcome
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+2025-12-06 05:14:23,333 - planner - ERROR - Failed to load from state: 3 validation errors for ClinicalHypothesis
+population
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+intervention
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+outcome
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+2025-12-06 05:14:23,333 - planner - ERROR - Failed to load from state: 3 validation errors for ClinicalHypothesis
+population
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+intervention
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+outcome
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+2025-12-06 05:14:23,333 - planner - ERROR - Failed to load from state: 3 validation errors for ClinicalHypothesis
+population
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+intervention
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+outcome
+  Field required [type=missing, input_value={'id': '', 'title': ''}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+2025-12-06 05:14:23,334 - planner - INFO - Extracting clinical hypothesis...
+2025-12-06 05:14:23,334 - planner - INFO - Extracting clinical hypothesis...
+2025-12-06 05:14:23,334 - planner - INFO - Extracting clinical hypothesis...
+2025-12-06 05:14:23,334 - planner - INFO - Extracting clinical hypothesis...
+2025-12-06 05:14:25,047 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 05:14:25,047 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 05:14:25,047 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 05:14:25,047 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 05:14:25,047 - planner - INFO - Hypothesis created:
+{
+  "id": "7cffde62-2619-4aaf-b5f6-4c06eaf8aa75",
+  "title": "",
+  "population": "",
+  "intervention": "",
+  "outcome": "",
+  "clinical_context": "",
+  "relationship_type": "",
+  "state": "not_confirmed"
+}
+
+2025-12-06 05:14:25,047 - planner - INFO - Hypothesis created:
+{
+  "id": "7cffde62-2619-4aaf-b5f6-4c06eaf8aa75",
+  "title": "",
+  "population": "",
+  "intervention": "",
+  "outcome": "",
+  "clinical_context": "",
+  "relationship_type": "",
+  "state": "not_confirmed"
+}
+
+2025-12-06 05:14:25,047 - planner - INFO - Hypothesis created:
+{
+  "id": "7cffde62-2619-4aaf-b5f6-4c06eaf8aa75",
+  "title": "",
+  "population": "",
+  "intervention": "",
+  "outcome": "",
+  "clinical_context": "",
+  "relationship_type": "",
+  "state": "not_confirmed"
+}
+
+2025-12-06 05:14:25,047 - planner - INFO - Hypothesis created:
+{
+  "id": "7cffde62-2619-4aaf-b5f6-4c06eaf8aa75",
+  "title": "",
+  "population": "",
+  "intervention": "",
+  "outcome": "",
+  "clinical_context": "",
+  "relationship_type": "",
+  "state": "not_confirmed"
+}
+
+2025-12-06 05:14:25,048 - planner - INFO - Designing study plan...
+2025-12-06 05:14:25,048 - planner - INFO - Designing study plan...
+2025-12-06 05:14:25,048 - planner - INFO - Designing study plan...
+2025-12-06 05:14:25,048 - planner - INFO - Designing study plan...
+2025-12-06 05:14:26,345 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 05:14:26,345 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 05:14:26,345 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 05:14:26,345 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 05:14:26,345 - planner - INFO - Hypothesis created:
+{
+  "id": "3af536a7-c741-498d-9842-7f3131070183",
+  "title": "",
+  "population": "",
+  "intervention": "",
+  "outcome": "",
+  "clinical_context": "",
+  "relationship_type": "",
+  "state": "not_confirmed"
+}
+
+2025-12-06 05:14:26,345 - planner - INFO - Hypothesis created:
+{
+  "id": "3af536a7-c741-498d-9842-7f3131070183",
+  "title": "",
+  "population": "",
+  "intervention": "",
+  "outcome": "",
+  "clinical_context": "",
+  "relationship_type": "",
+  "state": "not_confirmed"
+}
+
+2025-12-06 05:14:26,345 - planner - INFO - Hypothesis created:
+{
+  "id": "3af536a7-c741-498d-9842-7f3131070183",
+  "title": "",
+  "population": "",
+  "intervention": "",
+  "outcome": "",
+  "clinical_context": "",
+  "relationship_type": "",
+  "state": "not_confirmed"
+}
+
+2025-12-06 05:14:26,345 - planner - INFO - Hypothesis created:
+{
+  "id": "3af536a7-c741-498d-9842-7f3131070183",
+  "title": "",
+  "population": "",
+  "intervention": "",
+  "outcome": "",
+  "clinical_context": "",
+  "relationship_type": "",
+  "state": "not_confirmed"
+}
+
+2025-12-06 05:14:26,346 - planner - INFO - Designing study plan...
+2025-12-06 05:14:26,346 - planner - INFO - Designing study plan...
+2025-12-06 05:14:26,346 - planner - INFO - Designing study plan...
+2025-12-06 05:14:26,346 - planner - INFO - Designing study plan...
+2025-12-06 05:14:30,704 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 05:14:30,704 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 05:14:30,704 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 05:14:30,704 - planner - INFO - Saved plan and hypothesis to state file
