@@ -1,7 +1,80 @@
 {
   "hypothesis": {
-    "id": "",
-    "title": ""
-  }
-  
+    "id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+    "title": "",
+    "population": "",
+    "intervention": "",
+    "outcome": "",
+    "clinical_context": "",
+    "relationship_type": "",
+    "state": "not_confirmed"
+  },
+  "plan": {
+    "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+    "study_goal": "",
+    "steps": [
+      {
+        "name": "Define Research Hypothesis",
+        "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+        "matched_module": "ModelingModule",
+        "status": "pending"
+      },
+      {
+        "name": "Literature Review & Gap Analysis",
+        "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+        "matched_module": "ValidationModule",
+        "status": "pending"
+      },
+      {
+        "name": "Develop Study Protocol",
+        "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+        "matched_module": "ImagingProtocolDesigner",
+        "status": "pending"
+      },
+      {
+        "name": "Ethics & Regulatory Approval",
+        "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+        "matched_module": null,
+        "status": "pending"
+      },
+      {
+        "name": "Site Selection & Training",
+        "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+        "matched_module": "PopulationSelector",
+        "status": "pending"
+      },
+      {
+        "name": "Participant Recruitment & Screening",
+        "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+        "matched_module": "PopulationSelector",
+        "status": "pending"
+      },
+      {
+        "name": "Randomization & Intervention Delivery",
+        "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+        "matched_module": "ModelingModule",
+        "status": "pending"
+      },
+      {
+        "name": "Data Collection & Monitoring",
+        "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+        "matched_module": "ValidationModule",
+        "status": "pending"
+      },
+      {
+        "name": "Statistical Analysis & Interpretation",
+        "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+        "matched_module": "ModelingModule",
+        "status": "pending"
+      },
+      {
+        "name": "Dissemination of Results",
+        "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+        "matched_module": null,
+        "status": "pending"
+      }
+    ],
+    "state": "not_confirmed"
+  },
+  "planner_status": "idle"
 }
