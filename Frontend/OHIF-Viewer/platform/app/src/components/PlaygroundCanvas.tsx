@@ -1,9 +1,17 @@
-import React, { useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ReactFlow, Background, Controls, useNodesState, useEdgesState, addEdge, MarkerType } from "@xyflow/react";
-import { Play, RotateCcw, Terminal, Activity } from 'lucide-react';
+import { Play, Pause, RotateCcw } from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import { AgentNode, StartNode } from "./customNodes";
 import CustomEdge from "./CustomEdge";
+
+// The flow will be: We have three modes (planning mode - executing mode - results mode)
+// In planning mode: step represent a node and each step has an id and title and description appears when hovering over it, the steps are shown and user can delete or edit them if he needs (editting will be just rewriting the description - discussion with the chatbot)
+// Once planning finished the user now can start execution, each step had an id and title and description, the description still shown when hovering
+// while execution each step will have status and logs-messages, the current running step show loading glowing border and loading icon 
+// when we click on the current step it shows the logs-messages in the node (it is treated as we expanded it) max the last 5 log messages appears
+// once the step is completed its color turns into green and check appears then the following node starts
+// the user has the ability to pause while running and continue later.
 
 const nodeTypes = {
   start: StartNode,
@@ -14,10 +22,13 @@ const edgeTypes = {
   custom: CustomEdge,
 };
 
+// Mode: 'planning' | 'executing' | 'results'
 function PlaygroundCanvas({
   initialNodes = [],
   initialEdges = [],
-  editMode,
+  editMode = true,
+  mode = 'planning', // planning, executing, results
+  onModeChange,
 }) {
   const [nodes, setNodes, handleNodesChange] = useNodesState(
     initialNodes.map(n => ({
@@ -28,13 +39,16 @@ function PlaygroundCanvas({
         logs: [],
         editable: editMode,
         onDelete: (id) => handleDeleteNode(id),
+        onEdit: (id, description) => handleEditNode(id, description),
       }
     }))
   );
   const [edges, setEdges, handleEdgesChange] = useEdgesState(initialEdges);
-  const [globalLogs, setGlobalLogs] = React.useState([]);
-  const [isRunning, setIsRunning] = React.useState(false);
-  const [currentNodeId, setCurrentNodeId] = React.useState(null);
+  const [currentMode, setCurrentMode] = useState(mode);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [currentNodeId, setCurrentNodeId] = useState(null);
+  const [expandedNodeId, setExpandedNodeId] = useState(null);
 
   const onConnect = useCallback(
     (params) =>
@@ -60,13 +74,16 @@ function PlaygroundCanvas({
     );
   }, [setNodes, setEdges]);
 
-  // Logger Helper
-  const addGlobalLog = useCallback((message, type = 'info') => {
-    setGlobalLogs((prev) => [
-      ...prev,
-      { id: Date.now(), timestamp: new Date().toLocaleTimeString(), message, type },
-    ]);
-  }, []);
+  // Edit node handler
+  const handleEditNode = useCallback((nodeId, description) => {
+    setNodes((prevNodes) =>
+      prevNodes.map((n) =>
+        n.id === nodeId
+          ? { ...n, data: { ...n.data, description } }
+          : n
+      )
+    );
+  }, [setNodes]);
 
   // Update nodes when initialNodes change
   useEffect(() => {
@@ -76,47 +93,46 @@ function PlaygroundCanvas({
         ...n.data,
         status: n.data?.status || 'pending',
         logs: n.data?.logs || [],
-        editable: editMode,
+        editable: editMode && currentMode === 'planning',
         onDelete: (id) => handleDeleteNode(id),
+        onEdit: (id, description) => handleEditNode(id, description),
       }
     })));
-  }, [initialNodes, setNodes, editMode, handleDeleteNode]);
+  }, [initialNodes, setNodes, editMode, currentMode, handleDeleteNode, handleEditNode]);
 
   useEffect(() => {
     setEdges(initialEdges);
   }, [initialEdges, setEdges]);
 
-  // Workflow Execution Logic
-  const runWorkflow = async () => {
-    if (isRunning) return;
-    setIsRunning(true);
-    
-    // Reset nodes
-    setNodes(prev => prev.map(n => ({ 
-      ...n, 
-      data: { ...n.data, status: 'pending', logs: [] } 
-    })));
-    setGlobalLogs([]);
-    
-    addGlobalLog("🚀 Agent initialized. Starting workflow sequence...", 'system');
+  // Update mode
+  useEffect(() => {
+    setCurrentMode(mode);
+  }, [mode]);
 
-    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  // Execution workflow
+  const startExecution = async () => {
+    if (isExecuting) return;
+    setIsExecuting(true);
+    setCurrentMode('executing');
     
-    // Execute nodes in order (skip start node with id '0')
     const executionOrder = nodes.filter(n => n.id !== '0').map(n => n.id);
+    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
     for (const nodeId of executionOrder) {
-      const currentNode = nodes.find(n => n.id === nodeId);
-      if (!currentNode) continue;
+      if (!isExecuting && !isPaused) break; // Stop if execution ended
+      
+      // Wait if paused
+      while (isPaused && isExecuting) {
+        await wait(500);
+      }
+
+      setCurrentNodeId(nodeId);
+      setExpandedNodeId(nodeId);
 
       // Set Active
-      setCurrentNodeId(nodeId);
       setNodes(prev => prev.map(n => 
         n.id === nodeId ? { ...n, data: { ...n.data, status: 'active' } } : n
       ));
-      
-      const nodeLabel = currentNode.data?.label || currentNode.id;
-      addGlobalLog(`👉 STARTING STEP: ${nodeLabel}`, 'highlight');
 
       // Simulate work with logs
       const logCount = Math.floor(Math.random() * 3) + 2;
@@ -136,8 +152,6 @@ function PlaygroundCanvas({
           }
           return n;
         }));
-
-        addGlobalLog(`  > ${logMsg}`, 'detail');
       }
       
       await wait(300);
@@ -146,125 +160,174 @@ function PlaygroundCanvas({
       setNodes(prev => prev.map(n => 
         n.id === nodeId ? { ...n, data: { ...n.data, status: 'completed' } } : n
       ));
-      addGlobalLog(`✅ COMPLETED: ${nodeLabel}`, 'success');
       
       await wait(200);
     }
 
-    addGlobalLog("🏁 Workflow finished successfully.", 'system');
     setCurrentNodeId(null);
-    setIsRunning(false);
+    setIsExecuting(false);
+    setCurrentMode('results');
   };
 
-  const reset = () => {
-    setIsRunning(false);
+  const pauseExecution = () => {
+    setIsPaused(!isPaused);
+  };
+
+  const resetExecution = () => {
+    setIsExecuting(false);
+    setIsPaused(false);
     setCurrentNodeId(null);
+    setExpandedNodeId(null);
+    setCurrentMode('planning');
     setNodes(prev => prev.map(n => ({ 
       ...n, 
       data: { ...n.data, status: 'pending', logs: [] } 
     })));
-    setGlobalLogs([]);
-    addGlobalLog("🔄 Workflow state reset.", 'system');
   };
 
   return (
-    <div className="flex h-screen w-full bg-slate-50 font-sans text-slate-800">
-      <div className="relative flex-1 h-full overflow-hidden border-r border-slate-200">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={handleNodesChange}
-          onEdgesChange={handleEdgesChange}
-          onConnect={onConnect}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          nodesDraggable={!editMode}
-          fitView
-        >
-          <Background />
-          <Controls />
-        </ReactFlow>
+    <div style={{ width: "100vw", height: "100vh", position: 'relative' }}>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={handleNodesChange}
+        onEdgesChange={handleEdgesChange}
+        onConnect={onConnect}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        nodesDraggable={currentMode === 'planning'}
+        fitView
+      >
+        <Background />
+        <Controls />
+      </ReactFlow>
 
-        {/* Floating Controls */}
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 flex gap-3 bg-white p-2 rounded-xl shadow-lg border border-slate-100 z-10">
+      {/* Control Panel */}
+      <div 
+        style={{
+          position: 'absolute',
+          top: 20,
+          left: 20,
+          background: 'white',
+          padding: '16px',
+          borderRadius: '8px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          zIndex: 100,
+          display: 'flex',
+          gap: '8px',
+          alignItems: 'center',
+        }}
+      >
+        <span style={{ fontWeight: 'bold', marginRight: '16px', textTransform: 'capitalize' }}>
+          Mode: {currentMode}
+        </span>
+
+        {currentMode === 'planning' && (
           <button
-            onClick={runWorkflow}
-            disabled={isRunning}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors ${
-              isRunning 
-                ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
-                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-200'
-            }`}
+            onClick={startExecution}
+            style={{
+              background: '#3b82f6',
+              color: 'white',
+              padding: '8px 16px',
+              borderRadius: '4px',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
           >
-            {isRunning ? <Activity size={18} className="animate-spin" /> : <Play size={18} />}
-            {isRunning ? 'Agent Running...' : 'Start Workflow'}
+            <Play size={16} /> Start Execution
           </button>
+        )}
 
+        {currentMode === 'executing' && (
+          <>
+            <button
+              onClick={pauseExecution}
+              style={{
+                background: isPaused ? '#f59e0b' : '#ef4444',
+                color: 'white',
+                padding: '8px 16px',
+                borderRadius: '4px',
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <Pause size={16} /> {isPaused ? 'Resume' : 'Pause'}
+            </button>
+          </>
+        )}
+
+        {(currentMode === 'executing' || currentMode === 'results') && (
           <button
-            onClick={reset}
-            disabled={isRunning}
-            className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-lg transition-colors"
+            onClick={resetExecution}
+            style={{
+              background: '#6b7280',
+              color: 'white',
+              padding: '8px 16px',
+              borderRadius: '4px',
+              border: 'none',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
           >
-            <RotateCcw size={18} />
-            Reset
+            <RotateCcw size={16} /> Reset
           </button>
-        </div>
-
-        {/* Current Node Indicator */}
-        {currentNodeId && (
-          <div className="absolute bottom-6 left-6 bg-blue-50 border-l-4 border-blue-500 p-4 rounded-lg shadow-md">
-            <div className="text-sm font-semibold text-blue-900">
-              🔵 Currently Running:
-            </div>
-            <div className="text-lg font-bold text-blue-600 mt-1">
-              {nodes.find(n => n.id === currentNodeId)?.data?.label || currentNodeId}
-            </div>
-          </div>
         )}
       </div>
 
-      {/* Live Log Panel */}
-      <div className="w-96 flex flex-col bg-slate-900 text-slate-300 shadow-xl z-20">
-        <div className="p-4 border-b border-slate-800 bg-slate-950 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm font-semibold text-white">
-            <Terminal size={16} className="text-blue-400" />
-            Live Agent Logs
+      {/* Current Step Indicator */}
+      {currentMode === 'executing' && currentNodeId && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 20,
+            left: 20,
+            background: '#eff6ff',
+            border: '2px solid #3b82f6',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            zIndex: 100,
+          }}
+        >
+          <div style={{ fontSize: '12px', color: '#1e40af', fontWeight: 'bold' }}>
+            🔵 Currently Executing:
           </div>
-          <div className="flex gap-1.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-red-500/20"></div>
-            <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/20"></div>
-            <div className="w-2.5 h-2.5 rounded-full bg-green-500/80 shadow-[0_0_8px_rgba(34,197,94,0.4)]"></div>
+          <div style={{ fontSize: '14px', color: '#1d4ed8', fontWeight: 'bold', marginTop: '4px' }}>
+            {nodes.find(n => n.id === currentNodeId)?.data?.name || currentNodeId}
           </div>
         </div>
-        
-        <div className="flex-1 overflow-y-auto p-4 font-mono text-sm space-y-3 scrollbar-thin scrollbar-thumb-slate-700">
-          {globalLogs.length === 0 && (
-            <div className="text-slate-600 italic text-center mt-10">
-              Waiting for workflow trigger...
-            </div>
-          )}
-          
-          {globalLogs.map((log) => (
-            <div key={log.id} className="flex gap-3 animate-in fade-in slide-in-from-left-2 duration-300">
-              <span className="text-slate-600 text-xs min-w-[60px] pt-0.5 select-none">{log.timestamp}</span>
-              <span className={`${
-                log.type === 'success' ? 'text-green-400 font-bold' :
-                log.type === 'highlight' ? 'text-blue-300 font-bold' :
-                log.type === 'detail' ? 'text-slate-400 pl-2 border-l border-slate-700' :
-                'text-slate-300'
-              }`}>
-                {log.message}
-              </span>
-            </div>
-          ))}
-          <div className="h-4" /> 
-        </div>
+      )}
 
-        <div className="p-2 bg-slate-950 border-t border-slate-800 text-[10px] text-slate-500 flex justify-between px-4">
-          <span>STATUS: {isRunning ? 'EXECUTING' : 'IDLE'}</span>
-          <span>NODES: {nodes.filter(n => n.id !== '0').length}</span>
+      {/* Status Legend */}
+      {currentMode !== 'planning' && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 20,
+            right: 20,
+            background: 'white',
+            padding: '12px 16px',
+            borderRadius: '8px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+            zIndex: 100,
+            fontSize: '12px',
+          }}
+        >
+          <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Status Legend:</div>
+          <div style={{ display: 'flex', gap: '16px', flexDirection: 'column' }}>
+            <div>⚪ Pending</div>
+            <div>🔵 Active (Running)</div>
+            <div>✅ Completed</div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
