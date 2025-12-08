@@ -6,6 +6,39 @@ import {
 } from 'lucide-react';
 import websocketService from '../utils/WebsocketService';
 
+// ==========================================
+// TYPE DEFINITIONS
+// ==========================================
+interface StartNodeData {
+  title: string;
+  description: string;
+}
+
+interface AgentNodeData {
+  title: string;
+  description: string;
+  status: string;
+  logs: any[];
+  isExpanded?: boolean;
+  mode?: 'planning' | 'executing' | 'results';
+  onDelete?: (id: string) => void;
+  onEdit?: (id: string) => void;
+  onToggleExpand?: (id: string) => void;
+}
+
+interface FlowNode {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  data: StartNodeData | AgentNodeData;
+}
+
+interface FlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+}
 
 // ==========================================
 // 1. MINI-FLOW ENGINE (OHIF Theme)
@@ -160,7 +193,7 @@ const CustomEdge = ({ sourceX, sourceY, targetX, targetY, data }) => {
   );
 };
 
-const StartNode = memo(({ data }) => {
+const StartNode = memo(({ data }: { data: StartNodeData }) => {
   return (
     // OHIF: Dark panel background with light border
     <div className="px-4 py-2 shadow-md rounded-full bg-[#151a1f] border border-[#3c5d80] min-w-[100px] text-center">
@@ -169,7 +202,7 @@ const StartNode = memo(({ data }) => {
   );
 });
 
-const AgentNode = memo(({ data, id }) => {
+const AgentNode = memo(({ data, id }: { data: AgentNodeData; id: string }) => {
   const { title, description, status = 'pending', logs = [], isExpanded, onDelete, onEdit, onToggleExpand } = data;
   const [isHovered, setIsHovered] = useState(false);
 
@@ -315,9 +348,9 @@ const MOCK_DATA_STEPS = {
 };
 
 export default function AgentWorkflowCanvas() {
-  const [mode, setMode] = useState('planning'); 
-  const [nodes, setNodes] = useState(initialNodesData);
-  const [edges, setEdges] = useState(initialEdgesData);
+  const [mode, setMode] = useState<'planning' | 'executing' | 'results'>('planning'); 
+  const [nodes, setNodes] = useState<FlowNode[]>(initialNodesData);
+  const [edges, setEdges] = useState<FlowEdge[]>(initialEdgesData);
   const [isPaused, setIsPaused] = useState(false);
   const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -332,7 +365,7 @@ export default function AgentWorkflowCanvas() {
   websocketService.connect()
   }  , []);
 
-  const handleServerMessage = (msg) => {
+  const handleServerMessage = (msg: any) => {
     if (msg.type === 'node') {
         updateNodeData(msg.nodeId, msg.payload);
     }
@@ -340,26 +373,84 @@ export default function AgentWorkflowCanvas() {
     if (msg.type === 'plan') {
         updatePlan(msg.payload);
     }
-
   };
 
+  const updateNodeData = (id: string, patch: any) => {
+    setNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, ...patch } } : n));
+  };
+
+  const updatePlan = (planPayload: any) => {
+    // Update entire plan from backend
+    if (planPayload.nodes) {
+      setNodes(planPayload.nodes as FlowNode[]);
+    }
+    if (planPayload.edges) {
+      setEdges(planPayload.edges as FlowEdge[]);
+    }
+    if (planPayload.mode) {
+      setMode(planPayload.mode);
+    }
+  };
+
+  // Send entire plan to backend
+  const sendPlanToBackend = useCallback((nodesData, edgesData) => {
+    if (!isConnected || !socket) return;
+    
+    const planPayload = {
+      type: 'PLAN_UPDATE',
+      nodes: nodesData.map(n => ({
+        id: n.id,
+        type: n.type,
+        position: n.position,
+        data: {
+          title: n.data.title,
+          description: n.data.description,
+          status: n.data.status,
+          logs: n.data.logs
+        }
+      })),
+      edges: edgesData.map(e => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        type: e.type
+      })),
+      mode: mode,
+      timestamp: new Date().toISOString()
+    };
+    
+    socket.send(JSON.stringify(planPayload));
+  }, [isConnected, socket, mode]);
+
   const deleteNode = useCallback((id) => {
-    setNodes(prev => prev.filter(n => n.id !== id));
-    setEdges(prev => prev.filter(e => e.source !== id && e.target !== id));
-  }, []);
+    const updatedNodes = nodes.filter(n => n.id !== id);
+    const updatedEdges = edges.filter(e => e.source !== id && e.target !== id);
+    setNodes(updatedNodes);
+    setEdges(updatedEdges);
+    sendPlanToBackend(updatedNodes, updatedEdges);
+  }, [nodes, edges, sendPlanToBackend]);
 
   const editNode = useCallback((id) => {
     const node = nodes.find(n => n.id === id);
     if (!node) return;
     const newDesc = window.prompt("Edit Step Description:", node.data.description);
     if (newDesc !== null) {
-        setNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, description: newDesc } } : n));
+        const updatedNodes = nodes.map(n => n.id === id ? { ...n, data: { ...n.data, description: newDesc } } : n);
+        setNodes(updatedNodes);
+        sendPlanToBackend(updatedNodes, edges);
     }
-  }, [nodes]);
+  }, [nodes, edges, sendPlanToBackend]);
 
-  const toggleExpand = useCallback((id) => {
-    setNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, isExpanded: !n.data.isExpanded } } : n));
-  }, []);
+  const toggleExpand = useCallback((id: string) => {
+    const updatedNodes = nodes.map(n => {
+      if (n.id === id && n.type === 'agent') {
+        return { ...n, data: { ...(n.data as AgentNodeData), isExpanded: !(n.data as AgentNodeData).isExpanded } };
+      }
+      return n;
+    });
+    setNodes(updatedNodes);
+    sendPlanToBackend(updatedNodes, edges);
+  }, [nodes, edges, sendPlanToBackend]);
 
   const nodesWithHandlers = useMemo(() => nodes.map(n => ({
     ...n,
@@ -372,12 +463,9 @@ export default function AgentWorkflowCanvas() {
     }
   })), [nodes, mode, deleteNode, editNode, toggleExpand]);
 
-  const updateNodeData = (id, patch) => {
-    setNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, ...patch } } : n));
-  };
-
-  const animateEdgesFrom = (sourceId, active) => {
-    setEdges(prev => prev.map(e => e.source === sourceId ? { ...e, data: { ...e.data, animated: active } } : e));
+  const animateEdgesFrom = (sourceId: string, active: boolean) => {
+    // Edge animation can be implemented via CSS classes or state if needed
+    // For now, edges are animated via status updates on nodes
   };
 
   const startExecution = async () => {
@@ -399,11 +487,11 @@ export default function AgentWorkflowCanvas() {
     const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
     for (const nodeId of executionIds) {
-        if (modeRef.current === 'planning') return;
+        if (modeRef.current !== 'executing') return;
 
         while (isPausedRef.current) {
             await wait(100);
-            if (modeRef.current === 'planning') return;
+            if (modeRef.current !== 'executing') return;
         }
 
         updateNodeData(nodeId, { status: 'active', isExpanded: true }); 
@@ -413,8 +501,9 @@ export default function AgentWorkflowCanvas() {
             while (isPausedRef.current) await wait(100);
             await wait(800);
             setNodes(prev => prev.map(n => {
-                if (n.id === nodeId) {
-                    return { ...n, data: { ...n.data, logs: [...(n.data.logs || []), log] } };
+                if (n.id === nodeId && n.type === 'agent') {
+                    const agentData = n.data as AgentNodeData;
+                    return { ...n, data: { ...agentData, logs: [...(agentData.logs || []), log] } };
                 }
                 return n;
             }));
@@ -433,6 +522,8 @@ export default function AgentWorkflowCanvas() {
     setIsPaused(false);
     setNodes(initialNodesData);
     setEdges(initialEdgesData);
+    // Sync reset with backend
+    sendPlanToBackend(initialNodesData, initialEdgesData);
   };
 
   return (
