@@ -1,76 +1,76 @@
 {
   "hypothesis": {
-    "id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
-    "title": "",
-    "population": "",
-    "intervention": "",
-    "outcome": "",
-    "clinical_context": "",
-    "relationship_type": "",
-    "state": "not_confirmed"
+    "id": "9e583157-cf68-435d-9f58-4b6017cdc416",
+    "title": "Voice analysis for mental health assessment",
+    "population": "Adults (\u226518\u202fyears) with or without mental health conditions",
+    "intervention": "Acoustic feature extraction and machine\u2011learning analysis of speech recordings",
+    "outcome": "Accurate detection or quantification of mental health status (e.g., depression, anxiety) compared with standard clinical assessments",
+    "clinical_context": "Screening and monitoring of mental health in primary care or tele\u2011health settings",
+    "relationship_type": "Predictive association (voice features predict mental health status)",
+    "state": "confirmed"
   },
   "plan": {
-    "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
-    "study_goal": "",
+    "hypothesis_id": "9e583157-cf68-435d-9f58-4b6017cdc416",
+    "study_goal": "Voice analysis for mental health assessment",
     "steps": [
       {
-        "name": "Define Research Hypothesis",
-        "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
-        "matched_module": "ModelingModule",
-        "status": "pending"
-      },
-      {
-        "name": "Literature Review & Gap Analysis",
-        "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
-        "matched_module": "ValidationModule",
-        "status": "pending"
-      },
-      {
-        "name": "Develop Study Protocol",
-        "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+        "name": "Literature Review & Feasibility Assessment",
+        "description": "Conduct a systematic review of existing voice\u2011based mental\u2011health biomarkers and evaluate technical, ethical, and logistical feasibility of implementing acoustic analysis in a primary\u2011care/tele\u2011health setting.",
         "matched_module": "ImagingProtocolDesigner",
         "status": "pending"
       },
       {
-        "name": "Ethics & Regulatory Approval",
-        "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
-        "matched_module": null,
-        "status": "pending"
-      },
-      {
-        "name": "Site Selection & Training",
-        "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+        "name": "Study Protocol Development",
+        "description": "Draft a detailed protocol outlining objectives, inclusion/exclusion criteria (\u226518\u202fyears, with and without diagnosed depression/anxiety), sample size calculation, study design (cross\u2011sectional diagnostic accuracy), data collection procedures, and statistical analysis plan.",
         "matched_module": "PopulationSelector",
         "status": "pending"
       },
       {
-        "name": "Participant Recruitment & Screening",
-        "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
-        "matched_module": "PopulationSelector",
-        "status": "pending"
-      },
-      {
-        "name": "Randomization & Intervention Delivery",
-        "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
-        "matched_module": "ModelingModule",
-        "status": "pending"
-      },
-      {
-        "name": "Data Collection & Monitoring",
-        "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+        "name": "Ethics & Regulatory Approvals",
+        "description": "Submit the protocol, informed\u2011consent forms, and data\u2011privacy safeguards to an Institutional Review Board (IRB) and, if required, to data\u2011protection authorities; obtain all necessary approvals before recruitment.",
         "matched_module": "ValidationModule",
         "status": "pending"
       },
       {
-        "name": "Statistical Analysis & Interpretation",
-        "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+        "name": "Participant Recruitment & Screening",
+        "description": "Recruit a representative adult cohort (e.g., 300 participants) from primary\u2011care clinics and tele\u2011health platforms. Screen for eligibility, obtain informed consent, and record demographic/clinical baseline data.",
+        "matched_module": "PopulationSelector",
+        "status": "pending"
+      },
+      {
+        "name": "Standard Clinical Assessment",
+        "description": "Administer validated mental\u2011health instruments (e.g., PHQ\u20119 for depression, GAD\u20117 for anxiety) and, when applicable, structured clinical interviews (SCID) to establish reference diagnoses.",
+        "matched_module": "SegmentationModule",
+        "status": "pending"
+      },
+      {
+        "name": "Speech Data Collection",
+        "description": "Capture high\u2011quality audio recordings in a standardized setting (e.g., 5\u2011minute read passage, spontaneous interview, and picture\u2011description tasks) using calibrated microphones or secure mobile apps.",
+        "matched_module": "ImagingProtocolDesigner",
+        "status": "pending"
+      },
+      {
+        "name": "Acoustic Feature Extraction",
+        "description": "Process recordings with open\u2011source toolkits (e.g., OpenSMILE, Praat) to extract low\u2011level descriptors (pitch, jitter, shimmer, formants, MFCCs) and higher\u2011order statistical features; store features in a secure database.",
+        "matched_module": "RadiomicsExtractor",
+        "status": "pending"
+      },
+      {
+        "name": "Machine\u2011Learning Model Development",
+        "description": "Split the dataset into training (70\u202f%) and hold\u2011out test (30\u202f%) sets. Train multiple algorithms (e.g., logistic regression, random forest, gradient boosting, deep neural nets) using cross\u2011validation, and select the best model based on AUC\u2011ROC, sensitivity, and specificity.",
         "matched_module": "ModelingModule",
         "status": "pending"
       },
       {
-        "name": "Dissemination of Results",
-        "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
-        "matched_module": null,
+        "name": "Statistical Validation & Comparative Analysis",
+        "description": "Evaluate model performance against the clinical reference standard, calculate diagnostic accuracy metrics, conduct subgroup analyses (age, gender, comorbidities), and assess calibration and decision\u2011curve analysis for clinical utility.",
+        "matched_module": "ValidationModule",
+        "status": "pending"
+      },
+      {
+        "name": "Reporting, Dissemination & Implementation Planning",
+        "description": "Prepare a manuscript following STARD\u2011AI and CONSORT\u2011AI guidelines, present findings at conferences, and develop a roadmap for integrating the validated voice\u2011based tool into primary\u2011care workflows (e.g., API for tele\u2011health platforms).",
+        "matched_module": "ModelingModule",
         "status": "pending"
       }
     ],

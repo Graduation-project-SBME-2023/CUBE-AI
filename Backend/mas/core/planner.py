@@ -280,8 +280,11 @@ class Planner:
         self.load_from_state()
 
         # ====== PHASE 1: HYPOTHESIS CREATION ======
-        if self.hypothesis.id == "":
+        while self.hypothesis.title == "":
             await manager.send_ws_message("info", "Processing your message...")
+            if user_query is None:
+                user_query = await manager.wait_for_user_message()
+                
             message = await self.create_hypothesis(user_query)
             await manager.send_ws_message("hypothesis", self.hypothesis.model_dump())
             await manager.send_ws_message("msg", message)

@@ -1,335 +1,562 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { ReactFlow, Background, Controls, useNodesState, useEdgesState, addEdge, MarkerType } from "@xyflow/react";
-import { Play, Pause, RotateCcw } from "lucide-react";
-import "@xyflow/react/dist/style.css";
-import { AgentNode, StartNode } from "./customNodes";
-import CustomEdge from "./CustomEdge";
+import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
+import { 
+  Play, Pause, RotateCcw, Activity, CheckCircle2, Circle, 
+  X, Trash2, MousePointer2, Wifi, WifiOff, Edit3, 
+  ChevronDown, ChevronUp, FileText, Settings 
+} from 'lucide-react';
+import websocketService from '../utils/WebsocketService';
 
-// The flow will be: We have three modes (planning mode - executing mode - results mode)
-// In planning mode: step represent a node and each step has an id and title and description appears when hovering over it, the steps are shown and user can delete or edit them if he needs (editting will be just rewriting the description - discussion with the chatbot)
-// Once planning finished the user now can start execution, each step had an id and title and description, the description still shown when hovering
-// while execution each step will have status and logs-messages, the current running step show loading glowing border and loading icon 
-// when we click on the current step it shows the logs-messages in the node (it is treated as we expanded it) max the last 5 log messages appears
-// once the step is completed its color turns into green and check appears then the following node starts
-// the user has the ability to pause while running and continue later.
 
-const nodeTypes = {
-  start: StartNode,
-  agent: AgentNode,
-};
+// ==========================================
+// 1. MINI-FLOW ENGINE (OHIF Theme)
+// ==========================================
+const MiniFlow = ({ nodes, edges, onNodesChange, nodeTypes, edgeTypes, children, readOnly }) => {
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [scale, setScale] = useState(1);
+  const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
+  const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
+  const [draggingNodeId, setDraggingNodeId] = useState(null);
+  const containerRef = useRef(null);
 
-const edgeTypes = {
-  custom: CustomEdge,
-};
+  const handleCanvasMouseDown = (e) => {
+    if (e.button === 0 && !e.target.closest('.flow-node')) {
+      setIsDraggingCanvas(true);
+      setLastMousePos({ x: e.clientX, y: e.clientY });
+    }
+  };
 
-// Mode: 'planning' | 'executing' | 'results'
-function PlaygroundCanvas({
-  initialNodes = [],
-  initialEdges = [],
-  editMode = true,
-  mode = 'planning', // planning, executing, results
-  onModeChange,
-}) {
-  const [nodes, setNodes, handleNodesChange] = useNodesState(
-    initialNodes.map(n => ({
-      ...n,
-      data: {
-        ...n.data,
-        status: 'pending',
-        logs: [],
-        editable: editMode,
-        onDelete: (id) => handleDeleteNode(id),
-        onEdit: (id, description) => handleEditNode(id, description),
-      }
-    }))
-  );
-  const [edges, setEdges, handleEdgesChange] = useEdgesState(initialEdges);
-  const [currentMode, setCurrentMode] = useState(mode);
-  const [isExecuting, setIsExecuting] = useState(false);
-  const [isPaused, setIsPaused] = useState(false);
-  const [currentNodeId, setCurrentNodeId] = useState(null);
-  const [expandedNodeId, setExpandedNodeId] = useState(null);
-
-  const onConnect = useCallback(
-    (params) =>
-      setEdges((eds) =>
-        addEdge(
-          {
-            ...params,
-            type: "custom",
-            animated: true,
-            markerEnd: { type: MarkerType.ArrowClosed, color: "#555" },
-          },
-          eds
-        )
-      ),
-    [setEdges]
-  );
-
-  // Delete node handler
-  const handleDeleteNode = useCallback((nodeId) => {
-    setNodes((prevNodes) => prevNodes.filter(n => n.id !== nodeId));
-    setEdges((prevEdges) => 
-      prevEdges.filter(e => e.source !== nodeId && e.target !== nodeId)
-    );
-  }, [setNodes, setEdges]);
-
-  // Edit node handler
-  const handleEditNode = useCallback((nodeId, description) => {
-    setNodes((prevNodes) =>
-      prevNodes.map((n) =>
-        n.id === nodeId
-          ? { ...n, data: { ...n.data, description } }
-          : n
-      )
-    );
-  }, [setNodes]);
-
-  // Update nodes when initialNodes change
-  useEffect(() => {
-    setNodes(initialNodes.map(n => ({
-      ...n,
-      data: {
-        ...n.data,
-        status: n.data?.status || 'pending',
-        logs: n.data?.logs || [],
-        editable: editMode && currentMode === 'planning',
-        onDelete: (id) => handleDeleteNode(id),
-        onEdit: (id, description) => handleEditNode(id, description),
-      }
-    })));
-  }, [initialNodes, setNodes, editMode, currentMode, handleDeleteNode, handleEditNode]);
-
-  useEffect(() => {
-    setEdges(initialEdges);
-  }, [initialEdges, setEdges]);
-
-  // Update mode
-  useEffect(() => {
-    setCurrentMode(mode);
-  }, [mode]);
-
-  // Execution workflow
-  const startExecution = async () => {
-    if (isExecuting) return;
-    setIsExecuting(true);
-    setCurrentMode('executing');
-    
-    const executionOrder = nodes.filter(n => n.id !== '0').map(n => n.id);
-    const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-    for (const nodeId of executionOrder) {
-      if (!isExecuting && !isPaused) break; // Stop if execution ended
-      
-      // Wait if paused
-      while (isPaused && isExecuting) {
-        await wait(500);
-      }
-
-      setCurrentNodeId(nodeId);
-      setExpandedNodeId(nodeId);
-
-      // Set Active
-      setNodes(prev => prev.map(n => 
-        n.id === nodeId ? { ...n, data: { ...n.data, status: 'active' } } : n
-      ));
-
-      // Simulate work with logs
-      const logCount = Math.floor(Math.random() * 3) + 2;
-      for (let i = 0; i < logCount; i++) {
-        await wait(Math.random() * 400 + 300);
-        
-        const logMsg = `Processing step ${i + 1}/${logCount}...`;
-        setNodes(prev => prev.map(n => {
-          if (n.id === nodeId) {
-            return { 
-              ...n, 
-              data: { 
-                ...n.data, 
-                logs: [...(n.data?.logs || []), logMsg] 
-              } 
-            };
-          }
-          return n;
-        }));
-      }
-      
-      await wait(300);
-
-      // Set Completed
-      setNodes(prev => prev.map(n => 
-        n.id === nodeId ? { ...n, data: { ...n.data, status: 'completed' } } : n
-      ));
-      
-      await wait(200);
+  const handleMouseMove = (e) => {
+    if (isDraggingCanvas) {
+      const dx = e.clientX - lastMousePos.x;
+      const dy = e.clientY - lastMousePos.y;
+      setOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+      setLastMousePos({ x: e.clientX, y: e.clientY });
     }
 
-    setCurrentNodeId(null);
-    setIsExecuting(false);
-    setCurrentMode('results');
+    if (draggingNodeId && !readOnly) {
+      const dx = (e.movementX) / scale;
+      const dy = (e.movementY) / scale;
+      onNodesChange(nodes.map(n => 
+        n.id === draggingNodeId 
+          ? { ...n, position: { x: n.position.x + dx, y: n.position.y + dy } } 
+          : n
+      ));
+    }
   };
 
-  const pauseExecution = () => {
-    setIsPaused(!isPaused);
-  };
-
-  const resetExecution = () => {
-    setIsExecuting(false);
-    setIsPaused(false);
-    setCurrentNodeId(null);
-    setExpandedNodeId(null);
-    setCurrentMode('planning');
-    setNodes(prev => prev.map(n => ({ 
-      ...n, 
-      data: { ...n.data, status: 'pending', logs: [] } 
-    })));
+  const handleMouseUp = () => {
+    setIsDraggingCanvas(false);
+    setDraggingNodeId(null);
   };
 
   return (
-    <div style={{ width: "100vw", height: "100vh", position: 'relative' }}>
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={handleNodesChange}
-        onEdgesChange={handleEdgesChange}
-        onConnect={onConnect}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        nodesDraggable={currentMode === 'planning'}
-        fitView
-      >
-        <Background />
-        <Controls />
-      </ReactFlow>
-
-      {/* Control Panel */}
+    <div 
+      ref={containerRef}
+      // OHIF Theme: Main background is deep black/navy (#000000 or #090c29)
+      className={`w-full h-full bg-[#000000] relative overflow-hidden select-none ${readOnly ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
+      onMouseDown={handleCanvasMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+    >
+      {/* Background Grid - Adjusted for dark mode visibility */}
       <div 
+        className="absolute inset-0 pointer-events-none opacity-25"
         style={{
-          position: 'absolute',
-          top: 20,
-          left: 20,
-          background: 'white',
-          padding: '16px',
-          borderRadius: '8px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-          zIndex: 100,
-          display: 'flex',
-          gap: '8px',
-          alignItems: 'center',
+          backgroundImage: 'radial-gradient(#44626f 1px, transparent 1px)', // Blue-ish grey dots
+          backgroundSize: `${20 * scale}px ${20 * scale}px`,
+          backgroundPosition: `${offset.x}px ${offset.y}px`
+        }}
+      />
+
+      <div 
+        className="transform-gpu origin-top-left"
+        style={{ 
+          transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
+          width: '100%', 
+          height: '100%' 
         }}
       >
-        <span style={{ fontWeight: 'bold', marginRight: '16px', textTransform: 'capitalize' }}>
-          Mode: {currentMode}
-        </span>
+        {/* Layer 1: Edges */}
+        <svg className="absolute top-0 left-0 w-[5000px] h-[5000px] pointer-events-none overflow-visible">
+          {edges.map(edge => {
+            const source = nodes.find(n => n.id === edge.source);
+            const target = nodes.find(n => n.id === edge.target);
+            if (!source || !target) return null;
 
-        {currentMode === 'planning' && (
-          <button
-            onClick={startExecution}
-            style={{
-              background: '#3b82f6',
-              color: 'white',
-              padding: '8px 16px',
-              borderRadius: '4px',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <Play size={16} /> Start Execution
-          </button>
-        )}
+            const sx = source.position.x + (edge.sourceHandleX || 150);
+            const sy = source.position.y + 30; 
+            const tx = target.position.x;
+            const ty = target.position.y + 30;
+            
+            const EdgeComponent = edgeTypes[edge.type] || edgeTypes.default;
+            return (
+              <EdgeComponent 
+                key={edge.id}
+                id={edge.id}
+                sourceX={sx} sourceY={sy}
+                targetX={tx} targetY={ty}
+                data={edge.data}
+              />
+            );
+          })}
+        </svg>
 
-        {currentMode === 'executing' && (
-          <>
-            <button
-              onClick={pauseExecution}
-              style={{
-                background: isPaused ? '#f59e0b' : '#ef4444',
-                color: 'white',
-                padding: '8px 16px',
-                borderRadius: '4px',
-                border: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
+        {/* Layer 2: Nodes */}
+        {nodes.map(node => {
+          const NodeComponent = nodeTypes[node.type] || nodeTypes.default;
+          return (
+            <div
+              key={node.id}
+              className="absolute flow-node"
+              style={{ transform: `translate(${node.position.x}px, ${node.position.y}px)` }}
+              onMouseDown={(e) => {
+                if (!readOnly) {
+                  e.stopPropagation();
+                  setDraggingNodeId(node.id);
+                }
               }}
             >
-              <Pause size={16} /> {isPaused ? 'Resume' : 'Pause'}
-            </button>
-          </>
-        )}
+              <NodeComponent data={node.data} id={node.id} mode={readOnly ? 'executing' : 'planning'} />
+            </div>
+          );
+        })}
+      </div>
+      
+      {/* Layer 3: UI Overlay */}
+      <div className="absolute inset-0 pointer-events-none">
+        {children}
+      </div>
+    </div>
+  );
+};
 
-        {(currentMode === 'executing' || currentMode === 'results') && (
-          <button
-            onClick={resetExecution}
-            style={{
-              background: '#6b7280',
-              color: 'white',
-              padding: '8px 16px',
-              borderRadius: '4px',
-              border: 'none',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <RotateCcw size={16} /> Reset
-          </button>
+// ==========================================
+// 2. COMPONENTS (OHIF Styled)
+// ==========================================
+
+const CustomEdge = ({ sourceX, sourceY, targetX, targetY, data }) => {
+  const isAnimated = data?.animated;
+  const cX = (sourceX + targetX) / 2;
+  const path = `M${sourceX},${sourceY} C${cX},${sourceY} ${cX},${targetY} ${targetX},${targetY}`;
+
+  // OHIF: Edges are subtle slate/blue, active ones are bright cyan
+  return (
+    <g>
+      <path d={path} stroke="#1f2d40" strokeWidth="4" fill="none" />
+      <path 
+        d={path} 
+        stroke={isAnimated ? '#5acce6' : '#566a84'} 
+        strokeWidth="2" 
+        fill="none"
+        strokeDasharray={isAnimated ? "5,5" : "none"}
+        className={isAnimated ? "animate-flow" : ""}
+      />
+      <style>{`
+        .animate-flow { animation: dash 1s linear infinite; }
+        @keyframes dash { to { stroke-dashoffset: -10; } }
+      `}</style>
+    </g>
+  );
+};
+
+const StartNode = memo(({ data }) => {
+  return (
+    // OHIF: Dark panel background with light border
+    <div className="px-4 py-2 shadow-md rounded-full bg-[#151a1f] border border-[#3c5d80] min-w-[100px] text-center">
+      <div className="font-bold text-[#91b9cd] select-none uppercase tracking-wider text-xs">{data.title}</div>
+    </div>
+  );
+});
+
+const AgentNode = memo(({ data, id }) => {
+  const { title, description, status = 'pending', logs = [], isExpanded, onDelete, onEdit, onToggleExpand } = data;
+  const [isHovered, setIsHovered] = useState(false);
+
+  // --- OHIF Style Logic ---
+  // Default: Dark background (#151a1f), Border (#3c5d80), Text White
+  let borderColor = 'border-[#3c5d80]';
+  let bgColor = 'bg-[#151a1f]';
+  let textColor = 'text-white';
+  let Icon = Circle;
+  let iconColor = 'text-[#566a84]'; // Muted blue-grey
+  let shadow = 'shadow-none';
+
+  if (status === 'active') {
+    // OHIF Active: Cyan (#5acce6)
+    borderColor = 'border-[#5acce6]';
+    bgColor = 'bg-[#090c29]'; // Slightly darker for active
+    textColor = 'text-[#5acce6]';
+    Icon = Activity;
+    iconColor = 'text-[#5acce6]';
+    shadow = 'shadow-[0_0_15px_rgba(90,204,230,0.3)]';
+  } else if (status === 'completed') {
+    // OHIF Success: Green (#6fe5b8)
+    borderColor = 'border-[#6fe5b8]';
+    bgColor = 'bg-[#151a1f]';
+    textColor = 'text-[#6fe5b8]';
+    Icon = CheckCircle2;
+    iconColor = 'text-[#6fe5b8]';
+  }
+
+  const handleEditClick = (e) => {
+    e.stopPropagation();
+    onEdit(id);
+  };
+
+  const handleDeleteClick = (e) => {
+    e.stopPropagation();
+    onDelete(id);
+  };
+
+  const handleNodeClick = (e) => {
+    if (data.mode !== 'planning' && (status === 'active' || status === 'completed')) {
+      onToggleExpand(id);
+    }
+  };
+
+  return (
+    <div
+      className="relative group"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onClick={handleNodeClick}
+    >
+      {/* Node Body */}
+      <div className={`
+          relative flex flex-col justify-center min-w-[200px] rounded border 
+          transition-all duration-300 overflow-hidden
+          ${borderColor} ${bgColor} ${shadow}
+          ${data.mode !== 'planning' && (status === 'active' || status === 'completed') ? 'cursor-pointer hover:bg-[#1f2630]' : ''}
+        `}
+      >
+        <div className="h-[50px] flex items-center justify-between px-3">
+          {/* Status Icon & Title */}
+          <div className="flex items-center gap-3">
+            <Icon className={`${iconColor} ${status === 'active' ? 'animate-spin' : ''}`} size={16} />
+            <span className={`font-medium text-sm ${textColor} select-none`}>{title}</span>
+          </div>
+
+          {/* Planning Mode Controls */}
+          {data.mode === 'planning' && (
+            <div className={`flex gap-1 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
+              <button onClick={handleEditClick} className="p-1 hover:bg-[#000] rounded text-[#91b9cd]"><Edit3 size={14}/></button>
+              <button onClick={handleDeleteClick} className="p-1 hover:bg-[#000] rounded text-red-400"><Trash2 size={14}/></button>
+            </div>
+          )}
+
+          {/* Executing Mode Expand Indicator */}
+          {data.mode !== 'planning' && (status === 'active' || status === 'completed') && (
+            <div className="text-[#566a84]">
+               {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+            </div>
+          )}
+        </div>
+
+        {/* EXPANDED LOGS VIEW (Inside Node) */}
+        {isExpanded && data.mode !== 'planning' && (
+          <div className="border-t border-[#3c5d80] bg-[#000000] p-3 text-xs font-mono space-y-1 animate-in slide-in-from-top-2 duration-200">
+            <div className="flex items-center gap-2 text-[#91b9cd] mb-2 uppercase tracking-wider font-bold text-[10px]">
+              <FileText size={10} /> System Trace
+            </div>
+            {logs.length === 0 && <span className="text-gray-600 italic">Initializing...</span>}
+            {logs.slice(-5).map((log, i) => (
+              <div key={i} className="flex gap-2 text-gray-400">
+                <span className="opacity-50 select-none text-[#5acce6]">{'>'}</span>
+                <span>{log}</span>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
-      {/* Current Step Indicator */}
-      {currentMode === 'executing' && currentNodeId && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 20,
-            left: 20,
-            background: '#eff6ff',
-            border: '2px solid #3b82f6',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            zIndex: 100,
-          }}
-        >
-          <div style={{ fontSize: '12px', color: '#1e40af', fontWeight: 'bold' }}>
-            🔵 Currently Executing:
-          </div>
-          <div style={{ fontSize: '14px', color: '#1d4ed8', fontWeight: 'bold', marginTop: '4px' }}>
-            {nodes.find(n => n.id === currentNodeId)?.data?.name || currentNodeId}
-          </div>
+      {/* Description Tooltip (OHIF Style) */}
+      {isHovered && description && (
+        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 bg-[#090c29] border border-[#3c5d80] text-[#dadada] text-xs p-2 rounded shadow-xl pointer-events-none z-50 animate-in fade-in zoom-in-95">
+          {description}
         </div>
       )}
 
-      {/* Status Legend */}
-      {currentMode !== 'planning' && (
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 20,
-            right: 20,
-            background: 'white',
-            padding: '12px 16px',
-            borderRadius: '8px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-            zIndex: 100,
-            fontSize: '12px',
-          }}
-        >
-          <div style={{ marginBottom: '8px', fontWeight: 'bold' }}>Status Legend:</div>
-          <div style={{ display: 'flex', gap: '16px', flexDirection: 'column' }}>
-            <div>⚪ Pending</div>
-            <div>🔵 Active (Running)</div>
-            <div>✅ Completed</div>
-          </div>
+      {/* Connection Handles (Visual Only) */}
+      <div className="absolute left-0 top-[25px] -translate-y-1/2 -translate-x-1/2 w-2 h-2 bg-[#566a84] rounded-full border border-black" />
+      <div className="absolute right-0 top-[25px] -translate-y-1/2 translate-x-1/2 w-2 h-2 bg-[#566a84] rounded-full border border-black" />
+    </div>
+  );
+});
+
+// ==========================================
+// 3. MAIN APPLICATION
+// ==========================================
+
+const initialNodesData = [
+  { id: '1', type: 'start', position: { x: 50, y: 150 }, data: { title: 'Start', description: 'Entry point' } },
+  { id: '2', type: 'agent', position: { x: 250, y: 150 }, data: { title: 'Retrieve Study', description: 'Fetch DICOM metadata', status: 'pending', logs: [] } },
+  { id: '3', type: 'agent', position: { x: 500, y: 50 }, data: { title: 'Segmentation', description: 'Run ML Segmentation Model', status: 'pending', logs: [] } },
+  { id: '4', type: 'agent', position: { x: 500, y: 250 }, data: { title: 'Measurements', description: 'Calculate ROI metrics', status: 'pending', logs: [] } },
+  { id: '5', type: 'agent', position: { x: 750, y: 150 }, data: { title: 'Save Report', description: 'Commit SR to PACS', status: 'pending', logs: [] } },
+];
+
+const initialEdgesData = [
+  { id: 'e1-2', source: '1', target: '2', type: 'custom' },
+  { id: 'e2-3', source: '2', target: '3', type: 'custom' },
+  { id: 'e2-4', source: '2', target: '4', type: 'custom' },
+  { id: 'e3-5', source: '3', target: '5', type: 'custom' },
+  { id: 'e4-5', source: '4', target: '5', type: 'custom' },
+];
+
+const nodeTypes = { start: StartNode, agent: AgentNode };
+const edgeTypes = { custom: CustomEdge };
+
+const MOCK_DATA_STEPS = {
+  '2': ["Connecting to PACS...", "Querying SeriesInstanceUID...", "Retrieved 128 instances", "Metadata parsing complete"],
+  '3': ["Loading Tensor model...", "Inference started...", "Mask generated: Liver (0.98)", "Smoothing contours..."],
+  '4': ["Calculating volume...", "Volume: 1450 cc", "Mean HU: 45", "Generating SR structure"],
+  '5': ["Serializing DICOM SR...", "Association negotiated...", "C-STORE request sent", "Transfer Complete"]
+};
+
+export default function AgentWorkflowCanvas() {
+  const [mode, setMode] = useState('planning'); 
+  const [nodes, setNodes] = useState(initialNodesData);
+  const [edges, setEdges] = useState(initialEdgesData);
+  const [isPaused, setIsPaused] = useState(false);
+  const [socket, setSocket] = useState(null);
+  const [isConnected, setIsConnected] = useState(false);
+  
+  const isPausedRef = useRef(isPaused);
+  const modeRef = useRef(mode);
+
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  useEffect(() => { modeRef.current = mode; }, [mode]);
+
+  useEffect(() => {
+  websocketService.connect()
+  }  , []);
+
+  const handleServerMessage = (msg) => {
+    if (msg.type === 'plan') {
+        updateNodeData(msg.nodeId, msg.payload);
+    }
+  };
+
+  const deleteNode = useCallback((id) => {
+    setNodes(prev => prev.filter(n => n.id !== id));
+    setEdges(prev => prev.filter(e => e.source !== id && e.target !== id));
+  }, []);
+
+  const editNode = useCallback((id) => {
+    const node = nodes.find(n => n.id === id);
+    if (!node) return;
+    const newDesc = window.prompt("Edit Step Description:", node.data.description);
+    if (newDesc !== null) {
+        setNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, description: newDesc } } : n));
+    }
+  }, [nodes]);
+
+  const toggleExpand = useCallback((id) => {
+    setNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, isExpanded: !n.data.isExpanded } } : n));
+  }, []);
+
+  const nodesWithHandlers = useMemo(() => nodes.map(n => ({
+    ...n,
+    data: {
+      ...n.data,
+      mode: mode,
+      onDelete: deleteNode,
+      onEdit: editNode,
+      onToggleExpand: toggleExpand
+    }
+  })), [nodes, mode, deleteNode, editNode, toggleExpand]);
+
+  const updateNodeData = (id, patch) => {
+    setNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, ...patch } } : n));
+  };
+
+  const animateEdgesFrom = (sourceId, active) => {
+    setEdges(prev => prev.map(e => e.source === sourceId ? { ...e, data: { ...e.data, animated: active } } : e));
+  };
+
+  const startExecution = async () => {
+    setMode('executing');
+    setIsPaused(false);
+    
+    setNodes(prev => prev.map(n => ({ 
+        ...n, 
+        data: { ...n.data, status: 'pending', logs: [], isExpanded: false } 
+    })));
+    setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
+
+    if (isConnected && socket) {
+        socket.send(JSON.stringify({ type: 'START_WORKFLOW' }));
+        return; 
+    }
+
+    const executionIds = ['2', '3', '4', '5']; 
+    const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+    for (const nodeId of executionIds) {
+        if (modeRef.current === 'planning') return;
+
+        while (isPausedRef.current) {
+            await wait(100);
+            if (modeRef.current === 'planning') return;
+        }
+
+        updateNodeData(nodeId, { status: 'active', isExpanded: true }); 
+
+        const logs = MOCK_DATA_STEPS[nodeId] || ["Processing...", "Validating...", "Done"];
+        for (const log of logs) {
+            while (isPausedRef.current) await wait(100);
+            await wait(800);
+            setNodes(prev => prev.map(n => {
+                if (n.id === nodeId) {
+                    return { ...n, data: { ...n.data, logs: [...(n.data.logs || []), log] } };
+                }
+                return n;
+            }));
+        }
+
+        updateNodeData(nodeId, { status: 'completed', isExpanded: false });
+        animateEdgesFrom(nodeId, true);
+        await wait(500);
+    }
+
+    setMode('results');
+  };
+
+  const resetWorkflow = () => {
+    setMode('planning');
+    setIsPaused(false);
+    setNodes(initialNodesData);
+    setEdges(initialEdgesData);
+  };
+
+  return (
+    <div className="w-full h-screen font-sans flex flex-col bg-[#000000] text-white">
+      {/* --- HEADER / CONTROL BAR (OHIF Style) --- */}
+      <div className="h-12 bg-[#151a1f] border-b border-[#000000] flex items-center justify-between px-4 z-10">
+        <div className="flex items-center gap-4">
+            <h1 className="font-bold text-[#91b9cd] text-sm tracking-wide">WORKFLOW ENGINE</h1>
+            
+            <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border
+                ${mode === 'planning' ? 'bg-[#1f2d40] text-[#91b9cd] border-[#3c5d80]' : 
+                  mode === 'executing' ? 'bg-[#003f5c] text-[#5acce6] border-[#005f7d]' : 
+                  'bg-[#06422d] text-[#6fe5b8] border-[#085a3c]'}`}>
+                {mode}
+            </div>
         </div>
-      )}
+
+        <div className="flex items-center gap-3">
+             {mode === 'planning' && (
+                 <button
+                    onClick={startExecution}
+                    className="flex items-center gap-2 px-4 py-1.5 bg-[#348cfd] hover:bg-[#599fff] text-white text-xs rounded font-medium transition-colors"
+                 >
+                    <Play size={14} fill="currentColor"/> Execute
+                 </button>
+             )}
+
+             {mode === 'executing' && (
+                 <>
+                    <button
+                        onClick={() => setIsPaused(!isPaused)}
+                        className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors border ${
+                            isPaused 
+                            ? 'bg-[#3b2d1c] border-[#705228] text-[#f8ce46]' 
+                            : 'bg-[#151a1f] border-[#3c5d80] text-[#91b9cd] hover:border-[#91b9cd]'
+                        }`}
+                    >
+                        {isPaused ? <Play size={14} /> : <Pause size={14} />}
+                        {isPaused ? 'Resume' : 'Pause'}
+                    </button>
+                    
+                    <button
+                        onClick={resetWorkflow}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-[#151a1f] hover:bg-[#2c1a1f] text-[#91b9cd] hover:text-[#ff6b6b] border border-[#3c5d80] rounded text-xs transition-colors"
+                    >
+                        <RotateCcw size={14} /> Stop
+                    </button>
+                 </>
+             )}
+
+             {mode === 'results' && (
+                 <button
+                    onClick={resetWorkflow}
+                    className="flex items-center gap-2 px-4 py-1.5 bg-[#6fe5b8] hover:bg-[#91eac8] text-black text-xs rounded font-medium transition-colors"
+                 >
+                    <RotateCcw size={14} /> Reset
+                 </button>
+             )}
+
+             <div className="h-4 w-px bg-[#3c5d80] mx-2"></div>
+             <div className="flex items-center gap-1 text-[10px] text-[#566a84] font-medium uppercase" title={isConnected ? "WebSocket Connected" : "Using Mock Data"}>
+                 {isConnected ? <Wifi size={12} className="text-[#6fe5b8]" /> : <WifiOff size={12} />}
+             </div>
+             <Settings size={14} className="text-[#566a84] hover:text-[#91b9cd] cursor-pointer" />
+        </div>
+      </div>
+
+      {/* --- CANVAS --- */}
+      <div className="flex-1 relative overflow-hidden">
+        <MiniFlow
+            nodes={nodesWithHandlers}
+            edges={edges}
+            onNodesChange={setNodes}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            readOnly={mode !== 'planning'}
+        >
+            {/* Context Legend (OHIF Style) */}
+            <div className="absolute bottom-6 left-6 pointer-events-none">
+                 <div className="bg-[#151a1f]/90 backdrop-blur p-3 rounded border border-[#3c5d80] text-[10px] space-y-2">
+                    <div className="font-bold text-[#91b9cd] uppercase mb-1">
+                        {mode === 'planning' ? 'Planning Tools' : 'Monitor Status'}
+                    </div>
+                    
+                    {mode === 'planning' ? (
+                        <>
+                            <div className="flex items-center gap-2 text-[#dadada]">
+                                <MousePointer2 size={10} /> Drag nodes
+                            </div>
+                            <div className="flex items-center gap-2 text-[#dadada]">
+                                <Edit3 size={10} /> Edit / Delete
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                             <div className="flex items-center gap-2 text-[#dadada]">
+                                <Activity size={10} className="text-[#5acce6]" /> Active
+                            </div>
+                             <div className="flex items-center gap-2 text-[#dadada]">
+                                <CheckCircle2 size={10} className="text-[#6fe5b8]" /> Complete
+                            </div>
+                        </>
+                    )}
+                 </div>
+            </div>
+            
+            {/* Results Overlay (OHIF Style) */}
+            {mode === 'results' && (
+                <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px] z-50 flex items-center justify-center animate-in fade-in duration-500">
+                    <div className="bg-[#151a1f] p-8 rounded border border-[#3c5d80] max-w-md text-center space-y-4 shadow-2xl">
+                        <div className="w-12 h-12 bg-[#06422d] rounded-full flex items-center justify-center mx-auto mb-2 border border-[#6fe5b8]">
+                            <CheckCircle2 size={24} className="text-[#6fe5b8]" />
+                        </div>
+                        <h2 className="text-xl font-bold text-white">Workflow Complete</h2>
+                        <p className="text-[#91b9cd] text-sm">
+                            DICOM transfer verified. SR Object #1.2.840... committed successfully.
+                        </p>
+                        <button 
+                            onClick={resetWorkflow}
+                            className="w-full py-2 bg-[#348cfd] text-white text-sm rounded hover:bg-[#599fff] transition-colors font-medium"
+                        >
+                            Return to Worklist
+                        </button>
+                    </div>
+                </div>
+            )}
+
+        </MiniFlow>
+      </div>
     </div>
   );
 }
-
-export default PlaygroundCanvas;
