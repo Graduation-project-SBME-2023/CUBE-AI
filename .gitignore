@@ -18,6 +18,7 @@ Backend/models
 *.nii.gz
 
 Backend/apps/radiology/logs/app.log
+Backend/apps/radiology/bin/
 
 # Docker volumes
 Backend/volumes

@@ -236,11 +236,9 @@ class MyApp(MONAILabelApp):
         logger.info("+++++++++ workflow's json file is created")        
 
     def init_datastore(self) -> Datastore:
-    # Use your custom datastore instead of default
-    
-        dicom_url = os.environ.get("MONAI_LABEL_STUDIES", "http://localhost:8043/dicom-web")
-        client = DICOMwebClient(url=dicom_url)
-        datastore = MyDICOMWebDatastore(client,search_filter=None)
+        # Use your custom datastore instead of default
+        datastore = super().init_datastore()
+        datastore.__class__ = MyDICOMWebDatastore # only acceptable since no attributes differ from base class and custom class, just a different method implementation
         if self.heuristic_planner:
             self.planner.run(datastore)
         return datastore
