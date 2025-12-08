@@ -28,7 +28,6 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -54,7 +53,7 @@ async def run_pipeline(request: RunRequest):
             hypothesis_text=request.hypothesis,
         )
         
-        # 🔥 Example usage: push result to websocket if connected
+        # Example usage: push result to websocket if connected
         await send_ws_message("result", result)
 
     except Exception as exc:
@@ -73,7 +72,12 @@ async def websocket_endpoint(websocket: WebSocket):
     
     # 2. Start your Planner Logic (in background)
     planner = Planner()
-    asyncio.create_task(planner.run("Start"))
+
+    state_path = Path(__file__).parent.parent / "memory" / "workspace" / "state.json"
+    state =json.load(open(state_path)) if state_path.exists() else {}    
+    await manager.send_ws_message("plan", state['plan'])
+
+    # asyncio.create_task(planner.run("Start"))
     # Orchestrator.create_task(...)
 
     try:
