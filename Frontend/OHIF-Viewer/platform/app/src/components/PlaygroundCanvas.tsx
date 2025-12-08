@@ -364,6 +364,8 @@ export default function AgentWorkflowCanvas() {
 
   useEffect(() => {
   websocketService.connect()
+  msg => 
+  handleServerMessage(msg);
   }  , []);
 
   const handleServerMessage = (msg: any) => {
@@ -418,7 +420,7 @@ export default function AgentWorkflowCanvas() {
       });
       
       setNodes(newNodes);
-      
+      console.log('New Nodes:', newNodes);
       // Create edges connecting nodes sequentially
       const newEdges: FlowEdge[] = [];
       for (let i = 0; i < newNodes.length - 1; i++) {
@@ -431,7 +433,7 @@ export default function AgentWorkflowCanvas() {
           type: 'default'
         });
       }
-      
+      console.log('New Edges:', newEdges);
       setEdges(newEdges);
     }
     
