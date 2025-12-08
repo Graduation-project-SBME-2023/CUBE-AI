@@ -26,6 +26,10 @@ export const getSpecialPath = (
   } ${targetX} ${targetY}`;
 };
 
+/**
+ * CustomEdge component - Not used in canvas-based rendering
+ * Kept for backward compatibility
+ */
 export default function CustomEdge({
   source,
   target,

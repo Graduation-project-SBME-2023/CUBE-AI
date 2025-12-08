@@ -272,6 +272,10 @@ class Planner:
         3. Study plan creation and confirmation (if plan is empty)
         """
         
+        if user_query == "Start":
+            await manager.send_ws_message("msg", "Enter your clinical hypothesis to begin the planning process.")
+            user_query = await manager.wait_for_user_message()
+
         await manager.send_ws_message("info", "Planner started")
         self.load_from_state()
 
@@ -279,7 +283,7 @@ class Planner:
         if self.hypothesis.id == "":
             await manager.send_ws_message("info", "Processing your message...")
             message = await self.create_hypothesis(user_query)
-            await manager.send_ws_message("info", self.hypothesis.model_dump())
+            await manager.send_ws_message("hypothesis", self.hypothesis.model_dump())
             await manager.send_ws_message("msg", message)
             
             # Clear user_query so we don't process it again in confirmation phase
