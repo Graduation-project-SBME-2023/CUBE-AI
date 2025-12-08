@@ -17408,3 +17408,2007 @@ outcome
 2025-12-06 15:06:32,284 - planner - INFO - Saved plan and hypothesis to state file
 2025-12-06 15:06:32,284 - planner - INFO - Saved plan and hypothesis to state file
 2025-12-06 15:06:32,284 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:04:16,541 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:04:16,541 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:04:16,541 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:04:16,543 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:04:16,543 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:04:16,543 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:04:27,323 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:04:27,323 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:04:27,323 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:04:27,324 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:04:27,324 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:04:27,324 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:18:23,299 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:18:23,299 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:18:23,299 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:18:23,299 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:18:23,300 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:18:23,300 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:18:23,300 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:18:23,300 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:18:29,831 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:18:29,831 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:18:29,831 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:18:29,831 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:18:29,831 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:18:29,831 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:18:29,831 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:18:29,831 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:20:32,733 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:20:32,733 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:20:32,733 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:20:32,734 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:20:32,734 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:20:32,734 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:20:32,734 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:20:32,734 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:20:32,734 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:20:47,173 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:20:47,173 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:20:47,173 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:20:47,173 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:20:47,173 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:20:47,173 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:27:08,803 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:27:08,803 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:27:08,803 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-06 16:27:08,814 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:27:08,814 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:27:08,814 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:27:15,737 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:27:15,737 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:27:15,737 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:27:15,738 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:27:15,738 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:27:15,738 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:31:46,487 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:31:46,487 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:31:46,487 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:31:53,607 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:31:53,607 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:31:53,607 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:31:53,608 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:31:53,608 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:31:53,608 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:33:07,213 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:33:07,213 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:33:07,213 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:33:26,026 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:33:26,026 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:33:26,026 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:33:26,027 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:33:26,027 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:33:26,027 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:34:12,153 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:34:12,153 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:34:12,153 - planner - INFO - Processing study plan feedback...
+2025-12-06 16:34:17,350 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:34:17,350 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:34:17,350 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 16:34:17,350 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:34:17,350 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 16:34:17,350 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 17:00:24,519 - planner - INFO - Processing study plan feedback...
+2025-12-06 17:00:24,519 - planner - INFO - Processing study plan feedback...
+2025-12-06 17:00:24,519 - planner - INFO - Processing study plan feedback...
+2025-12-06 17:00:34,117 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 17:00:34,117 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 17:00:34,117 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 17:00:34,121 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 17:00:34,121 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 17:00:34,121 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 17:00:46,479 - planner - INFO - Processing study plan feedback...
+2025-12-06 17:00:46,479 - planner - INFO - Processing study plan feedback...
+2025-12-06 17:00:46,479 - planner - INFO - Processing study plan feedback...
+2025-12-06 17:01:02,385 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 17:01:02,385 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 17:01:02,385 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-06 17:01:02,385 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 17:01:02,385 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
+2025-12-06 17:01:02,385 - planner - INFO - Study plan updated:
+{
+  "hypothesis_id": "ccc4e40a-c39e-4821-9c8e-fdbbadd17db5",
+  "study_goal": "",
+  "steps": [
+    {
+      "name": "Define Research Hypothesis",
+      "description": "Articulate a clear, testable hypothesis based on the clinical context, specifying the population, intervention, comparator, and expected outcome.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Literature Review & Gap Analysis",
+      "description": "Conduct a systematic review of existing studies to confirm the novelty of the hypothesis and identify methodological strengths/weaknesses to inform study design.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Develop Study Protocol",
+      "description": "Create a detailed protocol that outlines objectives, study design (e.g., RCT, cohort), inclusion/exclusion criteria, sample size calculations, randomization method, blinding, intervention details, outcome measures, and statistical analysis plan.",
+      "matched_module": "ImagingProtocolDesigner",
+      "status": "pending"
+    },
+    {
+      "name": "Ethics & Regulatory Approval",
+      "description": "Prepare and submit the protocol, informed consent forms, and safety monitoring plans to an Institutional Review Board (IRB) or Ethics Committee and obtain any required regulatory approvals (e.g., FDA or EMA).",
+      "matched_module": null,
+      "status": "pending"
+    },
+    {
+      "name": "Site Selection & Training",
+      "description": "Identify clinical sites capable of recruiting the target population, verify infrastructure, and conduct training sessions for investigators and study staff on protocol adherence, data capture, and safety reporting.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Participant Recruitment & Screening",
+      "description": "Implement recruitment strategies (e.g., referrals, advertisements), screen candidates against inclusion/exclusion criteria, obtain written informed consent, and document baseline characteristics.",
+      "matched_module": "PopulationSelector",
+      "status": "pending"
+    },
+    {
+      "name": "Randomization & Intervention Delivery",
+      "description": "Assign participants to intervention or control groups using a pre\u2011specified randomization scheme, ensure blinding where applicable, and administer the intervention per the protocol while monitoring adherence.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Data Collection & Monitoring",
+      "description": "Collect outcome data at predefined time points using validated instruments, enter data into a secure electronic data capture system, and perform regular data monitoring for completeness, consistency, and safety signals.",
+      "matched_module": "ValidationModule",
+      "status": "pending"
+    },
+    {
+      "name": "Statistical Analysis & Interpretation",
+      "description": "Apply the pre\u2011specified statistical analysis plan to evaluate the primary and secondary outcomes, conduct sensitivity analyses, assess clinical relevance, and interpret findings in the context of the original hypothesis.",
+      "matched_module": "ModelingModule",
+      "status": "pending"
+    },
+    {
+      "name": "Dissemination of Results",
+      "description": "Prepare manuscripts for peer\u2011reviewed journals, present findings at scientific conferences, update trial registries, and provide summaries to participants and stakeholders, ensuring transparent reporting according to CONSORT or relevant guidelines.",
+      "matched_module": null,
+      "status": "pending"
+    }
+  ],
+  "state": "not_confirmed"
+}
+
