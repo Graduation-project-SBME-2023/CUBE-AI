@@ -10,6 +10,7 @@ class ConnectionManager:
     def __init__(self):
         # Holds the active socket connection(s)
         self.active_connections: List[WebSocket] = []
+        self.solely_connected_socket: WebSocket | None = None
         
         # A Queue buffers messages from the client so the Planner 
         # doesn't have to fight the Server for control of the socket.
@@ -19,6 +20,7 @@ class ConnectionManager:
         """Called when a new client connects via WebSocket."""
         await websocket.accept()
         self.active_connections.append(websocket)
+        self.solely_connected_socket = websocket
         logger.info("WebSocket client connected.")
 
     def disconnect(self, websocket: WebSocket):
@@ -58,12 +60,13 @@ class ConnectionManager:
         }, default=str)
 
         dead_sockets = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_text(message_data)
-            except Exception as e:
-                logger.error(f"Failed to send message: {e}")
-                dead_sockets.append(connection)
+        # for connection in self.active_connections:
+        #     try:
+        #         await connection.send_text(message_data)
+        #     except Exception as e:
+        #         logger.error(f"Failed to send message: {e}")
+        #         dead_sockets.append(connection)
+        await self.solely_connected_socket.send_text(message_data)
         
         # Cleanup broken connections
         for dead in dead_sockets:
