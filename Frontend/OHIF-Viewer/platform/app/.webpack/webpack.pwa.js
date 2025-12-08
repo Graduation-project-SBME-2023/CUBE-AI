@@ -63,30 +63,12 @@ module.exports = (env, argv) => {
       },
     },
     resolve: {
-      modules: [
-        // Modules specific to this package
-        path.resolve(__dirname, '../node_modules'),
-        // Hoisted Yarn Workspace Modules
-        path.resolve(__dirname, '../../../node_modules'),
-        SRC_DIR,
-        path.resolve(
-          __dirname,
-          'C:/Users/mayar/Desktop/GradProject-Material/OHIF-Standalone/OHIF-Viewer/extensions/monai-label/node_modules'
-        ),
-        path.resolve(
-          __dirname,
-          'C:/Users/mayar/Desktop/GradProject-Material/OHIF-Standalone/OHIF-Viewer/modes/monai-label/node_modules'
-        ),
-        path.resolve(
-          __dirname,
-          'C:/Users/mayar/Desktop/GradProject-Material/OHIF-Standalone/OHIF-Viewer/extensions/monai-label/node_modules'
-        ),
-        path.resolve(
-          __dirname,
-          'C:/Users/mayar/Desktop/GradProject-Material/OHIF-Standalone/OHIF-Viewer/modes/monai-label/node_modules'
-        ),
-      ],
-    },
+  modules: [
+    path.resolve(__dirname, '../node_modules'),
+    path.resolve(__dirname, '../../../node_modules'),
+    SRC_DIR,
+  ],
+},
     plugins: [
       new Dotenv(),
       // Clean output.path
