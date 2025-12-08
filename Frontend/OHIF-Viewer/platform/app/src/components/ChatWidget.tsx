@@ -215,79 +215,78 @@ const CustomChatWidget: React.FC = () => {
 
 
   const sortedSessions = [...sessions].sort((a, b) => (b.last_activity || 0) - (a.last_activity || 0));
-useEffect(() => {
-  // 1. Connect once on mount
-  // websocketService.connect();
 
-  // 2. Handle incoming WebSocket messages
-  const handleWS = async (data: any) => {
-    const { type, payload } = data;
+  useEffect(() => {
 
-    // Filter types (Add 'hypothesis' or 'plan' here if you want to display them)
-    // currently only handling 'msg' based on your logic
-    if (type !== "msg") return;
+    // 2. Handle incoming WebSocket messages
+    const handleWS = async (data: any) => {
+      const { type, payload } = data;
 
-    console.log("[WS] received assistant:", payload);
+      // Filter types (Add 'hypothesis' or 'plan' here if you want to display them)
+      // currently only handling 'msg' based on your logic
+      if (type !== "msg") return;
 
-    // USE THE REF HERE: This ensures we get the current ID without restarting the effect
-    const currentSessionId = activeSessionIdRef.current ?? sessions[0]?.chat_id;
-    
-    if (!currentSessionId) return;
+      console.log("[WS] received assistant:", payload);
 
-    // Safely handle text vs object payloads
-    const textContent = typeof payload === "string" 
-      ? payload 
-      : (payload.text || JSON.stringify(payload));
+      // USE THE REF HERE: This ensures we get the current ID without restarting the effect
+      const currentSessionId = activeSessionIdRef.current ?? sessions[0]?.chat_id;
+      
+      if (!currentSessionId) return;
 
-    const assistantMsg: Message = {
-      id: makeId("a"),
-      role: "assistant",
-      text: textContent,
-      ts: payload.ts || Date.now(),
+      // Safely handle text vs object payloads
+      const textContent = typeof payload === "string" 
+        ? payload 
+        : (payload.text || JSON.stringify(payload));
+
+      const assistantMsg: Message = {
+        id: makeId("a"),
+        role: "assistant",
+        text: textContent,
+        ts: payload.ts || Date.now(),
+      };
+
+      // 3. Add assistant message using Functional State Update
+      // We don't need 'sessions' as a dependency because we use 'prev'
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.chat_id === currentSessionId
+            ? { 
+                ...s, 
+                messages: [...s.messages, assistantMsg], 
+                last_activity: Date.now() 
+              }
+            : s
+        )
+      );
+
+      // 4. Save in backend
+      try {
+        await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: "assistant", text: assistantMsg.text }),
+        });
+      } catch (err) {
+        console.warn("Failed to save assistant message", err);
+      }
+
+      setIsTyping(false);
+      
+      // Note: We avoid calling updateSessionLastActivity here if it triggers 
+      // a fetch that updates 'sessions' again from the outside, 
+      // but the local setSessions above handles the UI update.
     };
 
-    // 3. Add assistant message using Functional State Update
-    // We don't need 'sessions' as a dependency because we use 'prev'
-    setSessions((prev) =>
-      prev.map((s) =>
-        s.chat_id === currentSessionId
-          ? { 
-              ...s, 
-              messages: [...s.messages, assistantMsg], 
-              last_activity: Date.now() 
-            }
-          : s
-      )
-    );
+    // Subscribe
+    const unsubscribe = websocketService.subscribe(handleWS);
 
-    // 4. Save in backend
-    try {
-      await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: "assistant", text: assistantMsg.text }),
-      });
-    } catch (err) {
-      console.warn("Failed to save assistant message", err);
-    }
-
-    setIsTyping(false);
+    // Cleanup on unmount only
+    return () => {
+      unsubscribe();
+    };
     
-    // Note: We avoid calling updateSessionLastActivity here if it triggers 
-    // a fetch that updates 'sessions' again from the outside, 
-    // but the local setSessions above handles the UI update.
-  };
-
-  // Subscribe
-  const unsubscribe = websocketService.subscribe(handleWS);
-
-  // Cleanup on unmount only
-  return () => {
-    unsubscribe();
-  };
-  
-// DEPENDENCY ARRAY IS EMPTY: This effect runs once on mount, never again.
-}, []);
+  // DEPENDENCY ARRAY IS EMPTY: This effect runs once on mount, never again.
+  }, []);
   // --- Scroll to bottom ---
   useEffect(() => {
     if (!listRef.current) return;
