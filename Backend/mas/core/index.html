@@ -1,0 +1,398 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MAS Orchestrator — WebSocket Chat</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { 
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+      margin: 0; 
+      padding: 0; 
+      background: linear-gradient(135deg, #0f172a 0%, #1a1f3a 100%); 
+      color: #e6eef8; 
+      display: flex; 
+      height: 100vh; 
+    }
+    .container { 
+      margin: auto; 
+      width: 900px; 
+      max-width: 96%; 
+      background: #071029; 
+      border-radius: 12px; 
+      box-shadow: 0 8px 30px rgba(0,0,0,0.8); 
+      padding: 24px; 
+      display: flex; 
+      flex-direction: column; 
+      height: 90vh; 
+    }
+    h1 { 
+      margin: 0 0 16px; 
+      font-size: 22px; 
+      color: #cfe8ff; 
+      border-bottom: 2px solid #0ea5a1; 
+      padding-bottom: 8px;
+    }
+    .header { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      margin-bottom: 12px; 
+    }
+    .conn-badge { 
+      font-size: 12px; 
+      padding: 4px 12px; 
+      border-radius: 6px; 
+      font-weight: 600;
+    }
+    .conn-badge.connected { 
+      background: #064e3b; 
+      color: #a7f3d0; 
+    }
+    .conn-badge.disconnected { 
+      background: #7f1d1d; 
+      color: #fca5a5; 
+    }
+    .log { 
+      flex: 1; 
+      overflow: auto; 
+      background: #041425; 
+      border-radius: 8px; 
+      padding: 14px; 
+      border: 1px solid #0b2b3a; 
+      margin-bottom: 14px;
+      scroll-behavior: smooth;
+    }
+    .msg { 
+      margin-bottom: 12px; 
+      padding: 10px 12px; 
+      border-radius: 8px; 
+      border-left: 3px solid transparent;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .msg.system { 
+      background: #072233; 
+      color: #9bd7ff; 
+      border-left-color: #0ea5a1;
+    }
+    .msg.info { 
+      background: #0f2e4f; 
+      color: #a5d6ff; 
+      border-left-color: #3b82f6;
+    }
+    .msg.user { 
+      background: #1a3a2a; 
+      color: #86efac; 
+      border-left-color: #22c55e;
+    }
+    .msg.msg { 
+      background: #2d1b4e; 
+      color: #d8b4fe; 
+      border-left-color: #a855f7;
+    }
+    .msg.hypothesis { 
+      background: #1f2937; 
+      color: #e5e7eb; 
+      border-left-color: #6366f1;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      max-height: 150px;
+      overflow: auto;
+    }
+    .msg.plan { 
+      background: #1f3a3a; 
+      color: #d0f0ff; 
+      border-left-color: #06b6d4;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow: auto;
+    }
+    .msg.result { 
+      background: #1a1a2e; 
+      color: #d3d0ff; 
+      border-left-color: #8b5cf6;
+      font-weight: 600;
+    }
+    .msg.error { 
+      background: #5f2c2c; 
+      color: #fecaca; 
+      border-left-color: #ef4444;
+      font-weight: 600;
+    }
+    .msg-type { 
+      font-size: 11px; 
+      opacity: 0.7; 
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .controls { 
+      display: flex; 
+      gap: 10px; 
+      margin-bottom: 14px; 
+    }
+    textarea { 
+      flex: 1; 
+      min-height: 80px; 
+      border-radius: 8px; 
+      padding: 12px; 
+      border: 1px solid #1f2937; 
+      background: #02101a; 
+      color: #e6eef8; 
+      resize: vertical;
+      font-family: 'Segoe UI', sans-serif;
+      font-size: 14px;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: #0ea5a1;
+      box-shadow: 0 0 0 2px rgba(14, 165, 161, 0.2);
+    }
+    button { 
+      padding: 10px 16px; 
+      border-radius: 8px; 
+      border: none; 
+      cursor: pointer; 
+      background: #0ea5a1; 
+      color: #012; 
+      font-weight: 600;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    button:hover:not(:disabled) {
+      background: #14b8a6;
+      transform: translateY(-1px);
+    }
+    button:disabled { 
+      opacity: 0.5; 
+      cursor: not-allowed; 
+    }
+    .button-group { 
+      display: flex; 
+      flex-direction: column; 
+      gap: 8px; 
+      width: 110px; 
+    }
+    .status-line { 
+      font-size: 13px; 
+      color: #9fb3c8; 
+      padding: 8px 0;
+      border-top: 1px solid #0b2b3a;
+      padding-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔬 MAS Orchestrator</h1>
+      <div class="conn-badge disconnected" id="conn-status">● Disconnected</div>
+    </div>
+    
+    <div class="log" id="log"></div>
+
+    <div class="controls">
+      <textarea id="hypothesis" placeholder="Enter your clinical hypothesis here...">A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.</textarea>
+      <div class="button-group">
+        <button id="connect">Connect</button>
+        <button id="send" disabled>Send</button>
+        <button id="clear">Clear Log</button>
+      </div>
+    </div>
+    
+    <div class="status-line" id="status-line">Ready. Click Connect to start.</div>
+  </div>
+
+<script>
+(() => {
+  const WS_URL = (location.protocol === "https:" ? "wss://" : "ws://") + location.hostname + ":8150/ws";
+
+  let ws = null;
+  let inputMode = "hypothesis"; // hypothesis | confirmation | plan_confirmation
+  let isProcessing = false;
+
+  const logEl = document.getElementById("log");
+  const connStatusEl = document.getElementById("conn-status");
+  const statusLine = document.getElementById("status-line");
+  const connectBtn = document.getElementById("connect");
+  const sendBtn = document.getElementById("send");
+  const clearBtn = document.getElementById("clear");
+  const hypothesisEl = document.getElementById("hypothesis");
+
+  function appendMsg(type, content) {
+    const el = document.createElement("div");
+    el.className = "msg " + type;
+    
+    let html = `<div class="msg-type">${type}</div>`;
+    
+    if (typeof content === "string") {
+      html += escapeHtml(content);
+    } else if (typeof content === "object") {
+      html += `<pre>${escapeHtml(JSON.stringify(content, null, 2))}</pre>`;
+    } else {
+      html += escapeHtml(String(content));
+    }
+    
+    el.innerHTML = html;
+    logEl.appendChild(el);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setStatus(s) {
+    statusLine.textContent = s;
+  }
+
+  function setConnected() {
+    connStatusEl.textContent = "● Connected";
+    connStatusEl.className = "conn-badge connected";
+    sendBtn.disabled = false;
+    connectBtn.textContent = "Disconnect";
+  }
+
+  function setDisconnected() {
+    connStatusEl.textContent = "● Disconnected";
+    connStatusEl.className = "conn-badge disconnected";
+    sendBtn.disabled = true;
+    connectBtn.textContent = "Connect";
+  }
+
+  connectBtn.addEventListener("click", async () => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.close();
+      return;
+    }
+
+    setStatus("Connecting to " + WS_URL + " ...");
+    appendMsg("system", "Attempting to connect...");
+    
+    try {
+      ws = new WebSocket(WS_URL);
+    } catch (err) {
+      appendMsg("error", "Failed to create WebSocket: " + err);
+      setStatus("Connection failed");
+      return;
+    }
+
+    ws.addEventListener("open", () => {
+      setConnected();
+      inputMode = "hypothesis";
+      hypothesisEl.placeholder = "Enter your clinical hypothesis...";
+      hypothesisEl.value = "A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma.";
+      setStatus("Connected ✓ Enter hypothesis and press Send");
+      appendMsg("system", "✓ WebSocket connected. Planner is waiting for your hypothesis...");
+    });
+
+    ws.addEventListener("message", (ev) => {
+      try {
+        const msg = JSON.parse(ev.data);
+        const msgType = msg.type || "unknown";
+        const payload = msg.payload || msg;
+        
+        // Map message types to CSS classes
+        const typeMap = {
+          "info": "info",
+          "msg": "msg",
+          "hypothesis": "hypothesis",
+          "plan": "plan",
+          "modules_matched": "plan",
+          "plan_created": "plan",
+          "result": "result",
+          "error": "error",
+          "require_input": "msg",
+          "system": "system"
+        };
+        
+        const cssType = typeMap[msgType] || "info";
+        appendMsg(cssType, payload);
+        setStatus("Received: " + msgType);
+        
+        // Update input mode based on message type
+        if (msgType === "hypothesis") {
+          inputMode = "hypothesis";
+          hypothesisEl.placeholder = "Confirm this hypothesis or ask to modify it...";
+        } else if (msgType === "plan") {
+          inputMode = "plan_confirmation";
+          hypothesisEl.placeholder = "Confirm the study plan or request modifications...";
+        }
+        
+        isProcessing = false;
+        
+      } catch (err) {
+        appendMsg("error", "Failed to parse: " + err.message);
+        isProcessing = false;
+      }
+    });
+
+    ws.addEventListener("close", () => {
+      appendMsg("system", "Connection closed. Session ended.");
+      setDisconnected();
+      setStatus("Disconnected - Click Connect to start a new session");
+      ws = null;
+      isProcessing = false;
+    });
+
+    ws.addEventListener("error", (ev) => {
+      appendMsg("error", "WebSocket error: check console logs");
+      setStatus("WebSocket error (see console)");
+      isProcessing = false;
+    });
+  });
+
+  sendBtn.addEventListener("click", () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      appendMsg("system", "Not connected. Click Connect first.");
+      return;
+    }
+
+    if (isProcessing) {
+      appendMsg("system", "Waiting for response... please be patient.");
+      return;
+    }
+
+    const userInput = hypothesisEl.value.trim();
+    if (!userInput) {
+      appendMsg("system", "Please enter text before sending.");
+      return;
+    }
+
+    // Send user message to server
+    ws.send(userInput);
+    appendMsg("user", userInput);
+    hypothesisEl.value = "";
+    isProcessing = true;
+    
+    setStatus("Processing your input...");
+  });
+
+  clearBtn.addEventListener("click", () => {
+    logEl.innerHTML = "";
+    setStatus("Log cleared");
+  });
+
+  // Allow Enter to send (Ctrl+Enter for new line)
+  hypothesisEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.ctrlKey && !isProcessing) {
+      e.preventDefault();
+      sendBtn.click();
+    }
+  });
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[c]));
+  }
+
+  setDisconnected();
+  appendMsg("system", "Ready. Click Connect to begin planning process.");
+})();
+</script>
+</body>
+</html>
