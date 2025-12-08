@@ -1,21 +1,30 @@
-import sys
-from pathlib import Path
-
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from tools import mcp
-
-# Import all your tool modules so their @mcp.tool() decorators get registered
-from tools.image_loading_tools import load_image_tool
-from tools.get_patients_info import get_all_patients_info
-from tools.get_studies_info import get_all_studies_info
+from fastapi import FastAPI
+import uvicorn
+# from tools.characterization_tools import characterize_tumor
+# from tools.image_loading_tools import load_image_tool
+# from tools.radiomics_analysis_tool import radiomics_analysis_tool
+# from tools.segmentation_tools import segment_volume_tool
+# from tools.get_patients_info import get_all_patients_info
+# from tools.get_studies_info import get_all_studies_info
 from tools.database.models.get_model import get_model
 from tools.database.patients.get_patient import get_patient
 from tools.database.studies.get_study import get_study, get_study_by_patient
+from tools.database.volumes.get_volume import get_volume, get_volumes_by_study
+from tools.database.volumes.count_volumes import count_volumes_in_study
+from tools.database.patients.search_patient import search_patient
+from tools.database.studies.search_studies import search_studies
+from tools.database.volumes.search_volumes import search_volumes
+from tools.database.segmentations.get_segmentation import get_segmentation, get_invalidate_segmentations, get_segmentation_by_model, get_segmentation_by_volume
+from tools.database.segmentations.search_segmentation import search_segmentation
+from tools.database.segmentations.segmentations_status import get_segmentation_stats
+from tools.save_population import save_final_output
+
+
 # from tools.database.models.get_models import get_models
 # from tools.database.models.create_model import create_model
 
-# For FastMCP, this is the correct way to run with stdio
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

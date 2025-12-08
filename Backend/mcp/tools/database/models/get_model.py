@@ -1,40 +1,22 @@
 from ... import mcp
 import httpx
+from typing import Annotated
+from pydantic import Field
 
 
 @mcp.tool()
-async def get_model(model_id: int | None = None, skip:int = 0, limit:int=100):
+async def get_model(
+    model_id: Annotated[int | None, Field(description="The unique identifier of the AI model. If provided, fetches a single detailed record. If omitted, fetches a list of all models.")] = None,
+    skip: Annotated[int, Field(description="Pagination offset: The number of model records to skip before starting the list.")] = 0,
+    limit: Annotated[int, Field(description="Pagination limit: The maximum number of model records to return in one request (max 100).")] = 100
+):
     """
-    Retrieve model data from the FastAPI backend.
+    Retrieves information about available AI models in the system.
 
-    This function acts as a unified HTTP client for the model-related API
-    endpoints. It supports two modes:
-
-    1. **Fetch a single model**
-       - Triggered when `model_id` is provided.
-       - Sends a GET request to: `GET /{model_id}`
-
-    2. **Fetch multiple models with pagination**
-       - Triggered when `model_id` is not provided.
-       - Sends a GET request to: `GET /?skip={skip}&limit={limit}`
-
-    Parameters
-    ----------
-    model_id : int, optional
-        The ID of a specific model to retrieve. If provided, pagination
-        parameters (`skip`, `limit`) are ignored.
-    skip : int, default=0
-        Number of records to skip when fetching multiple models.
-    limit : int, default=100
-        Maximum number of models to return when fetching multiple models.
-
-    Returns
-    -------
-    dict or list
-        - A single model object (dict) when `model_id` is provided.
-        - A list of model objects when fetching multiple models.
+    Use this tool in two scenarios:
+    1. To find details for a specific model when you know its unique 'model_id'.
+    2. To browse or list multiple models when no specific ID is known (uses pagination).
     """
-    
     async with httpx.AsyncClient() as client:
         if model_id is not None:
             response = await client.get(f"http://localhost:8000/models/{model_id}")
