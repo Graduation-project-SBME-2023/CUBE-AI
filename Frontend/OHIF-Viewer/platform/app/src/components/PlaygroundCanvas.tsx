@@ -333,9 +333,14 @@ export default function AgentWorkflowCanvas() {
   }  , []);
 
   const handleServerMessage = (msg) => {
-    if (msg.type === 'plan') {
+    if (msg.type === 'node') {
         updateNodeData(msg.nodeId, msg.payload);
     }
+
+    if (msg.type === 'plan') {
+        updatePlan(msg.payload);
+    }
+
   };
 
   const deleteNode = useCallback((id) => {
