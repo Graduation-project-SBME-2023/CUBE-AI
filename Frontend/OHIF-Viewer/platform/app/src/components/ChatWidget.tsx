@@ -30,10 +30,11 @@ const CustomChatWidget: React.FC = () => {
   const activeSession = sessions.find((s) => s.chat_id === activeSessionId) || null;
 
   useEffect(() => {
-  activeSessionIdRef.current = activeSessionId;
+    activeSessionIdRef.current = activeSessionId;
     }  , [activeSessionId]);
-  const messagesWithSummary = activeSession
-    ? activeSession.summary
+
+
+  const messagesWithSummary = activeSession ? activeSession.summary
       ? [
           { id: "summary", role: "assistant", text: activeSession.summary, ts: 0 },
           ...activeSession.messages,
@@ -170,33 +171,34 @@ const CustomChatWidget: React.FC = () => {
   };
 
   const sendMessage = async (text: string) => {
-  if (!text.trim()) return;
-  if (!activeSessionId) await createNewSession();
-  const sessionId = activeSessionId ?? sessions[0]?.chat_id;
-  if (!sessionId) return;
+    if (!text.trim()) return;
+    if (!activeSessionId) await createNewSession();
+    const sessionId = activeSessionId ?? sessions[0]?.chat_id;
+    if (!sessionId) return;
 
-  const userMsg: Message = { id: makeId("u"), role: "user", text, ts: Date.now() };
-
+    const userMsg: Message = { id: makeId("u"), role: "user", text, ts: Date.now() };
+    console.log("Sending message to session", sessionId);
+    console.log(userMsg);
   // Add to local state
-  setSessions((prev) =>
-    prev.map((s) =>
-      s.chat_id === sessionId ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() } : s
-    )
-  );
+    setSessions((prev) =>
+      prev.map((s) =>
+        s.chat_id === sessionId ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() } : s
+      )
+    );
 
   // Save to backend
-  await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "user", text }),
-  });
+    await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "user", text }),
+    });
 
-  // Send via WebSocket
-  websocketService.sendMessage({ type: "user", payload: text });
+    // Send via WebSocket
+    websocketService.sendMessage({ type: "user", payload: text });
 
-  setInput("");
-  setIsTyping(true);
-  };
+    setInput("");
+    setIsTyping(true);
+    };
 
   const openSession = async (chat_id: number) => {
     setActiveSessionId(chat_id);
@@ -215,7 +217,7 @@ const CustomChatWidget: React.FC = () => {
   const sortedSessions = [...sessions].sort((a, b) => (b.last_activity || 0) - (a.last_activity || 0));
 useEffect(() => {
   // 1. Connect once on mount
-  websocketService.connect();
+  // websocketService.connect();
 
   // 2. Handle incoming WebSocket messages
   const handleWS = async (data: any) => {

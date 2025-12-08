@@ -4,7 +4,7 @@ class WebSocketService {
   constructor() {
     this.socket = null;
     this.listeners = new Set();
-    this.url = "ws://localhost:8150/ws"; // <-- update to your backend WS URL
+    this.url = "ws://localhost:8150/ws"; 
     this.reconnectInterval = 2000; // 2 seconds
   }
 
