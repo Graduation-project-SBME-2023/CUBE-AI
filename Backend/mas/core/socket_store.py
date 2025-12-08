@@ -31,19 +31,13 @@ class ConnectionManager:
 
     async def push_to_queue(self, raw_text: str):
         """
-        Called by the FastAPI route listener when React sends a message.
-        We parse it and put it in the queue for the Planner to pick up.
+        Called by the FastAPI route listener when client sends a message.
+        We put it in the queue for the Planner to pick up.
         """
         try:
-            # Try to parse JSON, or just use raw text if not JSON
-            try:
-                data = json.loads(raw_text)
-                # If your frontend sends { "text": "..." }, extract it
-                payload = data.get("text") or data.get("payload") or raw_text
-            except json.JSONDecodeError:
-                payload = raw_text
-
-            await self.message_queue.put(payload)
+            # Use raw text as-is (frontend sends plain text or JSON)
+            await self.message_queue.put(raw_text)
+            logger.info(f"Message queued: {raw_text[:100]}")
         except Exception as e:
             logger.error(f"Error processing incoming message: {e}")
 
