@@ -21,6 +21,7 @@ interface AgentNodeData {
   logs: any[];
   isExpanded?: boolean;
   mode?: 'planning' | 'executing' | 'results';
+  matched_module?: string;
   onDelete?: (id: string) => void;
   onEdit?: (id: string) => void;
   onToggleExpand?: (id: string) => void;
@@ -380,13 +381,71 @@ export default function AgentWorkflowCanvas() {
   };
 
   const updatePlan = (planPayload: any) => {
-    // Update entire plan from backend
+    // Transform backend plan structure to frontend nodes/edges
+    // Backend structure: { hypothesis_id, study_goal, steps: [{name, description, matched_module, status}], state }
+    
+    if (planPayload.steps) {
+      // Create nodes from steps
+      const newNodes: FlowNode[] = [];
+      
+      // Add start node
+      newNodes.push({
+        id: 'start',
+        type: 'start',
+        position: { x: 50, y: 50 },
+        data: {
+          title: 'Start',
+          description: planPayload.study_goal || 'Study workflow'
+        }
+      });
+      
+      // Add step nodes
+      planPayload.steps.forEach((step: any, index: number) => {
+        const nodeId = String(index + 1);
+        newNodes.push({
+          id: nodeId,
+          type: 'agent',
+          position: { x: 50 + index * 250, y: 150 },
+          data: {
+            title: step.name || `Step ${index + 1}`,
+            description: step.description || '',
+            status: step.status || 'pending',
+            logs: [],
+            isExpanded: false,
+            matched_module: step.matched_module
+          } as AgentNodeData
+        });
+      });
+      
+      setNodes(newNodes);
+      
+      // Create edges connecting nodes sequentially
+      const newEdges: FlowEdge[] = [];
+      for (let i = 0; i < newNodes.length - 1; i++) {
+        const fromId = newNodes[i].id;
+        const toId = newNodes[i + 1].id;
+        newEdges.push({
+          id: `e${fromId}-${toId}`,
+          source: fromId,
+          target: toId,
+          type: 'default'
+        });
+      }
+      
+      setEdges(newEdges);
+    }
+    
+    // Update nodes if provided directly
     if (planPayload.nodes) {
       setNodes(planPayload.nodes as FlowNode[]);
     }
+    
+    // Update edges if provided directly
     if (planPayload.edges) {
       setEdges(planPayload.edges as FlowEdge[]);
     }
+    
+    // Update mode if provided
     if (planPayload.mode) {
       setMode(planPayload.mode);
     }
