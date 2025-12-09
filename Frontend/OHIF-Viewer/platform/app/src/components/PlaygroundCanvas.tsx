@@ -4,42 +4,84 @@ import {
   X, Trash2, MousePointer2, Wifi, WifiOff, Edit3, 
   ChevronDown, ChevronUp, FileText, Settings 
 } from 'lucide-react';
-import websocketService from '../utils/WebsocketService';
 
 // ==========================================
-// TYPE DEFINITIONS
+// 0. WEBSOCKET SERVICE (Inlined)
 // ==========================================
-interface StartNodeData {
-  title: string;
-  description: string;
+class WebSocketService {
+  constructor() {
+    this.socket = null;
+    this.listeners = new Set();
+    this.statusListeners = new Set(); // Added to track UI connection state
+    this.url = "ws://localhost:8150/ws"; 
+    this.reconnectInterval = 2000; // 2 seconds
+  }
+
+  // Connect to WebSocket
+  connect() {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) return;
+
+    this.socket = new WebSocket(this.url);
+
+    this.socket.onopen = () => {
+      console.log("[WS] Connected");
+      this.notifyStatus(true);
+    };
+
+    this.socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        this.listeners.forEach((cb) => cb(data));
+      } catch (err) {
+        console.error("[WS] Failed to parse message", err);
+      }
+    };
+
+    this.socket.onclose = () => {
+      console.log("[WS] Disconnected, retrying in 2s...");
+      this.notifyStatus(false);
+      setTimeout(() => this.connect(), this.reconnectInterval);
+    };
+
+    this.socket.onerror = (err) => {
+      console.error("[WS] Error:", err);
+      this.notifyStatus(false);
+      this.socket.close();
+    };
+  }
+
+  // Send message to backend
+  sendMessage(msg) {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify(msg));
+    } else {
+      console.warn("[WS] Socket not open, message not sent:", msg);
+    }
+  }
+
+  // Subscribe to messages
+  subscribe(callback) {
+    this.listeners.add(callback);
+    return () => this.listeners.delete(callback);
+  }
+
+  // (New) Subscribe to connection status for UI
+  onStatusChange(callback) {
+    this.statusListeners.add(callback);
+    return () => this.statusListeners.delete(callback);
+  }
+
+  notifyStatus(isConnected) {
+    this.statusListeners.forEach(cb => cb(isConnected));
+  }
+
+  isConnected() {
+      return this.socket?.readyState === WebSocket.OPEN;
+  }
 }
 
-interface AgentNodeData {
-  title: string;
-  description: string;
-  status: string;
-  logs: any[];
-  isExpanded?: boolean;
-  mode?: 'planning' | 'executing' | 'results';
-  matched_module?: string;
-  onDelete?: (id: string) => void;
-  onEdit?: (id: string) => void;
-  onToggleExpand?: (id: string) => void;
-}
-
-interface FlowNode {
-  id: string;
-  type: string;
-  position: { x: number; y: number };
-  data: StartNodeData | AgentNodeData;
-}
-
-interface FlowEdge {
-  id: string;
-  source: string;
-  target: string;
-  type: string;
-}
+// Export a singleton instance
+const websocketService = new WebSocketService();
 
 // ==========================================
 // 1. MINI-FLOW ENGINE (OHIF Theme)
@@ -86,18 +128,17 @@ const MiniFlow = ({ nodes, edges, onNodesChange, nodeTypes, edgeTypes, children,
   return (
     <div 
       ref={containerRef}
-      // OHIF Theme: Main background is deep black/navy (#000000 or #090c29)
       className={`w-full h-full bg-[#000000] relative overflow-hidden select-none ${readOnly ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'}`}
       onMouseDown={handleCanvasMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
-      {/* Background Grid - Adjusted for dark mode visibility */}
+      {/* Background Grid */}
       <div 
         className="absolute inset-0 pointer-events-none opacity-25"
         style={{
-          backgroundImage: 'radial-gradient(#44626f 1px, transparent 1px)', // Blue-ish grey dots
+          backgroundImage: 'radial-gradient(#44626f 1px, transparent 1px)',
           backgroundSize: `${20 * scale}px ${20 * scale}px`,
           backgroundPosition: `${offset.x}px ${offset.y}px`
         }}
@@ -174,7 +215,6 @@ const CustomEdge = ({ sourceX, sourceY, targetX, targetY, data }) => {
   const cX = (sourceX + targetX) / 2;
   const path = `M${sourceX},${sourceY} C${cX},${sourceY} ${cX},${targetY} ${targetX},${targetY}`;
 
-  // OHIF: Edges are subtle slate/blue, active ones are bright cyan
   return (
     <g>
       <path d={path} stroke="#1f2d40" strokeWidth="4" fill="none" />
@@ -194,38 +234,33 @@ const CustomEdge = ({ sourceX, sourceY, targetX, targetY, data }) => {
   );
 };
 
-const StartNode = memo(({ data }: { data: StartNodeData }) => {
+const StartNode = memo(({ data }) => {
   return (
-    // OHIF: Dark panel background with light border
     <div className="px-4 py-2 shadow-md rounded-full bg-[#151a1f] border border-[#3c5d80] min-w-[100px] text-center">
       <div className="font-bold text-[#91b9cd] select-none uppercase tracking-wider text-xs">{data.title}</div>
     </div>
   );
 });
 
-const AgentNode = memo(({ data, id }: { data: AgentNodeData; id: string }) => {
+const AgentNode = memo(({ data, id }) => {
   const { title, description, status = 'pending', logs = [], isExpanded, onDelete, onEdit, onToggleExpand } = data;
   const [isHovered, setIsHovered] = useState(false);
 
-  // --- OHIF Style Logic ---
-  // Default: Dark background (#151a1f), Border (#3c5d80), Text White
   let borderColor = 'border-[#3c5d80]';
   let bgColor = 'bg-[#151a1f]';
   let textColor = 'text-white';
   let Icon = Circle;
-  let iconColor = 'text-[#566a84]'; // Muted blue-grey
+  let iconColor = 'text-[#566a84]'; 
   let shadow = 'shadow-none';
 
   if (status === 'active') {
-    // OHIF Active: Cyan (#5acce6)
     borderColor = 'border-[#5acce6]';
-    bgColor = 'bg-[#090c29]'; // Slightly darker for active
+    bgColor = 'bg-[#090c29]'; 
     textColor = 'text-[#5acce6]';
     Icon = Activity;
     iconColor = 'text-[#5acce6]';
     shadow = 'shadow-[0_0_15px_rgba(90,204,230,0.3)]';
   } else if (status === 'completed') {
-    // OHIF Success: Green (#6fe5b8)
     borderColor = 'border-[#6fe5b8]';
     bgColor = 'bg-[#151a1f]';
     textColor = 'text-[#6fe5b8]';
@@ -256,7 +291,6 @@ const AgentNode = memo(({ data, id }: { data: AgentNodeData; id: string }) => {
       onMouseLeave={() => setIsHovered(false)}
       onClick={handleNodeClick}
     >
-      {/* Node Body */}
       <div className={`
           relative flex flex-col justify-center min-w-[200px] rounded border 
           transition-all duration-300 overflow-hidden
@@ -265,13 +299,11 @@ const AgentNode = memo(({ data, id }: { data: AgentNodeData; id: string }) => {
         `}
       >
         <div className="h-[50px] flex items-center justify-between px-3">
-          {/* Status Icon & Title */}
           <div className="flex items-center gap-3">
             <Icon className={`${iconColor} ${status === 'active' ? 'animate-spin' : ''}`} size={16} />
             <span className={`font-medium text-sm ${textColor} select-none`}>{title}</span>
           </div>
 
-          {/* Planning Mode Controls */}
           {data.mode === 'planning' && (
             <div className={`flex gap-1 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
               <button onClick={handleEditClick} className="p-1 hover:bg-[#000] rounded text-[#91b9cd]"><Edit3 size={14}/></button>
@@ -279,7 +311,6 @@ const AgentNode = memo(({ data, id }: { data: AgentNodeData; id: string }) => {
             </div>
           )}
 
-          {/* Executing Mode Expand Indicator */}
           {data.mode !== 'planning' && (status === 'active' || status === 'completed') && (
             <div className="text-[#566a84]">
                {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
@@ -287,7 +318,6 @@ const AgentNode = memo(({ data, id }: { data: AgentNodeData; id: string }) => {
           )}
         </div>
 
-        {/* EXPANDED LOGS VIEW (Inside Node) */}
         {isExpanded && data.mode !== 'planning' && (
           <div className="border-t border-[#3c5d80] bg-[#000000] p-3 text-xs font-mono space-y-1 animate-in slide-in-from-top-2 duration-200">
             <div className="flex items-center gap-2 text-[#91b9cd] mb-2 uppercase tracking-wider font-bold text-[10px]">
@@ -304,14 +334,12 @@ const AgentNode = memo(({ data, id }: { data: AgentNodeData; id: string }) => {
         )}
       </div>
 
-      {/* Description Tooltip (OHIF Style) */}
       {isHovered && description && (
         <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-48 bg-[#090c29] border border-[#3c5d80] text-[#dadada] text-xs p-2 rounded shadow-xl pointer-events-none z-50 animate-in fade-in zoom-in-95">
           {description}
         </div>
       )}
 
-      {/* Connection Handles (Visual Only) */}
       <div className="absolute left-0 top-[25px] -translate-y-1/2 -translate-x-1/2 w-2 h-2 bg-[#566a84] rounded-full border border-black" />
       <div className="absolute right-0 top-[25px] -translate-y-1/2 translate-x-1/2 w-2 h-2 bg-[#566a84] rounded-full border border-black" />
     </div>
@@ -349,11 +377,10 @@ const MOCK_DATA_STEPS = {
 };
 
 export default function AgentWorkflowCanvas() {
-  const [mode, setMode] = useState<'planning' | 'executing' | 'results'>('planning'); 
-  const [nodes, setNodes] = useState<FlowNode[]>(initialNodesData);
-  const [edges, setEdges] = useState<FlowEdge[]>(initialEdgesData);
+  const [mode, setMode] = useState('planning'); 
+  const [nodes, setNodes] = useState(initialNodesData);
+  const [edges, setEdges] = useState(initialEdgesData);
   const [isPaused, setIsPaused] = useState(false);
-  const [socket, setSocket] = useState(null);
   const [isConnected, setIsConnected] = useState(false);
   
   const isPausedRef = useRef(isPaused);
@@ -362,33 +389,60 @@ export default function AgentWorkflowCanvas() {
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
 
+  // --- Initialize WebSocket & Subscriptions ---
   useEffect(() => {
-  websocketService.connect()
-  }  , []);
+    // 1. Connect
+    websocketService.connect();
 
-  const handleServerMessage = (msg: any) => {
-    if (msg.type === 'node') {
-        updateNodeData(msg.nodeId, msg.payload);
-    }
+    // 2. Message Handler
+    const handleWSMessage = (data) => {
+        const { type, payload } = data;
+        
+        console.log("[Canvas] Received:", data);
 
-    if (msg.type === 'plan') {
-        updatePlan(msg.payload);
-    }
-  };
+        if (type === 'msg') return;
 
-  const updateNodeData = (id: string, patch: any) => {
+        // Route messages
+        if (type === 'node' || type === 'NODE_UPDATE') {
+            const targetId = data.nodeId || data.id || payload?.nodeId;
+            updateNodeData(targetId, payload || data.data);
+        }
+
+        if (type === 'plan' || type === 'PLAN_UPDATE') {
+            updatePlan(payload || data.data || data);
+        }
+    };
+
+    // 3. Status Handler
+    const handleStatusChange = (status) => {
+        setIsConnected(status);
+    };
+
+    const unsubscribeMsg = websocketService.subscribe(handleWSMessage);
+    const unsubscribeStatus = websocketService.onStatusChange(handleStatusChange);
+
+    return () => {
+        unsubscribeMsg();
+        unsubscribeStatus();
+    };
+  }, []);
+
+  const updateNodeData = (id, patch) => {
     setNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, ...patch } } : n));
   };
 
-  const updatePlan = (planPayload: any) => {
-    // Transform backend plan structure to frontend nodes/edges
-    // Backend structure: { hypothesis_id, study_goal, steps: [{name, description, matched_module, status}], state }
-    
+  const updatePlan = (planPayload) => {
+    // 1. Direct Nodes Array
+    if (planPayload.nodes) {
+        setNodes(planPayload.nodes);
+        if (planPayload.edges) setEdges(planPayload.edges);
+        if (planPayload.mode) setMode(planPayload.mode);
+        return;
+    }
+
+    // 2. Transform Steps -> Nodes
     if (planPayload.steps) {
-      // Create nodes from steps
-      const newNodes: FlowNode[] = [];
-      
-      // Add start node
+      const newNodes = [];
       newNodes.push({
         id: 'start',
         type: 'start',
@@ -399,8 +453,7 @@ export default function AgentWorkflowCanvas() {
         }
       });
       
-      // Add step nodes
-      planPayload.steps.forEach((step: any, index: number) => {
+      planPayload.steps.forEach((step, index) => {
         const nodeId = String(index + 1);
         newNodes.push({
           id: nodeId,
@@ -413,14 +466,13 @@ export default function AgentWorkflowCanvas() {
             logs: [],
             isExpanded: false,
             matched_module: step.matched_module
-          } as AgentNodeData
+          }
         });
       });
       
       setNodes(newNodes);
-      
-      // Create edges connecting nodes sequentially
-      const newEdges: FlowEdge[] = [];
+
+      const newEdges = [];
       for (let i = 0; i < newNodes.length - 1; i++) {
         const fromId = newNodes[i].id;
         const toId = newNodes[i + 1].id;
@@ -428,58 +480,26 @@ export default function AgentWorkflowCanvas() {
           id: `e${fromId}-${toId}`,
           source: fromId,
           target: toId,
-          type: 'default'
+          type: 'custom'
         });
       }
-      
       setEdges(newEdges);
-    }
-    
-    // Update nodes if provided directly
-    if (planPayload.nodes) {
-      setNodes(planPayload.nodes as FlowNode[]);
-    }
-    
-    // Update edges if provided directly
-    if (planPayload.edges) {
-      setEdges(planPayload.edges as FlowEdge[]);
-    }
-    
-    // Update mode if provided
-    if (planPayload.mode) {
-      setMode(planPayload.mode);
     }
   };
 
-  // Send entire plan to backend
   const sendPlanToBackend = useCallback((nodesData, edgesData) => {
-    if (!isConnected || !socket) return;
+    if (!websocketService.isConnected()) return;
     
     const planPayload = {
       type: 'PLAN_UPDATE',
-      nodes: nodesData.map(n => ({
-        id: n.id,
-        type: n.type,
-        position: n.position,
-        data: {
-          title: n.data.title,
-          description: n.data.description,
-          status: n.data.status,
-          logs: n.data.logs
-        }
-      })),
-      edges: edgesData.map(e => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-        type: e.type
-      })),
+      nodes: nodesData,
+      edges: edgesData,
       mode: mode,
       timestamp: new Date().toISOString()
     };
     
-    socket.send(JSON.stringify(planPayload));
-  }, [isConnected, socket, mode]);
+    websocketService.sendMessage(planPayload);
+  }, [mode]);
 
   const deleteNode = useCallback((id) => {
     const updatedNodes = nodes.filter(n => n.id !== id);
@@ -500,16 +520,15 @@ export default function AgentWorkflowCanvas() {
     }
   }, [nodes, edges, sendPlanToBackend]);
 
-  const toggleExpand = useCallback((id: string) => {
+  const toggleExpand = useCallback((id) => {
     const updatedNodes = nodes.map(n => {
       if (n.id === id && n.type === 'agent') {
-        return { ...n, data: { ...(n.data as AgentNodeData), isExpanded: !(n.data as AgentNodeData).isExpanded } };
+        return { ...n, data: { ...n.data, isExpanded: !n.data.isExpanded } };
       }
       return n;
     });
     setNodes(updatedNodes);
-    sendPlanToBackend(updatedNodes, edges);
-  }, [nodes, edges, sendPlanToBackend]);
+  }, [nodes]);
 
   const nodesWithHandlers = useMemo(() => nodes.map(n => ({
     ...n,
@@ -522,9 +541,8 @@ export default function AgentWorkflowCanvas() {
     }
   })), [nodes, mode, deleteNode, editNode, toggleExpand]);
 
-  const animateEdgesFrom = (sourceId: string, active: boolean) => {
-    // Edge animation can be implemented via CSS classes or state if needed
-    // For now, edges are animated via status updates on nodes
+  const animateEdgesFrom = (sourceId, active) => {
+    setEdges(prev => prev.map(e => e.source === sourceId ? { ...e, data: { ...e.data, animated: active } } : e));
   };
 
   const startExecution = async () => {
@@ -537,20 +555,21 @@ export default function AgentWorkflowCanvas() {
     })));
     setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
 
-    if (isConnected && socket) {
-        socket.send(JSON.stringify({ type: 'START_WORKFLOW' }));
+    if (websocketService.isConnected()) {
+        websocketService.sendMessage({ type: 'START_WORKFLOW' });
         return; 
     }
 
+    // Mock Execution Fallback
     const executionIds = ['2', '3', '4', '5']; 
     const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
     for (const nodeId of executionIds) {
-        if (modeRef.current !== 'executing') return;
+        if (modeRef.current === 'planning') return;
 
         while (isPausedRef.current) {
             await wait(100);
-            if (modeRef.current !== 'executing') return;
+            if (modeRef.current === 'planning') return;
         }
 
         updateNodeData(nodeId, { status: 'active', isExpanded: true }); 
@@ -560,9 +579,8 @@ export default function AgentWorkflowCanvas() {
             while (isPausedRef.current) await wait(100);
             await wait(800);
             setNodes(prev => prev.map(n => {
-                if (n.id === nodeId && n.type === 'agent') {
-                    const agentData = n.data as AgentNodeData;
-                    return { ...n, data: { ...agentData, logs: [...(agentData.logs || []), log] } };
+                if (n.id === nodeId) {
+                    return { ...n, data: { ...n.data, logs: [...(n.data.logs || []), log] } };
                 }
                 return n;
             }));
@@ -581,17 +599,17 @@ export default function AgentWorkflowCanvas() {
     setIsPaused(false);
     setNodes(initialNodesData);
     setEdges(initialEdgesData);
-    // Sync reset with backend
-    sendPlanToBackend(initialNodesData, initialEdgesData);
+    if(websocketService.isConnected()) {
+        websocketService.sendMessage({ type: 'RESET_WORKFLOW' });
+    }
   };
 
   return (
     <div className="w-full h-screen font-sans flex flex-col bg-[#000000] text-white">
-      {/* --- HEADER / CONTROL BAR (OHIF Style) --- */}
+      {/* --- HEADER --- */}
       <div className="h-12 bg-[#151a1f] border-b border-[#000000] flex items-center justify-between px-4 z-10">
         <div className="flex items-center gap-4">
             <h1 className="font-bold text-[#91b9cd] text-sm tracking-wide">WORKFLOW ENGINE</h1>
-            
             <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border
                 ${mode === 'planning' ? 'bg-[#1f2d40] text-[#91b9cd] border-[#3c5d80]' : 
                   mode === 'executing' ? 'bg-[#003f5c] text-[#5acce6] border-[#005f7d]' : 
@@ -602,46 +620,25 @@ export default function AgentWorkflowCanvas() {
 
         <div className="flex items-center gap-3">
              {mode === 'planning' && (
-                 <button
-                    onClick={startExecution}
-                    className="flex items-center gap-2 px-4 py-1.5 bg-[#348cfd] hover:bg-[#599fff] text-white text-xs rounded font-medium transition-colors"
-                 >
+                 <button onClick={startExecution} className="flex items-center gap-2 px-4 py-1.5 bg-[#348cfd] hover:bg-[#599fff] text-white text-xs rounded font-medium transition-colors">
                     <Play size={14} fill="currentColor"/> Execute
                  </button>
              )}
-
              {mode === 'executing' && (
                  <>
-                    <button
-                        onClick={() => setIsPaused(!isPaused)}
-                        className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors border ${
-                            isPaused 
-                            ? 'bg-[#3b2d1c] border-[#705228] text-[#f8ce46]' 
-                            : 'bg-[#151a1f] border-[#3c5d80] text-[#91b9cd] hover:border-[#91b9cd]'
-                        }`}
-                    >
-                        {isPaused ? <Play size={14} /> : <Pause size={14} />}
-                        {isPaused ? 'Resume' : 'Pause'}
+                    <button onClick={() => setIsPaused(!isPaused)} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors border ${isPaused ? 'bg-[#3b2d1c] border-[#705228] text-[#f8ce46]' : 'bg-[#151a1f] border-[#3c5d80] text-[#91b9cd] hover:border-[#91b9cd]'}`}>
+                        {isPaused ? <Play size={14} /> : <Pause size={14} />} {isPaused ? 'Resume' : 'Pause'}
                     </button>
-                    
-                    <button
-                        onClick={resetWorkflow}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-[#151a1f] hover:bg-[#2c1a1f] text-[#91b9cd] hover:text-[#ff6b6b] border border-[#3c5d80] rounded text-xs transition-colors"
-                    >
+                    <button onClick={resetWorkflow} className="flex items-center gap-2 px-3 py-1.5 bg-[#151a1f] hover:bg-[#2c1a1f] text-[#91b9cd] hover:text-[#ff6b6b] border border-[#3c5d80] rounded text-xs transition-colors">
                         <RotateCcw size={14} /> Stop
                     </button>
                  </>
              )}
-
              {mode === 'results' && (
-                 <button
-                    onClick={resetWorkflow}
-                    className="flex items-center gap-2 px-4 py-1.5 bg-[#6fe5b8] hover:bg-[#91eac8] text-black text-xs rounded font-medium transition-colors"
-                 >
+                 <button onClick={resetWorkflow} className="flex items-center gap-2 px-4 py-1.5 bg-[#6fe5b8] hover:bg-[#91eac8] text-black text-xs rounded font-medium transition-colors">
                     <RotateCcw size={14} /> Reset
                  </button>
              )}
-
              <div className="h-4 w-px bg-[#3c5d80] mx-2"></div>
              <div className="flex items-center gap-1 text-[10px] text-[#566a84] font-medium uppercase" title={isConnected ? "WebSocket Connected" : "Using Mock Data"}>
                  {isConnected ? <Wifi size={12} className="text-[#6fe5b8]" /> : <WifiOff size={12} />}
@@ -660,36 +657,25 @@ export default function AgentWorkflowCanvas() {
             edgeTypes={edgeTypes}
             readOnly={mode !== 'planning'}
         >
-            {/* Context Legend (OHIF Style) */}
             <div className="absolute bottom-6 left-6 pointer-events-none">
                  <div className="bg-[#151a1f]/90 backdrop-blur p-3 rounded border border-[#3c5d80] text-[10px] space-y-2">
                     <div className="font-bold text-[#91b9cd] uppercase mb-1">
                         {mode === 'planning' ? 'Planning Tools' : 'Monitor Status'}
                     </div>
-                    
                     {mode === 'planning' ? (
                         <>
-                            <div className="flex items-center gap-2 text-[#dadada]">
-                                <MousePointer2 size={10} /> Drag nodes
-                            </div>
-                            <div className="flex items-center gap-2 text-[#dadada]">
-                                <Edit3 size={10} /> Edit / Delete
-                            </div>
+                            <div className="flex items-center gap-2 text-[#dadada]"><MousePointer2 size={10} /> Drag nodes</div>
+                            <div className="flex items-center gap-2 text-[#dadada]"><Edit3 size={10} /> Edit / Delete</div>
                         </>
                     ) : (
                         <>
-                             <div className="flex items-center gap-2 text-[#dadada]">
-                                <Activity size={10} className="text-[#5acce6]" /> Active
-                            </div>
-                             <div className="flex items-center gap-2 text-[#dadada]">
-                                <CheckCircle2 size={10} className="text-[#6fe5b8]" /> Complete
-                            </div>
+                             <div className="flex items-center gap-2 text-[#dadada]"><Activity size={10} className="text-[#5acce6]" /> Active</div>
+                             <div className="flex items-center gap-2 text-[#dadada]"><CheckCircle2 size={10} className="text-[#6fe5b8]" /> Complete</div>
                         </>
                     )}
                  </div>
             </div>
             
-            {/* Results Overlay (OHIF Style) */}
             {mode === 'results' && (
                 <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px] z-50 flex items-center justify-center animate-in fade-in duration-500">
                     <div className="bg-[#151a1f] p-8 rounded border border-[#3c5d80] max-w-md text-center space-y-4 shadow-2xl">
@@ -697,19 +683,11 @@ export default function AgentWorkflowCanvas() {
                             <CheckCircle2 size={24} className="text-[#6fe5b8]" />
                         </div>
                         <h2 className="text-xl font-bold text-white">Workflow Complete</h2>
-                        <p className="text-[#91b9cd] text-sm">
-                            DICOM transfer verified. SR Object #1.2.840... committed successfully.
-                        </p>
-                        <button 
-                            onClick={resetWorkflow}
-                            className="w-full py-2 bg-[#348cfd] text-white text-sm rounded hover:bg-[#599fff] transition-colors font-medium"
-                        >
-                            Return to Worklist
-                        </button>
+                        <p className="text-[#91b9cd] text-sm">DICOM transfer verified. SR Object committed successfully.</p>
+                        <button onClick={resetWorkflow} className="w-full py-2 bg-[#348cfd] text-white text-sm rounded hover:bg-[#599fff] transition-colors font-medium">Return to Worklist</button>
                     </div>
                 </div>
             )}
-
         </MiniFlow>
       </div>
     </div>
