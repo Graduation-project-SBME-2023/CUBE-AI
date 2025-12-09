@@ -4,84 +4,10 @@ import {
   X, Trash2, MousePointer2, Wifi, WifiOff, Edit3, 
   ChevronDown, ChevronUp, FileText, Settings 
 } from 'lucide-react';
+import websocketService from '../utils/WebsocketService';
 
-// ==========================================
-// 0. WEBSOCKET SERVICE (Inlined)
-// ==========================================
-class WebSocketService {
-  constructor() {
-    this.socket = null;
-    this.listeners = new Set();
-    this.statusListeners = new Set(); // Added to track UI connection state
-    this.url = "ws://localhost:8150/ws"; 
-    this.reconnectInterval = 2000; // 2 seconds
-  }
-
-  // Connect to WebSocket
-  connect() {
-    if (this.socket && this.socket.readyState === WebSocket.OPEN) return;
-
-    this.socket = new WebSocket(this.url);
-
-    this.socket.onopen = () => {
-      console.log("[WS] Connected");
-      this.notifyStatus(true);
-    };
-
-    this.socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        this.listeners.forEach((cb) => cb(data));
-      } catch (err) {
-        console.error("[WS] Failed to parse message", err);
-      }
-    };
-
-    this.socket.onclose = () => {
-      console.log("[WS] Disconnected, retrying in 2s...");
-      this.notifyStatus(false);
-      setTimeout(() => this.connect(), this.reconnectInterval);
-    };
-
-    this.socket.onerror = (err) => {
-      console.error("[WS] Error:", err);
-      this.notifyStatus(false);
-      this.socket.close();
-    };
-  }
-
-  // Send message to backend
-  sendMessage(msg) {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify(msg));
-    } else {
-      console.warn("[WS] Socket not open, message not sent:", msg);
-    }
-  }
-
-  // Subscribe to messages
-  subscribe(callback) {
-    this.listeners.add(callback);
-    return () => this.listeners.delete(callback);
-  }
-
-  // (New) Subscribe to connection status for UI
-  onStatusChange(callback) {
-    this.statusListeners.add(callback);
-    return () => this.statusListeners.delete(callback);
-  }
-
-  notifyStatus(isConnected) {
-    this.statusListeners.forEach(cb => cb(isConnected));
-  }
-
-  isConnected() {
-      return this.socket?.readyState === WebSocket.OPEN;
-  }
-}
-
-// Export a singleton instance
-const websocketService = new WebSocketService();
+import CustomEdge from '../components/CustomEdge';
+// import { StartNode } from '../components/customNodes';
 
 // ==========================================
 // 1. MINI-FLOW ENGINE (OHIF Theme)
@@ -206,38 +132,68 @@ const MiniFlow = ({ nodes, edges, onNodesChange, nodeTypes, edgeTypes, children,
   );
 };
 
-// ==========================================
-// 2. COMPONENTS (OHIF Styled)
-// ==========================================
+// // ==========================================
+// // 2. COMPONENTS (OHIF Styled)
+// // ==========================================
 
-const CustomEdge = ({ sourceX, sourceY, targetX, targetY, data }) => {
-  const isAnimated = data?.animated;
-  const cX = (sourceX + targetX) / 2;
-  const path = `M${sourceX},${sourceY} C${cX},${sourceY} ${cX},${targetY} ${targetX},${targetY}`;
+// const CustomEdge = ({ sourceX, sourceY, targetX, targetY, data } ) => {
+  
+//   const isAnimated = data?.animated;
+//   const cX = (sourceX + targetX) / 2;
+//   const cY = (sourceY + targetY) / 2;
+//   const offset = 30;
+//   const startX = sourceX + offset;
+//   const endX = targetX + offset;
+//   const startY = sourceY;
+//   const endY = targetY;
 
+
+//   console.log("Rendering edge:", { startX, startY, targetX, targetY, isAnimated }); 
+//   const path = `M${startX},${startY} C${cX},${sourceY} ${cX},${targetY} ${endX},${endY}`;
+
+//   return (
+//     <g>
+//       <path d={path} stroke="#1f2d40" strokeWidth="4" fill="none" />
+//       <path 
+//         d={path} 
+//         stroke={isAnimated ? '#5acce6' : '#566a84'} 
+//         strokeWidth="2" 
+//         fill="none"
+//         strokeDasharray={isAnimated ? "5,5" : "none"}
+//         className={isAnimated ? "animate-flow" : ""}
+//       />
+//       <style>{`
+//         .animate-flow { animation: dash 1s linear infinite; }
+//         @keyframes dash { to { stroke-dashoffset: -10; } }
+//       `}</style>
+//     </g>
+//   );
+// };
+
+
+ const StartNode = memo(({ data, nodeWidth = 100, nodeHeight = 50 }) => {
   return (
-    <g>
-      <path d={path} stroke="#1f2d40" strokeWidth="4" fill="none" />
-      <path 
-        d={path} 
-        stroke={isAnimated ? '#5acce6' : '#566a84'} 
-        strokeWidth="2" 
-        fill="none"
-        strokeDasharray={isAnimated ? "5,5" : "none"}
-        className={isAnimated ? "animate-flow" : ""}
-      />
-      <style>{`
-        .animate-flow { animation: dash 1s linear infinite; }
-        @keyframes dash { to { stroke-dashoffset: -10; } }
-      `}</style>
-    </g>
-  );
-};
-
-const StartNode = memo(({ data }) => {
-  return (
-    <div className="px-4 py-2 shadow-md rounded-full bg-[#151a1f] border border-[#3c5d80] min-w-[100px] text-center">
-      <div className="font-bold text-[#91b9cd] select-none uppercase tracking-wider text-xs">{data.title}</div>
+    <div
+      style={{
+        width: nodeWidth,
+        height: nodeHeight,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: nodeHeight / 2,
+        background: '#151a1f',
+        border: '2px solid #3c5d80',
+        color: '#91b9cd',
+        fontWeight: 'bold',
+        fontSize: 12,
+        textTransform: 'uppercase',
+        padding: '0 10px',
+        boxSizing: 'border-box',
+        textAlign: 'center',
+        userSelect: 'none',
+      }}
+    >
+      {data.title || 'Start'}
     </div>
   );
 });
@@ -418,12 +374,12 @@ export default function AgentWorkflowCanvas() {
         setIsConnected(status);
     };
 
-    const unsubscribeMsg = websocketService.subscribe(handleWSMessage);
-    const unsubscribeStatus = websocketService.onStatusChange(handleStatusChange);
+    const unsubscribe = websocketService.subscribe(handleWSMessage);
+    // const unsubscribeStatus = websocketService.onStatusChange(handleStatusChange);
 
     return () => {
-        unsubscribeMsg();
-        unsubscribeStatus();
+        unsubscribe();
+        // unsubscribeStatus();
     };
   }, []);
 
@@ -440,7 +396,6 @@ export default function AgentWorkflowCanvas() {
         return;
     }
 
-    // 2. Transform Steps -> Nodes
     if (planPayload.steps) {
       const newNodes = [];
       newNodes.push({
@@ -455,21 +410,35 @@ export default function AgentWorkflowCanvas() {
       
       planPayload.steps.forEach((step, index) => {
         const nodeId = String(index + 1);
+
+        const baseX = 50;
+        const spacingX = 100;
+
+        const baseY = 180;
+        const offsetY = 40; // small up/down
+
+        // Even index = up, Odd index = down
+        const y = baseY + (index % 2 === 0 ? -offsetY : offsetY);
+
         newNodes.push({
           id: nodeId,
-          type: 'agent',
-          position: { x: 50 + index * 250, y: 150 },
+          type: "agent",
+          position: {
+            x: baseX + index * spacingX,
+            y
+          },
           data: {
             title: step.name || `Step ${index + 1}`,
-            description: step.description || '',
-            status: step.status || 'pending',
+            description: step.description || "",
+            status: step.status || "pending",
             logs: [],
             isExpanded: false,
             matched_module: step.matched_module
           }
         });
       });
-      
+
+            
       setNodes(newNodes);
 
       const newEdges = [];
@@ -488,7 +457,6 @@ export default function AgentWorkflowCanvas() {
   };
 
   const sendPlanToBackend = useCallback((nodesData, edgesData) => {
-    if (!websocketService.isConnected()) return;
     
     const planPayload = {
       type: 'PLAN_UPDATE',
