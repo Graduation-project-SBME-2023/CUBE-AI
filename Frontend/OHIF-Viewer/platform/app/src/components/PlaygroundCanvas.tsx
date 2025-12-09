@@ -1,13 +1,75 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react';
 import { 
   Play, Pause, RotateCcw, Activity, CheckCircle2, Circle, 
-  X, Trash2, MousePointer2, Wifi, WifiOff, Edit3, 
+  Trash2, MousePointer2, Wifi, WifiOff, Edit3, 
   ChevronDown, ChevronUp, FileText, Settings 
 } from 'lucide-react';
 import websocketService from '../utils/WebsocketService';
-
 import CustomEdge from '../components/CustomEdge';
-// import { StartNode } from '../components/customNodes';
+import { transformPlanToFlow } from '../utils/PlanTransformationUtils';
+
+// ==========================================
+// TYPES
+// ==========================================
+
+interface StartNodeData {
+  title: string;
+  description: string;
+}
+
+interface AgentNodeData {
+  title: string;
+  description: string;
+  status: string;
+  logs: string[];
+  isExpanded: boolean;
+  matched_module?: string;
+  mode?: string;
+  onDelete?: (id: string) => void;
+  onEdit?: (id: string) => void;
+  onToggleExpand?: (id: string) => void;
+}
+
+interface FlowNode {
+  id: string;
+  type: 'start' | 'agent';
+  position: { x: number; y: number };
+  data: StartNodeData | AgentNodeData;
+}
+
+interface FlowEdge {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+}
+
+interface PlanData {
+  hypothesis_id?: string;
+  study_goal?: string;
+  steps: Array<{
+    name: string;
+    description: string;
+    status?: string;
+    matched_module?: string;
+  }>;
+}
+
+interface StartNodeProps {
+  data: StartNodeData;
+  nodeWidth?: number;
+  nodeHeight?: number;
+}
+
+interface AgentNodeProps {
+  data: AgentNodeData;
+  id: string;
+}
+
+// ==========================================
+// UTILITY FUNCTIONS
+// ==========================================
+// Note: transformPlanToFlow is imported from PlanTransformationUtils
 
 // ==========================================
 // 1. MINI-FLOW ENGINE (OHIF Theme)
@@ -136,42 +198,10 @@ const MiniFlow = ({ nodes, edges, onNodesChange, nodeTypes, edgeTypes, children,
 // // 2. COMPONENTS (OHIF Styled)
 // // ==========================================
 
-// const CustomEdge = ({ sourceX, sourceY, targetX, targetY, data } ) => {
-  
-//   const isAnimated = data?.animated;
-//   const cX = (sourceX + targetX) / 2;
-//   const cY = (sourceY + targetY) / 2;
-//   const offset = 30;
-//   const startX = sourceX + offset;
-//   const endX = targetX + offset;
-//   const startY = sourceY;
-//   const endY = targetY;
 
 
-//   console.log("Rendering edge:", { startX, startY, targetX, targetY, isAnimated }); 
-//   const path = `M${startX},${startY} C${cX},${sourceY} ${cX},${targetY} ${endX},${endY}`;
-
-//   return (
-//     <g>
-//       <path d={path} stroke="#1f2d40" strokeWidth="4" fill="none" />
-//       <path 
-//         d={path} 
-//         stroke={isAnimated ? '#5acce6' : '#566a84'} 
-//         strokeWidth="2" 
-//         fill="none"
-//         strokeDasharray={isAnimated ? "5,5" : "none"}
-//         className={isAnimated ? "animate-flow" : ""}
-//       />
-//       <style>{`
-//         .animate-flow { animation: dash 1s linear infinite; }
-//         @keyframes dash { to { stroke-dashoffset: -10; } }
-//       `}</style>
-//     </g>
-//   );
-// };
-
-
- const StartNode = memo(({ data, nodeWidth = 100, nodeHeight = 50 }) => {
+ const StartNode = memo((props: StartNodeProps) => {
+  const { data, nodeWidth = 100, nodeHeight = 50 } = props;
   return (
     <div
       style={{
@@ -198,7 +228,8 @@ const MiniFlow = ({ nodes, edges, onNodesChange, nodeTypes, edgeTypes, children,
   );
 });
 
-const AgentNode = memo(({ data, id }) => {
+const AgentNode = memo((props: AgentNodeProps) => {
+  const { data, id } = props;
   const { title, description, status = 'pending', logs = [], isExpanded, onDelete, onEdit, onToggleExpand } = data;
   const [isHovered, setIsHovered] = useState(false);
 
@@ -482,7 +513,7 @@ export default function AgentWorkflowCanvas() {
     if (!node) return;
     const newDesc = window.prompt("Edit Step Description:", node.data.description);
     if (newDesc !== null) {
-        const updatedNodes = nodes.map(n => n.id === id ? { ...n, data: { ...n.data, description: newDesc } } : n);
+        const updatedNodes = nodes.map(n => n.id === id ? { ...n, data: { ...n.data, description: newDesc } } : n) as any;
         setNodes(updatedNodes);
         sendPlanToBackend(updatedNodes, edges);
     }
@@ -491,10 +522,10 @@ export default function AgentWorkflowCanvas() {
   const toggleExpand = useCallback((id) => {
     const updatedNodes = nodes.map(n => {
       if (n.id === id && n.type === 'agent') {
-        return { ...n, data: { ...n.data, isExpanded: !n.data.isExpanded } };
+        return { ...n, data: { ...n.data, isExpanded: !(n.data as any).isExpanded } };
       }
       return n;
-    });
+    }) as any;
     setNodes(updatedNodes);
   }, [nodes]);
 
@@ -509,8 +540,8 @@ export default function AgentWorkflowCanvas() {
     }
   })), [nodes, mode, deleteNode, editNode, toggleExpand]);
 
-  const animateEdgesFrom = (sourceId, active) => {
-    setEdges(prev => prev.map(e => e.source === sourceId ? { ...e, data: { ...e.data, animated: active } } : e));
+  const animateEdgesFrom = (sourceId: string, active: boolean) => {
+    setEdges(prev => prev.map(e => e.source === sourceId ? { ...e, data: { ...(e as any).data, animated: active } } as any : e));
   };
 
   const startExecution = async () => {
@@ -548,10 +579,10 @@ export default function AgentWorkflowCanvas() {
             await wait(800);
             setNodes(prev => prev.map(n => {
                 if (n.id === nodeId) {
-                    return { ...n, data: { ...n.data, logs: [...(n.data.logs || []), log] } };
+                    return { ...n, data: { ...n.data, logs: [...((n.data as any).logs || []), log] } };
                 }
                 return n;
-            }));
+            }) as any);
         }
 
         updateNodeData(nodeId, { status: 'completed', isExpanded: false });

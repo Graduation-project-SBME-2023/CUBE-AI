@@ -47,6 +47,11 @@ class WebSocketService {
     }
   }
 
+  // Check if connected
+  isConnected() {
+    return this.socket && this.socket.readyState === WebSocket.OPEN;
+  }
+
   // Subscribe to messages
   subscribe(callback) {
     this.listeners.add(callback);

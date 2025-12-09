@@ -1,219 +1,49 @@
-import React, { useEffect, useState, useCallback} from "react";
+import React from "react";
 import PlaygroundCanvas from "../../components/PlaygroundCanvas";
-import { MarkerType } from "@xyflow/react";
 import websocketService from "../../utils/WebsocketService";
 
-// mock for testing
-const mockResponse = {
-  steps: [
-    { id: "s1", name: "Population query", description: "Collect raw data from multiple sources including surveys and APIs." },
-    { id: "s2", name: "imaging protocols", description: "Remove duplicates and handle missing values." },
-    { id: "s3", name: "segmentation ", description: "Train ML models to predict outcomes based on clean data." },
-    { id: "s4", name: "Radiomics Feature", description: "Evaluate model accuracy and performance." },
-    { id: "s5", name: "modelling", description: "Train ML models to predict outcomes based on clean data."},
-    { id: "s6", name: "Validation", description: "Evaluate model accuracy and performance."}
-
-  ],
-};
-
-// from json to nodes & edges
-const buildGraph = (data, handleDeleteNode, editMode) => {
-  if (!data?.steps || data.steps.length === 0) return { nodes: [], edges: [] };
-
-  const startNode = {
-    id: "start",
-    type: "start",
-    position: { x: -100, y: 100 },
-    data: { label: "Start" },
-  };
-
-  const stepNodes = data.steps.map((step, index) => ({
-    id: step.id,
-    position: { x: index * 220, y: 100 },
-    type: "agent",
-    data: {
-      name: step.name,
-      description: step.description,
-      onDelete: handleDeleteNode, 
-      editable: editMode,  
-    },
-  }));
-
-  const stepEdges = data.steps.slice(0, -1).map((step, index) => ({
-    id: `${step.id}-${data.steps[index + 1].id}`,
-    source: step.id,
-    target: data.steps[index + 1].id,
-    type: "custom",
-    markerEnd: { type: MarkerType.ArrowClosed },
-  }));
-
-  const startEdge = {
-    id: `start-${data.steps[0].id}`,
-    source: "start",
-    target: data.steps[0].id,
-    type: "custom",
-    markerEnd: { type: MarkerType.ArrowClosed },
-  };
-
-  return { nodes: [startNode, ...stepNodes], edges: [startEdge, ...stepEdges] };
-};
+/**
+ * AgentsPlayground Component (Refactored)
+ * 
+ * CONSOLIDATION SUMMARY:
+ * This component has been significantly refactored to eliminate code duplication with PlaygroundCanvas.
+ * 
+ * CHANGES:
+ * --------
+ * 1. Removed duplicate buildGraph() function
+ *    - Moved to PlanTransformationUtils.ts as transformPlanToFlow()
+ *    - Extracted transformPlanToFlowLegacy() variant for legacy compatibility
+ * 
+ * 2. Removed duplicate state management
+ *    - Nodes, edges, and plan state now managed exclusively in PlaygroundCanvas
+ *    - Reduces prop drilling and state synchronization complexity
+ * 
+ * 3. Removed duplicate WebSocket subscription
+ *    - WebSocket now subscribed/managed only in PlaygroundCanvas
+ * 
+ * 4. Removed duplicate edit/delete/approve logic
+ *    - All workflow controls now in PlaygroundCanvas
+ * 
+ * 5. Enhanced WebsocketService
+ *    - Added isConnected() method (was missing)
+ *    - Used by PlaygroundCanvas to determine execution mode
+ * 
+ * RESULT:
+ * -------
+ * AgentsPlayground is now a minimal wrapper that initializes WebSocket and renders PlaygroundCanvas.
+ * All plan management logic consolidated into a single component for easier maintenance.
+ */
 
 function AgentsPlayground() {
-  const [nodes, setNodes] = useState([]);
-  const [edges, setEdges] = useState([]);
-  const [originalData, setOriginalData] = useState(null);
-  const [editMode, setEditMode] = useState(false);
-  const [loading, setLoading] = useState(true);
-
-// Initial load of plan
-useEffect(() => {
-  const fetchPlan = async () => {
-    setLoading(true);
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      const response = mockResponse; // replace with backend fetch if needed
-      setOriginalData(response);
-    } catch (err) {
-      console.error("Error fetching plan:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  fetchPlan();
-}, []);
-
-// Delete node handler
-const handleDeleteNode = useCallback((nodeId) => {
-  setOriginalData((prevData) => {
-    if (!prevData) return prevData;
-
-    const updatedSteps = prevData.steps.filter((step) => step.id !== nodeId);
-    return { steps: updatedSteps };
-  });
-}, []);
-
-// Rebuild graph whenever originalData changes
-useEffect(() => {
-  if (originalData) {
-    const { nodes: newNodes, edges: newEdges } = buildGraph(
-      originalData,
-      handleDeleteNode,
-      editMode
-    );
-    setNodes(newNodes);
-    setEdges(newEdges);
-  }
-}, [originalData, editMode, handleDeleteNode]);
-
-// WebSocket subscription for plan updates
-useEffect(() => {
-  websocketService.connect();
-
-  const unsubscribe = websocketService.subscribe((msg) => {
-    if (msg.type === "plan") {
-      console.log("Received plan update:", msg.payload);
-
-      setOriginalData(msg.payload);
-    }
-
-    if (msg.type === "final") {
-      console.log("Planner finished:", msg.payload);
-    }
-  });
-
-  return () => unsubscribe();
-}, []);
-
-  const handleCancelEdit = () => {
-    if (originalData) {
-      const { nodes, edges } = buildGraph(originalData, handleDeleteNode, false);
-      setNodes(nodes);
-      setEdges(edges);
-    }
-    setEditMode(false);
-  };
-  const handleToggleEdit = () => {
-    setEditMode(true);
-    if (originalData) {
-      // Call buildGraph outside setState for cleaner execution
-      const { nodes, edges } = buildGraph(originalData, handleDeleteNode, true);
-      setNodes(nodes);
-      setEdges(edges);
-    }
-  };
-
-
-  // Approved (send to backend → get updated plan) , i think if approved the planner should start working
-  const handleApprove = async () => {
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      
-      // Use the current originalData (which already reflects deletions)
-      // Rebuild graph with editMode = false to remove X buttons
-      const { nodes: newNodes, edges: newEdges } = buildGraph(
-        originalData,
-        handleDeleteNode,
-        false  // This removes the X buttons
-      );
-      
-      setNodes(newNodes);
-      setEdges(newEdges);
-      setEditMode(false);
-      
-      console.log("Plan approved!");
-    } catch (err) {
-      console.error(err);
-      alert("Failed to approve plan");
-    }
-  };
-
-
-  if (loading) return <div className="p-10 text-lg">⏳ Loading plan...</div>;
+  // Initialize WebSocket connection on mount
+  React.useEffect(() => {
+    websocketService.connect();
+  }, []);
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
-      {/* control Buttons <TODO: need better css and alignment in the page> */}
-      <div
-        style={{
-          position: "absolute",
-          top: 20,
-          left: 20,
-          zIndex: 10,
-          display: "flex",
-          gap: "10px",
-        }}
-      >
-        {!editMode ? (
-          <button
-            onClick={handleToggleEdit}
-            className="bg-yellow-500 text-white px-3 py-2 rounded-xl hover:bg-yellow-600"
-          >
-             Edit Plan
-          </button>
-        ) : (
-          <button
-            onClick={handleCancelEdit}
-            className="bg-gray-500 text-white px-3 py-2 rounded-xl hover:bg-gray-600"
-          >
-            Cancel Edit
-          </button>
-        )}
-        <button
-          onClick={handleApprove}
-          className="bg-green-600 text-white px-3 py-2 rounded-xl hover:bg-green-700"
-        >
-          Approve Plan
-        </button>
-      </div>
-      <PlaygroundCanvas
-        initialEdges={edges}
-        initialNodes={nodes}
-        onNodesChange={setNodes}
-        onEdgesChange={setEdges}
-        editMode={editMode} 
-        onDelete={handleDeleteNode}
-      />
+      {/* PlaygroundCanvas handles all plan visualization, editing, and execution */}
+      <PlaygroundCanvas />
     </div>
   );
 }
