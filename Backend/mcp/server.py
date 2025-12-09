@@ -19,6 +19,9 @@ from tools.database.segmentations.get_segmentation import get_segmentation, get_
 from tools.database.segmentations.search_segmentation import search_segmentation
 from tools.database.segmentations.segmentations_status import get_segmentation_stats
 from tools.save_population import save_final_output
+from tools.latex.get_final_report import get_final_report
+from tools.latex.latex_to_pdf import latex_to_pdf
+
 
 
 # from tools.database.models.get_models import get_models

@@ -6,5 +6,5 @@ POPULATION_PLANNER_AGENT_DESCRIPTION = """
         """
         
 REPORTER_AGENT_DESCRIPTION = """
-specialized AI that takes the final research findings 
+specialized AI that takes the final research findings, transformers it to latex and render it to pdf
 """
