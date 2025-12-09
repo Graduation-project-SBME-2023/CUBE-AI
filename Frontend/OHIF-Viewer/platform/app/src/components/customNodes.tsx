@@ -1,27 +1,53 @@
 import React, { useState } from "react";
 import { X } from "lucide-react";
 
-export function StartNode({ data, isConnectable }) {
-    return (
-        <div
-            style={{
-                background: '#4CAF50',
-                color: 'white',
-                padding: 10,
-                borderRadius: '50%',
-                width: 60,
-                height: 60,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 'bold',
-                cursor: "default",
-            }}
-        >
-            {data.label || 'Start'}
-        </div>
-    )
-}
+
+import { Handle, Position } from "@xyflow/react";
+
+// export function StartNode({ data, isConnectable }) {
+//   return (
+//     <div
+//       style={{
+//         background: "#151a1f",
+//         color: "#91b9cd",
+//         padding: 10,
+//         borderRadius: "999px",
+//         width: 110,
+//         height: 40,
+//         border: "2px solid #3c5d80",
+//         display: "flex",
+//         alignItems: "center",
+//         justifyContent: "center",
+//         fontWeight: "bold",
+//         fontSize: "11px",
+//         textTransform: "uppercase",
+//         letterSpacing: "1px",
+//         cursor: "default",
+//         position: "relative",
+//       }}
+//     >
+//       {data.title || "Start"}
+
+//       {/* Output handle on the right */}
+//       <Handle
+//         type="source"
+//         position={Position.Right}
+//         id="start-output"
+//         isConnectable={isConnectable}
+//         style={{
+//           width: 8,
+//           height: 8,
+//           background: "#566a84",
+//           border: "2px solid black",
+//           borderRadius: "50%",
+//           right: -6,
+//           top: "50%",
+//           transform: "translateY(-50%)",
+//         }}
+//       />
+//     </div>
+//   );
+// }
 
 export function AgentNode({ data, isConnectable, id }) {
   const { name, description, editable, onDelete, onEdit, status = 'pending', logs = [], isExpanded = false } = data;
@@ -221,3 +247,5 @@ export function AgentNode({ data, isConnectable, id }) {
     </div>
   );
 }
+
+

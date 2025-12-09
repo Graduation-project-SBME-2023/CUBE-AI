@@ -1,81 +1,49 @@
+// CustomEdge.jsx
 import React from "react";
-import {
-  getBezierPath,
-  useStore,
-  BaseEdge,
-  MarkerType,  
-  type EdgeProps,
-  type ReactFlowState,
-} from "@xyflow/react";
 
-export type GetSpecialPathParams = {
-  sourceX: number;
-  sourceY: number;
-  targetX: number;
-  targetY: number;
+const CustomEdge = ({ sourceX, sourceY, targetX, targetY, data }) => {
+  const isAnimated = data?.animated;
+
+  // Offset curve slightly so wires don't overlap nodes
+  const offset = 30;
+  const startX = sourceX + offset;
+  const endX = targetX + offset;
+  const startY = sourceY;
+  const endY = targetY;
+
+  // Mid control points for smooth curved path
+  const cX = (sourceX + targetX) / 2;
+
+  const path = `M${startX},${startY} 
+                C${cX},${sourceY} 
+                 ${cX},${targetY} 
+                 ${endX},${endY}`;
+
+  return (
+    <g>
+      {/* Background thick line */}
+      <path d={path} stroke="#1f2d40" strokeWidth="4" fill="none" />
+
+      {/* Foreground animated or static line */}
+      <path
+        d={path}
+        stroke={isAnimated ? "#5acce6" : "#566a84"}
+        strokeWidth="2"
+        fill="none"
+        strokeDasharray={isAnimated ? "5,5" : "none"}
+        className={isAnimated ? "animate-flow" : ""}
+      />
+
+      <style>{`
+        .animate-flow {
+          animation: dash 1s linear infinite;
+        }
+        @keyframes dash {
+          to { stroke-dashoffset: -10; }
+        }
+      `}</style>
+    </g>
+  );
 };
 
-export const getSpecialPath = (
-  { sourceX, sourceY, targetX, targetY }: GetSpecialPathParams,
-  offset: number
-) => {
-  const centerX = (sourceX + targetX) / 2;
-  const centerY = (sourceY + targetY) / 2;
-  return `M ${sourceX} ${sourceY} Q ${centerX} ${
-    centerY + offset
-  } ${targetX} ${targetY}`;
-};
-
-/**
- * CustomEdge component - Not used in canvas-based rendering
- * Kept for backward compatibility
- */
-export default function CustomEdge({
-  source,
-  target,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  sourcePosition,
-  targetPosition,
-  markerEnd,
-}: EdgeProps) {
-  const isBiDirectionEdge = useStore((s: ReactFlowState) => {
-    const edgeExists = s.edges.some(
-      (e) =>
-        (e.source === target && e.target === source) ||
-        (e.target === source && e.source === target)
-    );
-
-    return edgeExists;
-  });
-
-  const edgePathParams = {
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
-  };
-
-  let path = '';
-
-  if (isBiDirectionEdge) {
-    path = `M ${sourceX} ${sourceY} Q ${(sourceX + targetX) / 2} ${
-      (sourceY + targetY) / 2 + (sourceX < targetX ? 25 : -25)
-    } ${targetX} ${targetY}`;
-  } else {
-    [path] = getBezierPath(edgePathParams);
-  }
-
-  const arrowMarker = markerEnd || {
-    type: MarkerType.ArrowClosed,
-    color: '#333',
-    width: 150,
-    height: 150,
-  };
-
-  return <BaseEdge path={path} markerEnd={arrowMarker} />;
-}
+export default CustomEdge;
