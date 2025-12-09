@@ -1,13 +1,13 @@
 {
   "hypothesis": {
-    "id": "9e583157-cf68-435d-9f58-4b6017cdc416",
-    "title": "Voice analysis for mental health assessment",
-    "population": "Adults (\u226518\u202fyears) with or without mental health conditions",
-    "intervention": "Acoustic feature extraction and machine\u2011learning analysis of speech recordings",
-    "outcome": "Accurate detection or quantification of mental health status (e.g., depression, anxiety) compared with standard clinical assessments",
-    "clinical_context": "Screening and monitoring of mental health in primary care or tele\u2011health settings",
-    "relationship_type": "Predictive association (voice features predict mental health status)",
-    "state": "confirmed"
+    "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+    "title": "Voice-based assessment of mental health status",
+    "population": "Adults (aged 18\u201365) undergoing evaluation for mental health conditions",
+    "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+    "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+    "clinical_context": "Remote or telehealth mental\u2011health screening",
+    "relationship_type": "diagnostic",
+    "state": "not_confirmed"
   },
   "plan": {
     "hypothesis_id": "9e583157-cf68-435d-9f58-4b6017cdc416",

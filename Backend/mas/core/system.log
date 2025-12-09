@@ -24631,3 +24631,205 @@ outcome
 2025-12-08 01:29:15,312 - planner - INFO - Saved plan and hypothesis to state file
 2025-12-08 01:29:15,312 - planner - INFO - Saved plan and hypothesis to state file
 2025-12-08 01:29:15,312 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:27:52,952 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:27:52,952 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:27:52,952 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:27:52,952 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:27:52,952 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:27:52,952 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:27:52,952 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:27:52,952 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:28:02,994 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:28:02,994 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:28:02,994 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:28:02,994 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:28:02,994 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:28:02,994 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:28:02,994 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:28:02,994 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:28:02,994 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201165) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:28:02,994 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201165) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:28:02,994 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201165) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:28:02,994 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201165) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:28:02,994 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201165) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:28:02,994 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201165) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:28:02,994 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201165) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:28:02,994 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201165) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:31:11,909 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-08 02:31:11,909 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-08 02:31:11,909 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-08 02:31:11,909 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-08 02:31:11,909 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-08 02:31:11,909 - planner - INFO - Loaded plan and hypothesis from state file
+2025-12-08 02:31:11,910 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:31:11,910 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:31:11,910 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:31:11,910 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:31:11,910 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:31:11,910 - planner - INFO - Processing clinical hypothesis feedback...
+2025-12-08 02:31:14,241 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:31:14,241 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:31:14,241 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:31:14,241 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:31:14,241 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:31:14,241 - planner - INFO - Saved plan and hypothesis to state file
+2025-12-08 02:31:14,241 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201365) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:31:14,241 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201365) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:31:14,241 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201365) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:31:14,241 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201365) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:31:14,241 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201365) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
+2025-12-08 02:31:14,241 - planner - INFO - Hypothesis updated:
+{
+  "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
+  "title": "Voice-based assessment of mental health status",
+  "population": "Adults (aged 18\u201365) undergoing evaluation for mental health conditions",
+  "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
+  "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
+  "clinical_context": "Remote or telehealth mental\u2011health screening",
+  "relationship_type": "diagnostic",
+  "state": "not_confirmed"
+}
+
