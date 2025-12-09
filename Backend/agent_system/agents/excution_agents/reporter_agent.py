@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import os
 
@@ -11,24 +12,63 @@ from clients.ollamaClient import OllamaClient
 from autogen_core.models import SystemMessage
 from autogen_agentchat.ui import Console
 from autogen_core import CancellationToken
-from descriptions.models_descriptions import POPULATION_PLANNER_AGENT_DESCRIPTION
+from descriptions.models_descriptions import REPORTER_AGENT_DESCRIPTION
 from system_prompts.system_messages import REPORTER_AGENT_SYSTEM_MESSAGE
-import requests
-import json 
-import asyncio
+from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
 
 
 class ReporterAgent(AssistantAgent):
-    def __init__(self, model_client = None):
-        name = "reporter_agent"
+    def __init__(self, name, model_client, tools, description, system_message, max_tool_iterations):
+        super().__init__(name=name,
+                        model_client=model_client, 
+                        tools=tools, 
+                        description=description, 
+                        system_message=system_message,
+                        max_tool_iterations=max_tool_iterations)
+    
+    @classmethod
+    async def create(cls, model_client = None):
         model_client = OllamaClient() if not model_client else model_client
-        tools = []
-        description = POPULATION_PLANNER_AGENT_DESCRIPTION
+        mcp_server = StdioServerParams(
+            command="python", args=["Backend/mcp/server.py"]
+            )
+        mcp_tools = await mcp_server_tools(mcp_server)
+        desired_tools = ['get_final_report', 'latex_to_pdf']
+        final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
+        # final_tools = mcp_tools
+        name = "latex_reporter_agent"
+        description = REPORTER_AGENT_DESCRIPTION
         system_message = REPORTER_AGENT_SYSTEM_MESSAGE
-        super().__init__(name=name, model_client=model_client, tools=tools, description=description, system_message=system_message )
-        current_dir = Path(__file__).resolve().parent
-        self.config_path = current_dir.parent / "memory" / "workspace" / "state.json"
+        return cls(
+            name = name,
+            model_client = model_client,
+            tools = final_tools,
+            description = description,
+            system_message = system_message,
+            max_tool_iterations = 20
+        )
+        
+    @staticmethod
+    def get_desired_tools(mcp_tools, desired_tools):
+        return [tool for tool in mcp_tools if tool.name in desired_tools]
+
+
+
+
+
+
+async def main():
+    # Initialize the agent using the factory method
+    agent = await ReporterAgent.create()
     
-    
-    
-# TODO: remove the tools and use the mcp server
+    # Now you can use the agent normally
+    print(f"Agent initialized with {agent._tools} tools.")
+    print(agent._max_tool_iterations)
+    for tool in agent._tools:
+        print(tool.name)
+    await Console(
+        agent.run_stream(task="make me a pdf for the final report, use the tool provided called latex_to_pdf, you must use it ",
+                         cancellation_token=CancellationToken())
+        )
+if __name__ == "__main__":
+    asyncio.run(main())
