@@ -85,20 +85,21 @@ class SegmentationModule:
         self.PlannerAgent = AssistantAgent(
             name="PlannerAgent",
             system_message="""
-            You are PlannerAgent, orchestrating segmentation:
-
+            You are PlannerAgent, orchestrating segmentation and provide the plan to do:
+    
             - Analyze the given hypothesis and dataset list to determine the target label(s) for segmentation.
             - Decide whether to run automatic segmentation or delegate to interactive user guidance based on:
                 * Availability of automatic models for the target label.
                 * Existence of previous segmentation masks.
+                both are come from the ExecutionAgent checks.
             - Do NOT ask the user any questions yourself.
             - Only trigger UserFallbackAgent if human input, clarification, or confirmation is required.
             - Coordinate ExecutionAgent to run automatic segmentation models when available or found any previous existant masks .
             - Summarize the overall workflow and progress without asking the user directly.
             - Make decisions adaptively based on input data, model availability, and mask existence
             """,
-            model_client=self.model_client,
-            tools=self.selected_tools
+            model_client=self.model_client
+            # tools=self.selected_tools
         )
 
         self.ExecutionAgent = AssistantAgent(
@@ -120,10 +121,10 @@ class SegmentationModule:
             system_message="""
             You are UserFallbackAgent:
             - You handle ALL human interactions.
-            - Whenever confirmation or choice is needed, end your response with <ASK_USER>.
+            - Whenever confirmation or choice is needed, you must ask the user directly.
             - Wait for user input via UserProxy before continuing.
             - Guide interactive segmentation (points, boxes, labels) and provide navigation links navigate(`http://localhost:3000/monai-label?StudyInstanceUIDs=${uid}`).
-            - Stop only when all masks are successfully created. 
+            - Stop only when all masks are successfully created, don't run interactive segmentation you just guide the user. 
             """,
             model_client=self.model_client,
             tools=self.selected_tools
@@ -159,34 +160,36 @@ class SegmentationModule:
         You are given a hypothesis: {instruction}
         You have a dataset list at {datasetlist} containing SeriesInstanceUIDs.
         Your task is to segment the target structure mentioned in the hypothesis across all volumes in the dataset list.
-        """
-        messages = []
+        # """
+        # messages = []
         logger.info("=" * 80)
         logger.info("STARTING TEAM CONVERSATION")
         logger.info("=" * 80)
+        
+        await Console(self.team.run_stream(task=task_prompt))
 
-        async for message in self.team.run_stream(task=task_prompt):
+        # async for message in self.team.run_stream(task=task_prompt):
                 
-            messages.append(message)
+        #     messages.append(message)
 
-            source = getattr(message, "source", "")
-            content = getattr(message, "content", "")
+        #     source = getattr(message, "source", "")
+        #     content = getattr(message, "content", "")
 
-            # ----------------------------------------------------------------------
-            # 1. FILTER: Only show Planner, Execution, Fallback
-            # ----------------------------------------------------------------------
-            if source in ("PlannerAgent","UserFallbackAgent"):
-                printable = content
-                if printable:
-                    logger.info(f"\n[{source}] {printable}")
+        #     # ----------------------------------------------------------------------
+        #     # 1. FILTER: Only show Planner, Execution, Fallback
+        #     # ----------------------------------------------------------------------
+        #     if source in ("PlannerAgent","UserFallbackAgent","ExecutionAgent"):
+        #         printable = content
+        #         if printable:
+        #             logger.info(f"\n[{source}] {printable}")
 
-            # ----------------------------------------------------------------------
-            # 2. UserFallbackAgent requires human input
-            # ----------------------------------------------------------------------
-            if source == "UserFallbackAgent" and content and "<ASK_USER>" in content:
-                user_reply = input("\n[User Input Required] → ")
-                await self.UserProxy.send(user_reply)  # send to team
-                continue
+        #     # ----------------------------------------------------------------------
+        #     # 2. UserFallbackAgent requires human input
+        #     # ----------------------------------------------------------------------
+        #     if source == "UserFallbackAgent" and content and "<ASK_USER>" in content:
+        #         user_reply = input("\n[User Input Required] → ")
+        #         await self.UserProxy.send(user_reply)  # send to team
+        #         continue
 
         logger.info("=" * 80)
         logger.info("CONVERSATION COMPLETE")
