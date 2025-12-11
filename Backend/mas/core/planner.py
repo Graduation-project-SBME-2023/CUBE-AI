@@ -52,8 +52,10 @@ class ClinicalHypothesis(BaseModel):
 class StudyStep(BaseModel):
     name: str
     description: str
-    matched_module: Optional[str] = None
+    module: Optional[str] = None
+    logs: Optional[List[str]] = []
     status: str = "pending"
+    
 
 class StudyPlan(BaseModel):
     hypothesis_id: str
@@ -85,7 +87,7 @@ def format_plan(plan: StudyPlan) -> Dict:
             "id": f"s{idx}",          # or str(uuid4()) if you want unique ids
             "name": step['name'],
             "description": step['description'],
-            "matched_module": step.get('matched_module', None),
+            "module": step.get('module', None),
         })
 
     return {"steps": formatted_steps}
@@ -189,7 +191,7 @@ class Planner:
             system_message=(
                 "You are a system integrator. Match each study plan step "
                 "to one of the available modules. Return JSON with the same 'steps' array, "
-                "but include a 'matched_module' key for each step."
+                "but include a 'module' key for each step."
             ),
             model_client=self.model_client,
         )
@@ -522,3 +524,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
