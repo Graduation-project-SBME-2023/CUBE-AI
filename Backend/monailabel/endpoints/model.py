@@ -5,9 +5,9 @@ from crud.model import delete_model, get_model, get_models, create_model, update
 from core.database import get_db
 from fastapi import HTTPException
 router = APIRouter(prefix="/models", tags=["models"])
-
+from uuid import UUID
 @router.get("/{model_id}", response_model=Model)
-async def read_model(model_id: int, db: Session = Depends(get_db)):
+async def read_model(model_id: UUID, db: Session = Depends(get_db)):
     db_model = await get_model(db, model_id=model_id)
     return db_model
 
@@ -24,7 +24,7 @@ async def create_model_endpoint(model: ModelCreate,
 
 @router.put("/{model_id}", response_model=Model)
 async def update_model_endpoint(
-    model_id: int,
+    model_id: UUID,
     updates: ModelUpdate,
     db: Session = Depends(get_db)
 ):
@@ -40,7 +40,7 @@ async def update_model_endpoint(
 
 
 @router.delete("/{model_id}", response_model=dict)
-async def delete_model_endpoint(model_id: int,
+async def delete_model_endpoint(model_id: UUID,
                                 db: Session = Depends(get_db)):
     db_model = await delete_model(db, model_id=model_id)
     return {"detail": f"Model {model_id} deleted successfully"}

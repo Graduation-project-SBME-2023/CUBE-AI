@@ -7,11 +7,11 @@ from models.radiomics import Radiomics
 from schemas.radiomics import RadiomicsCreate
 from sqlalchemy.exc import SQLAlchemyError
 from fastapi import HTTPException
-
+from uuid import UUID
 # ----------------------------------------------------------------------
 # Get by ID
 # ----------------------------------------------------------------------
-async def get_radiomics(db: AsyncSession, radiomics_id: int) -> Optional[Radiomics]:
+async def get_radiomics(db: AsyncSession, radiomics_id: UUID) -> Optional[Radiomics]:
     try:
         result = await db.execute(
             select(Radiomics).where(Radiomics.id == radiomics_id)
@@ -68,7 +68,7 @@ async def create_radiomics(db: AsyncSession, radiomics: RadiomicsCreate) -> Radi
 # ----------------------------------------------------------------------
 # Delete
 # ----------------------------------------------------------------------
-async def delete_radiomics(db: AsyncSession, radiomics_id: int) -> bool:
+async def delete_radiomics(db: AsyncSession, radiomics_id: UUID) -> bool:
     try:
         db_radiomics = await get_radiomics(db, radiomics_id)
         if not db_radiomics:

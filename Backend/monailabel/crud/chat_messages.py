@@ -6,12 +6,12 @@ from sqlalchemy.future import select
 from models.chat_messages import ChatMessage
 from models.chat_sessions import ChatSession
 from schemas.chat_messages import ChatMessageCreate
-
+from uuid import UUID
 
 # -------------------------
 # CREATE MESSAGE
 # -------------------------
-async def create_chat_message(db: AsyncSession, chat_id: int, message: ChatMessageCreate):
+async def create_chat_message(db: AsyncSession, chat_id: UUID, message: ChatMessageCreate):
     try:
         # Ensure chat session exists
         result = await db.execute(select(ChatSession).filter(ChatSession.chat_id == chat_id))
@@ -37,7 +37,7 @@ async def create_chat_message(db: AsyncSession, chat_id: int, message: ChatMessa
 # -------------------------
 # GET ALL MESSAGES IN SESSION
 # -------------------------
-async def get_chat_messages(db: AsyncSession, chat_id: int):
+async def get_chat_messages(db: AsyncSession, chat_id: UUID):
     try:
         # Check session exists
         result = await db.execute(select(ChatSession).filter(ChatSession.chat_id == chat_id))
@@ -59,7 +59,7 @@ async def get_chat_messages(db: AsyncSession, chat_id: int):
 # -------------------------
 # GET SINGLE MESSAGE BY ID
 # -------------------------
-async def get_chat_message(db: AsyncSession, message_id: int):
+async def get_chat_message(db: AsyncSession, message_id: UUID):
     try:
         result = await db.execute(select(ChatMessage).filter(ChatMessage.message_id == message_id))
         msg = result.scalars().first()
@@ -73,7 +73,7 @@ async def get_chat_message(db: AsyncSession, message_id: int):
 # -------------------------
 # UPDATE MESSAGE
 # -------------------------
-async def update_chat_message(db: AsyncSession, message_id: int, new_data: ChatMessageCreate):
+async def update_chat_message(db: AsyncSession, message_id: UUID, new_data: ChatMessageCreate):
     try:
         result = await db.execute(select(ChatMessage).filter(ChatMessage.message_id == message_id))
         msg = result.scalars().first()
@@ -94,7 +94,7 @@ async def update_chat_message(db: AsyncSession, message_id: int, new_data: ChatM
 # -------------------------
 # DELETE MESSAGE
 # -------------------------
-async def delete_chat_message(db: AsyncSession, message_id: int):
+async def delete_chat_message(db: AsyncSession, message_id: UUID):
     try:
         result = await db.execute(select(ChatMessage).filter(ChatMessage.message_id == message_id))
         msg = result.scalars().first()
@@ -111,7 +111,7 @@ async def delete_chat_message(db: AsyncSession, message_id: int):
 # -------------------------
 # GET MESSAGES BY ROLE
 # -------------------------
-async def get_chat_messages_by_role(db: AsyncSession, chat_id: int, role: str):
+async def get_chat_messages_by_role(db: AsyncSession, chat_id: UUID, role: str):
     try:
         result = await db.execute(
             select(ChatMessage)
