@@ -16,9 +16,9 @@ from autogen_agentchat.ui import Console
 from autogen_core import CancellationToken
 from autogen_agentchat.teams import SelectorGroupChat
 from autogen_agentchat.conditions import TextMentionTermination
+from autogen_agentchat.base import TaskResult
 import json
 import logging
-
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -27,7 +27,7 @@ class SegmentationModule:
     Implements the SEGMENTATION Team Pipeline using explicit agents and a SelectorGroupChat team.
     Handles automatic and interactive segmentation workflows.
     """
-    def __init__(self, config_path: str = "config.json", model_name: str = "qwen3-coder:480b-cloud"):
+    def __init__(self, config_path: str = "config.json", model_name: str = "gpt-oss:120b-cloud"):
         self.config_path = config_path
         self.model_name = model_name
         self.model_client = None
@@ -43,10 +43,11 @@ class SegmentationModule:
             model_info={
                 "vision": False,
                 "function_calling": True,
-                "json_output": False,
-                "structured_output": False,
+                "json_output": True,
+                "structured_output": True,
                 "family": "unknown"
-            }
+            },
+            api_key="34d55bcebb014d6fa824c84eec5d3c61.fWWHg-syyiIDt02tVPQ3b5Of"
         )
         current_file = Path(__file__).resolve()
         backend_dir = current_file.parent.parent.parent  
@@ -84,39 +85,32 @@ class SegmentationModule:
         self.PlannerAgent = AssistantAgent(
             name="PlannerAgent",
             system_message="""
-            You are PlannerAgent, the orchestrator of the segmentation workflow. 
-            Your role is to understand the system, coordinate agents, and plan intelligently. 
-
-            Capabilities you have and understand in this system:
-
-            - You can parse hypotheses and dataset lists (SeriesInstanceUIDs).  
-            - You can communicate with ExecutionAgent to check for:
-                * Available automatic segmentation models.
-                * Existing masks.
-                * Whether the target label exists for the dataset.  
-            - You can decide between two main workflow paths:
-                1. **Automatic path**: leverage available models to segment volumes automatically, consulting the user when masks exist or decisions are needed.  
-                2. **Interactive path**: delegate segmentation guidance to UserFallbackAgent to guide the human user.  
-            - You can delegate tasks to UserFallbackAgent for interactive guidance, waiting for user confirmation when needed.  
-            - You understand the difference between automatic and interactive paths and can adaptively choose which to follow based on model availability, target label existence, and user input.  
-            - You can summarize outcomes and provide a high-level overview when all datasets are processed.  
-            - You know the capabilities of:
-                * **ExecutionAgent** – check mask existence, execute segmentation, provide model info.  
-                * **UserFallbackAgent** – instruct users, guide interactive segmentation, wait for confirmation.  
-          
-            Your focus is on understanding system capabilities, reasoning about workflow choices, coordinating agents, and adapting plans dynamically without following rigid step-by-step instructions.
+            You are PlannerAgent, orchestrating segmentation and provide the plan to do:
+    
+            - Analyze the given hypothesis and dataset list to determine the target label(s) for segmentation.
+            - Decide whether to run automatic segmentation or delegate to interactive user guidance based on:
+                * Availability of automatic models for the target label.
+                * Existence of previous segmentation masks.
+                both are come from the ExecutionAgent checks.
+            - Do NOT ask the user any questions yourself.
+            - Only trigger UserFallbackAgent if human input, clarification, or confirmation is required.
+            - Coordinate ExecutionAgent to run automatic segmentation models when available or found any previous existant masks .
+            - Summarize the overall workflow and progress without asking the user directly.
+            - Make decisions adaptively based on input data, model availability, and mask existence
             """,
-            model_client=self.model_client,
-            tools=self.selected_tools
+            model_client=self.model_client
+            # tools=self.selected_tools
         )
 
         self.ExecutionAgent = AssistantAgent(
             name="ExecutionAgent",
             system_message="""
-            Executes backend operations:
-            - Finds automatic model for the label 
-            - Checks if mask exists for a SeriesInstanceUID 
-            - Runs automatic segmentation 
+            You are ExecutionAgent:
+            - Check if a segmentation mask exists for a SeriesInstanceUID.
+            - Check if an automatic model is available for the target label.
+            - If no mask exists and a model is available, run automatic segmentation.
+            - Never ask the user for confirmation.
+            - If user confirmation is required (ambiguous case), hand over the task to UserFallbackAgent and stop.
             """,
             model_client=self.model_client,
             tools=self.selected_tools
@@ -125,16 +119,12 @@ class SegmentationModule:
         self.UserFallbackAgent = AssistantAgent(
             name="UserFallbackAgent",
             system_message="""
-            Guides the user in interactive segmentation:
-            - Explains available interactive models (e.g., SAM, nnInteractive) getted from model info descripiton
-            - Instructs on using prompts (points, boxes)
-            - Guides label creation
-            - Provides navigation route link for each UID: navigate(`http://localhost:3000/monai-label?StudyInstanceUIDs=${uid}`)
-            - Reminds instructions and waits for user completion
-            - Whenever you need the human to perform something or confirm, end your response with:
-                <ASK_USER>
-                Do NOT continue until the human replies.
-            - stop when all masks are created successfully.
+            You are UserFallbackAgent:
+            - You handle ALL human interactions.
+            - Whenever confirmation or choice is needed, you must ask the user directly.
+            - Wait for user input via UserProxy before continuing.
+            - Guide interactive segmentation (points, boxes, labels) and provide navigation links navigate(`http://localhost:3000/monai-label?StudyInstanceUIDs=${uid}`).
+            - Stop only when all masks are successfully created, don't run interactive segmentation you just guide the user. 
             """,
             model_client=self.model_client,
             tools=self.selected_tools
@@ -151,7 +141,12 @@ class SegmentationModule:
             model_client=self.model_client,
             termination_condition=termination,
             # model_context=model_context,
-            description="SEGMENTATION Team Pipeline: PlannerAgent orchestrates, ExecutionAgent executes backend tasks, UserFallbackAgent guides interactive segmentation , terminate when all tasks are done and all masks have been successifully created."
+            description="""SEGMENTATION Team Pipeline: 
+        The PlannerAgent coordinates the overall segmentation workflow, breaking tasks into structured steps and determining which agent should act next. 
+        The ExecutionAgent performs backend operations, including checking whether previous segmentation masks exist or whether an automatic model is available for the target label, and then running the  automatic segmentation model(if exist) over the relevant images. 
+        The UserFallbackAgent interacts directly with the user during any part of the workflow that requires clarification, confirmation, parameter selection, or interactive segmentation guidance. 
+        Whenever user confirmation or a choice is needed, control is handed to the UserFallbackAgent, and the system waits for the user’s response before continuing. 
+        This pipeline proceeds step-by-step until all required tasks are completed and every segmentation mask has been successfully created, at which point the team terminates cleanly.."""
         )
         return True
 
@@ -165,33 +160,36 @@ class SegmentationModule:
         You are given a hypothesis: {instruction}
         You have a dataset list at {datasetlist} containing SeriesInstanceUIDs.
         Your task is to segment the target structure mentioned in the hypothesis across all volumes in the dataset list.
-        """
-        messages = []
+        # """
+        # messages = []
         logger.info("=" * 80)
         logger.info("STARTING TEAM CONVERSATION")
         logger.info("=" * 80)
+        
+        await Console(self.team.run_stream(task=task_prompt))
 
-        async for message in self.team.run_stream(task=task_prompt):
-            messages.append(message)
+        # async for message in self.team.run_stream(task=task_prompt):
+                
+        #     messages.append(message)
 
-            source = getattr(message, "source", "")
-            content = getattr(message, "content", "")
+        #     source = getattr(message, "source", "")
+        #     content = getattr(message, "content", "")
 
-            # ----------------------------------------------------------------------
-            # 1. FILTER: Only show Planner, Execution, Fallback
-            # ----------------------------------------------------------------------
-            if source in ("PlannerAgent", "ExecutionAgent", "UserFallbackAgent"):
-                printable = content
-                if printable:
-                    logger.info(f"\n[{source}] {printable}")
+        #     # ----------------------------------------------------------------------
+        #     # 1. FILTER: Only show Planner, Execution, Fallback
+        #     # ----------------------------------------------------------------------
+        #     if source in ("PlannerAgent","UserFallbackAgent","ExecutionAgent"):
+        #         printable = content
+        #         if printable:
+        #             logger.info(f"\n[{source}] {printable}")
 
-            # ----------------------------------------------------------------------
-            # 2. UserFallbackAgent requires human input
-            # ----------------------------------------------------------------------
-            if source == "UserFallbackAgent" and content and "<ASK_USER>" in content:
-                user_reply = input("\n[User Input Required] → ")
-                await self.UserProxy.send(user_reply)  # send to team
-                continue
+        #     # ----------------------------------------------------------------------
+        #     # 2. UserFallbackAgent requires human input
+        #     # ----------------------------------------------------------------------
+        #     if source == "UserFallbackAgent" and content and "<ASK_USER>" in content:
+        #         user_reply = input("\n[User Input Required] → ")
+        #         await self.UserProxy.send(user_reply)  # send to team
+        #         continue
 
         logger.info("=" * 80)
         logger.info("CONVERSATION COMPLETE")
