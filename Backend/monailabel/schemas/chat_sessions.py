@@ -3,6 +3,7 @@
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import date, datetime
+from uuid import UUID
 
         # from Backend.monailabel.models.chat_messages import ChatMessage
 from .chat_messages import ChatMessage
@@ -26,7 +27,7 @@ class ChatSessionUpdate(BaseModel):
     study_uid: Optional[List[str]] = None
 
 class ChatSession(ChatSessionBase):
-    chat_id: int
+    chat_id:UUID
     started_at: datetime = None
     last_activity: Optional[datetime] = None
     studies: List[StudyRef] = []

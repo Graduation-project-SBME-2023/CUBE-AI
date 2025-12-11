@@ -7,7 +7,7 @@ import schemas
 from typing import Optional
 from datetime import datetime, date
 from typing import Optional, Union
-
+from uuid import UUID
 from datetime import datetime
 from typing import Optional
 
@@ -37,7 +37,7 @@ def normalize_birth_date(birth_date: Optional[Union[str, date]]) -> Optional[dat
             continue
     return None  # invalid format
 
-async def get_patient(db: AsyncSession, patient_id: int):
+async def get_patient(db: AsyncSession, patient_id: UUID):
     result = await db.execute(
         select(Patient).where(Patient.patient_id == patient_id)
     )
@@ -62,7 +62,7 @@ async def create_patient(db: AsyncSession, patient: PatientCreate):
             await db.rollback()
             raise e
 
-async def update_patient(db: AsyncSession, patient_id: int, data: PatientUpdate):
+async def update_patient(db: AsyncSession, patient_id: UUID, data: PatientUpdate):
     result = await db.execute(select(Patient).where(Patient.patient_id == patient_id))
     patient = result.scalar_one_or_none()
     if not patient:
@@ -84,7 +84,7 @@ async def update_patient(db: AsyncSession, patient_id: int, data: PatientUpdate)
         raise e
     
 
-async def delete_patient(db: AsyncSession, patient_id: int):
+async def delete_patient(db: AsyncSession, patient_id: UUID):
     result = await db.execute(select(Patient).where(Patient.patient_id == patient_id))
     patient = result.scalar_one_or_none()
     if not patient:
