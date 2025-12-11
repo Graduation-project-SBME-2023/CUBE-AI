@@ -168,6 +168,7 @@
     "trim-newlines": "^5.0.0",
     "glob-parent": "^6.0.2",
     "trim": "^1.0.0",
-    "package-json": "^8.1.0"
+    "package-json": "^8.1.0",
+    "@kitware/vtk.js": "29.7.0"
   }
 }

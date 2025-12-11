@@ -20,9 +20,6 @@ from endpoints import (
     chat_sessions,
     chat_messages,
     sync,
-    
-    
-
 )
 
 monai_server_app.include_router(workflow.router)
@@ -41,6 +38,8 @@ monai_server_app.include_router(chat_sessions.router)
 monai_server_app.include_router(chat_messages.router)
 monai_server_app.include_router(sync.router)
 
+original_lifespan = monai_server_app.router.lifespan_context
+
 @asynccontextmanager
 async def lifespan(app):
     print("[INFO] 🧹 Running database seeders...")
@@ -53,8 +52,14 @@ async def lifespan(app):
         except Exception as e:
             print(f"[ERROR] Initial Orthanc sync failed: {e}")
 
-    print("[INFO] 🚀 Startup complete")
-    yield
+    if original_lifespan:
+        async with original_lifespan(app):
+            print("[INFO] 🧹 Running original lifespan tasks...")
+            yield
+    else:
+        print("[INFO] 🧹 No original lifespan tasks found, skipping...")
+        yield
+        
     print("[INFO] 👋 Shutting down")
 
 # attach lifespan to app
