@@ -19,8 +19,6 @@ from tools.database.segmentations.get_segmentation import get_segmentation, get_
 from tools.database.segmentations.search_segmentation import search_segmentation
 from tools.database.segmentations.segmentations_status import get_segmentation_stats
 from tools.save_population import save_final_output
-
-
 from tools.run_segmentation import run_segmentation
 from tools.check_having_mask import check_having_mask
 from tools.get_model_info import get_model_info
