@@ -72,10 +72,11 @@ async def websocket_endpoint(websocket: WebSocket):
     
     # 2. Start your Planner Logic (in background)
     planner = Planner()
+    asyncio.create_task(planner.run("Start"))
 
-    state_path = Path(__file__).parent.parent / "memory" / "workspace" / "state.json"
-    state =json.load(open(state_path)) if state_path.exists() else {}    
-    await manager.send_ws_message("plan", state['plan'])
+    # state_path = Path(__file__).parent.parent / "memory" / "workspace" / "state.json"
+    # state =json.load(open(state_path)) if state_path.exists() else {}    
+    # await manager.send_ws_message("plan", state['plan'])
 
     # asyncio.create_task(planner.run("Start"))
     # Orchestrator.create_task(...)

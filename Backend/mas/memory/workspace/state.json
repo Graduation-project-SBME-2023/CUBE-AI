@@ -1,79 +1,18 @@
 {
   "hypothesis": {
-    "id": "7b7635fd-9cc7-4590-a2b2-e71d28be7c6c",
-    "title": "Voice-based assessment of mental health status",
-    "population": "Adults (aged 18\u201365) undergoing evaluation for mental health conditions",
-    "intervention": "Acoustic analysis of speech recordings using machine\u2011learning algorithms",
-    "outcome": "Diagnostic accuracy (sensitivity, specificity) for detecting depression or anxiety compared with standard clinical assessments",
-    "clinical_context": "Remote or telehealth mental\u2011health screening",
-    "relationship_type": "diagnostic",
+    "id": "458c2c4a-fd96-4cbd-bcd7-a43c0d04f4dc",
+    "title": "Radiomics-derived CT imaging signature predicts high\u2011risk neuroblastoma",
+    "population": "Patients diagnosed with neuroblastoma",
+    "intervention": "Application of a radiomics\u2011derived imaging signature derived from CT scans",
+    "outcome": "Accurate prediction of high\u2011risk disease status",
+    "clinical_context": "Use of CT\u2011based radiomic analysis for risk stratification in neuroblastoma patients",
+    "relationship_type": "Predictive association",
     "state": "not_confirmed"
   },
   "plan": {
-    "hypothesis_id": "9e583157-cf68-435d-9f58-4b6017cdc416",
-    "study_goal": "Voice analysis for mental health assessment",
-    "steps": [
-      {
-        "name": "Literature Review & Feasibility Assessment",
-        "description": "Conduct a systematic review of existing voice\u2011based mental\u2011health biomarkers and evaluate technical, ethical, and logistical feasibility of implementing acoustic analysis in a primary\u2011care/tele\u2011health setting.",
-        "matched_module": "ImagingProtocolDesigner",
-        "status": "pending"
-      },
-      {
-        "name": "Study Protocol Development",
-        "description": "Draft a detailed protocol outlining objectives, inclusion/exclusion criteria (\u226518\u202fyears, with and without diagnosed depression/anxiety), sample size calculation, study design (cross\u2011sectional diagnostic accuracy), data collection procedures, and statistical analysis plan.",
-        "matched_module": "PopulationSelector",
-        "status": "pending"
-      },
-      {
-        "name": "Ethics & Regulatory Approvals",
-        "description": "Submit the protocol, informed\u2011consent forms, and data\u2011privacy safeguards to an Institutional Review Board (IRB) and, if required, to data\u2011protection authorities; obtain all necessary approvals before recruitment.",
-        "matched_module": "ValidationModule",
-        "status": "pending"
-      },
-      {
-        "name": "Participant Recruitment & Screening",
-        "description": "Recruit a representative adult cohort (e.g., 300 participants) from primary\u2011care clinics and tele\u2011health platforms. Screen for eligibility, obtain informed consent, and record demographic/clinical baseline data.",
-        "matched_module": "PopulationSelector",
-        "status": "pending"
-      },
-      {
-        "name": "Standard Clinical Assessment",
-        "description": "Administer validated mental\u2011health instruments (e.g., PHQ\u20119 for depression, GAD\u20117 for anxiety) and, when applicable, structured clinical interviews (SCID) to establish reference diagnoses.",
-        "matched_module": "SegmentationModule",
-        "status": "pending"
-      },
-      {
-        "name": "Speech Data Collection",
-        "description": "Capture high\u2011quality audio recordings in a standardized setting (e.g., 5\u2011minute read passage, spontaneous interview, and picture\u2011description tasks) using calibrated microphones or secure mobile apps.",
-        "matched_module": "ImagingProtocolDesigner",
-        "status": "pending"
-      },
-      {
-        "name": "Acoustic Feature Extraction",
-        "description": "Process recordings with open\u2011source toolkits (e.g., OpenSMILE, Praat) to extract low\u2011level descriptors (pitch, jitter, shimmer, formants, MFCCs) and higher\u2011order statistical features; store features in a secure database.",
-        "matched_module": "RadiomicsExtractor",
-        "status": "pending"
-      },
-      {
-        "name": "Machine\u2011Learning Model Development",
-        "description": "Split the dataset into training (70\u202f%) and hold\u2011out test (30\u202f%) sets. Train multiple algorithms (e.g., logistic regression, random forest, gradient boosting, deep neural nets) using cross\u2011validation, and select the best model based on AUC\u2011ROC, sensitivity, and specificity.",
-        "matched_module": "ModelingModule",
-        "status": "pending"
-      },
-      {
-        "name": "Statistical Validation & Comparative Analysis",
-        "description": "Evaluate model performance against the clinical reference standard, calculate diagnostic accuracy metrics, conduct subgroup analyses (age, gender, comorbidities), and assess calibration and decision\u2011curve analysis for clinical utility.",
-        "matched_module": "ValidationModule",
-        "status": "pending"
-      },
-      {
-        "name": "Reporting, Dissemination & Implementation Planning",
-        "description": "Prepare a manuscript following STARD\u2011AI and CONSORT\u2011AI guidelines, present findings at conferences, and develop a roadmap for integrating the validated voice\u2011based tool into primary\u2011care workflows (e.g., API for tele\u2011health platforms).",
-        "matched_module": "ModelingModule",
-        "status": "pending"
-      }
-    ],
+    "hypothesis_id": "",
+    "study_goal": "",
+    "steps": [],
     "state": "not_confirmed"
   },
   "planner_status": "idle"
