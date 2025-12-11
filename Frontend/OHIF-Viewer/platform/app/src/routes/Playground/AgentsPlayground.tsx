@@ -1,5 +1,5 @@
 import React from "react";
-import PlaygroundCanvas from "../../components/PlaygroundCanvas";
+import PlaygroundCanvas from "../../components/PlaygroundCanvas/index";
 import websocketService from "../../utils/WebsocketService";
 
 /**
