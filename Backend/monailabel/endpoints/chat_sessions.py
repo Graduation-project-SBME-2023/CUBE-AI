@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from schemas import chat_sessions as schemas
 from crud import chat_sessions as crud
 from core.database import get_db
-
+from uuid import uuid4, UUID
 router = APIRouter(prefix="/chat_sessions", tags=["Chat Sessions"])
 
 # ---------------------------------------------------------
@@ -43,7 +43,7 @@ async def get_chat_sessions(
 # GET CHAT SESSION BY ID
 # ---------------------------------------------------------
 @router.get("/{chat_id}", response_model=schemas.ChatSession)
-async def get_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
+async def get_chat_session(chat_id: UUID, db: AsyncSession = Depends(get_db)):
     """
     Retrieve a chat session by its unique chat_id.
     """
@@ -57,7 +57,7 @@ async def get_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
 # UPDATE CHAT SESSION (title, summary, etc.)
 # ---------------------------------------------------------
 @router.put("/{chat_id}", response_model=schemas.ChatSession)
-async def update_chat_session(chat_id: int, data: schemas.ChatSessionUpdate, db: AsyncSession = Depends(get_db)):
+async def update_chat_session(chat_id: UUID, data: schemas.ChatSessionUpdate, db: AsyncSession = Depends(get_db)):
     """
     Update chat session fields such as title, summary, or is_active.
     Automatically updates last_activity timestamp.
@@ -71,7 +71,7 @@ async def update_chat_session(chat_id: int, data: schemas.ChatSessionUpdate, db:
 # TOUCH CHAT SESSION (update only last_activity)
 # ---------------------------------------------------------
 @router.patch("/{chat_id}/touch", response_model=schemas.ChatSession)
-async def touch_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
+async def touch_chat_session(chat_id: UUID, db: AsyncSession = Depends(get_db)):
     """
     Update only the last_activity timestamp of a chat session.
     Typically used when the user sends or receives a message.
@@ -85,7 +85,7 @@ async def touch_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
 # DEACTIVATE CHAT SESSION
 # ---------------------------------------------------------
 @router.patch("/{chat_id}/deactivate", response_model=schemas.ChatSession)
-async def deactivate_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
+async def deactivate_chat_session(chat_id: UUID, db: AsyncSession = Depends(get_db)):
     """
     Mark a chat session as inactive (e.g., when user closes the session).
     """
@@ -98,7 +98,7 @@ async def deactivate_chat_session(chat_id: int, db: AsyncSession = Depends(get_d
 # ACTIVATE CHAT SESSION
 # ---------------------------------------------------------
 @router.patch("/{chat_id}/activate", response_model=schemas.ChatSession)
-async def activate_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
+async def activate_chat_session(chat_id: UUID, db: AsyncSession = Depends(get_db)):
     """
     Reactivate a chat session when user resumes chatting.
     """
@@ -111,7 +111,7 @@ async def activate_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)
 # DELETE CHAT SESSION
 # ---------------------------------------------------------
 @router.delete("/{chat_id}", status_code=status.HTTP_200_OK)
-async def delete_chat_session(chat_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_chat_session(chat_id: UUID, db: AsyncSession = Depends(get_db)):
     """
     Delete a chat session permanently.
     """

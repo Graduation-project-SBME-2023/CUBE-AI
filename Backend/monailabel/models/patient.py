@@ -1,10 +1,14 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, text,UUID
 from core.database import Base
 
 class Patient(Base):
     __tablename__ = 'patients'
 
-    patient_id =  Column(Integer, primary_key=True, index=True, autoincrement=True)
+    patient_id =  Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text('gen_random_uuid()')
+    )
 
     name = Column(String, nullable=False)
     birth_date = Column(DateTime, nullable=False)

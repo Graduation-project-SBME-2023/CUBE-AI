@@ -6,7 +6,7 @@ import crud, schemas
 from core.database import get_db
 from schemas.patient import PatientCreate, PatientUpdate, Patient
 from datetime import date
-
+from uuid import UUID
 
 router = APIRouter(prefix="/patients", tags=["patients"])
 
@@ -41,7 +41,7 @@ async def search_patients(name: str | None = None, gender: str | None = None, db
     return patients
 
 @router.get("/{patient_id}", response_model=schemas.Patient)
-async def read_patient(patient_id: int, db: Session = Depends(get_db)):
+async def read_patient(patient_id: UUID, db: Session = Depends(get_db)):
     p = await crud.get_patient(db, patient_id)
     if p is None:
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -51,14 +51,14 @@ async def read_patient(patient_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{patient_id}", response_model=schemas.Patient)
-async def update_patient(patient_id: int, patient: PatientUpdate, db: Session = Depends(get_db)):
+async def update_patient(patient_id: UUID, patient: PatientUpdate, db: Session = Depends(get_db)):
     updated=  await crud.update_patient(db, patient_id, patient)
     if updated is None:
         raise HTTPException(status_code=404, detail="Patient not found")
     return updated
 
 @router.delete("/{patient_id}")
-async def delete_patient(patient_id: int, db: Session = Depends(get_db)):
+async def delete_patient(patient_id: UUID, db: Session = Depends(get_db)):
     success = await crud.delete_patient(db, patient_id)
     if not success:
         raise HTTPException(status_code=404, detail="Patient not found")

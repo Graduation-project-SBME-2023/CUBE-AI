@@ -7,7 +7,7 @@ from models import chat_sessions as models
 from models.study import Study
 from schemas import chat_sessions as schemas
 from sqlalchemy.orm import selectinload
-
+from uuid import UUID 
 def ensure_last_activity(session):
     if session or session.last_activity is None:
         session.last_activity = session.started_at
@@ -43,7 +43,7 @@ async def create_chat_session(db: AsyncSession, data: schemas.ChatSessionCreate)
 # ---------------------------
 # GET CHAT SESSION BY ID
 # ---------------------------
-async def get_chat_session(db: AsyncSession, chat_id: int):
+async def get_chat_session(db: AsyncSession, chat_id: UUID):
     try:
         result = await db.execute(
             select(models.ChatSession)
@@ -87,7 +87,7 @@ async def get_chat_sessions(db: AsyncSession, study_UID: str = None, active_only
 # ---------------------------
 # UPDATE CHAT SESSION
 # ---------------------------
-async def update_chat_session(db: AsyncSession, chat_id: int, data: schemas.ChatSessionUpdate):
+async def update_chat_session(db: AsyncSession, chat_id: UUID, data: schemas.ChatSessionUpdate):
     try:
         result = await db.execute(
             select(models.ChatSession).where(models.ChatSession.chat_id == chat_id)
@@ -121,7 +121,7 @@ async def update_chat_session(db: AsyncSession, chat_id: int, data: schemas.Chat
 # ---------------------------
 # TOUCH CHAT SESSION
 # ---------------------------
-async def touch_chat_session(db: AsyncSession, chat_id: int):
+async def touch_chat_session(db: AsyncSession, chat_id: UUID):
     try:
         session = await get_chat_session(db, chat_id)
         if not session:
@@ -137,7 +137,7 @@ async def touch_chat_session(db: AsyncSession, chat_id: int):
 # ---------------------------
 # DEACTIVATE CHAT SESSION
 # ---------------------------
-async def deactivate_chat_session(db: AsyncSession, chat_id: int):
+async def deactivate_chat_session(db: AsyncSession, chat_id: UUID):
     try:
         session = await get_chat_session(db, chat_id)
         if not session:
@@ -154,7 +154,7 @@ async def deactivate_chat_session(db: AsyncSession, chat_id: int):
 # ---------------------------
 # ACTIVATE CHAT SESSION
 # ---------------------------
-async def activate_chat_session(db: AsyncSession, chat_id: int):
+async def activate_chat_session(db: AsyncSession, chat_id: UUID):
     try:
         session = await get_chat_session(db, chat_id)
         if not session:
@@ -171,7 +171,7 @@ async def activate_chat_session(db: AsyncSession, chat_id: int):
 # ---------------------------
 # DELETE CHAT SESSION
 # ---------------------------
-async def delete_chat_session(db: AsyncSession, chat_id: int):
+async def delete_chat_session(db: AsyncSession, chat_id: UUID):
     try:
         session = await get_chat_session(db, chat_id)
         if not session:
@@ -186,7 +186,7 @@ async def delete_chat_session(db: AsyncSession, chat_id: int):
 # ---------------------------
 # ADD NOTE TO SUMMARY
 # ---------------------------
-async def add_hypothesis_note(db: AsyncSession, chat_id: int, note: str):
+async def add_hypothesis_note(db: AsyncSession, chat_id: UUID, note: str):
     try:
         session = await get_chat_session(db, chat_id)
         if not session:
