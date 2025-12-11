@@ -20,6 +20,10 @@ from endpoints import (
     chat_sessions,
     chat_messages,
     sync,
+    hypothesis,
+    plan,   
+    steps,
+
     
     
 
@@ -40,6 +44,9 @@ monai_server_app.include_router(radiomics.router)
 monai_server_app.include_router(chat_sessions.router)
 monai_server_app.include_router(chat_messages.router)
 monai_server_app.include_router(sync.router)
+monai_server_app.include_router(hypothesis.router)
+monai_server_app.include_router(plan.router)
+monai_server_app.include_router(steps.router)
 
 @asynccontextmanager
 async def lifespan(app):

@@ -2,8 +2,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from models.model import Model
 from schemas.model import ModelCreate
-
-async def get_model(db: AsyncSession, model_id: int):
+from uuid import UUID
+async def get_model(db: AsyncSession, model_id: UUID):
     result = await db.execute(
         select(Model).where(Model.model_id == model_id)
     )
@@ -20,7 +20,7 @@ async def create_model(db: AsyncSession, model: ModelCreate):
     await db.refresh(db_model)
     return db_model
 
-async def update_model(db: AsyncSession, model_id: int, updates: dict):
+async def update_model(db: AsyncSession, model_id: UUID, updates: dict):
     result = await db.execute(
         select(Model).where(Model.model_id == model_id)
     )
@@ -34,7 +34,7 @@ async def update_model(db: AsyncSession, model_id: int, updates: dict):
     return db_model
 
 
-async def delete_model(db: AsyncSession, model_id: int):
+async def delete_model(db: AsyncSession, model_id: UUID):
     result = await db.execute(
         select(Model).where(Model.model_id == model_id)
     )

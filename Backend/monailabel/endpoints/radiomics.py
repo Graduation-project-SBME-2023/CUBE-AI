@@ -7,13 +7,13 @@ from crud import radiomics as crud
 from schemas.radiomics import RadiomicsCreate, Radiomics
 
 router = APIRouter(prefix="/radiomics", tags=["Radiomics"])
-
+from uuid import UUID
 
 # ----------------------------------------------------------------------
 # Get Radiomics by ID
 # ----------------------------------------------------------------------
 @router.get("/{radiomics_id}", response_model=Radiomics)
-async def read_radiomics(radiomics_id: int, db: AsyncSession = Depends(get_db)):
+async def read_radiomics(radiomics_id: UUID, db: AsyncSession = Depends(get_db)):
     db_radiomics = await crud.get_radiomics(db, radiomics_id)
     if not db_radiomics:
         raise HTTPException(status_code=404, detail="Radiomics entry not found")
@@ -52,7 +52,7 @@ async def create_radiomics_entry(radiomics: RadiomicsCreate, db: AsyncSession = 
 # Delete a Radiomics Entry
 # ----------------------------------------------------------------------
 @router.delete("/{radiomics_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_radiomics_entry(radiomics_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_radiomics_entry(radiomics_id: UUID, db: AsyncSession = Depends(get_db)):
     deleted = await crud.delete_radiomics(db, radiomics_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Radiomics entry not found")
