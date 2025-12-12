@@ -6,7 +6,7 @@ import os
 # Add 'backend/monailabel' to PYTHONPATH so 'core' can be imported
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'monailabel')))
 
-# from Backend.monailabel.core.database import Base
+from Backend.monailabel.core.database import Base
 # from Backend.monailabel.models.model import Model
 # from Backend.monailabel.models.volume import Volume
 # from Backend.monailabel.models.segmentation import Segmentation
@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..',
 # from Backend.monailabel.models.workflow_details import WorkflowDetail
 # from Backend.monailabel.models.hypothesis import Hypothesis
 # from Backend.monailabel.models.plan import Plan
-# from Backend.monailabel.models.steps import PlanStep
+from Backend.monailabel.models.steps import PlanStep
 
 
 from sqlalchemy import engine_from_config
@@ -53,8 +53,8 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-# target_metadata = Base.metadata
-target_metadata=None  # Replace with actual MetaData object
+target_metadata = Base.metadata
+# target_metadata=None  # Replace with actual MetaData object
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
