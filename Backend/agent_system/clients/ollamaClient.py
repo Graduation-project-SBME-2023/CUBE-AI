@@ -10,7 +10,8 @@ class OllamaClient(OllamaChatCompletionClient):
                 "vision": False,
                 "function_calling": True,
                 "json_output": True,
-                "structured_output": True
+                "structured_output": True,
+                "family": "unknown"
             }
         super().__init__(model=model, model_info=model_info)
         self._model = model
