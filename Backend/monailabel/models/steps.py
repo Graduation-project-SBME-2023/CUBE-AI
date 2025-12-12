@@ -1,6 +1,7 @@
 
 
 from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, text,ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from core.database import Base  
@@ -28,5 +29,6 @@ class PlanStep(Base):
 
     order = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    logs = Column(JSONB, nullable=True, server_default='[]')
 
     plan = relationship("Plan", back_populates="steps")
