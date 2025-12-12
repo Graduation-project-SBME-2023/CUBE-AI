@@ -33,7 +33,7 @@ class ReporterAgent(AssistantAgent):
             command="python", args=["Backend/mcp/server.py"]
             )
         mcp_tools = await mcp_server_tools(mcp_server)
-        desired_tools = ['get_final_report', 'latex_to_pdf']
+        desired_tools = ['latex_to_pdf']
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         # final_tools = mcp_tools
         name = "latex_reporter_agent"

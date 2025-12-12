@@ -9,7 +9,7 @@ from typing import Annotated
 async def latex_to_pdf(
     latex_text: Annotated[str, Field(description="The complete LaTeX source code content, including the preamble and document body, to be compiled.")] ,
     output_filename: Annotated[str, Field(description="The destination file path or name where the generated PDF should be saved (e.g., 'report.pdf').")]
-) -> str:
+) -> str: 
     """
     Compiles LaTeX source code into a PDF document using pdflatex.
 

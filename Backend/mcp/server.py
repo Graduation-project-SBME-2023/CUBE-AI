@@ -21,7 +21,7 @@ from tools.database.segmentations.segmentations_status import get_segmentation_s
 from tools.save_population import save_final_output
 from tools.latex.get_final_report import get_final_report
 from tools.latex.latex_to_pdf import latex_to_pdf
-
+from tools.get_modeling_results import get_modeling_results
 
 
 from tools.run_segmentation import run_segmentation
