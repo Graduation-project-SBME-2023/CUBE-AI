@@ -140,7 +140,6 @@ class SegmentationModule:
         self.UserProxy = UserProxyAgent(
             name="HumanUser",
             description="Proxy agent to relay human user input into the team",
-            input_func=lambda prompt: input(prompt)
         )
         termination = TextMentionTermination("task_done")
         self.team = SelectorGroupChat(
@@ -225,7 +224,7 @@ class SegmentationModule:
         
         def post_trigger_download(url, task_name, uids_list):
             try:
-                return requests.post(url, params={"task": task_name}, json=uids_list, timeout=30)
+                return requests.post(url, params={"task_name": task_name}, json=uids_list, timeout=30)
             except Exception as e:
                 print(f"ERROR posting to {url}: {e}")
                 return None
@@ -295,9 +294,8 @@ async def test_module():
         await agent.initialize()
         
         # Run the module with your configuration file
-        current_file = Path(__file__).resolve()
-        config_path = os.path.join(current_file.parent.parent, r"memory\workspace\configurations.json")
-        # config_path = r"Backend\mas\memory\workspace\configurations.json"
+        current_file = Path(__file__)
+        config_path =os.path.join(current_file.parent.parent, "memory", "workspace", "configurations.json")
         logger.info(f"Running with config: {config_path}")
         
         result = await agent.run(config_path)
