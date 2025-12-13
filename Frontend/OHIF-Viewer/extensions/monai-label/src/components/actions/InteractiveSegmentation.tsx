@@ -689,32 +689,31 @@ export default class InteractiveSegmentation extends BaseTab {
       return;
     }
 
-    // const response = await this.props
-    //   .client()
-    //   .infer(model, displaySet.SeriesInstanceUID, params);
-    // const labels = info.models[model].labels;
-    // console.log(response);
-    // console.log("the parameters for model interactive run", params);
+    const response = await this.props
+      .client()
+      .infer(model, displaySet.SeriesInstanceUID, params);
+    const labels = info.models[model].labels;
+    console.log(response);
+    console.log("the parameters for model interactive run", params);
 
 
-    // if (response.status !== 200) {
-    //   this.notification.show({
-    //     title: 'MONAI Label - ' + model,
-    //     message: 'Failed to Run Inference for Point Prompts',
-    //     type: 'error',
-    //     duration: 6000,
-    //   });
-    //   return;
-    // }
+    if (response.status !== 200) {
+      this.notification.show({
+        title: 'MONAI Label - ' + model,
+        message: 'Failed to Run Inference for Point Prompts',
+        type: 'error',
+        duration: 6000,
+      });
+      return;
+    }
+    this.props.updateView(response, labels, model);
 
-    // this.notification.show({
-    //   title: 'MONAI Label - ' + model,
-    //   message: 'Running Inference for Point Prompts - Successful',
-    //   type: 'success',
-    //   duration: 4000,
-    // });
-
-    // this.props.updateView(response, labels, model);
+    this.notification.show({
+      title: 'MONAI Label - ' + model,
+      message: 'Running Inference for Interactive Segmentation - Successful',
+      type: 'success',
+      duration: 4000,
+    });
   };
 
   // initPoints = () => {

@@ -2060,15 +2060,15 @@ Update the ui based on sam2 points
         duration: 5000,
       });
     } else {
+      await this.props.updateView(response, labels, model);
+      this.state.resetInteractions = false;
+
       this.notification.show({
         title: 'MONAI Label',
         message: 'Run Segmentation - Successful',
         type: 'success',
         duration: 2000,
       });
-
-      await this.props.updateView(response, labels, model);
-      this.state.resetInteractions = false;
     }
   };
 
