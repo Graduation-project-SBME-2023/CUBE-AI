@@ -295,7 +295,9 @@ async def test_module():
         await agent.initialize()
         
         # Run the module with your configuration file
-        config_path = r"D:\GP_2026\Github\agenticsystem\OHIF-Standalone\Backend\mas\memory\workspace\configurations.json"
+        current_file = Path(__file__).resolve()
+        config_path = os.path.join(current_file.parent.parent, r"memory\workspace\configurations.json")
+        # config_path = r"Backend\mas\memory\workspace\configurations.json"
         logger.info(f"Running with config: {config_path}")
         
         result = await agent.run(config_path)
