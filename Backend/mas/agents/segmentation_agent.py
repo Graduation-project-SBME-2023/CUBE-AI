@@ -60,7 +60,7 @@ class SegmentationModule:
         server_path = backend_dir / "mcp" / "server.py"   
         logger.info(f"➤ Starting MCP server at: {server_path}")     
         math_server = StdioServerParams(
-            command="python", args=[str(server_path)]
+            command="python", args=[str(server_path)], timeout=None
         )
         try:
             self.tools = await mcp_server_tools(math_server)
@@ -103,6 +103,7 @@ class SegmentationModule:
             - Coordinate ExecutionAgent to run automatic segmentation models when available or found any previous existant masks .
             - Summarize the overall workflow and progress without asking the user directly.
             - Make decisions adaptively based on input data, model availability, and mask existence
+            -don't talk with the user directly at any time 
             """,
             model_client=self.model_client
             # tools=self.selected_tools
@@ -131,7 +132,8 @@ class SegmentationModule:
             - Wait for user input via UserProxy before continuing.
             - Guide interactive segmentation (points, boxes, labels) and provide navigation links navigate(`http://localhost:3000/monai-label?StudyInstanceUIDs=${uid}`).
             - Stop only when all masks are successfully created, don't run interactive segmentation you just guide the user. 
-               - when all process are done and the user don't want anything else you just need to provide task_done to terminate the team, only provide when all things done .
+               - when all process are done and the user don't want anything else you just need to provide task_done to terminate the team, only provide when all things done.
+               -don't ask user multiple times if they need anything else, just provide task_done when all things are done.
             """,
             model_client=self.model_client,
             tools=self.selected_tools
