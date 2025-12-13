@@ -6,7 +6,9 @@ segmentation model (e.g., nnUNet, MONAI) to produce binary masks for the
 structures of interest.
 """
 from pathlib import Path
+import shutil
 import sys
+import time
 from typing import Dict, Any, Union
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 import asyncio
@@ -19,9 +21,13 @@ from autogen_agentchat.conditions import TextMentionTermination
 from autogen_agentchat.base import TaskResult
 import json
 import logging
+from dotenv import load_dotenv
+import os
+
+import requests
+load_dotenv() 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
 class SegmentationModule:
     """
     Implements the SEGMENTATION Team Pipeline using explicit agents and a SelectorGroupChat team.
@@ -47,14 +53,14 @@ class SegmentationModule:
                 "structured_output": True,
                 "family": "unknown"
             },
-            api_key="34d55bcebb014d6fa824c84eec5d3c61.fWWHg-syyiIDt02tVPQ3b5Of"
+            api_key=os.environ.get("APIKEY")
         )
         current_file = Path(__file__).resolve()
         backend_dir = current_file.parent.parent.parent  
         server_path = backend_dir / "mcp" / "server.py"   
         logger.info(f"➤ Starting MCP server at: {server_path}")     
         math_server = StdioServerParams(
-            command="python", args=[str(server_path)]
+            command="python", args=[str(server_path)], timeout=None
         )
         try:
             self.tools = await mcp_server_tools(math_server)
@@ -97,6 +103,7 @@ class SegmentationModule:
             - Coordinate ExecutionAgent to run automatic segmentation models when available or found any previous existant masks .
             - Summarize the overall workflow and progress without asking the user directly.
             - Make decisions adaptively based on input data, model availability, and mask existence
+            -don't talk with the user directly at any time 
             """,
             model_client=self.model_client
             # tools=self.selected_tools
@@ -125,6 +132,8 @@ class SegmentationModule:
             - Wait for user input via UserProxy before continuing.
             - Guide interactive segmentation (points, boxes, labels) and provide navigation links navigate(`http://localhost:3000/monai-label?StudyInstanceUIDs=${uid}`).
             - Stop only when all masks are successfully created, don't run interactive segmentation you just guide the user. 
+               - when all process are done and the user don't want anything else you just need to provide task_done to terminate the team, only provide when all things done.
+               -don't ask user multiple times if they need anything else, just provide task_done when all things are done.
             """,
             model_client=self.model_client,
             tools=self.selected_tools
@@ -133,7 +142,6 @@ class SegmentationModule:
         self.UserProxy = UserProxyAgent(
             name="HumanUser",
             description="Proxy agent to relay human user input into the team",
-            input_func=lambda prompt: input(prompt)
         )
         termination = TextMentionTermination("task_done")
         self.team = SelectorGroupChat(
@@ -167,33 +175,113 @@ class SegmentationModule:
         logger.info("=" * 80)
         
         await Console(self.team.run_stream(task=task_prompt))
-
         # async for message in self.team.run_stream(task=task_prompt):
                 
         #     messages.append(message)
 
         #     source = getattr(message, "source", "")
         #     content = getattr(message, "content", "")
-
-        #     # ----------------------------------------------------------------------
-        #     # 1. FILTER: Only show Planner, Execution, Fallback
-        #     # ----------------------------------------------------------------------
         #     if source in ("PlannerAgent","UserFallbackAgent","ExecutionAgent"):
         #         printable = content
         #         if printable:
         #             logger.info(f"\n[{source}] {printable}")
-
-        #     # ----------------------------------------------------------------------
-        #     # 2. UserFallbackAgent requires human input
-        #     # ----------------------------------------------------------------------
         #     if source == "UserFallbackAgent" and content and "<ASK_USER>" in content:
         #         user_reply = input("\n[User Input Required] → ")
         #         await self.UserProxy.send(user_reply)  # send to team
         #         continue
-
         logger.info("=" * 80)
         logger.info("CONVERSATION COMPLETE")
         logger.info("=" * 80)
+        # download the data and volume in the memory to be used by the other agents
+        VOLUMES = datasetlist 
+        LABELS_BY_VOLUME_URL = "http://localhost:8000/segmentations/by-volume/"
+        DOWNLOAD_IMAGES_URL = "http://localhost:8000/datastore/images"
+        DOWNLOAD_LABELS_URL = "http://localhost:8000/datastore/labels"
+        TASK_NAME = "final"
+        
+        current_file = Path(__file__)
+        current_dir = current_file.parent.parent.parent
+        DOWNLOAD_DIR_IMG = os.path.join(current_dir, "apps", "radiology", "General_Data")
+        DOWNLOAD_DIR_LABEL = os.path.join(current_dir, "apps", "radiology", "Labels")
+        FINAL_DIR_IMG = os.path.join(current_dir, "mas", "memory", "workspace", "volumes_data")
+        FINAL_DIR_LABEL = os.path.join(current_dir, "mas", "memory", "workspace", "labels_data")
+        
+        os.makedirs(DOWNLOAD_DIR_IMG, exist_ok=True)
+        os.makedirs(DOWNLOAD_DIR_LABEL, exist_ok=True)
+        os.makedirs(FINAL_DIR_IMG, exist_ok=True)
+        os.makedirs(FINAL_DIR_LABEL, exist_ok=True)
+        
+        def fetch_labels_for_volume(volume_uid):
+            url = LABELS_BY_VOLUME_URL + volume_uid
+            r = requests.get(url)
+            if r.status_code != 200:
+                print(f"WARN: GET {url} returned {r.status_code}: {r.text}")
+                return []
+            return r.json()
+        
+        def pick_most_recent_label(labels):
+            if not labels:
+                return None
+            return max(labels, key=lambda x: x.get("created_at", ""))
+        
+        def post_trigger_download(url, task_name, uids_list):
+            try:
+                return requests.post(url, params={"task_name": task_name}, json=uids_list, timeout=30)
+            except Exception as e:
+                print(f"ERROR posting to {url}: {e}")
+                return None
+            
+        def wait_for_files_appear(target_dir, expected_uids, timeout_s=30, poll_interval=1.0):
+            deadline = time.time() + timeout_s
+            found = set()
+            while time.time() < deadline:
+                for name in os.listdir(target_dir):
+                    if not name.lower().endswith(".nii.gz"):
+                        continue
+                    for uid in expected_uids:
+                        if uid in name:
+                            found.add(name)
+                if found:
+                    return found
+                time.sleep(poll_interval)
+            return found
+        
+        volumes_to_download = []
+        labels_to_download = []
+
+        for vol_uid in VOLUMES:
+            labels = fetch_labels_for_volume(vol_uid)
+            latest = pick_most_recent_label(labels)
+            if latest is None:
+                continue
+
+            label_uid = latest.get("label_series_instance_uid")
+            vol_uid_from_label = latest.get("volume_series_instance_uid") or vol_uid
+
+            if not label_uid:
+                continue
+
+            volumes_to_download.append(vol_uid_from_label)
+            labels_to_download.append(label_uid)
+
+        post_trigger_download(DOWNLOAD_IMAGES_URL, TASK_NAME, volumes_to_download)
+        post_trigger_download(DOWNLOAD_LABELS_URL, TASK_NAME, labels_to_download)
+
+        found_volume_files = wait_for_files_appear(DOWNLOAD_DIR_IMG, volumes_to_download)
+        found_label_files = wait_for_files_appear(DOWNLOAD_DIR_LABEL, labels_to_download)
+        def move_matching_niigz(src_dir, dst_dir, matching_uids=None):
+            moved = []
+            for fname in os.listdir(src_dir):
+                if not fname.lower().endswith(".nii.gz"):
+                    continue
+                if matching_uids and not any(uid in fname for uid in matching_uids):
+                    continue
+                shutil.move(os.path.join(src_dir, fname), os.path.join(dst_dir, fname))
+                moved.append(fname)
+            return moved
+
+        move_matching_niigz(DOWNLOAD_DIR_IMG, FINAL_DIR_IMG, volumes_to_download)
+        move_matching_niigz(DOWNLOAD_DIR_LABEL, FINAL_DIR_LABEL, labels_to_download) 
 
         return {"status": "finished"}
 
@@ -208,7 +296,8 @@ async def test_module():
         await agent.initialize()
         
         # Run the module with your configuration file
-        config_path = r"D:\GP_2026\Github\agenticsystem\OHIF-Standalone\Backend\mas\memory\workspace\configurations.json"
+        current_file = Path(__file__)
+        config_path =os.path.join(current_file.parent.parent, "memory", "workspace", "configurations.json")
         logger.info(f"Running with config: {config_path}")
         
         result = await agent.run(config_path)
