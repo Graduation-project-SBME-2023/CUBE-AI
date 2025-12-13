@@ -5,10 +5,10 @@ import {
 } from 'lucide-react';
 
 import websocketService from '../../utils/WebsocketService';
-import MiniFlow from './MiniFlow';
+import MiniFlow from './miniflow';
 import StartNode from './nodes/StartNode';
 import AgentNode from './nodes/AgentNode';
-import CustomEdge from './edges/CustomEdge';
+import CustomEdge from './edges/CustomEdges';
 import { FlowNode, FlowEdge } from './types';
 
 // Mock Data
