@@ -37,3 +37,7 @@ latex_test.py
 final_report.pdf
 final_output.pdf
 Backend/mas/system.log
+Backend/agent_system/memory_output_logs
+my_models
+testing_folders
+autogen_feature.txt
