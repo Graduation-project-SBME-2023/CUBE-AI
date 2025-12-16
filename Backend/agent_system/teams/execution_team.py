@@ -24,7 +24,7 @@ async def main() -> None:
     result_agent = await ResultReporterAgent.create()
     modeling_agent = await ModelingAgent.create()
     termination = TextMentionTermination("task_done")
-    team = SelectorGroupChat([modeling_agent, result_agent, reporter_agent], model_client=model_client, termination_condition=termination)
+    team = MagenticOneGroupChat([modeling_agent, result_agent, reporter_agent], model_client=model_client, termination_condition=termination)
     await Console(team.run_stream(task="""you are part of a radiomcs research study, the results of the feature
                                 extraction is given, use the modeling agent to do the modeling step,
                                 write the report and then save it in latex,
