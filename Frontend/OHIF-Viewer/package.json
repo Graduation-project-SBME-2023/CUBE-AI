@@ -57,7 +57,7 @@
   },
   "dependencies": {
     "@babel/runtime": "^7.20.13",
-    "@kitware/vtk.js": "^28.4.1",
+    "@kitware/vtk.js": "^30.4.1",
     "core-js": "^3.2.1",
     "framer-motion": "^7.6.19",
     "lucide-react": "^0.546.0",
