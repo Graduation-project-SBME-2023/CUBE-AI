@@ -5,7 +5,7 @@ from schemas.volume import VolumeCreate, VolumeUpdate
 from sqlalchemy.exc import SQLAlchemyError
 from fastapi import HTTPException
 from sqlalchemy import func
-
+from models.study import Study
 
 async def get_volume(db: AsyncSession, volume_series_instance_uid: str):
     try:
@@ -91,5 +91,29 @@ async def count_volumes_by_study(db: AsyncSession, study_uid: str):
     try:
         result = await db.execute(select(func.count()).select_from(Volume).where(Volume.study_uid == study_uid))
         return result.scalar()
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+async def get_study_by_volume(db: AsyncSession, volume_series_instance_uid: str):
+    try:
+        # First, get the volume
+        result = await db.execute(
+            select(Volume).where(Volume.volume_series_instance_uid == volume_series_instance_uid)
+        )
+        volume = result.scalar_one_or_none()
+        if not volume:
+            raise HTTPException(status_code=404, detail=f"Volume {volume_series_instance_uid} not found")
+
+        # Then, get the study associated with that volume
+        result = await db.execute(
+            select(Study).where(Study.study_uid == volume.study_uid)
+        )
+        study = result.scalar_one_or_none()
+        if not study:
+            raise HTTPException(status_code=404, detail=f"Study {volume.study_uid} not found")
+
+        return study
+
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
