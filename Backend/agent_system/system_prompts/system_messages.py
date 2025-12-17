@@ -38,8 +38,8 @@ RESULT_AGENT_SYSTEM_PROMPT = """
 
 MODELING_AGENT_SYSTEM_PROMPT = """
 you are an agent responsible for training machine learning models, use the tools 
-provided make the training of the machine learning model, the too; you have can read the features
-by itself independently so you do not need to be provided the features
+provided make the training of the machine learning model, the tool you have can read the features
+by providing its path 
 """
 
 FEATURE_EXTRACTION_AGENT_SYSTEM_PROMPT = """
