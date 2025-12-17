@@ -9,7 +9,7 @@ from pathlib import Path
 import shutil
 import sys
 import time
-from typing import Dict, Any, Union
+from typing import Dict, Any, Union, List
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 import asyncio
 from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
@@ -23,11 +23,24 @@ import json
 import logging
 from dotenv import load_dotenv
 import os
-
 import requests
+
 load_dotenv() 
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+log_file_path = Path(__file__).parent.parent/"memory"/"workspace"/ "segmentation_module.log"
+logger = logging.getLogger("SegmentationModule")
+logger.setLevel(logging.INFO)
+formatter = logging.Formatter(
+    "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+# console handler
+ch = logging.StreamHandler()
+ch.setFormatter(formatter)
+logger.addHandler(ch)
+# file handler
+fh = logging.FileHandler(log_file_path)
+fh.setFormatter(formatter)
+logger.addHandler(fh)
+
 class SegmentationModule:
     """
     Implements the SEGMENTATION Team Pipeline using explicit agents and a SelectorGroupChat team.
@@ -38,6 +51,8 @@ class SegmentationModule:
         self.model_name = model_name
         self.model_client = None
         self.tools = None
+        self.discovery_tool = None
+        self.execution_tools = None
         self.PlannerAgent = None
         self.ExecutionAgent = None
         self.UserFallbackAgent = None
@@ -58,232 +73,509 @@ class SegmentationModule:
         current_file = Path(__file__).resolve()
         backend_dir = current_file.parent.parent.parent  
         server_path = backend_dir / "mcp" / "server.py"   
-        logger.info(f"➤ Starting MCP server at: {server_path}")     
+        logger.info(f"Starting MCP server at: {server_path}")     
         math_server = StdioServerParams(
             command="python", args=[str(server_path)], timeout=None
         )
         try:
-            self.tools = await mcp_server_tools(math_server)
-            logger.info(f"Connected! Available tools count: {len(self.tools)}")
-            
-            # Log all available tool names
-            for tool in self.tools:
-                logger.info(f"  - Tool: {tool.name}")
+            tools = await mcp_server_tools(math_server)
+            logger.info(f"Connected! Available tools count: {len(tools)}")
             
         except Exception as e:
             logger.error(f"Failed to connect: {e}")
             raise 
         
-        # Filter tools by name - mcp_server_tools returns a list, not a dict
-        desired_tool_names = ['run_segmentation', 'get_model_info', 'check_having_mask']
-        self.selected_tools = [tool for tool in self.tools if tool.name in desired_tool_names]
-        
-        logger.info(f"➤ Selected {len(self.selected_tools)} tools for SegmentationModule:")
-        for tool in self.selected_tools:
-            logger.info(f"  - {tool.name}")
-        
-        # Verify all desired tools were found
-        found_names = {tool.name for tool in self.selected_tools}
-        missing_tools = set(desired_tool_names) - found_names
-        if missing_tools:
-            logger.warning(f" Missing tools: {missing_tools}")
+        self.discovery_tools = [t for t in tools if t.name == "get_model_info"]
+        self.execution_tools = [
+            t for t in tools
+            if t.name in ("check_having_mask", "run_segmentation")
+        ]
+        assert self.discovery_tools, "Missing get_model_info"
+        assert self.execution_tools, "Missing execution tools"        
+        self._init_agents()
+        return True
+    
 
+    def _init_agents(self):
         self.PlannerAgent = AssistantAgent(
             name="PlannerAgent",
+            model_client=self.model_client,
+            tools=self.discovery_tools,
             system_message="""
-            You are PlannerAgent, orchestrating segmentation and provide the plan to do:
-    
-            - Analyze the given hypothesis and dataset list to determine the target label(s) for segmentation.
-            - Decide whether to run automatic segmentation or delegate to interactive user guidance based on:
-                * Availability of automatic models for the target label.
-                * Existence of previous segmentation masks.
-                both are come from the ExecutionAgent checks.
-            - Do NOT ask the user any questions yourself.
-            - Only trigger UserFallbackAgent if human input, clarification, or confirmation is required.
-            - Coordinate ExecutionAgent to run automatic segmentation models when available or found any previous existant masks .
-            - Summarize the overall workflow and progress without asking the user directly.
-            - Make decisions adaptively based on input data, model availability, and mask existence
-            -don't talk with the user directly at any time 
-            """,
-            model_client=self.model_client
-            # tools=self.selected_tools
-        )
+                   You are PlannerAgent.
+                Your responsibilities:
+                1. Infer target anatomical label(s) from the hypothesis.
+                2. Use  tool to discover available segmentation models.
+                3. Analyze the returned models 
+                4. Decide whether segmentation should be automatic or interactive based on available models.
+                After calling the tool and receiving the model information, you MUST analyze the results and output ONLY a JSON object (no other text) that STRICTLY follows this schema:
 
+                {
+                "target_labels": ["label1", "label2"],
+                "chosen_path": "automatic",
+                "automatic_models": ["model1", "model2"],
+                "interactive_models": ["model3"],
+                "fallback_path": "interactive",
+                "exclusion_rule": "exclude_existing_masks_for_same_label"
+                }
+
+                Rules:
+                - target_labels: Extract anatomical structures from the hypothesis (e.g., "spleen", "liver")
+                - chosen_path: "automatic" if automatic models exist for the target labels, otherwise "interactive"
+                - automatic_models: List models where type contains "automatic" and match target labels
+                - interactive_models: List models where type contains "interactive"
+                - fallback_path: "interactive" if automatic fails, "none" if not applicable
+                - Output ONLY valid JSON, no explanations or markdown
+
+                    """,
+                reflect_on_tool_use= True
+                # max_tool_iterations=2
+        )
         self.ExecutionAgent = AssistantAgent(
             name="ExecutionAgent",
-            system_message="""
-            You are ExecutionAgent:
-            - Check if a segmentation mask exists for a SeriesInstanceUID.
-            - Check if an automatic model is available for the target label.
-            - If no mask exists and a model is available, run automatic segmentation.
-            - Never ask the user for confirmation.
-            - If user confirmation is required (ambiguous case), hand over the task to UserFallbackAgent and stop.
-            """,
             model_client=self.model_client,
-            tools=self.selected_tools
-        )
-
+            tools=self.execution_tools,
+            system_message="""
+            You are ExecutionAgent.
+            You operate on exactly one volume at a time.
+            CRITICAL: Read the task carefully to understand which tool to use.
+            If the task says "check" or "check_having_mask":
+            - Use ONLY check_having_mask tool
+            - Respond with ONLY a JSON object: {"mask_exists": true} or {"mask_exists": false}
+            - DO NOT run segmentation
+            If the task says "run" or "run_segmentation":
+            - Use ONLY run_segmentation tool
+            - Execute the segmentation with provided parameters
+                """,
+                max_tool_iterations= 2
+                        )   
         self.UserFallbackAgent = AssistantAgent(
             name="UserFallbackAgent",
+            model_client=self.model_client,
+            tools=self.discovery_tools,
             system_message="""
-            You are UserFallbackAgent:
-            - You handle ALL human interactions.
-            - Whenever confirmation or choice is needed, you must ask the user directly.
-            - Wait for user input via UserProxy before continuing.
-            - Guide interactive segmentation (points, boxes, labels) and provide navigation links navigate(`http://localhost:3000/monai-label?StudyInstanceUIDs=${uid}`).
-            - Stop only when all masks are successfully created, don't run interactive segmentation you just guide the user. 
-               - when all process are done and the user don't want anything else you just need to provide task_done to terminate the team, only provide when all things done.
-               -don't ask user multiple times if they need anything else, just provide task_done when all things are done.
-            """,
-            model_client=self.model_client,
-            tools=self.selected_tools
+                You are UserFallbackAgent.
+
+                Your role:
+                - Explain available interactive segmentation models.
+                - Explain their parameters using discovery tools.
+                - Guide the user step-by-step.
+                - Answer user questions.
+
+                Rules:
+                - You MUST NOT run segmentation or check masks.
+                - You MUST wait for user confirmation via UserProxy.
+                - Terminate only when user confirm that the task is done.
+                """,
+                reflect_on_tool_use= True,
+                max_tool_iterations=3 # need to optimize
+                
         )
-        
-        self.UserProxy = UserProxyAgent(
-            name="HumanUser",
-            description="Proxy agent to relay human user input into the team",
-        )
-        termination = TextMentionTermination("task_done")
-        self.team = SelectorGroupChat(
-            [self.PlannerAgent, self.ExecutionAgent, self.UserFallbackAgent, self.UserProxy],
-            model_client=self.model_client,
-            termination_condition=termination,
-            # model_context=model_context,
-            description="""SEGMENTATION Team Pipeline: 
-        The PlannerAgent coordinates the overall segmentation workflow, breaking tasks into structured steps and determining which agent should act next. 
-        The ExecutionAgent performs backend operations, including checking whether previous segmentation masks exist or whether an automatic model is available for the target label, and then running the  automatic segmentation model(if exist) over the relevant images. 
-        The UserFallbackAgent interacts directly with the user during any part of the workflow that requires clarification, confirmation, parameter selection, or interactive segmentation guidance. 
-        Whenever user confirmation or a choice is needed, control is handed to the UserFallbackAgent, and the system waits for the user’s response before continuing. 
-        This pipeline proceeds step-by-step until all required tasks are completed and every segmentation mask has been successfully created, at which point the team terminates cleanly.."""
-        )
-        return True
+
+        self.UserProxy = UserProxyAgent(name="HumanUser")
 
     async def run(self, input_data: Union[str, Dict[str, Any]]):
         if isinstance(input_data, str):
             with open(input_data, "r") as f:
                 input_data = json.load(f)
-        instruction = input_data.get("hypothesis", "")
-        datasetlist = input_data.get("datasetlist", "")
-        task_prompt = f"""
-        You are given a hypothesis: {instruction}
-        You have a dataset list at {datasetlist} containing SeriesInstanceUIDs.
-        Your task is to segment the target structure mentioned in the hypothesis across all volumes in the dataset list.
-        # """
-        # messages = []
-        logger.info("=" * 80)
-        logger.info("STARTING TEAM CONVERSATION")
-        logger.info("=" * 80)
-        
-        await Console(self.team.run_stream(task=task_prompt))
-        # async for message in self.team.run_stream(task=task_prompt):
-                
-        #     messages.append(message)
 
-        #     source = getattr(message, "source", "")
-        #     content = getattr(message, "content", "")
-        #     if source in ("PlannerAgent","UserFallbackAgent","ExecutionAgent"):
-        #         printable = content
-        #         if printable:
-        #             logger.info(f"\n[{source}] {printable}")
-        #     if source == "UserFallbackAgent" and content and "<ASK_USER>" in content:
-        #         user_reply = input("\n[User Input Required] → ")
-        #         await self.UserProxy.send(user_reply)  # send to team
-        #         continue
-        logger.info("=" * 80)
-        logger.info("CONVERSATION COMPLETE")
-        logger.info("=" * 80)
-        # download the data and volume in the memory to be used by the other agents
-        VOLUMES = datasetlist 
+        hypothesis: str = input_data["hypothesis"]
+        datasetlist: List[str] = input_data["datasetlist"]
+
+        # plan
+        plan = await self._run_planner(hypothesis)
+        logger.info(f"Planner plan: {plan}")
+        target_labels = plan["target_labels"]
+        chosen_path = plan["chosen_path"]
+        # target_labels=['spleen'] # hard test
+        # chosen_path='automatic' # hard test
+        # eligible_volumes=datasetlist # hard test
+        # exclude existing masks
+        eligible_volumes = await self._exclude_existing_masks(
+            datasetlist, target_labels
+        )
+
+        logger.info(
+            f"Eligible volumes for segmentation: {len(eligible_volumes)}"
+        )
+
+        # whether it's automatic or interactive
+        if chosen_path == "automatic" and eligible_volumes:
+            # selected_auto_model = "segmentation_spleen" # hard test
+            selected_auto_model = plan["automatic_models"][0]
+            await self._run_automatic(eligible_volumes, target_labels, selected_auto_model)
+
+        else:
+            await self._run_interactive(target_labels)
+            
+        # finally download the volumes with its label masks 
+        # selected_auto_model_for_volume= "segmentation_spleen" # hard test
+        await asyncio.sleep(120)  
+        await self.download_and_pair_volumes(
+                datasetlist, 
+                chosen_path=chosen_path, 
+                selected_auto_model_for_volume=plan["automatic_models"][0] if plan["automatic_models"] else None
+            )
+
+        return {"status": "finished"}
+    
+    async def _run_planner(self, hypothesis: str) -> Dict[str, Any]:
+        task = f"""
+            Analyze this hypothesis:
+
+            {hypothesis}
+
+            Steps:
+            1.  discover available models
+            2. Identify the target anatomical label(s) from the hypothesis
+            3. Categorize models as automatic or interactive
+            4. Determine if automatic models exist for the target labels
+            5. Output the JSON plan following the required schema
+            Remember: Output ONLY the JSON object, nothing else..
+            """
+
+        result = await self.PlannerAgent.run(task=task)
+        return json.loads(result.messages[-1].content)
+    
+
+    async def _exclude_existing_masks(
+        self, volumes: List[str], labels: List[str]
+    ) -> List[str]:
+
+        eligible = []
+
+        for volume_uid in volumes:
+            has_mask = False
+            for label in labels:
+                task_prompt = (
+                    f"Check if a mask exists for:\n"
+                    f"series_instance_uid: {volume_uid}\n"
+                    f"label: {label}\n"
+                    f"Use check_having_mask tool and respond with ONLY JSON:\n"
+                    f'{{"mask_exists": true}} or {{"mask_exists": false}}\n'
+                    f"No other text."
+                )
+                
+                logger.info(f"Checking mask: volume={volume_uid}, label={label}")
+                
+                try:
+                    r = await self.ExecutionAgent.run(task=task_prompt)
+                    
+                    response_content = r.messages[-1].content
+                    logger.info(f"Agent response: {response_content}")
+        
+                    result = json.loads(response_content)
+                    has_mask = result.get("mask_exists", False)
+                except Exception as e:
+                    logger.error(f"Error checking mask: {e}", exc_info=True)
+                    has_mask = False          
+                if has_mask:
+                    logger.info(f"Volume {volume_uid} has existing mask for '{label}'")
+                    break
+
+            if not has_mask:
+                eligible.append(volume_uid)
+                logger.info(f"Volume {volume_uid} added to eligible list")
+            else:
+                logger.info(f"Volume {volume_uid} excluded (has mask)")
+        
+        return eligible
+
+    async def _run_automatic(
+        self, volumes: List[str], labels: List[str], selected_auto_model: str
+    ):
+        logger.info(f"Starting automatic segmentation on {len(volumes)} volumes using model '{selected_auto_model}'")
+        
+        for idx, volume_uid in enumerate(volumes, start=1):
+            logger.info(f"[{idx}/{len(volumes)}] Running segmentation for volume: {volume_uid}")
+            try:
+                result = await self.ExecutionAgent.run(
+                    task=(
+                        f"run the segmentation for:\n"
+                        f"series_instance_uid: {volume_uid}\n"
+                        f"labels: {labels}\n"
+                        f"model_name: {selected_auto_model}"
+                    )
+                )
+                logger.info(f"Completed segmentation for volume: {volume_uid}")
+            except Exception as e:
+                logger.error(f"Segmentation failed for volume {volume_uid}: {e}")     
+
+    async def _run_interactive(self, labels: List[str]):
+        logger.info(f"Starting interactive segmentation guidance for labels: {labels}")
+        
+        # intial guide
+        await self.UserFallbackAgent.run(
+            task={
+                "labels": labels,
+                "instruction": (
+                    "Guide the user through interactive segmentation. "
+                    "Explain available models and parameters. "
+                    "The user can ask questions one by one. "
+                    "Terminate the session once the user has no further questions."
+                )
+            }
+        )
+
+        logger.info("Entering console UserProxy loop for interactive guidance")
+
+        loop = asyncio.get_running_loop()
+
+        while True:
+            user_input = await loop.run_in_executor(
+                None, input, "User (press Enter if no more questions)> "
+            )
+
+            if not user_input.strip():
+                logger.info("User has no more questions. Terminating interactive session.")
+                break
+
+            await self.UserProxy.send(user_input)
+            logger.info(f"[User] {user_input}")
+
+            response = await self.UserFallbackAgent.run(
+                task={"user_question": user_input}
+            )
+
+            print(f"UserFallbackAgent> {response.content}")
+            logger.info(f"[UserFallbackAgent Response] {response.content}")
+
+        logger.info("Interactive session completed.")
+
+    async def download_and_pair_volumes(self, datasetlist, chosen_path, selected_auto_model_for_volume):
+        """
+        Downloads volumes and their associated labels.
+        """
+        VOLUMES = datasetlist
         LABELS_BY_VOLUME_URL = "http://localhost:8000/segmentations/by-volume/"
         DOWNLOAD_IMAGES_URL = "http://localhost:8000/datastore/images"
         DOWNLOAD_LABELS_URL = "http://localhost:8000/datastore/labels"
         TASK_NAME = "final"
-        
+
         current_file = Path(__file__)
         current_dir = current_file.parent.parent.parent
+
         DOWNLOAD_DIR_IMG = os.path.join(current_dir, "apps", "radiology", "General_Data")
         DOWNLOAD_DIR_LABEL = os.path.join(current_dir, "apps", "radiology", "Labels")
         FINAL_DIR_IMG = os.path.join(current_dir, "mas", "memory", "workspace", "volumes_data")
         FINAL_DIR_LABEL = os.path.join(current_dir, "mas", "memory", "workspace", "labels_data")
-        
+
         os.makedirs(DOWNLOAD_DIR_IMG, exist_ok=True)
         os.makedirs(DOWNLOAD_DIR_LABEL, exist_ok=True)
         os.makedirs(FINAL_DIR_IMG, exist_ok=True)
         os.makedirs(FINAL_DIR_LABEL, exist_ok=True)
-        
+
         def fetch_labels_for_volume(volume_uid):
+            """Fetch all labels associated with a volume from the API"""
             url = LABELS_BY_VOLUME_URL + volume_uid
-            r = requests.get(url)
-            if r.status_code != 200:
-                print(f"WARN: GET {url} returned {r.status_code}: {r.text}")
-                return []
-            return r.json()
-        
-        def pick_most_recent_label(labels):
-            if not labels:
-                return None
-            return max(labels, key=lambda x: x.get("created_at", ""))
-        
-        def post_trigger_download(url, task_name, uids_list):
+            logger.info(f"Fetching labels from: {url}")
             try:
-                return requests.post(url, params={"task_name": task_name}, json=uids_list, timeout=30)
+                r = requests.get(url, timeout=10)
+                if r.status_code != 200:
+                    logger.warning(f"GET {url} returned {r.status_code}: {r.text}")
+                    return []
+                labels = r.json()
+                logger.info(f"Received {len(labels)} labels for volume {volume_uid}")
+                if labels:
+                    logger.debug(f"Labels data: {json.dumps(labels, indent=2)}")
+                return labels
             except Exception as e:
-                print(f"ERROR posting to {url}: {e}")
+                logger.error(f"Error fetching labels for {volume_uid}: {e}")
+                return []
+
+        def pick_latest_or_auto(labels, chosen_path="interactive", selected_auto_model=None):
+            """
+            Select the appropriate label based on the path:
+            - automatic: Match segmentation_type with selected_auto_model
+            - interactive: Pick the latest by created_at
+            """
+            if not labels:
+                logger.warning("No labels provided to pick_latest_or_auto")
                 return None
             
-        def wait_for_files_appear(target_dir, expected_uids, timeout_s=30, poll_interval=1.0):
+            logger.info(f"Picking label from {len(labels)} options (path={chosen_path}, model={selected_auto_model})")
+            
+            # match model for automatic path
+            if chosen_path == "automatic" and selected_auto_model:
+                logger.info(f"Searching for label with segmentation_type='{selected_auto_model}'")
+                for label in labels:
+                    seg_type = label.get("segmentation_type")
+                    logger.debug(f"Checking label: segmentation_type='{seg_type}', created_at='{label.get('created_at')}'")
+                    if seg_type == selected_auto_model:
+                        logger.info(f" Found matching automatic label: {label.get('label_series_instance_uid')}")
+                        return label
+                logger.warning(f"No label found with segmentation_type='{selected_auto_model}', falling back to latest")
+            
+            # the latest created mask
+            latest = max(labels, key=lambda x: x.get("created_at", ""))
+            logger.info(f"Selected latest label: {latest.get('label_series_instance_uid')} (created_at={latest.get('created_at')})")
+            return latest
+
+        def post_trigger_download(url, task_name, uids_list):
+            """Trigger download API endpoint"""
+            if not uids_list:
+                logger.warning(f"Empty UID list for {url}, skipping")
+                return None
+            
+            logger.info(f"POST to {url} with {len(uids_list)} UIDs: {uids_list}")
+            try:
+                response = requests.post(url, params={"task_name": task_name}, json=uids_list, timeout=60)
+                logger.info(f"Download trigger response: {response.status_code}")
+                if response.status_code != 200:
+                    logger.error(f"Download failed: {response.text}")
+                return response
+            except Exception as e:
+                logger.error(f"ERROR posting to {url}: {e}")
+                return None
+
+        async def wait_for_files_appear(target_dir, expected_uids, timeout_s=60, poll_interval=2.0):
+            """Wait for files to appear in the download directory"""
+            if not expected_uids:
+                logger.info("No UIDs to wait for")
+                return set()
+            
             deadline = time.time() + timeout_s
             found = set()
+            logger.info(f"Waiting for {len(expected_uids)} files in {target_dir}")
+            logger.info(f"Expected UIDs: {expected_uids}")
+            
             while time.time() < deadline:
-                for name in os.listdir(target_dir):
+                current_files = os.listdir(target_dir)
+                for name in current_files:
                     if not name.lower().endswith(".nii.gz"):
                         continue
                     for uid in expected_uids:
-                        if uid in name:
+                        if uid in name and name not in found:
                             found.add(name)
-                if found:
+                            logger.info(f"Found file: {name}")
+                
+                if len(found) >= len(expected_uids):
+                    logger.info(f"All {len(expected_uids)} files found!")
                     return found
-                time.sleep(poll_interval)
+                
+                remaining = time.time() - deadline
+                logger.debug(f"Found {len(found)}/{len(expected_uids)} files, waiting... ({remaining:.1f}s remaining)")
+                await asyncio.sleep(poll_interval)
+            
+            logger.warning(f"Timeout Only found {len(found)}/{len(expected_uids)} files: {found}")
             return found
-        
-        volumes_to_download = []
-        labels_to_download = []
 
-        for vol_uid in VOLUMES:
-            labels = fetch_labels_for_volume(vol_uid)
-            latest = pick_most_recent_label(labels)
-            if latest is None:
-                continue
-
-            label_uid = latest.get("label_series_instance_uid")
-            vol_uid_from_label = latest.get("volume_series_instance_uid") or vol_uid
-
-            if not label_uid:
-                continue
-
-            volumes_to_download.append(vol_uid_from_label)
-            labels_to_download.append(label_uid)
-
-        post_trigger_download(DOWNLOAD_IMAGES_URL, TASK_NAME, volumes_to_download)
-        post_trigger_download(DOWNLOAD_LABELS_URL, TASK_NAME, labels_to_download)
-
-        found_volume_files = wait_for_files_appear(DOWNLOAD_DIR_IMG, volumes_to_download)
-        found_label_files = wait_for_files_appear(DOWNLOAD_DIR_LABEL, labels_to_download)
         def move_matching_niigz(src_dir, dst_dir, matching_uids=None):
+            """Move volume files from source to destination"""
             moved = []
             for fname in os.listdir(src_dir):
                 if not fname.lower().endswith(".nii.gz"):
                     continue
                 if matching_uids and not any(uid in fname for uid in matching_uids):
                     continue
-                shutil.move(os.path.join(src_dir, fname), os.path.join(dst_dir, fname))
+                src_path = os.path.join(src_dir, fname)
+                dst_path = os.path.join(dst_dir, fname)
+                shutil.move(src_path, dst_path)
                 moved.append(fname)
+                logger.info(f"Moved volume: {fname}")
+            logger.info(f"Total volumes moved: {len(moved)}")
             return moved
 
-        move_matching_niigz(DOWNLOAD_DIR_IMG, FINAL_DIR_IMG, volumes_to_download)
-        move_matching_niigz(DOWNLOAD_DIR_LABEL, FINAL_DIR_LABEL, labels_to_download) 
+        def move_and_rename_labels(src_dir, dst_dir, label_uids, volume_uids):
+            """
+            Move label files and rename them to match their corresponding volume UIDs.
+            This ensures labels have the same filename as their associated volumes.
+            """
+            if not label_uids or not volume_uids:
+                logger.warning("Empty label or volume UID lists")
+                return
+            
+            logger.info(f"Moving and renaming {len(label_uids)} labels to match volume UIDs")
+            moved_count = 0
+            
+            for label_uid, volume_uid in zip(label_uids, volume_uids):
+                # Find the file containing the label UID
+                label_file = None
+                for fname in os.listdir(src_dir):
+                    if label_uid in fname and fname.lower().endswith(".nii.gz"):
+                        label_file = fname
+                        break
+                
+                if label_file:
+                    src_path = os.path.join(src_dir, label_file)
+                    # Rename to match volume UID exactly
+                    dst_path = os.path.join(dst_dir, f"{volume_uid}.nii.gz")
+                    shutil.move(src_path, dst_path)
+                    moved_count += 1
+                    logger.info(f" Renamed label: {label_file} -> {volume_uid}.nii.gz")
+                else:
+                    logger.warning(f"Label file not found for UID: {label_uid}")
+            
+            logger.info(f"Total labels moved and renamed: {moved_count}/{len(label_uids)}")
 
-        return {"status": "finished"}
+        # Main pairing logic
+        volumes_to_download = []
+        labels_to_download = []
+
+        logger.info(f"Processing {len(VOLUMES)} volumes for label pairing...")
+        
+        for idx, vol_uid in enumerate(VOLUMES, 1):
+            logger.info(f"[{idx}/{len(VOLUMES)}] Processing volume: {vol_uid}")
+            
+            # Fetch all labels for this volume
+            labels = fetch_labels_for_volume(vol_uid)
+            
+            if not labels:
+                logger.warning(f"No labels found for volume {vol_uid}, skipping")
+                continue
+            
+            # Select the appropriate label based on path
+            selected_model = selected_auto_model_for_volume if chosen_path == "automatic" else None
+            latest = pick_latest_or_auto(labels, chosen_path=chosen_path, selected_auto_model=selected_model)
+            
+            if latest is None:
+                logger.warning(f"No suitable label selected for volume {vol_uid}, skipping")
+                continue
+            
+            # Extract UIDs from the selected label
+            label_uid = latest.get("label_series_instance_uid")
+            vol_uid_from_label = latest.get("volume_series_instance_uid") or vol_uid
+            
+            if not label_uid:
+                logger.warning(f"Label UID is empty for volume {vol_uid}, skipping")
+                continue
+            
+            logger.info(f"Paired: volume={vol_uid_from_label} label={label_uid}")
+            volumes_to_download.append(vol_uid_from_label)
+            labels_to_download.append(label_uid)
+
+        logger.info("="*60)
+        logger.info(f"PAIRING COMPLETE:")
+        logger.info(f"Volumes to download: {len(volumes_to_download)}")
+        logger.info(f"Labels to download: {len(labels_to_download)}")
+        logger.info("="*60)
+
+        if not volumes_to_download or not labels_to_download:
+            logger.error(" No volumes or labels to download! Exiting.")
+            return
+
+        # Trigger downloads
+        logger.info("Triggering volume download...")
+        vol_response = post_trigger_download(DOWNLOAD_IMAGES_URL, TASK_NAME, volumes_to_download)
+        
+        logger.info("Triggering label download...")
+        label_response = post_trigger_download(DOWNLOAD_LABELS_URL, TASK_NAME, labels_to_download)
+
+        # Wait for files to appear in download directories
+        logger.info("Waiting for volume files to appear...")
+        found_volume_files = await wait_for_files_appear(DOWNLOAD_DIR_IMG, volumes_to_download, timeout_s=90)
+        
+        logger.info("Waiting for label files to appear...")
+        found_label_files = await wait_for_files_appear(DOWNLOAD_DIR_LABEL, labels_to_download, timeout_s=90)
+
+        logger.info("Moving volume files to final directory...")
+        move_matching_niigz(DOWNLOAD_DIR_IMG, FINAL_DIR_IMG, volumes_to_download)
+        
+        logger.info("Moving and renaming label files...")
+        move_and_rename_labels(DOWNLOAD_DIR_LABEL, FINAL_DIR_LABEL, labels_to_download, volumes_to_download)
+        
+        logger.info("="*60)
+        logger.info("DOWNLOAD AND PAIRING COMPLETED SUCCESSFULLY!")
 
 
 async def test_module():
@@ -291,11 +583,10 @@ async def test_module():
     try:
         logger.info("Starting SegmentationModule test...")
         
-        # Initialize the module
+        # intialize
         agent = SegmentationModule()
         await agent.initialize()
         
-        # Run the module with your configuration file
         current_file = Path(__file__)
         config_path =os.path.join(current_file.parent.parent, "memory", "workspace", "configurations.json")
         logger.info(f"Running with config: {config_path}")
@@ -310,8 +601,6 @@ async def test_module():
 
 
 if __name__ == "__main__":
-    # Run the test
     asyncio.run(test_module())
-
 
 __all__ = ["SegmentationModule"]
