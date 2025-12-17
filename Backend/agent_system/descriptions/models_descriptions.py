@@ -21,3 +21,15 @@ MODELING_AGENT_DESCRIPTION = """
 specialized ai that have the capability to get the radiomics features and then run machine
 learning algorithms on it and save the results
 """
+
+FEATURE_EXTRACTION_AGENT_DESCRIPTION = """"
+This agent is specialized in extracting the radiomics features from image-mask pairs, and should rank the statistical importance of the features relating to some target. When called, a json object should be provided containing the following:
+{
+        "hypothesis": "", # required
+        "image_dir": "", # required
+        "mask_dir": "", # required
+        "output_dir": "", # optional
+        "targets_csv": "", # optional
+        "target_column": "", # optional
+}
+"""
