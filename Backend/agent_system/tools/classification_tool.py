@@ -918,6 +918,8 @@ class PyCaretClassificationTool:
                 logging.info("Classification modeling completed successfully")
                 
                 # Return Dictionary (Matching your original return structure)
+                if created_files is None:
+                    created_files = None
                 return {
                     "status": "success",
                     "experiment_name": experiment_name,
