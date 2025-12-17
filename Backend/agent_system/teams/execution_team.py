@@ -20,7 +20,6 @@ from autogen_agentchat.ui import Console
 
 async def main() -> None:
     model_client = OllamaClient()
-
     reporter_agent = await ReporterAgent.create()
     result_agent = await ResultReporterAgent.create()
     modeling_agent = await ModelingAgent.create()
