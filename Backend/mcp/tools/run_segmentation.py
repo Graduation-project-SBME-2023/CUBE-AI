@@ -10,6 +10,8 @@ from typing import List, Dict, Any, Union
 from typing import Annotated
 from pydantic import Field
 import os
+import asyncio
+
 logger = logging.getLogger(__name__)
 
 MONAI_LABEL_URL = "http://localhost:8000"  
@@ -53,7 +55,8 @@ async def run_segmentation(
         - label_id: ID assigned by datastore (if successful)
     """
     
-    logger.info(f"=== TOOL STARTED at {datetime.now()} ===")
+    start_time = datetime.now()
+    logger.info(f"=== TOOL STARTED at {start_time} ===")
     
     clean_model = model.strip().rstrip(",")
     
@@ -74,7 +77,6 @@ async def run_segmentation(
         logger.error("label_info is empty!")
         return {"error": True, "stage": "validation", "message": "label_info cannot be empty"}
     
-
     organ_list = [organ.strip().lower() for organ in label_info.split(',') if organ.strip()]
     
     if not organ_list:
@@ -111,12 +113,34 @@ async def run_segmentation(
 
     files = {"params": (None, json.dumps(inference_params), "application/json")}
 
-    # run the inference request
     logger.info("Starting inference request...")
-    async with httpx.AsyncClient(timeout=None) as client:  
+    logger.info(" This may take several minutes for large volumes...")
+    
+    # long timeouts for large volume inference
+    timeout_config = httpx.Timeout(
+        connect=30.0,      # 30 seconds to establish connection
+        read=300.0,        # 5 minutes to read response
+        write=30.0,        # 30 seconds to write request
+        pool=30.0          # 30 seconds to get connection from pool
+    )
+    
+    async with httpx.AsyncClient(timeout=timeout_config) as client:  
         try:
+            inference_start = datetime.now()
             response = await client.post(infer_url, params=query_params, files=files)
-            logger.info(f"Inference completed with status: {response.status_code}")
+            inference_duration = (datetime.now() - inference_start).total_seconds()
+            
+            logger.info(f"Inference completed in {inference_duration:.1f}s with status: {response.status_code}")
+            
+        except httpx.TimeoutException as e:
+            elapsed = (datetime.now() - start_time).total_seconds()
+            logger.error(f"Inference timeout after {elapsed:.1f}s: {str(e)}")
+            return {
+                "error": True, 
+                "stage": "inference_timeout", 
+                "message": f"Inference exceeded timeout after {elapsed:.1f}s. Try with smaller volume or different model.",
+                "elapsed_seconds": elapsed
+            }
         except Exception as e:
             logger.error(f"Inference request failed: {str(e)}")
             return {"error": True, "stage": "inference_request", "message": str(e)}
@@ -126,17 +150,18 @@ async def run_segmentation(
         "query_params": query_params,
         "sent_params": inference_params,
         "status_code": response.status_code,
+        "inference_duration_seconds": inference_duration
     }
 
     if response.status_code != 200:
         result["error"] = True
         result["server_response"] = response.text[:500] 
+        logger.error(f"Inference failed with status {response.status_code}: {response.text[:200]}")
         return result
 
-    # parse the multipart response
+    # parse the data
     logger.info("Parsing multipart response...")
     try:
-    
         content_type = response.headers.get('content-type', '')
         
         if 'multipart' not in content_type.lower():
@@ -156,10 +181,9 @@ async def run_segmentation(
                 "parts_count": len(multipart.parts)
             }
         
-        # json metadata (part 0)
+        # json part (part 0)
         try:
             json_bytes = multipart.parts[0].content
-            # Remove any leading/trailing whitespace or BOM
             json_text = json_bytes.decode('utf-8').strip()
             returned_params = json.loads(json_text)
         except UnicodeDecodeError as e:
@@ -177,8 +201,8 @@ async def run_segmentation(
         
         # segmentation bytes (part 1)
         seg_bytes = multipart.parts[1].content
+        logger.info(f"Parsed segmentation data: {len(seg_bytes)} bytes")
         
-    
         disposition = multipart.parts[1].headers.get(b'Content-Disposition', b'').decode('utf-8')
         original_filename = "segmentation.nii.gz"  # default
         if 'filename=' in disposition:
@@ -217,6 +241,7 @@ async def run_segmentation(
             "exception_type": type(e).__name__,
             "traceback": traceback.format_exc()
         })
+        logger.error(f"Multipart parsing failed: {traceback.format_exc()}")
         return result
 
     # save to MONAI Label datastore
@@ -235,6 +260,14 @@ async def run_segmentation(
         "tag": "final"  # needed for nifti conversion
     }
 
+    # extended timeout for upload as well
+    upload_timeout = httpx.Timeout(
+        connect=30.0,
+        read=120.0,    # 2 minutes for upload
+        write=120.0,   # 2 minutes to write
+        pool=30.0
+    )
+
     try:
         logger.info(f"Reading file for upload: {temp_file_path}")
         with open(temp_file_path, 'rb') as label_file:
@@ -248,15 +281,19 @@ async def run_segmentation(
         }
         
         logger.info(f"Uploading to datastore: {save_url}")
-        async with httpx.AsyncClient(timeout=None) as client:
+        
+        async with httpx.AsyncClient(timeout=upload_timeout) as client:
+            upload_start = datetime.now()
             save_resp = await client.put(save_url, params=save_params, files=save_files)
+            upload_duration = (datetime.now() - upload_start).total_seconds()
             
-            logger.info(f"Datastore save completed with status: {save_resp.status_code}")
+            logger.info(f"Datastore upload completed in {upload_duration:.1f}s with status: {save_resp.status_code}")
             
             if save_resp.status_code == 200:
                 result["saved"] = True
                 result["saved_filename"] = filename
                 result["label_id"] = save_resp.text.strip()
+                result["upload_duration_seconds"] = upload_duration
                 logger.info(f"Successfully saved to datastore with label_id: {result['label_id']}")
             else:
                 result["saved"] = False
@@ -264,12 +301,21 @@ async def run_segmentation(
                 result["save_status_code"] = save_resp.status_code
                 logger.error(f"Datastore save failed: {save_resp.text[:200]}")
 
+    except httpx.TimeoutException as e:
+        result["saved"] = False
+        result["save_error"] = f"Upload timeout: {str(e)}"
+        logger.error(f"Datastore upload timeout: {str(e)}")
     except Exception as e:
         import traceback
         result["saved"] = False
         result["save_error"] = str(e)
         result["save_traceback"] = traceback.format_exc()
-        logger.error(f"Exception during datastore save: {str(e)}")
+        logger.error(f"Exception during datastore save: {traceback.format_exc()}")
 
+    total_duration = (datetime.now() - start_time).total_seconds()
+    result["total_duration_seconds"] = total_duration
+    
     logger.info(f"=== TOOL COMPLETED at {datetime.now()} ===")
+    logger.info(f"Total execution time: {total_duration:.1f}s")
+    
     return result
