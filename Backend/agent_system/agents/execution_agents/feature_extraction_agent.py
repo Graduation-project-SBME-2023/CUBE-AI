@@ -102,10 +102,11 @@ async def main():
     from autogen_agentchat.ui import Console
     from autogen_core import CancellationToken
     
-    client = OllamaClient("qwen3-coder:480b-cloud")
+    # client = OllamaClient("qwen3-coder:480b-cloud")
 
-    # Initialize the agent using the factory method
-    agent = await FeatureExtractionAgent.create(client)
+    # # Initialize the agent using the factory method
+    # agent = await FeatureExtractionAgent.create(client)
+    agent = await FeatureExtractionAgent.create()
     
     # Now you can use the agent normally
     print(f"Agent initialized with {agent._tools} tools.")
@@ -118,8 +119,9 @@ async def main():
                 "hypothesis": "What are the most important features for determining the health of the spleen?",
                 "image_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/volumes_data",
                 "mask_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/labels_data",
+                "target_csv": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/targets.csv",
+                "target_column": "diseased",
             }
-        Can you work if I tell you the subjects with files ending in 003 are diseased, and those ending in 001 are healthy?
         """,
         cancellation_token=CancellationToken())
         )
