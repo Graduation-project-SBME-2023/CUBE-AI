@@ -140,8 +140,8 @@ class SegmentationModule:
             You operate on exactly one volume at a time.
             CRITICAL: Read the task carefully to understand which tool to use.
             If the task says "check" or "check_having_mask":
-            - Use ONLY check_having_mask tool
-            - Respond with ONLY a JSON object: {"mask_exists": true} or {"mask_exists": false}
+            - Use ONLY check_having_mask tool to check if a mask exists for the given volume and label.
+            - Respond with ONLY a JSON object: {"mask_exists": true} ONLY if the mask is for the needed label or {"mask_exists": false} if no mask or having mask but with different label.
             - DO NOT run segmentation
             If the task says "run" or "run_segmentation":
             - Use ONLY run_segmentation tool
