@@ -102,11 +102,11 @@ async def main():
     from autogen_agentchat.ui import Console
     from autogen_core import CancellationToken
     
-    # client = OllamaClient("qwen3-coder:480b-cloud")
+    client = OllamaClient("qwen3-coder:480b-cloud")
 
-    # # Initialize the agent using the factory method
-    # agent = await FeatureExtractionAgent.create(client)
-    agent = await FeatureExtractionAgent.create()
+    # Initialize the agent using the factory method
+    agent = await FeatureExtractionAgent.create(client)
+    # agent = await FeatureExtractionAgent.create()
     
     # Now you can use the agent normally
     print(f"Agent initialized with {agent._tools} tools.")
@@ -120,7 +120,8 @@ async def main():
                 "image_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/volumes_data",
                 "mask_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/labels_data",
                 "target_csv": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/targets.csv",
-                "target_column": "diseased",
+                "target_column": "target",
+                "subject_id_column": "subject_id",
             }
         """,
         cancellation_token=CancellationToken())
