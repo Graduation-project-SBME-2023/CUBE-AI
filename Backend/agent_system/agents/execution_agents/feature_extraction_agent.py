@@ -37,7 +37,7 @@ class FeatureExtractionAgent(AssistantAgent):
                 mask_dir: Directory containing the segmentation masks
                 output_dir: Directory where extracted features will be saved
                 image_types: Image preprocessing types (e.g., ["Original", "Wavelet", "LoG"]) | Optional
-                feature_classes: Feature classes to extract (e.g., ["firstorder", "shape", "glcm"]) | Optional
+                feature_classes: (must be list of strings, no thing other) Feature classes to extract (e.g., ["firstorder", "shape", "glcm"]) | Optional
                 specific_features: Specific features to extract (e.g., ["original_firstorder_Mean"]) | Optional
                 mask_labels: Specific label values to extract features for | Optional
                 image_pattern: Filename pattern to match image files | Optional
@@ -117,9 +117,9 @@ async def main():
         agent.run_stream(task="""Perform analysis, and find out the most important radiomics features for determining the health of the spleen. These are the inputs you'll need:
             {
                 "hypothesis": "What are the most important features for determining the health of the spleen?",
-                "image_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/volumes_data",
-                "mask_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/labels_data",
-                "target_csv": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/targets.csv",
+                "image_dir": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/labels_data",
+                "mask_dir": "C:/sbme 26/GP/refactored project\OHIF-Standalone\Backend/mas/memory/workspace/labels_data",
+                "target_csv": "C:/sbme 26/GP/refactored project\OHIF-Standalone\Backend/mas/memory/workspace/targets.csv",
                 "target_column": "target",
                 "subject_id_column": "subject_id",
             }
@@ -127,6 +127,6 @@ async def main():
         cancellation_token=CancellationToken())
         )
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+# if __name__ == "__main__":
+#     import asyncio
+#     asyncio.run(main())

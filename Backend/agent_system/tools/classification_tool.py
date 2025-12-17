@@ -1022,6 +1022,7 @@ from concurrent.futures import ThreadPoolExecutor
 # from your_module import PyCaretClassificationTool 
 
 async def classification_modelling(
+    input_path: str,
     experiment_name: Optional[str] = None,
     fold: Optional[int] = 2,
     session_id: Optional[int] = None,
@@ -1041,6 +1042,7 @@ async def classification_modelling(
     Asynchronously executes the full Classification Modelling pipeline.
 
     Args:
+        input_path: The path of the file of the radiomics features
         experiment_name: A unique identifier for the experiment. If not provided, a timestamped name will be generated.
         fold: The number of cross-validation folds to use during model evaluation. Defaults to 2.
         session_id: A random seed for reproducibility. If None, a random seed is generated.
@@ -1058,7 +1060,7 @@ async def classification_modelling(
     """
     
     # Hardcoded paths as per your original snippet
-    input_path = r'testing_folders\radiomic_features_label_1.csv'
+    # input_path = r'testing_folders\radiomic_features_label_1.csv'
     output_dir = r"Backend\agent_system\memory_output_logs"
     target_column = "target"
 

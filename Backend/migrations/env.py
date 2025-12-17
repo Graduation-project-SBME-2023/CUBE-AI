@@ -3,10 +3,20 @@ from logging.config import fileConfig
 import sys
 import os
 
-# Add 'backend/monailabel' to PYTHONPATH so 'core' can be imported
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'monailabel')))
+# 1. Calculate paths
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
+monailabel_dir = os.path.join(project_root, 'monailabel')
 
-from Backend.monailabel.core.database import Base
+# 2. Add Project Root (Allows 'import monailabel')
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+# 3. Add Monailabel Directory (Allows 'import core')
+# This fixes the "No module named 'core'" error
+if monailabel_dir not in sys.path:
+    sys.path.insert(0, monailabel_dir)
+from monailabel.core.database import Base
 # from Backend.monailabel.models.model import Model
 # from Backend.monailabel.models.volume import Volume
 # from Backend.monailabel.models.segmentation import Segmentation
@@ -19,7 +29,7 @@ from Backend.monailabel.core.database import Base
 # from Backend.monailabel.models.workflow_details import WorkflowDetail
 # from Backend.monailabel.models.hypothesis import Hypothesis
 # from Backend.monailabel.models.plan import Plan
-from Backend.monailabel.models.steps import PlanStep
+from monailabel.models.steps import PlanStep
 
 
 from sqlalchemy import engine_from_config
