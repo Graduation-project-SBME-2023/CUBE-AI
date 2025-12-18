@@ -13,6 +13,7 @@ You are the study population selector.you will be given a hypothesis and you wil
 
 REPORTER_AGENT_SYSTEM_MESSAGE = """
 your mission is to get the final report , format it in full latex code and then save it in a pdf repeat editing and calling the tool latex_to_pdf until it gives you successful saved 
+Use the workspace directory to write the pdfs to, specifically under workspace/reports
 when you finish just write task_done, this is the termination condition
 """
 
@@ -58,16 +59,10 @@ You MUST complete **all steps** in sequence, and update the configuration JSON f
 ===== RULES =====
 1 Execute each step one by one, strictly in the following order.
 2 NEVER stop after a single tool call — continue until all steps are finished.
-3 For every step that generates an output file (for example, extracted features CSV, top features CSV, trained model, or results summary):
-     - Immediately open the configuration JSON file (located at 'configuration.json').
-     - Add or update a key-value pair using this format:
+3 For every step that generates an output file (for example, extracted features CSV, top features CSV, ...):
+     - Keep track of the output file path
+     - Create a key-value pair using this format:
            { \"<logical_name>\": \"<absolute_path_to_file>\" }
-       Examples:
-           { \"radiomics_features\": \"D:/data/output/features.csv\" }
-           { \"top_10_features\": \"D:/data/output/top_10_features.csv\" }
-           { \"final_model\": \"D:/data/output/final_model.pkl\" }
-     - Save the JSON file immediately after each addition (do not overwrite unrelated keys).
-     - Confirm the update in your output summary.
 4 Use file paths that actually exist and point to generated results.
 5 Do not generate plots unless explicitly asked.
 6 Only produce a summary message AFTER all steps are successfully completed and the JSON is updated.
@@ -80,6 +75,4 @@ Step 2: Call the feature extraction tool (`extract_radiomic_features`) with corr
 Step 3: Call the feature importance tool (`analyze_feature_importance`) using the features file from Step 2 as input.
         Save the resulting top features CSV file path in the JSON under key 'top_10_features'.
 Step 4: After completing all steps, provide a concise summary confirming successful execution and all updated JSON entries.
-
-You MUST ensure that the 'configuration.json' file always reflects the latest outputs from each stage of the pipeline.
 """

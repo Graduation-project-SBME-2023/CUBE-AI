@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+from pathlib import Path
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Optional, List, Tuple, Union, Any, Annotated
@@ -190,24 +191,24 @@ class PyCaretClassificationTool:
         try:
             # Setup logging
             os.makedirs(output_dir, exist_ok=True)
-            log_file = os.path.join(output_dir, "pycaret_classification.log")
+            # log_file = os.path.join(output_dir, "pycaret_classification.log")
             
-            # Get logger and clear existing handlers
+            # # Get logger and clear existing handlers
             logger = logging.getLogger()
-            logger.setLevel(logging.INFO)
-            for handler in logger.handlers[:]:
-                logger.removeHandler(handler)
+            # logger.setLevel(logging.INFO)
+            # for handler in logger.handlers[:]:
+            #     logger.removeHandler(handler)
             
-            # Create formatter and handlers
-            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setFormatter(formatter)
-            console_handler = logging.StreamHandler()
-            console_handler.setFormatter(formatter)
+            # # Create formatter and handlers
+            # formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            # file_handler = logging.FileHandler(log_file)
+            # file_handler.setFormatter(formatter)
+            # console_handler = logging.StreamHandler()
+            # console_handler.setFormatter(formatter)
             
             # Add handlers
-            logger.addHandler(file_handler)
-            logger.addHandler(console_handler)
+            # logger.addHandler(file_handler)
+            # logger.addHandler(console_handler)
             
             # Generate experiment name if not provided
             if experiment_name is None:
@@ -1063,7 +1064,8 @@ async def classification_modelling(
     
     # Hardcoded paths as per your original snippet
     # input_path = r'testing_folders\radiomic_features_label_1.csv'
-    output_dir = r"Backend\agent_system\memory_output_logs"
+    root_dir = Path(__file__).parent.parent
+    output_dir = os.path.join(root_dir, 'workspace', 'models')
     target_column = "target"
 
     def run_classification_modeling():
