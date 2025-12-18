@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
+from uuid import UUID
 
 class RadiomicsBase(BaseModel):
    
@@ -10,7 +11,7 @@ class RadiomicsCreate(RadiomicsBase):
     pass
 
 class Radiomics(RadiomicsBase):
-    id: int
+    id: UUID
     created_at: datetime | None = None  # ISO format date-time
 
     class Config:

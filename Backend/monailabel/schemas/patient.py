@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date, datetime
-
+from uuid import UUID
 class PatientBase(BaseModel):
     name: str
     birth_date: Optional[date] = None  # ISO format date
@@ -17,7 +17,7 @@ class PatientUpdate(BaseModel):
 
 
 class Patient(PatientBase):
-    patient_id: int
+    patient_id: UUID
     created_at: datetime | None = None  # ISO format date-time
     age: Optional[int] = None
 

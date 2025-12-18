@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
 class ModelBase(BaseModel):
     
@@ -20,7 +21,7 @@ class ModelUpdate(BaseModel):
     types: Optional[list[str]] = None
 
 class Model(ModelBase):
-    model_id: int
+    model_id: UUID
     created_at: datetime | None = None
     class Config:
         orm_mode = True
