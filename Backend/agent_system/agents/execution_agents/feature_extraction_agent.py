@@ -35,7 +35,6 @@ class FeatureExtractionAgent(AssistantAgent):
             Args:
                 image_dir: Directory containing the medical images
                 mask_dir: Directory containing the segmentation masks
-                output_dir: Directory where extracted features will be saved
                 image_types: Image preprocessing types (e.g., ["Original", "Wavelet", "LoG"]) | Optional
                 specific_features: Specific features to extract (e.g., ["original_firstorder_Mean"]) | Optional
                 mask_labels: Specific label values to extract features for | Optional
@@ -68,7 +67,6 @@ class FeatureExtractionAgent(AssistantAgent):
         
             Args:
                 input_path: Path to input CSV file
-                output_dir: Directory to save results
                 target_column: Target column name for prediction
                 task_type: 'classification' or 'regression' (auto-detected if None)
                 method: Feature selection method ('rf', 'f_test', 'mutual_info', 'rfe')

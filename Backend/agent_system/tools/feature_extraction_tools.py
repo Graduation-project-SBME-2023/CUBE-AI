@@ -10,6 +10,7 @@ import tempfile
 import traceback
 import ast
 from typing import Optional, List, Dict, Tuple, Union, Any
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -2199,9 +2200,7 @@ class FeatureImportanceAnalysisTool:
 
 async def extract_radiomic_features(
             image_dir: str,
-            mask_dir: str,
-            output_dir: str,
-            feature_classes: Union[str, List[str]] = None,     # change original to union as function wraper add constrains to it
+            mask_dir: str,    # change original to union as function wraper add constrains to it
             specific_features: Union[str, List[str]] = None,   
             image_types: Union[str, List[str]] = "Original",   
             normalize: bool = True,
@@ -2225,13 +2224,14 @@ async def extract_radiomic_features(
             except Exception:
                 return [value]
         return value
-    
+    root_dir = Path(__file__).parent.parent
+    output_dir = os.path.join(root_dir, 'workspace', 'features')
     def run_extraction():
         kwargs = dict(
             image_dir=image_dir,
             mask_dir=mask_dir,
             output_dir=output_dir,
-            feature_classes=feature_classes,
+            feature_classes=None,
             specific_features=specific_features,
             image_types=image_types,
             normalize=normalize,
@@ -2247,7 +2247,7 @@ async def extract_radiomic_features(
             })
         return PyRadiomicsFeatureExtractionTool().forward(**kwargs)
 
-    feature_classes = safe_parse(feature_classes)
+    # feature_classes = safe_parse(feature_classes)
     specific_features = safe_parse(specific_features)
     image_types = safe_parse(image_types)
 
@@ -2258,7 +2258,6 @@ async def extract_radiomic_features(
 
 async def analyze_feature_importance(
     input_path: str,
-    output_dir: str,
     target_column: str,
     task_type: Optional[str] = None,
     method: Optional[str] = "rf",
@@ -2275,6 +2274,8 @@ async def analyze_feature_importance(
         top_features_str = ",".join(map(str, top_features))
     else:
         top_features_str = str(top_features)
+        
+    output_dir = os.path.join(os.path.dirname(__file__), 'agent_system', 'workspace', 'features')
 
     def run_analysis():
         kwargs = dict(

@@ -1,18 +1,30 @@
 import asyncio
 import sys
 import os
-import logging  # Import logging module
+import logging
+from datetime import datetime
 
-# 1. Setup Logging BEFORE other imports or code execution
-# This captures logs from all imported modules (AutoGen, your agents, etc.)
-logging.basicConfig(
-    level=logging.INFO,  # Capture INFO, WARNING, ERROR, CRITICAL
-    format='%(asctime)s | %(name)s | %(levelname)s | %(message)s',
-    handlers=[
-        logging.FileHandler("experiment_run.log", mode='w', encoding='utf-8'), # Log to file
-        logging.StreamHandler(sys.stdout) # Also print to console (optional)
-    ]
-)
+def setup_logging():
+    log_dir = os.path.join(os.path.dirname(__file__), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_file = os.path.join(log_dir, f"execution_{timestamp}.log")
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        handlers=[
+            logging.FileHandler(log_file, mode="w", encoding='utf-8'),
+            logging.StreamHandler(sys.stdout)
+        ],
+        force=True,
+    )
+
+    logging.info(f"Logging initialized: {log_file}")
+    return log_file
+
+setup_logging()
 
 # Optional: Silence overly verbose libraries if needed (e.g., http requests)
 # logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -36,7 +48,7 @@ from agents.execution_agents.reporter_agent import ReporterAgent
 
 async def main() -> None:
     # 1. Initialize the raw agents
-    seg_agent = await SegmentationAgent.create()
+    # seg_agent = await SegmentationAgent.create()
     feat_agent = await FeatureExtractionAgent.create()
     model_agent = await ModelingAgent.create()
     report_agent = await ResultReporterAgent.create()
@@ -78,16 +90,16 @@ async def main() -> None:
     )
 
     builder = DiGraphBuilder()
-    builder.add_node(seg_agent)
-    builder.add_node(filtered_feat_agent)
+    # builder.add_node(seg_agent)
+    builder.add_node(feat_agent)
     builder.add_node(filtered_model_agent)
     builder.add_node(filtered_report_agent)
     builder.add_node(filtered_latex_agent)
 
 
-    builder.add_edge(seg_agent, filtered_feat_agent)
+    # builder.add_edge(seg_agent, filtered_feat_agent)
     
-    builder.add_edge(filtered_feat_agent, filtered_model_agent)
+    builder.add_edge(feat_agent, filtered_model_agent)
     
     builder.add_edge(filtered_model_agent, filtered_report_agent)
     
@@ -99,10 +111,10 @@ async def main() -> None:
         graph=builder.build()
     )
 
-    task_prompt = """start the radiomics pipeline
-                "image_dir": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/labels_data",
-                "mask_dir": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/labels_data",
-                "target_csv": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/targets.csv",
+    task_prompt = """Check what Radiomic features best predict the health of the spleen. The data is already downloaded and ready in the following manner.
+                "image_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/volumes_data",
+                "mask_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/labels_data",
+                "target_csv": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/targets.csv",
                 "target_label_name": "target"""
 
     print("--- Starting GraphFlow Pipeline ---")
@@ -113,9 +125,9 @@ if __name__ == "__main__":
 
 
 
-task_prompt = """start the radiomics pipeline
-                "image_dir": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/labels_data",
-                "mask_dir": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/labels_data",
-                "target_csv": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/targets.csv",
-                "target_label_name": "target"
-                """
+# task_prompt = """start the radiomics pipeline
+#                 "image_dir": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/labels_data",
+#                 "mask_dir": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/labels_data",
+#                 "target_csv": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/targets.csv",
+#                 "target_label_name": "target"
+#                 """
