@@ -14,6 +14,6 @@ class OllamaClient(OllamaChatCompletionClient):
                 "family": "unknown",
                 
             }
-        super().__init__(model=model, model_info=model_info)
+        super().__init__(model=model, model_info=model_info, options={"num_ctx": 16384})
         self._model = model
         self._model_info = model_info

@@ -22,8 +22,8 @@ from autogen_agentchat.agents import AssistantAgent
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 import os
 
-from agent_registry import agents_description_for_prompt
-from socket_store import manager, send_ws_message, wait_for_user_message
+from .agent_registry import agents_description_for_prompt
+from .socket_store import manager, send_ws_message, wait_for_user_message
 
 # ============================== CLIENT ==============================
 
