@@ -205,7 +205,7 @@ class SegmentationModule:
             selected_auto_model = plan["automatic_models"][0]
             await self._run_automatic(eligible_volumes, target_labels, selected_auto_model)
 
-        else:
+        elif eligible_volumes:
             await self._run_interactive(target_labels)
             
         # finally download the volumes with its label masks 
