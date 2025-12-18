@@ -1,7 +1,7 @@
 from datetime import datetime
 from pydantic import BaseModel
 from typing import List, Optional
-
+from uuid import UUID
 # --- Chat Message Schemas ---
 class ChatMessageBase(BaseModel):
     role: str
@@ -12,8 +12,8 @@ class ChatMessageCreate(ChatMessageBase):
     pass
 
 class ChatMessage(ChatMessageBase):
-    message_id: int
-    chat_id: int
+    message_id: UUID
+    chat_id: UUID
     timestamp: datetime
 
     class Config:
