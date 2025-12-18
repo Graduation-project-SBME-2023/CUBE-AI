@@ -304,41 +304,67 @@ class SegmentationModule:
     async def _run_interactive(self, labels: List[str]):
         logger.info(f"Starting interactive segmentation guidance for labels: {labels}")
         
-        # intial guide
-        await self.UserFallbackAgent.run(
-            task={
-                "labels": labels,
-                "instruction": (
-                    "Guide the user through interactive segmentation. "
-                    "Explain available models and parameters. "
-                    "The user can ask questions one by one. "
-                    "Terminate the session once the user has no further questions."
+        # console 
+        logger.info("Providing initial guidance to user...")
+        await Console(
+            self.UserFallbackAgent.run_stream(
+                task=(
+                    f"Guide the user through interactive segmentation for these labels: {labels}. "
+                    "Explain available interactive segmentation models and their parameters. "
+                    "answer there question precisely and also provide precise overview unless they ask for details"
+                    "Tell the user they can ask questions, or press Enter if they have no more questions."
+                    "terminare when they confirm that they make all masks needed you need to check this."
                 )
-            }
+            )
         )
 
-        logger.info("Entering console UserProxy loop for interactive guidance")
-
+        logger.info("Entering interactive Q&A loop")
+        
         loop = asyncio.get_running_loop()
 
         while True:
             user_input = await loop.run_in_executor(
-                None, input, "User (press Enter if no more questions)> "
+                None, input, "\nUser (type your question, or press Enter to finish)> "
             )
 
             if not user_input.strip():
-                logger.info("User has no more questions. Terminating interactive session.")
+                logger.info("User pressed Enter with no input - terminating session")
+                print("\nInteractive session ended.\n")
+                break
+            
+            # termination words
+            exit_phrases = ["done", "finish", "finished", "no more", "that's all", "exit", "quit", "bye", "complete"]
+            if any(phrase in user_input.lower() for phrase in exit_phrases):
+                logger.info(f"User indicated completion: '{user_input}'")
+                print("\ Great! Interactive session completed.\n")
                 break
 
-            await self.UserProxy.send(user_input)
-            logger.info(f"[User] {user_input}")
-
-            response = await self.UserFallbackAgent.run(
-                task={"user_question": user_input}
+            logger.info(f"[User Input] {user_input}")
+            
+            task_message = (
+                f"The user asked: \"{user_input}\"\n\n"
+                f"Context: We are guiding them through interactive segmentation for labels: {labels}\n\n"
+                "Please provide a concise answer to their specific question. "
+                "Do NOT repeat previous answers or conversation history."
             )
 
-            print(f"UserFallbackAgent> {response.content}")
-            logger.info(f"[UserFallbackAgent Response] {response.content}")
+            try:
+                print("\nUserFallbackAgent> ", end="", flush=True)
+                
+                full_response = ""
+                async for message in self.UserFallbackAgent.run_stream(task=task_message):
+                    if hasattr(message, 'content') and message.content:
+                        print(message.content, end="", flush=True)
+                        full_response += message.content
+                
+                print("\n") 
+                
+                logger.info(f"[Agent Response] {full_response}")
+                
+            except Exception as e:
+                logger.error(f"Error during interactive response: {e}", exc_info=True)
+                print(f"\n Error: {str(e)}\n")
+                break
 
         logger.info("Interactive session completed.")
 
