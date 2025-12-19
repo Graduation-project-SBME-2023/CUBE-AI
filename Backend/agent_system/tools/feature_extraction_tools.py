@@ -212,23 +212,23 @@ class PyRadiomicsFeatureExtractionTool:
             
             # Set up logging
             os.makedirs(output_dir, exist_ok=True)
-            log_file = os.path.join(output_dir, "radiomics_extraction.log")
+            # log_file = os.path.join(output_dir, "radiomics_extraction.log")
             
-            # Reset the root logger to prevent duplicate logging
-            root_logger = logging.getLogger()
-            if root_logger.handlers:
-                for handler in root_logger.handlers[:]:
-                    root_logger.removeHandler(handler)
+            # # Reset the root logger to prevent duplicate logging
+            # root_logger = logging.getLogger()
+            # if root_logger.handlers:
+            #     for handler in root_logger.handlers[:]:
+            #         root_logger.removeHandler(handler)
                     
-            # Configure logging with basicConfig (affects the global state)
-            logging.basicConfig(
-                level=logging.INFO,
-                format='%(asctime)s - %(levelname)s - %(message)s',
-                handlers=[
-                    logging.FileHandler(log_file),
-                    logging.StreamHandler()
-                ]
-            )
+            # # Configure logging with basicConfig (affects the global state)
+            # logging.basicConfig(
+            #     level=logging.INFO,
+            #     format='%(asctime)s - %(levelname)s - %(message)s',
+            #     handlers=[
+            #         logging.FileHandler(log_file),
+            #         logging.StreamHandler()
+            #     ]
+            # )
             
             # Use the root logger
             logger = logging.getLogger()
@@ -407,7 +407,7 @@ class PyRadiomicsFeatureExtractionTool:
                         target_value,
                         i + 1,
                         len(image_mask_pairs),
-                        log_file  # Pass log file path to enable logging in subprocess
+                        # log_file  # Pass log file path to enable logging in subprocess
                     ))
                 
                 # Execute in parallel
@@ -483,7 +483,7 @@ class PyRadiomicsFeatureExtractionTool:
                 "num_subjects": len(image_mask_pairs),
                 "num_features": feature_counts,
                 "mask_labels": mask_labels,
-                "log_file": log_file,
+                # "log_file": log_file,
                 "params_file": params_file,
                 "processing_time_seconds": processing_time
             }
@@ -862,17 +862,17 @@ class PyRadiomicsFeatureExtractionTool:
         target_value,
         subject_index,
         total_subjects,
-        log_file
+        # log_file
     ):
         """Process a single subject in parallel mode"""
         # Set up basic logging for the subprocess
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file)
-            ]
-        )
+        # logging.basicConfig(
+        #     level=logging.INFO,
+        #     format='%(asctime)s - %(levelname)s - %(message)s',
+        #     handlers=[
+        #         logging.FileHandler(log_file)
+        #     ]
+        # )
         
         # Use the root logger
         logger = logging.getLogger()
@@ -1076,8 +1076,8 @@ class FeatureImportanceAnalysisTool:
         os.makedirs(output_dir, exist_ok=True)
         
         # Set up logger and log file
-        log_file = os.path.join(output_dir, "feature_importance_analysis.log")
-        logger = self._setup_logging(log_file)
+        # log_file = os.path.join(output_dir, "feature_importance_analysis.log")
+        logger = self._setup_logging()
         
         try:
             logger.info(f"Starting feature importance analysis for {input_path}")
@@ -1120,7 +1120,7 @@ class FeatureImportanceAnalysisTool:
                 "method": method,
                 "result_files": result_files,
                 "feature_count": X.shape[1],
-                "log_file": log_file
+                # "log_file": log_file
             }
             
         except Exception as e:
@@ -1131,7 +1131,7 @@ class FeatureImportanceAnalysisTool:
                 "error_message": error_msg,
                 "input_path": input_path,
                 "output_dir": output_dir,
-                "log_file": log_file
+                # "log_file": log_file
             }
     
     def _validate_parameters(self, input_path, output_dir, target_column, task_type, method, 
@@ -1173,7 +1173,7 @@ class FeatureImportanceAnalysisTool:
         if not re.match(r'^(\d+,)*\d+$', top_features):
             raise ValueError(f"Invalid top_features format: {top_features}. Must be comma-separated integers (e.g., '10,50,100')")
     
-    def _setup_logging(self, log_file):
+    def _setup_logging(self):
         """
         Set up a logger specific to this instance to avoid modifying the root logger.
         
@@ -1184,22 +1184,22 @@ class FeatureImportanceAnalysisTool:
             Logger instance
         """
         # Create logger with unique name
-        logger_name = f"feature_importance_{os.path.basename(log_file)}_{id(self)}"
+        logger_name = f"feature_importance_{id(self)}"
         logger = logging.getLogger(logger_name)
         logger.setLevel(logging.INFO)
         
         # Remove all existing handlers to avoid duplicates
-        for handler in logger.handlers[:]:
-            logger.removeHandler(handler)
+        # for handler in logger.handlers[:]:
+        #     logger.removeHandler(handler)
         
-        # Create file handler
-        file_handler = logging.FileHandler(log_file, mode='w')  # 'w' mode to overwrite existing log
-        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        logger.addHandler(file_handler)
+        # # Create file handler
+        # file_handler = logging.FileHandler(log_file, mode='w')  # 'w' mode to overwrite existing log
+        # file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        # logger.addHandler(file_handler)
         
-        # Make logger not propagate messages to parent loggers (root)
-        # This prevents duplicate logs
-        logger.propagate = False
+        # # Make logger not propagate messages to parent loggers (root)
+        # # This prevents duplicate logs
+        # logger.propagate = False
         
         return logger
     
@@ -2275,7 +2275,8 @@ async def analyze_feature_importance(
     else:
         top_features_str = str(top_features)
         
-    output_dir = os.path.join(os.path.dirname(__file__), 'agent_system', 'workspace', 'features')
+    root_dir = Path(__file__).parent.parent
+    output_dir = os.path.join(root_dir, 'workspace', 'features')
 
     def run_analysis():
         kwargs = dict(
