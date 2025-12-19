@@ -1,10 +1,11 @@
 from pydantic import BaseModel, validator
 from datetime import date, datetime
 from typing import Optional
+from uuid import UUID
 
 class StudyBase(BaseModel):
     study_uid: str
-    patient_id: int
+    patient_id: UUID
     description: Optional[str] = None
     modality: Optional[str] = None
     created_at: Optional[date] = None  # ISO format date-time
