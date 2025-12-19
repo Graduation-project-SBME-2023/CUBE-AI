@@ -53,7 +53,7 @@ original_lifespan = monai_server_app.router.lifespan_context
 @asynccontextmanager
 async def lifespan(app):
     print("[INFO] 🧹 Running database seeders...")
-    all_seeders()  # sync seeders
+    # all_seeders()  # sync seeders
 
     print("[INFO] 🚀 Running initial Orthanc sync...")
     async with AsyncSessionLocal() as db:

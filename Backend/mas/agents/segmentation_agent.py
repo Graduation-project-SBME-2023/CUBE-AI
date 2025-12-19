@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import sys
 import time
+import nibabel as nib
 from typing import Dict, Any, Union, List
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 import asyncio
@@ -19,6 +20,7 @@ from autogen_core import CancellationToken
 from autogen_agentchat.teams import SelectorGroupChat
 from autogen_agentchat.conditions import TextMentionTermination
 from autogen_agentchat.base import TaskResult
+import numpy as np
 import json
 import logging
 from dotenv import load_dotenv

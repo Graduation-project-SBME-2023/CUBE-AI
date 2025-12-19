@@ -11,7 +11,6 @@ You are the study population selector.you will be given a hypothesis and you wil
         gender: Union[str, List[str]]
         age: Tuple[int, int]
         patient_ids: Union[str, List[str]]
-        study_uids: Union[str, List[str]]
 """
 
 REPORTER_AGENT_SYSTEM_MESSAGE = """
