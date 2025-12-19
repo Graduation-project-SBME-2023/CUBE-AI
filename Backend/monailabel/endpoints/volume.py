@@ -1,4 +1,4 @@
-from schemas.study import Study
+from schemas.study import StudyRead
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from schemas.volume import Volume, VolumeCreate, VolumeUpdate
@@ -30,7 +30,7 @@ async def update_volume_endpoint(
     updated_volume = await update_volume(db, volume_series_instance_uid, updates)
     return updated_volume
 
-@router.delete("/{volume_series_instance_uid}", response_model=Volume)
+@router.delete("/{volume_series_instance_uid}")
 async def delete_volume_endpoint(volume_series_instance_uid: str, db: Session = Depends(get_db)):
     deleted_volume = await delete_volume(db, volume_series_instance_uid)
     return deleted_volume
@@ -52,7 +52,7 @@ async def search_volumes_endpoint(
 async def count_volumes(study_uid: str, db: Session = Depends(get_db)):
     return {"study_uid": study_uid, "volume_count": await count_volumes_by_study(db, study_uid)}
 
-@router.get("/{volume_series_instance_uid}/study", response_model=Study)
+@router.get("/{volume_series_instance_uid}/study", response_model=StudyRead)
 async def read_study_by_volume(
     volume_series_instance_uid: str,
     db: Session = Depends(get_db)
