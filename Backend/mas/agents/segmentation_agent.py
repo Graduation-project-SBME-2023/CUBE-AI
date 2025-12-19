@@ -383,8 +383,8 @@ class SegmentationModule:
 
         DOWNLOAD_DIR_IMG = os.path.join(current_dir, "apps", "radiology", "General_Data")
         DOWNLOAD_DIR_LABEL = os.path.join(current_dir, "apps", "radiology", "Labels")
-        FINAL_DIR_IMG = os.path.join(current_dir, "agent_system", "workspace", "volumes")
-        FINAL_DIR_LABEL = os.path.join(current_dir, "agent_system", "workspace", "masks")
+        FINAL_DIR_IMG = os.path.join(current_dir, "mas", "memory", "workspace", "volumes_data")
+        FINAL_DIR_LABEL = os.path.join(current_dir, "mas", "memory", "workspace", "labels_data")
 
         os.makedirs(DOWNLOAD_DIR_IMG, exist_ok=True)
         os.makedirs(DOWNLOAD_DIR_LABEL, exist_ok=True)
@@ -501,38 +501,56 @@ class SegmentationModule:
                 logger.info(f"Moved volume: {fname}")
             logger.info(f"Total volumes moved: {len(moved)}")
             return moved
-
         def move_and_rename_labels(src_dir, dst_dir, label_uids, volume_uids):
             """
-            Move label files and rename them to match their corresponding volume UIDs.
-            This ensures labels have the same filename as their associated volumes.
+            Move label files, convert {0,255} -> {0,1}, and rename them
+            to match their corresponding volume UIDs.
             """
             if not label_uids or not volume_uids:
                 logger.warning("Empty label or volume UID lists")
                 return
-            
-            logger.info(f"Moving and renaming {len(label_uids)} labels to match volume UIDs")
+
+            logger.info(f"Moving, renaming, and normalizing {len(label_uids)} labels")
             moved_count = 0
-            
+
             for label_uid, volume_uid in zip(label_uids, volume_uids):
-                # Find the file containing the label UID
                 label_file = None
                 for fname in os.listdir(src_dir):
                     if label_uid in fname and fname.lower().endswith(".nii.gz"):
                         label_file = fname
                         break
-                
-                if label_file:
-                    src_path = os.path.join(src_dir, label_file)
-                    # Rename to match volume UID exactly
-                    dst_path = os.path.join(dst_dir, f"{volume_uid}.nii.gz")
-                    shutil.move(src_path, dst_path)
-                    moved_count += 1
-                    logger.info(f" Renamed label: {label_file} -> {volume_uid}.nii.gz")
-                else:
+
+                if not label_file:
                     logger.warning(f"Label file not found for UID: {label_uid}")
-            
-            logger.info(f"Total labels moved and renamed: {moved_count}/{len(label_uids)}")
+                    continue
+
+                src_path = os.path.join(src_dir, label_file)
+                dst_path = os.path.join(dst_dir, f"{volume_uid}.nii.gz")
+
+                try:
+                    nii = nib.load(src_path)
+                    data = nii.get_fdata()
+
+                    unique_vals = np.unique(data)
+                    logger.info(f"Label {label_file} unique values before: {unique_vals}")
+
+                    # convert {0,255} → {0,1}
+                    if np.max(data) == 255:
+                        data = (data > 0).astype(np.uint8)
+                        logger.info(f"Converted label {label_file} from {{0,255}} to {{0,1}}")
+                    # the new updated one    
+                    new_nii = nib.Nifti1Image(data, affine=nii.affine, header=nii.header)
+                    nib.save(new_nii, dst_path)
+
+                    os.remove(src_path)
+
+                    moved_count += 1
+                    logger.info(f" Renamed + normalized label → {volume_uid}.nii.gz")
+
+                except Exception as e:
+                    logger.error(f"Error processing label {label_file}: {e}")
+
+            logger.info(f"Total labels moved and normalized: {moved_count}/{len(label_uids)}")
 
         # Main pairing logic
         volumes_to_download = []
