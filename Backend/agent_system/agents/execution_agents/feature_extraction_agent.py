@@ -33,23 +33,14 @@ class FeatureExtractionAgent(AssistantAgent):
             Features are extracted for each label and saved separately to CSV files.
         
             Args:
-                image_dir: Directory containing the medical images
-                mask_dir: Directory containing the segmentation masks
                 image_types: Image preprocessing types (e.g., ["Original", "Wavelet", "LoG"]) | Optional
                 specific_features: Specific features to extract (e.g., ["original_firstorder_Mean"]) | Optional
-                mask_labels: Specific label values to extract features for | Optional
-                image_pattern: Filename pattern to match image files | Optional
-                mask_pattern: Filename pattern to match mask files | Optional
                 normalize: Whether to normalize image intensities | Optional
                 bin_width: Bin width for discretizing image intensities | Optional
                 resample: Whether to resample the image | Optional
                 pixel_spacing: Target pixel spacing for resampling [x, y, z] | Optional
                 force_2d: Whether to extract features in 2D mode | Optional
                 n_workers: Number of parallel workers | Optional
-                targets_csv: Path to CSV with target values | Optional
-                id_column: Name of ID column in targets CSV | Optional
-                target_column: Name of target column in targets CSV | Optional
-                id_pattern: Regex pattern to extract subject ID from filenames | Optional
                 
             Returns:
                 Dictionary with feature extraction results and file paths

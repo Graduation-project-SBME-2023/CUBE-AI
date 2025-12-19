@@ -116,7 +116,7 @@ async def main() -> None:
     task_prompt = """Check what Radiomic features best predict the health of the spleen. The data is already downloaded and ready in the following manner.
                 "image_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/volumes",
                 "mask_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/masks",
-                "target_csv": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/target.csv",
+                "target_csv": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/targets.csv",
                 "target_label_name": "target"""
 
     print("--- Starting GraphFlow Pipeline ---")

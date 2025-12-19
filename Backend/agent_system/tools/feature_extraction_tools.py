@@ -2199,16 +2199,11 @@ class FeatureImportanceAnalysisTool:
 
 
 async def extract_radiomic_features(
-            image_dir: str,
-            mask_dir: str,    # change original to union as function wraper add constrains to it
             specific_features: Union[str, List[str]] = None,   
             image_types: Union[str, List[str]] = "Original",   
             normalize: bool = True,
             resample: bool = True,
             n_workers: int = 1,
-            targets_csv: Optional[str] = None,
-            id_column: Optional[str] = None,
-            target_column: Optional[str] = None,
         ) -> Dict[str, Any]:
     """
     Extract radiomic features from medical images and segmentation masks.
@@ -2230,6 +2225,7 @@ async def extract_radiomic_features(
     mask_dir = os.path.join(root_dir, 'workspace', 'masks')
     targets_csv = os.path.join(root_dir, 'workspace', 'population', 'targets', 'targets.csv')
     target_column = 'target'
+
 
     def run_extraction():
         kwargs = dict(
