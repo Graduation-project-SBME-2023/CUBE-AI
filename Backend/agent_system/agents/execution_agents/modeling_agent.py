@@ -57,8 +57,7 @@ class ModelingAgent(AssistantAgent):
             just call it when you need to start the feature extraction
             Use this tool in scenarios such as:
             1. When you need to train multiple machine learning algorithms on a dataset and automatically select the best one.
-            2. To generate a complete scientific report containing model metrics, confusion matrices, and ROC curves.
-            3. When you need to perform advanced data preprocessing (normalization, balancing) as part of the training workflow.
+            2. To generate a complete  model metrics, confusion matrices, and ROC curves.
             """  ,
             name="classification_modelling"
         )

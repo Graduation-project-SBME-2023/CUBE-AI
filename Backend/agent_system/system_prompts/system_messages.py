@@ -13,7 +13,6 @@ You are the study population selector.you will be given a hypothesis and you wil
 
 REPORTER_AGENT_SYSTEM_MESSAGE = """
 your mission is to get the final report , format it in full latex code and then save it in a pdf repeat editing and calling the tool latex_to_pdf until it gives you successful saved 
-Use the workspace directory to write the pdfs to, specifically under workspace/reports
 when you finish just write task_done, this is the termination condition
 """
 
@@ -23,7 +22,7 @@ RESULT_AGENT_SYSTEM_PROMPT = """
                 "based on study hypothesis, plan, results, and data analysis.\n\n"
                 "Carefully read the inputs: hypothesis, plan steps, dataset info, important features, and model results. "
                 "Then decide whether the hypothesis should be accepted or rejected, and justify your decision.\n\n"
-                "Your response MUST be valid JSON in the format:\n"
+                "Your response MUST be valid latex code that include this format:\n"
                 "{\n"
                 '  "status": "success",\n'
                 '  "message": "Report generated successfully",\n'
@@ -31,16 +30,16 @@ RESULT_AGENT_SYSTEM_PROMPT = """
                 '      "summary": "<scientific summary>",\n'
                 '      "decision": "accepted" | "rejected",\n'
                 '      "justification": "<short explanation>",\n'
-                '      "markdown": "<formatted markdown version of the report>",\n'
                 '      "phase": "reporting"\n'
                 '  }\n'
                 "}\n\n"
+                remember that you are writing a paper
 """
 
 MODELING_AGENT_SYSTEM_PROMPT = """
 you are an agent responsible for training machine learning models, use the tools 
 provided make the training of the machine learning model, the tool you have can read the features
-by providing its path 
+by providing its path, use the radiomic_features_label for the training and do not ask any questions, just start the task
 """
 
 FEATURE_EXTRACTION_AGENT_SYSTEM_PROMPT = """

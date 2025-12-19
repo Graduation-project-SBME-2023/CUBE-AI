@@ -73,7 +73,7 @@ class SegmentationAgent(AssistantAgent):
         ]
         name = "segmentation_agent"
         description = "agent to run the segmentation task, has the capability to know which volumes to segment by itself"
-        system_message = "to start the task of the segmentation, all you need to do just run the tool you have"
+        system_message = "to start the task of the segmentation, all you need to do just run the tool you have, do not ask any questions"
         return cls(
             name = name,
             model_client = model_client,

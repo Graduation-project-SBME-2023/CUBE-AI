@@ -2223,7 +2223,7 @@ async def extract_radiomic_features(
     output_dir = os.path.join(root_dir, 'workspace', 'features')
     image_dir = os.path.join(root_dir, 'workspace', 'volumes')
     mask_dir = os.path.join(root_dir, 'workspace', 'masks')
-    targets_csv = os.path.join(root_dir, 'workspace', 'population', 'targets', 'targets.csv')
+    targets_csv = os.path.join(root_dir, 'workspace', 'populations', 'targets', 'targets.csv')
     target_column = 'target'
 
 
