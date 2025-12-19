@@ -2228,6 +2228,9 @@ async def extract_radiomic_features(
     output_dir = os.path.join(root_dir, 'workspace', 'features')
     image_dir = os.path.join(root_dir, 'workspace', 'volumes')
     mask_dir = os.path.join(root_dir, 'workspace', 'masks')
+    targets_csv = os.path.join(root_dir, 'workspace', 'population', 'targets', 'targets.csv')
+    target_column = 'target'
+
     def run_extraction():
         kwargs = dict(
             image_dir=image_dir,
@@ -2279,6 +2282,7 @@ async def analyze_feature_importance(
         
     root_dir = Path(__file__).parent.parent
     output_dir = os.path.join(root_dir, 'workspace', 'features')
+    target_column = 'target'
 
     def run_analysis():
         kwargs = dict(
