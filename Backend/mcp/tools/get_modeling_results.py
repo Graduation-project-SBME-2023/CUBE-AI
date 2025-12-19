@@ -22,13 +22,15 @@ def get_modeling_results(
     try:
         # 1. Resolve Paths
         current_dir = Path(__file__).resolve().parent
-        logging_path = current_dir.parent.parent / "agent_system" / "memory_output_logs"
+        logging_path = current_dir.parent.parent / "agent_system" / "workspace"
 
         # Map modes to specific files (or all of them)
         all_files = {
-            "features": logging_path / "top_10_features.csv",
-            "tuning": logging_path / "tuned_model_1_results.csv",
-            "evaluation": logging_path / "independent_eval_results_tuned_model_1.csv"
+            "features": logging_path / "features" / "top_10_features.csv",
+            # "tuning": logging_path / "model_1_results.csv",
+            "evaluation": logging_path / "models" / "model_1" / "independent_eval_results_model_1.csv",
+            "comparisons": logging_path / "models" / "model_comparison_results.csv",
+            "summary": logging_path / "models" / "model_summary.csv"
         }
 
         # Select which files to read based on the 'mode' argument

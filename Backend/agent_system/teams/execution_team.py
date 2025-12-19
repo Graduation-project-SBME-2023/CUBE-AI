@@ -3,9 +3,11 @@ import sys
 import os
 import logging
 from datetime import datetime
+from pathlib import Path
 
 def setup_logging():
-    log_dir = os.path.join(os.path.dirname(__file__), "logs")
+    root_dir = Path(__file__).parent.parent
+    log_dir = os.path.join(root_dir, "logs")
     os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -40,7 +42,7 @@ from autogen_agentchat.ui import Console
 from clients.ollamaClient import OllamaClient
 
 # Import your existing custom agent classes
-from agents.execution_agents.segmentation_agent import SegmentationAgent
+# from agents.execution_agents.segmentation_agent import SegmentationAgent
 from agents.execution_agents.feature_extraction_agent import FeatureExtractionAgent
 from agents.execution_agents.modeling_agent import ModelingAgent
 from agents.execution_agents.result_reporter_agent import ResultReporterAgent
@@ -112,9 +114,9 @@ async def main() -> None:
     )
 
     task_prompt = """Check what Radiomic features best predict the health of the spleen. The data is already downloaded and ready in the following manner.
-                "image_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/volumes_data",
-                "mask_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/labels_data",
-                "target_csv": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/targets.csv",
+                "image_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/volumes",
+                "mask_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/masks",
+                "target_csv": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/target.csv",
                 "target_label_name": "target"""
 
     print("--- Starting GraphFlow Pipeline ---")
