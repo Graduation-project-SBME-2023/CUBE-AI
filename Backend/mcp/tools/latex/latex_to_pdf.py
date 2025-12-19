@@ -9,7 +9,7 @@ from typing import Annotated
 @mcp.tool()
 async def latex_to_pdf(
     latex_text: Annotated[str, Field(description="The complete LaTeX source code content, including the preamble and document body, to be compiled.")] ,
-    output_filename: Annotated[str, Field(description="The destination file path or name where the generated PDF should be saved (e.g., 'report.pdf').")]
+    output_filename: Annotated[str, Field(description="The file name where the generated PDF should be saved, without the path (e.g., 'report.pdf').")]
 ) -> str: 
     """
     Compiles LaTeX source code into a PDF document using pdflatex.
@@ -31,7 +31,8 @@ async def latex_to_pdf(
                 ["pdflatex", "-interaction=nonstopmode", tex_path],
                 cwd=temp,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stderr=subprocess.PIPE,
+                timeout=20.0
             )
 
             # Check for compilation errors

@@ -1,7 +1,6 @@
 featureClass:
   firstorder: []
   glcm: []
-  gldm: []
   glrlm: []
   glszm: []
   ngtdm: []

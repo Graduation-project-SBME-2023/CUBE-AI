@@ -42,7 +42,7 @@ from autogen_agentchat.ui import Console
 from clients.ollamaClient import OllamaClient
 
 # Import your existing custom agent classes
-# from agents.execution_agents.segmentation_agent import SegmentationAgent
+from agents.execution_agents.segmentation_agent import SegmentationAgent
 from agents.execution_agents.feature_extraction_agent import FeatureExtractionAgent
 from agents.execution_agents.modeling_agent import ModelingAgent
 from agents.execution_agents.result_reporter_agent import ResultReporterAgent
@@ -50,7 +50,7 @@ from agents.execution_agents.reporter_agent import ReporterAgent
 
 async def main() -> None:
     # 1. Initialize the raw agents
-    # seg_agent = await SegmentationAgent.create()
+    seg_agent = await SegmentationAgent.create()
     feat_agent = await FeatureExtractionAgent.create()
     model_agent = await ModelingAgent.create()
     report_agent = await ResultReporterAgent.create()
@@ -92,16 +92,16 @@ async def main() -> None:
     )
 
     builder = DiGraphBuilder()
-    # builder.add_node(seg_agent)
-    builder.add_node(feat_agent)
+    builder.add_node(seg_agent)
+    builder.add_node(filtered_feat_agent)
     builder.add_node(filtered_model_agent)
     builder.add_node(filtered_report_agent)
     builder.add_node(filtered_latex_agent)
 
 
-    # builder.add_edge(seg_agent, filtered_feat_agent)
+    builder.add_edge(seg_agent, filtered_feat_agent)
     
-    builder.add_edge(feat_agent, filtered_model_agent)
+    builder.add_edge(filtered_feat_agent, filtered_model_agent)
     
     builder.add_edge(filtered_model_agent, filtered_report_agent)
     
@@ -113,11 +113,9 @@ async def main() -> None:
         graph=builder.build()
     )
 
-    task_prompt = """Check what Radiomic features best predict the health of the spleen. The data is already downloaded and ready in the following manner.
-                "image_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/volumes",
-                "mask_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/masks",
-                "target_csv": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/targets.csv",
-                "target_label_name": "target"""
+    task_prompt = """
+    run the pipeline, this is the hypothesis (A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma)
+"""
 
     print("--- Starting GraphFlow Pipeline ---")
     await Console(flow.run_stream(task=task_prompt))
