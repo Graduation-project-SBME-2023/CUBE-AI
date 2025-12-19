@@ -2226,6 +2226,8 @@ async def extract_radiomic_features(
         return value
     root_dir = Path(__file__).parent.parent
     output_dir = os.path.join(root_dir, 'workspace', 'features')
+    image_dir = os.path.join(root_dir, 'workspace', 'volumes')
+    mask_dir = os.path.join(root_dir, 'workspace', 'masks')
     def run_extraction():
         kwargs = dict(
             image_dir=image_dir,
