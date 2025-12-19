@@ -126,7 +126,7 @@ async def main() -> None:
     )
 
     task_prompt = """
-    run the pipeline, this is the hypothesis (A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma)
+    run the pipeline, this is the hypothesis (The radiomics features can detect weather the spleen is cancerous is not.)
     """
 
     print("--- Starting GraphFlow Pipeline ---")
