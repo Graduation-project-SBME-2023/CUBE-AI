@@ -1,17 +1,18 @@
-from pydantic import BaseModel, validator
+from pydantic import BaseModel,field_validator, ConfigDict
 from datetime import date, datetime
 from typing import Optional
-
+from uuid import UUID
 class StudyBase(BaseModel):
     study_uid: str
-    patient_id: int
+    patient_id: UUID
     description: Optional[str] = None
     modality: Optional[str] = None
     created_at: Optional[date] = None  # ISO format date-time
-    @validator("created_at", pre=True)
+    @field_validator("created_at", mode="before")
+    @classmethod
     def extract_date(cls, v):
         if isinstance(v, datetime):
-            return v.date()  # keep only the date part
+            return v.date()
         return v
 
 class StudyCreate(StudyBase):
@@ -22,7 +23,6 @@ class StudyUpdate(BaseModel):
     modality: Optional[str] = None
     created_at: Optional[date] | None = None  # ISO format date-time
 
-class Study(StudyBase):
-    class Config:
-        orm_mode = True
+class StudyRead(StudyBase):
+    model_config = ConfigDict(from_attributes=True)
 

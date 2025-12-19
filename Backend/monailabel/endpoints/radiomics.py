@@ -51,12 +51,12 @@ async def create_radiomics_entry(radiomics: RadiomicsCreate, db: AsyncSession = 
 # ----------------------------------------------------------------------
 # Delete a Radiomics Entry
 # ----------------------------------------------------------------------
-@router.delete("/{radiomics_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{radiomics_id}")
 async def delete_radiomics_entry(radiomics_id: UUID, db: AsyncSession = Depends(get_db)):
     deleted = await crud.delete_radiomics(db, radiomics_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Radiomics entry not found")
-    return None
+    return deleted
 
 
 # ----------------------------------------------------------------------

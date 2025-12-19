@@ -2,8 +2,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.future import select
 from models.study import Study
-from schemas.study import StudyCreate, StudyUpdate
+from schemas.study import StudyCreate, StudyUpdate, StudyRead
 from fastapi import HTTPException
+from uuid import UUID
 async def get_study(db: AsyncSession, study_uid: str):
     try:
         result = await db.execute(select(Study).where(Study.study_uid == study_uid))
@@ -64,7 +65,7 @@ async def delete_study(db: AsyncSession, study_uid: str):
         await db.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to delete study: {str(e)}")
 
-async def get_studies_by_patient(db: AsyncSession, patient_id: int):
+async def get_studies_by_patient(db: AsyncSession, patient_id: UUID):
     try:
         result = await db.execute(select(Study).where(Study.patient_id == patient_id))
         return result.scalars().all()
