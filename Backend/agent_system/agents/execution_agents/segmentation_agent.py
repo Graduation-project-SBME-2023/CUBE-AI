@@ -29,7 +29,7 @@ async def test_module():
         await agent.initialize()
         
         current_file = Path(__file__)
-        config_path = os.path.join(current_file.parent.parent.parent.parent, "mas", "memory", "workspace", "configurations.json")
+        config_path = os.path.join(current_file.parent.parent.parent, "workspace", "config.json")
         # print(f"Running with config: {config_path}")
         
         # Run the agent and capture the result

@@ -15,6 +15,9 @@ from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
 from descriptions.models_descriptions import POPULATION_PLANNER_AGENT_DESCRIPTION
 from system_prompts.system_messages import POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE
 import asyncio
+import logging
+
+logger = logging.getLogger()
 
 
 class PopulationPlannerAgent(AssistantAgent):
@@ -33,7 +36,11 @@ class PopulationPlannerAgent(AssistantAgent):
             command="python", args=["Backend/mcp/server.py"]
             )
         mcp_tools = await mcp_server_tools(mcp_server)
-        final_tools = mcp_tools
+        desired_tools = ['generate_targets', 'get_all_patients_info', 'get_all_studies_info', 'save_final_output']
+        final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
+        logger.info(f"Started population selection with available tools: {len(final_tools)}")
+        for tool in final_tools:
+            logger.info(f"Tool selected: {tool.name}")
         name = "study_population_planner_agent"
         description = POPULATION_PLANNER_AGENT_DESCRIPTION
         system_message = POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE
@@ -45,6 +52,12 @@ class PopulationPlannerAgent(AssistantAgent):
             system_message = system_message,
             max_tool_iterations = 20
         )
+    
+    @staticmethod
+    def get_desired_tools(mcp_tools, desired_tools):
+        for tool in mcp_tools:
+            logger.info(f"Tool available: {tool.name}")
+        return [tool for tool in mcp_tools if tool.name in desired_tools]
 
 
 import asyncio

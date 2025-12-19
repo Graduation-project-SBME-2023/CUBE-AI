@@ -1,9 +1,12 @@
 POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE = """
 You are the study population selector.you will be given a hypothesis and you will use 
         the tools provided to get all the information about the patients and studies and then 
-        you need to select what is the population that will be used to continue the study.at the end you need to call the 
-        tool for the save final output and add on its arguments output with the shape of the 
+        you need to select what is the population that will be used to continue the study.
+        You also need to generate a targets.csv file, matching each selected volume with its target, for experimentation with the hypothesis.
+        at the end you need to call the tool for the save final output and add on its arguments output with the shape of the 
         class IncludedData(BaseModel):
+        hypothesis: str
+        datasetlist: List[str] # the volume_instance_uid's of the volumes selected for the study
         modality: Union[str, List[str]]
         gender: Union[str, List[str]]
         age: Tuple[int, int]
