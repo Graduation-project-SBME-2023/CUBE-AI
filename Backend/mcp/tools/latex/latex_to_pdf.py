@@ -1,6 +1,7 @@
 import subprocess
 import tempfile
 import os 
+import asyncio
 from .. import mcp
 from pydantic import Field
 from typing import Annotated
@@ -35,22 +36,54 @@ async def latex_to_pdf(
 
             # Check for compilation errors
             if result.returncode != 0:
-                return "❌ LaTeX compilation failed. Check your LaTeX syntax."
+                return "LaTeX compilation failed. Check your LaTeX syntax."
 
             # Read compiled PDF bytes
             pdf_path = os.path.join(temp, "document.pdf")
 
             if not os.path.exists(pdf_path):
-                return "❌ PDF was not generated. Possible LaTeX error."
+                return "PDF was not generated. Possible LaTeX error."
 
             with open(pdf_path, "rb") as f:
                 pdf_bytes = f.read()
 
+    
+        current_dir = os.getcwd()
+        target_dir = os.path.abspath(os.path.join(current_dir, "Backend", "agent_system/workspace"))
+        final_folder = os.path.join(target_dir, "reports") 
+        final_path = os.path.join(final_folder, output_filename)
+                
         # Save final PDF
-        with open(output_filename, "wb") as f:
+        with open(final_path, "wb") as f:
             f.write(pdf_bytes)
 
-        return f"✅ PDF generated successfully and saved as: {output_filename}"
+        return f"PDF generated successfully and saved as: {output_filename}"
 
     except Exception as e:
-        return f"❌ Error: {str(e)}"
+        return f"Error: {str(e)}"
+
+
+
+
+
+
+# if __name__ == "__main__":
+#     # 1. Simple LaTeX content for testing
+#     test_latex = r"""
+#     \documentclass{article}
+#     \title{Test Document}
+#     \author{Python Script}
+#     \date{\today}
+#     \begin{document}
+#     \maketitle
+#     \section{Introduction}
+#     This is a test PDF generated from Python code.
+#     \end{document}
+#     """
+
+#     # 2. Run the async function
+#     print("Starting PDF generation...")
+#     result = asyncio.run(latex_to_pdf(test_latex, "test_doc.pdf"))
+    
+#     # 3. Print result
+#     print(result)
