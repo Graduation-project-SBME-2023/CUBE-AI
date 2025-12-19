@@ -383,8 +383,8 @@ class SegmentationModule:
 
         DOWNLOAD_DIR_IMG = os.path.join(current_dir, "apps", "radiology", "General_Data")
         DOWNLOAD_DIR_LABEL = os.path.join(current_dir, "apps", "radiology", "Labels")
-        FINAL_DIR_IMG = os.path.join(current_dir, "mas", "memory", "workspace", "volumes_data")
-        FINAL_DIR_LABEL = os.path.join(current_dir, "mas", "memory", "workspace", "labels_data")
+        FINAL_DIR_IMG = os.path.join(current_dir, "agent_system", "workspace", "volumes")
+        FINAL_DIR_LABEL = os.path.join(current_dir, "agent_system", "workspace", "masks")
 
         os.makedirs(DOWNLOAD_DIR_IMG, exist_ok=True)
         os.makedirs(DOWNLOAD_DIR_LABEL, exist_ok=True)
