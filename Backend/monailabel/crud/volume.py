@@ -6,7 +6,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from fastapi import HTTPException
 from sqlalchemy import func
 from models.study import Study
-
+from uuid import UUID
+import aiohttp
+from crud.orthanc_sync import ORTHANC_URL, AUTH
 async def get_volume(db: AsyncSession, volume_series_instance_uid: str):
     try:
         result = await db.execute(
@@ -55,18 +57,51 @@ async def update_volume(db: AsyncSession, volume_series_instance_uid: str, updat
         await db.rollback()
         raise HTTPException(status_code=400, detail=f"Failed to update volume: {str(e)}")
 
-async def delete_volume(db: AsyncSession, volume_series_instance_uid: str):
+async def delete_volume(db: AsyncSession, volume_uid: str):
+    """
+    Delete volume from both Orthanc and database.
+    Returns (success: bool, error_message: str | None)
+    """
+    result = await db.execute(
+        select(Volume).where(Volume.volume_series_instance_uid == volume_uid)
+    )
+    volume = result.scalar_one_or_none()
+    
+    if not volume:
+        return False, "Volume not found"
+    
+    orthanc_series_id = volume.orthanc_series_id
+    volume_description = volume.series_description
+    
+    # Delete from Orthanc first
+    if orthanc_series_id:
+        async with aiohttp.ClientSession(auth=AUTH) as session:
+            try:
+                async with session.delete(f"{ORTHANC_URL}/series/{orthanc_series_id}") as resp:
+                    if resp.status == 404:
+                        print(f"[WARN] Series {orthanc_series_id} not found in Orthanc (already deleted)")
+                    elif resp.status not in [200, 204]:
+                        error_msg = f"Failed to delete from Orthanc: HTTP {resp.status}"
+                        print(f"[ERROR] {error_msg}")
+                        return False, error_msg
+                    else:
+                        print(f"[INFO] 🗑 Deleted volume {volume_description} from Orthanc")
+            except aiohttp.ClientError as e:
+                error_msg = f"Orthanc connection error: {str(e)}"
+                print(f"[ERROR] {error_msg}")
+                return False, error_msg
+    
+    # Delete from database
     try:
-        result = await db.execute(select(Volume).where(Volume.volume_series_instance_uid == volume_series_instance_uid))
-        db_volume = result.scalar_one_or_none()
-        if not db_volume:
-            raise HTTPException(status_code=404, detail= f"Volume {volume_series_instance_uid} not found")
-        await db.delete(db_volume)
+        await db.delete(volume)
         await db.commit()
-        return {"detail": f"Volume {volume_series_instance_uid} deleted successfully"}
+        print(f"[INFO] 🗑 Deleted volume {volume_description} from database")
+        return True, None
     except SQLAlchemyError as e:
         await db.rollback()
-        raise HTTPException(status_code=400, detail=f"Failed to delete volume: {str(e)}")
+        error_msg = f"Database error: {str(e)}"
+        print(f"[ERROR] {error_msg}")
+        return False, error_msg
 
 async def get_volumes_by_study(db: AsyncSession, study_uid: str):
     try:

@@ -60,5 +60,79 @@ function OnStableStudy(studyId, tags, metadata)
     end)
 end
 
--- Optional: Log when script is loaded
+
+-- Deletion callbacks (Orthanc >= 1.6.0)
+function OnDeletedPatient(patientId)
+    print('🗑 Patient deleted: ' .. patientId)
+
+    local payload = {
+        change_type = 'deleted',
+        resource_id = patientId,
+        level = 'patient'
+    }
+
+    pcall(function()
+        HttpPost(
+            'http://monailabel:8000/sync/orthanc-webhook',
+            DumpJson(payload, true),
+            { ['Content-Type'] = 'application/json' }
+        )
+    end)
+end
+
+function OnDeletedStudy(studyId)
+    print('🗑 Study deleted: ' .. studyId)
+
+    local payload = {
+        change_type = 'deleted',
+        resource_id = studyId,
+        level = 'study'
+    }
+
+    pcall(function()
+        HttpPost(
+            'http://monailabel:8000/sync/orthanc-webhook',
+            DumpJson(payload, true),
+            { ['Content-Type'] = 'application/json' }
+        )
+    end)
+end
+
+function OnDeletedSeries(seriesId)
+    print('🗑 Series deleted: ' .. seriesId)
+
+    local payload = {
+        change_type = 'deleted',
+        resource_id = seriesId,
+        level = 'series'
+    }
+
+    pcall(function()
+        HttpPost(
+            'http://monailabel:8000/sync/orthanc-webhook',
+            DumpJson(payload, true),
+            { ['Content-Type'] = 'application/json' }
+        )
+    end)
+end
+
+-- function OnDeletedInstance(instanceId)
+--     print('🗑 Instance deleted: ' .. instanceId)
+
+--     local payload = {
+--         change_type = 'deleted',
+--         resource_id = instanceId,
+--         level = 'instance'
+--     }
+
+--     pcall(function()
+--         HttpPost(
+--             'http://monailabel:8000/sync/orthanc-webhook',
+--             DumpJson(payload, true),
+--             { ['Content-Type'] = 'application/json' }
+--         )
+--     end)
+-- end
+
+-- Log when script is loaded
 print('📜 Orthanc Lua webhook script loaded successfully')

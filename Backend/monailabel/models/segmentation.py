@@ -5,6 +5,8 @@ class Segmentation(Base):
     __tablename__ = 'segmentations'
 
     label_series_instance_uid = Column(String, nullable=False, primary_key=True)
+    orthanc_series_id = Column(String, unique=True, index=True, nullable=False)
+
     volume_series_instance_uid = Column(String, nullable=False)
     segmentation_type = Column(String, nullable=False)
     method = Column(String, nullable=True)
