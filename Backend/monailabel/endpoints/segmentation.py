@@ -76,9 +76,17 @@ async def update_segmentation_endpoint(
 # ----------------------------------------------------------------------
 @router.delete("/{label_uid}", response_model=dict)
 async def delete_segmentation_endpoint(label_uid: str, db: AsyncSession = Depends(get_db)):
-    deleted = await delete_segmentation(db, label_uid)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Segmentation not found")
+    """
+    Delete segmentation from both Orthanc and database.
+    """
+    success, error_message = await delete_segmentation(db, label_uid)
+    
+    if not success:
+        if error_message == "Segmentation not found":
+            raise HTTPException(status_code=404, detail=error_message)
+        else:
+            raise HTTPException(status_code=500, detail=error_message)
+    
     return {"detail": "Segmentation deleted successfully"}
 
 

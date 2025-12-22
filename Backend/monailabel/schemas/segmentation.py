@@ -19,5 +19,6 @@ class SegmentationUpdate(BaseModel):
     created_at: Optional[datetime] = None # ISO format date-time
 
 class Segmentation(SegmentationBase):
+    orthanc_series_id: Optional[str] = None
     class Config:
         orm_mode = True
