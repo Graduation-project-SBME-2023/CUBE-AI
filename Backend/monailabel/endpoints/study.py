@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from schemas.study import StudyRead, StudyCreate, StudyUpdate
 from crud.study import delete_study, get_studies_by_patient, get_study, get_studies, create_study, search_studies, search_studies, update_study
@@ -31,8 +31,19 @@ async def update_study_endpoint(
 
 @router.delete("/{study_uid}")
 async def delete_study_endpoint(study_uid: str, db: Session = Depends(get_db)):
-    deleted_study = await delete_study(db, study_uid)
-    return deleted_study
+    """
+    Delete study from both Orthanc and database.
+    This will cascade delete all volumes and segmentations.
+    """
+    success, error_message = await delete_study(db, study_uid)
+    
+    if not success:
+        if error_message == "Study not found":
+            raise HTTPException(status_code=404, detail=error_message)
+        else:
+            raise HTTPException(status_code=500, detail=error_message)
+    
+    return {"detail": "Study deleted successfully"}
 
 @router.get("/search/", response_model=list[StudyRead])
 async def search_studies_endpoint(

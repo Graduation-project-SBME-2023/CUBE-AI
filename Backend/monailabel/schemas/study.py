@@ -6,7 +6,6 @@ from uuid import UUID
 class StudyBase(BaseModel):
     study_uid: str
     patient_id: UUID
-    patient_id: UUID
     description: Optional[str] = None
     modality: Optional[str] = None
     created_at: Optional[date] = None  # ISO format date-time
@@ -26,5 +25,6 @@ class StudyUpdate(BaseModel):
     created_at: Optional[date] | None = None  # ISO format date-time
 
 class StudyRead(StudyBase):
+    orthanc_study_id: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 

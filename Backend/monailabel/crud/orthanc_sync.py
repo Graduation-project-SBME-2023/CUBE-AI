@@ -29,11 +29,24 @@ def _parse_dicom_datetime(date_str, time_str):
         return datetime.strptime(f"{date_str}{clean_time}", "%Y%m%d%H%M%S")
     except Exception:
         return datetime.utcnow()
+    
 
+async def fetch_dicom_uid(session, level: str, resource_id: str):
+    async with session.get(f"{ORTHANC_URL}/{level}s/{resource_id}") as resp:
+        if resp.status != 200:
+            return None
+        info = await resp.json()
+        tags = info.get("MainDicomTags", {})
+        if level == "series":
+            return tags.get("SeriesInstanceUID"), tags.get("Modality")
+        if level == "study":
+            return tags.get("StudyInstanceUID"), None
+        if level == "patient":
+            return tags.get("PatientName"), None
 
 # ----------------- GET OR CREATE -----------------
 
-async def _get_or_create_patient(db: AsyncSession, name: str, birth_date: str, gender: str):
+async def _get_or_create_patient(db: AsyncSession,orthanc_patient_id: str, name: str, birth_date: str, gender: str):
     """Find or create patient. Preserve manual edits and handle race conditions."""
     name = name or "Unknown"
     gender = gender if gender in ("M", "F") else None
@@ -47,6 +60,9 @@ async def _get_or_create_patient(db: AsyncSession, name: str, birth_date: str, g
     if bdate:
         query = query.where(Patient.birth_date == bdate)
     result = await db.execute(query)
+    result = await db.execute(
+        select(Patient).where(Patient.orthanc_patient_id == orthanc_patient_id)
+    )
     patient = result.scalar_one_or_none()
 
     if patient:
@@ -59,6 +75,7 @@ async def _get_or_create_patient(db: AsyncSession, name: str, birth_date: str, g
     # Create new patient
     patient = Patient(
         name=name,
+        orthanc_patient_id=orthanc_patient_id,
         birth_date=bdate,
         gender=gender,
         created_at=datetime.utcnow(),
@@ -81,13 +98,16 @@ async def _get_or_create_patient(db: AsyncSession, name: str, birth_date: str, g
     return patient
 
 
-async def _get_or_create_study(db: AsyncSession, study_uid: str, patient_id: int,
+async def _get_or_create_study(db: AsyncSession, study_uid: str, orthanc_study_id: str, patient_id: int,
                                description: str, modality: str, created_at: datetime):
     result = await db.execute(select(Study).where(Study.study_uid == study_uid))
     study = result.scalar_one_or_none()
     if study:
         # Preserve manual edits: only fill missing fields
         updated = False
+        if not study.orthanc_study_id:
+            study.orthanc_study_id = orthanc_study_id
+            updated = True
         if description and not study.description:
             study.description = description
             updated = True
@@ -98,8 +118,10 @@ async def _get_or_create_study(db: AsyncSession, study_uid: str, patient_id: int
             db.add(study)
         return study
 
+
     study = Study(
         study_uid=study_uid,
+        orthanc_study_id=orthanc_study_id,
         patient_id=patient_id,
         description=description or "Unknown",
         modality=(modality or "UNK")[:20],
@@ -122,13 +144,16 @@ async def _get_or_create_study(db: AsyncSession, study_uid: str, patient_id: int
     return study
 
 
-async def _get_or_create_volume(db: AsyncSession, volume_uid: str, study_uid: str, desc: str,
+async def _get_or_create_volume(db: AsyncSession, volume_uid: str, orthanc_series_id: str, study_uid: str, desc: str,
                                 modality: str, num_slices: int, created_at: datetime):
     result = await db.execute(select(Volume).where(Volume.volume_series_instance_uid == volume_uid))
     volume = result.scalar_one_or_none()
     if volume:
         # Preserve manual edits: only fill missing fields
         updated = False
+        if not volume.orthanc_series_id:
+            volume.orthanc_series_id = orthanc_series_id
+            updated = True
         if desc and not volume.series_description:
             volume.series_description = desc
             updated = True
@@ -141,9 +166,11 @@ async def _get_or_create_volume(db: AsyncSession, volume_uid: str, study_uid: st
         if updated:
             db.add(volume)
         return volume
+    
 
     volume = Volume(
         volume_series_instance_uid=volume_uid,
+        orthanc_series_id=orthanc_series_id,
         study_uid=study_uid,
         series_description=desc or "Unknown",
         modality=modality or "UNK",
@@ -167,7 +194,7 @@ async def _get_or_create_volume(db: AsyncSession, volume_uid: str, study_uid: st
     return volume
 
 
-async def _get_or_create_segmentation(db: AsyncSession, label_uid: str, volume_uid: str,
+async def _get_or_create_segmentation(db: AsyncSession, label_uid: str, orthanc_series_id: str, volume_uid: str,
                                       segmentation_type: str, method: str, created_at: datetime = None):
     created_at = created_at or datetime.utcnow()
 
@@ -175,6 +202,9 @@ async def _get_or_create_segmentation(db: AsyncSession, label_uid: str, volume_u
     seg = result.scalar_one_or_none()
     if seg:
         updated = False
+        if not seg.orthanc_series_id:
+            seg.orthanc_series_id = orthanc_series_id
+            updated = True
         if segmentation_type and not seg.segmentation_type:
             seg.segmentation_type = segmentation_type
             updated = True
@@ -197,6 +227,7 @@ async def _get_or_create_segmentation(db: AsyncSession, label_uid: str, volume_u
 
     seg = Segmentation(
         label_series_instance_uid=label_uid,
+        orthanc_series_id=orthanc_series_id,
         volume_series_instance_uid=volume_uid,
         segmentation_type=segmentation_type,
         method=method,
@@ -285,20 +316,22 @@ async def sync_all_from_orthanc(db: AsyncSession):
 # SYNC STUDY & SERIES
 # ----------------------------------------------------------------------
 
-async def sync_study_to_db(db: AsyncSession, study_uid: str, session: aiohttp.ClientSession = None):
+async def sync_study_to_db(db: AsyncSession, orthanc_study_id: str, study_uid: str=None, session: aiohttp.ClientSession = None):
     """Sync a single study and all its series"""
     own_session = False
     if not session:
         session = aiohttp.ClientSession(auth=AUTH)
         own_session = True
     try:
-        async with session.get(f"{ORTHANC_URL}/studies/{study_uid}") as resp:
+        async with session.get(f"{ORTHANC_URL}/studies/{orthanc_study_id}") as resp:
             if resp.status != 200:
                 print(f"[WARN] Study {study_uid} not found in Orthanc.")
                 return
             study_info = await resp.json()
 
         tags = study_info.get("MainDicomTags", {})
+        if study_uid is None:
+            study_uid = tags.get("StudyInstanceUID")
         patient_id_orthanc = study_info.get("ParentPatient")
         async with session.get(f"{ORTHANC_URL}/patients/{patient_id_orthanc}") as resp:
             patient_info = await resp.json()
@@ -306,6 +339,7 @@ async def sync_study_to_db(db: AsyncSession, study_uid: str, session: aiohttp.Cl
         patient = await _get_or_create_patient(
             db=db,
             name=p_tags.get("PatientName", "Unknown"),
+            orthanc_patient_id=patient_id_orthanc,
             birth_date=p_tags.get("PatientBirthDate"),
             gender=p_tags.get("PatientSex"),
         )
@@ -314,6 +348,7 @@ async def sync_study_to_db(db: AsyncSession, study_uid: str, session: aiohttp.Cl
         db_study = await _get_or_create_study(
             db=db,
             study_uid=tags.get("StudyInstanceUID"),
+            orthanc_study_id=orthanc_study_id,
             patient_id=patient.patient_id,
             description=tags.get("StudyDescription"),
             modality=tags.get("ModalitiesInStudy"),
@@ -327,20 +362,22 @@ async def sync_study_to_db(db: AsyncSession, study_uid: str, session: aiohttp.Cl
             await session.close()
 
 
-async def sync_series_to_db(db: AsyncSession, series_id: str, session: aiohttp.ClientSession = None):
+async def sync_series_to_db(db: AsyncSession, orthanc_series_id: str, series_id: str=None, session: aiohttp.ClientSession = None):
     """Sync a single series (volume or SEG)"""
     own_session = False
     if not session:
         session = aiohttp.ClientSession(auth=AUTH)
         own_session = True
     try:
-        async with session.get(f"{ORTHANC_URL}/series/{series_id}") as resp:
+        async with session.get(f"{ORTHANC_URL}/series/{orthanc_series_id}") as resp:
             if resp.status != 200:
                 print(f"[WARN] Series {series_id} not found in Orthanc.")
                 return
             series_info = await resp.json()
 
         s_tags = series_info.get("MainDicomTags", {})
+        if series_id is None:
+            series_id = s_tags.get("SeriesInstanceUID")
         dicom_series_uid = s_tags.get("SeriesInstanceUID")
         modality = (s_tags.get("Modality") or "").upper()
         desc = s_tags.get("SeriesDescription")
@@ -368,6 +405,7 @@ async def sync_series_to_db(db: AsyncSession, series_id: str, session: aiohttp.C
             await _get_or_create_segmentation(
                 db=db,
                 label_uid=dicom_series_uid,
+                orthanc_series_id=orthanc_series_id,
                 volume_uid=volume_uid,
                 segmentation_type=desc or "Unknown",
                 method="manual" if "MANUAL" in (desc or "").upper() else "auto",
@@ -377,6 +415,7 @@ async def sync_series_to_db(db: AsyncSession, series_id: str, session: aiohttp.C
             await _get_or_create_volume(
                 db=db,
                 volume_uid=dicom_series_uid,
+                orthanc_series_id=orthanc_series_id,
                 study_uid=dicom_study_uid,
                 desc=desc,
                 modality=modality,
@@ -386,3 +425,79 @@ async def sync_series_to_db(db: AsyncSession, series_id: str, session: aiohttp.C
     finally:
         if own_session:
             await session.close()
+
+# Add this helper function to fetch DICOM UIDs before deletion
+async def fetch_dicom_uid_for_deletion(session: aiohttp.ClientSession, level: str, orthanc_id: str):
+    """Fetch DICOM UID from Orthanc before resource is deleted"""
+    try:
+        async with session.get(f"{ORTHANC_URL}/{level}s/{orthanc_id}") as resp:
+            if resp.status != 200:
+                print(f"[WARN] Could not fetch {level} {orthanc_id} for deletion")
+                return None
+            info = await resp.json()
+            tags = info.get("MainDicomTags", {})
+            
+            if level == "series":
+                return tags.get("SeriesInstanceUID")
+            elif level == "study":
+                return tags.get("StudyInstanceUID")
+            elif level == "patient":
+                return tags.get("PatientID")  # Use PatientID, not PatientName
+    except Exception as e:
+        print(f"[ERROR] Error fetching {level} {orthanc_id}: {e}")
+    return None
+
+
+# Updated deletion functions
+async def delete_series_from_db(db: AsyncSession, dicom_series_uid: str):
+    """Delete volume by DICOM Series UID"""
+    result = await db.execute(
+        select(Volume).where(Volume.volume_series_instance_uid == dicom_series_uid)
+    )
+    volume = result.scalar_one_or_none()
+    if volume:
+        await db.delete(volume)
+        print(f"[INFO] 🗑 Deleted volume {dicom_series_uid}")
+        return True
+    return False
+
+
+async def delete_segmentation_from_db(db: AsyncSession, dicom_series_uid: str):
+    """Delete segmentation by DICOM Series UID"""
+    result = await db.execute(
+        select(Segmentation).where(
+            Segmentation.label_series_instance_uid == dicom_series_uid
+        )
+    )
+    seg = result.scalar_one_or_none()
+    if seg:
+        await db.delete(seg)
+        print(f"[INFO] 🗑 Deleted segmentation {dicom_series_uid}")
+        return True
+    return False
+
+
+async def delete_study_from_db(db: AsyncSession, dicom_study_uid: str):
+    """Delete study by DICOM Study UID"""
+    result = await db.execute(
+        select(Study).where(Study.study_uid == dicom_study_uid)
+    )
+    study = result.scalar_one_or_none()
+    if study:
+        await db.delete(study)
+        print(f"[INFO] 🗑 Deleted study {dicom_study_uid}")
+        return True
+    return False
+
+
+async def delete_patient_from_db(db: AsyncSession, orthanc_patient_id: str):
+    """Delete patient by Orthanc Patient ID"""
+    result = await db.execute(
+        select(Patient).where(Patient.orthanc_patient_id == orthanc_patient_id)
+    )
+    patient = result.scalar_one_or_none()
+    if patient:
+        await db.delete(patient)
+        print(f"[INFO] 🗑 Deleted patient {patient.name} (Orthanc ID: {orthanc_patient_id})")
+        return True
+    return False
