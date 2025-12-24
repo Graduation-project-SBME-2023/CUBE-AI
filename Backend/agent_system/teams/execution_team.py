@@ -26,7 +26,7 @@ def setup_logging():
     logging.info(f"Logging initialized: {log_file}")
     return log_file
 
-setup_logging()
+# setup_logging()
 
 # Optional: Silence overly verbose libraries if needed (e.g., http requests)
 # logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -53,6 +53,8 @@ from agents.execution_agents.reporter_agent import ReporterAgent
 class BasicPipelineBuilder(DiGraphBuilder):
     @classmethod
     async def create(cls):
+        setup_logging()
+
         population_agent = await PopulationPlannerAgent.create()
         seg_agent = await SegmentationAgent.create()
         feat_agent = await FeatureExtractionAgent.create()
@@ -106,18 +108,18 @@ class BasicPipelineBuilder(DiGraphBuilder):
 
         # Nodes
         builder.add_node(population_agent)
-        # builder.add_node(filtered_seg_agent)
-        # builder.add_node(filtered_feat_agent)
-        # builder.add_node(filtered_model_agent)
-        # builder.add_node(filtered_report_agent)
-        # builder.add_node(filtered_latex_agent)
+        builder.add_node(filtered_seg_agent)
+        builder.add_node(filtered_feat_agent)
+        builder.add_node(filtered_model_agent)
+        builder.add_node(filtered_report_agent)
+        builder.add_node(filtered_latex_agent)
 
         # Edges
-        # builder.add_edge(population_agent, filtered_seg_agent)
-        # builder.add_edge(filtered_seg_agent, filtered_feat_agent)
-        # builder.add_edge(filtered_feat_agent, filtered_model_agent)
-        # builder.add_edge(filtered_model_agent, filtered_report_agent)
-        # builder.add_edge(filtered_report_agent, filtered_latex_agent)
+        builder.add_edge(population_agent, filtered_seg_agent)
+        builder.add_edge(filtered_seg_agent, filtered_feat_agent)
+        builder.add_edge(filtered_feat_agent, filtered_model_agent)
+        builder.add_edge(filtered_model_agent, filtered_report_agent)
+        builder.add_edge(filtered_report_agent, filtered_latex_agent)
 
         return builder
 
