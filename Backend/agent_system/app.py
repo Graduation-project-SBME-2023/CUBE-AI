@@ -1,9 +1,12 @@
 import asyncio
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Literal, Any
+from datetime import datetime
 from pydantic import BaseModel, Field
 from teams.execution_team import BasicPipelineBuilder
 from autogen_agentchat.teams import GraphFlow
+import logging
 
 import os
 import sys
@@ -38,6 +41,22 @@ planner = Planner()
 class RunRequest(BaseModel):
     hypothesis: str = Field(..., description="Free form clinical hypothesis")
 
+EventType = Literal[
+    "tool_started",
+    "tool_progress",
+    "tool_log",
+    "tool_finished",
+    "run_started",
+    "run_finished",
+    "error"
+]
+
+class ToolEvent(BaseModel):
+    event_type: EventType
+    source: str          # tool name or agent
+    payload: Any
+    timestamp: datetime
+
 # ----------------------------------------------------------------------
 # POST /run
 # ----------------------------------------------------------------------
@@ -50,25 +69,27 @@ async def run_pipeline(request: RunRequest):
     try:
         stream = graph_flow.run_stream(task=request.hypothesis) # Not clean, still needs to connect to websocket?
         async for message in stream:
-            print(message)
+            # print(message)
+            pass
 
         # result = await orchestrator.process_hypothesis(
         #     hypothesis_text=request.hypothesis,
         # )
         
         # Example usage: push result to websocket if connected
-        await send_ws_message("result", stream)
+        # await send_ws_message("result", stream)
 
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    return stream
+    # return stream
 
 
 @app.post("/events")
-async def receive_event(event: dict):
+async def receive_tool_event(event: ToolEvent):
+    logging.getLogger().info(f"event at /events: {event}")
     await send_ws_message(
-        msg_type=event["type"],
+        msg_type=event.event_type,
         payload=event
     )
 
