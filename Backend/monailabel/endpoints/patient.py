@@ -58,9 +58,17 @@ async def update_patient(patient_id: UUID, patient: PatientUpdate, db: Session =
     return updated
 
 @router.delete("/{patient_id}")
-async def delete_patient(patient_id: UUID, db: Session = Depends(get_db)):
-    success = await crud.delete_patient(db, patient_id)
+async def delete_patient(patient_id: UUID, db: AsyncSession = Depends(get_db)):
+    """
+    Delete patient from both Orthanc and database.
+    This will cascade delete all studies, volumes, and segmentations.
+    """
+    success, error_message = await crud.delete_patient(db, patient_id)
+    
     if not success:
-        raise HTTPException(status_code=404, detail="Patient not found")
+        if error_message == "Patient not found":
+            raise HTTPException(status_code=404, detail=error_message)
+        else:
+            raise HTTPException(status_code=500, detail=error_message)
+    
     return {"detail": "Patient deleted successfully"}
-
