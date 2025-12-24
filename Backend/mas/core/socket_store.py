@@ -66,7 +66,7 @@ class ConnectionManager:
         #     except Exception as e:
         #         logger.error(f"Failed to send message: {e}")
         #         dead_sockets.append(connection)
-        await self.solely_connected_socket.send_text(message_data)
+        # await self.solely_connected_socket.send_text(message_data)
         
         # Cleanup broken connections
         for dead in dead_sockets:
