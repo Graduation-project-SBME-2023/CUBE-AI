@@ -59,12 +59,24 @@ const styles = {
 const AgenticHome = ({ onNavigate, onBack }) => {
     const [hypothesis, setHypothesis] = useState("");
 
-    const handleSearch = () => {
+    const handleSearch = async () => {
         if (!hypothesis.trim()) return;
-        console.log("Starting research for:", hypothesis);
+        try {
+            // Send hypothesis to backend
+            const response = await fetch('http://localhost:8000/hypotheses/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hypothesis })
+            });
+            if (!response.ok) throw new Error('Failed to submit hypothesis');
+            // Optionally, you can use the response data here
+        } catch (err) {
+            alert('Failed to submit hypothesis to backend.');
+            return;
+        }
         // Use the prop to navigate
         if (onNavigate) {
-            onNavigate('/cube-workflow', { state: { hypothesis } }); 
+            onNavigate('/playground', { state: { hypothesis } }); 
         }
     };
 
