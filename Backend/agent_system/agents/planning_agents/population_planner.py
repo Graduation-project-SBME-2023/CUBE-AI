@@ -72,5 +72,5 @@ async def main():
         agent.run_stream(task="A radiomics-derived imaging signature from CT imaging can predict high-risk patients with neuroblastoma ",
                          cancellation_token=CancellationToken())
         )
-if __name__ == "__main__":
-    asyncio.run(main())
+# if __name__ == "__main__":
+#     asyncio.run(main())

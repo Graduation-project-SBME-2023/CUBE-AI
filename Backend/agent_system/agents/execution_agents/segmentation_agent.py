@@ -87,18 +87,18 @@ class SegmentationAgent(AssistantAgent):
     def get_desired_tools(mcp_tools, desired_tools):
         return [tool for tool in mcp_tools if tool.name in desired_tools]
 
-# async def main():
-#     # Initialize the agent using the factory method
-#     agent = await SegmentationAgent.create()
+async def main():
+    # Initialize the agent using the factory method
+    agent = await SegmentationAgent.create()
     
-#     # # Now you can use the agent normally
-#     # print(f"Agent initialized with {agent._tools} tools.")
-#     # print(agent._max_tool_iterations)
-#     # for tool in agent._tools:
-#     #     print(tool.name)
-#     await Console(
-#         agent.run_stream(task="run segmentation",
-#                          cancellation_token=CancellationToken())
-#         )
-# if __name__ == "__main__":
-#     asyncio.run(main())
+    # # Now you can use the agent normally
+    # print(f"Agent initialized with {agent._tools} tools.")
+    # print(agent._max_tool_iterations)
+    # for tool in agent._tools:
+    #     print(tool.name)
+    await Console(
+        agent.run_stream(task="run segmentation",
+                        cancellation_token=CancellationToken())
+        )
+if __name__ == "__main__":
+    asyncio.run(main())
