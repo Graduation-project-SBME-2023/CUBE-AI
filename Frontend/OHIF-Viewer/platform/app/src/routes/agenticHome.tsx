@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Search, Clock, Plus, ArrowLeft, ArrowRight, Box, Bot 
 } from 'lucide-react';
+
+import websocketService from '../utils/WebsocketService';
 
 // ==========================================
 // STYLE CONFIGURATION
@@ -59,24 +61,24 @@ const styles = {
 const AgenticHome = ({ onNavigate, onBack }) => {
     const [hypothesis, setHypothesis] = useState("");
 
-    const handleSearch = async () => {
+    useEffect(() => {
+        // Connect to WebSocket on mount
+        websocketService.connect();
+        return () => {
+            // Optionally close or cleanup on unmount
+            if (websocketService.socket) {
+                websocketService.socket.close();
+            }
+        };
+    }, []);
+
+    const handleSearch = () => {
         if (!hypothesis.trim()) return;
-        try {
-            // Send hypothesis to backend
-            const response = await fetch('http://localhost:8000/hypotheses/', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ hypothesis })
-            });
-            if (!response.ok) throw new Error('Failed to submit hypothesis');
-            // Optionally, you can use the response data here
-        } catch (err) {
-            alert('Failed to submit hypothesis to backend.');
-            return;
-        }
-        // Use the prop to navigate
+        // Send initial hypothesis as a message to backend via WebSocket
+        websocketService.sendMessage({ type: 'initial_hypothesis', hypothesis });
+        // Navigate to playground
         if (onNavigate) {
-            onNavigate('/playground', { state: { hypothesis } }); 
+            onNavigate('/playground', { state: { hypothesis } });
         }
     };
 

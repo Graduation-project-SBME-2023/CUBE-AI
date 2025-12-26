@@ -138,7 +138,7 @@ const createRoutes = ({
   const WorkListRoute = {
     path: '/worklist',
     children: DataSourceWrapper,
-    private: false, //Change to test the appliaction
+    private: true, //Change to test the appliaction
     props: { children: WorkList, servicesManager, extensionManager },
   };
 
@@ -147,12 +147,13 @@ const createRoutes = ({
   const allRoutes = [
     cubeStartupRoute, // CUBE startup is now the landing page
     ...routes,
-    agenticHomeRoute,
     ...workflowRoutes,
     ...playgroundRoutes,
     ...(showStudyList ? [WorkListRoute] : []),
     ...(customRoutes?.routes || []),
     ...bakedInRoutes,
+    agenticHomeRoute,
+
     customRoutes?.notFoundRoute || notFoundRoute,
   ];
 
