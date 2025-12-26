@@ -114,7 +114,7 @@ const createRoutes = ({
 
   const playgroundRoutes = [
     {
-      path: '/playground/:chat_id',
+      path: '/playground',
       children: AgentsPlayground,
     }
   ];
