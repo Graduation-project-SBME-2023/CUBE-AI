@@ -10,6 +10,18 @@ function AgentsPlayground() {
     websocketService.connect();
   }, []);
 
+  React.useEffect(() => {
+    const handleWS = async (data: any) => {
+
+    };
+
+    const unsubscribe = websocketService.subscribe(handleWS);
+
+    return () => {
+      unsubscribe();
+    }
+  })
+
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
       {/* PlaygroundCanvas handles all plan visualization, editing, and execution */}
