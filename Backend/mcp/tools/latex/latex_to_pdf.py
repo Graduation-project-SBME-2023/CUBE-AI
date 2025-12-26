@@ -1,12 +1,15 @@
 import subprocess
 import tempfile
-import os 
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 import asyncio
-from .. import mcp
+# from .. import mcp
 from pydantic import Field
 from typing import Annotated
+from tool_logging import ToolEvent, log_tool_state
 
-@mcp.tool()
+# @mcp.tool()
 async def latex_to_pdf(
     latex_text: Annotated[str, Field(description="The complete LaTeX source code content, including the preamble and document body, to be compiled.")] ,
     output_filename: Annotated[str, Field(description="The file name where the generated PDF should be saved, without the path (e.g., 'report.pdf').")]
@@ -20,12 +23,16 @@ async def latex_to_pdf(
     """
     try:
         with tempfile.TemporaryDirectory() as temp:
+            start_event = ToolEvent('tool_started', 'latex_reporter_agent', {'tool_name':'latex_to_pdf','progress':'working'})
+            log_tool_state(start_event)
             tex_path = os.path.join(temp, "document.tex")
 
             # Write LaTeX to .tex file
             with open(tex_path, "w", encoding="utf-8") as f:
                 f.write(latex_text)
 
+            compiling_latex_event = ToolEvent('tool_progress', 'latex_reporter_agent', {'tool_name':'latex_to_pdf','progress':'working'})
+            log_tool_state(compiling_latex_event)
             # Compile using pdflatex
             result = subprocess.run(
                 ["pdflatex", "-interaction=nonstopmode", tex_path],
@@ -37,12 +44,16 @@ async def latex_to_pdf(
 
             # Check for compilation errors
             if result.returncode != 0:
+                error_compilation_event = ToolEvent('error','latex_reporter_agent', {'tool_name':'latex_to_pdf','progress':'LaTeX compilation failed.'})
+                log_tool_state(error_compilation_event)
                 return "LaTeX compilation failed. Check your LaTeX syntax."
 
             # Read compiled PDF bytes
             pdf_path = os.path.join(temp, "document.pdf")
 
             if not os.path.exists(pdf_path):
+                error_compilation_event = ToolEvent('error','latex_reporter_agent', {'tool_name':'latex_to_pdf','progress':'Possible LaTeX error.'})
+                log_tool_state(error_compilation_event)
                 return "PDF was not generated. Possible LaTeX error."
 
             with open(pdf_path, "rb") as f:
@@ -57,7 +68,8 @@ async def latex_to_pdf(
         # Save final PDF
         with open(final_path, "wb") as f:
             f.write(pdf_bytes)
-
+        error_compilation_event = ToolEvent('tool_finished','latex_reporter_agent', {'tool_name':'latex_to_pdf','progress':'PDF generated successfully'})
+        log_tool_state(error_compilation_event)
         return f"PDF generated successfully and saved as: {output_filename}"
 
     except Exception as e:
@@ -68,23 +80,23 @@ async def latex_to_pdf(
 
 
 
-# if __name__ == "__main__":
-#     # 1. Simple LaTeX content for testing
-#     test_latex = r"""
-#     \documentclass{article}
-#     \title{Test Document}
-#     \author{Python Script}
-#     \date{\today}
-#     \begin{document}
-#     \maketitle
-#     \section{Introduction}
-#     This is a test PDF generated from Python code.
-#     \end{document}
-#     """
+if __name__ == "__main__":
+    # 1. Simple LaTeX content for testing
+    test_latex = r"""
+    \documentclass{article}
+    \title{Test Document}
+    \author{Python Script}
+    \date{\today}
+    \begin{document}
+    \maketitle
+    \section{Introduction}
+    This is a test PDF generated from Python code.
+    \end{document}
+    """
 
-#     # 2. Run the async function
-#     print("Starting PDF generation...")
-#     result = asyncio.run(latex_to_pdf(test_latex, "test_doc.pdf"))
+    # 2. Run the async function
+    print("Starting PDF generation...")
+    result = asyncio.run(latex_to_pdf(test_latex, "test_doc.pdf"))
     
-#     # 3. Print result
-#     print(result)
+    # 3. Print result
+    print(result)
