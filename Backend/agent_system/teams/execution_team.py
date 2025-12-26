@@ -201,6 +201,7 @@ async def main() -> None:
 
     task_prompt = """
     run the pipeline, this is the hypothesis (The radiomics features can detect weather the spleen is cancerous is not.)
+    please use all the volumes that are abdomen, abdpel, venous arterial, ABA
     """
 
     print("--- Starting GraphFlow Pipeline ---")
