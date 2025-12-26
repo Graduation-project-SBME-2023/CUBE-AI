@@ -8,7 +8,7 @@ type Message = {
 };
 
 type ChatSession = {
-  chat_id: number;
+  chat_id: string;
   title: string;
   messages: Message[];
   summary?: string;
@@ -21,12 +21,12 @@ const CustomChatWidget: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [activeSessionId, setActiveSessionId] = useState<number | null>(null);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
-  const activeSessionIdRef = useRef<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const activeSessionIdRef = useRef<string | null>(null);
   const activeSession = sessions.find((s) => s.chat_id === activeSessionId) || null;
 
   useEffect(() => {
@@ -50,7 +50,7 @@ const CustomChatWidget: React.FC = () => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       const mapped: ChatSession[] = (data || []).map((s: any) => ({
-        chat_id: Number(s.chat_id),
+        chat_id: String(s.chat_id),
         title: s.title || `Chat ${s.chat_id}`,
         messages: [],
         summary: s.summary,
@@ -63,7 +63,7 @@ const CustomChatWidget: React.FC = () => {
     }
   };
 
-  const fetchMessagesForSession = async (chat_id: number) => {
+  const fetchMessagesForSession = async (chat_id: string) => {
     try {
       const res = await fetch(`http://localhost:8000/chat_messages/${chat_id}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -98,9 +98,10 @@ const CustomChatWidget: React.FC = () => {
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
+      console.log(data);
 
       const newSession: ChatSession = {
-        chat_id: Number(data.chat_id),
+        chat_id: String(data.chat_id),
         title: data.title || payload.title,
         messages: [
           { id: makeId("sys"), role: "system", text: "Hello Doctor! I am your radiologist assistant.", ts: Date.now() },
@@ -125,7 +126,7 @@ const CustomChatWidget: React.FC = () => {
     }
   };
 
-  const updateSessionLastActivity = async (chat_id: number) => {
+  const updateSessionLastActivity = async (chat_id: string) => {
     try {
       await fetch(`http://localhost:8000/chat_sessions/${chat_id}`, {
         method: "PUT",
@@ -140,7 +141,7 @@ const CustomChatWidget: React.FC = () => {
     }
   };
 
-  const deleteSession = async (chat_id: number) => {
+  const deleteSession = async (chat_id: string) => {
     try {
       await fetch(`http://localhost:8000/chat_sessions/${chat_id}`, { method: "DELETE" });
     } catch (err) {
@@ -200,7 +201,7 @@ const CustomChatWidget: React.FC = () => {
     setIsTyping(true);
     };
 
-  const openSession = async (chat_id: number) => {
+  const openSession = async (chat_id: string) => {
     setActiveSessionId(chat_id);
     setOpen(true);
     setDrawerOpen(false);
