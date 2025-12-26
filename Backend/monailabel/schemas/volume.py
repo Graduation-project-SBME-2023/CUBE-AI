@@ -24,5 +24,6 @@ class VolumeUpdate(BaseModel):
 
 
 class Volume(VolumeBase):
+    orthanc_series_id: str | None = None
     class Config:
         orm_mode = True

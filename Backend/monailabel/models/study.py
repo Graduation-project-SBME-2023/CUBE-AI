@@ -7,6 +7,7 @@ class Study(Base):
     __tablename__ = 'studies'
 
     study_uid = Column(String, primary_key=True, index=True)
+    orthanc_study_id = Column(String, unique=True, index=True, nullable=False)
     patient_id = Column(UUID(as_uuid=True), ForeignKey('patients.patient_id'), index=True)
     description = Column(String, nullable=True)
     modality = Column(String, nullable=True)

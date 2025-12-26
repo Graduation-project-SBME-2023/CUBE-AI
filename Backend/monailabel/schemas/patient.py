@@ -18,6 +18,7 @@ class PatientUpdate(BaseModel):
 
 class Patient(PatientBase):
     patient_id: UUID
+    orthanc_patient_id: str | None = None
     created_at: datetime | None = None  # ISO format date-time
     age: Optional[int] = None
 

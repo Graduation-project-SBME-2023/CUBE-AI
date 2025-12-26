@@ -1,3 +1,4 @@
+import aiohttp
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import func
@@ -6,7 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from fastapi import HTTPException
 from models.segmentation import Segmentation
 from schemas.segmentation import SegmentationCreate, SegmentationBase, SegmentationUpdate
-
+from crud.orthanc_sync import ORTHANC_URL, AUTH
 # Get by label UID (primary key)
 async def get_segmentation(db: AsyncSession, label_uid: str) -> Optional[Segmentation]:
     try:
@@ -59,16 +60,51 @@ async def update_segmentation(
 
 
 # Delete
-async def delete_segmentation(db: AsyncSession, label_uid: str) -> bool:
+async def delete_segmentation(db: AsyncSession, label_uid: str):
+    """
+    Delete segmentation from both Orthanc and database.
+    Returns (success: bool, error_message: str | None)
+    """
+    result = await db.execute(
+        select(Segmentation).where(Segmentation.label_series_instance_uid == label_uid)
+    )
+    segmentation = result.scalar_one_or_none()
+    
+    if not segmentation:
+        return False, "Segmentation not found"
+    
+    orthanc_series_id = segmentation.orthanc_series_id
+    seg_type = segmentation.segmentation_type
+    
+    # Delete from Orthanc first
+    if orthanc_series_id:
+        async with aiohttp.ClientSession(auth=AUTH) as session:
+            try:
+                async with session.delete(f"{ORTHANC_URL}/series/{orthanc_series_id}") as resp:
+                    if resp.status == 404:
+                        print(f"[WARN] Segmentation {orthanc_series_id} not found in Orthanc (already deleted)")
+                    elif resp.status not in [200, 204]:
+                        error_msg = f"Failed to delete from Orthanc: HTTP {resp.status}"
+                        print(f"[ERROR] {error_msg}")
+                        return False, error_msg
+                    else:
+                        print(f"[INFO] 🗑 Deleted segmentation {seg_type} from Orthanc")
+            except aiohttp.ClientError as e:
+                error_msg = f"Orthanc connection error: {str(e)}"
+                print(f"[ERROR] {error_msg}")
+                return False, error_msg
+    
+    # Delete from database
     try:
-        seg = await get_segmentation(db, label_uid)
-        if not seg:
-            raise HTTPException(status_code=404, detail=f"Segmentation {label_uid} not found")
-        await db.delete(seg)
+        await db.delete(segmentation)
         await db.commit()
-        return {"detail": f"Segmentation {label_uid} deleted successfully"}
+        print(f"[INFO] 🗑 Deleted segmentation {seg_type} from database")
+        return True, None
     except SQLAlchemyError as e:
-        raise HTTPException(status_code=400, detail= f" Failed to delete: {str(e)}")
+        await db.rollback()
+        error_msg = f"Database error: {str(e)}"
+        print(f"[ERROR] {error_msg}")
+        return False, error_msg
 
 
 # Get by volume UID

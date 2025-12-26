@@ -9,6 +9,10 @@ from crud.orthanc_sync import (
     sync_study_to_db,
     sync_series_to_db,
     sync_all_from_orthanc,
+    delete_study_from_db,
+    delete_series_from_db,
+    delete_patient_from_db,
+    delete_segmentation_from_db,
     AUTH,
     ORTHANC_URL
 )
@@ -96,21 +100,86 @@ async def run_full_sync_background():
         await sync_all_from_orthanc(db)
 
 
-async def process_webhook_background(change_type: str, resource_id: str):
+async def process_webhook_background(change_type: str, resource_id: str, level: str):
     """Process webhook changes in background"""
     print(f"[INFO] Background processing started for {change_type}: {resource_id}")
 
     async with AsyncSessionLocal() as db:
         try:
             if change_type == "stable_study":
-                await sync_study_to_db(db, resource_id)
+                await sync_study_to_db(db, orthanc_study_id=resource_id)
                 await db.commit()
                 print(f"[INFO] ✅ Background sync completed for study {resource_id}")
 
             elif change_type == "stable_series":
-                await sync_series_to_db(db, resource_id)
+                await sync_series_to_db(db, orthanc_series_id=resource_id)
                 await db.commit()
                 print(f"[INFO] ✅ Background sync completed for series {resource_id}")
+
+            # ---------- DELETE EVENTS ----------
+            elif change_type == "deleted":
+                level_lower = level.lower()
+                
+                # We need to fetch the DICOM UID BEFORE deletion happens
+                # But the resource is already deleted in Orthanc, so we query our DB
+                
+                if level_lower == "patient":
+                    # For patient, we use orthanc_patient_id directly
+                    deleted = await delete_patient_from_db(db, resource_id)
+                    if deleted:
+                        print(f"[INFO] 🗑 Successfully deleted patient {resource_id}")
+                    else:
+                        print(f"[WARN] Patient {resource_id} not found in database")
+
+                elif level_lower == "study":
+                    # Find study by orthanc_study_id and delete
+                    result = await db.execute(
+                        select(Study).where(Study.orthanc_study_id == resource_id)
+                    )
+                    study = result.scalar_one_or_none()
+                    if study:
+                        study_uid = study.study_uid
+                        await delete_study_from_db(db, study_uid)
+                        print(f"[INFO] 🗑 Successfully deleted study {study_uid}")
+                    else:
+                        print(f"[WARN] Study with Orthanc ID {resource_id} not found in database")
+
+                elif level_lower == "series":
+                    # Try to find as volume first
+                    result = await db.execute(
+                        select(Volume).where(Volume.orthanc_series_id == resource_id)
+                    )
+                    volume = result.scalar_one_or_none()
+                    
+                    if volume:
+                        series_uid = volume.volume_series_instance_uid
+                        await delete_series_from_db(db, series_uid)
+                        print(f"[INFO] 🗑 Successfully deleted volume series {series_uid}")
+                    else:
+                        # Try as segmentation
+                        result = await db.execute(
+                            select(Segmentation).where(Segmentation.orthanc_series_id == resource_id)
+                        )
+                        seg = result.scalar_one_or_none()
+                        if seg:
+                            seg_uid = seg.label_series_instance_uid
+                            await delete_segmentation_from_db(db, seg_uid)
+                            print(f"[INFO] 🗑 Successfully deleted segmentation series {seg_uid}")
+                        else:
+                            print(f"[WARN] Series with Orthanc ID {resource_id} not found in database")
+
+                elif level_lower == "instance":
+                    # Instance deletion: only delete if it's the last instance in a series
+                    # For now, we'll just log it - typically you don't delete series on single instance deletion
+                    print(f"[INFO] Instance {resource_id} deleted - no database action needed")
+
+                else:
+                    print(f"[WARN] Unknown delete level: {level_lower}")
+
+                await db.commit()
+
+            else:
+                print(f"[INFO] Ignored change_type={change_type}")
 
         except Exception as e:
             print(f"[ERROR] ❌ Background sync failed for {change_type} {resource_id}: {e}")
@@ -125,23 +194,28 @@ async def process_webhook_background(change_type: str, resource_id: str):
 async def orthanc_webhook(payload: OrthancWebhookPayload, background_tasks: BackgroundTasks):
     """
     Webhook endpoint that responds immediately and processes in background.
-    Supports hybrid incremental sync.
+    Supports sync + deletion.
     """
     print(f"[INFO] Received webhook: {payload.change_type} for resource {payload.resource_id}")
 
-    if payload.change_type in ["stable_study", "stable_series"]:
-        # Add task to background queue and return immediately
+    supported_events = {
+    "stable_study",
+    "stable_series",
+    "deleted",
+}
+
+    if payload.change_type in supported_events:
         background_tasks.add_task(
             process_webhook_background,
             payload.change_type,
-            payload.resource_id
+            payload.resource_id,
+            payload.level
         )
         return {
             "status": "accepted",
             "message": f"Processing {payload.change_type} {payload.resource_id} in background"
         }
 
-    # Ignore other change types
     return {
         "status": "ignored",
         "message": f"No action for change_type={payload.change_type}"
