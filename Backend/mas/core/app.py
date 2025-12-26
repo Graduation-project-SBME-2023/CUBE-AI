@@ -40,26 +40,8 @@ planner = Planner()
 class RunRequest(BaseModel):
     hypothesis: str = Field(..., description="Free form clinical hypothesis")
 
-# ----------------------------------------------------------------------
-# POST /run
-# ----------------------------------------------------------------------
-@app.post("/run")
-async def run_pipeline(request: RunRequest):
 
-    orchestrator = Orchestrator()
 
-    try:
-        result = await orchestrator.process_hypothesis(
-            hypothesis_text=request.hypothesis,
-        )
-        
-        # Example usage: push result to websocket if connected
-        await send_ws_message("result", result)
-
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return result
 
 
 # ----------------------------------------------------------------------
@@ -69,14 +51,9 @@ async def run_pipeline(request: RunRequest):
 async def websocket_endpoint(websocket: WebSocket):
     # 1. Register connection
     await manager.connect(websocket)
-    
     # 2. Start your Planner Logic (in background)
-    planner = Planner()
     asyncio.create_task(planner.run("Start"))
 
-
-    # asyncio.create_task(planner.run("Start"))
-    # Orchestrator.create_task(...)
 
     try:
         while True:

@@ -72,12 +72,6 @@ async def run_pipeline(request: RunRequest):
             # print(message)
             pass
 
-        # result = await orchestrator.process_hypothesis(
-        #     hypothesis_text=request.hypothesis,
-        # )
-        
-        # Example usage: push result to websocket if connected
-        # await send_ws_message("result", stream)
 
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -104,10 +98,6 @@ async def websocket_endpoint(websocket: WebSocket):
     # 2. Start your Planner Logic (in background)
     planner = Planner()
     asyncio.create_task(planner.run("Start"))
-
-
-    # asyncio.create_task(planner.run("Start"))
-    # Orchestrator.create_task(...)
 
     try:
         while True:

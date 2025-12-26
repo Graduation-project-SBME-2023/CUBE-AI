@@ -4,6 +4,7 @@ import AgentRegistry from './AgentRegistry';
 import ChatSidebar from './ChatSidebar';
 import websocketService from './WebSocketService';
 import { Play, Pause, RotateCcw, MessageSquare, CheckCircle2, Activity, CheckCircle2 as CheckIcon, Circle, Edit3, Trash2, ChevronUp, ChevronDown, FileText } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 
 // --- Node and Edge Components ---
 const CustomEdge = ({ sourceX, sourceY, targetX, targetY, data }) => {
@@ -146,6 +147,7 @@ const MOCK_DATA_STEPS = {
 };
 
 export default function AgentsPlayground() {
+  const location = useLocation();
   const [mode, setMode] = useState('planning'); 
   const [nodes, setNodes] = useState(initialNodesData);
   const [edges, setEdges] = useState(initialEdgesData);
@@ -153,12 +155,17 @@ export default function AgentsPlayground() {
   const [isConnected, setIsConnected] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isRegistryOpen, setIsRegistryOpen] = useState(true);
+  const [hypothesis, setHypothesis] = useState(() => location.state?.hypothesis || '');
   const isPausedRef = useRef(isPaused);
   const modeRef = useRef(mode);
   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => {
     websocketService.connect();
+    // If hypothesis is present, send to backend via WebSocket
+    if (location.state?.hypothesis) {
+      websocketService.sendMessage({ type: 'hypothesis', payload: location.state.hypothesis });
+    }
     const handleWSMessage = (data) => {
         const { type, payload } = data;
         if (type === 'msg') return;
@@ -174,7 +181,7 @@ export default function AgentsPlayground() {
     const unsubscribeMsg = websocketService.subscribe(handleWSMessage);
     const unsubscribeStatus = websocketService.onStatusChange(handleStatusChange);
     return () => { unsubscribeMsg(); unsubscribeStatus(); };
-  }, []);
+  }, [location.state]);
   const updateNodeData = (id, patch) => {
     setNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, ...patch } } : n));
   };
@@ -229,6 +236,12 @@ export default function AgentsPlayground() {
   };
   return (
     <div className="w-full h-screen font-sans flex flex-col bg-[#000000] text-white overflow-hidden">
+      {/* Display current hypothesis if present */}
+      {hypothesis && (
+        <div className="bg-[#1f2d40] text-[#6fe5b8] px-6 py-2 text-lg font-semibold border-b border-[#3c5d80]">
+          Research Hypothesis: <span className="font-mono text-white">{hypothesis}</span>
+        </div>
+      )}
       <div className="h-12 bg-[#151a1f] border-b border-[#000000] flex items-center justify-between px-4 z-20 shrink-0">
         <div className="flex items-center gap-4">
             <h1 className="font-bold text-[#91b9cd] text-sm tracking-wide">CUBE WORKSPACE</h1>
