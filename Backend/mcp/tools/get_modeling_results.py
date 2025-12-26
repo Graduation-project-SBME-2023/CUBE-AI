@@ -28,7 +28,7 @@ def get_modeling_results(
         all_files = {
             "features": logging_path / "features" / "top_10_features.csv",
             # "tuning": logging_path / "model_1_results.csv",
-            "evaluation": logging_path / "models" / "model_1" / "independent_eval_results_model_1.csv",
+            "evaluation": logging_path / "models" / "models" / "model_1" / "independent_eval_results_model_1.csv",
             "comparisons": logging_path / "models" / "model_comparison_results.csv",
             "summary": logging_path / "models" / "model_summary.csv"
         }
