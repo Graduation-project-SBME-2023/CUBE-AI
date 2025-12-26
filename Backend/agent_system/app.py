@@ -89,7 +89,7 @@ async def run_pipeline(request: RunRequest):
 async def receive_tool_event(event: ToolEvent):
     logging.getLogger().info(f"event at /events: {event}")
     await send_ws_message(
-        msg_type=event.event_type,
+        msg_type="tool_update",
         payload=event
     )
 
