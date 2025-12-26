@@ -10,6 +10,8 @@ class Patient(Base):
         server_default=text('gen_random_uuid()')
     )
 
+    orthanc_patient_id = Column(String, unique=True, index=True, nullable=False)
+
     name = Column(String, nullable=False)
     birth_date = Column(DateTime, nullable=False)
     gender = Column(String, nullable=True)

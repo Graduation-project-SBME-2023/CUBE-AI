@@ -10,7 +10,9 @@ from typing import Optional, Union
 from uuid import UUID
 from datetime import datetime
 from typing import Optional
-
+from datetime import date
+import aiohttp  
+from crud.orthanc_sync import ORTHANC_URL, AUTH
 def normalize_gender(gender: Optional[str]) -> Optional[str]:
     if not gender:
         return None
@@ -85,17 +87,48 @@ async def update_patient(db: AsyncSession, patient_id: UUID, data: PatientUpdate
     
 
 async def delete_patient(db: AsyncSession, patient_id: UUID):
+    """
+    Delete patient from both Orthanc and database.
+    Returns (success: bool, error_message: str | None)
+    """
     result = await db.execute(select(Patient).where(Patient.patient_id == patient_id))
     patient = result.scalar_one_or_none()
+    
     if not patient:
-        return False
+        return False, "Patient not found"
+    
+    orthanc_patient_id = patient.orthanc_patient_id
+    patient_name = patient.name
+    
+    # Delete from Orthanc first
+    if orthanc_patient_id:
+        async with aiohttp.ClientSession(auth=AUTH) as session:
+            try:
+                async with session.delete(f"{ORTHANC_URL}/patients/{orthanc_patient_id}") as resp:
+                    if resp.status == 404:
+                        print(f"[WARN] Patient {orthanc_patient_id} not found in Orthanc (already deleted)")
+                    elif resp.status not in [200, 204]:
+                        error_msg = f"Failed to delete from Orthanc: HTTP {resp.status}"
+                        print(f"[ERROR] {error_msg}")
+                        return False, error_msg
+                    else:
+                        print(f"[INFO] 🗑 Deleted patient {patient_name} from Orthanc")
+            except aiohttp.ClientError as e:
+                error_msg = f"Orthanc connection error: {str(e)}"
+                print(f"[ERROR] {error_msg}")
+                return False, error_msg
+    
+    # Delete from database
     try:
         await db.delete(patient)
         await db.commit()
-        return True
-    except SQLAlchemyError:
+        print(f"[INFO] 🗑 Deleted patient {patient_name} from database")
+        return True, None
+    except SQLAlchemyError as e:
         await db.rollback()
-        return False
+        error_msg = f"Database error: {str(e)}"
+        print(f"[ERROR] {error_msg}")
+        return False, error_msg
 
 # ---------------------------
 # find a patient by name, gender
