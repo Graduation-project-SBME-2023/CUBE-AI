@@ -75,9 +75,9 @@ const AgenticHome = ({ onNavigate, onBack }) => {
 
     const handleSearch = () => {
         if (!hypothesis.trim()) return;
-        // Send initial hypothesis as a message to backend via WebSocket
-        // websocketService.sendMessage({ type: 'initial_hypothesis', hypothesis });
-        // Navigate to playground
+        // Send the hypothesis as a user chat message to backend via WebSocket
+        websocketService.sendMessage({ type: 'msg', role: 'user', content: hypothesis });
+        // Navigate to playground, passing the hypothesis
         navigate('/playground', { state: { hypothesis } });
     };
 
