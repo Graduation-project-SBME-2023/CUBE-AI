@@ -70,7 +70,21 @@ const ChatSidebar = ({ isOpen, onClose, initialUserMessage }) => {
             setSessions((s) => [newSession, ...s]);
             setActiveSessionId(newSession.chat_id);
             setDrawerOpen(false);
-        } catch (err) {}
+        } catch (err) {
+            // Fallback: create a local-only session if DB fails
+            const fallbackId = Date.now();
+            const newSession = {
+                chat_id: fallbackId,
+                title: `Local Chat ${sessions.length + 1}`,
+                messages: [{ id: makeId("sys"), role: "system", text: "Hello! (local session, DB unavailable)", ts: Date.now() }],
+                summary: '',
+                last_activity: Date.now(),
+            };
+            setSessions((s) => [newSession, ...s]);
+            setActiveSessionId(newSession.chat_id);
+            setDrawerOpen(false);
+            alert("Warning: Could not create chat session in the database. Using a local-only session.\n\nError: " + err);
+        }
     };
     const deleteSession = async (chat_id) => {
         try { await fetch(`http://localhost:8000/chat_sessions/${chat_id}`, { method: "DELETE" }); } catch (err) {}
@@ -79,18 +93,26 @@ const ChatSidebar = ({ isOpen, onClose, initialUserMessage }) => {
     };
     const sendMessage = async () => {
         if (!input.trim()) return;
-        if (!activeSessionId) await createNewSession();
-        const sessionId = activeSessionId ?? sessions[0]?.chat_id;
-        if (!sessionId) return;
+        let sessionId = activeSessionId;
+        // If no session, create one and wait for state update
+        if (!sessionId) {
+            await createNewSession();
+            sessionId = activeSessionIdRef.current ?? sessions[0]?.chat_id;
+            if (!sessionId) return;
+        }
         const userMsg = { id: makeId("u"), role: "user", text: input, ts: Date.now() };
         setSessions((prev) => prev.map((s) => s.chat_id === sessionId ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() } : s));
         setInput("");
         setIsTyping(true);
+        let dbFailed = false;
         try {
             await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
                 method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: "user", text: userMsg.text }),
             });
-        } catch(e) {}
+        } catch(e) {
+            dbFailed = true;
+            alert("Warning: Could not save message to the database. This chat is now local-only.\n\nError: " + e);
+        }
         // Debug log outgoing message
         console.log("[ChatSidebar] Sending WS message:", { type: "user", payload: userMsg.text });
         if (websocketService.isConnected()) {
@@ -187,6 +209,7 @@ const ChatSidebar = ({ isOpen, onClose, initialUserMessage }) => {
                     <button 
                         onClick={sendMessage}
                         className="w-chat-send-btn"
+                        disabled={!input.trim() || isTyping}
                     >
                         <Send size={16} />
                     </button>
