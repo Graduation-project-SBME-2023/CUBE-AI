@@ -90,6 +90,7 @@ const ChatSidebar = ({ isOpen, onClose, initialUserMessage }) => {
             await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
                 method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: "user", text: userMsg.text }),
             });
+            
             websocketService.sendMessage({ type: "user", payload: userMsg.text });
         } catch(e) {}
     };
