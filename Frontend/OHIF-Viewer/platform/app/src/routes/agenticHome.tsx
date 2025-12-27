@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, Clock, Plus, ArrowLeft, ArrowRight, Box, Bot 
 } from 'lucide-react';
-
+import { useNavigate } from 'react-router';
 import websocketService from '../utils/WebsocketService';
+import { use } from 'i18next';
 
 // ==========================================
 // STYLE CONFIGURATION
@@ -60,7 +61,7 @@ const styles = {
 // ==========================================
 const AgenticHome = ({ onNavigate, onBack }) => {
     const [hypothesis, setHypothesis] = useState("");
-
+    const navigate = useNavigate();
     useEffect(() => {
         // Connect to WebSocket on mount
         websocketService.connect();
@@ -75,11 +76,9 @@ const AgenticHome = ({ onNavigate, onBack }) => {
     const handleSearch = () => {
         if (!hypothesis.trim()) return;
         // Send initial hypothesis as a message to backend via WebSocket
-        websocketService.sendMessage({ type: 'initial_hypothesis', hypothesis });
+        // websocketService.sendMessage({ type: 'initial_hypothesis', hypothesis });
         // Navigate to playground
-        if (onNavigate) {
-            onNavigate('/playground', { state: { hypothesis } });
-        }
+        navigate('/playground', { state: { hypothesis } });
     };
 
     const handleProjectClick = (project) => {
