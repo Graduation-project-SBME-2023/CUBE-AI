@@ -95,6 +95,8 @@ const ChatSidebar = ({ isOpen, onClose, initialUserMessage }) => {
         } catch(e) {}
     };
     useEffect(() => {
+        if (!isOpen) return;
+        websocketService.connect();
         fetchChatSessions();
         const handleWS = async (data) => {
             if (data.type !== "msg") return;
@@ -111,8 +113,13 @@ const ChatSidebar = ({ isOpen, onClose, initialUserMessage }) => {
             } catch (err) {}
         };
         const unsubscribe = websocketService.subscribe(handleWS);
-        return () => unsubscribe();
-    }, []);
+        return () => {
+            unsubscribe();
+            if (websocketService.socket) {
+                websocketService.socket.close();
+            }
+        };
+    }, [isOpen]);
     useEffect(() => {
         if (activeSessionId) fetchMessagesForSession(activeSessionId);
     }, [activeSessionId]);
