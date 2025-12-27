@@ -90,15 +90,21 @@ const ChatSidebar = ({ isOpen, onClose, initialUserMessage }) => {
             await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
                 method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: "user", text: userMsg.text }),
             });
-            
-            websocketService.sendMessage({ type: "user", payload: userMsg.text });
         } catch(e) {}
+        // Debug log outgoing message
+        console.log("[ChatSidebar] Sending WS message:", { type: "user", payload: userMsg.text });
+        if (websocketService.isConnected()) {
+            websocketService.sendMessage({ type: "user", payload: userMsg.text });
+        } else {
+            alert("WebSocket not connected. Message not sent to backend in real time.");
+        }
     };
+    // Only connect WebSocket once for the app session (not just when sidebar is open)
     useEffect(() => {
-        if (!isOpen) return;
         websocketService.connect();
         fetchChatSessions();
         const handleWS = async (data) => {
+            console.log("[ChatSidebar] WS received:", data);
             if (data.type !== "msg") return;
             const currentSessionId = activeSessionIdRef.current ?? sessions[0]?.chat_id;
             if (!currentSessionId) return;
@@ -113,13 +119,8 @@ const ChatSidebar = ({ isOpen, onClose, initialUserMessage }) => {
             } catch (err) {}
         };
         const unsubscribe = websocketService.subscribe(handleWS);
-        return () => {
-            unsubscribe();
-            if (websocketService.socket) {
-                websocketService.socket.close();
-            }
-        };
-    }, [isOpen]);
+        return () => unsubscribe();
+    }, []);
     useEffect(() => {
         if (activeSessionId) fetchMessagesForSession(activeSessionId);
     }, [activeSessionId]);
