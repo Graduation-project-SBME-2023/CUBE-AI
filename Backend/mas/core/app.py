@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from orchestrator import Orchestrator, SystemState
+# from orchestrator import Orchestrator, SystemState
 from planner import Planner
 
 # NEW: socket storemaset_socket, get_socket, send_ws_message

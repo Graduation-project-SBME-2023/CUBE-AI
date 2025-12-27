@@ -96,7 +96,7 @@ const CubeStartUp = () => {
         
         if (mode === 'standard') {
             // Navigate to worklist for standard pipeline
-            navigate('/worklist');
+            navigate('/');
         } else if (mode === 'agentic') {
             // Navigate to playground for agentic researcher
             // Using a default chat_id or you can generate one

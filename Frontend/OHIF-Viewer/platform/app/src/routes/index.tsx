@@ -127,7 +127,7 @@ const createRoutes = ({
 
   // CUBE Startup Route - Landing Page
   const cubeStartupRoute = {
-    path: '/',
+    path: '/home',
     children: CubeStartUp,
     private: false, // Set to true if authentication is required
   };
@@ -136,7 +136,7 @@ const createRoutes = ({
 
   // WorkList Route (now moved to /worklist path since CUBE takes root)
   const WorkListRoute = {
-    path: '/worklist',
+    path: '/',
     children: DataSourceWrapper,
     private: true, //Change to test the appliaction
     props: { children: WorkList, servicesManager, extensionManager },
@@ -148,6 +148,7 @@ const createRoutes = ({
     cubeStartupRoute, // CUBE startup is now the landing page
     ...routes,
     ...workflowRoutes,
+    playgroundRoutes,
     ...playgroundRoutes,
     ...(showStudyList ? [WorkListRoute] : []),
     ...(customRoutes?.routes || []),

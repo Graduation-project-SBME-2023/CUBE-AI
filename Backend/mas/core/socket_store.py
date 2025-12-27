@@ -60,13 +60,13 @@ class ConnectionManager:
         }, default=str)
 
         dead_sockets = []
-        # for connection in self.active_connections:
-        #     try:
-        #         await connection.send_text(message_data)
-        #     except Exception as e:
-        #         logger.error(f"Failed to send message: {e}")
-        #         dead_sockets.append(connection)
-        # await self.solely_connected_socket.send_text(message_data)
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message_data)
+            except Exception as e:
+                logger.error(f"Failed to send message: {e}")
+                dead_sockets.append(connection)
+        await self.solely_connected_socket.send_text(message_data)
         
         # Cleanup broken connections
         for dead in dead_sockets:
