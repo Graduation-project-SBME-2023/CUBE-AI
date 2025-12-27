@@ -5,7 +5,7 @@ import './ChatSidebar.css';
 
 const makeId = (prefix = "id") => `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 
-const ChatSidebar = ({ isOpen, onClose }) => {
+const ChatSidebar = ({ isOpen, onClose, initialUserMessage }) => {
     const [sessions, setSessions] = useState([]);
     const [activeSessionId, setActiveSessionId] = useState(null);
     const [input, setInput] = useState("");
@@ -14,7 +14,11 @@ const ChatSidebar = ({ isOpen, onClose }) => {
     const messagesEndRef = useRef(null);
     const activeSessionIdRef = useRef(null);
     const activeSession = sessions.find((s) => s.chat_id === activeSessionId) || null;
-    const messages = activeSession ? activeSession.messages : [];
+    let messages = activeSession ? activeSession.messages : [];
+    // If there are no messages and an initialUserMessage is provided, show it as the first user message
+    if (messages.length === 0 && initialUserMessage) {
+        messages = [{ id: makeId('init'), role: 'user', text: initialUserMessage, ts: Date.now() }];
+    }
     useEffect(() => { activeSessionIdRef.current = activeSessionId; }, [activeSessionId]);
     const fetchChatSessions = async () => {
         try {

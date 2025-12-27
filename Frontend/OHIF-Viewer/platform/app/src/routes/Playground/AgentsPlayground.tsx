@@ -234,84 +234,84 @@ export default function AgentsPlayground() {
     setEdges(initialEdgesData);
     if(websocketService.isConnected()) websocketService.sendMessage({ type: 'RESET_WORKFLOW' });
   };
-  return (
+    return (
     <div className="w-full h-screen font-sans flex flex-col bg-[#000000] text-white overflow-hidden">
       {/* Display current hypothesis if present */}
       {hypothesis && (
-        <div className="bg-[#1f2d40] text-[#6fe5b8] px-6 py-2 text-lg font-semibold border-b border-[#3c5d80]">
-          Research Hypothesis: <span className="font-mono text-white">{hypothesis}</span>
-        </div>
+      <div className="bg-[#1f2d40] text-[#6fe5b8] px-6 py-2 text-lg font-semibold border-b border-[#3c5d80]">
+        Research Hypothesis: <span className="font-mono text-white">{hypothesis}</span>
+      </div>
       )}
       <div className="h-12 bg-[#151a1f] border-b border-[#000000] flex items-center justify-between px-4 z-20 shrink-0">
-        <div className="flex items-center gap-4">
-            <h1 className="font-bold text-[#91b9cd] text-sm tracking-wide">CUBE WORKSPACE</h1>
-            <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border
-                ${mode === 'planning' ? 'bg-[#1f2d40] text-[#91b9cd] border-[#3c5d80]' : 
-                  mode === 'executing' ? 'bg-[#003f5c] text-[#5acce6] border-[#005f7d]' : 
-                  'bg-[#06422d] text-[#6fe5b8] border-[#085a3c]'}`}>
-                {mode}
-            </div>
+      <div className="flex items-center gap-4">
+        <h1 className="font-bold text-[#91b9cd] text-sm tracking-wide">CUBE WORKSPACE</h1>
+        <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border
+          ${mode === 'planning' ? 'bg-[#1f2d40] text-[#91b9cd] border-[#3c5d80]' : 
+            mode === 'executing' ? 'bg-[#003f5c] text-[#5acce6] border-[#005f7d]' : 
+            'bg-[#06422d] text-[#6fe5b8] border-[#085a3c]'}`}>
+          {mode}
         </div>
-        <div className="flex items-center gap-3">
-             {mode === 'planning' && (
-                 <button onClick={startExecution} className="flex items-center gap-2 px-4 py-1.5 bg-[#348cfd] hover:bg-[#599fff] text-white text-xs rounded font-medium transition-colors shadow-lg">
-                    <Play size={14} fill="currentColor"/> Execute
-                 </button>
-             )}
-             {mode === 'executing' && (
-                 <>
-                    <button onClick={() => setIsPaused(!isPaused)} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors border ${isPaused ? 'bg-[#3b2d1c] border-[#705228] text-[#f8ce46]' : 'bg-[#151a1f] border-[#3c5d80] text-[#91b9cd] hover:border-[#91b9cd]'}`}>
-                        {isPaused ? <Play size={14} /> : <Pause size={14} />} {isPaused ? 'Resume' : 'Pause'}
-                    </button>
-                    <button onClick={resetWorkflow} className="flex items-center gap-2 px-3 py-1.5 bg-[#151a1f] hover:bg-[#2c1a1f] text-[#91b9cd] hover:text-[#ff6b6b] border border-[#3c5d80] rounded text-xs transition-colors">
-                        <RotateCcw size={14} /> Stop
-                    </button>
-                 </>
-             )}
-             {mode === 'results' && (
-                 <button onClick={resetWorkflow} className="flex items-center gap-2 px-4 py-1.5 bg-[#6fe5b8] hover:bg-[#91eac8] text-black text-xs rounded font-medium transition-colors">
-                    <RotateCcw size={14} /> Reset
-                 </button>
-             )}
-             <button 
-                onClick={() => setIsChatOpen(!isChatOpen)}
-                className={`ml-4 p-1.5 rounded border transition-colors ${isChatOpen ? 'bg-[#3c5d80] text-white border-[#5acce6]' : 'bg-[#151a1f] text-[#566a84] border-[#3c5d80] hover:text-white'}`}
-                title="Toggle Assistant"
-             >
-                 <MessageSquare size={16} />
-             </button>
-        </div>
+      </div>
+      <div className="flex items-center gap-3">
+         {mode === 'planning' && (
+           <button onClick={startExecution} className="flex items-center gap-2 px-4 py-1.5 bg-[#348cfd] hover:bg-[#599fff] text-white text-xs rounded font-medium transition-colors shadow-lg">
+            <Play size={14} fill="currentColor"/> Execute
+           </button>
+         )}
+         {mode === 'executing' && (
+           <>
+            <button onClick={() => setIsPaused(!isPaused)} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors border ${isPaused ? 'bg-[#3b2d1c] border-[#705228] text-[#f8ce46]' : 'bg-[#151a1f] border-[#3c5d80] text-[#91b9cd] hover:border-[#91b9cd]'}`}>
+              {isPaused ? <Play size={14} /> : <Pause size={14} />} {isPaused ? 'Resume' : 'Pause'}
+            </button>
+            <button onClick={resetWorkflow} className="flex items-center gap-2 px-3 py-1.5 bg-[#151a1f] hover:bg-[#2c1a1f] text-[#91b9cd] hover:text-[#ff6b6b] border border-[#3c5d80] rounded text-xs transition-colors">
+              <RotateCcw size={14} /> Stop
+            </button>
+           </>
+         )}
+         {mode === 'results' && (
+           <button onClick={resetWorkflow} className="flex items-center gap-2 px-4 py-1.5 bg-[#6fe5b8] hover:bg-[#91eac8] text-black text-xs rounded font-medium transition-colors">
+            <RotateCcw size={14} /> Reset
+           </button>
+         )}
+         <button 
+          onClick={() => setIsChatOpen(!isChatOpen)}
+          className={`ml-4 p-1.5 rounded border transition-colors ${isChatOpen ? 'bg-[#3c5d80] text-white border-[#5acce6]' : 'bg-[#151a1f] text-[#566a84] border-[#3c5d80] hover:text-white'}`}
+          title="Toggle Assistant"
+         >
+           <MessageSquare size={16} />
+         </button>
+      </div>
       </div>
       <div className="flex-1 flex overflow-hidden">
-          <div className="flex-1 flex flex-col min-w-0">
-              <div className="flex-1 relative overflow-hidden">
-                <MiniFlow
-                    nodes={nodes}
-                    edges={edges}
-                    onNodesChange={setNodes}
-                    nodeTypes={nodeTypes}
-                    edgeTypes={edgeTypes}
-                    readOnly={mode !== 'planning'}
-                >
-                    {mode === 'results' && (
-                        <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px] z-50 flex items-center justify-center animate-in fade-in duration-500">
-                            <div className="bg-[#151a1f] p-8 rounded border border-[#3c5d80] max-w-md text-center space-y-4 shadow-2xl">
-                                <div className="w-12 h-12 bg-[#06422d] rounded-full flex items-center justify-center mx-auto mb-2 border border-[#6fe5b8]">
-                                    <CheckCircle2 size={24} className="text-[#6fe5b8]" />
-                                </div>
-                                <h2 className="text-xl font-bold text-white">Workflow Complete</h2>
-                                <button onClick={resetWorkflow} className="w-full py-2 bg-[#348cfd] text-white text-sm rounded hover:bg-[#599fff] transition-colors font-medium">Return to Worklist</button>
-                            </div>
-                        </div>
-                    )}
-                </MiniFlow>
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex-1 relative overflow-hidden">
+          <MiniFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={setNodes}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            readOnly={mode !== 'planning'}
+          >
+            {mode === 'results' && (
+              <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px] z-50 flex items-center justify-center animate-in fade-in duration-500">
+                <div className="bg-[#151a1f] p-8 rounded border border-[#3c5d80] max-w-md text-center space-y-4 shadow-2xl">
+                  <div className="w-12 h-12 bg-[#06422d] rounded-full flex items-center justify-center mx-auto mb-2 border border-[#6fe5b8]">
+                    <CheckCircle2 size={24} className="text-[#6fe5b8]" />
+                  </div>
+                  <h2 className="text-xl font-bold text-white">Workflow Complete</h2>
+                  <button onClick={resetWorkflow} className="w-full py-2 bg-[#348cfd] text-white text-sm rounded hover:bg-[#599fff] transition-colors font-medium">Return to Worklist</button>
+                </div>
               </div>
-              <AgentRegistry isOpen={isRegistryOpen} onToggle={() => setIsRegistryOpen(!isRegistryOpen)} />
+            )}
+          </MiniFlow>
           </div>
-          {isChatOpen && (
-              <ChatSidebar isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
-          )}
+          <AgentRegistry isOpen={isRegistryOpen} onToggle={() => setIsRegistryOpen(!isRegistryOpen)} />
+        </div>
+        {isChatOpen && (
+          <ChatSidebar isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} initialUserMessage={hypothesis} />
+        )}
       </div>
     </div>
-  );
+    );
 }
