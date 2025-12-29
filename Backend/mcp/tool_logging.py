@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict, field
-from typing import Any, Literal
+from typing import Literal, Union
 import json
 import time
 import requests
@@ -14,11 +14,38 @@ EventType = Literal[
     "error"
 ]
 
+ContentType = Literal[
+    "markdown",
+    "progress",
+    "text",
+]
+
+@dataclass 
+class MarkdownPayload:
+    markdown: str
+
+@dataclass
+class ProgressPayload:
+    current: int
+    total: int
+    label: str | None = None
+
+@dataclass
+class TextPayload:
+    message: str
+
+ContentPayload = Union[
+    MarkdownPayload,
+    TextPayload,
+    ProgressPayload,
+]
+
 @dataclass
 class ToolEvent:
     event_type: EventType
-    source: str          # tool name or agent
-    payload: Any
+    source: str                 # tool name or agent
+    content_type: ContentType
+    content: ContentPayload
     timestamp: float = field(default_factory=time.time)
 
 def log_tool_state(event: ToolEvent):
