@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, memo } from 'react';
 import MiniFlow from './MiniFlow';
 import AgentRegistry from './AgentRegistry';
 import ChatSidebar from './ChatSidebar';
-import websocketService from './WebSocketService';
+import websocketService from '../../utils/WebsocketService';
 import { Play, Pause, RotateCcw, MessageSquare, CheckCircle2, Activity, CheckCircle2 as CheckIcon, Circle, Edit3, Trash2, ChevronUp, ChevronDown, FileText } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 
@@ -179,8 +179,8 @@ export default function AgentsPlayground() {
     };
     const handleStatusChange = (status) => setIsConnected(status);
     const unsubscribeMsg = websocketService.subscribe(handleWSMessage);
-    const unsubscribeStatus = websocketService.onStatusChange(handleStatusChange);
-    return () => { unsubscribeMsg(); unsubscribeStatus(); };
+    // const unsubscribeStatus = websocketService.onStatusChange(handleStatusChange);
+    return () => { unsubscribeMsg(); };
   }, [location.state]);
   const updateNodeData = (id, patch) => {
     setNodes(prev => prev.map(n => n.id === id ? { ...n, data: { ...n.data, ...patch } } : n));
