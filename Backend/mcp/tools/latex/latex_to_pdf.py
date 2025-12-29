@@ -7,7 +7,7 @@ import asyncio
 # from .. import mcp
 from pydantic import Field
 from typing import Annotated
-from tool_logging import ToolEvent, log_tool_state
+from tool_logging import ToolEvent, log_tool_state, TextPayload
 
 # @mcp.tool()
 async def latex_to_pdf(
@@ -23,7 +23,8 @@ async def latex_to_pdf(
     """
     try:
         with tempfile.TemporaryDirectory() as temp:
-            start_event = ToolEvent('tool_started', 'latex_reporter_agent', {'tool_name':'latex_to_pdf','progress':'working'})
+            payload = TextPayload(message='Generating pdf...')
+            start_event = ToolEvent('tool_started', 'latex_reporter_agent', 'text', payload)
             log_tool_state(start_event)
             tex_path = os.path.join(temp, "document.tex")
 
@@ -31,7 +32,8 @@ async def latex_to_pdf(
             with open(tex_path, "w", encoding="utf-8") as f:
                 f.write(latex_text)
 
-            compiling_latex_event = ToolEvent('tool_progress', 'latex_reporter_agent', {'tool_name':'latex_to_pdf','progress':'working'})
+            payload = TextPayload(message='Compiling...')
+            compiling_latex_event = ToolEvent('tool_progress', 'latex_reporter_agent', 'text', payload)
             log_tool_state(compiling_latex_event)
             # Compile using pdflatex
             result = subprocess.run(
@@ -44,7 +46,8 @@ async def latex_to_pdf(
 
             # Check for compilation errors
             if result.returncode != 0:
-                error_compilation_event = ToolEvent('error','latex_reporter_agent', {'tool_name':'latex_to_pdf','progress':'LaTeX compilation failed.'})
+                payload = TextPayload(message='LaTeX compilation failed.')
+                error_compilation_event = ToolEvent('error','latex_reporter_agent', 'text', payload)
                 log_tool_state(error_compilation_event)
                 return "LaTeX compilation failed. Check your LaTeX syntax."
 
@@ -52,7 +55,8 @@ async def latex_to_pdf(
             pdf_path = os.path.join(temp, "document.pdf")
 
             if not os.path.exists(pdf_path):
-                error_compilation_event = ToolEvent('error','latex_reporter_agent', {'tool_name':'latex_to_pdf','progress':'Possible LaTeX error.'})
+                payload = TextPayload(message='Possible LaTeX error.')
+                error_compilation_event = ToolEvent('error','latex_reporter_agent', 'text', payload)
                 log_tool_state(error_compilation_event)
                 return "PDF was not generated. Possible LaTeX error."
 
@@ -68,7 +72,8 @@ async def latex_to_pdf(
         # Save final PDF
         with open(final_path, "wb") as f:
             f.write(pdf_bytes)
-        error_compilation_event = ToolEvent('tool_finished','latex_reporter_agent', {'tool_name':'latex_to_pdf','progress':'PDF generated successfully'})
+        payload = TextPayload(message='PDF generated successfully.')
+        error_compilation_event = ToolEvent('tool_finished','latex_reporter_agent', 'text', payload)
         log_tool_state(error_compilation_event)
         return f"PDF generated successfully and saved as: {output_filename}"
 
