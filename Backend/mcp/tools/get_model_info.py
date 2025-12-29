@@ -3,7 +3,7 @@ import requests
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
-from tool_logging import ToolEvent,log_tool_state
+from tool_logging import ToolEvent,log_tool_state, TextPayload
 
 @mcp.tool()
 async def get_model_info():
@@ -36,7 +36,14 @@ async def get_model_info():
         }
         for m in models
     ]
-    finish_event = ToolEvent( 'tool_finished', 'segmentation_agent', {'tool_name':'get_model_info','progress':'models fetched'})
+    payload = TextPayload(message="Models Fetched")
+    finish_event = ToolEvent(
+        event_type='tool_finished',
+        source='segmentation_agent',
+        content_type='text',
+        content=payload
+    )
+    # finish_event = ToolEvent('tool_finished', 'segmentation_agent', {'tool_name':'get_model_info','progress':'models fetched'})
     log_tool_state(finish_event)
 
     return formatted
