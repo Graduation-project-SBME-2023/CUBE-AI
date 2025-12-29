@@ -112,7 +112,7 @@ function App({ config, defaultExtensions, defaultModes }) {
       <BrowserRouter basename={routerBasename}>
         {authRoutes}
         {appRoutes}
-        <ChatWidget /> 
+        {/* <ChatWidget /> */}
       </BrowserRouter>
     </CombinedProviders>
 
