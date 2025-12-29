@@ -9,22 +9,22 @@ import MiniFlow from './miniflow';
 import StartNode from './nodes/StartNode';
 import AgentNode from './nodes/AgentNode';
 import CustomEdge from './edges/CustomEdges';
-import { FlowNode, FlowEdge } from './types';
+import { FlowNode, FlowEdge, ToolEvent } from './types';
 
 // Mock Data
 const initialNodesData: FlowNode[] = [
   { id: '1', type: 'start', position: { x: 50, y: 150 }, data: { title: 'Start', description: 'Entry point' } },
-  { id: '2', type: 'agent', position: { x: 250, y: 150 }, data: { title: 'Retrieve Study', description: 'Fetch DICOM metadata', status: 'pending', logs: [], isExpanded: false } },
-  { id: '3', type: 'agent', position: { x: 500, y: 50 }, data: { title: 'Segmentation', description: 'Run ML Segmentation Model', status: 'pending', logs: [], isExpanded: false } },
+  { id: 'population_planner_agent', type: 'agent', position: { x: 250, y: 150 }, data: { title: 'Retrieve Study', description: 'Fetch DICOM metadata', status: 'pending', logs: [], isExpanded: false } },
+  { id: 'segmentation_agent', type: 'agent', position: { x: 500, y: 50 }, data: { title: 'Segmentation', description: 'Run ML Segmentation Model', status: 'pending', logs: [], isExpanded: false } },
   { id: '4', type: 'agent', position: { x: 500, y: 250 }, data: { title: 'Measurements', description: 'Calculate ROI metrics', status: 'pending', logs: [], isExpanded: false } },
   { id: '5', type: 'agent', position: { x: 750, y: 150 }, data: { title: 'Save Report', description: 'Commit SR to PACS', status: 'pending', logs: [], isExpanded: false } },
 ];
 
 const initialEdgesData: FlowEdge[] = [
   { id: 'e1-2', source: '1', target: '2', type: 'custom' },
-  { id: 'e2-3', source: '2', target: '3', type: 'custom' },
-  { id: 'e2-4', source: '2', target: '4', type: 'custom' },
-  { id: 'e3-5', source: '3', target: '5', type: 'custom' },
+  { id: 'e2-3', source: 'population_planner_agent', target: 'segmentation_agent', type: 'custom' },
+  { id: 'e2-4', source: 'population_planner_agent', target: '4', type: 'custom' },
+  { id: 'e3-5', source: 'segmentation_agent', target: '5', type: 'custom' },
   { id: 'e4-5', source: '4', target: '5', type: 'custom' },
 ];
 
@@ -47,14 +47,17 @@ export default function PlaygroundCanvas() {
   useEffect(() => {
     websocketService.connect();
     const handleWSMessage = (data: any) => {
-        const { type, payload } = data;
-        if (type === 'msg') return;
-        if (type === 'node' || type === 'NODE_UPDATE') {
-            updateNodeData(data.nodeId || data.id || payload?.nodeId, payload || data.data);
-        }
-        if (type === 'plan' || type === 'PLAN_UPDATE') {
-            updatePlan(payload || data.data || data);
-        }
+      const { type, payload } = data;
+      if (type === 'msg') return;
+      if (type === 'node' || type === 'NODE_UPDATE') {
+        updateNodeData(data.nodeId || data.id || payload?.nodeId, payload || data.data);
+      }
+      if (type === 'plan' || type === 'PLAN_UPDATE') {
+        updatePlan(payload || data.data || data);
+      }
+      if (type === 'tool_update') {
+        updateToolProgress(payload);
+      }
     };
     const unsubscribe = websocketService.subscribe(handleWSMessage);
     return () => { unsubscribe(); };
@@ -107,6 +110,36 @@ export default function PlaygroundCanvas() {
       }
       setEdges(newEdges);
     }
+  };
+
+  const updateToolProgress = (event: ToolEvent) => {
+    setNodes(prev =>
+      prev.map(node => {
+        if (
+          node.type !== 'agent' ||
+          node.id !== event.source
+        ) {
+          return node;
+        }
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            // auto-expand when logs arrive
+            isExpanded: true,
+            logs: [...(node.data.logs || []), event],
+            // optionally update status
+            // status:
+            //   event.event_type === 'tool_started'
+            //     ? 'active'
+            //     : event.event_type === 'tool_finished'
+            //     ? 'completed'
+            //     : node.data.status,
+          },
+        };
+      })
+    );
   };
 
   const sendPlanToBackend = useCallback((nodesData: FlowNode[], edgesData: FlowEdge[]) => {

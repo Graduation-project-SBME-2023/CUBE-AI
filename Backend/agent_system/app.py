@@ -1,7 +1,7 @@
 import asyncio
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Literal, Any
+from typing import Literal, Any, Union
 from datetime import datetime
 from pydantic import BaseModel, Field
 from teams.execution_team import BasicPipelineBuilder
@@ -51,10 +51,34 @@ EventType = Literal[
     "error"
 ]
 
+ContentType = Literal[
+    "markdown",
+    "progress",
+    "text",  # could add more content types
+]
+
+class MarkdownPayload(BaseModel):
+    markdown: str
+
+class ProgressPayload(BaseModel):
+    current: int
+    total: int
+    label: str | None = None
+
+class TextPayload(BaseModel):
+    message: str
+
+ContentPayload = Union[
+    MarkdownPayload,
+    ProgressPayload,
+    TextPayload,
+]
+
 class ToolEvent(BaseModel):
     event_type: EventType
     source: str          # tool name or agent
-    payload: Any
+    content_type: ContentType
+    content: ContentPayload
     timestamp: datetime
 
 # ----------------------------------------------------------------------
@@ -90,7 +114,8 @@ async def receive_tool_event(event: ToolEvent):
     logging.getLogger().info(f"event at /events: {event}")
     await send_ws_message(
         msg_type="tool_update",
-        payload=event
+        payload=event.model_dump()
+        # payload=event
     )
 
 # ----------------------------------------------------------------------
@@ -131,5 +156,5 @@ if __name__ == "__main__":
         "app:app",
         host="0.0.0.0",
         port=8150,
-        reload=False,
+        reload=True,
     )
