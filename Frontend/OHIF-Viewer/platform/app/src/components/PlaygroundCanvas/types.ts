@@ -10,7 +10,7 @@ export interface AgentNodeData {
   name?: string; // fallback for title
   description: string;
   status: 'pending' | 'active' | 'completed' | string;
-  logs: string[];
+  logs: ToolEvent[];
   isExpanded: boolean;
   matched_module?: string;
   mode?: string;
@@ -59,4 +59,52 @@ export interface MiniFlowProps {
   edgeTypes: Record<string, React.ComponentType<any>>;
   children?: React.ReactNode;
   readOnly?: boolean;
+}
+
+export type EventType =
+  | 'tool_started'
+  | 'tool_progress'
+  | 'tool_log'
+  | 'tool_finished'
+  | 'run_started'
+  | 'run_finished'
+  | 'error'
+
+export type ContentType =
+  | 'markdown'
+  | 'progress'
+  | 'text'
+
+  export interface MarkdownPayload {
+  markdown: string
+}
+
+export interface ProgressPayload {
+  current: number
+  total: number
+  label?: string
+}
+
+export interface TextPayload {
+  message: string
+}
+
+export type ToolContent =
+  | {
+      content_type: 'markdown'
+      content: MarkdownPayload
+    }
+  | {
+      content_type: 'progress'
+      content: ProgressPayload
+    }
+  | {
+      content_type: 'text'
+      content: TextPayload
+    }
+
+export type ToolEvent = ToolContent & {
+  event_type: EventType
+  source: string
+  timestamp: string
 }
