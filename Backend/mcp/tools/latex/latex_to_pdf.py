@@ -4,12 +4,12 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 import asyncio
-# from .. import mcp
+from .. import mcp
 from pydantic import Field
 from typing import Annotated
 from tool_logging import ToolEvent, log_tool_state, TextPayload
 
-# @mcp.tool()
+@mcp.tool()
 async def latex_to_pdf(
     latex_text: Annotated[str, Field(description="The complete LaTeX source code content, including the preamble and document body, to be compiled.")] ,
     output_filename: Annotated[str, Field(description="The file name where the generated PDF should be saved, without the path (e.g., 'report.pdf').")]
