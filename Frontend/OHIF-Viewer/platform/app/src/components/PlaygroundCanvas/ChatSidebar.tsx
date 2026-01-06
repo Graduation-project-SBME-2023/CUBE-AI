@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, History, Plus, ChevronRight, Trash2, Send } from 'lucide-react';
-import websocketService from './WebSocketService';
+import websocketService from '../../utils/WebsocketService'; // Adjust path as needed
 import './ChatSidebar.css';
 
 const makeId = (prefix = "id") => `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
