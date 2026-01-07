@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { MessageSquare, FlaskConical  } from 'lucide-react';
+import { MessageSquare, FlaskConical } from 'lucide-react';
 
 // Components
-import PlaygroundCanvas from '../../components/PlaygroundCanvas'; // Importing the unified engine
-import AgentRegistry from '../../components/PlaygroundCanvas/AgentRegistry'; // Your updated deck component
+import PlaygroundCanvas from '../../components/PlaygroundCanvas'; 
+import AgentRegistry from '../../components/PlaygroundCanvas/AgentRegistry'; 
 import ChatSidebar from '../../components/PlaygroundCanvas/ChatSidebar';
 
 export default function AgentsPlayground() {
@@ -12,28 +12,28 @@ export default function AgentsPlayground() {
     const location = useLocation();
     const [isChatOpen, setIsChatOpen] = useState(false);
     
-    // Retrieve hypothesis passed from previous navigation (e.g., Search Page)
+    // 1. Add state for the Registry Deck
+    const [isRegistryOpen, setIsRegistryOpen] = useState(true);
+    
     const hypothesis = location.state?.hypothesis || '';
 
     return (
         <div className="w-full h-screen font-sans flex flex-col bg-[#000000] text-white overflow-hidden">
             
-            {/* 1. TOP HEADER (App Context) */}
-            
             {/* --- THE ONLY HEADER --- */}
             <div className="h-14 bg-[#0b1015] border-b border-[#1f2d40] flex items-center justify-between px-4 z-20 shrink-0">
                 <div className="flex items-center gap-6">
-                    {/* 1. Breadcrumbs */}
+                    {/* Breadcrumbs */}
                     <div className="flex items-center gap-3">
                         <span className="font-bold text-[#5acce6] text-xs tracking-widest">CUBE</span>
                         <span className="text-gray-500 text-xs">/</span>
                         <span className="text-gray-300 text-xs font-medium">Workspace</span>
                     </div>
 
-                    {/* 2. Merged Hypothesis Context */}
+                    {/* Hypothesis Context */}
                     {hypothesis && (
                         <>
-                            <div className="h-6 w-px bg-[#1f2d40]" /> {/* Vertical Separator */}
+                            <div className="h-6 w-px bg-[#1f2d40]" />
                             <div className="flex items-center gap-3 text-xs">
                                 <span className="text-[#5acce6] uppercase tracking-wider font-bold flex items-center gap-2">
                                     <FlaskConical size={14} /> Hypothesis:
@@ -46,7 +46,7 @@ export default function AgentsPlayground() {
                     )}
                 </div>
                 
-                {/* 3. Right Actions */}
+                {/* Right Actions */}
                 <button 
                     onClick={() => setIsChatOpen(!isChatOpen)}
                     className={`p-2 rounded border transition-colors flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider
@@ -56,24 +56,24 @@ export default function AgentsPlayground() {
                 </button>
             </div>
 
-
-            {/* 3. MAIN WORKSPACE */}
+            {/* --- MAIN WORKSPACE --- */}
             <div className="flex-1 flex overflow-hidden relative">
                 
-                {/* A. The Workflow Canvas (The Engine) */}
+                {/* A. The Workflow Canvas */}
                 <div className="flex-1 min-w-0 relative">
                     <PlaygroundCanvas 
                         initialHypothesis={hypothesis} 
                     />
                     
                     {/* B. Agent Registry (Floating Deck) */}
+                    {/* FIX: Connect state here */}
                     <AgentRegistry 
-                        isOpen={true} // It manages its own state or you can pass props
-                        onToggle={() => {}} // Optional if using internal state
+                        isOpen={isRegistryOpen} 
+                        onToggle={() => setIsRegistryOpen(!isRegistryOpen)} 
                     />
                 </div>
 
-                {/* C. Chat Sidebar (Overlay/Slide-in) */}
+                {/* C. Chat Sidebar */}
                 {isChatOpen && (
                     <div className="w-[350px] border-l border-[#3c5d80] bg-[#0b1015] z-30 shadow-2xl animate-in slide-in-from-right duration-300 relative">
                         <ChatSidebar 
