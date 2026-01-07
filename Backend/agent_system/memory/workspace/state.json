@@ -1,0 +1,20 @@
+{
+  "hypothesis": {
+    "id": "",
+    "title": "",
+    "population": "",
+    "intervention": "",
+    "outcome": "",
+    "clinical_context": "",
+    "relationship_type": "",
+    "state": "confirmed",
+    "message": null
+  },
+  "plan": {
+    "hypothesis_id": "",
+    "study_goal": "",
+    "steps": [],
+    "state": "confirmed"
+  },
+  "status": "idle"
+}

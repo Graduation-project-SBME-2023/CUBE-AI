@@ -1,0 +1,15 @@
+{
+  "hypothesis": {
+    "id": "458c2c4a-fd96-4cbd-bcd7-a43c0d04f4dc",
+    "title": "",
+    
+    "state": "not_confirmed"
+  },
+  "plan": {
+    "hypothesis_id": "",
+    "study_goal": "",
+    "steps": [],
+    "state": "not_confirmed"
+  },
+  "planner_status": "idle"
+}

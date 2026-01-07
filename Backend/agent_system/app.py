@@ -17,7 +17,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, ".."))
 sys.path.append(root_dir)
 
-from mas.core.socket_store import manager, send_ws_message
+from socket_store import manager, send_ws_message
 from agents.planning_agents.planner import ClinicalPlanner
 # ----------------------------------------------------------------------
 # FastAPI app definition
@@ -119,8 +119,8 @@ async def run_planner(message: str):
 @app.post("/run")
 async def run_pipeline(request: RunRequest):
 
-    graph_builder = await BasicPipelineBuilder.create()
-    graph_flow = GraphFlow(participants=graph_builder.get_participants(), graph=graph_builder.build())
+    # graph_builder = await BasicPipelineBuilder.create()
+    # graph_flow = GraphFlow(participants=graph_builder.get_participants(), graph=graph_builder.build())
 
     try:
         async for event in graph_flow.run_stream(task=request.hypothesis):
