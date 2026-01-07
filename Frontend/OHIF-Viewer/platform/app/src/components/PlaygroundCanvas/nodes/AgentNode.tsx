@@ -4,7 +4,6 @@ import {
   ChevronDown, ChevronUp, FileText 
 } from 'lucide-react';
 import { AgentNodeProps } from '../types';
-import { AgentLogRenderer } from '../logs/AgentLogRenderer';
 
 const AgentNode = memo((props: AgentNodeProps) => {
   const { data, id } = props;
@@ -51,10 +50,9 @@ const AgentNode = memo((props: AgentNodeProps) => {
 
   const handleNodeClick = () => {
     // Only allow expanding if we are executing/viewing results
-    // if (mode !== 'planning' && (status === 'active' || status === 'completed')) {
-    //   onToggleExpand?.(id);
-    // }
-    onToggleExpand?.(id);
+    if (mode !== 'planning' && (status === 'active' || status === 'completed')) {
+      onToggleExpand?.(id);
+    }
   };
 
   return (
@@ -98,18 +96,18 @@ const AgentNode = memo((props: AgentNodeProps) => {
         </div>
 
         {/* Logs / Details Section */}
-        {/* {isExpanded && mode !== 'planning' && ( */}
-        {isExpanded && (
+        {isExpanded && mode !== 'planning' && (
           <div className="border-t border-[#3c5d80] bg-[#000000] p-3 text-xs font-mono space-y-1 animate-in slide-in-from-top-2 duration-200">
             <div className="flex items-center gap-2 text-[#91b9cd] mb-2 uppercase tracking-wider font-bold text-[10px]">
               <FileText size={10} /> System Trace
             </div>
             {logs.length === 0 && <span className="text-gray-600 italic">Initializing...</span>}
-            <div className="space-y-2">
-              {logs.map((log, i) => (
-                <AgentLogRenderer key={i} log={log} />
-              ))}
-            </div>
+            {logs.slice(-5).map((log, i) => (
+              <div key={i} className="flex gap-2 text-gray-400">
+                <span className="opacity-50 select-none text-[#5acce6]">{'>'}</span>
+                <span>{log}</span>
+              </div>
+            ))}
           </div>
         )}
       </div>
