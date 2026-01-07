@@ -4,6 +4,22 @@ import AgentRegistry from './AgentRegistry';
 import ChatSidebar from './ChatSidebar';
 import websocketService from '../../utils/WebsocketService';
 import { Play, Pause, RotateCcw, MessageSquare, CheckCircle2, Activity, CheckCircle2 as CheckIcon, Circle, Edit3, Trash2, ChevronUp, ChevronDown, FileText } from 'lucide-react';
+import Button from '../../components/ui/Button';
+
+// Icon aliases for lucide-react
+const PlayIcon: any = Play;
+const PauseIcon: any = Pause;
+const RotateCcwIcon: any = RotateCcw;
+const MessageSquareIcon: any = MessageSquare;
+const CheckCircle2Icon: any = CheckCircle2;
+const ActivityIcon: any = Activity;
+const CheckIconAlias: any = CheckIcon;
+const CircleIcon: any = Circle;
+const Edit3Icon: any = Edit3;
+const Trash2Icon: any = Trash2;
+const ChevronUpIcon: any = ChevronUp;
+const ChevronDownIcon: any = ChevronDown;
+const FileTextIcon: any = FileText;
 import { useLocation } from 'react-router-dom';
 
 // --- Node and Edge Components ---
@@ -30,35 +46,35 @@ const CustomEdge = ({ sourceX, sourceY, targetX, targetY, data }) => {
   );
 };
 
-const StartNode = memo(({ data }) => (
+const StartNode = memo(({ data }: { data: any }) => (
   <div className="px-6 py-3 shadow-lg rounded-full bg-[#151a1f] border-2 border-[#5acce6] min-w-[120px] text-center relative z-10">
     <div className="font-bold text-[#5acce6] select-none uppercase tracking-wider text-xs">{data.title}</div>
     <div className="absolute left-1/2 bottom-0 translate-y-1/2 -translate-x-1/2 w-2 h-2 bg-[#5acce6] rounded-full" />
   </div>
 ));
 
-const AgentNode = memo(({ data, id }) => {
+const AgentNode = memo(({ data, id }: { data: any; id: string }) => {
   const { title, description, status = 'pending', logs = [], isExpanded, onDelete, onEdit, onToggleExpand } = data;
   const [isHovered, setIsHovered] = useState(false);
   let borderColor = 'border-[#3c5d80]';
   let bgColor = 'bg-[#151a1f]';
   let textColor = 'text-white';
-  let Icon = Circle;
+  let Icon: any = CircleIcon;
   let iconColor = 'text-[#566a84]'; 
   let shadow = 'shadow-none';
   if (status === 'active') {
     borderColor = 'border-[#5acce6]';
     bgColor = 'bg-[#090c29]'; 
     textColor = 'text-[#5acce6]';
-    Icon = Activity;
+    Icon = ActivityIcon;
     iconColor = 'text-[#5acce6]';
     shadow = 'shadow-[0_0_20px_rgba(90,204,230,0.2)]';
   } else if (status === 'completed') {
-    borderColor = 'border-[#6fe5b8]';
+    borderColor = 'border-[#5acce6]';
     bgColor = 'bg-[#151a1f]';
-    textColor = 'text-[#6fe5b8]';
-    Icon = CheckIcon;
-    iconColor = 'text-[#6fe5b8]';
+    textColor = 'text-[#5acce6]';
+    Icon = CheckIconAlias;
+    iconColor = 'text-[#5acce6]';
   }
   const handleNodeClick = (e) => {
     if (data.mode !== 'planning' && (status === 'active' || status === 'completed')) {
@@ -90,20 +106,20 @@ const AgentNode = memo(({ data, id }) => {
           </div>
           {data.mode === 'planning' && (
             <div className={`flex gap-1 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`}>
-              <button onClick={(e) => { e.stopPropagation(); if (typeof onEdit === 'function') onEdit(id); }} className="p-1 hover:bg-[#000] rounded text-[#91b9cd]"><Edit3 size={14}/></button>
-              <button onClick={(e) => { e.stopPropagation(); if (typeof onDelete === 'function') onDelete(id); }} className="p-1 hover:bg-[#000] rounded text-red-400"><Trash2 size={14}/></button>
+              <button onClick={(e) => { e.stopPropagation(); if (typeof onEdit === 'function') onEdit(id); }} className="p-1 hover:bg-[#000] rounded text-[#91b9cd]"><Edit3Icon size={14}/></button>
+              <button onClick={(e) => { e.stopPropagation(); if (typeof onDelete === 'function') onDelete(id); }} className="p-1 hover:bg-[#000] rounded text-red-400"><Trash2Icon size={14}/></button>
             </div>
           )}
           {data.mode !== 'planning' && (status === 'active' || status === 'completed') && (
             <div className="text-[#566a84]">
-               {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+               {isExpanded ? <ChevronUpIcon size={14}/> : <ChevronDownIcon size={14}/>}
             </div>
           )}
         </div>
         {isExpanded && data.mode !== 'planning' && (
           <div className="border-t border-[#3c5d80] bg-[#000000] p-3 text-xs font-mono space-y-1 animate-in slide-in-from-top-2 duration-200">
             <div className="flex items-center gap-2 text-[#91b9cd] mb-2 uppercase tracking-wider font-bold text-[10px]">
-              <FileText size={10} /> Live Logs
+              <FileTextIcon size={10} /> Live Logs
             </div>
             {logs.length === 0 && <span className="text-gray-600 italic">Initializing...</span>}
             {logs.slice(-5).map((log, i) => (
@@ -213,7 +229,7 @@ export default function AgentsPlayground() {
             await wait(800);
             setNodes(prev => prev.map(n => {
                 if (n.id === nodeId) {
-                    return { ...n, data: { ...n.data, logs: [...(n.data.logs || []), log] } };
+                    return { ...n, data: { ...(n.data as any), logs: [...(((n.data as any).logs || [])), log] } };
                 }
                 return n;
             }));
@@ -225,7 +241,7 @@ export default function AgentsPlayground() {
     setMode('results');
   };
   const animateEdgesFrom = (sourceId, active) => {
-    setEdges(prev => prev.map(e => e.source === sourceId ? { ...e, data: { ...e.data, animated: active } } : e));
+    setEdges(prev => prev.map(e => e.source === sourceId ? { ...e, ...(e as any), data: { ...((e as any).data || {}), animated: active } } : e));
   };
   const resetWorkflow = () => {
     setMode('planning');
@@ -238,47 +254,44 @@ export default function AgentsPlayground() {
     <div className="w-full h-screen font-sans flex flex-col bg-[#000000] text-white overflow-hidden">
       {/* Display current hypothesis if present */}
       {hypothesis && (
-      <div className="bg-[#1f2d40] text-[#6fe5b8] px-6 py-2 text-lg font-semibold border-b border-[#3c5d80]">
+      <div className="bg-[#1f2d40] text-[#5acce6] px-6 py-2 text-lg font-semibold border-b border-[#3c5d80]">
         Research Hypothesis: <span className="font-mono text-white">{hypothesis}</span>
       </div>
       )}
       <div className="h-12 bg-[#151a1f] border-b border-[#000000] flex items-center justify-between px-4 z-20 shrink-0">
       <div className="flex items-center gap-4">
         <h1 className="font-bold text-[#91b9cd] text-sm tracking-wide">CUBE WORKSPACE</h1>
-        <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border
-          ${mode === 'planning' ? 'bg-[#1f2d40] text-[#91b9cd] border-[#3c5d80]' : 
-            mode === 'executing' ? 'bg-[#003f5c] text-[#5acce6] border-[#005f7d]' : 
-            'bg-[#06422d] text-[#6fe5b8] border-[#085a3c]'}`}>
+        <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${mode === 'planning' ? 'bg-[#1f2d40] text-[#91b9cd] border-[#3c5d80]' : mode === 'executing' ? 'bg-[#003f5c] text-[#5acce6] border-[#005f7d]' : 'bg-[#023a7d] text-[#5acce6] border-[#0f3354]'}`}>
           {mode}
         </div>
       </div>
       <div className="flex items-center gap-3">
          {mode === 'planning' && (
-           <button onClick={startExecution} className="flex items-center gap-2 px-4 py-1.5 bg-[#348cfd] hover:bg-[#599fff] text-white text-xs rounded font-medium transition-colors shadow-lg">
-            <Play size={14} fill="currentColor"/> Execute
-           </button>
+           <Button onClick={startExecution} variant="primary" className="text-xs">
+            <PlayIcon size={14} fill="currentColor"/> Execute
+           </Button>
          )}
          {mode === 'executing' && (
            <>
             <button onClick={() => setIsPaused(!isPaused)} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors border ${isPaused ? 'bg-[#3b2d1c] border-[#705228] text-[#f8ce46]' : 'bg-[#151a1f] border-[#3c5d80] text-[#91b9cd] hover:border-[#91b9cd]'}`}>
-              {isPaused ? <Play size={14} /> : <Pause size={14} />} {isPaused ? 'Resume' : 'Pause'}
+              {isPaused ? <PlayIcon size={14} /> : <PauseIcon size={14} />} {isPaused ? 'Resume' : 'Pause'}
             </button>
             <button onClick={resetWorkflow} className="flex items-center gap-2 px-3 py-1.5 bg-[#151a1f] hover:bg-[#2c1a1f] text-[#91b9cd] hover:text-[#ff6b6b] border border-[#3c5d80] rounded text-xs transition-colors">
-              <RotateCcw size={14} /> Stop
+              <RotateCcwIcon size={14} /> Stop
             </button>
            </>
          )}
          {mode === 'results' && (
-           <button onClick={resetWorkflow} className="flex items-center gap-2 px-4 py-1.5 bg-[#6fe5b8] hover:bg-[#91eac8] text-black text-xs rounded font-medium transition-colors">
-            <RotateCcw size={14} /> Reset
-           </button>
+           <Button onClick={resetWorkflow} variant="agentic" className="text-xs">
+            <RotateCcwIcon size={14} /> Reset
+           </Button>
          )}
          <button 
           onClick={() => setIsChatOpen(!isChatOpen)}
           className={`ml-4 p-1.5 rounded border transition-colors ${isChatOpen ? 'bg-[#3c5d80] text-white border-[#5acce6]' : 'bg-[#151a1f] text-[#566a84] border-[#3c5d80] hover:text-white'}`}
           title="Toggle Assistant"
          >
-           <MessageSquare size={16} />
+           <MessageSquareIcon size={16} />
          </button>
       </div>
       </div>
@@ -296,8 +309,8 @@ export default function AgentsPlayground() {
             {mode === 'results' && (
               <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px] z-50 flex items-center justify-center animate-in fade-in duration-500">
                 <div className="bg-[#151a1f] p-8 rounded border border-[#3c5d80] max-w-md text-center space-y-4 shadow-2xl">
-                  <div className="w-12 h-12 bg-[#06422d] rounded-full flex items-center justify-center mx-auto mb-2 border border-[#6fe5b8]">
-                    <CheckCircle2 size={24} className="text-[#6fe5b8]" />
+                  <div className="w-12 h-12 bg-[#023a7d] rounded-full flex items-center justify-center mx-auto mb-2 border border-[#5acce6]">
+                    <CheckCircle2Icon size={24} className="text-[#5acce6]" />
                   </div>
                   <h2 className="text-xl font-bold text-white">Workflow Complete</h2>
                   <button onClick={resetWorkflow} className="w-full py-2 bg-[#348cfd] text-white text-sm rounded hover:bg-[#599fff] transition-colors font-medium">Return to Worklist</button>
