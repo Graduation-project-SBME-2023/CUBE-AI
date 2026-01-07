@@ -10,7 +10,7 @@ export interface AgentNodeData {
   name?: string; // fallback for title
   description: string;
   status: 'pending' | 'active' | 'completed' | string;
-  logs: ToolEvent[];
+  logs: ToolLog[];
   isExpanded: boolean;
   matched_module?: string;
   mode?: string;
@@ -107,4 +107,12 @@ export type ToolEvent = ToolContent & {
   event_type: EventType
   source: string
   timestamp: string
+}
+
+export interface ToolLog {
+  source: string
+  started_at: string
+  last_updated_at: string
+  events: ToolEvent[]
+  status: 'active' | 'completed' | 'error'
 }

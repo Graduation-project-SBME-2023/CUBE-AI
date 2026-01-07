@@ -14,18 +14,21 @@ import { FlowNode, FlowEdge, ToolEvent } from './types';
 // Mock Data
 const initialNodesData: FlowNode[] = [
   { id: '1', type: 'start', position: { x: 50, y: 150 }, data: { title: 'Start', description: 'Entry point' } },
-  { id: 'population_planner_agent', type: 'agent', position: { x: 250, y: 150 }, data: { title: 'Retrieve Study', description: 'Fetch DICOM metadata', status: 'pending', logs: [], isExpanded: false } },
-  { id: 'segmentation_agent', type: 'agent', position: { x: 500, y: 50 }, data: { title: 'Segmentation', description: 'Run ML Segmentation Model', status: 'pending', logs: [], isExpanded: false } },
-  { id: '4', type: 'agent', position: { x: 500, y: 250 }, data: { title: 'Measurements', description: 'Calculate ROI metrics', status: 'pending', logs: [], isExpanded: false } },
-  { id: '5', type: 'agent', position: { x: 750, y: 150 }, data: { title: 'Save Report', description: 'Commit SR to PACS', status: 'pending', logs: [], isExpanded: false } },
+  { id: 'study_population_planner_agent', type: 'agent', position: { x: 250, y: 150 }, data: { title: 'Retrieve Study', description: 'Fetch DICOM metadata', status: 'pending', logs: [], isExpanded: false } },
+  { id: 'segmentation_agent', type: 'agent', position: { x: 500, y: 150 }, data: { title: 'Segmentation', description: 'Run ML Segmentation Model', status: 'pending', logs: [], isExpanded: false } },
+  { id: 'feature_extraction_agent', type: 'agent', position: { x: 750, y: 150 }, data: { title: 'Radiomics Feature Extraction', description: 'Calculate ROI metrics', status: 'pending', logs: [], isExpanded: false } },
+  { id: 'modeling_agent', type: 'agent', position: { x: 250, y: 450 }, data: { title: 'ML Modeling', description: 'Commit SR to PACS', status: 'pending', logs: [], isExpanded: false } },
+  { id: 'result_reporter_agent', type: 'agent', position: { x: 500, y: 450 }, data: { title: 'Analyze Results', description: 'Commit SR to PACS', status: 'pending', logs: [], isExpanded: false } },
+  { id: 'latex_reporter_agent', type: 'agent', position: { x: 750, y: 450 }, data: { title: 'Write PDF Report', description: 'Commit SR to PACS', status: 'pending', logs: [], isExpanded: false } },
 ];
 
 const initialEdgesData: FlowEdge[] = [
-  { id: 'e1-2', source: '1', target: '2', type: 'custom' },
-  { id: 'e2-3', source: 'population_planner_agent', target: 'segmentation_agent', type: 'custom' },
-  { id: 'e2-4', source: 'population_planner_agent', target: '4', type: 'custom' },
-  { id: 'e3-5', source: 'segmentation_agent', target: '5', type: 'custom' },
-  { id: 'e4-5', source: '4', target: '5', type: 'custom' },
+  { id: 'e1-2', source: '1', target: 'study_population_planner_agent', type: 'custom' },
+  { id: 'e2-3', source: 'study_population_planner_agent', target: 'segmentation_agent', type: 'custom' },
+  { id: 'e3-4', source: 'segmentation_agent', target: 'feature_extraction_agent', type: 'custom' },
+  { id: 'e4-5', source: 'feature_extraction_agent', target: 'modeling_agent', type: 'custom' },
+  { id: 'e5-6', source: 'modeling_agent', target: 'result_reporter_agent', type: 'custom' },
+  { id: 'e6-7', source: 'result_reporter_agent', target: 'latex_reporter_agent', type: 'custom' },
 ];
 
 const nodeTypes = { start: StartNode, agent: AgentNode };
@@ -58,8 +61,15 @@ export default function PlaygroundCanvas() {
       if (type === 'tool_update') {
         updateToolProgress(payload);
       }
+      if (type === 'run_status') {
+        updateCurrentAgent(payload.current_agent);
+      }
+      if (type === 'run_finished') {
+        updateCurrentAgent('run_finished');
+      }
     };
     const unsubscribe = websocketService.subscribe(handleWSMessage);
+    setIsConnected(true);
     return () => { unsubscribe(); };
   }, []);
 
@@ -112,6 +122,41 @@ export default function PlaygroundCanvas() {
     }
   };
 
+  const updateCurrentAgent = (current_agent: string) => {
+    setNodes(prev => 
+      prev.map(node => {
+        if (node.type !== 'agent') return node;
+
+        const isCurrent = node.id === current_agent;
+        const wasActive = node.data.status === 'active';
+
+        if (isCurrent) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              status: 'active',
+              isExpanded: true,
+            },
+          };
+        }
+
+        if (wasActive && !isCurrent) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              status: 'completed',
+              isExpanded: false,
+            },
+          };
+        }
+
+        return node;
+      })
+    );
+  };
+
   const updateToolProgress = (event: ToolEvent) => {
     setNodes(prev =>
       prev.map(node => {
@@ -122,20 +167,52 @@ export default function PlaygroundCanvas() {
           return node;
         }
 
+        const logs = node.data.logs ?? [];
+
+        if (event.event_type === 'tool_started') {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              isExpanded: true,
+              logs: [
+                ...logs,
+                {
+                  source: event.source,
+                  started_at: event.timestamp,
+                  last_updated_at: event.timestamp,
+                  status: 'active',
+                  events: [event],
+                }
+              ]
+            }
+          }
+        }
+
+        if (logs.length === 0) {
+          return node;
+        }
+
+        const lastLog = logs[logs.length - 1];
+
+        const updatedLastLog = {
+          ...lastLog,
+          last_updated_at: event.timestamp,
+          status:
+            event.event_type === 'tool_finished'
+              ? 'completed'
+              : event.event_type === 'error'
+              ? 'error'
+              : lastLog.status,
+          events: [...lastLog.events, event],
+        };
+
         return {
           ...node,
           data: {
             ...node.data,
-            // auto-expand when logs arrive
             isExpanded: true,
-            logs: [...(node.data.logs || []), event],
-            // optionally update status
-            // status:
-            //   event.event_type === 'tool_started'
-            //     ? 'active'
-            //     : event.event_type === 'tool_finished'
-            //     ? 'completed'
-            //     : node.data.status,
+            logs: [...logs.slice(0, -1), updatedLastLog],
           },
         };
       })

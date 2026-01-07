@@ -6,6 +6,8 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from teams.execution_team import BasicPipelineBuilder
 from autogen_agentchat.teams import GraphFlow
+from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage
+from autogen_agentchat.base import TaskResult
 import logging
 
 import os
@@ -91,17 +93,18 @@ async def run_pipeline(request: RunRequest):
     graph_flow = GraphFlow(participants=graph_builder.get_participants(), graph=graph_builder.build())
 
     try:
-        stream = graph_flow.run_stream(task=request.hypothesis) # Not clean, still needs to connect to websocket?
-        async for message in stream:
-            # print(message)
-            pass
-
-        # result = await orchestrator.process_hypothesis(
-        #     hypothesis_text=request.hypothesis,
-        # )
-        
-        # Example usage: push result to websocket if connected
-        # await send_ws_message("result", stream)
+        async for event in graph_flow.run_stream(task=request.hypothesis):
+            if isinstance(event, TaskResult):
+                await send_ws_message("run_finished", "run_finished")
+            
+            if isinstance(event, BaseChatMessage):
+                logging.getLogger().info(f"agent {event.source} probably finished running??")
+                await send_ws_message("run_status", {"current_agent": event.source})
+            
+            if isinstance(event, BaseAgentEvent):
+                logging.getLogger().info(f"BaseAgentEvent: {event}")
+                logging.getLogger().info(f"agent {event.source} is currently running.")
+                await send_ws_message("run_status", {"current_agent": event.source})
 
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
