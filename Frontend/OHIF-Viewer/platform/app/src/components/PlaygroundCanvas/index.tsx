@@ -3,8 +3,21 @@ import {
     Play, Pause, RotateCcw, Wifi, WifiOff, Activity, CheckCircle2, 
     MousePointer2, Edit3 
 } from 'lucide-react';
-import websocketService from '../../utils/WebsocketService'; 
-import MiniFlow from './miniflow'; 
+
+import websocketService from '../../utils/WebsocketService';
+
+// Icon aliases for lucide-react to satisfy JSX typing
+const PlayIcon: any = Play;
+const PauseIcon: any = Pause;
+const RotateCcwIcon: any = RotateCcw;
+const MousePointer2Icon: any = MousePointer2;
+const WifiIcon: any = Wifi;
+const WifiOffIcon: any = WifiOff;
+const Edit3Icon: any = Edit3;
+const ActivityIcon: any = Activity;
+const CheckCircle2Icon: any = CheckCircle2;
+const SettingsIcon: any = Settings;
+import MiniFlow from './miniflow';
 import StartNode from './nodes/StartNode';
 import AgentNode from './nodes/AgentNode';
 import CustomEdge from './edges/CustomEdges';
