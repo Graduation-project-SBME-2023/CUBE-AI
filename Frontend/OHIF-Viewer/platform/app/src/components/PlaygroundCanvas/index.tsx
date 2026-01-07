@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { 
     Play, Pause, RotateCcw, Wifi, WifiOff, Activity, CheckCircle2, 
-    MousePointer2, Edit3 
+    MousePointer2, Edit3, Settings 
 } from 'lucide-react';
 
 import websocketService from '../../utils/WebsocketService';
