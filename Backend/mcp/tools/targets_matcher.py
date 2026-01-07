@@ -4,7 +4,7 @@ import numpy as np
 from typing import List
 from pathlib import Path
 from . import mcp
-from tool_logging import ToolEvent, log_tool_state 
+from tool_logging import ToolEvent, log_tool_state, TextPayload
 
 @mcp.tool()
 async def generate_targets(
@@ -18,7 +18,17 @@ async def generate_targets(
 
     Returns:
         The path of the generated csv file.
-    """
+    """-
+    payload = TextPayload(message='assigning labels')
+    start_event = ToolEvent(
+        event_type='tool_started',
+        source="study_population_planner_agent",
+        content_type='text' ,
+        content=payload
+    )
+    log_tool_state(start_event)
+    
+    
     root_dir = Path(__file__).parent.parent.parent
     output_dir = os.path.join(root_dir, 'agent_system', 'workspace', 'populations', 'targets')
     
@@ -33,7 +43,13 @@ async def generate_targets(
         for uid, target in zip(datasetlist, targets):
             writer.writerow([uid, int(target)])
 
-    finished_event = ToolEvent('tool_finished', 'study_population_planner_agent', {'tool_name': 'generate_target', 'progress': 'done'})
-    log_tool_state(finished_event)
+    payload = TextPayload(message="labels assigned")
+    finish_event = ToolEvent(
+    event_type='tool_finished',
+    source='study_population_planner_agent',
+    content_type='text',
+    content=payload
+    )
+    log_tool_state(finish_event)
 
     return csv_path
