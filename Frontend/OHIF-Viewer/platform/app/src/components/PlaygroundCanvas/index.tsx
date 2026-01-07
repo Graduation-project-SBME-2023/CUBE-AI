@@ -418,19 +418,23 @@ export default function PlaygroundCanvas({ initialHypothesis, onNodeSelect }: Pl
 
     return (
         <div className="w-full h-full flex flex-col relative bg-[#000000]">
-            {/* 1. INTERNAL HEADER / TOOLBAR */}
-            <div className="h-12 bg-[#151a1f] border-b border-[#000000] flex items-center justify-between px-4 z-10 shrink-0">
-                <div className="flex items-center gap-4">
-                    <h1 className="font-bold text-[#91b9cd] text-sm tracking-wide">WORKFLOW ENGINE</h1>
-                    <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border
+{/* 1. FLOATING TOOLBAR ISLAND (Previously Internal Header) */}
+            {/* Changed from relative block to absolute positioning */}
+            <div className="absolute top-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 bg-[#151a1f]/90 backdrop-blur-md border border-[#3c5d80] p-2 rounded-lg shadow-2xl">
+                
+                {/* Mode Indicator */}
+                <div className="flex items-center gap-3 pl-2 border-r border-[#3c5d80] pr-4">
+                     <h1 className="font-bold text-[#91b9cd] text-[10px] tracking-wide uppercase hidden xl:block">Workflow Engine</h1>
+                     <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border
                         ${mode === 'planning' ? 'bg-[#1f2d40] text-[#91b9cd] border-[#3c5d80]' : 
                           mode === 'executing' ? 'bg-[#003f5c] text-[#5acce6] border-[#005f7d]' : 
                           'bg-[#06422d] text-[#6fe5b8] border-[#085a3c]'}`}>
                         {mode}
                     </div>
                 </div>
-                
-                <div className="flex items-center gap-3">
+
+                {/* Controls */}
+                <div className="flex items-center gap-2">
                     {mode === 'planning' && (
                         <button onClick={startExecution} className="flex items-center gap-2 px-4 py-1.5 bg-[#348cfd] hover:bg-[#599fff] text-white text-xs rounded font-medium transition-colors shadow-lg">
                             <Play size={14} fill="currentColor"/> Execute
@@ -451,11 +455,11 @@ export default function PlaygroundCanvas({ initialHypothesis, onNodeSelect }: Pl
                             <RotateCcw size={14} /> Reset
                         </button>
                     )}
-                    
-                    <div className="h-4 w-px bg-[#3c5d80] mx-2"></div>
-                    <div className="flex items-center gap-1 text-[10px] text-[#566a84] font-medium uppercase" title={isConnected ? "WebSocket Connected" : "Using Mock Data"}>
-                        {isConnected ? <Wifi size={12} className="text-[#6fe5b8]" /> : <WifiOff size={12} />}
-                    </div>
+                </div>
+
+                {/* Status Icon */}
+                <div className="pl-2 border-l border-[#3c5d80] flex items-center text-[10px] text-[#566a84]" title={isConnected ? "WebSocket Connected" : "Using Mock Data"}>
+                     {isConnected ? <Wifi size={14} className="text-[#6fe5b8]" /> : <WifiOff size={14} />}
                 </div>
             </div>
 
