@@ -18,7 +18,7 @@ async def generate_targets(
 
     Returns:
         The path of the generated csv file.
-    """-
+    """
     payload = TextPayload(message='assigning labels')
     start_event = ToolEvent(
         event_type='tool_started',
