@@ -5,6 +5,18 @@ import {
 } from 'lucide-react';
 
 import websocketService from '../../utils/WebsocketService';
+
+// Icon aliases for lucide-react to satisfy JSX typing
+const PlayIcon: any = Play;
+const PauseIcon: any = Pause;
+const RotateCcwIcon: any = RotateCcw;
+const MousePointer2Icon: any = MousePointer2;
+const WifiIcon: any = Wifi;
+const WifiOffIcon: any = WifiOff;
+const Edit3Icon: any = Edit3;
+const ActivityIcon: any = Activity;
+const CheckCircle2Icon: any = CheckCircle2;
+const SettingsIcon: any = Settings;
 import MiniFlow from './miniflow';
 import StartNode from './nodes/StartNode';
 import AgentNode from './nodes/AgentNode';
@@ -175,13 +187,13 @@ export default function PlaygroundCanvas() {
 
     for (const nodeId of executionIds) {
         if (modeRef.current === 'planning') return;
-        while (isPausedRef.current) { await wait(100); if (modeRef.current === 'planning') return; }
+        while (isPausedRef.current) { await wait(100); if ((modeRef.current as any) === 'planning') return; }
         updateNodeData(nodeId, { status: 'active', isExpanded: true }); 
         const logs = ["Processing...", "Analyzing data...", "Task completed"];
         for (const log of logs) {
             while (isPausedRef.current) await wait(100);
             await wait(800);
-            setNodes(prev => prev.map(n => (n.id === nodeId ? { ...n, data: { ...n.data, logs: [...(n.data.logs || []), log] } } : n)));
+            setNodes(prev => prev.map(n => (n.id === nodeId ? { ...n, data: { ...(n.data as any), logs: [...(((n.data as any).logs || [])), log] } } : n)));
         }
         updateNodeData(nodeId, { status: 'completed', isExpanded: false });
         setEdges(prev => prev.map(e => e.source === nodeId ? { ...e, data: { ...e.data, animated: true } } : e));
@@ -204,39 +216,36 @@ export default function PlaygroundCanvas() {
       <div className="h-12 bg-[#151a1f] border-b border-[#000000] flex items-center justify-between px-4 z-10">
         <div className="flex items-center gap-4">
             <h1 className="font-bold text-[#91b9cd] text-sm tracking-wide">WORKFLOW ENGINE</h1>
-            <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border
-                ${mode === 'planning' ? 'bg-[#1f2d40] text-[#91b9cd] border-[#3c5d80]' : 
-                  mode === 'executing' ? 'bg-[#003f5c] text-[#5acce6] border-[#005f7d]' : 
-                  'bg-[#06422d] text-[#6fe5b8] border-[#085a3c]'}`}>
+            <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${mode === 'planning' ? 'bg-[#1f2d40] text-[#91b9cd] border-[#3c5d80]' : mode === 'executing' ? 'bg-[#003f5c] text-[#5acce6] border-[#005f7d]' : 'bg-[#023a7d] text-[#5acce6] border-[#0f3354]'}`}>
                 {mode}
             </div>
         </div>
         <div className="flex items-center gap-3">
              {mode === 'planning' && (
                  <button onClick={startExecution} className="flex items-center gap-2 px-4 py-1.5 bg-[#348cfd] hover:bg-[#599fff] text-white text-xs rounded font-medium transition-colors">
-                    <Play size={14} fill="currentColor"/> Execute
+                    <PlayIcon size={14} fill="currentColor"/> Execute
                  </button>
              )}
              {mode === 'executing' && (
                  <>
                     <button onClick={() => setIsPaused(!isPaused)} className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-medium transition-colors border ${isPaused ? 'bg-[#3b2d1c] border-[#705228] text-[#f8ce46]' : 'bg-[#151a1f] border-[#3c5d80] text-[#91b9cd] hover:border-[#91b9cd]'}`}>
-                        {isPaused ? <Play size={14} /> : <Pause size={14} />} {isPaused ? 'Resume' : 'Pause'}
+                        {isPaused ? <PlayIcon size={14} /> : <PauseIcon size={14} />} {isPaused ? 'Resume' : 'Pause'}
                     </button>
                     <button onClick={resetWorkflow} className="flex items-center gap-2 px-3 py-1.5 bg-[#151a1f] hover:bg-[#2c1a1f] text-[#91b9cd] hover:text-[#ff6b6b] border border-[#3c5d80] rounded text-xs transition-colors">
-                        <RotateCcw size={14} /> Stop
+                        <RotateCcwIcon size={14} /> Stop
                     </button>
                  </>
              )}
              {mode === 'results' && (
-                 <button onClick={resetWorkflow} className="flex items-center gap-2 px-4 py-1.5 bg-[#6fe5b8] hover:bg-[#91eac8] text-black text-xs rounded font-medium transition-colors">
-                    <RotateCcw size={14} /> Reset
+                 <button onClick={resetWorkflow} className="flex items-center gap-2 px-4 py-1.5 bg-[#5acce6] hover:bg-[#5acce6] text-black text-xs rounded font-medium transition-colors">
+                    <RotateCcwIcon size={14} /> Reset
                  </button>
              )}
              <div className="h-4 w-px bg-[#3c5d80] mx-2"></div>
              <div className="flex items-center gap-1 text-[10px] text-[#566a84] font-medium uppercase" title={isConnected ? "WebSocket Connected" : "Using Mock Data"}>
-                 {isConnected ? <Wifi size={12} className="text-[#6fe5b8]" /> : <WifiOff size={12} />}
+                 {isConnected ? <WifiIcon size={12} className="text-[#5acce6]" /> : <WifiOffIcon size={12} />}
              </div>
-             <Settings size={14} className="text-[#566a84] hover:text-[#91b9cd] cursor-pointer" />
+             <SettingsIcon size={14} className="text-[#566a84] hover:text-[#91b9cd] cursor-pointer" />
         </div>
       </div>
 
@@ -257,13 +266,13 @@ export default function PlaygroundCanvas() {
                     </div>
                     {mode === 'planning' ? (
                         <>
-                            <div className="flex items-center gap-2 text-[#dadada]"><MousePointer2 size={10} /> Drag nodes</div>
-                            <div className="flex items-center gap-2 text-[#dadada]"><Edit3 size={10} /> Edit / Delete</div>
+                            <div className="flex items-center gap-2 text-[#dadada]"><MousePointer2Icon size={10} /> Drag nodes</div>
+                            <div className="flex items-center gap-2 text-[#dadada]"><Edit3Icon size={10} /> Edit / Delete</div>
                         </>
                     ) : (
                         <>
-                             <div className="flex items-center gap-2 text-[#dadada]"><Activity size={10} className="text-[#5acce6]" /> Active</div>
-                             <div className="flex items-center gap-2 text-[#dadada]"><CheckCircle2 size={10} className="text-[#6fe5b8]" /> Complete</div>
+                             <div className="flex items-center gap-2 text-[#dadada]"><ActivityIcon size={10} className="text-[#5acce6]" /> Active</div>
+                             <div className="flex items-center gap-2 text-[#dadada]"><CheckCircle2Icon size={10} className="text-[#5acce6]" /> Complete</div>
                         </>
                     )}
                  </div>
@@ -272,8 +281,8 @@ export default function PlaygroundCanvas() {
             {mode === 'results' && (
                 <div className="absolute inset-0 bg-black/70 backdrop-blur-[2px] z-50 flex items-center justify-center animate-in fade-in duration-500">
                     <div className="bg-[#151a1f] p-8 rounded border border-[#3c5d80] max-w-md text-center space-y-4 shadow-2xl">
-                        <div className="w-12 h-12 bg-[#06422d] rounded-full flex items-center justify-center mx-auto mb-2 border border-[#6fe5b8]">
-                            <CheckCircle2 size={24} className="text-[#6fe5b8]" />
+                        <div className="w-12 h-12 bg-[#023a7d] rounded-full flex items-center justify-center mx-auto mb-2 border border-[#5acce6]">
+                            <CheckCircle2Icon size={24} className="text-[#5acce6]" />
                         </div>
                         <h2 className="text-xl font-bold text-white">Workflow Complete</h2>
                         <p className="text-[#91b9cd] text-sm">All workflow steps executed successfully.</p>
