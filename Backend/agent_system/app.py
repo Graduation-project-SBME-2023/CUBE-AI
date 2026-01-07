@@ -4,8 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import Literal, Any
 from datetime import datetime
 from pydantic import BaseModel, Field
-from teams.execution_team import BasicPipelineBuilder
-from autogen_agentchat.teams import GraphFlow
+# from teams.execution_team import BasicPipelineBuilder
+# from autogen_agentchat.teams import GraphFlow
 import logging
 
 import os
@@ -15,7 +15,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, ".."))
 sys.path.append(root_dir)
 
-from mas.core.socket_store import manager, send_ws_message
+from socket_store import manager, send_ws_message
 from agents.planning_agents.planner import ClinicalPlanner
 # ----------------------------------------------------------------------
 # FastAPI app definition
@@ -103,15 +103,15 @@ async def start_planning(request: PlanningRequest):
 @app.post("/run")
 async def run_pipeline(request: RunRequest):
 
-    graph_builder = await BasicPipelineBuilder.create()
-    graph_flow = GraphFlow(participants=graph_builder.get_participants(), graph=graph_builder.build())
+    # graph_builder = await BasicPipelineBuilder.create()
+    # graph_flow = GraphFlow(participants=graph_builder.get_participants(), graph=graph_builder.build())
 
     try:
-        stream = graph_flow.run_stream(task=request.hypothesis) # Not clean, still needs to connect to websocket?
-        async for message in stream:
-            # print(message)
-            pass
-
+        # stream = graph_flow.run_stream(task=request.hypothesis) # Not clean, still needs to connect to websocket?
+        # async for message in stream:
+        #     # print(message)
+        #     pass
+        print("Running pipeline with hypothesis:", request.hypothesis)
 
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
