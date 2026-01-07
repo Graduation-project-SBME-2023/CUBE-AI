@@ -1,4 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
+import MiniFlow from './MiniFlow';
+import AgentRegistry from './AgentRegistry';
+import ChatSidebar from './ChatSidebar';
+import websocketService from '../../utils/WebsocketService';
+import { Play, Pause, RotateCcw, MessageSquare, CheckCircle2, Activity, CheckCircle2 as CheckIcon, Circle, Edit3, Trash2, ChevronUp, ChevronDown, FileText } from 'lucide-react';
+import Button from '../../components/ui/Button';
+
+// Icon aliases for lucide-react
+const PlayIcon: any = Play;
+const PauseIcon: any = Pause;
+const RotateCcwIcon: any = RotateCcw;
+const MessageSquareIcon: any = MessageSquare;
+const CheckCircle2Icon: any = CheckCircle2;
+const ActivityIcon: any = Activity;
+const CheckIconAlias: any = CheckIcon;
+const CircleIcon: any = Circle;
+const Edit3Icon: any = Edit3;
+const Trash2Icon: any = Trash2;
+const ChevronUpIcon: any = ChevronUp;
+const ChevronDownIcon: any = ChevronDown;
+const FileTextIcon: any = FileText;
 import { useLocation } from 'react-router-dom';
 import { MessageSquare, FlaskConical } from 'lucide-react';
 
