@@ -47,12 +47,43 @@ export default function PlaygroundCanvas({ initialHypothesis, onNodeSelect }: Pl
         
         // Send initial hypothesis if present
         if (initialHypothesis) {
-             // Small timeout to ensure connection or queue it
+            
              setTimeout(() => {
                 websocketService.sendMessage({ type: 'hypothesis', payload: initialHypothesis });
              }, 500);
         }
+        // 2. If an initial hypothesis exists, trigger the planner via the HTTP API
+        if (initialHypothesis) {
+            const startPlanning = async () => {
+                try {
 
+                    // Call the synchronous/blocking endpoint.
+                    // The planner will run on the server, streaming updates via WS,
+                    // and this fetch will resolve when the entire plan is confirmed/finished.
+                    const response = await fetch('http://localhost:8150/plan', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ 
+                            message: initialHypothesis 
+                        }),
+                    });
+
+                    if (!response.ok) {
+                        console.error('Failed to initiate planning session');
+                    } else {
+                        const result = await response.json();
+                        console.log('Planning complete:', result);
+                    }
+
+                } catch (error) {
+                    console.error('Error contacting planner API:', error);
+                }
+            };
+
+            startPlanning();
+        }
         const handleWSMessage = (data: any) => {
             const { type, payload } = data;
             if (type === 'msg') return;
