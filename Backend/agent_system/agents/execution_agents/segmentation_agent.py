@@ -15,7 +15,7 @@ from autogen_core import CancellationToken
 # from agent_system.descriptions.models_descriptions import RESULT_AGENT_DESCRIPTION
 # from agent_system.system_prompts.system_messages import RESULT_AGENT_SYSTEM_PROMPT
 # from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
-from mas.agents.segmentation_agent import SegmentationModule
+from .segmentation_module import SegmentationModule
 from autogen_core.tools import FunctionTool
 
 
