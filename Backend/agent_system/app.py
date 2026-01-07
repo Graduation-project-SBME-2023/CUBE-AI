@@ -16,7 +16,7 @@ root_dir = os.path.abspath(os.path.join(current_dir, ".."))
 sys.path.append(root_dir)
 
 from mas.core.socket_store import manager, send_ws_message
-from mas.core.planner import Planner
+from agents.planning_agents.planner import ClinicalPlanner
 # ----------------------------------------------------------------------
 # FastAPI app definition
 # ----------------------------------------------------------------------
@@ -33,13 +33,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-planner = Planner()
 
 # ----------------------------------------------------------------------
 # Request model
 # ----------------------------------------------------------------------
 class RunRequest(BaseModel):
     hypothesis: str = Field(..., description="Free form clinical hypothesis")
+
+class PlanningRequest(BaseModel):
+    message: str = Field(..., description="Initial message or clinical hypothesis from the user to start planning")
 
 EventType = Literal[
     "tool_started",
@@ -56,6 +58,44 @@ class ToolEvent(BaseModel):
     source: str          # tool name or agent
     payload: Any
     timestamp: datetime
+
+
+@app.post("/plan")
+async def start_planning(request: PlanningRequest):
+    """
+    Initiates and runs the Clinical Planner synchronously.
+    The HTTP request will wait until the entire planning process (including human interaction) is complete.
+    Returns the final plan and hypothesis.
+    
+    The HTTP request to /plan will remain open (pending) for the entire duration of the planning session.
+    If the session takes longer than your HTTP client's timeout setting (usually 30–60 seconds),
+    the client might throw a timeout error, even though the process is still running on the server.
+    """
+    
+    
+    async def websocket_input_provider() -> str:
+        return await manager.wait_for_user_message()
+
+    async def websocket_output_callback(msg_type: str, data: Any):
+        try:
+            await manager.send_ws_message(msg_type, data)
+        except AttributeError:
+            pass
+    api_key = os.getenv("OLLAMA_API_KEY", "cf8ed2bae88d4d659602bc340b4b2bcf.mEvRr0YQ54A_OKfTT2Z92rge")
+    
+    planner_instance = ClinicalPlanner(
+        input_provider=websocket_input_provider,
+        output_callback=websocket_output_callback,
+        api_key=api_key
+    )
+
+    try:
+        final_result = await planner_instance.run(start_query=request.message)
+        return {"status": "finished", "result": final_result}
+    except Exception as e:
+        # Gracefully handle errors during the long-running process
+        raise HTTPException(status_code=500, detail=f"Planning session failed: {str(e)}")
+
 
 # ----------------------------------------------------------------------
 # POST /run
@@ -95,10 +135,6 @@ async def websocket_endpoint(websocket: WebSocket):
     # 1. Register connection
     await manager.connect(websocket)
     
-    # 2. Start your Planner Logic (in background)
-    planner = Planner()
-    asyncio.create_task(planner.run("Start"))
-
     try:
         while True:
             # 3. LISTEN LOOP
