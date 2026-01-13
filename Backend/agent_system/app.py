@@ -4,11 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import Literal, Any, Union
 from datetime import datetime
 from pydantic import BaseModel, Field
-# from teams.execution_team import BasicPipelineBuilder
-# from autogen_agentchat.teams import GraphFlow
+from teams.execution_team import BasicPipelineBuilder
+from autogen_agentchat.teams import GraphFlow
 from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage
 from autogen_agentchat.base import TaskResult
 import logging
+
 
 import os
 import sys
@@ -122,18 +123,18 @@ async def run_planner(message: str):
 @app.post("/run")
 async def run_pipeline(request: RunRequest):
 
-    # graph_builder = await BasicPipelineBuilder.create()
-    # graph_flow = GraphFlow(participants=graph_builder.get_participants(), graph=graph_builder.build())
+    graph_builder = await BasicPipelineBuilder.create()
+    graph_flow = GraphFlow(participants=graph_builder.get_participants(), graph=graph_builder.build())
 
     try:
         async for event in graph_flow.run_stream(task=request.hypothesis):
             if isinstance(event, TaskResult):
                 await send_ws_message("run_finished", "run_finished")
-            
+
             if isinstance(event, BaseChatMessage):
                 logging.getLogger().info(f"agent {event.source} probably finished running??")
                 await send_ws_message("run_status", {"current_agent": event.source})
-            
+
             if isinstance(event, BaseAgentEvent):
                 logging.getLogger().info(f"BaseAgentEvent: {event}")
                 logging.getLogger().info(f"agent {event.source} is currently running.")
@@ -162,7 +163,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # 1. Register connection
     await manager.connect(websocket)
     # 2. Start your Planner Logic (in background)
-    asyncio.create_task(planner.run("Start"))
+    # asyncio.create_task(planner.run("Start"))
 
     try:
         while True:

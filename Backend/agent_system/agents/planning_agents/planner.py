@@ -163,9 +163,9 @@ class ClinicalPlanner:
         
         # Only run if not already confirmed
         if self.state.hypothesis.state != "confirmed":
-            
+            print("state not confirmed, architect engaged")
             architect = self.agents["architect"]
-            
+
             # Initial Prompt
             if start_query and not self.state.hypothesis.title:
                 user_input = start_query
@@ -176,13 +176,14 @@ class ClinicalPlanner:
             # --- Sequential Planning Loop ---
             # 1. First iteration: Generate initial hypothesis/plan
             prompt = f"User Request: {user_input}. Generate JSON with 'hypothesis' and 'steps' matching the fixed workflow."
-            
+
             # Direct call to agent (no team)
             response = await architect.on_messages(
-                [TextMessage(content=prompt, source="user")], 
+                [TextMessage(content=prompt, source="user")],
                 cancellation_token=None
             )
-            
+            print(f"response from architect: {response.chat_message.content}")
+
             # Process the response (parse JSON, update UI)
             await self._process_agent_response(response.chat_message.content)
 
@@ -194,23 +195,23 @@ class ClinicalPlanner:
 
                 if "APPROVE" in user_feedback.upper():
                     break
-                
+
                 # Feed feedback back to the agent
                 refinement_prompt = f"User Feedback: {user_feedback}. Update the JSON 'hypothesis' and 'steps' accordingly."
-                
-                # Pass previous history implicitly if agent is stateful, 
+
+                # Pass previous history implicitly if agent is stateful,
                 # or here we just rely on the agent's internal memory if using AutoGen agents directly.
                 response = await architect.on_messages(
-                    [TextMessage(content=refinement_prompt, source="user")], 
+                    [TextMessage(content=refinement_prompt, source="user")],
                     cancellation_token=None
                 )
-                
+
                 await self._process_agent_response(response.chat_message.content)
 
             # --- Finalize ---
             self.state.hypothesis.state = "confirmed"
             self.state.plan.state = "confirmed"
             await self._save_state()
-            
+
             await self._send("msg", "Study Plan Confirmed.")
             await self._send("modules_matched", True)
