@@ -1,4 +1,3 @@
-import asyncio
 import sys
 import os
 import json
@@ -10,10 +9,9 @@ import aiofiles
 from pathlib import Path
 from typing import Callable, Awaitable, Any, List
 
-from autogen_agentchat.teams import RoundRobinGroupChat
-from autogen_agentchat.conditions import TextMentionTermination
+# Removed Team imports
 from autogen_agentchat.base import TaskResult
-
+from autogen_agentchat.messages import TextMessage
 from .models import PlannerState, ClinicalHypothesis, StudyPlan, StudyStep
 from .planning_agents import create_planner_agents, create_model_client
 
@@ -43,6 +41,7 @@ class ClinicalPlanner:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         
         self.client = create_model_client(api_key)
+        # We only need the agents creation, no team wrapper needed
         self.agents = create_planner_agents(self.client, input_func=self._user_proxy_input_adapter)
         
         self.state = PlannerState()
@@ -90,102 +89,128 @@ class ClinicalPlanner:
         except Exception as e:
             logger.error(f"Load Error: {e}")
 
-    async def _run_team(self, task: str):
-        """
-        Runs the consolidated Architect Team.
-        """
-        await self._send("info", "Starting Clinical Architect Session...")
+    async def _process_agent_response(self, response_content: str):
+        """Helper to parse JSON from agent and update state/frontend."""
+        logger.info(f"[Architect]: {response_content[:100]}...")
         
-        termination = TextMentionTermination("APPROVE")
-        team = RoundRobinGroupChat(
-            [self.agents["architect"], self.agents["user_proxy"]], 
-            termination_condition=termination
-        )
+        clean_content = self._clean_json(response_content)
         
-        async for message in team.run_stream(task=task):
-            if isinstance(message, TaskResult):
-                logger.info(f"Team finished. Reason: {message.stop_reason}")
-                break
+        try:
+            data = json.loads(clean_content)
             
-            logger.info(f"[{message.source}]: {message.content[:50]}...")
-            
-            if message.source == "User":
-                continue
-
-            clean_content = self._clean_json(message.content)
-            
-            try:
-                data = json.loads(clean_content)
+            # 1. Handle Hypothesis
+            # FIX: Check if data["hypothesis"] is actually a dictionary (not None)
+            if "hypothesis" in data and isinstance(data["hypothesis"], dict):
+                hypo_data = data["hypothesis"]
                 
-                # 1. Handle Hypothesis
-                if "hypothesis" in data:
-                    hypo_data = data["hypothesis"]
-                    if "id" not in hypo_data or not hypo_data["id"]: 
-                        hypo_data["id"] = self.state.hypothesis.id or str(uuid.uuid4())
-                    
-                    self.state.hypothesis = ClinicalHypothesis(**hypo_data)
-                    await self._send("hypothesis", self.state.hypothesis.model_dump())
+                # Safe check for ID
+                if "id" not in hypo_data or not hypo_data["id"]: 
+                    hypo_data["id"] = self.state.hypothesis.id or str(uuid.uuid4())
+                
+                self.state.hypothesis = ClinicalHypothesis(**hypo_data)
+                await self._send("hypothesis", self.state.hypothesis.model_dump())
 
-                # 2. Handle Plan (Fixed Steps Customization)
-                if "steps" in data:
-                    steps_data = data["steps"]
-                    # Map the JSON steps to StudyStep objects. 
-                    # We use 'module' field to store the static ID to track it.
-                    self.state.plan = StudyPlan(
-                        hypothesis_id=self.state.hypothesis.id,
-                        study_goal=self.state.hypothesis.title,
-                        steps=[
-                            StudyStep(
-                                name=s.get("title", ""), 
-                                description=s.get("description", ""), 
-                                module=s.get("id", "") # Storing the fixed ID in 'module' field
-                            ) for s in steps_data
-                        ]
-                    )
-                    
-                    # Format for UI (flat list of steps with IDs)
-                    ui_steps = [
-                        {
-                            "id": s.module, # Use the fixed ID (e.g., 'segmentation_agent')
-                            "name": s.name, 
-                            "description": s.description,
-                            "module": s.module
-                        } 
-                        for s in self.state.plan.steps
+            # 2. Handle Plan (Fixed Steps Customization)
+            # FIX: Check if data["steps"] is a list
+            if "steps" in data and isinstance(data["steps"], list):
+                steps_data = data["steps"]
+                self.state.plan = StudyPlan(
+                    hypothesis_id=self.state.hypothesis.id,
+                    study_goal=self.state.hypothesis.title,
+                    steps=[
+                        StudyStep(
+                            name=s.get("title", ""), 
+                            description=s.get("description", ""), 
+                            module=s.get("id", "") 
+                        ) for s in steps_data
                     ]
-                    await self._send("plan", {"steps": ui_steps})
+                )
+                
+                # Format for UI 
+                ui_steps = [
+                    {
+                        "id": s.module, 
+                        "name": s.name, 
+                        "description": s.description,
+                        "module": s.module
+                    } 
+                    for s in self.state.plan.steps
+                ]
+                await self._send("plan", {"steps": ui_steps})
 
-                # 3. Message
-                if "message" in data:
-                    await self._send("msg", data["message"])
+            # 3. Message to User
+            if "message" in data and data["message"]:
+                await self._send("msg", data["message"])
+            
+            await self._save_state()
 
-                await self._save_state()
+        except json.JSONDecodeError:
+            # Fallback for non-JSON chat
+            display_text = response_content.replace("APPROVE", "").strip()
+            if display_text:
+                await self._send("msg", display_text)
+                
+                
+        except json.JSONDecodeError:
+            # Fallback for non-JSON chat
+            display_text = response_content.replace("APPROVE", "").strip()
+            if display_text:
+                await self._send("msg", display_text)
 
-            except json.JSONDecodeError:
-                display_text = message.content.replace("APPROVE", "").strip()
-                if display_text:
-                    await self._send("msg", display_text)
 
     async def run(self, start_query: str = "Start"):
-        await self.initialize()
+        print(f"Planner {start_query} state before run:", self.state)
         
         # Only run if not already confirmed
         if self.state.hypothesis.state != "confirmed":
             
-            initial_task = start_query
-            if start_query == "Start" and not self.state.hypothesis.title:
-                await self._send("msg", "Please enter your clinical observation to generate a study plan.")
-                initial_task = await self.input_provider()
+            architect = self.agents["architect"]
             
-            # Single combined run
-            await self._run_team(
-                task=f"User Request: {initial_task}. Define Hypothesis and Customize Workflow. Wait for 'APPROVE'."
+            # Initial Prompt
+            if start_query and not self.state.hypothesis.title:
+                user_input = start_query
+            else:
+                await self._send("msg", "Please enter your clinical observation to generate a study plan.")
+                user_input = await self.input_provider()
+
+            # --- Sequential Planning Loop ---
+            # 1. First iteration: Generate initial hypothesis/plan
+            prompt = f"User Request: {user_input}. Generate JSON with 'hypothesis' and 'steps' matching the fixed workflow."
+            
+            # Direct call to agent (no team)
+            response = await architect.on_messages(
+                [TextMessage(content=prompt, source="user")], 
+                cancellation_token=None
             )
             
-            # Finalize
+            # Process the response (parse JSON, update UI)
+            await self._process_agent_response(response.chat_message.content)
+
+            # 2. Refinement Loop
+            while True:
+                # Wait for user feedback
+                await self._send("msg", "Review the plan. Type 'APPROVE' to finish or enter changes.")
+                user_feedback = await self.input_provider()
+
+                if "APPROVE" in user_feedback.upper():
+                    break
+                
+                # Feed feedback back to the agent
+                refinement_prompt = f"User Feedback: {user_feedback}. Update the JSON 'hypothesis' and 'steps' accordingly."
+                
+                # Pass previous history implicitly if agent is stateful, 
+                # or here we just rely on the agent's internal memory if using AutoGen agents directly.
+                response = await architect.on_messages(
+                    [TextMessage(content=refinement_prompt, source="user")], 
+                    cancellation_token=None
+                )
+                
+                await self._process_agent_response(response.chat_message.content)
+
+            # --- Finalize ---
             self.state.hypothesis.state = "confirmed"
             self.state.plan.state = "confirmed"
             await self._save_state()
             
             await self._send("msg", "Study Plan Confirmed.")
-            await self._send("modules_matched", True) # Signal frontend that plan is final
+            await self._send("modules_matched", True)

@@ -4,8 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import Literal, Any, Union
 from datetime import datetime
 from pydantic import BaseModel, Field
-from teams.execution_team import BasicPipelineBuilder
-from autogen_agentchat.teams import GraphFlow
+# from teams.execution_team import BasicPipelineBuilder
+# from autogen_agentchat.teams import GraphFlow
 from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage
 from autogen_agentchat.base import TaskResult
 import logging
@@ -85,11 +85,20 @@ class ToolEvent(BaseModel):
     content: ContentPayload
     timestamp: datetime
 
+api_key = os.getenv("OLLAMA_API_KEY", "cf8ed2bae88d4d659602bc340b4b2bcf.mEvRr0YQ54A_OKfTT2Z92rge")
+planner = ClinicalPlanner(
+    input_provider=lambda:  manager.wait_for_user_message(),
+    output_callback=lambda t, d: manager.send_ws_message(t, d),
+    api_key=api_key
+)
 
 @app.post("/plan")
 async def start_planning(request: PlanningRequest):
+    print("Received planning request:", request.message)
     asyncio.create_task(run_planner(request.message))
     return {"task_id": "null for now", "status": "started"}
+
+
 
 async def run_planner(message: str):
     """
@@ -101,17 +110,11 @@ async def run_planner(message: str):
     If the session takes longer than your HTTP client's timeout setting (usually 30–60 seconds),
     the client might throw a timeout error, even though the process is still running on the server.
     """
-    api_key = os.getenv("OLLAMA_API_KEY", "cf8ed2bae88d4d659602bc340b4b2bcf.mEvRr0YQ54A_OKfTT2Z92rge")
-    planner = ClinicalPlanner(
-        input_provider=lambda: manager.wait_for_user_message(),
-        output_callback=lambda t, d: manager.send_ws_message(t, d),
-        api_key=api_key
-    )
 
-    try:
-        await planner.run(start_query=message)
-    except Exception as e:
-        manager.send_ws_message("error", str(e))
+    # try:
+    await planner.run(start_query=message)
+    # except Exception as e:
+    #     await manager.send_ws_message("error", str(e))
 
 # ----------------------------------------------------------------------
 # POST /run
@@ -158,7 +161,9 @@ async def receive_tool_event(event: ToolEvent):
 async def websocket_endpoint(websocket: WebSocket):
     # 1. Register connection
     await manager.connect(websocket)
-    
+    # 2. Start your Planner Logic (in background)
+    asyncio.create_task(planner.run("Start"))
+
     try:
         while True:
             # 3. LISTEN LOOP
