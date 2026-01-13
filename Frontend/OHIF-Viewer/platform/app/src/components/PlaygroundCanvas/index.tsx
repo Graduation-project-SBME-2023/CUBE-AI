@@ -164,7 +164,7 @@ export default function PlaygroundCanvas({
 
   const [edges, setEdges] = useState<FlowEdge[]>(INITIAL_EDGES);
   const [isPaused, setIsPaused] = useState(false);
-  const [isConnected, setIsConnected] = useState(false);
+  const [isConnected, setIsConnected] = useState(websocketService.isConnected());
 
   const isPausedRef = useRef(isPaused);
   const modeRef = useRef(mode);
@@ -312,6 +312,7 @@ export default function PlaygroundCanvas({
   };
 
   const updateCurrentAgent = (current_agent: string) => {
+    console.log(current_agent);
     setNodes(prev =>
       prev.map(node => {
         if (node.type !== 'agent') {
@@ -320,6 +321,7 @@ export default function PlaygroundCanvas({
         const isCurrent = node.id === current_agent;
         const wasActive = node.data.status === 'active';
         if (isCurrent) {
+          console.log('Active node: ', node);
           return { ...node, data: { ...node.data, status: 'active', isExpanded: true } };
         }
         if (wasActive && !isCurrent) {
@@ -437,6 +439,11 @@ export default function PlaygroundCanvas({
   }, []);
 
   const startExecution = async () => {
+    // only start execution if plan is approved?
+
+    // find start node and set hypothesis as study description
+    const hypothesis = nodes.find(node => node.type === 'start')?.data.description ?? '';
+
     setMode('executing');
     setIsPaused(false);
     setNodes(prev =>
@@ -444,34 +451,13 @@ export default function PlaygroundCanvas({
     );
     setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
 
-    if (websocketService.isConnected()) {
-      websocketService.sendMessage({ type: 'START_WORKFLOW' });
-      return;
-    }
-
-    const executionIds = nodes.filter(n => n.type === 'agent').map(n => n.id);
-    const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-    for (const nodeId of executionIds) {
-      if (modeRef.current === 'planning') {
-        return;
-      }
-      while (isPausedRef.current) {
-        await wait(100);
-        if (modeRef.current === 'planning') {
-          return;
-        }
-      }
-      updateNodeData(nodeId, { status: 'active', isExpanded: true });
-      await wait(1000);
-      updateNodeData(nodeId, { logs: ['Processing...'] });
-      await wait(1000);
-      updateNodeData(nodeId, { status: 'completed', isExpanded: false });
-      setEdges(prev =>
-        prev.map(e => (e.source === nodeId ? { ...e, data: { ...e.data, animated: true } } : e))
-      );
-    }
-    setMode('results');
+    const payload = { hypothesis: hypothesis };
+    console.log(hypothesis);
+    const response = await fetch('http://localhost:8150/run/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
   };
 
   const resetWorkflow = () => {
