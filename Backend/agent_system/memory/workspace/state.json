@@ -7,14 +7,14 @@
     "outcome": "",
     "clinical_context": "",
     "relationship_type": "",
-    "state": "confirmed",
+    "state": "not_confirmed",
     "message": null
   },
   "plan": {
     "hypothesis_id": "",
     "study_goal": "",
     "steps": [],
-    "state": "confirmed"
+    "state": "not_confirmed"
   },
   "status": "idle"
 }

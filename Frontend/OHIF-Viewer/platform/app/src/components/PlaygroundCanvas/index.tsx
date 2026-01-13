@@ -82,31 +82,14 @@ export default function PlaygroundCanvas({ initialHypothesis, onNodeSelect }: Pl
     useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
     useEffect(() => { modeRef.current = mode; }, [mode]);
 
+    // Add this ref near your other refs (around line 75)
+    const hasInitiatedPlan = useRef(false);
+
     useEffect(() => {
+                // Ensure we are connected
         websocketService.connect();
         
-        if (initialHypothesis) {
-             setTimeout(() => {
-                websocketService.sendMessage({ type: 'hypothesis', payload: initialHypothesis });
-             }, 500);
-        }
-
-        if (initialHypothesis) {
-            const startPlanning = async () => {
-                try {
-                    const response = await fetch('http://localhost:8150/plan', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ message: initialHypothesis }),
-                    });
-                    if (!response.ok) console.error('Failed to initiate planning session');
-                } catch (error) {
-                    console.error('Error contacting planner API:', error);
-                }
-            };
-            startPlanning();
-        }
-
+        // 1. Setup WebSocket Listeners immediately
         const handleWSMessage = (data: any) => {
             const { type, payload } = data;
             if (type === 'msg') return;
@@ -129,11 +112,52 @@ export default function PlaygroundCanvas({ initialHypothesis, onNodeSelect }: Pl
         };
 
         const handleStatus = (status: boolean) => setIsConnected(status);
+
+
+        
         const unsubscribeMsg = websocketService.subscribe(handleWSMessage);
         const unsubscribeStatus = websocketService.onStatusChange(handleStatus);
-        
-        return () => { unsubscribeMsg(); unsubscribeStatus(); };
+
+        // 2. Handle the Planning Trigger safely
+        // We check 'hasInitiatedPlan' to prevents double-execution in React Strict Mode
+        if (initialHypothesis && !hasInitiatedPlan.current) {
+            hasInitiatedPlan.current = true; // Lock it so it doesn't fire again on remount
+            
+            const startPlanning = async () => {
+                try {
+                    // Slight delay to ensure WS is ready before backend tries to use it
+                    await new Promise(r => setTimeout(r, 500)); 
+                    
+                    const response = await fetch('http://localhost:8150/plan', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: initialHypothesis }),
+                    });
+                    
+                    if (!response.ok) console.error('Failed to initiate planning session');
+                    
+                    // Send the hypothesis over WS as backup/context
+                    if (websocketService.isConnected()) {
+                         websocketService.sendMessage({ type: 'hypothesis', payload: initialHypothesis });
+                    }
+
+                } catch (error) {
+                    console.error('Error contacting planner API:', error);
+                    hasInitiatedPlan.current = false; // Reset lock on failure so user can try again
+                }
+            };
+
+            startPlanning();
+        }
+
+        // Cleanup listeners on unmount, but DO NOT disconnect the socket 
+        // (unless you want to kill the session entirely when switching tabs)
+        return () => { 
+            unsubscribeMsg(); 
+            unsubscribeStatus(); 
+        };
     }, [initialHypothesis]);
+
 
     // --- LOGIC: DATA HANDLERS ---
     const applyBackendPlan = (planPayload: any) => {

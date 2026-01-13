@@ -20,7 +20,8 @@ class ConnectionManager:
         """Called when a new client connects via WebSocket."""
         await websocket.accept()
         self.active_connections.append(websocket)
-        self.solely_connected_socket = websocket
+        if self.solely_connected_socket is None:
+            self.solely_connected_socket = websocket
         logger.info("WebSocket client connected.")
 
     def disconnect(self, websocket: WebSocket):
@@ -66,7 +67,9 @@ class ConnectionManager:
             except Exception as e:
                 logger.error(f"Failed to send message: {e}")
                 dead_sockets.append(connection)
-        await self.solely_connected_socket.send_text(message_data)
+                
+        # if self.solely_connected_socket:
+        #     await self.solely_connected_socket.send_text(message_data)
         
         # Cleanup broken connections
         for dead in dead_sockets:

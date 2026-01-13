@@ -50,9 +50,6 @@ class RunRequest(BaseModel):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     # 1. Register connection
-    await manager.connect(websocket)
-    # 2. Start your Planner Logic (in background)
-    asyncio.create_task(planner.run("Start"))
 
 
     try:
@@ -77,5 +74,8 @@ if __name__ == "__main__":
         "app:app",
         host="0.0.0.0",
         port=8150,
-        reload=True,
+        reload=Tr    await manager.connect(websocket)
+    # 2. Start your Planner Logic (in background)
+    asyncio.create_task(planner.run("Start"))
+ue,
     )
