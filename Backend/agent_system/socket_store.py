@@ -63,6 +63,7 @@ class ConnectionManager:
         dead_sockets = []
         for connection in self.active_connections:
             try:
+                print(f"will send to frontend msg: {message_data}")
                 await connection.send_text(message_data)
             except Exception as e:
                 logger.error(f"Failed to send message: {e}")
