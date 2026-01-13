@@ -43,6 +43,7 @@ app.add_middleware(
 class RunRequest(BaseModel):
     hypothesis: str = Field(..., description="Free form clinical hypothesis")
 
+
 class PlanningRequest(BaseModel):
     message: str = Field(..., description="Initial message or clinical hypothesis from the user to start planning")
 
