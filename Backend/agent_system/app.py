@@ -94,13 +94,14 @@ planner = ClinicalPlanner(
     api_key=api_key
 )
 
+
 @app.post("/plan")
 async def start_planning(request: PlanningRequest):
+    # chat_session_id needs to be passed in the request.
+    # planning and execution tasks need to be stored and controlled, and should communicate via ws
     print("Received planning request:", request.message)
     asyncio.create_task(run_planner(request.message))
     return {"task_id": "null for now", "status": "started"}
-
-
 
 async def run_planner(message: str):
     """
@@ -122,6 +123,12 @@ async def run_planner(message: str):
 # POST /run
 # ----------------------------------------------------------------------
 @app.post("/run")
+async def start_execution(request: RunRequest):
+    # chat_session_id needs to be passed in the request as well
+    # task needs to be stored somehow and controlled,
+    asyncio.create_task(run_pipeline(request))
+    return {"task_id": "null for now", "status": "started"}
+
 async def run_pipeline(request: RunRequest):
 
     graph_builder = await BasicPipelineBuilder.create()
