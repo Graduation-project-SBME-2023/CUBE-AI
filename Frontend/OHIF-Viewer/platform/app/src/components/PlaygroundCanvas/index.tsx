@@ -281,8 +281,9 @@ export default function PlaygroundCanvas({
 
       // Step Nodes (Vertical Stack)
       planPayload.steps.forEach((step: any, index: number) => {
+        console.log(step);
         newNodes.push({
-          id: String(index + 1),
+          id: step.id,
           type: 'agent',
           position: { x: AGENT_X, y: Y_START + Y_GAP + index * Y_GAP },
           data: {
@@ -318,6 +319,7 @@ export default function PlaygroundCanvas({
         if (node.type !== 'agent') {
           return node;
         }
+        console.log(node);
         const isCurrent = node.id === current_agent;
         const wasActive = node.data.status === 'active';
         if (isCurrent) {
