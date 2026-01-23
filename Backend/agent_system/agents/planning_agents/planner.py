@@ -51,6 +51,7 @@ class ClinicalPlanner:
         return await self.input_provider()
 
     def _initialize_logging(self):
+        os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
         file_handler = logging.FileHandler(self.log_path)
         file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(message)s'))
         std_handler = logging.StreamHandler(sys.stdout)
