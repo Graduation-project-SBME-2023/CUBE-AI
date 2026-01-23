@@ -1,5 +1,0 @@
-original_glrlm_RunVariance,original_gldm_DependenceNonUniformity,original_glszm_HighGrayLevelZoneEmphasis,original_glrlm_LongRunLowGrayLevelEmphasis,original_shape_SurfaceVolumeRatio,original_firstorder_TotalEnergy,original_firstorder_Energy,original_gldm_GrayLevelNonUniformity,original_shape_Flatness,original_glcm_ClusterProminence,target,prediction_label,prediction_score
-44.104538,11385.038,1.0603448,22.481468,0.22542167,733709440.0,733709440.0,58932.477,0.13996385,0.38787553,healty,neuroblastoma,0.56
-101.90888,29019.744,3.857143,391.5411,0.17041947,677786940.0,677786940.0,50399.82,0.68544406,0.0544898,neuroblastoma,neuroblastoma,0.72
-23.008715,6592.325,11.333333,20.76632,0.38731688,270841900.0,270841900.0,21767.98,0.21933931,1.1178771,healty,healty,0.87
-428.31485,213050.28,4.243531,102.30694,0.11999532,3771952400.0,3771952400.0,336282.0,0.70034724,0.039485563,neuroblastoma,neuroblastoma,0.71
