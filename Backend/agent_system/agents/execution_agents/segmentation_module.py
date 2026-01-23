@@ -307,7 +307,7 @@ class SegmentationModule:
             payload = ProgressPayload(
                 current=idx,
                 total=len(volumes),
-                label='Volumes'
+                label='Segmenting Volumes'
             )
             tool_progress = ToolEvent(
                 event_type='tool_progress',
@@ -1008,7 +1008,7 @@ class SegmentationModule:
         TASK_NAME = "final"
 
         current_file = Path(__file__)
-        current_dir = current_file.parent.parent.parent
+        current_dir = current_file.parent.parent.parent.parent
 
         DOWNLOAD_DIR_IMG = os.path.join(current_dir, "apps", "radiology", "General_Data")
         DOWNLOAD_DIR_LABEL = os.path.join(current_dir, "apps", "radiology", "Labels")
