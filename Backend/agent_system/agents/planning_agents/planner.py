@@ -73,6 +73,7 @@ class ClinicalPlanner:
         return text.strip()
 
     async def _save_state(self):
+        os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
         try:
             async with aiofiles.open(self.state_path, 'w') as f:
                 await f.write(self.state.model_dump_json(indent=2))
