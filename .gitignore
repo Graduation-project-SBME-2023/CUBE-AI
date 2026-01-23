@@ -20,6 +20,7 @@ Backend/temp_labels/
 Backend/test_label.py
 
 # Workspace files
+Backend/agent_system/workspace_*/
 Backend/agent_system/workspace/
 Backend/mas/memory/
 

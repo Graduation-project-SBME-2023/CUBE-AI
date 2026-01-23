@@ -10,6 +10,7 @@ from tool_logging import ToolEvent,log_tool_state, TextPayload
 
 @mcp.tool()
 def get_modeling_results(
+        workspace_folder: str = None,
 ) -> str:
     """
     Retrieves the latest machine learning modeling artifacts from the local file system. this will git you all the required data with one request
@@ -28,16 +29,19 @@ def get_modeling_results(
         )
         log_tool_state(start_event)
         # 1. Resolve Paths
-        current_dir = Path(__file__).resolve().parent
-        logging_path = current_dir.parent.parent / "agent_system" / "workspace"
+        if not workspace_folder:
+            workspace_folder = os.path.join(Path(__file__).parent.parent.parent, "agent_system", "workspace")
+
+        # current_dir = Path(__file__).resolve().parent
+        # logging_path = current_dir.parent.parent / "agent_system" / "workspace"
 
         # Map modes to specific files (or all of them)
         all_files = {
-            "features": logging_path / "features" / "top_10_features.csv",
+            "features": workspace_folder / "features" / "top_10_features.csv",
             # "tuning": logging_path / "model_1_results.csv",
-            "evaluation": logging_path / "models" / "models" / "model_1" / "independent_eval_results_model_1.csv",
-            "comparisons": logging_path / "models" / "model_comparison_results.csv",
-            "summary": logging_path / "models" / "model_summary.csv"
+            "evaluation": workspace_folder / "models" / "models" / "model_1" / "independent_eval_results_model_1.csv",
+            "comparisons": workspace_folder / "models" / "model_comparison_results.csv",
+            "summary": workspace_folder / "models" / "model_summary.csv"
         }
 
         # Select which files to read based on the 'mode' argument
@@ -46,8 +50,8 @@ def get_modeling_results(
         results = []
 
         # 2. Check Directory
-        if not logging_path.exists():
-            return f"Error: The directory '{logging_path}' does not exist."
+        if not workspace_folder.exists():
+            return f"Error: The directory '{workspace_folder}' does not exist."
 
         # 3. Read Files with Error Handling
         for key, file_path in files_to_read.items():

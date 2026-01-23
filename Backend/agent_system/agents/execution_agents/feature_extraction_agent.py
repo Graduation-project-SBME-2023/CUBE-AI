@@ -22,7 +22,7 @@ class FeatureExtractionAgent(AssistantAgent):
                         max_tool_iterations=max_tool_iterations)
     
     @classmethod
-    async def create(cls, model_client = None):
+    async def create(cls, model_client = None, workspace_folder = None):
         model_client = OllamaClient() if not model_client else model_client
 
         feature_extraction_tool_wrapper = FunctionTool(
@@ -41,6 +41,7 @@ class FeatureExtractionAgent(AssistantAgent):
                 pixel_spacing: Target pixel spacing for resampling [x, y, z] | Optional
                 force_2d: Whether to extract features in 2D mode | Optional
                 n_workers: Number of parallel workers | Optional
+                workspace_folder: The workspace folder to output files to | Optional
                 
             Returns:
                 Dictionary with feature extraction results and file paths
@@ -66,6 +67,7 @@ class FeatureExtractionAgent(AssistantAgent):
                 max_onehot_cardinality: Max unique values for one-hot encoding if auto
                 create_plots: Whether to generate visualization plots
                 top_n_plot: Number of top features to show in importance plots
+                workspace_folder: The workspace folder to output files to | Optional
                 
             Returns:
                 Dictionary with analysis results and file paths
@@ -75,7 +77,7 @@ class FeatureExtractionAgent(AssistantAgent):
 
         name = "feature_extraction_agent"
         description = FEATURE_EXTRACTION_AGENT_DESCRIPTION
-        system_message = FEATURE_EXTRACTION_AGENT_SYSTEM_PROMPT
+        system_message = FEATURE_EXTRACTION_AGENT_SYSTEM_PROMPT + f"\n\nThe workspace folder is {workspace_folder}."
         return cls(
             name = name,
             model_client = model_client,

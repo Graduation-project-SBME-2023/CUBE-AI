@@ -27,6 +27,7 @@ class ClinicalPlanner:
         input_provider: InputProvider,
         output_callback: OutputCallback,
         api_key: str,
+        session_id: str,
     ):
         self.input_provider = input_provider
         self.output_handler = output_callback
@@ -34,7 +35,7 @@ class ClinicalPlanner:
         log_dir = os.path.join(root_dir, "logs")
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_file = os.path.join(log_dir, f"planner_{timestamp}.log")
-        config_dir = os.path.join(root_dir, "workspace")
+        config_dir = os.path.join(root_dir, "workspace_" + session_id)
         self.log_path = Path(log_file)
         
         self.state_path = Path(config_dir) / "state.json"
