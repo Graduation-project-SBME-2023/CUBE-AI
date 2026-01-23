@@ -20,6 +20,10 @@ sys.path.append(root_dir)
 
 from socket_store import manager, send_ws_message
 from agents.planning_agents.planner import ClinicalPlanner
+from models.tool_logging import ToolEvent
+from tool_logging import receive_tool_event
+
+
 # ----------------------------------------------------------------------
 # FastAPI app definition
 # ----------------------------------------------------------------------
@@ -46,46 +50,6 @@ class RunRequest(BaseModel):
 
 class PlanningRequest(BaseModel):
     message: str = Field(..., description="Initial message or clinical hypothesis from the user to start planning")
-
-EventType = Literal[
-    "tool_started",
-    "tool_progress",
-    "tool_log",
-    "tool_finished",
-    "run_started",
-    "run_finished",
-    "error"
-]
-
-ContentType = Literal[
-    "markdown",
-    "progress",
-    "text",  # could add more content types
-]
-
-class MarkdownPayload(BaseModel):
-    markdown: str
-
-class ProgressPayload(BaseModel):
-    current: int
-    total: int
-    label: str | None = None
-
-class TextPayload(BaseModel):
-    message: str
-
-ContentPayload = Union[
-    MarkdownPayload,
-    ProgressPayload,
-    TextPayload,
-]
-
-class ToolEvent(BaseModel):
-    event_type: EventType
-    source: str          # tool name or agent
-    content_type: ContentType
-    content: ContentPayload
-    timestamp: datetime
 
 api_key = os.getenv("OLLAMA_API_KEY", "cf8ed2bae88d4d659602bc340b4b2bcf.mEvRr0YQ54A_OKfTT2Z92rge")
 planner = ClinicalPlanner(
@@ -155,13 +119,9 @@ async def run_pipeline(request: RunRequest):
 
 
 @app.post("/events")
-async def receive_tool_event(event: ToolEvent):
+async def receive_event(event: ToolEvent):
     logging.getLogger().info(f"event at /events: {event}")
-    await send_ws_message(
-        msg_type="tool_update",
-        payload=event.model_dump()
-        # payload=event
-    )
+    await receive_tool_event(event)
 
 # ----------------------------------------------------------------------
 # WebSocket /ws – Streaming interface

@@ -36,22 +36,24 @@ from typing import Annotated
 from pydantic import Field
 import os
 import asyncio
+from agent_system.models.tool_logging import ProgressPayload, TextPayload, ToolEvent
+from agent_system.tool_logging import receive_tool_event
 
-load_dotenv() 
-log_file_path = Path(__file__).parent.parent/"memory"/"workspace"/ "segmentation_module.log"
+# load_dotenv()
+# log_file_path = Path(__file__).parent.parent/"memory"/"workspace"/ "segmentation_module.log"
 logger = logging.getLogger("SegmentationModule")
-logger.setLevel(logging.INFO)
-formatter = logging.Formatter(
-    "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
-)
-# console handler
-ch = logging.StreamHandler()
-ch.setFormatter(formatter)
-logger.addHandler(ch)
-# file handler
-fh = logging.FileHandler(log_file_path)
-fh.setFormatter(formatter)
-logger.addHandler(fh)
+# logger.setLevel(logging.INFO)
+# formatter = logging.Formatter(
+#     "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+# )
+# # console handler
+# ch = logging.StreamHandler()
+# ch.setFormatter(formatter)
+# logger.addHandler(ch)
+# # file handler
+# fh = logging.FileHandler(log_file_path)
+# fh.setFormatter(formatter)
+# logger.addHandler(fh)
 
 class SegmentationModule:
     """
@@ -83,7 +85,7 @@ class SegmentationModule:
             api_key=os.environ.get("APIKEY")
         )
         current_file = Path(__file__).resolve()
-        backend_dir = current_file.parent.parent.parent  
+        backend_dir = current_file.parent.parent.parent.parent
         server_path = backend_dir / "mcp" / "server.py"   
         logger.info(f"Starting MCP server at: {server_path}")     
         math_server = StdioServerParams(
@@ -284,6 +286,16 @@ class SegmentationModule:
     async def _run_automatic(
         self, volumes: List[str], labels: List[str], selected_auto_model: str
     ):
+
+        payload = TextPayload(message=f'Starting Automatic Segmentation on {len(volumes)}...')
+        tool_started = ToolEvent(
+            event_type='tool_started',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload
+        )
+        await receive_tool_event(tool_started)
+
         logger.info(f"Starting automatic segmentation on {len(volumes)} volumes using model '{selected_auto_model}'")
         # try:
         #         result = await self.run_batch_segmentation(
@@ -292,6 +304,18 @@ class SegmentationModule:
         #             label_info=labels
         # )
         for idx, volume_uid in enumerate(volumes, start=1):
+            payload = ProgressPayload(
+                current=idx,
+                total=len(volumes),
+                label='Volumes'
+            )
+            tool_progress = ToolEvent(
+                event_type='tool_progress',
+                source='segmentation_agent',
+                content_type='progress',
+                content=payload
+            )
+            await receive_tool_event(tool_progress)
             logger.info(f"[{idx}/{len(volumes)}] Running segmentation for volume: {volume_uid}")
             try:
                 result = await self.run_segmentation(
