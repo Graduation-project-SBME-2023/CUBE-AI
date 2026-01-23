@@ -143,11 +143,13 @@ const edgeTypes = { custom: CustomEdge };
 interface PlaygroundCanvasProps {
   initialHypothesis?: string;
   onNodeSelect?: (node: FlowNode | null) => void;
+  session_id?: string;
 }
 
 export default function PlaygroundCanvas({
   initialHypothesis,
   onNodeSelect,
+  session_id,
 }: PlaygroundCanvasProps) {
   const [mode, setMode] = useState<'planning' | 'executing' | 'results'>('planning');
 
@@ -224,7 +226,7 @@ export default function PlaygroundCanvas({
           const response = await fetch('http://localhost:8150/plan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: initialHypothesis }),
+            body: JSON.stringify({ message: initialHypothesis, session_id: session_id }),
           });
 
           if (!response.ok) {
@@ -444,7 +446,7 @@ export default function PlaygroundCanvas({
     // only start execution if plan is approved?
 
     // find start node and set hypothesis as study description
-    const hypothesis = nodes.find(node => node.type === 'start')?.data.description ?? '';
+    // const hypothesis = nodes.find(node => node.type === 'start')?.data.description ?? '';
 
     setMode('executing');
     setIsPaused(false);
@@ -453,8 +455,9 @@ export default function PlaygroundCanvas({
     );
     setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
 
-    const payload = { hypothesis: hypothesis };
-    console.log(hypothesis);
+    // const payload = { hypothesis: hypothesis };
+    // console.log(hypothesis);
+    const payload = { session_id: session_id }
     const response = await fetch('http://localhost:8150/run/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

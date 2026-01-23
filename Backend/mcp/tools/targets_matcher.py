@@ -9,12 +9,14 @@ from tool_logging import ToolEvent, log_tool_state, TextPayload
 @mcp.tool()
 async def generate_targets(
     datasetlist: List[str],
+    workspace_dir: str,
 ) -> str:
     """
     Generates the necessary targets.csv file for the matching subjects to targets
 
     Args:
         datasetlist: The complete list of the volume_instance_uid's included in the population.
+        workspace_dir: The workspace directory to output the targets csv to.
 
     Returns:
         The path of the generated csv file.
@@ -29,8 +31,10 @@ async def generate_targets(
     log_tool_state(start_event)
     
     
-    root_dir = Path(__file__).parent.parent.parent
-    output_dir = os.path.join(root_dir, 'agent_system', 'workspace', 'populations', 'targets')
+    # root_dir = Path(__file__).parent.parent.parent
+    # output_dir = os.path.join(root_dir, 'agent_system', 'workspace', 'populations', 'targets')
+
+    output_dir = os.path.join(workspace_dir, 'populations', 'targets', 'targets.csv')
     
     os.makedirs(output_dir, exist_ok=True)
 

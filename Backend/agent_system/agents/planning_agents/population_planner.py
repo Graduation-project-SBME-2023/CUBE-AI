@@ -17,7 +17,7 @@ from system_prompts.system_messages import POPULATION_PLANNER_AGENT_SYSTEM_MESSA
 import asyncio
 import logging
 
-logger = logging.getLogger()
+logger = logging.getLogger('Population Planner')
 
 
 class PopulationPlannerAgent(AssistantAgent):
@@ -30,7 +30,7 @@ class PopulationPlannerAgent(AssistantAgent):
                         max_tool_iterations=max_tool_iterations)
     
     @classmethod
-    async def create(cls, model_client = None):
+    async def create(cls, model_client = None, workspace_folder=None):
         model_client = OllamaClient() if not model_client else model_client
         mcp_server = StdioServerParams(
             command="python", args=["Backend/mcp/server.py"]
@@ -43,7 +43,7 @@ class PopulationPlannerAgent(AssistantAgent):
             logger.info(f"Tool selected: {tool.name}")
         name = "study_population_planner_agent"
         description = POPULATION_PLANNER_AGENT_DESCRIPTION
-        system_message = POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE
+        system_message = POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE + f"\n \n The workspace folder to output to is {workspace_folder}"
         return cls(
             name = name,
             model_client = model_client,

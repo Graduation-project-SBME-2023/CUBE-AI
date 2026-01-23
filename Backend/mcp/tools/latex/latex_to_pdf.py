@@ -12,7 +12,8 @@ from tool_logging import ToolEvent, log_tool_state, TextPayload
 @mcp.tool()
 async def latex_to_pdf(
     latex_text: Annotated[str, Field(description="The complete LaTeX source code content, including the preamble and document body, to be compiled.")] ,
-    output_filename: Annotated[str, Field(description="The file name where the generated PDF should be saved, without the path (e.g., 'report.pdf').")]
+    output_filename: Annotated[str, Field(description="The file name where the generated PDF should be saved, without the path (e.g., 'report.pdf').")],
+    workspace_folder: Annotated[str, Field(description="The workspace directory to output the PDF to.", default=None)]
 ) -> str: 
     """
     Compiles LaTeX source code into a PDF document using pdflatex.
@@ -63,10 +64,13 @@ async def latex_to_pdf(
             with open(pdf_path, "rb") as f:
                 pdf_bytes = f.read()
 
-    
-        current_dir = os.getcwd()
-        target_dir = os.path.abspath(os.path.join(current_dir, "Backend", "agent_system/workspace"))
-        final_folder = os.path.join(target_dir, "reports") 
+
+        if not workspace_folder:
+            current_dir = os.getcwd()
+            target_dir = os.path.abspath(os.path.join(current_dir, "Backend", "agent_system/workspace"))
+            final_folder = os.path.join(target_dir, "reports")
+        else:
+            final_folder = os.path.join(workspace_folder, "reports")
         final_path = os.path.join(final_folder, output_filename)
                 
         # Save final PDF

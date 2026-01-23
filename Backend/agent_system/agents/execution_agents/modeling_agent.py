@@ -40,7 +40,7 @@ class ModelingAgent(AssistantAgent):
                         max_tool_iterations=max_tool_iterations)
     
     @classmethod
-    async def create(cls, model_client = None):
+    async def create(cls, model_client = None, workspace_folder = None):
         model_client = OllamaClient() if not model_client else model_client
         # mcp_server = StdioServerParams(
         #     command="python", args=["Backend/mcp/server.py"]
@@ -64,7 +64,7 @@ class ModelingAgent(AssistantAgent):
         
         name = "modeling_agent"
         description = MODELING_AGENT_DESCRIPTION
-        system_message = MODELING_AGENT_SYSTEM_PROMPT
+        system_message = MODELING_AGENT_SYSTEM_PROMPT + f"\n\nThe workspace folder is {workspace_folder}."
         return cls(
             name = name,
             model_client = model_client,
