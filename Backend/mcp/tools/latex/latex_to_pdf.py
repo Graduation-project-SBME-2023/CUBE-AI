@@ -66,7 +66,8 @@ async def latex_to_pdf(
     
         current_dir = os.getcwd()
         target_dir = os.path.abspath(os.path.join(current_dir, "Backend", "agent_system/workspace"))
-        final_folder = os.path.join(target_dir, "reports") 
+        final_folder = os.path.join(target_dir, "reports")
+        os.makedirs(final_folder, exist_ok=True)
         final_path = os.path.join(final_folder, output_filename)
                 
         # Save final PDF
