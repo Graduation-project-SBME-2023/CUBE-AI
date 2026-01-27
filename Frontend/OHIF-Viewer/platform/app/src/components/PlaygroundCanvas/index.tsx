@@ -10,6 +10,8 @@ import {
   MousePointer2,
   Edit3,
   Settings,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 
 import websocketService from '../../utils/WebsocketService';
@@ -49,93 +51,9 @@ const INITIAL_NODES: FlowNode[] = [
     position: { x: START_X, y: Y_START },
     data: { title: 'Research Hypothesis', description: 'Entry point' },
   },
-  {
-    id: 'study_population_planner_agent',
-    type: 'agent',
-    position: { x: AGENT_X, y: Y_START + Y_GAP },
-    data: {
-      title: 'Retrieve Study',
-      description: 'Fetch DICOM metadata',
-      status: 'pending',
-      logs: [],
-      isExpanded: false,
-    },
-  },
-  {
-    id: 'segmentation_agent',
-    type: 'agent',
-    position: { x: AGENT_X, y: Y_START + Y_GAP * 2 },
-    data: {
-      title: 'Segmentation',
-      description: 'Run ML Segmentation Model',
-      status: 'pending',
-      logs: [],
-      isExpanded: false,
-    },
-  },
-  {
-    id: 'feature_extraction_agent',
-    type: 'agent',
-    position: { x: AGENT_X, y: Y_START + Y_GAP * 3 },
-    data: {
-      title: 'Radiomics Feature Extraction',
-      description: 'Calculate ROI metrics',
-      status: 'pending',
-      logs: [],
-      isExpanded: false,
-    },
-  },
-  {
-    id: 'modeling_agent',
-    type: 'agent',
-    position: { x: AGENT_X, y: Y_START + Y_GAP * 4 },
-    data: {
-      title: 'ML Modeling',
-      description: 'Train/Inference Model',
-      status: 'pending',
-      logs: [],
-      isExpanded: false,
-    },
-  },
-  {
-    id: 'result_reporter_agent',
-    type: 'agent',
-    position: { x: AGENT_X, y: Y_START + Y_GAP * 5 },
-    data: {
-      title: 'Analyze Results',
-      description: 'Generate Findings',
-      status: 'pending',
-      logs: [],
-      isExpanded: false,
-    },
-  },
-  {
-    id: 'latex_reporter_agent',
-    type: 'agent',
-    position: { x: AGENT_X, y: Y_START + Y_GAP * 6 },
-    data: {
-      title: 'Write PDF Report',
-      description: 'Compile Final Report',
-      status: 'pending',
-      logs: [],
-      isExpanded: false,
-    },
-  },
 ];
 
-const INITIAL_EDGES: FlowEdge[] = [
-  { id: 'e1-2', source: '1', target: 'study_population_planner_agent', type: 'custom' },
-  {
-    id: 'e2-3',
-    source: 'study_population_planner_agent',
-    target: 'segmentation_agent',
-    type: 'custom',
-  },
-  { id: 'e3-4', source: 'segmentation_agent', target: 'feature_extraction_agent', type: 'custom' },
-  { id: 'e4-5', source: 'feature_extraction_agent', target: 'modeling_agent', type: 'custom' },
-  { id: 'e5-6', source: 'modeling_agent', target: 'result_reporter_agent', type: 'custom' },
-  { id: 'e6-7', source: 'result_reporter_agent', target: 'latex_reporter_agent', type: 'custom' },
-];
+const INITIAL_EDGES: FlowEdge[] = [];
 
 const nodeTypes = { start: StartNode, agent: AgentNode };
 const edgeTypes = { custom: CustomEdge };
@@ -175,7 +93,6 @@ export default function PlaygroundCanvas({
     modeRef.current = mode;
   }, [mode]);
 
-  // Add this ref near your other refs (around line 75)
   const hasInitiatedPlan = useRef(false);
 
   useEffect(() => {
@@ -212,13 +129,11 @@ export default function PlaygroundCanvas({
     const unsubscribeStatus = websocketService.onStatusChange(handleStatus);
 
     // 2. Handle the Planning Trigger safely
-    // We check 'hasInitiatedPlan' to prevents double-execution in React Strict Mode
     if (initialHypothesis && !hasInitiatedPlan.current) {
-      hasInitiatedPlan.current = true; // Lock it so it doesn't fire again on remount
+      hasInitiatedPlan.current = true;
 
       const startPlanning = async () => {
         try {
-          // Slight delay to ensure WS is ready before backend tries to use it
           await new Promise(r => setTimeout(r, 500));
 
           const response = await fetch('http://localhost:8150/plan', {
@@ -230,22 +145,15 @@ export default function PlaygroundCanvas({
           if (!response.ok) {
             console.error('Failed to initiate planning session');
           }
-
-          // // Send the hypothesis over WS as backup/context
-          // if (websocketService.isConnected()) {
-          //      websocketService.sendMessage({ type: 'hypothesis', payload: initialHypothesis });
-          // }
         } catch (error) {
           console.error('Error contacting planner API:', error);
-          hasInitiatedPlan.current = false; // Reset lock on failure so user can try again
+          hasInitiatedPlan.current = false;
         }
       };
 
       startPlanning();
     }
 
-    // Cleanup listeners on unmount, but DO NOT disconnect the socket
-    // (unless you want to kill the session entirely when switching tabs)
     return () => {
       unsubscribeMsg();
       unsubscribeStatus();
@@ -400,6 +308,22 @@ export default function PlaygroundCanvas({
     [mode]
   );
 
+  // Handle node position changes
+  const handleNodesChange = useCallback(
+    (updatedNodes: FlowNode[]) => {
+      setNodes(updatedNodes);
+      // Sync to backend if in planning mode
+      if (mode === 'planning') {
+        // Debounce to avoid flooding the backend
+        clearTimeout((window as any)._nodeSyncTimeout);
+        (window as any)._nodeSyncTimeout = setTimeout(() => {
+          sendPlanToBackend(updatedNodes, edges);
+        }, 300);
+      }
+    },
+    [mode, edges, sendPlanToBackend]
+  );
+
   const deleteNode = useCallback(
     (id: string) => {
       const updatedNodes = nodes.filter(n => n.id !== id);
@@ -441,9 +365,6 @@ export default function PlaygroundCanvas({
   }, []);
 
   const startExecution = async () => {
-    // only start execution if plan is approved?
-
-    // find start node and set hypothesis as study description
     const hypothesis = nodes.find(node => node.type === 'start')?.data.description ?? '';
 
     setMode('executing');
@@ -502,7 +423,9 @@ export default function PlaygroundCanvas({
         isExpanded: false,
       },
     };
-    setNodes(nds => nds.concat(newNode));
+    const updatedNodes = nodes.concat(newNode);
+    setNodes(updatedNodes);
+    sendPlanToBackend(updatedNodes, edges);
   };
 
   const handleDragOver = (event: React.DragEvent) => {
@@ -607,7 +530,7 @@ export default function PlaygroundCanvas({
         <MiniFlow
           nodes={nodesWithHandlers}
           edges={edges}
-          onNodesChange={setNodes}
+          onNodesChange={handleNodesChange}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           readOnly={mode !== 'planning'}
@@ -620,10 +543,13 @@ export default function PlaygroundCanvas({
               {mode === 'planning' ? (
                 <>
                   <div className="flex items-center gap-2 text-[#dadada]">
-                    <MousePointer2 size={10} /> Drag nodes
+                    <MousePointer2 size={10} /> Drag nodes & canvas
                   </div>
                   <div className="flex items-center gap-2 text-[#dadada]">
                     <Edit3 size={10} /> Edit / Delete
+                  </div>
+                  <div className="flex items-center gap-2 text-[#dadada]">
+                    <ZoomIn size={10} /> Ctrl+Scroll to zoom
                   </div>
                 </>
               ) : (
