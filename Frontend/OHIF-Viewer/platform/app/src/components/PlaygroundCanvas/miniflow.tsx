@@ -42,6 +42,14 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
     setDraggingNodeId(null);
   };
 
+  // --- UPDATED: Dimensions to match new sizes ---
+  const getNodeDimensions = (type: string) => {
+      // Start Node: 300x80 (Updated)
+      if (type === 'start') return { w: 300, h: 80 };
+      // Agent Node: 280x60 (Standard)
+      return { w: 280, h: 60 };
+  };
+
   return (
     <div 
       ref={containerRef}
@@ -74,10 +82,17 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
             const target = nodes.find(n => n.id === edge.target);
             if (!source || !target) return null;
 
-            const sx = source.position.x + (edge.sourceHandleX || 150);
-            const sy = source.position.y + 30; 
-            const tx = target.position.x;
-            const ty = target.position.y + 30;
+            // DYNAMIC CALCULATION
+            const srcDim = getNodeDimensions(source.type);
+            const tgtDim = getNodeDimensions(target.type);
+
+            // Source Handle: Bottom Center
+            const sx = source.position.x + (srcDim.w / 2);
+            const sy = source.position.y + srcDim.h; 
+
+            // Target Handle: Top Center
+            const tx = target.position.x + (tgtDim.w / 2);
+            const ty = target.position.y;
             
             const EdgeComponent = edgeTypes[edge.type] || edgeTypes.default;
             return (

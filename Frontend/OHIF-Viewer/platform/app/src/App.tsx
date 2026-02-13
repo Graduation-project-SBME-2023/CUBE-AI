@@ -6,6 +6,7 @@ import { I18nextProvider } from 'react-i18next';
 import { BrowserRouter } from 'react-router-dom';
 import Compose from './routes/Mode/Compose';
 import ChatWidget from "./components/ChatWidget";
+import { registerAllLogRenderers } from './components/PlaygroundCanvas/logs/registerRenderers';
 import websocketService from './utils/WebsocketService';
 import { ServicesManager, ExtensionManager, CommandsManager, HotkeysManager } from '@ohif/core';
 import {
@@ -37,6 +38,7 @@ function App({ config, defaultExtensions, defaultModes }) {
     const run = async () => {
       appInit(config, defaultExtensions, defaultModes).then(setInit).catch(console.error);
     };
+    registerAllLogRenderers();
     websocketService.connect();
     run();
   }, []);
@@ -112,7 +114,7 @@ function App({ config, defaultExtensions, defaultModes }) {
       <BrowserRouter basename={routerBasename}>
         {authRoutes}
         {appRoutes}
-        <ChatWidget /> 
+        {/* <ChatWidget /> */}
       </BrowserRouter>
     </CombinedProviders>
 

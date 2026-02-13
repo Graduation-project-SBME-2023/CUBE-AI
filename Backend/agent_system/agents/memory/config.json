@@ -1,0 +1,7 @@
+{
+  "image_dir": "D:\\GP_2026\\Dataset001_Neuroblastoma\\imagesTr",
+  "mask_dir": "D:\\GP_2026\\Dataset001_Neuroblastoma\\labelsTr",
+  "output_dir": "D:\\GP_2026\\Github\\agenticsystem\\OHIF-Standalone\\Backend\\mas\\memory\\workspace",
+  "targets_csv":"D:\\GP_2026\\Dataset001_Neuroblastoma\\outcome2.csv",
+  "target_column":"target"
+}
