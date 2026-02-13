@@ -2016,7 +2016,7 @@ Update the ui based on sam2 points
         params.Class = 133;
 
         params.Points = this.state.vistaPrompts;
-        // params.Mask = this.state.prevMask2Refine;
+        
         // console.log("mask has been sent to vista",this.state.prevMask2Refine );
         
       }
@@ -2029,21 +2029,21 @@ Update the ui based on sam2 points
 
     }
     const labels = info.models[model].labels;
-    const response = await this.props
-      .client()
-      .segmentation(model, image, params);
+    // const response = await this.props
+    //   .client()
+    //   .segmentation(model, image, params);
     console.log("the parameters for model autoseg run", params);
-    if (model != 'sam'){ 
-    const extractedData = await this.extractMaskFromResponse(response);
-    this.setState({
-      prevMask2Refine: extractedData.mask,
-      prevLabeL: Object.values(extractedData.metadata.label_names),
-    });
+    // if (model != 'sam'){ 
+    // const extractedData = await this.extractMaskFromResponse(response);
+    // this.setState({
+    //   prevMask2Refine: extractedData.mask,
+    //   prevLabeL: Object.values(extractedData.metadata.label_names),
+    // });
     
-    console.log('Extracted mask:', extractedData.mask);
-    console.log('Metadata:', extractedData.metadata);
-    console.log('labels of this mask  is :', this.state.prevLabeL); };
-    console.log("length of the labels is ", this.state.prevLabeL.length);
+    // console.log('Extracted mask:', extractedData.mask);
+    // console.log('Metadata:', extractedData.metadata);
+    // console.log('labels of this mask  is :', this.state.prevLabeL); };
+    // console.log("length of the labels is ", this.state.prevLabeL.length);
 
     // Bug:: Notification Service on show doesn't return idprevLabeL
     if (!nid) {
