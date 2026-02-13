@@ -12,6 +12,8 @@ import buildModeRoutes from './buildModeRoutes';
 import WorkflowDetailPage from './Workflow/WorkflowDetails';
 import AgentsPlayground from './Playground/AgentsPlayground';
 import PrivateRoute from './PrivateRoute';
+import CubeStartUp from './StartUp';
+import agenticHome from './agenticHome';
 import PropTypes from 'prop-types';
 import { Link } from 'react-router-dom';
 
@@ -112,30 +114,48 @@ const createRoutes = ({
 
   const playgroundRoutes = [
     {
-      path: '/playground/:chat_id',
+      path: '/playground',
       children: AgentsPlayground,
     }
-  ]
+  ];
+  
+  const agenticHomeRoute = {
+    path: '/agentic-home',
+    children: agenticHome,
+    private: false,
+  };
+
+  // CUBE Startup Route - Landing Page
+  const cubeStartupRoute = {
+    path: '/home',
+    children: CubeStartUp,
+    private: false, // Set to true if authentication is required
+  };
 
   const { customizationService } = servicesManager.services;
 
+  // WorkList Route (now moved to /worklist path since CUBE takes root)
   const WorkListRoute = {
     path: '/',
     children: DataSourceWrapper,
-    private: true,
+    private: true, //Change to test the appliaction
     props: { children: WorkList, servicesManager, extensionManager },
   };
 
   const customRoutes = customizationService.getGlobalCustomization('customRoutes');
 
   const allRoutes = [
+    cubeStartupRoute, // CUBE startup is now the landing page
     ...routes,
     ...workflowRoutes,
+    playgroundRoutes,
+    ...playgroundRoutes,
     ...(showStudyList ? [WorkListRoute] : []),
     ...(customRoutes?.routes || []),
     ...bakedInRoutes,
+    agenticHomeRoute,
+
     customRoutes?.notFoundRoute || notFoundRoute,
-    ...playgroundRoutes,
   ];
 
   function RouteWithErrorBoundary({ route, ...rest }) {

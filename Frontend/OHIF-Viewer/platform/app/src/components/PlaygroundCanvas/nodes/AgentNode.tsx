@@ -31,11 +31,11 @@ const AgentNode = memo((props: AgentNodeProps) => {
     iconColor = 'text-[#5acce6]';
     shadow = 'shadow-[0_0_15px_rgba(90,204,230,0.3)]';
   } else if (status === 'completed') {
-    borderColor = 'border-[#6fe5b8]';
+    borderColor = 'border-[#5acce6]';
     bgColor = 'bg-[#151a1f]';
-    textColor = 'text-[#6fe5b8]';
+    textColor = 'text-[#5acce6]';
     Icon = CheckCircle2;
-    iconColor = 'text-[#6fe5b8]';
+    iconColor = 'text-[#5acce6]';
   }
 
   const handleEditClick = (e: React.MouseEvent) => {

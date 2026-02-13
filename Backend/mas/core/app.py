@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from orchestrator import Orchestrator, SystemState
+# from orchestrator import Orchestrator, SystemState
 from planner import Planner
 
 # NEW: socket storemaset_socket, get_socket, send_ws_message
@@ -40,26 +40,8 @@ planner = Planner()
 class RunRequest(BaseModel):
     hypothesis: str = Field(..., description="Free form clinical hypothesis")
 
-# ----------------------------------------------------------------------
-# POST /run
-# ----------------------------------------------------------------------
-@app.post("/run")
-async def run_pipeline(request: RunRequest):
 
-    orchestrator = Orchestrator()
 
-    try:
-        result = await orchestrator.process_hypothesis(
-            hypothesis_text=request.hypothesis,
-        )
-        
-        # Example usage: push result to websocket if connected
-        await send_ws_message("result", result)
-
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return result
 
 
 # ----------------------------------------------------------------------
@@ -68,15 +50,7 @@ async def run_pipeline(request: RunRequest):
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     # 1. Register connection
-    await manager.connect(websocket)
-    
-    # 2. Start your Planner Logic (in background)
-    planner = Planner()
-    asyncio.create_task(planner.run("Start"))
 
-
-    # asyncio.create_task(planner.run("Start"))
-    # Orchestrator.create_task(...)
 
     try:
         while True:
@@ -100,5 +74,8 @@ if __name__ == "__main__":
         "app:app",
         host="0.0.0.0",
         port=8150,
-        reload=True,
+        reload=Tr    await manager.connect(websocket)
+    # 2. Start your Planner Logic (in background)
+    asyncio.create_task(planner.run("Start"))
+ue,
     )

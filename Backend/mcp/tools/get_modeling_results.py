@@ -1,13 +1,12 @@
 from . import mcp 
 from pathlib import Path
+import os
 import pandas as pd
-from typing import Annotated
-from pydantic import Field
-
-import pandas as pd
+import sys
 from pathlib import Path
-from typing import Annotated, Literal
-from pydantic import Field
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
+from tool_logging import ToolEvent,log_tool_state, TextPayload
+
 
 @mcp.tool()
 def get_modeling_results(
@@ -20,6 +19,14 @@ def get_modeling_results(
     """
     mode = "all"
     try:
+        payload = TextPayload(message='fetching results')
+        start_event = ToolEvent(
+            event_type='tool_started',
+            source="result_reporter_agent",
+            content_type='text' ,
+            content=payload
+        )
+        log_tool_state(start_event)
         # 1. Resolve Paths
         current_dir = Path(__file__).resolve().parent
         logging_path = current_dir.parent.parent / "agent_system" / "workspace"
@@ -28,7 +35,7 @@ def get_modeling_results(
         all_files = {
             "features": logging_path / "features" / "top_10_features.csv",
             # "tuning": logging_path / "model_1_results.csv",
-            "evaluation": logging_path / "models" / "model_1" / "independent_eval_results_model_1.csv",
+            "evaluation": logging_path / "models" / "models" / "model_1" / "independent_eval_results_model_1.csv",
             "comparisons": logging_path / "models" / "model_comparison_results.csv",
             "summary": logging_path / "models" / "model_summary.csv"
         }
@@ -59,7 +66,14 @@ def get_modeling_results(
                     results.append(f"### {header}\n{df.to_markdown(index=False)}")
             except Exception as e:
                 results.append(f"### {header}\n*Error reading CSV: {str(e)}*")
-
+        payload = TextPayload(message="study data results Fetched")
+        finish_event = ToolEvent(
+        event_type='tool_finished',
+        source='result_reporter_agent',
+        content_type='text',
+        content=payload
+        )
+        log_tool_state(finish_event)
         return "\n\n".join(results)
 
     except Exception as e:

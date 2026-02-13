@@ -1,5 +1,9 @@
 from . import mcp
 import requests
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
+from tool_logging import ToolEvent,log_tool_state, TextPayload
 
 @mcp.tool()
 async def get_model_info():
@@ -7,6 +11,9 @@ async def get_model_info():
     Returns a structured list of available segmentation models
     with their capabilities so the agent can choose the right one.
     """
+    start_event = ToolEvent('tool_started', 'segmentation_agent', {'tool_name':'get_model_info','progress':'fetching auto models info'})
+    log_tool_state(start_event)
+    
     response = requests.get("http://localhost:8000/models")
     models = response.json()
 
@@ -29,5 +36,14 @@ async def get_model_info():
         }
         for m in models
     ]
+    payload = TextPayload(message="Models Fetched")
+    finish_event = ToolEvent(
+        event_type='tool_finished',
+        source='segmentation_agent',
+        content_type='text',
+        content=payload
+    )
+    # finish_event = ToolEvent('tool_finished', 'segmentation_agent', {'tool_name':'get_model_info','progress':'models fetched'})
+    log_tool_state(finish_event)
 
     return formatted
