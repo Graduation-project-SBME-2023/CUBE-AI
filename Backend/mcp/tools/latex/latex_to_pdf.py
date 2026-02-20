@@ -26,6 +26,8 @@ async def latex_to_pdf(
             payload = TextPayload(message='Generating pdf...')
             start_event = ToolEvent('tool_started', 'latex_reporter_agent', 'text', payload)
             log_tool_state(start_event)
+            log_event = ToolEvent('tool_progress', 'latex_reporter_agent', 'text', payload)
+            log_tool_state(log_event)
             tex_path = os.path.join(temp, "document.tex")
 
             # Write LaTeX to .tex file
@@ -49,7 +51,10 @@ async def latex_to_pdf(
                 payload = TextPayload(message='LaTeX compilation failed.')
                 error_compilation_event = ToolEvent('error','latex_reporter_agent', 'text', payload)
                 log_tool_state(error_compilation_event)
-                return "LaTeX compilation failed. Check your LaTeX syntax."
+
+                stdout = result.stdout.decode("utf-8", errors="ignore")
+                stderr = result.stderr.decode("utf-8", errors="ignore")
+                return f"LaTeX compilation failed. Check your LaTeX syntax. {stdout}. {stderr}"
 
             # Read compiled PDF bytes
             pdf_path = os.path.join(temp, "document.pdf")
