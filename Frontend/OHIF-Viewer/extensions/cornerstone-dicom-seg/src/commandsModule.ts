@@ -380,9 +380,9 @@ const commandsModule = ({
       if (!segmentation) {
         throw new Error('No segmentation found');
       }
-      console.log("segmentan", segmentation);
+      console.log("segmentation", segmentation);
       console.log("desc", SeriesDescription);
-      const generatedData = actions.generateSegmentatitioon({
+      const generatedData = actions.generateSegmentation({
         segmentationId,
         options: {
           SeriesDescription,
