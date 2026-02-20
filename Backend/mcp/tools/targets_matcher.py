@@ -43,7 +43,7 @@ async def generate_targets(
         for uid, target in zip(datasetlist, targets):
             writer.writerow([uid, int(target)])
 
-    payload = TextPayload(message="labels assigned")
+    payload = TextPayload(message="Fetching labels...")
     finish_event = ToolEvent(
     event_type='tool_finished',
     source='study_population_planner_agent',

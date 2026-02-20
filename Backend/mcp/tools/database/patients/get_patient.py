@@ -2,6 +2,7 @@ import httpx
 from ... import mcp
 from typing import Annotated
 from pydantic import Field
+from tool_logging import ToolEvent, log_tool_state, TextPayload
 
 
 @mcp.tool()
@@ -17,6 +18,11 @@ async def get_patient(
     2. To browse or list multiple patients when no specific ID is known (uses pagination).
     """
     async with httpx.AsyncClient() as client:
+        payload = TextPayload(message='Checking patients\' demographics...')
+        start_event = ToolEvent('tool_started', 'study_population_planner_agent', 'text', payload)
+        log_tool_state(start_event)
+        log_event = ToolEvent('tool_progress', 'study_population_planner_agent', 'text', payload)
+        log_tool_state(log_event)
         if patient_id is not None:
             response = await client.get(f"http://localhost:8000/patients/{patient_id}")
         else:
@@ -31,4 +37,7 @@ async def get_patient(
         except ValueError:
             return {"error": "Invalid JSON returned", "raw": response.text}
 
+        payload = TextPayload(message='Checking patients\' demographics...')
+        finished_event = ToolEvent('tool_finished', 'study_population_planner_agent', 'text', payload)
+        log_tool_state(finished_event)
         return {"data": data}
