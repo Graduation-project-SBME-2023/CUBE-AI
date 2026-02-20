@@ -182,6 +182,24 @@ class SegmentationModule:
         eligible_volumes = await self._exclude_existing_masks(
             datasetlist, target_labels
         )
+        payload = TextPayload(
+            message=f'Found existing masks for {len(datasetlist) - len(eligible_volumes)} volumes'
+        )
+        plan_log_event = ToolEvent(
+            event_type='tool_started',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload
+        )
+        await receive_tool_event(plan_log_event)
+        plan_log_event = ToolEvent(
+            event_type='tool_finished',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload
+        )
+        await receive_tool_event(plan_log_event)
+
 
         logger.info(
             f"Eligible volumes for segmentation: {len(eligible_volumes)}"
@@ -194,9 +212,33 @@ class SegmentationModule:
 
         elif eligible_volumes:
             await self._run_interactive(target_labels)
+
+        payload = TextPayload(message=f'Segmentation...Done')
+        segmentation_tool_event = ToolEvent(
+            event_type='tool_finished',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload
+        )
+        await receive_tool_event(segmentation_tool_event)
             
         # finally download the volumes with its label masks 
         # selected_auto_model_for_volume= "segmentation_spleen" # hard test
+        payload = TextPayload(message='Creating dataset...')
+        environment_setup_event = ToolEvent(
+            event_type='tool_started',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload
+        )
+        await receive_tool_event(environment_setup_event)
+        environment_setup_event = ToolEvent(
+            event_type='tool_progress',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload
+        )
+        await receive_tool_event(environment_setup_event)
         await asyncio.sleep(120)  
         await self.download_and_pair_volumes(
                 datasetlist, 
@@ -295,6 +337,13 @@ class SegmentationModule:
             content=payload
         )
         await receive_tool_event(tool_started)
+        tool_progress = ToolEvent(
+            event_type='tool_progress',
+            source='segmentation_agent',
+            content_type='progress',
+            content=payload
+        )
+        await receive_tool_event(tool_progress)
 
         logger.info(f"Starting automatic segmentation on {len(volumes)} volumes using model '{selected_auto_model}'")
         # try:
