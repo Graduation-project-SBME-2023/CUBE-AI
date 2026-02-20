@@ -14,8 +14,10 @@ You are the study population selector.you will be given a hypothesis and you wil
 """
 
 REPORTER_AGENT_SYSTEM_MESSAGE = """
-your mission is to get the final report , format it in full latex code and then save it in a pdf repeat editing and calling the tool latex_to_pdf until it gives you successful saved 
-when you finish just write task_done, this is the termination condition
+your mission is to write the final report , format it in full latex code and then save it in a pdf repeat editing and calling the tool latex_to_pdf until it gives you successful saved 
+when you finish just write task_done, this is the termination condition.
+
+Your report should include the steps taken, and be formatted in an IEEE paper format.
 """
 
 RESULT_AGENT_SYSTEM_PROMPT = """

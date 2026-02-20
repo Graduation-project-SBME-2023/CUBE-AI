@@ -52,6 +52,7 @@ class ClinicalPlanner:
         return await self.input_provider()
 
     def _initialize_logging(self):
+        os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
         file_handler = logging.FileHandler(self.log_path)
         file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(message)s'))
         std_handler = logging.StreamHandler(sys.stdout)
@@ -73,6 +74,7 @@ class ClinicalPlanner:
         return text.strip()
 
     async def _save_state(self):
+        os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
         try:
             async with aiofiles.open(self.state_path, 'w') as f:
                 await f.write(self.state.model_dump_json(indent=2))
@@ -198,7 +200,7 @@ class ClinicalPlanner:
                     break
 
                 # Feed feedback back to the agent
-                refinement_prompt = f"User Feedback: {user_feedback}. Update the JSON 'hypothesis' and 'steps' accordingly."
+                refinement_prompt = f"User Feedback: {user_feedback}. Update the JSON 'hypothesis' and 'steps' accordingly, or answer their query on the chosen aspects of each step. Do not update or resend the json if you are just answering the query."
 
                 # Pass previous history implicitly if agent is stateful,
                 # or here we just rely on the agent's internal memory if using AutoGen agents directly.

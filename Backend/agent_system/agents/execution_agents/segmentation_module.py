@@ -36,6 +36,8 @@ from typing import Annotated
 from pydantic import Field
 import os
 import asyncio
+from agent_system.models.tool_logging import ProgressPayload, TextPayload, ToolEvent
+from agent_system.tool_logging import receive_tool_event
 
 # load_dotenv()
 # log_file_path = Path(__file__).parent.parent/"memory"/"workspace"/ "segmentation_module.log"
@@ -83,7 +85,7 @@ class SegmentationModule:
             api_key=os.environ.get("APIKEY")
         )
         current_file = Path(__file__).resolve()
-        backend_dir = current_file.parent.parent.parent  
+        backend_dir = current_file.parent.parent.parent.parent
         server_path = backend_dir / "mcp" / "server.py"   
         logger.info(f"Starting MCP server at: {server_path}")     
         math_server = StdioServerParams(
@@ -180,6 +182,24 @@ class SegmentationModule:
         eligible_volumes = await self._exclude_existing_masks(
             datasetlist, target_labels
         )
+        payload = TextPayload(
+            message=f'Found existing masks for {len(datasetlist) - len(eligible_volumes)} volumes'
+        )
+        plan_log_event = ToolEvent(
+            event_type='tool_started',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload
+        )
+        await receive_tool_event(plan_log_event)
+        plan_log_event = ToolEvent(
+            event_type='tool_finished',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload
+        )
+        await receive_tool_event(plan_log_event)
+
 
         logger.info(
             f"Eligible volumes for segmentation: {len(eligible_volumes)}"
@@ -192,9 +212,33 @@ class SegmentationModule:
 
         elif eligible_volumes:
             await self._run_interactive(target_labels)
+
+        payload = TextPayload(message=f'Segmentation...Done')
+        segmentation_tool_event = ToolEvent(
+            event_type='tool_finished',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload
+        )
+        await receive_tool_event(segmentation_tool_event)
             
         # finally download the volumes with its label masks 
         # selected_auto_model_for_volume= "segmentation_spleen" # hard test
+        payload = TextPayload(message='Creating dataset...')
+        environment_setup_event = ToolEvent(
+            event_type='tool_started',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload
+        )
+        await receive_tool_event(environment_setup_event)
+        environment_setup_event = ToolEvent(
+            event_type='tool_progress',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload
+        )
+        await receive_tool_event(environment_setup_event)
         await asyncio.sleep(120)  
         await self.download_and_pair_volumes(
                 datasetlist, 
@@ -285,6 +329,23 @@ class SegmentationModule:
     async def _run_automatic(
         self, volumes: List[str], labels: List[str], selected_auto_model: str, workspace_folder: str
     ):
+
+        payload = TextPayload(message=f'Starting Automatic Segmentation on {len(volumes)}...')
+        tool_started = ToolEvent(
+            event_type='tool_started',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload
+        )
+        await receive_tool_event(tool_started)
+        tool_progress = ToolEvent(
+            event_type='tool_progress',
+            source='segmentation_agent',
+            content_type='progress',
+            content=payload
+        )
+        await receive_tool_event(tool_progress)
+
         logger.info(f"Starting automatic segmentation on {len(volumes)} volumes using model '{selected_auto_model}'")
         # try:
         #         result = await self.run_batch_segmentation(
@@ -293,6 +354,18 @@ class SegmentationModule:
         #             label_info=labels
         # )
         for idx, volume_uid in enumerate(volumes, start=1):
+            payload = ProgressPayload(
+                current=idx,
+                total=len(volumes),
+                label='Segmenting Volumes'
+            )
+            tool_progress = ToolEvent(
+                event_type='tool_progress',
+                source='segmentation_agent',
+                content_type='progress',
+                content=payload
+            )
+            await receive_tool_event(tool_progress)
             logger.info(f"[{idx}/{len(volumes)}] Running segmentation for volume: {volume_uid}")
             try:
                 result = await self.run_segmentation(
@@ -992,7 +1065,7 @@ class SegmentationModule:
         TASK_NAME = "final"
 
         current_file = Path(__file__)
-        current_dir = current_file.parent.parent.parent
+        current_dir = current_file.parent.parent.parent.parent
 
         DOWNLOAD_DIR_IMG = os.path.join(current_dir, "apps", "radiology", "General_Data")
         DOWNLOAD_DIR_LABEL = os.path.join(current_dir, "apps", "radiology", "Labels")
