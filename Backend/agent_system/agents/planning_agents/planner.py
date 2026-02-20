@@ -199,7 +199,7 @@ class ClinicalPlanner:
                     break
 
                 # Feed feedback back to the agent
-                refinement_prompt = f"User Feedback: {user_feedback}. Update the JSON 'hypothesis' and 'steps' accordingly, or answer their query on the chosen aspects of each step."
+                refinement_prompt = f"User Feedback: {user_feedback}. Update the JSON 'hypothesis' and 'steps' accordingly, or answer their query on the chosen aspects of each step. Do not update or resend the json if you are just answering the query."
 
                 # Pass previous history implicitly if agent is stateful,
                 # or here we just rely on the agent's internal memory if using AutoGen agents directly.
