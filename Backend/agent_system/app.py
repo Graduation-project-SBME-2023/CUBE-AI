@@ -24,6 +24,10 @@ from agents.planning_agents.planner import ClinicalPlanner
 from task_manager.session import Session
 from task_manager.task_manager import TaskManager
 
+from models.tool_logging import ToolEvent
+from tool_logging import receive_tool_event
+
+
 # ----------------------------------------------------------------------
 # FastAPI app definition
 # ----------------------------------------------------------------------
@@ -230,13 +234,9 @@ async def run_pipeline(session: Session):
 
 
 @app.post("/events")
-async def receive_tool_event(event: ToolEvent):
+async def receive_event(event: ToolEvent):
     logging.getLogger().info(f"event at /events: {event}")
-    await send_ws_message(
-        msg_type="tool_update",
-        payload=event.model_dump()
-        # payload=event
-    )
+    await receive_tool_event(event)
 
 
 # ----------------------------------------------------------------------
