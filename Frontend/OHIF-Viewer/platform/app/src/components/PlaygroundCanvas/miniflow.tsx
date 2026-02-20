@@ -1,5 +1,15 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { MiniFlowProps } from './types';
+
+// These must match the visual handle positions in each node component:
+// - AgentNode pins its dots to `top: 25` (half of the 50px header)
+// - StartNode pins its dot to `top: START_HANDLE_Y` (exported from StartNode)
+const HANDLE_Y_BY_TYPE: Record<string, number> = {
+  start: 40,  // START_HANDLE_Y — vertical center of the 80px start card
+  agent: 25,  // AGENT_HEADER_MID — vertical center of the 50px header row
+};
+
+const DEFAULT_HANDLE_Y = 25;
 
 const MiniFlow: React.FC<MiniFlowProps> = ({
   nodes,
@@ -15,9 +25,74 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+
+  // Map of nodeId → measured { w, h }
+  const [nodeDims, setNodeDims] = useState<Record<string, { w: number; h: number }>>({});
+  const nodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Handle canvas panning with mouse drag
+  // Measure node dimensions after every render
+  useEffect(() => {
+    const measured: Record<string, { w: number; h: number }> = {};
+    let changed = false;
+
+    for (const [id, el] of Object.entries(nodeRefs.current)) {
+      if (!el) continue;
+      const { offsetWidth: w, offsetHeight: h } = el;
+      if (nodeDims[id]?.w !== w || nodeDims[id]?.h !== h) {
+        changed = true;
+      }
+      measured[id] = { w, h };
+    }
+
+    if (changed) {
+      setNodeDims(measured);
+    }
+  });
+
+  // Prevent default touch/wheel behaviors
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const preventDefaultTouch = (e: TouchEvent) => {
+      if (e.touches.length > 1) e.preventDefault();
+    };
+    const preventDefaultWheel = (e: WheelEvent) => {
+      e.preventDefault();
+    };
+
+    container.addEventListener('touchstart', preventDefaultTouch, { passive: false });
+    container.addEventListener('touchmove', preventDefaultTouch, { passive: false });
+    container.addEventListener('wheel', preventDefaultWheel, { passive: false });
+
+    return () => {
+      container.removeEventListener('touchstart', preventDefaultTouch);
+      container.removeEventListener('touchmove', preventDefaultTouch);
+      container.removeEventListener('wheel', preventDefaultWheel);
+    };
+  }, []);
+
+  // Returns the canvas-space XY where an edge should attach to a node side.
+  // X uses the measured DOM width; Y uses the per-type handle constant.
+  const getEdgeAnchors = useCallback(
+    (nodeId: string, side: 'right' | 'left') => {
+      const node = nodes.find(n => n.id === nodeId);
+      if (!node) return { x: 0, y: 0 };
+
+      const dim = nodeDims[nodeId];
+      const w = dim?.w ?? 220;
+      const handleY = HANDLE_Y_BY_TYPE[node.type] ?? DEFAULT_HANDLE_Y;
+
+      return {
+        x: node.position.x + (side === 'right' ? w : 0),
+        y: node.position.y + handleY,
+      };
+    },
+    [nodes, nodeDims]
+  );
+
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (e.button === 0 && !(e.target as HTMLElement).closest('.flow-node')) {
       setIsDraggingCanvas(true);
@@ -54,37 +129,27 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
     setDraggingNodeId(null);
   };
 
-  // Handle zoom with mouse wheel
   const handleWheel = useCallback(
     (e: React.WheelEvent) => {
-      e.preventDefault();
-
-      // If holding Ctrl/Cmd, zoom. Otherwise, pan.
       if (e.ctrlKey || e.metaKey) {
-        // Zoom
         const container = containerRef.current;
-        if (!container) {
-          return;
-        }
+        if (!container) return;
 
         const rect = container.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
         const mouseY = e.clientY - rect.top;
 
-        // Calculate zoom factor
         const zoomIntensity = 0.002;
         const delta = -e.deltaY;
         const newScale = Math.min(Math.max(0.1, scale * (1 + delta * zoomIntensity)), 3);
 
-        // Adjust offset to zoom towards mouse position
         const scaleRatio = newScale / scale;
-        const newOffsetX = mouseX - (mouseX - offset.x) * scaleRatio;
-        const newOffsetY = mouseY - (mouseY - offset.y) * scaleRatio;
-
         setScale(newScale);
-        setOffset({ x: newOffsetX, y: newOffsetY });
+        setOffset({
+          x: mouseX - (mouseX - offset.x) * scaleRatio,
+          y: mouseY - (mouseY - offset.y) * scaleRatio,
+        });
       } else {
-        // Pan with scroll wheel
         setOffset(prev => ({
           x: prev.x - e.deltaX,
           y: prev.y - e.deltaY,
@@ -94,22 +159,19 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
     [scale, offset]
   );
 
-  const getNodeDimensions = (type: string) => {
-    if (type === 'start') {
-      return { w: 300, h: 80 };
-    }
-    return { w: 280, h: 60 };
-  };
-
   return (
     <div
       ref={containerRef}
       className={`relative h-full w-full select-none overflow-hidden bg-[#000000] ${isDraggingCanvas ? 'cursor-grabbing' : 'cursor-grab'}`}
+      style={{ touchAction: 'none' }}
       onMouseDown={handleCanvasMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
       onWheel={handleWheel}
+      onTouchStart={e => {
+        if (e.touches.length > 1) e.preventDefault();
+      }}
     >
       {/* Grid background */}
       <div
@@ -133,31 +195,16 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
         {/* Edges */}
         <svg className="pointer-events-none absolute top-0 left-0 h-[5000px] w-[5000px] overflow-visible">
           {edges.map(edge => {
-            const source = nodes.find(n => n.id === edge.source);
-            const target = nodes.find(n => n.id === edge.target);
-            if (!source || !target) {
-              return null;
-            }
-
-            const srcDim = getNodeDimensions(source.type);
-            const tgtDim = getNodeDimensions(target.type);
-
-            // Source Handle: Bottom Center
-            const sx = source.position.x + srcDim.w / 2;
-            const sy = source.position.y + srcDim.h;
-
-            // Target Handle: Top Center
-            const tx = target.position.x + tgtDim.w / 2;
-            const ty = target.position.y;
-
+            const src = getEdgeAnchors(edge.source, 'right');
+            const tgt = getEdgeAnchors(edge.target, 'left');
             const EdgeComponent = edgeTypes[edge.type] || edgeTypes.default;
             return (
               <EdgeComponent
                 key={edge.id}
-                sourceX={sx}
-                sourceY={sy}
-                targetX={tx}
-                targetY={ty}
+                sourceX={src.x}
+                sourceY={src.y}
+                targetX={tgt.x}
+                targetY={tgt.y}
                 data={edge.data}
               />
             );
@@ -170,6 +217,7 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
           return (
             <div
               key={node.id}
+              ref={el => { nodeRefs.current[node.id] = el; }}
               className="flow-node absolute cursor-move"
               style={{ transform: `translate(${node.position.x}px, ${node.position.y}px)` }}
               onMouseDown={e => {
@@ -177,10 +225,7 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
                 setDraggingNodeId(node.id);
               }}
             >
-              <NodeComponent
-                data={node.data}
-                id={node.id}
-              />
+              <NodeComponent data={node.data} id={node.id} />
             </div>
           );
         })}
