@@ -30,18 +30,26 @@ class TaskManager:
             await planner(session, starting_message)
             session.state = SessionState.READY
         except asyncio.CancelledError:
-            session.state = SessionState.CANCELLED
+            if not session.interrupted:
+                session.state = SessionState.CANCELLED
         except Exception as e:
             session.last_error = str(e)
             session.state = SessionState.FAILED
         finally:
+            session.interrupted = False
             session.planning_task = None
 
-    def start_execution(self, session_id: str, executor):
+    async def start_execution(self, session_id: str, executor):
         session = self.get_or_create(session_id)
 
-        if session.state != SessionState.READY:
-            raise RuntimeError("Session is not ready for execution")
+        # If planning is active, forcibly cancel it first
+        if session.planning_task and not session.planning_task.done():
+            session.interrupted = True
+            session.planning_task.cancel()
+            try:
+                await session.planning_task
+            except asyncio.CancelledError:
+                pass
 
         if session.execution_task and not session.execution_task.done():
             raise RuntimeError("Execution already running")
