@@ -71,11 +71,13 @@ const edgeTypes = { custom: CustomEdge };
 
 interface PlaygroundCanvasProps {
   initialHypothesis?: string;
+  session_id?: string;
   onNodeSelect?: (node: FlowNode | null) => void;
 }
 
 export default function PlaygroundCanvas({
   initialHypothesis,
+  session_id,
   onNodeSelect,
 }: PlaygroundCanvasProps) {
   const [mode, setMode] = useState<'planning' | 'executing' | 'results'>('planning');
@@ -102,6 +104,7 @@ export default function PlaygroundCanvas({
 
   useEffect(() => {
     websocketService.connect();
+    console.log(session_id);
 
     const handleWSMessage = (data: any) => {
       const { type, payload } = data;
@@ -130,7 +133,7 @@ export default function PlaygroundCanvas({
           const response = await fetch('http://localhost:8150/plan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: initialHypothesis }),
+            body: JSON.stringify({ message: initialHypothesis, session_id: session_id }),
           });
           if (!response.ok) console.error('Failed to initiate planning session');
         } catch (error) {
@@ -326,7 +329,6 @@ export default function PlaygroundCanvas({
   }, []);
 
   const startExecution = async () => {
-    const hypothesis = nodes.find(node => node.type === 'start')?.data.description ?? '';
     setMode('executing');
     setIsPaused(false);
     setNodes(prev =>
@@ -336,7 +338,7 @@ export default function PlaygroundCanvas({
     await fetch('http://localhost:8150/run/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hypothesis }),
+      body: JSON.stringify({ session_id }),
     });
   };
 

@@ -33,11 +33,11 @@ const ChatSidebar = ({
       fetchChatSessions();
     }
     if (sendInitialMessage) {
-      if (websocketService.isConnected()) {
-        websocketService.sendMessage({ type: 'user', payload: initialUserMessage });
-      } else {
-        alert('WebSocket not connected. Message not sent to backend in real time.');
-      }
+      // if (websocketService.isConnected()) {
+      //   websocketService.sendMessage({ type: 'user', payload: initialUserMessage });
+      // } else {
+      //   alert('WebSocket not connected. Message not sent to backend in real time.');
+      // }
       fetch(`http://localhost:8000/chat_messages/${externalSessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
