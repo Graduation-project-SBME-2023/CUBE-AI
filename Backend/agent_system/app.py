@@ -155,7 +155,7 @@ async def run_planner(session: Session, message: str):
 async def start_execution(request: RunRequest):
     # chat_session_id needs to be passed in the request as well
     # task needs to be stored somehow and controlled,
-    task_manager.start_execution(request.session_id, run_pipeline)
+    await task_manager.start_execution(request.session_id, run_pipeline)
     # asyncio.create_task(run_pipeline(request))
     return {"task_id": request.session_id, "status": "started"}
 
@@ -182,10 +182,14 @@ async def run_pipeline(session: Session):
         workspace_folder=workspace_folder
     )
 
+    print(graph_builder.get_participants())
+
     graph_flow = GraphFlow(
         participants=graph_builder.get_participants(),
         graph=graph_builder.build(),
     )
+
+    print(graph_flow)
 
     logging.getLogger(
         "Execution Pipeline - runner task"
