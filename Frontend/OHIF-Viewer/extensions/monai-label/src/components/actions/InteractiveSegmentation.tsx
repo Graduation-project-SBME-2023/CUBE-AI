@@ -52,7 +52,7 @@ export default class InteractiveSegmentation extends BaseTab {
       };
     }
   };
-  getLastAnnotations = (currentObject, worldToIndex) => {
+  getLastAnnotations = (worldToIndex) => {
     const manager = cornerstoneTools.annotation.state.getAnnotationManager();
     const saved = manager.saveAnnotations();
     console.log("iam inside get last annotations", saved);
@@ -74,7 +74,11 @@ export default class InteractiveSegmentation extends BaseTab {
       const lastKey = posKeys[posKeys.length - 1];
       const pt = positive_annotations[lastKey].data.handles.points[0];
       console.log("the last positive point", pt);
-      result.positive_points.push(worldToIndex(pt).map(Math.round));
+    result.positive_points.push([
+      ...this.correct_xy_format(worldToIndex(pt)).map((value, i) =>
+        i === 2 ? Math.round(value) : value
+      ),
+      2]);
     }
 
     // last negative
@@ -82,7 +86,11 @@ export default class InteractiveSegmentation extends BaseTab {
     if (negKeys.length > 0) {
       const lastKey = negKeys[negKeys.length - 1];
       const pt = negative_annotations[lastKey].data.handles.points[0];
-      result.negative_points.push(worldToIndex(pt).map(Math.round));
+      result.negative_points.push([
+      ...this.correct_xy_format(worldToIndex(pt)).map((value, i) =>
+        i === 2 ? Math.round(value) : value
+      ),
+      2]);
     }
 
     // last box
@@ -92,8 +100,8 @@ export default class InteractiveSegmentation extends BaseTab {
       const pt1 = box_annotations[lastKey].data.handles.points[0];
       const pt2 = box_annotations[lastKey].data.handles.points[3];
       result.boxes.push([
-        worldToIndex(pt1).map(Math.round),
-        worldToIndex(pt2).map(Math.round),
+        this.correct_xy_format(worldToIndex(pt1)).map((value, i) => i === 2 ? Math.round(value) : value),
+        this.correct_xy_format(worldToIndex(pt2)).map((value, i) => i === 2 ? Math.round(value) : value),
       ]);
     }
 
@@ -109,6 +117,7 @@ export default class InteractiveSegmentation extends BaseTab {
   };
 
   handleUpdatePrompts = (mode)=>{
+    //todo: instead of timeout , use event listner as the cornerstone creation take time not reliable ! 
     setTimeout(() => {
     const { cornerstoneViewportService } = this.props.servicesManager.services;
     const { viewport, displaySet } = this.props.getActiveViewportInfo();
@@ -116,8 +125,8 @@ export default class InteractiveSegmentation extends BaseTab {
     const currentViewPort = viewportInfo.viewportId
     const { worldToIndex } = viewportInfo.viewportData.data[0].volume.imageData;
     const { currentModel, currentObject, clickPoints } = this.state;
-
-    const result = this.getLastAnnotations(currentObject, worldToIndex);
+    console.log("the current object is ", currentObject);
+    const result = this.getLastAnnotations(worldToIndex);
     console.log("the results getted from the function is ", result);
     this.initPromptObject(currentObject);
 
@@ -201,7 +210,7 @@ export default class InteractiveSegmentation extends BaseTab {
     }
     console.log("the prompts is ,", this.prompts);
     this.onsam2d(this.sam2dstate);
-  }, 200); // 100ms delay should be enough
+  }, 500); 
  
   }
 
@@ -500,7 +509,10 @@ export default class InteractiveSegmentation extends BaseTab {
     const config = this.props.onOptionsConfig();
     const params =
       config && config.infer && config.infer[model] ? config.infer[model] : {};
-  
+    params['restore_label_idx'] = false;
+    params['result_compress']= false;
+    params['result_dtype'] = 'uint16';
+    params['result_extension'] = '.nrrd';
     params['sam2config'] = this.prompts;
     params['SliceIndex'] = this.currentSlice;
     if (state ==='2d'){
@@ -514,35 +526,35 @@ export default class InteractiveSegmentation extends BaseTab {
     console.log("the parameters are ",params);
 
     
-    // const response = await this.props
-    //   .client()
-    //   .infer('sam', displaySet.SeriesInstanceUID, params);
-    // const labels = info.models['sam'].labels;
-    // console.log(response);
+    const response = await this.props
+      .client()
+      .infer('sam', displaySet.SeriesInstanceUID, params);
+    const labels = info.models['sam'].labels;
+    console.log(response);
 
-    // if (!nid) {
-    //   window.snackbar.hideAll();
-    // } else {
-    //   this.notification.hide(nid);
-    // }
+    if (!nid) {
+      window.snackbar.hideAll();
+    } else {
+      this.notification.hide(nid);
+    }
 
-    // if (response.status !== 200) {
-    //   this.notification.show({
-    //     title: 'MONAI Label',
-    //     message: 'Failed to Run Segmentation',
-    //     type: 'error',
-    //     duration: 5000,
-    //   });
-    // } else {
-    //   this.notification.show({
-    //     title: 'MONAI Label',
-    //     message: 'Run SAM Segmentation Successfully',
-    //     type: 'success',
-    //     duration: 10000,
-    //   });
-    // }
+    if (response.status !== 200) {
+      this.notification.show({
+        title: 'MONAI Label',
+        message: 'Failed to Run Segmentation',
+        type: 'error',
+        duration: 5000,
+      });
+    } else {
+      this.notification.show({
+        title: 'MONAI Label',
+        message: 'Run SAM Segmentation Successfully',
+        type: 'success',
+        duration: 10000,
+      });
+    }
 
-    // this.props.updateView(response, labels, model);
+    this.props.updateView(response, labels, 'sam');
   }
 
   correct_xy_format = (point) => {
@@ -607,13 +619,15 @@ export default class InteractiveSegmentation extends BaseTab {
       for (const neg_annotation in negative_annotations) {
         console.log(neg_annotation);
         const pt = negative_annotations[neg_annotation].data.handles.points[0];
-        negative_points[object_id].push(this.correct_xy_format(worldToIndex(pt).map(Math.round)));
+        negative_points[object_id].push(this.correct_xy_format(worldToIndex(pt)));
+        // negative_points[object_id].push(this.correct_xy_format(worldToIndex(pt).map(Math.round)));
       }
 
       positive_points[object_id] = [];
       for (const pos_annotation in positive_annotations) {
         const pt = positive_annotations[pos_annotation].data.handles.points[0];
-        positive_points[object_id].push(this.correct_xy_format(worldToIndex(pt).map(Math.round)));
+          positive_points[object_id].push(this.correct_xy_format(worldToIndex(pt)));
+        // positive_points[object_id].push(this.correct_xy_format(worldToIndex(pt).map(Math.round)));
       }
 
       boxes[object_id] = [];
@@ -643,7 +657,7 @@ export default class InteractiveSegmentation extends BaseTab {
         points: [
           ...(positive_points[currentObject] || []),
           ...(negative_points[currentObject] || []),
-        ],
+        ].map(([x, y, z]) => [x, y, Math.round(z)]), 
         labels: [
           ...(positive_points[currentObject]
             ? new Array(positive_points[currentObject].length).fill(1)
@@ -660,14 +674,14 @@ export default class InteractiveSegmentation extends BaseTab {
       params['State'] = "3d";
 
     } else if (model === 'nninteractive') {
-      // todo : add the params needed for nninteractive
-
+      const allPoints = [
+        ...(positive_points[currentObject] || []),
+        ...(negative_points[currentObject] || []),
+      ];
+      const swappedPoints = allPoints.map(([x, y, z]) => new Float32Array([y, x, z]));
       params['viewPort'] = viewportInfo.viewportId;
       params['Points'] = {
-        points: [
-          ...(positive_points[currentObject] || []),
-          ...(negative_points[currentObject] || []),
-        ],
+        points:swappedPoints ,
         labels: [
           ...(positive_points[currentObject]
             ? new Array(positive_points[currentObject].length).fill(1)
@@ -676,6 +690,7 @@ export default class InteractiveSegmentation extends BaseTab {
             ? new Array(negative_points[currentObject].length).fill(0)
             : []),
         ],
+        viewport: viewportInfo.viewportId,
       };
       params['resetInteractions'] = this.resetnnInteractiveAll;
     } else {
@@ -693,7 +708,7 @@ export default class InteractiveSegmentation extends BaseTab {
       .client()
       .infer(model, displaySet.SeriesInstanceUID, params);
     const labels = info.models[model].labels;
-    console.log(response);
+    // console.log(response);
     console.log("the parameters for model interactive run", params);
 
 
@@ -758,6 +773,7 @@ export default class InteractiveSegmentation extends BaseTab {
 
   onChangeObject = (id) => {
     const { currentObject } = this.state;
+    console.log("the id is ", id, "the current object is ", currentObject);
     if (id === currentObject) {
       console.log('Both new and prev are same');
       return;
@@ -771,7 +787,8 @@ export default class InteractiveSegmentation extends BaseTab {
     //   console.log('Saving Prev annotations...', this.state.clickPoints[prev]);
     //   this.clearPoints();
     // }
-    this.setState({ currentObject: id, clickPoints: clickPoints });
+    console.log("the id selected is ", id);
+    this.setState({ currentObject: id});
     // this.initPoints();
   };
 
@@ -795,7 +812,7 @@ export default class InteractiveSegmentation extends BaseTab {
 
     this.state.currentLabel = name;
     this.setState({ currentLabel: name, clickPoints: clickPoints });
-    this.initPoints();
+    // this.initPoints();
   };
 
   getModels() {
