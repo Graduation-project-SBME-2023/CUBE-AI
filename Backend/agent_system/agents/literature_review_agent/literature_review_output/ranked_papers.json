@@ -1,0 +1,202 @@
+[
+  {
+    "rank": 1,
+    "title": "Machine Learning Radiomics Signature for Differentiating Lymphoma versus Benign Splenomegaly on CT.",
+    "authors": "Cheng Jih-An, Lin Yu-Chun, Lin Yenpo, Wu Ren-Chin, Lu Hsin-Ying et al.",
+    "year": "2023",
+    "journal": "Diagnostics (Basel, Switzerland)",
+    "url": "https://pubmed.ncbi.nlm.nih.gov/38132216/",
+    "relevance_score": 23.96,
+    "similar_study": true,
+    "highly_relevant": true,
+    "dimensions": ["Clinical Validation & Diagnostic Performance Benchmarking", "ML/DL Classifier Architecture & Feature Selection", "Radiomic Feature Engineering & IBSI Standardisation"],
+    "key_extraction": "Achieved 97% diagnostic accuracy using seven feature signature including first-order statistics, shape-based and texture features",
+    "score_breakdown": {
+      "population": 5.0,
+      "intervention": 7.5,
+      "comparison": 2.05,
+      "outcome": 5.29,
+      "hypothesis": 4.12
+    }
+  },
+  {
+    "rank": 2,
+    "title": "Radiomics Features of the Spleen as Surrogates for CT-Based Lymphoma Diagnosis and Subtype Differentiation.",
+    "authors": "Enke Johanna S, Moltz Jan H, D'Anastasi Melvin, Kunz Wolfgang G, Schmidt Christian et al.",
+    "year": "2022",
+    "journal": "Cancers",
+    "url": "https://pubmed.ncbi.nlm.nih.gov/35158980/",
+    "relevance_score": 21.68,
+    "similar_study": true,
+    "highly_relevant": true,
+    "dimensions": ["Radiomic Feature Engineering & IBSI Standardisation", "ML/DL Classifier Architecture & Feature Selection", "Clinical Validation & Diagnostic Performance Benchmarking", "Dataset Characteristics & Multi-centre Generalisation"],
+    "key_extraction": "Comprehensive analysis of 326 patients with 1317 radiomics features using Random Forest for lymphoma subtype differentiation",
+    "score_breakdown": {
+      "population": 5.83,
+      "intervention": 4.38,
+      "comparison": 2.05,
+      "outcome": 4.71,
+      "hypothesis": 4.71
+    }
+  },
+  {
+    "rank": 3,
+    "title": "Two-Stage Deep Learning Model for Automated Segmentation and Classification of Splenomegaly.",
+    "authors": "Meddeb Aymen, Kossen Tabea, Bressem Keno K, Molinski Noah, Hamm Bernd et al.",
+    "year": "2022",
+    "journal": "Cancers",
+    "url": "https://pubmed.ncbi.nlm.nih.gov/36428569/",
+    "relevance_score": 12.29,
+    "similar_study": true,
+    "highly_relevant": false,
+    "dimensions": ["Splenic Segmentation Methods & Reproducibility", "ML/DL Classifier Architecture & Feature Selection"],
+    "key_extraction": "Demonstrated automated spleen segmentation and classification of splenomegaly etiology (cirrhotic portal hypertension vs lymphoma)",
+    "score_breakdown": {
+      "population": 5.0,
+      "intervention": 2.5,
+      "comparison": 0.68,
+      "outcome": 1.76,
+      "hypothesis": 2.35
+    }
+  },
+  {
+    "rank": 4,
+    "title": "Systemic immune-related spleen radiomics predict progression-free survival in patients with locally advanced cervical cancer underwent definitive chemoradiotherapy.",
+    "authors": "Li Yi, Guo Longxiang, Xie Peng, Liu Yuhui, Li Yuanlin et al.",
+    "year": "2024",
+    "journal": "BMC medical imaging",
+    "url": "https://pubmed.ncbi.nlm.nih.gov/39548404/",
+    "relevance_score": 8.42,
+    "similar_study": false,
+    "highly_relevant": false,
+    "dimensions": ["Clinical Validation & Diagnostic Performance Benchmarking"],
+    "key_extraction": "Demonstrated spleen radiomics as prognostic biomarker in cervical cancer using LASSO-Cox regression",
+    "score_breakdown": {
+      "population": 3.21,
+      "intervention": 2.18,
+      "comparison": 1.05,
+      "outcome": 1.98,
+      "hypothesis": 0.0
+    }
+  },
+  {
+    "rank": 5,
+    "title": "The role of spleen radiomics model for predicting prognosis in esophageal squamous cell carcinoma patients receiving definitive radiotherapy.",
+    "authors": "Guo Longxiang, Liu Ao, Geng Xiaotao, Zhao Zongxing, Nie Yu et al.",
+    "year": "2024",
+    "journal": "Thoracic cancer",
+    "url": "https://pubmed.ncbi.nlm.nih.gov/38480505/",
+    "relevance_score": 7.89,
+    "similar_study": false,
+    "highly_relevant": false,
+    "dimensions": ["Clinical Validation & Diagnostic Performance Benchmarking"],
+    "key_extraction": "Spleen radiomics prognostic model for esophageal cancer patients using LASSO-Cox regression",
+    "score_breakdown": {
+      "population": 3.15,
+      "intervention": 2.01,
+      "comparison": 1.12,
+      "outcome": 1.61,
+      "hypothesis": 0.0
+    }
+  },
+  {
+    "rank": 6,
+    "title": "Validation and Optimization of Multi-Organ Segmentation on Clinical Imaging Archives.",
+    "authors": "Tang Olivia, Xu Yuchen, Tang Yucheng, Lee Ho Hin, Chen Yunqiang et al.",
+    "year": "2020",
+    "journal": "Proceedings of SPIE",
+    "url": "https://pubmed.ncbi.nlm.nih.gov/34040277/",
+    "relevance_score": 6.55,
+    "similar_study": false,
+    "highly_relevant": false,
+    "dimensions": ["Splenic Segmentation Methods & Reproducibility", "Dataset Characteristics & Multi-centre Generalisation"],
+    "key_extraction": "Multi-organ segmentation validation study including spleen, addressing reproducibility challenges",
+    "score_breakdown": {
+      "population": 2.18,
+      "intervention": 1.76,
+      "comparison": 0.84,
+      "outcome": 0.77,
+      "hypothesis": 1.0
+    }
+  },
+  {
+    "rank": 7,
+    "title": "Deep learning and radiomics for gastric cancer serosal invasion: automated segmentation and multi-machine learning from two centers.",
+    "authors": "Shang Hui, Feng Tao, Han Dong, Liang Fengying, Zhao Bin et al.",
+    "year": "2025",
+    "journal": "Journal of cancer research and clinical oncology",
+    "url": "https://pubmed.ncbi.nlm.nih.gov/39900688/",
+    "relevance_score": 5.32,
+    "similar_study": false,
+    "highly_relevant": false,
+    "dimensions": ["Splenic Segmentation Methods & Reproducibility", "ML/DL Classifier Architecture & Feature Selection"],
+    "key_extraction": "U-Mamba automated spleen segmentation applied to gastric cancer with radiomics feature extraction",
+    "score_breakdown": {
+      "population": 2.15,
+      "intervention": 1.42,
+      "comparison": 0.68,
+      "outcome": 0.91,
+      "hypothesis": 0.16
+    }
+  },
+  {
+    "rank": 8,
+    "title": "Assessment of Repeatability, Reproducibility, and Performances of T2 Mapping-Based Radiomics Features: A Comparative Study.",
+    "authors": "Crombé Amandine, Buy Xavier, Han Fei, Toupin Solenn, Kind Michèle",
+    "year": "2021",
+    "journal": "Journal of magnetic resonance imaging : JMRI",
+    "url": "https://pubmed.ncbi.nlm.nih.gov/33594768/",
+    "relevance_score": 4.89,
+    "similar_study": false,
+    "highly_relevant": false,
+    "dimensions": ["Radiomic Feature Engineering & IBSI Standardisation", "Splenic Segmentation Methods & Reproducibility"],
+    "key_extraction": "Radiomics feature reproducibility analysis including spleen tissue in healthy adults",
+    "score_breakdown": {
+      "population": 1.82,
+      "intervention": 1.56,
+      "comparison": 0.45,
+      "outcome": 0.68,
+      "hypothesis": 0.38
+    }
+  },
+  {
+    "rank": 9,
+    "title": "Deep Learning and Radiomics for Gastric Cancer Lymph Node Metastasis: Automated Segmentation and Multi-Machine Learning Study from Two Centers.",
+    "authors": "Shang Hui, Fang Yue, Zhao Yuyang, Mi Nan, Cao Zhendong et al.",
+    "year": "2026",
+    "journal": "Oncology",
+    "url": "https://pubmed.ncbi.nlm.nih.gov/39947156/",
+    "relevance_score": 4.62,
+    "similar_study": false,
+    "highly_relevant": false,
+    "dimensions": ["Splenic Segmentation Methods & Reproducibility", "ML/DL Classifier Architecture & Feature Selection"],
+    "key_extraction": "Automated spleen segmentation using U-Mamba for gastric cancer lymph node metastasis prediction",
+    "score_breakdown": {
+      "population": 1.78,
+      "intervention": 1.35,
+      "comparison": 0.52,
+      "outcome": 0.74,
+      "hypothesis": 0.23
+    }
+  },
+  {
+    "rank": 10,
+    "title": "Tumor Location Relative to the Spleen Is a Prognostic Factor in Lymphoma Patients: A Demonstration from the REMARC Trial.",
+    "authors": "Girum Kibrom B, Cottereau Anne-Ségolène, Vercellino Laetitia, Rebaud Louis, Clerc Jérôme et al.",
+    "year": "2024",
+    "journal": "Journal of nuclear medicine : official publication, Society of Nuclear Medicine",
+    "url": "https://pubmed.ncbi.nlm.nih.gov/38071535/",
+    "relevance_score": 3.84,
+    "similar_study": false,
+    "highly_relevant": false,
+    "dimensions": ["Clinical Validation & Diagnostic Performance Benchmarking"],
+    "key_extraction": "Demonstrated spleen location as prognostic factor in lymphoma patients using PET-CT data",
+    "score_breakdown": {
+      "population": 1.45,
+      "intervention": 0.89,
+      "comparison": 0.38,
+      "outcome": 0.56,
+      "hypothesis": 0.56
+    }
+  }
+]
