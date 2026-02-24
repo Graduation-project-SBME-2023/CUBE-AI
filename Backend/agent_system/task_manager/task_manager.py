@@ -1,5 +1,8 @@
 import asyncio
 from .session import Session, SessionState
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class TaskManager:
@@ -34,6 +37,7 @@ class TaskManager:
                 session.state = SessionState.CANCELLED
         except Exception as e:
             session.last_error = str(e)
+            logger.info(f'Planning {session.session_id} failed, error: {e}')
             session.state = SessionState.FAILED
         finally:
             session.interrupted = False
@@ -70,6 +74,7 @@ class TaskManager:
             session.state = SessionState.CANCELLED
         except Exception as e:
             session.last_error = str(e)
+            logger.info(f'Execution {session.session_id} failed, error: {e}')
             session.state = SessionState.FAILED
         finally:
             session.execution_task = None

@@ -1,6 +1,9 @@
 import asyncio
 import sys
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "..", "..", ".."))
@@ -19,7 +22,7 @@ from .segmentation_module import SegmentationModule
 from autogen_core.tools import FunctionTool
 
 
-async def test_module(workspace_folder=None):
+async def test_module(workspace_folder: str | None = None):
     """Test function for the SegmentationModule with return value
         :arg workspace_folder: The workspace folder to save outputs to.
     """
@@ -73,12 +76,14 @@ class SegmentationAgent(AssistantAgent):
         # desired_tools = ['get_modeling_results']
         # final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         # final_tools = mcp_tools
+        logger.info(f"Creating segmentation agent")
         tools = [
             FunctionTool(
                 test_module,
                 description="the tool that starts the segmentation, it has the capability to know what to segment and install by itself"
             )
         ]
+        logger.info(f"Tools initialized: {tools}")
         name = "segmentation_agent"
         description = "agent to run the segmentation task, has the capability to know which volumes to segment by itself"
         system_message = f"to start the task of the segmentation, all you need to do just run the tool you have, do not ask any questions, the workspace folder is {workspace_folder}"
