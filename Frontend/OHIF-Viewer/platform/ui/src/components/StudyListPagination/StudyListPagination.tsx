@@ -13,9 +13,9 @@ import AutoSegmentation from '../../../../../extensions/monai-label/src/componen
 import InteractiveSegmentation from '../../../../../extensions/monai-label/src/components/actions/InteractiveSegmentation';
 
 const StudyListPagination = ({ onChangePage, currentPage, perPage, onChangePerPage }) => {
-  AutoSegmentation.clearSam2UIContrainers();
-  AutoSegmentation.clearVistaPoints();
-  AutoSegmentation.clearNnInteractivePoints();
+  // AutoSegmentation.clearSam2UIContrainers();
+  // AutoSegmentation.clearVistaPoints();
+  // AutoSegmentation.clearNnInteractivePoints();
   // InteractiveSegmentation.clearINteractiveComponents();
 
   const { t } = useTranslation('StudyList');
