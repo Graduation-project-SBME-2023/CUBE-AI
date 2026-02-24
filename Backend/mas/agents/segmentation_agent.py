@@ -614,11 +614,12 @@ class SegmentationModule:
     def ensure_required_patient_tags(self,datasets):
         new_for_uid = generate_uid()
         for ds in datasets:
-            ds.FrameOfReferenceUID = new_for_uid # generate it to avoid conflicts
+            # ds.FrameOfReferenceUID = new_for_uid # generate it to avoid conflicts
             ds.setdefault("PatientName", "Anonymous")
             ds.setdefault("PatientID", "Unknown")
             ds.setdefault("PatientBirthDate", "")
             ds.setdefault("PatientSex", "")
+            ds.setdefault("FrameOfReferenceUID", "")
             ds.setdefault("StudyInstanceUID", ds.StudyInstanceUID)
             ds.setdefault("StudyID", "")
             ds.setdefault("StudyDate", "")
@@ -836,43 +837,53 @@ class SegmentationModule:
         # =========== create segmentation description =================
         labelmap_np: np.ndarray = segmentation_object["scalarData"]
         labelmap_np = labelmap_np.astype(np.uint8)
-        labelmap_np = np.transpose(labelmap_np, (2, 0, 1)) # to be numslices, rows, cols
+        labelmap_np = np.transpose(labelmap_np, (2, 1, 0)) # to be numslices, rows, cols
         print(f"Labelmap shape: {labelmap_np.shape}")
         segments = segmentation_object["segments"]
         segment_descriptions = []
 
         colors_rgb = [[255, 0, 0], [0, 255, 0]] * len(segments)  
 
-        for i, seg in enumerate(segments):
-            idx = seg["segmentIndex"]
-            label = seg["label"]
-            rgb_norm = np.array(colors_rgb[i]) / 255.0
-            cielab =self.rgb_to_dicom_cielab(rgb_norm)
+        # for i, seg in enumerate(segments):
+        #     idx = seg["segmentIndex"]
+        #     label = seg["label"]
+        #     rgb_norm = np.array(colors_rgb[i]) / 255.0
+        #     cielab =self.rgb_to_dicom_cielab(rgb_norm)
 
-            desc = hd.seg.SegmentDescription(
-                segment_number=idx,
-                segment_label=label,
-                segmented_property_category=codes.cid7150.Tissue,
-                segmented_property_type=codes.cid7166.ConnectiveTissue,
-                algorithm_type=hd.seg.SegmentAlgorithmTypeValues.AUTOMATIC,
-                algorithm_identification= algorithm_identification,
-                # recommended_display_cielab_value=cielab
-            )
-            segment_descriptions.append(desc)
+        #     desc = hd.seg.SegmentDescription(
+        #         segment_number=idx,
+        #         segment_label=label,
+        #         segmented_property_category=codes.cid7150.Tissue,
+        #         segmented_property_type=codes.cid7166.ConnectiveTissue,
+        #         algorithm_type=hd.seg.SegmentAlgorithmTypeValues.AUTOMATIC,
+        #         algorithm_identification= algorithm_identification,
+        #         # recommended_display_cielab_value=cielab
+        #     )
+        #     segment_descriptions.append(desc)
+        description_segment = hd.seg.SegmentDescription(
+            segment_number=1,
+            segment_label='spleen',
+            segmented_property_category=codes.cid7150.Tissue,
+            segmented_property_type=codes.cid7166.ConnectiveTissue,
+            algorithm_type=hd.seg.SegmentAlgorithmTypeValues.AUTOMATIC,
+            algorithm_identification=algorithm_identification,
+            tracking_uid=hd.UID(),
+            tracking_id='Test Segmentation'
+        )
         # =========== create the DICOM-SEG  ================
         print("TYPE:", type(dicom_datasets[0]))
         print("IS DATASET:", isinstance(dicom_datasets[0], pydicom.dataset.Dataset))
         now = datetime.now()
-        series_time = now.strftime("%H%M%S") 
+        series_time = now.strftime("%I:%M:%S %p")
         seg = hd.seg.Segmentation(
                 source_images=dicom_datasets,  # references + geometry
                 pixel_array=labelmap_np,        # 3D labelmap → auto 2D frames
-                segmentation_type=hd.seg.SegmentationTypeValues.LABELMAP,
-                segment_descriptions=segment_descriptions,
+                segmentation_type=hd.seg.SegmentationTypeValues.BINARY,
+                segment_descriptions=[description_segment],
                 series_instance_uid=hd.UID(),
-                series_number=1000,
+                series_number=1001,
                 sop_instance_uid=hd.UID(),
-                series_description=f"{clean_model}-{series_time}",
+                series_description=f"{clean_model}-{series_time}-g",
                 instance_number=1,
                 manufacturer='Manufacturer Name',
                 manufacturer_model_name='MONAI Label Backend',
