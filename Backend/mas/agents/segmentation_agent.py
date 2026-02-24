@@ -5,7 +5,9 @@ The module receives an imaging protocol and raw volumes, then runs a
 segmentation model (e.g., nnUNet, MONAI) to produce binary masks for the
 structures of interest.
 """
+from http import client
 from pathlib import Path
+from random import Random
 import shutil
 import sys
 import time
@@ -36,7 +38,19 @@ from typing import Annotated
 from pydantic import Field
 import os
 import asyncio
-
+import pydicom
+import tempfile
+import re
+from typing import Dict, Optional, Tuple 
+import nrrd
+import numpy as np
+import gzip
+import io
+from requests_toolbelt.multipart.decoder import MultipartDecoder 
+import highdicom as hd
+from pydicom.sr.codedict import codes
+from pydicom.uid import generate_uid
+from datetime import datetime
 load_dotenv() 
 log_file_path = Path(__file__).parent.parent/"memory"/"workspace"/ "segmentation_module.log"
 logger = logging.getLogger("SegmentationModule")
@@ -101,7 +115,6 @@ class SegmentationModule:
         assert self.discovery_tools, "Missing get_model_info"       
         self._init_agents()
         return True
-    
 
     def _init_agents(self):
         self.PlannerAgent = AssistantAgent(
@@ -173,21 +186,26 @@ class SegmentationModule:
         datasetlist: List[str] = input_data["datasetlist"]
 
         # plan
-        plan = await self._run_planner(hypothesis)
-        logger.info(f"Planner plan: {plan}")
-        target_labels = plan["target_labels"]
-        chosen_path = plan["chosen_path"]
-        eligible_volumes = await self._exclude_existing_masks(
-            datasetlist, target_labels
-        )
+        # plan = await self._run_planner(hypothesis)
+        # logger.info(f"Planner plan: {plan}")
+        # target_labels = plan["target_labels"]
+        # chosen_path = plan["chosen_path"]
+        # eligible_volumes = await self._exclude_existing_masks(
+        #     datasetlist, target_labels
+        # )
 
-        logger.info(
-            f"Eligible volumes for segmentation: {len(eligible_volumes)}"
-        )
+        # logger.info(
+        #     f"Eligible volumes for segmentation: {len(eligible_volumes)}"
+        # )
+        chosen_path = "automatic"
+        eligible_volumes = datasetlist
+        target_labels = ["spleen"]
+        selected_auto_model= "segmentation_spleen" # hard test
 
         # whether it's automatic or interactive
         if chosen_path == "automatic" and eligible_volumes:
-            selected_auto_model = plan["automatic_models"][0]
+            # selected_auto_model = plan["automatic_models"][0]
+            selected_auto_model = "segmentation_spleen" # hard test
             await self._run_automatic(eligible_volumes, target_labels, selected_auto_model)
 
         elif eligible_volumes:
@@ -195,12 +213,12 @@ class SegmentationModule:
             
         # finally download the volumes with its label masks 
         # selected_auto_model_for_volume= "segmentation_spleen" # hard test
-        await asyncio.sleep(120)  
-        await self.download_and_pair_volumes(
-                datasetlist, 
-                chosen_path=chosen_path, 
-                selected_auto_model_for_volume=plan["automatic_models"][0] if plan["automatic_models"] else None
-            )
+        # await asyncio.sleep(120)  
+        # await self.download_and_pair_volumes(
+        #         datasetlist, 
+        #         chosen_path=chosen_path, 
+        #         selected_auto_model_for_volume=plan["automatic_models"][0] if plan["automatic_models"] else None
+        #     )
 
         return {"status": "finished"}
     
@@ -270,6 +288,7 @@ class SegmentationModule:
                 logger.info(f"Volume {volume_uid} excluded (matching mask exists)")
 
         return eligible
+    
     async def check_having_mask(self, volume_uid: str):
         """
         Checks if a segmentation mask exists for the given volume SeriesInstanceUID (volume_uid).
@@ -281,7 +300,8 @@ class SegmentationModule:
             return response.json()
         else:
             return []
-    async def _run_automatic(
+       
+    async def _run_automatic(  
         self, volumes: List[str], labels: List[str], selected_auto_model: str
     ):
         logger.info(f"Starting automatic segmentation on {len(volumes)} volumes using model '{selected_auto_model}'")
@@ -294,7 +314,7 @@ class SegmentationModule:
         for idx, volume_uid in enumerate(volumes, start=1):
             logger.info(f"[{idx}/{len(volumes)}] Running segmentation for volume: {volume_uid}")
             try:
-                result = await self.run_segmentation(
+                result = await self.run_test_segmentation(
                     model=selected_auto_model,
                     series_instance_uid=volume_uid,
                     label_info=labels
@@ -310,6 +330,575 @@ class SegmentationModule:
                 logger.info(f"Completed segmentation for volume: {volume_uid}")
             except Exception as e:
                 logger.error(f"Segmentation failed for {volume_uid} : {e}")    
+
+    def parse_multipart_response(self,
+        headers: Dict[str, str],
+        body: bytes
+    ) -> Tuple[bytes, dict]:
+        """
+        Parses a multipart/mixed response that contains:
+        - One part with Content-Type: application/json     → centroids dict
+        - One part with Content-Type: application/octet-stream → NRRD binary data
+        Returns:
+            (nrrd_bytes: bytes, centroids: dict)
+        """
+        content_type = headers.get('content-type', '')
+        boundary_match = re.search(r'boundary=([^;]+)', content_type, re.IGNORECASE)
+        if not boundary_match:
+            raise ValueError("No boundary found in Content-Type header")
+
+        boundary = boundary_match.group(1).strip()
+        boundary_bytes = f"--{boundary}".encode('ascii')
+
+        parts = self.split_multipart(body, boundary_bytes)
+
+        json_data = None
+        nrrd_bytes = None
+
+        for part in parts:
+            header_end = self.find_double_crlf(part)
+            if header_end == -1:
+                continue
+
+            headers_part = part[:header_end].decode('ascii', errors='replace')
+            body_part = part[header_end:]
+
+            if 'application/json' in headers_part:
+                try:
+                    json_text = body_part.decode('utf-8')
+                    json_data = eval(json_text)          # safer: json.loads(json_text)
+                except Exception as e:
+                    raise ValueError(f"Failed to parse JSON part: {e}")
+
+            elif 'application/octet-stream' in headers_part:
+                nrrd_bytes = body_part
+
+        if json_data is None or nrrd_bytes is None:
+            raise ValueError(
+                "Multipart response missing required parts: "
+                "need application/json and application/octet-stream"
+            )
+
+        # Return in same order as original TS → data first, then centroids
+        return nrrd_bytes, json_data.get('centroids', {})
+
+    def split_multipart(self, buffer: bytes, boundary: bytes) -> list[bytes]:
+        """ 
+        Splits the buffer into parts using the boundary.
+        Skips the boundary line itself and trailing \r\n.
+        """
+        parts = []
+        start = 0
+
+        while start < len(buffer):
+            boundary_index = self.find_subarray(buffer, boundary, start)
+            if boundary_index == -1:
+                break
+
+            # Start of actual part content = after boundary + \r\n
+            part_start = boundary_index + len(boundary) + 2
+            next_boundary = self.find_subarray(buffer, boundary, part_start)
+
+            part_end = next_boundary if next_boundary != -1 else len(buffer)
+
+            # Exclude trailing \r\n before next boundary or end
+            part = buffer[part_start : part_end - 2]
+            parts.append(part)
+
+            start = part_end
+
+        return parts
+
+    def find_subarray(self, haystack: bytes, needle: bytes, start: int = 0) -> int:
+        """
+        Returns the starting index of the first occurrence of needle in haystack[start:],
+        or -1 if not found.
+        """
+        n_h = len(haystack)
+        n_n = len(needle)
+
+        for i in range(start, n_h - n_n + 1):
+            match = True
+            for j in range(n_n):
+                if haystack[i + j] != needle[j]:
+                    match = False
+                    break
+            if match:
+                return i
+
+        return -1
+
+    def find_double_crlf(self, buffer: bytes) -> int:
+        """      
+        Finds the position right after the first \r\n\r\n occurrence.
+        Returns -1 if not found.
+        """
+        for i in range(len(buffer) - 3):
+            if (buffer[i]     == 13 and   # \r
+                buffer[i + 1] == 10 and   # \n
+                buffer[i + 2] == 13 and   # \r
+                buffer[i + 3] == 10):     # \n
+                return i + 4              # position after second \r\n
+
+        return -1
+
+    def parse_nrrd_data(self, nrrd_bytes: bytes) -> Tuple[np.ndarray, Dict[str, Any]]:
+        """
+        Parses NRRD data (raw bytes) and returns:
+
+        """
+        try:  
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".nrrd") as tmp:
+                tmp.write(nrrd_bytes)
+                tmp_path = tmp.name
+
+
+            try:
+                data_array, header = nrrd.read(tmp_path)
+            finally:
+                os.remove(tmp_path)
+          
+            if data_array.dtype != np.uint16:
+                print(f"Warning: NRRD data type is {data_array.dtype}, converting to uint16")
+                data_array = data_array.astype(np.uint16)
+
+            return data_array, header
+
+        except Exception as e:
+            # If pynrrd fails → fallback to manual gzip handling (rare)
+            try:
+                if nrrd_bytes.startswith(b'\x1f\x8b'):  # gzip magic number
+                    decompressed = gzip.decompress(nrrd_bytes)
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".nrrd") as tmp:
+                        tmp.write(decompressed)
+                        tmp_path = tmp.name
+                    try:
+                        data_array, header = nrrd.read(tmp_path)
+                    finally:
+                        os.remove(tmp_path)
+                    return data_array.astype(np.uint16), header
+                else:
+                    raise e
+            except Exception as inner_e:
+                raise ValueError(f"Failed to parse NRRD data: {inner_e}") from inner_e
+  
+    async def fetch_source_datasets_from_orthanc(
+        self,
+        series_instance_uid: str,
+        orthanc_url: str = "http://localhost:8043",
+        timeout: float = 300.0,
+    ) -> list[pydicom.Dataset]:
+        """
+        Fetch all DICOM instances of a series using Orthanc REST API.
+        Returns list of pydicom.Dataset objects.
+        """
+        timeout_config = httpx.Timeout(timeout)
+       
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            logger.info(f"Searching series by SeriesInstanceUID: {series_instance_uid}")
+
+            # find the internal series id
+            find_payload = {
+                "Level": "Series",
+                "Query": {"SeriesInstanceUID": series_instance_uid}
+            }
+            response = await client.post(f"{orthanc_url}/tools/find", json=find_payload)
+            response.raise_for_status()
+            results = response.json()
+
+            if not results:
+                raise ValueError(f"Series with SeriesInstanceUID {series_instance_uid} not found in Orthanc")
+
+            series_id = results[0] 
+            logger.info(f"Resolved Orthanc series_id: {series_id}")
+
+            # get  list of Instance IDs
+            series_response = await client.get(f"{orthanc_url}/series/{series_id}")
+            series_response.raise_for_status()
+            series_data = series_response.json()
+            instance_ids = series_data.get("Instances", [])
+
+            if not instance_ids:
+                raise ValueError(f"No instances found in series {series_instance_uid}")
+
+            logger.info(f"Found {len(instance_ids)} instances in series {series_instance_uid}")
+
+            # download each instance file and parse to pydicom.Dataset
+            temp_dir = Path(tempfile.mkdtemp(prefix="orthanc-dicom-"))
+            dicom_paths = [] 
+
+            try:
+                for i, inst_id in enumerate(instance_ids):
+                    file_url = f"{orthanc_url}/instances/{inst_id}/file"
+                    file_response = await client.get(file_url)
+                    file_response.raise_for_status()
+
+                    # save to tmp
+                    temp_path = temp_dir / f"instance_{i:06d}.dcm"
+                    with open(temp_path, "wb") as f:
+                        f.write(file_response.content)
+
+                    # Load with pydicom to get InstanceNumber for sorting
+                    try:
+                        ds = pydicom.dcmread(str(temp_path))
+                        dicom_paths.append((ds, temp_path))
+                        logger.debug(f"Saved & read {inst_id} → {temp_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed pydicom read for {inst_id}: {e}")
+                        temp_path.unlink(missing_ok=True)
+                        continue
+
+                if not dicom_paths:
+                    raise ValueError("No valid DICOM files loaded")
+
+                # sort by InstanceNumber (0020,0013), default to 0 if missing
+                dicoms_sorted = sorted(
+                    dicom_paths,
+                    key=lambda x: int(x[0].get((0x0020, 0x0013), pydicom.DataElement((0x0020, 0x0013), 'IS', '0')).value or 0)
+                )
+
+
+                # source_images = []
+                # for ds, path in dicoms_sorted:
+                #     try:
+                #         img = hd.imread(str(path))
+                #         source_images.append(img)
+                #     except Exception as e:
+                #         logger.warning(f"highdicom.imread failed for {path}: {e}")
+                #         continue
+
+                # if not source_images:
+                #     raise ValueError("Failed to load any images with highdicom")
+
+                # logger.info(f"Loaded and sorted {len(source_images)} highdicom images")
+                # return source_images
+                source_images = [ds for ds, _ in dicoms_sorted]
+                logger.info(f"Loaded and sorted {len(source_images)} pydicom datasets")
+                return source_images
+
+            finally:
+                # Cleanup temp files
+                for p in temp_dir.glob("*.dcm"):
+                    p.unlink(missing_ok=True)
+                temp_dir.rmdir()
+
+    def rgb_to_dicom_cielab(self, rgb: list[float] | np.ndarray) -> list[int]:
+        """
+        Convert RGB [0-1] to DICOM CIELab 
+        """
+        import numpy as np
+        
+        rgb = np.asarray(rgb)  # shape (3,)
+        # Simple sRGB to XYZ (D65 white point)
+        xyz = np.dot(rgb, np.array([
+            [0.4124, 0.3576, 0.1805],
+            [0.2126, 0.7152, 0.0722],
+            [0.0193, 0.1192, 0.9505]
+        ]).T)
+        
+        xyz /= np.array([0.95047, 1.0, 1.08883])  # D65 normalize
+        
+        # XYZ to Lab
+        xyz = np.where(xyz > 0.008856, xyz ** (1/3), (7.787 * xyz) + (16/116))
+        L = (116 * xyz[1]) - 16
+        a = 500 * (xyz[0] - xyz[1])
+        b = 200 * (xyz[1] - xyz[2])
+        
+        # DICOM scales Lab to 0-255 range (approx)
+        L = np.clip((L + 16) * (255 / 116), 0, 255)
+        a = np.clip((a + 128) * (255 / 256), 0, 255)
+        b = np.clip((b + 128) * (255 / 256), 0, 255)
+        
+        return [int(round(v)) for v in [L, a, b]]
+
+    def ensure_required_patient_tags(self,datasets):
+        new_for_uid = generate_uid()
+        for ds in datasets:
+            ds.FrameOfReferenceUID = new_for_uid # generate it to avoid conflicts
+            ds.setdefault("PatientName", "Anonymous")
+            ds.setdefault("PatientID", "Unknown")
+            ds.setdefault("PatientBirthDate", "")
+            ds.setdefault("PatientSex", "")
+            ds.setdefault("StudyInstanceUID", ds.StudyInstanceUID)
+            ds.setdefault("StudyID", "")
+            ds.setdefault("StudyDate", "")
+            ds.setdefault("StudyTime", "")
+            ds.setdefault("AccessionNumber", "")
+            ds.setdefault("ReferringPhysicianName", "")
+            ds.setdefault("SeriesInstanceUID", ds.SeriesInstanceUID)
+            ds.setdefault("Modality", ds.get("Modality", "OT"))
+                   
+    async def run_test_segmentation(self,
+        model: Annotated[
+            str,
+            Field(description="MONAI Label model name to run inference with")
+        ],
+        series_instance_uid: Annotated[
+            str,
+            Field(description="DICOM SeriesInstanceUID to segment")
+        ],
+        label_info: Annotated[
+            str,
+            Field(description="Comma-separated anatomical labels to segment (e.g. 'spleen' or 'spleen,liver,kidney')")
+        ],
+        params: Annotated[
+            Dict[str, Any] | None,
+            Field(description="Optional inference parameters")
+        ] = None,
+    ):  
+        start_time = datetime.now()
+        MONAI_LABEL_URL = "http://localhost:8000"
+        ORTHANC_URL = "http://localhost:8043"
+        clean_model = model.strip().rstrip(",")
+        
+        timeout_config = httpx.Timeout(
+            connect=30.0,
+            read=1800.0,
+            write=30.0,
+            pool=30.0
+        ) 
+        FrameOfReferenceUID = None 
+        study_instance_uid = None
+        # =========== get the study from the series UID ===========
+        get_study_url = f"{MONAI_LABEL_URL}/volumes/{series_instance_uid}/study"
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            try:
+                study_response = await client.get(get_study_url)
+                if study_response.status_code == 200:
+                    study_info = study_response.json()
+                    study_instance_uid = study_info.get('study_uid')
+                    logger.info(f"Retrieved StudyInstanceUID: {study_instance_uid} for SeriesInstanceUID: {series_instance_uid}")
+                else:
+                    logger.warning(f"Failed to retrieve study info for SeriesInstanceUID: {series_instance_uid}, status code: {study_response.status_code}")
+            except Exception as e:
+                logger.warning(f"Error retrieving study info for SeriesInstanceUID: {series_instance_uid}: {e}")
+        
+        # =========== try get the frameofReference ================
+        # fetch frameof reference
+        # try:
+        #     async with httpx.AsyncClient(timeout=timeout_config) as client:
+        #         logger.info(f"Searching series by SeriesInstanceUID: {series_instance_uid}")
+
+        
+        #         find_payload = {
+        #             "Level": "Series",
+        #             "Query": {"SeriesInstanceUID": series_instance_uid}
+        #         }
+        #         response = await client.post(f"{ORTHANC_URL}/tools/find", json=find_payload)
+        #         response.raise_for_status()
+        #         results = response.json()
+        #         logger.info(f"/tools/find response: {results}")
+
+        #         if not results:
+        #             raise ValueError("Series not found")
+
+        #         series_id = results[0]
+        #         logger.info(f"Resolved Orthanc series_id: {series_id}")
+
+        #         series_json = await client.get(f"{ORTHANC_URL}/series/{series_id}")
+        #         series_json.raise_for_status()
+        #         instances = series_json.json().get("Instances", [])
+        #         logger.info(f"Found {len(instances)} instances in the series")
+
+        #         if not instances:
+        #             raise ValueError("No instances found in series")
+        #         first_instance_id = instances[0]
+        #         inst_response = await client.get(f"{ORTHANC_URL}/instances/{first_instance_id}/simplified-tags")
+        #         inst_tags = inst_response.json()
+        #         FrameOfReferenceUID = inst_tags.get("0020,0052")
+                
+        # except Exception as e:
+        #     logger.exception(f"Error fetching FrameOfReferenceUID for series {series_instance_uid}")
+
+        # ====the inference using monai label=====
+                
+        infer_url = f"{MONAI_LABEL_URL}/infer/{clean_model}"
+        query_params = {"image": series_instance_uid,"output": "all"}
+        inference_params = params or {}
+        inference_params["result_extension"]=".nrrd"
+        inference_params["result_dtype"] = "uint16"
+        inference_params["result_compress"]= False
+        inference_params["restore_label_idxs"] = False
+
+        files = {"params": (None, json.dumps(inference_params), "application/json")}      
+        async with httpx.AsyncClient(timeout=timeout_config) as client:  
+            try:
+                inference_start = datetime.now()
+                response = await client.post(infer_url, params=query_params, files=files)
+                inference_duration = (datetime.now() - inference_start).total_seconds()
+                
+                logger.info(f"Inference completed in {inference_duration:.1f}s with status: {response.status_code}")
+                
+            except httpx.TimeoutException as e:
+                elapsed = (datetime.now() - start_time).total_seconds()
+                logger.error(f"Inference timeout after {elapsed:.1f}s: {str(e)}")
+                return {
+                    "error": True, 
+                    "stage": "inference_timeout", 
+                    "message": f"Inference exceeded timeout after {elapsed:.1f}s. Try with smaller volume or different model.",
+                    "elapsed_seconds": elapsed
+                }
+            except Exception as e:
+                logger.error(f"Inference request failed: {str(e)}")
+                return {"error": True, "stage": "inference_request", "message": str(e)}
+
+        result = {
+            "endpoint": infer_url,
+            "query_params": query_params,
+            "sent_params": inference_params,
+            "status_code": response.status_code,
+            "inference_duration_seconds": inference_duration
+        }
+
+        if response.status_code != 200:
+            result["error"] = True
+            result["server_response"] = response.text[:500] 
+            logger.error(f"Inference failed with status {response.status_code}: {response.text[:200]}")
+            return result          
+            
+        # ===== parsing the response into nrrd and centroids ============
+        nrrd_data, centroids = self.parse_multipart_response(
+            response.headers,
+            response.content
+        )
+        logger.info(f"Parsed multipart response: nrrd_data_size={len(nrrd_data)} bytes, centroids={list(centroids)}")
+        
+        # ==== parse the nrrd and extrace centroids ijk =====
+        
+        # parse the nrrd data into numpy array and header
+        image, header = self.parse_nrrd_data(nrrd_data)
+        logger.info(f"Parsed NRRD data: image_shape={image.shape}, image_dtype={image.dtype}, header_keys={list(header.keys())}")
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            try:
+                response_info = await client.get(f"{MONAI_LABEL_URL}/info/")
+        
+            except Exception as e:
+                logger.warning(f"Error fetching MONAI Label info: {e}")
+                
+        labels = response_info.json().get("labels", [])
+        logger.info(f"Available labels in MONAI Label: {labels}")
+        
+        # the centroid world and image coordinates 
+        
+        centroids_ijk = {}
+
+        for key, value in centroids.items():
+            segment_index = int(value[0])           # same as parseInt(..., 10)
+            image_coords = [float(v) for v in value[1:]]   # slice(1:) → [1:]
+            centroids_ijk[segment_index] = {
+                "image": image_coords,
+                "world": []                         # empty list, same as in JS
+            }
+        # ==== create the segmentation object =====
+        
+        segmentation_object = {
+            "id": series_instance_uid,
+            "label": f"Segmentation_{series_instance_uid}",
+            "segments": [
+                {
+                    "segmentIndex": idx,
+                    "label": label,
+                    "isActive": True,
+                    "isVisible": True
+                }
+                for idx, label in enumerate(labels, start=1)
+            ],
+            "isActive": True,
+            "activeSegmentIndex": 1,
+            "scalarData": image, 
+            "FrameOfReferenceUID": FrameOfReferenceUID,
+            "centroidsIJK": centroids_ijk
+        }
+        
+        logger.info(f"Constructed segmentation object with {len(segmentation_object['segments'])} segments")
+        # logger.info(f"Segmentation object: {segmentation_object}")
+        
+        # ========== create pydicom datasets for the original series ============
+        dicom_datasets = await self.fetch_source_datasets_from_orthanc(
+            series_instance_uid=series_instance_uid
+        )
+        num_slices = len(dicom_datasets)
+        rows = dicom_datasets[0].Rows
+        cols = dicom_datasets[0].Columns
+   
+      
+        print("Rows, Columns, slices:", rows, cols, num_slices)
+
+
+        # ========== inject missing tags due to de-identification (if any) ============
+        self.ensure_required_patient_tags(dicom_datasets)
+        # ============== create Algorithm description=================
+        algorithm_identification = hd.AlgorithmIdentificationSequence(
+                name=f'Automatic Segmentation',
+                version='0.0',
+                family=codes.cid7162.ArtificialIntelligence
+            ) 
+        # =========== create segmentation description =================
+        labelmap_np: np.ndarray = segmentation_object["scalarData"]
+        labelmap_np = labelmap_np.astype(np.uint8)
+        labelmap_np = np.transpose(labelmap_np, (2, 0, 1)) # to be numslices, rows, cols
+        print(f"Labelmap shape: {labelmap_np.shape}")
+        segments = segmentation_object["segments"]
+        segment_descriptions = []
+
+        colors_rgb = [[255, 0, 0], [0, 255, 0]] * len(segments)  
+
+        for i, seg in enumerate(segments):
+            idx = seg["segmentIndex"]
+            label = seg["label"]
+            rgb_norm = np.array(colors_rgb[i]) / 255.0
+            cielab =self.rgb_to_dicom_cielab(rgb_norm)
+
+            desc = hd.seg.SegmentDescription(
+                segment_number=idx,
+                segment_label=label,
+                segmented_property_category=codes.cid7150.Tissue,
+                segmented_property_type=codes.cid7166.ConnectiveTissue,
+                algorithm_type=hd.seg.SegmentAlgorithmTypeValues.AUTOMATIC,
+                algorithm_identification= algorithm_identification,
+                # recommended_display_cielab_value=cielab
+            )
+            segment_descriptions.append(desc)
+        # =========== create the DICOM-SEG  ================
+        print("TYPE:", type(dicom_datasets[0]))
+        print("IS DATASET:", isinstance(dicom_datasets[0], pydicom.dataset.Dataset))
+        now = datetime.now()
+        series_time = now.strftime("%H%M%S") 
+        seg = hd.seg.Segmentation(
+                source_images=dicom_datasets,  # references + geometry
+                pixel_array=labelmap_np,        # 3D labelmap → auto 2D frames
+                segmentation_type=hd.seg.SegmentationTypeValues.LABELMAP,
+                segment_descriptions=segment_descriptions,
+                series_instance_uid=hd.UID(),
+                series_number=1000,
+                sop_instance_uid=hd.UID(),
+                series_description=f"{clean_model}-{series_time}",
+                instance_number=1,
+                manufacturer='Manufacturer Name',
+                manufacturer_model_name='MONAI Label Backend',
+                software_versions='-',
+                device_serial_number='XYZ',
+            )    
+        logger.info(f"Created DICOM-SEG object with SeriesInstanceUID: {seg.SeriesInstanceUID}")    
+        
+        # ========== saving to orthanc ====================
+        
+        seg_bytes_io = io.BytesIO()
+        seg.save_as(seg_bytes_io)
+        seg_bytes_io.seek(0)
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            headers = {"Content-Type": "application/dicom"}
+            response = await client.post(f"{ORTHANC_URL}/instances", headers=headers, content=seg_bytes_io.read())
+
+            if response.status_code in (200, 201):
+                logger.info(f"DICOM-SEG successfully uploaded to Orthanc. InstanceID: {response.json()['ID']}")
+            else:
+                logger.error(f"Failed to upload DICOM-SEG: {response.status_code} {response.text}")
+
+        
+        
+        return result
+ 
     async def run_segmentation(self,
         model: Annotated[
             str,
@@ -364,7 +953,7 @@ class SegmentationModule:
 
         normalized_label_info = []
 
-        # Normalize label_info into a list of strings
+        # normalize label_info into a list of strings
         if not label_info:
             logger.error("label_info is empty!")
             return {
@@ -405,12 +994,12 @@ class SegmentationModule:
             "heart": [255, 192, 203],   # Pink
         }
         
-        # Fetch source volume metadata
+        # fetch source volume metadata
         study_instance_uid = None
         
         timeout_config = httpx.Timeout(
             connect=30.0,
-            read=300.0,
+            read=1800.0,
             write=30.0,
             pool=30.0
         )
@@ -439,7 +1028,7 @@ class SegmentationModule:
                 "model_name": clean_model
             }
             
-            # Add reference to source series for proper DICOM-SEG linking
+            # add reference to source series for proper DICOM-SEG linking
             if series_instance_uid:
                 label_entry["ReferencedSeriesInstanceUID"] = series_instance_uid
             
@@ -566,7 +1155,7 @@ class SegmentationModule:
             result["temp_file_path"] = str(temp_file_path)
             logger.info("Segmentation file saved successfully")
             
-            # Validate segmentation file
+            #validate segmentation
             logger.info("Validating segmentation spatial information...")
             try:
                 import nibabel as nib
@@ -575,12 +1164,29 @@ class SegmentationModule:
                 logger.info(f"Segmentation affine:\n{seg_nifti.affine}")
                 logger.info(f"Segmentation voxel dims: {seg_nifti.header.get_zooms()}")
                 
-                # Check if segmentation has any non-zero voxels
+                # check if segmentation has any non-zero voxels
                 data = seg_nifti.get_fdata()
                 nonzero_count = (data > 0).sum()
                 logger.info(f"Non-zero voxels in segmentation: {nonzero_count}")
+                
                 if nonzero_count == 0:
-                    logger.warning("Segmentation appears to be empty (no non-zero voxels)")
+                    logger.error("Segmentation is empty (no non-zero voxels). Skipping save to datastore.")
+
+                    # remove the temp file since it's useless
+                    try:
+                        os.remove(temp_file_path)
+                        logger.info("Empty segmentation file removed.")
+                    except Exception as e:
+                        logger.warning(f"Could not remove temp file: {e}")
+
+                    return {
+                        "error": True,
+                        "stage": "empty_segmentation",
+                        "message": "Model returned empty segmentation (all voxels = 0). Nothing saved.",
+                        "nonzero_voxels": int(nonzero_count),
+                        "inference_duration_seconds": inference_duration
+                    }
+
             except Exception as e:
                 logger.warning(f"Could not validate segmentation file: {e}")
 
@@ -603,7 +1209,7 @@ class SegmentationModule:
             "label_info": normalized_label_info,
         }
         
-        # Add StudyInstanceUID if we retrieved it
+        # add StudyInstanceUID if we retrieved it
         if study_instance_uid:
             label_info_payload["StudyInstanceUID"] = study_instance_uid
             logger.info(f"Including StudyInstanceUID in payload: {study_instance_uid}")
@@ -623,7 +1229,7 @@ class SegmentationModule:
         upload_timeout = httpx.Timeout(
             connect=30.0,
             read=120.0,
-            write=120.0,
+            write=500.0,
             pool=30.0
         )
 
@@ -679,233 +1285,7 @@ class SegmentationModule:
         logger.info(f"Total execution time: {total_duration:.1f}s")
         
         return result
-    async def run_batch_segmentation(
-        self,
-        model: Annotated[
-            str,
-            Field(description="MONAI Label model name to run inference with")
-        ],
-        series_instance_uids: Annotated[
-            List[str],
-            Field(description="List of DICOM SeriesInstanceUIDs to segment")
-        ],
-        label_info: Annotated[
-            str,
-            Field(description="Comma-separated anatomical labels to segment (e.g. 'spleen' or 'spleen,liver,kidney')")
-        ],
-        max_workers: Annotated[
-            int,
-            Field(description="Number of parallel workers (default: 1 to avoid server overload)")
-        ] = 1,
-        max_batch_size: Annotated[
-            int,
-            Field(description="Maximum batch size (default: 1)")
-        ] = 1,
-        params: Annotated[
-            Dict[str, Any] | None,
-            Field(description="Optional inference parameters")
-        ] = None,
-    ):
-        """
-        Run MONAI Label batch segmentation using /batch/infer/{model}.
-        The server automatically saves results to datastore - no manual parsing needed!
-        
-        Args:
-            model: The segmentation model name (e.g., "segmentation_spleen")
-            series_instance_uids: List of DICOM SeriesInstanceUIDs to segment
-            label_info: Comma-separated list of anatomical labels
-            max_workers: Number of parallel workers (keep at 1 to avoid DICOMweb overload)
-            max_batch_size: Maximum batch size
-            params: Optional inference parameters
-        
-        Returns:
-            Dictionary containing:
-            - job_id: The batch job identifier
-            - total_images: Number of images to process
-            - status: Job status
-        """
-        MONAI_LABEL_URL = "http://localhost:8000"          
-        start_time = datetime.now()
-        logger.info(f"=== BATCH SEGMENTATION STARTED at {start_time} ===")
-        
-        clean_model = model.strip().rstrip(",")
-        
-        logger.info(f"Model: {clean_model}")
-        logger.info(f"Series UIDs: {series_instance_uids}")
-        logger.info(f"Label info: {label_info}")
-        logger.info(f"Total volumes: {len(series_instance_uids)}")
-        
-        # Normalize label_info into a list of strings
-        if not label_info:
-            logger.error("label_info is empty!")
-            return {
-                "error": True,
-                "stage": "validation",
-                "message": "label_info cannot be empty"
-            }
 
-        if isinstance(label_info, list):
-            organ_list = [str(o).strip().lower() for o in label_info if str(o).strip()]
-        elif isinstance(label_info, str):
-            organ_list = [o.strip().lower() for o in label_info.split(",") if o.strip()]
-        else:
-            return {
-                "error": True,
-                "stage": "validation",
-                "message": f"Invalid label_info type: {type(label_info)}"
-            }
-
-        if not organ_list:
-            return {
-                "error": True,
-                "stage": "validation",
-                "message": "No valid organs found in label_info"
-            }
-
-        logger.info(f"Parsed organs from label_info: {organ_list}")
-        
-        # Build label_names dictionary (CRITICAL: MONAI Label expects this format)
-        label_names = {organ_name: idx for idx, organ_name in enumerate(organ_list, start=1)}
-        logger.info(f"Label names mapping: {label_names}")
-        
-        # Build segment attributes for proper DICOM-SEG encoding
-        default_colors = {
-            "spleen": [255, 0, 0],
-            "liver": [139, 69, 19],
-            "kidney": [255, 255, 0],
-            "pancreas": [255, 165, 0],
-            "lung": [173, 216, 230],
-            "heart": [255, 192, 203],
-        }
-        
-        # SNOMED CT codes for common organs
-        snomed_codes = {
-            "spleen": ("78961009", "Spleen"),
-            "liver": ("10200004", "Liver"),
-            "kidney": ("64033007", "Kidney"),
-            "pancreas": ("15776009", "Pancreas"),
-            "lung": ("39607008", "Lung"),
-            "heart": ("80891009", "Heart"),
-        }
-        
-        segment_attributes = []
-        for idx, organ_name in enumerate(organ_list, start=1):
-            code_value, code_meaning = snomed_codes.get(organ_name, ("78961009", organ_name.capitalize()))
-            
-            segment_attributes.append([{
-                "labelID": idx,
-                "SegmentLabel": organ_name,
-                "SegmentDescription": f"{organ_name.capitalize()} segmentation",
-                "SegmentAlgorithmType": "AUTOMATIC",
-                "SegmentAlgorithmName": clean_model,
-                "SegmentedPropertyCategoryCodeSequence": {
-                    "CodeValue": "123037004",
-                    "CodingSchemeDesignator": "SCT",
-                    "CodeMeaning": "Anatomical Structure"
-                },
-                "SegmentedPropertyTypeCodeSequence": {
-                    "CodeValue": code_value,
-                    "CodingSchemeDesignator": "SCT",
-                    "CodeMeaning": code_meaning
-                },
-                "recommendedDisplayRGBValue": default_colors.get(organ_name, [255, 0, 0])
-            }])
-        
-        logger.info(f"Segment attributes: {json.dumps(segment_attributes, indent=2)}")
-        
-        # Prepare batch infer request
-        batch_url = f"{MONAI_LABEL_URL}/batch/infer/{clean_model}"
-        
-        # Build request payload with correct parameter structure
-        request_payload = {
-            "images": series_instance_uids,
-            "save_label": True,
-            "label_tag": "final",
-            "max_workers": max_workers,
-            "max_batch_size": max_batch_size,
-            "params": {
-                # CRITICAL: Use label_names dict, not label_info list
-                "label_names": label_names,
-                # Add segment attributes for proper DICOM-SEG encoding
-                "segment_attributes": segment_attributes,
-                # Merge any additional params
-                **(params or {})
-            }
-        }
-        
-        logger.info(f"Batch request payload: {json.dumps(request_payload, indent=2)}")
-        
-        # Extended timeout for batch job submission
-        timeout_config = httpx.Timeout(
-            connect=30.0,
-            read=60.0,
-            write=30.0,
-            pool=30.0
-        )
-        
-        try:
-            logger.info(f"Submitting batch job to: {batch_url}")
-            
-            async with httpx.AsyncClient(timeout=timeout_config) as client:
-                response = await client.post(
-                    batch_url,
-                    json=request_payload,
-                    headers={"Content-Type": "application/json"}
-                )
-            
-            logger.info(f"Batch job submitted with status: {response.status_code}")
-            
-            if response.status_code != 200:
-                return {
-                    "error": True,
-                    "stage": "batch_submission",
-                    "status_code": response.status_code,
-                    "message": response.text[:500]
-                }
-            
-            # Parse response
-            result = response.json()
-            
-            logger.info(f"Batch job created successfully!")
-            logger.info(f"Job details: {json.dumps(result, indent=2)}")
-            
-            total_duration = (datetime.now() - start_time).total_seconds()
-            
-            return {
-                "error": False,
-                "job_submitted": True,
-                "job_info": result,
-                "total_images": len(series_instance_uids),
-                "organs_segmented": organ_list,
-                "label_mapping": label_names,
-                "submission_duration_seconds": total_duration,
-                "message": (
-                    f"Batch job submitted successfully! "
-                    f"Processing {len(series_instance_uids)} volumes for organs: {', '.join(organ_list)}. "
-                    f"Results will be automatically saved to datastore with proper DICOM-SEG labels."
-                )
-            }
-            
-        except httpx.TimeoutException as e:
-            elapsed = (datetime.now() - start_time).total_seconds()
-            logger.error(f"Batch submission timeout after {elapsed:.1f}s: {str(e)}")
-            return {
-                "error": True,
-                "stage": "batch_submission_timeout",
-                "message": f"Batch job submission timed out after {elapsed:.1f}s",
-                "elapsed_seconds": elapsed
-            }
-        except Exception as e:
-            import traceback
-            logger.error(f"Batch submission failed: {traceback.format_exc()}")
-            return {
-                "error": True,
-                "stage": "batch_submission_error",
-                "message": str(e),
-                "traceback": traceback.format_exc()
-            }
-        finally:
-            logger.info(f"=== BATCH SEGMENTATION COMPLETED at {datetime.now()} ===")  
     async def _run_interactive(self, labels: List[str]):
         logger.info(f"Starting interactive segmentation guidance for labels: {labels}")
         

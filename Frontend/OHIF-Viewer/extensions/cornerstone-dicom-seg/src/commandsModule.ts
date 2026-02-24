@@ -238,15 +238,15 @@ const commandsModule = ({
      */
     generateSegmentation: ({ segmentationId, options = {} }) => {
       const segmentation = cornerstoneToolsSegmentation.state.getSegmentation(segmentationId);
-
+      console.log("Segmentation retrieved for generation from cornerstonetools:", segmentation);
       const { referencedVolumeId } = segmentation.representationData.LABELMAP;
-
+      console.log("Referenced Volume ID:", referencedVolumeId);
       const segmentationVolume = cache.getVolume(segmentationId);
       const referencedVolume = cache.getVolume(referencedVolumeId);
       const referencedImages = referencedVolume.getCornerstoneImages();
 
       const labelmapObj = generateLabelMaps2DFrom3D(segmentationVolume);
-
+      console.log("Generated labelmap object:", labelmapObj);
       // Generate fake metadata as an example
       labelmapObj.metadata = [];
 
@@ -261,7 +261,7 @@ const commandsModule = ({
         const RecommendedDisplayCIELabValue = dcmjs.data.Colors.rgb2DICOMLAB(
           color.slice(0, 3).map(value => value / 255)
         ).map(value => Math.round(value));
-
+        console.log(`Segment ${segmentIndex} - Label: ${label}, Color: ${color}, CIELab: ${RecommendedDisplayCIELabValue}`);
         const segmentMetadata = {
           SegmentNumber: segmentIndex.toString(),
           SegmentLabel: label,
@@ -380,9 +380,9 @@ const commandsModule = ({
       if (!segmentation) {
         throw new Error('No segmentation found');
       }
-      console.log("segmentan", segmentation);
+      console.log("segmentation", segmentation);
       console.log("desc", SeriesDescription);
-      const generatedData = actions.generateSegmentatitioon({
+      const generatedData = actions.generateSegmentation({
         segmentationId,
         options: {
           SeriesDescription,
@@ -392,6 +392,7 @@ const commandsModule = ({
         throw new Error('Error during segmentation generation');
       }
       const { dataset: naturalizedReport } = generatedData;
+      console.log("generatedData for naturalizedReport", naturalizedReport);
       await dataSource.store.dicom(naturalizedReport);
       // Add the information for where we stored it to the instance as well
       naturalizedReport.wadoRoot = dataSource.getConfig().wadoRoot;
