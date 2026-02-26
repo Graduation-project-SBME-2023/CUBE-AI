@@ -1,4 +1,3 @@
-from mcp.tools.scratchpad import scratchpad_write_note
 from tools import mcp
 from fastapi import FastAPI
 import uvicorn
