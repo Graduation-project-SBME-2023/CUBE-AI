@@ -2,16 +2,16 @@ from pathlib import Path
 from datetime import datetime
 from . import mcp
 import json
+import os
 from tool_logging import ToolEvent, log_tool_state, TextPayload
 
 @mcp.tool()
-async def save_final_output(data: dict, workspace_dir: str):
+async def save_final_output(data: dict):
     """
     Save the agent's final output to a JSON file.
     
     Arguments:
         data -- A Python dict containing the agent's final output.
-        workspace_dir -- The workspace directory to save the final output to.
 
     Returns:
         A confirmation message with the saved file path.
@@ -21,6 +21,8 @@ async def save_final_output(data: dict, workspace_dir: str):
     # json_path = current_dir.parent.parent / "agent_system" / "workspace" / "config.json"
 
     # data['hypothesis'] = 'The radiomics features can detect weather the spleen is cancerous is not.'
+
+    workspace_dir = os.environ.get("WORKSPACE_DIR")
 
     json_path = Path(workspace_dir) / "config.json"
     patient_count = len(data['patient_ids'])

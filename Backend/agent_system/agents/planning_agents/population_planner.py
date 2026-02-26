@@ -33,17 +33,19 @@ class PopulationPlannerAgent(AssistantAgent):
     async def create(cls, model_client = None, workspace_folder=None):
         model_client = OllamaClient() if not model_client else model_client
         mcp_server = StdioServerParams(
-            command="python", args=["Backend/mcp/server.py"]
+            command="python", args=["Backend/mcp/server.py"], env={"WORKSPACE_DIR": workspace_folder}
             )
         mcp_tools = await mcp_server_tools(mcp_server)
-        desired_tools = ['generate_targets', 'get_patient', 'get_volume', 'save_final_output']
+        desired_tools = ['generate_targets', 'get_patient', 'get_volume', 'save_final_output',
+                         'scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',
+                         'scratchpad_write_summary', 'scratchpad_set_status']
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         logger.info(f"Started population selection with available tools: {len(final_tools)}")
         for tool in final_tools:
             logger.info(f"Tool selected: {tool.name}")
         name = "study_population_planner_agent"
         description = POPULATION_PLANNER_AGENT_DESCRIPTION
-        system_message = POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE + f"\n \n The workspace folder to output to is {workspace_folder}"
+        system_message = POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE
         return cls(
             name = name,
             model_client = model_client,

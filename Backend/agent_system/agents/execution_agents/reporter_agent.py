@@ -30,15 +30,15 @@ class ReporterAgent(AssistantAgent):
     async def create(cls, model_client = None, workspace_folder = None):
         model_client = OllamaClient() if not model_client else model_client
         mcp_server = StdioServerParams(
-            command="python", args=["Backend/mcp/server.py"]
+            command="python", args=["Backend/mcp/server.py"], env={"WORKSPACE_DIR": workspace_folder}
             )
         mcp_tools = await mcp_server_tools(mcp_server)
-        desired_tools = ['latex_to_pdf']
+        desired_tools = ['latex_to_pdf', 'scratchpad_read_report']
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         # final_tools = mcp_tools
         name = "latex_reporter_agent"
         description = REPORTER_AGENT_DESCRIPTION
-        system_message = REPORTER_AGENT_SYSTEM_MESSAGE + f"\n\n The workspace folder is {workspace_folder}."
+        system_message = REPORTER_AGENT_SYSTEM_MESSAGE
         return cls(
             name = name,
             model_client = model_client,

@@ -1,3 +1,4 @@
+from mcp.tools.scratchpad import scratchpad_write_note
 from tools import mcp
 from fastapi import FastAPI
 import uvicorn
@@ -30,6 +31,8 @@ from tools.check_having_mask import check_having_mask
 from tools.get_model_info import get_model_info
 # from tools.database.models.get_models import get_models
 # from tools.database.models.create_model import create_model
+
+import tools.scratchpad
 
 
 
