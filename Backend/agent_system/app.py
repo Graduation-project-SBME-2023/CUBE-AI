@@ -6,7 +6,15 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from teams.execution_team import BasicPipelineBuilder
 from autogen_agentchat.teams import GraphFlow
-from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage
+from autogen_agentchat.messages import (
+    ToolCallRequestEvent,
+    ToolCallExecutionEvent,
+    MemoryQueryEvent,
+    UserInputRequestedEvent,
+    ThoughtEvent,
+    BaseChatMessage,
+    BaseAgentEvent,
+)
 from autogen_agentchat.base import TaskResult
 import logging
 import json
@@ -50,8 +58,7 @@ task_manager = TaskManager()
 # ----------------------------------------------------------------------
 # Request model
 # ----------------------------------------------------------------------
-class RunRequest(BaseModel):
-    # hypothesis: str = Field(..., description="Free form clinical hypothesis")
+class SessionControlRequest(BaseModel):
     session_id: str = Field(..., description="Session ID")
 
 
@@ -152,7 +159,7 @@ async def run_planner(session: Session, message: str):
 # POST /run
 # ----------------------------------------------------------------------
 @app.post("/run")
-async def start_execution(request: RunRequest):
+async def start_execution(request: SessionControlRequest):
     # chat_session_id needs to be passed in the request as well
     # task needs to be stored somehow and controlled,
     await task_manager.start_execution(request.session_id, run_pipeline)
@@ -165,13 +172,15 @@ async def run_pipeline(session: Session):
         current_dir, f"workspace_{session.session_id}"
     )
 
+    logger = logging.getLogger("Execution Pipeline")
+    logging.getLogger("autogen_core").setLevel(logging.CRITICAL)
+    logging.getLogger("autogen_core.events").setLevel(logging.CRITICAL)
+
     hypothesis = json.load(
         open(os.path.join(workspace_folder, "state.json"))
     ).get("hypothesis", {}).get("title")
 
-    logging.getLogger(
-        "Execution Pipeline - runner task"
-    ).info(f"workspace_folder: {workspace_folder}, hypothesis: {hypothesis}")
+    logger.info(f"workspace_folder: {workspace_folder}, hypothesis: {hypothesis}")
 
     # Allow pause / cancel before heavy init
     await session.pause_event.wait()
@@ -191,38 +200,60 @@ async def run_pipeline(session: Session):
 
     print(graph_flow)
 
-    logging.getLogger(
-        "Execution Pipeline - runner task"
-    ).info("Starting execution...")
+    logger.info("Starting execution...")
 
     try:
         async for event in graph_flow.run_stream(task=hypothesis):
+            if session.cancel_event.is_set():
+                raise asyncio.CancelledError()
+            await session.pause_event.wait()
 
-            # ⛔ cooperative cancellation
             if session.cancel_event.is_set():
                 raise asyncio.CancelledError()
 
-            # ⏸ cooperative pause
-            await session.pause_event.wait()
-
             if isinstance(event, TaskResult):
+                logger.info("━" * 60)
+                logger.info("✅ TASK COMPLETE")
+                for msg in event.messages:
+                    logger.info(f"  [{msg.source}] {msg.content}")
+                logger.info("━" * 60)
                 await send_ws_message("run_finished", "run_finished")
 
+            elif isinstance(event, ToolCallRequestEvent):
+                logger.info(f"🔧 [{event.source}] TOOL CALL REQUEST")
+                await send_ws_message("run_status", {"current_agent": event.source})
+                for call in event.content:
+                    logger.info(f"   Tool: {call.name}  Args: {call.arguments}")
+
+            elif isinstance(event, ToolCallExecutionEvent):
+                logger.info(f"🔧 [{event.source}] TOOL CALL RESULT")
+                await send_ws_message("run_status", {"current_agent": event.source})
+                for result in event.content:
+                    logger.info(f"   Tool: {result.name}  Result: {result.content}")
+
+            elif isinstance(event, MemoryQueryEvent):
+                await send_ws_message("run_status", {"current_agent": event.source})
+                logger.info(f"🧠 [{event.source}] MEMORY QUERY: {event.content}")
+
+            elif isinstance(event, UserInputRequestedEvent):
+                logger.info(f"⏳ [{event.source}] WAITING FOR USER INPUT")
+
+            elif isinstance(event, ThoughtEvent):
+                logger.info(f"💭 [{event.source}] THOUGHT")
+                logger.info(f"   {event.content}")
+                await send_ws_message("run_status", {"current_agent": event.source})
+
             elif isinstance(event, BaseChatMessage):
-                logging.getLogger(
-                    "Execution Pipeline - runner task"
-                ).info(f"agent {event.source} finished?")
-                await send_ws_message(
-                    "run_status", {"current_agent": event.source}
-                )
+                logger.info("─" * 60)
+                logger.info(f"💬 [{event.source}] ({type(event).__name__})")
+                logger.info(f"   {event.content}")
+                await send_ws_message("run_status", {"current_agent": event.source})
 
             elif isinstance(event, BaseAgentEvent):
-                logging.getLogger(
-                    "Execution Pipeline - runner task"
-                ).info(f"agent {event.source} is running")
-                await send_ws_message(
-                    "run_status", {"current_agent": event.source}
-                )
+                logger.info(f"⚙️  [{event.source}] ({type(event).__name__})")
+                if hasattr(event, "content") and event.content:
+                    logger.info(f"   {event.content}")
+                await send_ws_message("run_status", {"current_agent": event.source})
 
     except asyncio.CancelledError:
         logging.getLogger(
@@ -235,6 +266,54 @@ async def run_pipeline(session: Session):
         raise HTTPException(status_code=500, detail=str(exc))
 
     # return stream
+
+
+@app.post("/pause")
+async def pause_execution(request: SessionControlRequest):
+    try:
+        task_manager.pause(request.session_id)
+        return {"session_id": request.session_id, "status": "paused"}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
+@app.post("/resume")
+async def resume_execution(request: SessionControlRequest):
+    try:
+        task_manager.resume(request.session_id)
+        return {"session_id": request.session_id, "status": "running"}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
+@app.post("/stop")
+async def stop_execution(request: SessionControlRequest):
+    try:
+        task_manager.stop(request.session_id)
+        return {"session_id": request.session_id, "status": "stopped"}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
+@app.post("/restart")
+async def restart_execution(request: SessionControlRequest):
+    try:
+        await task_manager.restart_execution(request.session_id, run_pipeline)
+        return {"session_id": request.session_id, "status": "restarted"}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
+@app.get("/status/{session_id}")
+async def get_status(session_id: str):
+    session = task_manager.sessions.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return {
+        "session_id": session_id,
+        "state": session.state.value,
+        "last_error": session.last_error,
+    }
 
 
 @app.post("/events")

@@ -34,21 +34,21 @@ const CheckCircle2Icon: any = CheckCircle2;
 const SettingsIcon: any = Settings;
 
 // ─── Layout constants ────────────────────────────────────────────────────────
-const CENTER_LINE = 400;      // Horizontal canvas center (Y axis)
+const CENTER_LINE = 400; // Horizontal canvas center (Y axis)
 const START_W = 300;
-const AGENT_W = 220;          // Must match w-[220px] in AgentNode
-const H_GAP = 120;            // Horizontal gap between nodes
+const AGENT_W = 220; // Must match w-[220px] in AgentNode
+const H_GAP = 120; // Horizontal gap between nodes
 
 // Handle anchors (must match node components + MiniFlow's HANDLE_Y_BY_TYPE)
-const AGENT_HEADER_MID = 25;  // top:25 in AgentNode connection dots
-const START_HANDLE_Y = 40;    // top:40 in StartNode connection dot
+const AGENT_HEADER_MID = 25; // top:25 in AgentNode connection dots
+const START_HANDLE_Y = 40; // top:40 in StartNode connection dot
 
 // All nodes are positioned so their handle sits at the same canvas Y.
 // Agent nodes:  node.y + AGENT_HEADER_MID = SHARED_HANDLE_Y
 // Start node:   node.y + START_HANDLE_Y   = SHARED_HANDLE_Y
 const SHARED_HANDLE_Y = CENTER_LINE;
 
-const START_NODE_Y = SHARED_HANDLE_Y - START_HANDLE_Y;   // 360
+const START_NODE_Y = SHARED_HANDLE_Y - START_HANDLE_Y; // 360
 const AGENT_NODE_Y = SHARED_HANDLE_Y - AGENT_HEADER_MID; // 375
 
 const START_X = CENTER_LINE - START_W / 2;
@@ -83,7 +83,9 @@ export default function PlaygroundCanvas({
   const [mode, setMode] = useState<'planning' | 'executing' | 'results'>('planning');
 
   const [nodes, setNodes] = useState<FlowNode[]>(() => {
-    if (!initialHypothesis) return INITIAL_NODES;
+    if (!initialHypothesis) {
+      return INITIAL_NODES;
+    }
     return INITIAL_NODES.map(node =>
       node.type === 'start'
         ? { ...node, data: { ...node.data, description: initialHypothesis } }
@@ -97,8 +99,12 @@ export default function PlaygroundCanvas({
 
   const isPausedRef = useRef(isPaused);
   const modeRef = useRef(mode);
-  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
-  useEffect(() => { modeRef.current = mode; }, [mode]);
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   const hasInitiatedPlan = useRef(false);
 
@@ -108,17 +114,24 @@ export default function PlaygroundCanvas({
 
     const handleWSMessage = (data: any) => {
       const { type, payload } = data;
-      if (type === 'msg') return;
-      if (type === 'node' || type === 'NODE_UPDATE')
+      if (type === 'msg') {
+        return;
+      }
+      if (type === 'node' || type === 'NODE_UPDATE') {
         updateNodeData(data.nodeId || data.id || payload?.nodeId, payload || data.data);
-      if (type === 'plan' || type === 'PLAN_UPDATE')
+      }
+      if (type === 'plan' || type === 'PLAN_UPDATE') {
         applyBackendPlan(payload || data.data || data);
-      if (type === 'tool_update')
+      }
+      if (type === 'tool_update') {
         updateToolProgress(payload);
-      if (type === 'run_status')
+      }
+      if (type === 'run_status') {
         updateCurrentAgent(payload.current_agent);
-      if (type === 'run_finished')
+      }
+      if (type === 'run_finished') {
         updateCurrentAgent('run_finished');
+      }
     };
 
     const handleStatus = (status: boolean) => setIsConnected(status);
@@ -135,7 +148,9 @@ export default function PlaygroundCanvas({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: initialHypothesis, session_id: session_id }),
           });
-          if (!response.ok) console.error('Failed to initiate planning session');
+          if (!response.ok) {
+            console.error('Failed to initiate planning session');
+          }
         } catch (error) {
           console.error('Error contacting planner API:', error);
           hasInitiatedPlan.current = false;
@@ -154,8 +169,12 @@ export default function PlaygroundCanvas({
   const applyBackendPlan = (planPayload: any) => {
     if (planPayload.nodes) {
       setNodes(planPayload.nodes);
-      if (planPayload.edges) setEdges(planPayload.edges);
-      if (planPayload.mode) setMode(planPayload.mode);
+      if (planPayload.edges) {
+        setEdges(planPayload.edges);
+      }
+      if (planPayload.mode) {
+        setMode(planPayload.mode);
+      }
       return;
     }
 
@@ -209,13 +228,17 @@ export default function PlaygroundCanvas({
   const updateCurrentAgent = (current_agent: string) => {
     setNodes(prev =>
       prev.map(node => {
-        if (node.type !== 'agent') return node;
+        if (node.type !== 'agent') {
+          return node;
+        }
         const isCurrent = node.id === current_agent;
         const wasActive = node.data.status === 'active';
-        if (isCurrent)
+        if (isCurrent) {
           return { ...node, data: { ...node.data, status: 'active', isExpanded: true } };
-        if (wasActive && !isCurrent)
+        }
+        if (wasActive && !isCurrent) {
           return { ...node, data: { ...node.data, status: 'completed', isExpanded: false } };
+        }
         return node;
       })
     );
@@ -224,7 +247,9 @@ export default function PlaygroundCanvas({
   const updateToolProgress = (event: ToolEvent) => {
     setNodes(prev =>
       prev.map(node => {
-        if (node.type !== 'agent' || node.id !== event.source) return node;
+        if (node.type !== 'agent' || node.id !== event.source) {
+          return node;
+        }
         const logs = node.data.logs ?? [];
         if (event.event_type === 'tool_started') {
           return {
@@ -232,25 +257,32 @@ export default function PlaygroundCanvas({
             data: {
               ...node.data,
               isExpanded: true,
-              logs: [...logs, {
-                source: event.source,
-                started_at: event.timestamp,
-                last_updated_at: event.timestamp,
-                status: 'active',
-                events: [event],
-              }],
+              logs: [
+                ...logs,
+                {
+                  source: event.source,
+                  started_at: event.timestamp,
+                  last_updated_at: event.timestamp,
+                  status: 'active',
+                  events: [event],
+                },
+              ],
             },
           };
         }
-        if (logs.length === 0) return node;
+        if (logs.length === 0) {
+          return node;
+        }
         const lastLog = logs[logs.length - 1];
         const updatedLastLog = {
           ...lastLog,
           last_updated_at: event.timestamp,
           status:
-            event.event_type === 'tool_finished' ? 'completed'
-            : event.event_type === 'error' ? 'error'
-            : lastLog.status,
+            event.event_type === 'tool_finished'
+              ? 'completed'
+              : event.event_type === 'error'
+                ? 'error'
+                : lastLog.status,
           events: [...lastLog.events, event],
         };
         return {
@@ -264,6 +296,13 @@ export default function PlaygroundCanvas({
   const updateNodeData = (id: string, patch: any) => {
     setNodes(prev => prev.map(n => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
   };
+
+  const resetNodeLogs = (prev: FlowNode[]) =>
+    prev.map(n =>
+      n.type === 'agent'
+        ? { ...n, data: { ...n.data, status: 'pending', logs: [], isExpanded: false } }
+        : n
+    );
 
   const sendPlanToBackend = useCallback(
     (nodesData: FlowNode[], edgesData: FlowEdge[]) => {
@@ -305,7 +344,9 @@ export default function PlaygroundCanvas({
   const editNode = useCallback(
     (id: string) => {
       const node = nodes.find(n => n.id === id);
-      if (!node) return;
+      if (!node) {
+        return;
+      }
       const newDesc = window.prompt('Edit Step Description:', node.data.description);
       if (newDesc !== null) {
         const updatedNodes = nodes.map(n =>
@@ -321,8 +362,9 @@ export default function PlaygroundCanvas({
   const toggleExpand = useCallback((id: string) => {
     setNodes(prev =>
       prev.map(n => {
-        if (n.id === id && n.type === 'agent')
+        if (n.id === id && n.type === 'agent') {
           return { ...n, data: { ...n.data, isExpanded: !(n.data as any).isExpanded } };
+        }
         return n;
       })
     );
@@ -331,15 +373,47 @@ export default function PlaygroundCanvas({
   const startExecution = async () => {
     setMode('executing');
     setIsPaused(false);
-    setNodes(prev =>
-      prev.map(n => ({ ...n, data: { ...n.data, status: 'pending', logs: [], isExpanded: false } }))
-    );
+    setNodes(resetNodeLogs);
     setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
     await fetch('http://localhost:8150/run/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id }),
     });
+  };
+
+  const togglePause = async () => {
+    const next = !isPaused;
+    setIsPaused(next);
+    await fetch(`http://localhost:8150/${next ? 'pause' : 'resume'}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id }),
+    });
+  };
+
+  const stopExecution = async () => {
+    await fetch(`http://localhost:8150/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id }),
+    });
+    setIsPaused(false);
+    setMode('planning');           // go back to planning so user can re-execute
+    setNodes(resetNodeLogs);       // keep nodes, wipe logs only
+    setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
+  };
+
+  const restartExecution = async () => {
+    await fetch(`http://localhost:8150/restart`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id }),
+    });
+    setIsPaused(false);
+    setMode('executing');
+    setNodes(resetNodeLogs);       // keep nodes, wipe logs only
+    setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
   };
 
   const resetWorkflow = () => {
@@ -352,15 +426,18 @@ export default function PlaygroundCanvas({
     );
     setNodes(resetNodes);
     setEdges(INITIAL_EDGES);
-    if (websocketService.isConnected())
+    if (websocketService.isConnected()) {
       websocketService.sendMessage({ type: 'RESET_WORKFLOW' });
+    }
   };
 
   const handleDrop = (event: React.DragEvent) => {
     event.preventDefault();
     const type = event.dataTransfer.getData('application/reactflow');
     const agentDataString = event.dataTransfer.getData('application/agentData');
-    if (!type || !agentDataString) return;
+    if (!type || !agentDataString) {
+      return;
+    }
     const agentData = JSON.parse(agentDataString);
     const reactFlowBounds = event.currentTarget.getBoundingClientRect();
     const position = {
@@ -413,9 +490,13 @@ export default function PlaygroundCanvas({
           </h1>
           <div
             className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider
-              ${mode === 'planning' ? 'border-[#3c5d80] bg-[#1f2d40] text-[#91b9cd]'
-              : mode === 'executing' ? 'border-[#005f7d] bg-[#003f5c] text-[#5acce6]'
-              : 'border-[#085a3c] bg-[#06422d] text-[#6fe5b8]'}`}
+              ${
+                mode === 'planning'
+                  ? 'border-[#3c5d80] bg-[#1f2d40] text-[#91b9cd]'
+                  : mode === 'executing'
+                    ? 'border-[#005f7d] bg-[#003f5c] text-[#5acce6]'
+                    : 'border-[#085a3c] bg-[#06422d] text-[#6fe5b8]'
+              }`}
           >
             {mode}
           </div>
@@ -427,20 +508,24 @@ export default function PlaygroundCanvas({
               onClick={startExecution}
               className="flex items-center gap-2 rounded bg-[#348cfd] px-4 py-1.5 text-xs font-medium text-white shadow-lg transition-colors hover:bg-[#599fff]"
             >
-              <Play size={14} fill="currentColor" /> Execute
+              <Play
+                size={14}
+                fill="currentColor"
+              />{' '}
+              Execute
             </button>
           )}
           {mode === 'executing' && (
             <>
               <button
-                onClick={() => setIsPaused(!isPaused)}
+                onClick={togglePause}
                 className={`flex items-center gap-2 rounded border px-3 py-1.5 text-xs font-medium transition-colors ${isPaused ? 'border-[#705228] bg-[#3b2d1c] text-[#f8ce46]' : 'border-[#3c5d80] bg-[#151a1f] text-[#91b9cd] hover:border-[#91b9cd]'}`}
               >
                 {isPaused ? <Play size={14} /> : <Pause size={14} />}
                 {isPaused ? 'Resume' : 'Pause'}
               </button>
               <button
-                onClick={resetWorkflow}
+                onClick={restartExecution}
                 className="flex items-center gap-2 rounded border border-[#3c5d80] bg-[#151a1f] px-3 py-1.5 text-xs text-[#91b9cd] transition-colors hover:bg-[#2c1a1f] hover:text-[#ff6b6b]"
               >
                 <RotateCcw size={14} /> Stop
@@ -461,11 +546,22 @@ export default function PlaygroundCanvas({
           className="flex items-center border-l border-[#3c5d80] pl-2 text-[10px] text-[#566a84]"
           title={isConnected ? 'WebSocket Connected' : 'Using Mock Data'}
         >
-          {isConnected ? <Wifi size={14} className="text-[#6fe5b8]" /> : <WifiOff size={14} />}
+          {isConnected ? (
+            <Wifi
+              size={14}
+              className="text-[#6fe5b8]"
+            />
+          ) : (
+            <WifiOff size={14} />
+          )}
         </div>
       </div>
 
-      <div className="relative flex-1 overflow-hidden" onDrop={handleDrop} onDragOver={handleDragOver}>
+      <div
+        className="relative flex-1 overflow-hidden"
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+      >
         <MiniFlow
           nodes={nodesWithHandlers}
           edges={edges}
@@ -481,14 +577,32 @@ export default function PlaygroundCanvas({
               </div>
               {mode === 'planning' ? (
                 <>
-                  <div className="flex items-center gap-2 text-[#dadada]"><MousePointer2 size={10} /> Drag nodes & canvas</div>
-                  <div className="flex items-center gap-2 text-[#dadada]"><Edit3 size={10} /> Edit / Delete</div>
-                  <div className="flex items-center gap-2 text-[#dadada]"><ZoomIn size={10} /> Ctrl+Scroll to zoom</div>
+                  <div className="flex items-center gap-2 text-[#dadada]">
+                    <MousePointer2 size={10} /> Drag nodes & canvas
+                  </div>
+                  <div className="flex items-center gap-2 text-[#dadada]">
+                    <Edit3 size={10} /> Edit / Delete
+                  </div>
+                  <div className="flex items-center gap-2 text-[#dadada]">
+                    <ZoomIn size={10} /> Ctrl+Scroll to zoom
+                  </div>
                 </>
               ) : (
                 <>
-                  <div className="flex items-center gap-2 text-[#dadada]"><Activity size={10} className="text-[#5acce6]" /> Active</div>
-                  <div className="flex items-center gap-2 text-[#dadada]"><CheckCircle2 size={10} className="text-[#6fe5b8]" /> Complete</div>
+                  <div className="flex items-center gap-2 text-[#dadada]">
+                    <Activity
+                      size={10}
+                      className="text-[#5acce6]"
+                    />{' '}
+                    Active
+                  </div>
+                  <div className="flex items-center gap-2 text-[#dadada]">
+                    <CheckCircle2
+                      size={10}
+                      className="text-[#6fe5b8]"
+                    />{' '}
+                    Complete
+                  </div>
                 </>
               )}
             </div>
@@ -498,7 +612,10 @@ export default function PlaygroundCanvas({
             <div className="animate-in fade-in absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-[2px] duration-500">
               <div className="max-w-md space-y-4 rounded border border-[#3c5d80] bg-[#151a1f] p-8 text-center shadow-2xl">
                 <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full border border-[#6fe5b8] bg-[#06422d]">
-                  <CheckCircle2 size={24} className="text-[#6fe5b8]" />
+                  <CheckCircle2
+                    size={24}
+                    className="text-[#6fe5b8]"
+                  />
                 </div>
                 <h2 className="text-xl font-bold text-white">Workflow Complete</h2>
                 <button
