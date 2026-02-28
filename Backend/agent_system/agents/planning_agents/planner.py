@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 import re
 import uuid
+import asyncio
 import aiofiles
 from pathlib import Path
 from typing import Callable, Awaitable, Any, List
@@ -12,8 +13,10 @@ from typing import Callable, Awaitable, Any, List
 # Removed Team imports
 from autogen_agentchat.base import TaskResult
 from autogen_agentchat.messages import TextMessage
-from .models import PlannerState, ClinicalHypothesis, StudyPlan, StudyStep
+from .models import PlannerState, ClinicalHypothesis, StudyPlan, StudyStep, TaskMessage
 from .planning_agents import create_planner_agents, create_model_client
+from .context_compiler import compile_task_messages, build_enriched_pipeline_prompt
+from agents.literature_review_agent.knowledge_builder import build_knowledge_base
 
 # Type aliases
 InputProvider = Callable[[], Awaitable[str]]
@@ -149,14 +152,69 @@ class ClinicalPlanner:
             display_text = response_content.replace("APPROVE", "").strip()
             if display_text:
                 await self._send("msg", display_text)
-                
-                
-        except json.JSONDecodeError:
-            # Fallback for non-JSON chat
-            display_text = response_content.replace("APPROVE", "").strip()
-            if display_text:
-                await self._send("msg", display_text)
 
+
+    def _extract_pico_from_hypothesis(self) -> dict:
+        """
+        Extract a PICO dict from the confirmed hypothesis.
+        Maps ClinicalHypothesis fields → knowledge_builder PICO format.
+        """
+        hyp = self.state.hypothesis
+        
+        population = hyp.population
+        if isinstance(population, dict):
+            population = ", ".join(f"{k}: {v}" for k, v in population.items())
+        
+        intervention = hyp.intervention
+        if isinstance(intervention, dict):
+            intervention = ", ".join(f"{k}: {v}" for k, v in intervention.items())
+        
+        outcome = hyp.outcome
+        if isinstance(outcome, dict):
+            outcome = ", ".join(f"{k}: {v}" for k, v in outcome.items())
+        
+        return {
+            "population": str(population) if population else "",
+            "intervention": str(intervention) if intervention else "",
+            "comparison": "",  # Not always specified in hypothesis
+            "outcome": str(outcome) if outcome else "",
+            "hypothesis": hyp.title or "",
+        }
+
+    async def _build_knowledge_and_compile(self) -> list:
+        """
+        Run the knowledge builder (synchronous, CPU-bound) in a thread pool,
+        then compile task messages with the context compiler.
+        
+        Returns list of TaskMessage objects.
+        """
+        pico = self._extract_pico_from_hypothesis()
+        logger.info(f"Building knowledge base with PICO: {pico}")
+        
+        # build_knowledge_base is synchronous + does HTTP calls → run in executor
+        loop = asyncio.get_event_loop()
+        knowledge_base, sources_guide = await loop.run_in_executor(
+            None, build_knowledge_base, pico
+        )
+        
+        logger.info(
+            f"Knowledge base built: {len(knowledge_base):,} chars, "
+            f"sources guide: {len(sources_guide):,} chars"
+        )
+        
+        # Store in state for later use
+        self.state.knowledge_base = knowledge_base
+        self.state.sources_guide = sources_guide
+        
+        # Compile structured task messages
+        task_messages = compile_task_messages(
+            hypothesis=self.state.hypothesis,
+            plan=self.state.plan,
+            knowledge_base=knowledge_base,
+            sources_guide=sources_guide,
+        )
+        
+        return task_messages
 
     async def run(self, start_query: str = "Start"):
         print(f"Planner {start_query} state before run:", self.state)
@@ -213,5 +271,32 @@ class ClinicalPlanner:
             self.state.plan.state = "confirmed"
             await self._save_state()
 
-            await self._send("msg", "Study Plan Confirmed.")
+            await self._send("msg", "Study Plan Confirmed. Building domain knowledge base...")
+
+            # ── PHASE: Literature-Driven Knowledge Building ──────────────
+            try:
+                task_messages = await self._build_knowledge_and_compile()
+                self.state.task_messages = task_messages
+                await self._save_state()
+
+                await self._send("msg", f"Knowledge base built. {len(task_messages)} structured task messages generated.")
+                
+                # Send task message summaries to UI
+                task_summaries = [
+                    {
+                        "task_id": tm.task_id,
+                        "phase": tm.phase,
+                        "agent_id": tm.agent_id,
+                        "agent_title": tm.agent_title,
+                        "has_knowledge": bool(tm.context_augmentation.knowledge_summary),
+                        "has_literature": bool(tm.context_augmentation.literature_findings),
+                        "has_methodology": bool(tm.context_augmentation.methodology_guidance),
+                    }
+                    for tm in task_messages
+                ]
+                await self._send("task_messages", task_summaries)
+            except Exception as e:
+                logger.error(f"Knowledge building failed (non-fatal): {e}", exc_info=True)
+                await self._send("msg", f"Warning: Knowledge base construction failed ({e}). Pipeline will proceed without literature augmentation.")
+
             await self._send("modules_matched", True)

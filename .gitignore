@@ -22,6 +22,8 @@ Backend/test_label.py
 # Workspace files
 Backend/agent_system/workspace/
 Backend/mas/memory/
+Backend/agent_system/agents/literature_review_agent/.knowledge_cache/
+Backend/agent_system/agents/literature_review_agent/literature_review_output
 
 # Saved Data - will change this after fixing the env variables for all data directories
 *.nii.gz
@@ -30,7 +32,7 @@ Backend/mas/memory/
 **/*.log
 Backend/apps/radiology/logs/app.log
 
-
+Backend/agent_system/agents/literature_review_agent/.knowledge_cache
 Backend/apps/radiology/bin/
 Backend/apps/radiology/General_Data/
 Backend/apps/radiology/Labels/
