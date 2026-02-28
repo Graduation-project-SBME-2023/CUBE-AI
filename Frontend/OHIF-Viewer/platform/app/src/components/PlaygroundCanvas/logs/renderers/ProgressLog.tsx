@@ -14,7 +14,7 @@ export function ProgressLog({
         </div>
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 min-w-0">
         <div className="flex-1 h-2 bg-[#1f2630] rounded overflow-hidden">
           <div
             className="h-full bg-[#5acce6] transition-all"

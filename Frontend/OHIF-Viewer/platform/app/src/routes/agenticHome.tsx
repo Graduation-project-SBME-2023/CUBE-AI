@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Search, Clock, Plus, ArrowLeft, ArrowRight, Box, Bot } from 'lucide-react';
 import Card from '../components/ui/Card';
 import { useNavigate } from 'react-router';
@@ -42,15 +42,16 @@ const styles = {
   heroSubtitle:
     'text-2xl md:text-3xl font-medium text-transparent bg-clip-text bg-gradient-to-r from-white to-[#91b9cd] max-w-4xl mx-auto leading-relaxed',
 
-  // Search Bar
+  // Search Bar (Chat-like)
   searchContainer: 'relative max-w-3xl mx-auto w-full pt-4',
-  searchInputWrapper: 'relative group',
-  searchInput:
-    'w-full h-16 pl-14 pr-36 rounded-2xl bg-[#151a1f] border border-[#3c5d80] text-lg text-white placeholder-[#566a84] focus:outline-none focus:border-[#5acce6] focus:ring-1 focus:ring-[#5acce6] transition-all shadow-2xl',
+  searchInputWrapper: 'relative group flex flex-col gap-3',
+  searchTextareaContainer: 'relative w-full',
+  searchTextarea:
+    'w-full min-h-[56px] max-h-[140px] py-4 pl-14 pr-4 rounded-2xl bg-[#151a1f] border border-[#3c5d80] text-lg text-white placeholder-[#566a84] focus:outline-none focus:border-[#5acce6] focus:ring-1 focus:ring-[#5acce6] transition-all shadow-2xl resize-none overflow-y-auto',
   searchIcon:
-    'absolute left-5 top-1/2 -translate-y-1/2 text-[#566a84] group-focus-within:text-[#5acce6] transition-colors',
+    'absolute left-5 top-4 text-[#566a84] group-focus-within:text-[#5acce6] transition-colors',
   searchButton:
-    'absolute right-2 top-2 bottom-2 px-6 bg-[#5acce6] hover:bg-[#5acce6] text-[#000000] font-bold rounded-xl flex items-center gap-2 transition-colors',
+    'self-end px-6 py-3 bg-[#5acce6] hover:bg-[#4ab8d4] text-[#000000] font-bold rounded-xl flex items-center gap-2 transition-colors shadow-lg',
 
   // Grid Section
   gridSection: 'w-full max-w-6xl mx-auto px-6 pb-20 z-10',
@@ -80,7 +81,18 @@ const styles = {
 // ==========================================
 const AgenticHome = ({ onNavigate, onBack }) => {
   const [hypothesis, setHypothesis] = useState('');
+  const textareaRef = useRef(null);
   const navigate = useNavigate();
+
+  // Auto-resize textarea as content grows
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = '56px'; // Reset to min height
+      const scrollHeight = textareaRef.current.scrollHeight;
+      textareaRef.current.style.height = Math.min(scrollHeight, 140) + 'px';
+    }
+  }, [hypothesis]);
+
   const handleSearch = async () => {
     if (!hypothesis.trim()) {
       return;
@@ -119,6 +131,14 @@ const AgenticHome = ({ onNavigate, onBack }) => {
           sessionId: Date.now(),
         },
       });
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    // Submit on Enter (without Shift)
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSearch();
     }
   };
 
@@ -198,21 +218,32 @@ const AgenticHome = ({ onNavigate, onBack }) => {
 
         <div className={styles.searchContainer}>
           <div className={styles.searchInputWrapper}>
-            <SearchIcon
-              className={styles.searchIcon}
-              size={24}
-            />
-            <input
-              type="text"
-              className={styles.searchInput}
-              placeholder="Enter your research question or hypothesis..."
-              value={hypothesis}
-              onChange={e => setHypothesis(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && handleSearch()}
-            />
+            {/* Textarea Container with Icon */}
+            <div className={styles.searchTextareaContainer}>
+              <SearchIcon
+                className={styles.searchIcon}
+                size={24}
+              />
+              <textarea
+                ref={textareaRef}
+                className={styles.searchTextarea}
+                placeholder="Enter your research question or hypothesis..."
+                value={hypothesis}
+                onChange={e => setHypothesis(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={1}
+              />
+            </div>
+
+            {/* Button on separate line */}
             <button
               onClick={handleSearch}
               className={styles.searchButton}
+              disabled={!hypothesis.trim()}
+              style={{
+                opacity: hypothesis.trim() ? 1 : 0.5,
+                cursor: hypothesis.trim() ? 'pointer' : 'not-allowed'
+              }}
             >
               Start Research <ArrowRightIcon size={16} />
             </button>
