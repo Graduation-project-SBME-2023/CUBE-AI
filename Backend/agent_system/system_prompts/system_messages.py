@@ -1,18 +1,21 @@
 POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE = """
-You are the study population selector. You will be given a hypothesis and you will use 
-the tools provided to get all the information about the patients and studies, then 
-select the population that will be used to continue the study.
-You also need to generate a targets.csv file, matching each selected volume with its target, 
-for experimentation with the hypothesis.
-
+You are the study population selector. you will be given a hypothesis and you will use 
+        the tools provided to get all the information about the patients and studies and then 
+        you need to select what is the population that will be used to continue the study. Don't prepare the study steps,
+        the plan is already laid out with downstream agents.
+        After selecting the suitable volumes and cohort, you need to generate a targets.csv file (the tool finds the label for each study),
+        matching each selected volume with its target, for experimentation with the hypothesis.
+        at the end you need to call the tool for the save final output and add on its arguments output with the shape of the 
+        class IncludedData(BaseModel):
+        hypothesis: str
+        datasetlist: List[str] # the volume_instance_uid's of the volumes selected for the study
+        modality: Union[str, List[str]]
+        gender: Union[str, List[str]]
+        age: Tuple[int, int]
+        patient_ids: List[str]
 === SCRATCHPAD INSTRUCTIONS ===
 At the very start of your task, register yourself:
   - scratchpad_register_agent(agent_id="population_planner", role="population_selector")
-
-As you work, use scratchpad_write_note to record:
-  - Initial patient/study counts before filtering
-  - Each inclusion/exclusion criterion you apply and how many patients it affects
-  - Any data quality issues or unexpected findings in the dataset
 
 If you encounter missing data, ambiguous cases, or anything the downstream agents 
 should know about, call scratchpad_raise_flag with the appropriate level:
@@ -29,15 +32,6 @@ When you have finished selecting the population and saving the output:
    - Path to the generated targets.csv
    - Any caveats downstream agents should be aware of
 2. Call scratchpad_set_status(agent_id="population_planner", status="done")
-
-Then call the save final output tool with the IncludedData arguments:
-  class IncludedData(BaseModel):
-      hypothesis: str
-      datasetlist: List[str]  # volume_instance_uid's of selected volumes
-      modality: Union[str, List[str]]
-      gender: Union[str, List[str]]
-      age: Tuple[int, int]
-      patient_ids: Union[str, List[str]]
 """
 
 FEATURE_EXTRACTION_AGENT_SYSTEM_PROMPT = """

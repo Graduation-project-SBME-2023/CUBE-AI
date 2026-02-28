@@ -37,7 +37,7 @@ class PopulationPlannerAgent(AssistantAgent):
             )
         mcp_tools = await mcp_server_tools(mcp_server)
         desired_tools = ['generate_targets', 'get_patient', 'get_volume', 'save_final_output',
-                         'scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',
+                         'scratchpad_register_agent', 'scratchpad_raise_flag',
                          'scratchpad_write_summary', 'scratchpad_set_status']
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         logger.info(f"Started population selection with available tools: {len(final_tools)}")
