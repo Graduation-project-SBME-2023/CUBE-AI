@@ -34,7 +34,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR")
+WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "../../agent_system/workspace")
 SCRATCHPAD_FILE = os.path.join(WORKSPACE_DIR, "scratchpad.json")
 AgentStatus = Literal["in_progress", "done", "blocked", "failed"]
 FlagLevel = Literal["info", "warning", "error", "critical"]
