@@ -2204,6 +2204,7 @@ async def extract_radiomic_features(
             normalize: bool = True,
             resample: bool = True,
             n_workers: int = 1,
+            workspace_folder: str = None
         ) -> Dict[str, Any]:
     """
     Extract radiomic features from medical images and segmentation masks.
@@ -2219,11 +2220,12 @@ async def extract_radiomic_features(
             except Exception:
                 return [value]
         return value
-    root_dir = Path(__file__).parent.parent
-    output_dir = os.path.join(root_dir, 'workspace', 'features')
-    image_dir = os.path.join(root_dir, 'workspace', 'volumes')
-    mask_dir = os.path.join(root_dir, 'workspace', 'masks')
-    targets_csv = os.path.join(root_dir, 'workspace', 'populations', 'targets', 'targets.csv')
+    if not workspace_folder:
+        workspace_folder = os.path.join(Path(__file__).parent.parent, 'workspace')
+    output_dir = os.path.join(workspace_folder, 'features')
+    image_dir = os.path.join(workspace_folder, 'volumes')
+    mask_dir = os.path.join(workspace_folder, 'masks')
+    targets_csv = os.path.join(workspace_folder, 'populations', 'targets', 'targets.csv')
     target_column = 'target'
 
 
@@ -2266,7 +2268,8 @@ async def analyze_feature_importance(
     encode_categorical: Optional[str] = "auto",
     max_onehot_cardinality: Optional[int] = 10,
     create_plots: Optional[bool] = False,
-    top_n_plot: Optional[int] = 30
+    top_n_plot: Optional[int] = 30,
+    workspace_folder: str = None
 ) -> Dict[str, Any]:
     """
     Run the FeatureImportanceAnalysisTool asynchronously.
@@ -2276,8 +2279,11 @@ async def analyze_feature_importance(
     else:
         top_features_str = str(top_features)
         
-    root_dir = Path(__file__).parent.parent
-    output_dir = os.path.join(root_dir, 'workspace', 'features')
+    if workspace_folder:
+        output_dir = os.path.join(workspace_folder, 'features')
+    else:
+        root_dir = Path(__file__).parent.parent
+        output_dir = os.path.join(root_dir, 'workspace', 'features')
     target_column = 'target'
 
     def run_analysis():

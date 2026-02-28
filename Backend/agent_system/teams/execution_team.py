@@ -59,15 +59,15 @@ class BasicPipelineBuilder(DiGraphBuilder):
         self.task_messages = task_messages or []
 
     @classmethod
-    async def create(cls, task_messages: Optional[List[TaskMessage]] = None):
+    async def create(cls, workspace_folder=None, task_messages: Optional[List[TaskMessage]] = None):
         setup_logging()
 
-        population_agent = await PopulationPlannerAgent.create()
-        seg_agent = await SegmentationAgent.create()
-        feat_agent = await FeatureExtractionAgent.create()
-        model_agent = await ModelingAgent.create()
-        report_agent = await ResultReporterAgent.create()
-        latex_agent = await ReporterAgent.create()
+        population_agent = await PopulationPlannerAgent.create(workspace_folder=workspace_folder)
+        seg_agent = await SegmentationAgent.create(workspace_folder=workspace_folder)
+        feat_agent = await FeatureExtractionAgent.create(workspace_folder=workspace_folder)
+        model_agent = await ModelingAgent.create(workspace_folder=workspace_folder)
+        report_agent = await ResultReporterAgent.create(workspace_folder=workspace_folder)
+        latex_agent = await ReporterAgent.create(workspace_folder=workspace_folder)
 
         filtered_seg_agent = MessageFilterAgent(
             name="segmentation_agent",

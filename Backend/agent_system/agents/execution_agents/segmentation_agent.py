@@ -1,6 +1,9 @@
 import asyncio
 import sys
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "..", "..", ".."))
@@ -19,21 +22,29 @@ from .segmentation_module import SegmentationModule
 from autogen_core.tools import FunctionTool
 
 
-async def test_module():
-    """Test function for the SegmentationModule with return value"""
+async def test_module(workspace_folder: str | None = None):
+    """Test function for the SegmentationModule with return value
+        :arg workspace_folder: The workspace folder to save outputs to.
+    """
     try:
         # print("Starting SegmentationModule test...")
         
         # Initialize
+        if workspace_folder is None:
+            return RuntimeError("Please specify a workspace folder")
         agent = SegmentationModule()
         await agent.initialize()
         
-        current_file = Path(__file__)
-        config_path = os.path.join(current_file.parent.parent.parent, "workspace", "config.json")
+        # current_file = Path(__file__)
+        # config_path = os.path.join(current_file.parent.parent.parent, "workspace", "config.json")
+        if workspace_folder is None:
+            current_file = Path(__file__)
+            workspace_folder = os.path.join(current_file.parent.parent.parent, "workspace")
+        config_path = os.path.join(workspace_folder, "config.json")
         # print(f"Running with config: {config_path}")
         
         # Run the agent and capture the result
-        result = await agent.run(config_path)
+        result = await agent.run(config_path, workspace_folder)
         
         # print("Test completed successfully!")
         # print(f"Result: {result}")
@@ -56,7 +67,7 @@ class SegmentationAgent(AssistantAgent):
                         max_tool_iterations=max_tool_iterations)
         
     @classmethod
-    async def create(cls, model_client = None):
+    async def create(cls, model_client = None, workspace_folder = None):
         model_client = OllamaClient() if not model_client else model_client
         # mcp_server = StdioServerParams(
         #     command="python", args=["Backend/mcp/server.py"]
@@ -65,15 +76,17 @@ class SegmentationAgent(AssistantAgent):
         # desired_tools = ['get_modeling_results']
         # final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         # final_tools = mcp_tools
+        logger.info(f"Creating segmentation agent")
         tools = [
             FunctionTool(
                 test_module,
                 description="the tool that starts the segmentation, it has the capability to know what to segment and install by itself"
             )
         ]
+        logger.info(f"Tools initialized: {tools}")
         name = "segmentation_agent"
         description = "agent to run the segmentation task, has the capability to know which volumes to segment by itself"
-        system_message = "to start the task of the segmentation, all you need to do just run the tool you have, do not ask any questions"
+        system_message = f"to start the task of the segmentation, all you need to do just run the tool you have, do not ask any questions, the workspace folder is {workspace_folder}"
         return cls(
             name = name,
             model_client = model_client,

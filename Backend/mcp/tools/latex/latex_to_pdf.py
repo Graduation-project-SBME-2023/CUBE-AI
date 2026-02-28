@@ -12,7 +12,7 @@ from tool_logging import ToolEvent, log_tool_state, TextPayload
 @mcp.tool()
 async def latex_to_pdf(
     latex_text: Annotated[str, Field(description="The complete LaTeX source code content, including the preamble and document body, to be compiled.")] ,
-    output_filename: Annotated[str, Field(description="The file name where the generated PDF should be saved, without the path (e.g., 'report.pdf').")]
+    output_filename: Annotated[str, Field(description="The file name where the generated PDF should be saved, without the path (e.g., 'report.pdf').")],
 ) -> str: 
     """
     Compiles LaTeX source code into a PDF document using pdflatex.
@@ -26,6 +26,8 @@ async def latex_to_pdf(
             payload = TextPayload(message='Generating pdf...')
             start_event = ToolEvent('tool_started', 'latex_reporter_agent', 'text', payload)
             log_tool_state(start_event)
+            log_event = ToolEvent('tool_progress', 'latex_reporter_agent', 'text', payload)
+            log_tool_state(log_event)
             tex_path = os.path.join(temp, "document.tex")
 
             # Write LaTeX to .tex file
@@ -49,7 +51,10 @@ async def latex_to_pdf(
                 payload = TextPayload(message='LaTeX compilation failed.')
                 error_compilation_event = ToolEvent('error','latex_reporter_agent', 'text', payload)
                 log_tool_state(error_compilation_event)
-                return "LaTeX compilation failed. Check your LaTeX syntax."
+
+                stdout = result.stdout.decode("utf-8", errors="ignore")
+                stderr = result.stderr.decode("utf-8", errors="ignore")
+                return f"LaTeX compilation failed. Check your LaTeX syntax. {stdout}. {stderr}"
 
             # Read compiled PDF bytes
             pdf_path = os.path.join(temp, "document.pdf")
@@ -63,10 +68,15 @@ async def latex_to_pdf(
             with open(pdf_path, "rb") as f:
                 pdf_bytes = f.read()
 
-    
-        current_dir = os.getcwd()
-        target_dir = os.path.abspath(os.path.join(current_dir, "Backend", "agent_system/workspace"))
-        final_folder = os.path.join(target_dir, "reports") 
+        workspace_folder = os.environ.get("WORKSPACE_DIR")
+        if not workspace_folder:
+            current_dir = os.getcwd()
+            target_dir = os.path.abspath(os.path.join(current_dir, "Backend", "agent_system/workspace"))
+            final_folder = os.path.join(target_dir, "reports")
+        else:
+            final_folder = os.path.join(workspace_folder, "reports")
+
+        os.makedirs(final_folder, exist_ok=True)
         final_path = os.path.join(final_folder, output_filename)
                 
         # Save final PDF
