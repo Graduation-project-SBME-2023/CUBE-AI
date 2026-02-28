@@ -15,12 +15,12 @@ def create_model_client(api_key: str, model: str = "gpt-oss:120b-cloud"):
 
 # Static definition of the workflow nodes as per requirement
 STATIC_NODES = [
-    {"id": "study_population_planner_agent", "default_title": "Retrieve Study", "default_desc": "Fetch DICOM metadata"},
-    {"id": "segmentation_agent", "default_title": "Segmentation", "default_desc": "Run ML Segmentation Model"},
-    {"id": "feature_extraction_agent", "default_title": "Radiomics Feature Extraction", "default_desc": "Calculate ROI metrics"},
-    {"id": "modeling_agent", "default_title": "ML Modeling", "default_desc": "Commit SR to PACS"},
-    {"id": "result_reporter_agent", "default_title": "Analyze Results", "default_desc": "Commit SR to PACS"},
-    {"id": "latex_reporter_agent", "default_title": "Write PDF Report", "default_desc": "Commit SR to PACS"},
+    {"id": "study_population_planner_agent", "default_title": "Cohort Discovery", "default_desc": "Query PACS, select study population, define inclusion/exclusion criteria, generate targets"},
+    {"id": "segmentation_agent", "default_title": "Segmentation", "default_desc": "Run automatic or interactive ROI segmentation on selected volumes"},
+    {"id": "feature_extraction_agent", "default_title": "Radiomics Feature Extraction", "default_desc": "Extract PyRadiomics features from image-mask pairs and rank feature importance"},
+    {"id": "modeling_agent", "default_title": "ML Modeling", "default_desc": "Train and evaluate classification models on extracted features"},
+    {"id": "result_reporter_agent", "default_title": "Result Analysis", "default_desc": "Aggregate results, validate hypothesis, generate scientific summary"},
+    {"id": "latex_reporter_agent", "default_title": "Manuscript Generation", "default_desc": "Format findings as LaTeX and render final PDF report"},
 ]
 
 def create_planner_agents(model_client, input_func: Callable[[], Awaitable[str]]) -> Dict[str, Any]:

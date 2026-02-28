@@ -60,6 +60,11 @@ if _current_dir not in sys.path:
     sys.path.insert(0, _current_dir)
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Dynamic Knowledge Builder
+# ──────────────────────────────────────────────────────────────────────────────
+from knowledge_builder import build_knowledge_base
+
+# ──────────────────────────────────────────────────────────────────────────────
 # AutoGen
 # ──────────────────────────────────────────────────────────────────────────────
 from autogen_agentchat.agents import AssistantAgent
@@ -170,6 +175,7 @@ _DOMAIN_KEYWORDS: List[str] = [
 
 def _is_domain_relevant(title: str, abstract: str) -> bool:
     """Return True if the paper mentions at least 2 domain keywords."""
+    #can we make this based on llm call or semantic similarity instead of keywords mathcing 
     text = (title + " " + abstract).lower()
     hits = sum(1 for kw in _DOMAIN_KEYWORDS if kw.lower() in text)
     return hits >= 2
@@ -530,228 +536,39 @@ def save_output(filename: str, content: str) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SECTION 3 — AGENT SYSTEM PROMPTS
+# SECTION 3 — AGENT SYSTEM PROMPTS (Template Functions)
+# ══════════════════════════════════════════════════════════════════════════════
+# Prompts are now generated dynamically at runtime via template functions.
+# The knowledge base is built from online medical databases (PubMed, MeSH,
+# Wikipedia, Semantic Scholar, Europe PMC) by knowledge_builder.py.
+# See build_knowledge_base() for details.
+#
+# LEGACY STATIC KNOWLEDGE BASE REMOVED — replaced by dynamic builder.
+# The static _RADIOLOGY_KNOWLEDGE_BASE and _SEARCH_SOURCES_GUIDE that were
+# previously hardcoded here are now generated per-PICO by knowledge_builder.py.
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ──────────────────────────────────────────────────────────────────────────────
-# RADIOLOGY DOMAIN KNOWLEDGE BASE — shared context injected into all prompts
-# ──────────────────────────────────────────────────────────────────────────────
-_RADIOLOGY_KNOWLEDGE_BASE = """\
-════════════════════════════════════════════════════════════════════════════════
-RADIOLOGY DOMAIN KNOWLEDGE BASE  (your foundational expertise — apply always)
-════════════════════════════════════════════════════════════════════════════════
-
-┌─ IMAGING MODALITIES & PROTOCOLS ──────────────────────────────────────────┐
-│ CT (Computed Tomography)                                                   │
-│   • Contrast phases: non-contrast (NCCT), arterial (25-35s), portal        │
-│     venous (60-70s), delayed (3-5 min), equilibrium phase                  │
-│   • Key parameters: slice thickness (0.5-1.5mm thin preferred), kVp,       │
-│     mAs, pitch, reconstruction kernel (soft/sharp), matrix size            │
-│   • Hounsfield Units (HU): fat -100 to -50, soft tissue 20-80,             │
-│     blood 55-65, bone 400+, contrast-enhancing lesions >100                │
-│   • Noise reduction: iterative reconstruction (ADMIRE, ASIR-V, AIDR)       │
-│                                                                             │
-│ MRI (Magnetic Resonance Imaging)                                            │
-│   • Sequences: T1W, T2W, DWI/ADC, DCE-MRI, STIR, fat-sat, Dixon           │
-│   • Field strengths: 1.5T vs 3T (higher SNR, B0/B1 inhomogeneity)         │
-│   • Gadolinium contrast: extracellular agents (Gd-DTPA), hepatobiliary     │
-│   • ADC maps from DWI: restricted diffusion in malignancy                  │
-│                                                                             │
-│ PET-CT & PET-MRI                                                            │
-│   • FDG-PET: SUVmax, SUVmean, MTV (metabolic tumour volume), TLG           │
-│   • Staging: Deauville scale for lymphoma, Lugano classification            │
-│                                                                             │
-│ Nuclear Medicine: Tc-99m sulfur colloid for RES uptake assessment          │
-└────────────────────────────────────────────────────────────────────────────┘
-
-┌─ SPLENIC PATHOLOGY & CLINICAL CONTEXT ────────────────────────────────────┐
-│ Normal spleen: homogeneous, 8-13cm craniocaudal, ~150g, arcuate vessels   │
-│                                                                             │
-│ Malignant pathology:                                                        │
-│   • Lymphoma: Hodgkin (HL) and Non-Hodgkin (NHL) — most common splenic     │
-│     malignancy; diffuse infiltration, miliary, nodular, or bulky patterns  │
-│     Subtypes: DLBCL, follicular, marginal zone, mantle cell, Burkitt       │
-│   • Leukaemia: CML, CLL, AML → uniform splenomegaly                       │
-│   • Metastases: melanoma, lung, breast, colon, ovarian primaries           │
-│   • Primary splenic malignancies: angiosarcoma, PMBCL (rare)               │
-│                                                                             │
-│ Benign mimics: hamartoma, haemangioma, lymphangioma, Gaucher disease,      │
-│   sarcoidosis, splenic infarcts, abscess, littoral cell angioma            │
-│                                                                             │
-│ Staging systems: Ann Arbor, Lugano (lymphoma); AJCC TNM (solid tumours)   │
-│ Clinical markers: LDH, beta-2 microglobulin, CBC with differential,        │
-│   bone marrow biopsy, PET-CT Deauville score                               │
-│                                                                             │
-│ Imaging signs: splenomegaly (>13cm), splenic index, focal hypodensity,     │
-│   heterogeneity, capsular irregularity, peri-splenic adenopathy            │
-└────────────────────────────────────────────────────────────────────────────┘
-
-┌─ RADIOMICS PIPELINE & IBSI STANDARDS ─────────────────────────────────────┐
-│ Standard radiomics workflow (per IBSI 2.0 / Lambin et al. 2017):           │
-│   1. Image acquisition & standardisation                                   │
-│   2. ROI/VOI segmentation (manual, semi-auto, deep learning)               │
-│   3. Image pre-processing (resampling, normalisation, interpolation)       │
-│   4. Feature extraction                                                     │
-│   5. Feature selection (filter: LASSO, mRMR; wrapper: RFE)                │
-│   6. Model building & internal validation (k-fold CV, bootstrap)           │
-│   7. External validation & calibration (Hosmer-Lemeshow, reliability)      │
-│                                                                             │
-│ Feature categories (IBSI-compliant naming):                                 │
-│   • First-order statistics: mean, median, SD, kurtosis, skewness,          │
-│     entropy, energy, uniformity (18 features)                              │
-│   • Shape/morphological: volume, surface area, sphericity, elongation,     │
-│     flatness, maximum 3D diameter, mesh volume (14 features)               │
-│   • Texture — GLCM (Grey Level Co-occurrence Matrix): contrast,            │
-│     correlation, energy, homogeneity, ASM, IDM, dissimilarity              │
-│   • Texture — GLRLM (Grey Level Run Length): SRE, LRE, GLN, RLN,          │
-│     LRHGE, SRHGE, RLNU, GLNU                                               │
-│   • Texture — GLSZM (Grey Level Size Zone): SZE, LZE, GLNU, ZSNU          │
-│   • Texture — NGTDM (Neighbourhood Grey Tone Difference): busyness,        │
-│     coarseness, complexity, contrast, strength                              │
-│   • Texture — GLDM (Grey Level Dependence Matrix)                          │
-│   • Wavelet features: HHH, HHL, HLH, HLL, LHH, LHL, LLH, LLL             │
-│     decompositions — multiply first-order + GLCM features                  │
-│   • LoG (Laplacian of Gaussian) filtered features: sigma 0.5-5mm           │
-│                                                                             │
-│ Reproducibility: ICC > 0.75 acceptable, ICC > 0.90 excellent               │
-│ Feature selection pitfalls: overfitting, curse of dimensionality,          │
-│   feature instability across scanners/protocols                             │
-│                                                                             │
-│ Radiomic score (Rad-score): linear combination of selected features,       │
-│   often via logistic regression coefficient weighting                      │
-│ Nomogram: combines Rad-score + clinical variables for clinical utility     │
-└────────────────────────────────────────────────────────────────────────────┘
-
-┌─ ML/DL METHODS IN RADIOLOGY ──────────────────────────────────────────────┐
-│ Classical ML classifiers: SVM (linear/RBF), Random Forest, XGBoost,        │
-│   Gradient Boosting, LDA, k-NN, Naive Bayes, Logistic Regression           │
-│ Deep Learning: CNN (AlexNet, VGG, ResNet, DenseNet, EfficientNet),         │
-│   Vision Transformers (ViT), 3D-UNet for volumetric segmentation            │
-│ Explainability: SHAP (SHapley Additive exPlanations), LIME, Grad-CAM,      │
-│   saliency maps, attention maps                                             │
-│ Class imbalance: SMOTE, ADASYN, cost-sensitive learning, focal loss        │
-│ Transfer learning: ImageNet pre-trained fine-tuned on medical images        │
-│ Multi-modal fusion: early fusion, late fusion, intermediate fusion          │
-└────────────────────────────────────────────────────────────────────────────┘
-
-┌─ DIAGNOSTIC PERFORMANCE METRICS ──────────────────────────────────────────┐
-│ Sensitivity (recall, TPR): TP / (TP + FN)                                  │
-│ Specificity (TNR): TN / (TN + FP)                                          │
-│ PPV (precision): TP / (TP + FP)                                            │
-│ NPV: TN / (TN + FN)                                                        │
-│ AUC-ROC: area under ROC curve (0.5=random, 0.7-0.8=acceptable,             │
-│   0.8-0.9=excellent, >0.9=outstanding)                                     │
-│ AUC-PRC: precision-recall curve (better for imbalanced data)               │
-│ F1 score: harmonic mean of precision and recall                             │
-│ DeLong test: statistical comparison of two AUC values                      │
-│ Calibration: Hosmer-Lemeshow goodness-of-fit, calibration plots            │
-│ NRI (Net Reclassification Improvement), IDI (Integrated Discrimination)    │
-│ Decision curve analysis (DCA): net benefit at varying threshold probs      │
-│ Inter-observer agreement: Cohen's kappa, ICC, Bland-Altman                 │
-└────────────────────────────────────────────────────────────────────────────┘
-
-┌─ KEY RADIOLOGY JOURNALS (prioritise in literature search) ─────────────────┐
-│ Tier 1 (IF >6):                                                             │
-│   Radiology (radiology.rsna.org) — IF ~20                                  │
-│   European Radiology (springer.com/eurad) — IF ~7                          │
-│   Radiology: Artificial Intelligence (pubs.rsna.org/journal/ai) — IF ~8   │
-│   European Journal of Radiology — IF ~5                                    │
-│   Medical Image Analysis (Elsevier) — IF ~14                               │
-│   IEEE Transactions on Medical Imaging — IF ~11                            │
-│   JACR (Journal of the American College of Radiology) — IF ~5             │
-│                                                                             │
-│ Tier 2 (IF 3-6):                                                            │
-│   Academic Radiology, Insights into Imaging, Cancer Imaging,               │
-│   Quantitative Imaging in Medicine and Surgery (QIMS),                     │
-│   Frontiers in Oncology, Scientific Reports, PLOS ONE                     │
-│                                                                             │
-│ Specialty journals:                                                         │
-│   European Journal of Haematology, Haematologica, Blood,                   │
-│   Annals of Hematology (for lymphoma/haematology context)                  │
-│   Journal of Nuclear Medicine, European Journal of Nuclear Medicine         │
-└────────────────────────────────────────────────────────────────────────────┘
-
-┌─ AUTHORITATIVE CLINICAL GUIDELINES & RESOURCES ───────────────────────────┐
-│ RSNA (Radiological Society of North America): rsna.org                     │
-│ ESR (European Society of Radiology): myesr.org                             │
-│ ACR (American College of Radiology): acr.org                               │
-│   ACR Appropriateness Criteria: acsearch.acr.org                           │
-│ ESMO Guidelines: esmo.org/guidelines (lymphoma, haematology)               │
-│ NCCN Guidelines: nccn.org (B-cell lymphoma, splenic marginal zone)         │
-│ IBSI (Image Biomarker Standardisation Initiative): ibsi.netlify.app         │
-│ TRIPOD statement (prediction model reporting): equator-network.org          │
-│ RQS (Radiomics Quality Score): Lambin et al., European Radiology 2017      │
-│ CLAIM checklist (AI in medical imaging): Mongan et al., 2020               │
-│ STARD 2015 (diagnostic accuracy reporting): equator-network.org            │
-│ WHO Classification of Tumours (Haematopoietic): who.int                   │
-└────────────────────────────────────────────────────────────────────────────┘
-
-┌─ KEY RADIOLOGY AI BENCHMARKS & DATASETS ───────────────────────────────────┐
-│ Splenic / Abdominal:                                                        │
-│   • Multi-Atlas Labeling Beyond the Cranial Vault (BTCV) — 50 CT scans    │
-│   • Medical Segmentation Decathlon (Task 3: liver, Task 9: spleen)         │
-│   • NIH DeepLesion — 32,735 lesion annotations across CT                  │
-│   • TCIA (The Cancer Imaging Archive): tcia.nci.nih.gov — multiple         │
-│     cancer-specific collections (lymphoma, HCC, etc.)                      │
-│   • Lymphoma CT dataset — TCIA collection                                  │
-│                                                                             │
-│ General radiology AI:                                                       │
-│   • LIDC-IDRI (lung nodule), LUNA16, CheXpert, MIMIC-CXR,                 │
-│     BraTS (brain tumour), LiTS (liver tumour)                              │
-└────────────────────────────────────────────────────────────────────────────┘
-"""
 
 # ──────────────────────────────────────────────────────────────────────────────
-# SEARCH SOURCES REFERENCE — injected into executor & compiler prompts
+# PROMPT TEMPLATE FUNCTIONS
 # ──────────────────────────────────────────────────────────────────────────────
-_SEARCH_SOURCES_GUIDE = """\
-┌─ CURATED SEARCH SOURCES FOR RADIOLOGY AI LITERATURE ──────────────────────┐
-│                                                                             │
-│ MEDICAL DATABASES (primary — highest clinical evidence quality):            │
-│   PubMed/MEDLINE   : pubmed.ncbi.nlm.nih.gov — gold standard for           │
-│                      clinical & biomedical literature, MeSH indexing        │
-│   Europe PMC       : europepmc.org — open access, full-text search,        │
-│                      includes preprints + PMC OA content                   │
-│   EMBASE           : via Ovid — drug/device studies, European coverage     │
-│   Cochrane Library : cochranelibrary.com — systematic reviews/meta-analyses│
-│                                                                             │
-│ TECHNICAL/AI DATABASES (primary — AI/ML architecture literature):           │
-│   Arxiv            : arxiv.org (cs.CV, cs.AI, eess.IV, cs.LG)             │
-│   Semantic Scholar : semanticscholar.org — citation graph, semantic search │
-│   IEEE Xplore      : ieeexplore.ieee.org — IEEE TMI, ISBI, MICCAI        │
-│   ACM Digital Lib  : dl.acm.org — computer vision/ML papers               │
-│                                                                             │
-│ RADIOLOGY-SPECIFIC RESOURCES:                                               │
-│   RSNA Publications: pubs.rsna.org (Radiology, RSNA RI, Radiology: AI)    │
-│   ESR Insights     : insightsintoimaging.springeropen.com                  │
-│   TCIA             : tcia.nci.nih.gov — annotated imaging datasets         │
-│   Grand Challenge  : grand-challenge.org — AI benchmark competitions       │
-│                                                                             │
-│ CLINICAL GUIDELINES:                                                        │
-│   ACR Appropriateness: acsearch.acr.org                                    │
-│   ESMO Guidelines  : esmo.org/guidelines                                   │
-│   NCCN Guidelines  : nccn.org/guidelines                                   │
-│   UpToDate (if accessible): uptodate.com                                   │
-│                                                                             │
-│ PREPRINT SERVERS:                                                            │
-│   medRxiv          : medrxiv.org — clinical/epidemiological preprints      │
-│   bioRxiv          : biorxiv.org — biological science preprints            │
-│   Arxiv eess.IV    : Medical image analysis preprints                      │
-└────────────────────────────────────────────────────────────────────────────┘
-"""
-
+# Each function takes (knowledge_base: str, sources_guide: str) and returns
+# the complete system prompt string for that agent.
+# ──────────────────────────────────────────────────────────────────────────────
 
 # ══════════════════════════════════════════════════════════════════════════════
-# AGENT 1 — PICO ANALYST
+# AGENT 1 — PICO ANALYST (prompt template)
 # ══════════════════════════════════════════════════════════════════════════════
 
-PICO_ANALYST_PROMPT = f"""\
+def build_pico_analyst_prompt(knowledge_base: str, sources_guide: str) -> str:
+    """Build the PICO Analyst Agent system prompt with dynamic knowledge."""
+    return f"""\
 You are the PICO Research Analyst — Agent 1 of 5 in the Agentic AI Radiology
 Researcher pipeline. You are a board-certified radiologist and clinical AI
 researcher with 15+ years of experience in oncological imaging, radiomics
 methodology, and evidence-based medicine.
 
-{_RADIOLOGY_KNOWLEDGE_BASE}
+{knowledge_base}
 
 YOUR ROLE
 ─────────
@@ -847,17 +664,19 @@ CONSTRAINTS
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# AGENT 2 — QUERY BUILDER
+# AGENT 2 — QUERY BUILDER (prompt template)
 # ══════════════════════════════════════════════════════════════════════════════
 
-QUERY_BUILDER_PROMPT = f"""\
+def build_query_builder_prompt(knowledge_base: str, sources_guide: str) -> str:
+    """Build the Query Builder Agent system prompt with dynamic knowledge."""
+    return f"""\
 You are the Query Builder — Agent 2 of 5 in the Agentic AI Radiology Researcher
 pipeline. You are an expert medical librarian and clinical informatics specialist
 with deep knowledge of MeSH vocabulary, Boolean search construction, and the
 information architecture of medical and technical databases.
 
-{_RADIOLOGY_KNOWLEDGE_BASE}
-{_SEARCH_SOURCES_GUIDE}
+{knowledge_base}
+{sources_guide}
 
 YOUR ROLE
 ─────────
@@ -965,16 +784,18 @@ CONSTRAINTS
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# AGENT 3 — SEARCH EXECUTOR
+# AGENT 3 — SEARCH EXECUTOR (prompt template)
 # ══════════════════════════════════════════════════════════════════════════════
 
-SEARCH_EXECUTOR_PROMPT = f"""\
+def build_search_executor_prompt(knowledge_base: str, sources_guide: str) -> str:
+    """Build the Search Executor Agent system prompt with dynamic knowledge."""
+    return f"""\
 You are the Search Executor — Agent 3 of 5 in the Agentic AI Radiology Researcher
 pipeline. You are a systematic review research assistant with expertise in
 executing structured database searches and managing large-scale literature
 retrieval across heterogeneous sources.
 
-{_SEARCH_SOURCES_GUIDE}
+{sources_guide}
 
 YOUR ROLE
 ─────────
@@ -1075,16 +896,18 @@ CONSTRAINTS
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# AGENT 4 — RELEVANCE RANKER
+# AGENT 4 — RELEVANCE RANKER (prompt template)
 # ══════════════════════════════════════════════════════════════════════════════
 
-RELEVANCE_RANKER_PROMPT = f"""\
+def build_relevance_ranker_prompt(knowledge_base: str, sources_guide: str) -> str:
+    """Build the Relevance Ranker Agent system prompt with dynamic knowledge."""
+    return f"""\
 You are the Relevance Ranker — Agent 4 of 5 in the Agentic AI Radiology
 Researcher pipeline. You are a senior radiologist-scientist with expertise in
 systematic review methodology, evidence quality appraisal, and radiomics
 research design. You combine algorithmic scoring with expert clinical judgement.
 
-{_RADIOLOGY_KNOWLEDGE_BASE}
+{knowledge_base}
 
 YOUR ROLE
 ─────────
@@ -1203,16 +1026,18 @@ CONSTRAINTS
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# AGENT 5 — CONTEXT COMPILER
+# AGENT 5 — CONTEXT COMPILER (prompt template)
 # ══════════════════════════════════════════════════════════════════════════════
 
-CONTEXT_COMPILER_PROMPT = f"""\
+def build_context_compiler_prompt(knowledge_base: str, sources_guide: str) -> str:
+    """Build the Context Compiler Agent system prompt with dynamic knowledge."""
+    return f"""\
 You are the Context Compiler — Agent 5 of 5 in the Agentic AI Radiology
 Researcher pipeline. You are a senior academic radiologist, systematic review
 author, and clinical AI research lead. Your role is to synthesise the entire
 pipeline output into publication-quality deliverables.
 
-{_RADIOLOGY_KNOWLEDGE_BASE}
+{knowledge_base}
 
 YOUR ROLE
 ─────────
@@ -1562,6 +1387,19 @@ async def run_literature_review(
     if missing:
         raise ValueError(f"PICO input is missing required keys: {missing}")
 
+    # ── Build Dynamic Knowledge Base from Online Medical Databases ────────────
+    print("\n[Pipeline] Building dynamic knowledge base from online medical databases...")
+    print("[Pipeline] Sources: PubMed MeSH, Wikipedia, Semantic Scholar, Europe PMC")
+    knowledge_base, sources_guide = build_knowledge_base(pico)
+    print(f"[Pipeline] Knowledge base ready ({len(knowledge_base):,} chars)")
+
+    # ── Generate Agent Prompts with Dynamic Knowledge ─────────────────────────
+    pico_analyst_prompt    = build_pico_analyst_prompt(knowledge_base, sources_guide)
+    query_builder_prompt   = build_query_builder_prompt(knowledge_base, sources_guide)
+    search_executor_prompt = build_search_executor_prompt(knowledge_base, sources_guide)
+    relevance_ranker_prompt = build_relevance_ranker_prompt(knowledge_base, sources_guide)
+    context_compiler_prompt = build_context_compiler_prompt(knowledge_base, sources_guide)
+
     # ── LLM Client ───────────────────────────────────────────────────────────
     print(f"[Pipeline] Initialising Ollama client  model='{model}'")
     model_client = OllamaClient(model=model)
@@ -1578,30 +1416,30 @@ async def run_literature_review(
     pico_analyst = AssistantAgent(
         name           = "PICO_Analyst_Agent",
         model_client   = model_client,
-        system_message = PICO_ANALYST_PROMPT,
+        system_message = pico_analyst_prompt,
     )
     query_builder = AssistantAgent(
         name           = "Query_Builder_Agent",
         model_client   = model_client,
-        system_message = QUERY_BUILDER_PROMPT,
+        system_message = query_builder_prompt,
     )
     search_executor = AssistantAgent(
         name           = "Search_Executor_Agent",
         model_client   = model_client,
         tools          = [t_pubmed, t_arxiv, t_semantic, t_europepmc],
-        system_message = SEARCH_EXECUTOR_PROMPT,
+        system_message = search_executor_prompt,
     )
     relevance_ranker = AssistantAgent(
         name           = "Relevance_Ranker_Agent",
         model_client   = model_client,
         tools          = [t_scorer],
-        system_message = RELEVANCE_RANKER_PROMPT,
+        system_message = relevance_ranker_prompt,
     )
     context_compiler = AssistantAgent(
         name           = "Context_Compiler_Agent",
         model_client   = model_client,
         tools          = [t_save],
-        system_message = CONTEXT_COMPILER_PROMPT,
+        system_message = context_compiler_prompt,
     )
 
     # ── Orchestration — RoundRobin (guaranteed sequential execution) ──────────

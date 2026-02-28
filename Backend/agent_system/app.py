@@ -8,8 +8,10 @@ from teams.execution_team import BasicPipelineBuilder
 from autogen_agentchat.teams import GraphFlow
 from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage
 from autogen_agentchat.base import TaskResult
+from agents.planning_agents.models import PlannerState
 import logging
-
+import aiofiles
+from pathlib import Path
 
 import os
 import sys
@@ -131,11 +133,32 @@ async def start_execution(request: RunRequest):
 
 async def run_pipeline(request: RunRequest):
 
-    graph_builder = await BasicPipelineBuilder.create()
+    # Load planner state to get task messages (if available)
+    state_path = Path(current_dir) / "workspace" / "state.json"
+    task_messages = []
+    try:
+        if state_path.exists():
+            async with aiofiles.open(state_path, 'r') as f:
+                content = await f.read()
+                if content.strip():
+                    planner_state = PlannerState.model_validate_json(content)
+                    task_messages = planner_state.task_messages
+                    logging.getLogger().info(
+                        f"Loaded {len(task_messages)} task messages from planner state"
+                    )
+    except Exception as e:
+        logging.getLogger().warning(f"Could not load planner state: {e}. Using raw hypothesis.")
+
+    graph_builder = await BasicPipelineBuilder.create(task_messages=task_messages)
     graph_flow = GraphFlow(participants=graph_builder.get_participants(), graph=graph_builder.build())
 
+    # Build the pipeline prompt: use structured task messages if available,
+    # otherwise fall back to the raw hypothesis string from the request
+    task_prompt = graph_builder.get_pipeline_prompt(fallback_hypothesis=request.hypothesis)
+    logging.getLogger().info(f"Pipeline prompt length: {len(task_prompt)} chars")
+
     try:
-        async for event in graph_flow.run_stream(task=request.hypothesis):
+        async for event in graph_flow.run_stream(task=task_prompt):
             if isinstance(event, TaskResult):
                 await send_ws_message("run_finished", "run_finished")
 
