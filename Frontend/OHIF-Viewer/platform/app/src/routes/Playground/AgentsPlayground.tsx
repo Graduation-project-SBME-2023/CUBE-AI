@@ -20,7 +20,7 @@ import Button from '../../components/ui/Button';
 import { useLocation } from 'react-router-dom';
 
 // Components
-import PlaygroundCanvas from '../../components/PlaygroundCanvas';
+import PlaygroundCanvas from '../../components/PlaygroundCanvas/PlaygroundCanvas';
 import AgentRegistry from '../../components/PlaygroundCanvas/AgentRegistry';
 import ChatSidebar from '../../components/PlaygroundCanvas/ChatSidebar';
 
