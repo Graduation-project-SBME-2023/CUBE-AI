@@ -39,33 +39,35 @@ class ModelingAgent(AssistantAgent):
                          max_tool_iterations=max_tool_iterations)
 
     @classmethod
-    async def create(cls, model_client=None, workspace_folder=None):
+    async def create(cls, model_client=None, workspace_folder=None, mcp_server_path='Backend/mcp/server.py'):
         model_client = OllamaClient() if not model_client else model_client
         mcp_server = StdioServerParams(
-            command="python", args=["Backend/mcp/server.py"], env={"WORKSPACE_DIR": workspace_folder}
+            command="python", args=[os.path.normpath(mcp_server_path)], env={"WORKSPACE_DIR": workspace_folder}
         )
         mcp_tools = await mcp_server_tools(mcp_server)
-        desired_mcp_tools = ['scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',
-                             'scratchpad_write_summary', 'scratchpad_set_status', 'scratchpad_read_agent']
+        desired_mcp_tools = ['pycaret_train_classifier', 'pycaret_run_inference', 'scratchpad_register_agent',
+                             'scratchpad_write_note', 'scratchpad_raise_flag', 'scratchpad_write_summary',
+                             'scratchpad_set_status', 'scratchpad_read_agent']
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
-        modelling_classification_tool_wrapper = FunctionTool(
-            func=classification_modelling,
-            description="""
-            Asynchronously executes the full Classification Modelling pipeline.
-            this tool have the capability internally to get the results of the feature extraction and work on it
-            just call it when you need to start the feature extraction
-            Use this tool in scenarios such as:
-            1. When you need to train multiple machine learning algorithms on a dataset and automatically select the best one.
-            2. To generate a complete  model metrics, confusion matrices, and ROC curves.
-            """,
-            name="classification_modelling"
-        )
+        # modelling_classification_tool_wrapper = FunctionTool(
+        #     func=classification_modelling,
+        #     description="""
+        #     Asynchronously executes the full Classification Modelling pipeline.
+        #     this tool have the capability internally to get the results of the feature extraction and work on it
+        #     just call it when you need to start the feature extraction
+        #     Use this tool in scenarios such as:
+        #     1. When you need to train multiple machine learning algorithms on a dataset and automatically select the best one.
+        #     2. To generate a complete  model metrics, confusion matrices, and ROC curves.
+        #     """,
+        #     name="classification_modelling"
+        # )
 
-        tools = [modelling_classification_tool_wrapper, *final_mcp_tools]
+        # tools = [modelling_classification_tool_wrapper, *final_mcp_tools]
+        tools = final_mcp_tools
 
         name = "modeling_agent"
         description = MODELING_AGENT_DESCRIPTION
-        system_message = MODELING_AGENT_SYSTEM_PROMPT + f"\n\nThe workspace folder is {workspace_folder}."
+        system_message = MODELING_AGENT_SYSTEM_PROMPT
         return cls(
             name=name,
             model_client=model_client,
@@ -79,18 +81,22 @@ class ModelingAgent(AssistantAgent):
     def get_desired_tools(mcp_tools, desired_tools):
         return [tool for tool in mcp_tools if tool.name in desired_tools]
 
-# async def main():
-#     # Initialize the agent using the factory method
-#     agent = await ModelingAgent.create()
+async def main():
+    # Initialize the agent using the factory method
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    SERVER_PATH = os.path.join(BASE_DIR, '..', '..', '..', 'mcp', 'server.py')
+    workspace_dir = os.path.join(BASE_DIR, '..', '..', "workspace")
 
-#     # Now you can use the agent normally
-#     print(f"Agent initialized with {agent._tools} tools.")
-#     print(agent._max_tool_iterations)
-#     for tool in agent._tools:
-#         print(tool.name)
-#     await Console(
-#         agent.run_stream(task="run the classification modeling, provide as argument to the tool just experiment name, make the name experiment1",
-#                          cancellation_token=CancellationToken())
-#         )
-# if __name__ == "__main__":
-#     asyncio.run(main())
+    agent = await ModelingAgent.create(workspace_folder=workspace_dir, mcp_server_path=SERVER_PATH)
+
+    # Now you can use the agent normally
+    print(f"Agent initialized with {agent._tools} tools.")
+    print(agent._max_tool_iterations)
+    for tool in agent._tools:
+        print(tool.name)
+    await Console(
+        agent.run_stream(task="run the classification modeling, provide as argument to the tool just experiment name, make the name experiment1",
+                         cancellation_token=CancellationToken())
+        )
+if __name__ == "__main__":
+    asyncio.run(main())

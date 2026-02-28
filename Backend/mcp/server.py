@@ -32,6 +32,8 @@ from tools.get_model_info import get_model_info
 # from tools.database.models.create_model import create_model
 
 import tools.scratchpad
+from tools.modeling.classification import pycaret_train_classifier, pycaret_run_inference
+from tools.modeling.regression import pycaret_train_regressor, pycaret_run_regression_inference
 
 
 
