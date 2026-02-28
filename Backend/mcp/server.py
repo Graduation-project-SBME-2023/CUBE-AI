@@ -32,7 +32,7 @@ from tools.get_model_info import get_model_info
 # from tools.database.models.create_model import create_model
 
 import tools.scratchpad
-
+from tools.feature_extraction.features import radiomics_extract_features, radiomics_analyze_importance
 
 
 if __name__ == "__main__":
