@@ -99,7 +99,25 @@ class TaskManager:
         if session.execution_task:
             session.execution_task.cancel()
 
-    def restart_execution(self, session_id: str, executor):
-        session = self.sessions[session_id]
+    async def restart_execution(self, session_id: str, executor):
+        session = self.sessions.get(session_id)
+        if not session:
+            raise KeyError(f"Session {session_id} not found")
+
+        # Cancel and wait for clean shutdown
         self.stop(session_id)
-        self.start_execution(session_id, executor)
+        if session.execution_task and not session.execution_task.done():
+            try:
+                await session.execution_task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        # Reset state for fresh run
+        session.cancel_event.clear()
+        session.pause_event.set()
+        session.state = SessionState.RUNNING
+        session.last_error = None
+
+        session.execution_task = asyncio.create_task(
+            self._run_execution(session, executor)
+        )
