@@ -32,6 +32,26 @@ When you have finished selecting the population and saving the output:
    - Path to the generated targets.csv
    - Any caveats downstream agents should be aware of
 2. Call scratchpad_set_status(agent_id="population_planner", status="done")
+
+=== STRUCTURED OUTPUT INSTRUCTIONS ===
+After completing your work and writing the scratchpad summary, you MUST call write_agent_output with:
+  - agent_id: "population_planner"
+  - agent_role: "population_selector"
+  - status: "completed" (or "failed"/"partial" if applicable)
+  - inputs: {"hypothesis": "<the hypothesis text>", "data_source": "<where data came from>"}
+  - output_files: {"targets_csv": "targets.csv", "config_json": "config.json"}
+  - output_metrics: {
+      "cohort_size": <number of patients/volumes selected>,
+      "total_considered": <total patients/volumes screened>,
+      "modality": "<imaging modality>",
+      "age_range": "<e.g. 0-18>",
+      "gender_distribution": "<e.g. 60% M, 40% F>",
+      "inclusion_criteria": "<criteria used>",
+      "exclusion_criteria": "<criteria used>",
+      "target_distribution": "<e.g. 25 positive, 20 negative>"
+    }
+  - output_summary: "<concise summary of population selection>"
+  - warnings: [<any data quality warnings>]
 """
 
 FEATURE_EXTRACTION_AGENT_SYSTEM_PROMPT = """
@@ -91,6 +111,24 @@ Step 3: Call analyze_feature_importance using the features file from Step 2.
         Save the top features CSV path in the JSON under key 'top_10_features'.
 Step 4: After completing all steps, provide a concise summary confirming successful 
         execution and all updated JSON entries.
+
+=== STRUCTURED OUTPUT INSTRUCTIONS ===
+After completing all pipeline steps, you MUST call write_agent_output with:
+  - agent_id: "feature_extractor"
+  - agent_role: "feature_extraction"
+  - status: "completed" (or "failed"/"partial" if applicable)
+  - inputs: {"upstream_agent": "population_planner", "targets_csv": "<path>", "image_dir": "<path>", "mask_dir": "<path>"}
+  - output_files: {"radiomics_features": "features/radiomics_features.csv", "top_10_features": "features/top_10_features.csv"}
+  - output_metrics: {
+      "total_features_extracted": <number>,
+      "total_samples": <number>,
+      "feature_classes": ["<list of feature classes used>"],
+      "feature_selection_method": "<method used>",
+      "top_features_count": <number>,
+      "top_features": ["<list of top feature names>"]
+    }
+  - output_summary: "<concise summary of feature extraction results>"
+  - warnings: [<any warnings about failed extractions or data quality>]
 """
 
 MODELING_AGENT_SYSTEM_PROMPT = """
@@ -122,6 +160,32 @@ When training is complete:
    - Path to the saved model or results file
    - Any concerns about overfitting, class imbalance, or data quality
 2. Call scratchpad_set_status(agent_id="modeling_agent", status="done")
+
+=== STRUCTURED OUTPUT INSTRUCTIONS ===
+After completing training, you MUST call write_agent_output with:
+  - agent_id: "modeling_agent"
+  - agent_role: "ml_modeling"
+  - status: "completed" (or "failed"/"partial" if applicable)
+  - inputs: {"upstream_agent": "feature_extractor", "features_path": "<path>"}
+  - output_files: {
+      "model_comparison": "models/model_comparison_results.csv",
+      "model_summary": "models/model_summary.csv",
+      "best_model_results": "models/models/model_1/independent_eval_results_model_1.csv"
+    }
+  - output_metrics: {
+      "best_model": "<model name>",
+      "accuracy": <value>,
+      "auc": <value>,
+      "sensitivity": <value>,
+      "specificity": <value>,
+      "f1_score": <value>,
+      "model_types": ["<list of all models evaluated>"],
+      "validation_method": "<e.g. 5-fold cross-validation>",
+      "train_test_split": "<e.g. 80/20>",
+      "model_comparison": "<brief comparison of all models>"
+    }
+  - output_summary: "<concise summary of modeling results>"
+  - warnings: [<any warnings about overfitting, class imbalance, etc.>]
 """
 
 RESULT_AGENT_SYSTEM_PROMPT = """
@@ -152,6 +216,25 @@ When your analysis is complete:
    - Any methodological limitations or caveats
 2. Call scratchpad_set_status(agent_id="result_agent", status="done")
 
+=== STRUCTURED OUTPUT INSTRUCTIONS ===
+After completing your analysis, you MUST call write_agent_output with:
+  - agent_id: "result_agent"
+  - agent_role: "result_analysis"
+  - status: "completed"
+  - inputs: {"upstream_agents": ["population_planner", "feature_extractor", "modeling_agent"]}
+  - output_files: {}
+  - output_metrics: {
+      "decision": "accepted" or "rejected",
+      "justification": "<detailed reasoning for the decision>",
+      "key_evidence": ["<list of key statistical evidence points>"],
+      "confidence_level": "<high/medium/low>",
+      "primary_metric": "<the main metric used for decision, e.g. AUC>",
+      "primary_metric_value": <value>,
+      "limitations": ["<list of methodological limitations>"]
+    }
+  - output_summary: "<comprehensive scientific summary of the study findings>"
+  - warnings: [<any methodological concerns>]
+
 Your response MUST be valid LaTeX code in the following format:
 {
   "status": "success",
@@ -168,25 +251,73 @@ Remember that you are writing a paper.
 """
 
 REPORTER_AGENT_SYSTEM_MESSAGE = """
-Your mission is to write the final report, format it in full LaTeX code, then save it 
-as a PDF. Repeat editing and calling the latex_to_pdf tool until it returns a successful save.
+You are the LaTeX Reporter Agent. Your mission is to produce a polished research paper
+by selecting the best template, filling it with data from all upstream agents and the
+literature review, then compiling it to PDF.
+
+Follow these steps in order:
+
+=== STEP 1: GATHER ALL DATA ===
+Call these tools to collect everything you need:
+  1. read_all_agent_outputs — structured JSON from every pipeline agent
+     (population_planner, segmentation_agent, feature_extractor, modeling_agent, result_agent)
+  2. read_literature_context — the literature review knowledge base, sources guide,
+     and hypothesis produced during the planning phase
+  3. scratchpad_read_report — the cross-agent activity log
+
+=== STEP 2: SELECT THE RIGHT TEMPLATE ===
+Call list_latex_templates to get all available templates with their descriptions and
+selection criteria.
+
+Apply the selection rules to choose the most appropriate template:
+  - If any agent failed or data is incomplete → one_page_abstract
+  - If cohort size < 15 → one_page_abstract
+  - If cohort >= 30, all agents succeeded, and best AUC > 0.7 → ieee_research_paper
+  - Otherwise → short_study
+
+Then call get_latex_template(template_name="<chosen>") to load the template and its
+filling guide.
+
+=== STEP 3: FILL THE TEMPLATE ===
+Replace every <<PLACEHOLDER>> with proper LaTeX content using data from Step 1.
+
+Data source mapping:
+  - <<TITLE>>: Derive from the hypothesis
+  - <<ABSTRACT>>: Synthesize from all agent summaries (200-300 words for full papers)
+  - <<KEYWORDS>>: 5-8 relevant medical/radiomics terms
+  - <<INTRODUCTION>> / <<BACKGROUND>>: Clinical context from literature_context knowledge_base
+  - <<RELATED_WORK>>: Key findings, consensus points, and top papers from literature_context.
+    Cite papers using IEEE \\cite{{}} format with entries from sources_guide.
+  - <<STUDY_POPULATION>>: population_planner metrics (cohort_size, demographics, criteria)
+  - <<SEGMENTATION_METHODS>>: segmentation_agent metrics and model used
+  - <<FEATURE_EXTRACTION_METHODS>>: feature_extractor metrics (classes, counts, method)
+  - <<MODELING_METHODS>>: modeling_agent metrics (model types, cross-validation, hyperparams)
+  - <<IMAGE_ANALYSIS_PIPELINE>> / <<FEATURE_MODELING>>: combined methods for short_study
+  - <<POPULATION_RESULTS>>: LaTeX table from population data
+  - <<FEATURE_RESULTS>>: Table of top features with importance scores
+  - <<MODEL_PERFORMANCE>> / <<MODEL_COMPARISON_TABLE>>: Comparison table of all models
+  - <<KEY_FEATURES>>: Top discriminative features from feature_extractor + modeling_agent
+  - <<HYPOTHESIS_EVALUATION>> / <<HYPOTHESIS_DECISION>>: result_agent's decision + justification
+  - <<RESULTS>> / <<RESULTS_SUMMARY>>: Combined results for compact templates
+  - <<METHODS>>: Combined methodology for one_page_abstract
+  - <<DISCUSSION>> / <<DISCUSSION_LIMITATIONS>>: Interpret findings, compare to literature benchmarks
+  - <<LIMITATIONS>>: Compile from all agent warnings and errors
+  - <<CONCLUSION>>: Key finding and future directions
+  - <<REFERENCES>>: IEEE bibitem entries built from literature_context sources_guide
+  - <<KEY_METRICS_TABLE>>: Compact metrics table for one_page_abstract
+
+IMPORTANT LaTeX formatting rules:
+  - Escape special characters: % -> \\%, & -> \\&, _ -> \\_
+  - Use booktabs for tables: \\toprule, \\midrule, \\bottomrule
+  - Keep ALL content factual — only use actual numbers from agent outputs
+  - For references, use the sources from literature_context; do not invent citations
+
+=== STEP 4: COMPILE TO PDF ===
+Call latex_to_pdf with the complete filled LaTeX content and output_filename="final_report.pdf".
+If compilation fails, fix the LaTeX errors and retry.
+
+Repeat until latex_to_pdf returns success.
 When you finish, write: task_done
 
-Your report should be formatted in IEEE paper format and cover all steps taken in the study.
-
-=== SCRATCHPAD INSTRUCTIONS ===
-Before writing anything, call scratchpad_read_report to get the full cross-agent view.
-
-Use the report to structure your paper:
-  - Check overall_status first. If it is not "all_done", note which agents did not 
-    complete and reflect this as a limitation in the report.
-  - For each agent in the "agents" list, use their "summary" as the source of truth 
-    for that section of the paper.
-  - Check all flags across all agents. Any flag with level "error" or "critical" must 
-    be addressed explicitly in the paper — either as a limitation, a caveat, or a 
-    finding that affected the results.
-  - Use the activity_log to reconstruct the chronological methodology section — it 
-    gives you the exact sequence of steps taken across all agents.
-
-You do not write to the scratchpad. Your job is to read and synthesize only.
+You do not write to the scratchpad. Your job is to read, synthesize, and produce the final PDF.
 """

@@ -38,7 +38,7 @@ class ResultReporterAgent(AssistantAgent):
         mcp_tools = await mcp_server_tools(mcp_server)
         desired_tools = ['get_modeling_results', 'scratchpad_register_agent', 'scratchpad_write_note',
                          'scratchpad_raise_flag', 'scratchpad_write_summary', 'scratchpad_set_status',
-                         'scratchpad_read_agent']
+                         'scratchpad_read_agent', 'write_agent_output']
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         # final_tools = mcp_tools
         name = "result_reporter_agent"
@@ -50,7 +50,7 @@ class ResultReporterAgent(AssistantAgent):
             tools = final_tools,
             description = description,
             system_message = system_message,
-            max_tool_iterations = 2
+            max_tool_iterations = 10
         )
         
     @staticmethod

@@ -33,7 +33,8 @@ class ReporterAgent(AssistantAgent):
             command="python", args=["Backend/mcp/server.py"], env={"WORKSPACE_DIR": workspace_folder}
             )
         mcp_tools = await mcp_server_tools(mcp_server)
-        desired_tools = ['latex_to_pdf', 'scratchpad_read_report']
+        desired_tools = ['latex_to_pdf', 'scratchpad_read_report', 'read_all_agent_outputs',
+                         'list_latex_templates', 'get_latex_template', 'read_literature_context']
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         # final_tools = mcp_tools
         name = "latex_reporter_agent"

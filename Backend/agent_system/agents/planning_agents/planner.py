@@ -100,6 +100,20 @@ class ClinicalPlanner:
 
         return text.strip()
 
+    @staticmethod
+    def _fix_invalid_json_escapes(text: str) -> str:
+        """Fix invalid backslash escapes that break json.loads().
+
+        LLMs often embed LaTeX (\\documentclass, \\begin{table}) or Windows
+        paths (\\Users) in JSON string values.  These are not valid JSON
+        escape sequences and cause ``Invalid \\escape`` errors.
+
+        Valid JSON escapes are: \\" \\\\ \\/ \\b \\f \\n \\r \\t \\uXXXX
+        Any backslash NOT followed by one of those characters is doubled so
+        json.loads() will accept it.
+        """
+        return re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
+
     async def _save_state(self):
         os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
         try:
@@ -129,27 +143,37 @@ class ClinicalPlanner:
         
         clean_content = self._clean_json(response_content)
         
-        try:
-            data = json.loads(clean_content)
-            
-            if "hypothesis" in data and isinstance(data["hypothesis"], dict):
-                hypo_data = data["hypothesis"]
-                
-                if "id" not in hypo_data or not hypo_data["id"]: 
-                    hypo_data["id"] = self.state.hypothesis.id or str(uuid.uuid4())
-                
-                self.state.hypothesis = ClinicalHypothesis(**hypo_data)
-                await self._send("hypothesis", self.state.hypothesis.model_dump())
+        # Try parsing — if invalid escapes, fix and retry
+        data = None
+        for attempt, content in enumerate(
+            [clean_content, self._fix_invalid_json_escapes(clean_content)]
+        ):
+            try:
+                data = json.loads(content)
+                break
+            except json.JSONDecodeError:
+                if attempt == 0:
+                    continue
 
-            if "message" in data and data["message"]:
-                await self._send("msg", data["message"])
-            
-            await self._save_state()
-
-        except json.JSONDecodeError:
+        if data is None:
             display_text = response_content.replace("APPROVE", "").strip()
             if display_text:
                 await self._send("msg", display_text)
+            return
+
+        if "hypothesis" in data and isinstance(data["hypothesis"], dict):
+            hypo_data = data["hypothesis"]
+            
+            if "id" not in hypo_data or not hypo_data["id"]: 
+                hypo_data["id"] = self.state.hypothesis.id or str(uuid.uuid4())
+            
+            self.state.hypothesis = ClinicalHypothesis(**hypo_data)
+            await self._send("hypothesis", self.state.hypothesis.model_dump())
+
+        if "message" in data and data["message"]:
+            await self._send("msg", data["message"])
+        
+        await self._save_state()
 
     async def _process_pipeline_response(self, response_content: str):
         """Parse pipeline plan JSON from the PipelineArchitect and update state/UI."""
@@ -157,60 +181,71 @@ class ClinicalPlanner:
         
         clean_content = self._clean_json(response_content)
         
-        try:
-            data = json.loads(clean_content)
-            
-            if "steps" in data and isinstance(data["steps"], list):
-                steps_data = data["steps"]
-                self.state.plan = StudyPlan(
-                    hypothesis_id=self.state.hypothesis.id,
-                    study_goal=self.state.hypothesis.title,
-                    steps=[
-                        StudyStep(
-                            name=s.get("title", ""), 
-                            description=s.get("description", ""),
-                            module=s.get("id", ""),
-                        ) for s in steps_data
-                    ]
-                )
-                
-                # Format for UI — include instructions summary
-                ui_steps = [
-                    {
-                        "id": s.get("id", ""),
-                        "name": s.get("title", ""),
-                        "description": s.get("description", ""),
-                        "module": s.get("id", ""),
-                        "instructions": s.get("instructions", "")[:200] + "..." 
-                            if len(s.get("instructions", "")) > 200 
-                            else s.get("instructions", ""),
-                    } 
-                    for s in steps_data
-                ]
-                await self._send("plan", {"steps": ui_steps})
+        # Try parsing — if invalid escapes (LaTeX, paths), fix and retry
+        data = None
+        for attempt, content in enumerate(
+            [clean_content, self._fix_invalid_json_escapes(clean_content)]
+        ):
+            try:
+                data = json.loads(content)
+                break
+            except json.JSONDecodeError as e:
+                if attempt == 0:
+                    logger.warning(f"Pipeline JSON attempt 1 failed ({e}), retrying with escape fix...")
+                    continue
+                logger.error(f"Pipeline JSON parse error after escape fix: {e}")
+                logger.error(f"Clean content (first 300 chars): {clean_content[:300]}")
+                print(f"[DEBUG] Pipeline JSON parse error: {e}")
+                print(f"[DEBUG] Clean content preview: {clean_content[:200]}...")
 
-                # Store full instructions in task_messages for later use
-                self._pipeline_instructions = {
-                    s.get("id", ""): s.get("instructions", "") 
-                    for s in steps_data
-                }
-
-            if "rationale" in data and data["rationale"]:
-                await self._send("msg", f"**Pipeline Rationale:** {data['rationale']}")
-
-            if "message" in data and data["message"]:
-                await self._send("msg", data["message"])
-            
-            await self._save_state()
-
-        except json.JSONDecodeError as e:
-            logger.error(f"Pipeline JSON parse error: {e}")
-            logger.error(f"Clean content (first 300 chars): {clean_content[:300]}")
-            print(f"[DEBUG] Pipeline JSON parse error: {e}")
-            print(f"[DEBUG] Clean content preview: {clean_content[:200]}...")
+        if data is None:
             display_text = response_content.replace("APPROVE", "").strip()
             if display_text:
                 await self._send("msg", display_text)
+            return
+
+        if "steps" in data and isinstance(data["steps"], list):
+            steps_data = data["steps"]
+            self.state.plan = StudyPlan(
+                hypothesis_id=self.state.hypothesis.id,
+                study_goal=self.state.hypothesis.title,
+                steps=[
+                    StudyStep(
+                        name=s.get("title", ""), 
+                        description=s.get("description", ""),
+                        module=s.get("id", ""),
+                    ) for s in steps_data
+                ]
+            )
+            
+            # Format for UI — include instructions summary
+            ui_steps = [
+                {
+                    "id": s.get("id", ""),
+                    "name": s.get("title", ""),
+                    "description": s.get("description", ""),
+                    "module": s.get("id", ""),
+                    "instructions": s.get("instructions", "")[:200] + "..." 
+                        if len(s.get("instructions", "")) > 200 
+                        else s.get("instructions", ""),
+                } 
+                for s in steps_data
+            ]
+            await self._send("plan", {"steps": ui_steps})
+
+            # Store full instructions in task_messages for later use
+            self._pipeline_instructions = {
+                s.get("id", ""): s.get("instructions", "") 
+                for s in steps_data
+            }
+
+        if "rationale" in data and data["rationale"]:
+            await self._send("msg", f"**Pipeline Rationale:** {data['rationale']}")
+
+        if "message" in data and data["message"]:
+            await self._send("msg", data["message"])
+        
+        await self._save_state()
 
     # ══════════════════════════════════════════════════════════════════════════
     # PICO EXTRACTION & KNOWLEDGE BUILDING
@@ -260,6 +295,28 @@ class ClinicalPlanner:
         await self._save_state()
         
         return knowledge_base, sources_guide
+
+    async def _save_literature_context(self, knowledge_base: str, sources_guide: str):
+        """
+        Save the literature review context (knowledge base + sources guide)
+        to the workspace as a structured JSON file that the reporter agent
+        can read via the read_literature_context MCP tool.
+        """
+        workspace_dir = self.state_path.parent
+        lit_context_path = workspace_dir / "literature_context.json"
+        
+        context_data = {
+            "knowledge_base": knowledge_base,
+            "sources_guide": sources_guide,
+            "hypothesis": self.state.hypothesis.model_dump() if self.state.hypothesis else {},
+        }
+        
+        try:
+            async with aiofiles.open(lit_context_path, 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(context_data, indent=2, ensure_ascii=False))
+            logger.info(f"Literature context saved to {lit_context_path}")
+        except Exception as e:
+            logger.error(f"Failed to save literature context: {e}")
 
     # ══════════════════════════════════════════════════════════════════════════
     # MAIN RUN — THREE-PHASE PIPELINE
@@ -334,6 +391,9 @@ class ClinicalPlanner:
 
             try:
                 knowledge_base, sources_guide = await self._build_knowledge_base()
+                
+                # Save literature context to workspace for the reporter agent
+                await self._save_literature_context(knowledge_base, sources_guide)
                 
                 # Report knowledge base stats to user
                 kb_size = len(knowledge_base)
