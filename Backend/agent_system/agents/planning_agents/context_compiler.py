@@ -100,26 +100,35 @@ def _header_to_key(header: str) -> Optional[str]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _build_hypothesis_summary(hypothesis: ClinicalHypothesis) -> str:
-    """Create a compact, structured hypothesis summary for agent prompts."""
+    """Create a compact, structured PICO hypothesis summary for agent prompts."""
+    def _field_str(val):
+        if isinstance(val, dict):
+            return ", ".join(f"{k}: {v}" for k, v in val.items())
+        return str(val) if val else ""
+
     parts = [f"Study: {hypothesis.title}"]
 
-    pop = hypothesis.population
-    if isinstance(pop, dict):
-        pop = ", ".join(f"{k}: {v}" for k, v in pop.items())
+    pop = _field_str(hypothesis.population)
     if pop:
         parts.append(f"Population: {pop}")
 
-    interv = hypothesis.intervention
-    if isinstance(interv, dict):
-        interv = ", ".join(f"{k}: {v}" for k, v in interv.items())
+    interv = _field_str(hypothesis.intervention)
     if interv:
-        parts.append(f"Intervention/Comparison: {interv}")
+        parts.append(f"Intervention: {interv}")
 
-    outcome = hypothesis.outcome
-    if isinstance(outcome, dict):
-        outcome = ", ".join(f"{k}: {v}" for k, v in outcome.items())
+    comp = _field_str(hypothesis.comparison)
+    if comp:
+        parts.append(f"Comparison: {comp}")
+
+    outcome = _field_str(hypothesis.outcome)
     if outcome:
         parts.append(f"Outcome: {outcome}")
+
+    if hypothesis.hypothesis:
+        parts.append(f"Hypothesis: {hypothesis.hypothesis}")
+
+    if hypothesis.question:
+        parts.append(f"Research Question: {hypothesis.question}")
 
     if hypothesis.clinical_context:
         parts.append(f"Clinical Context: {hypothesis.clinical_context}")
@@ -387,6 +396,7 @@ def compile_task_messages(
     plan: StudyPlan,
     knowledge_base: str,
     sources_guide: str,
+    pipeline_instructions: Optional[Dict[str, str]] = None,
 ) -> List[TaskMessage]:
     """
     Compile structured task messages for every step in the study plan.
@@ -395,19 +405,23 @@ def compile_task_messages(
         - Unique task_id
         - Pipeline phase name
         - Agent-specific instructions enriched with hypothesis context
+        - Pipeline architect's detailed instructions (from dynamic planning)
         - context_augmentation with relevant knowledge slices
         - Hypothesis summary
 
     Args:
-        hypothesis:     The confirmed clinical hypothesis.
-        plan:           The confirmed study plan with customized steps.
-        knowledge_base: Full knowledge base text from knowledge_builder.
-        sources_guide:  Sources guide text from knowledge_builder.
+        hypothesis:            The confirmed clinical hypothesis.
+        plan:                  The confirmed study plan with customized steps.
+        knowledge_base:        Full knowledge base text from knowledge_builder.
+        sources_guide:         Sources guide text from knowledge_builder.
+        pipeline_instructions: Dict mapping agent_id → detailed instructions
+                               from the Pipeline Architect (Phase 3).
 
     Returns:
         List of TaskMessage objects, one per plan step, ordered by pipeline phase.
     """
     logger.info("Context Compiler: Assembling task messages for %d steps", len(plan.steps))
+    pipeline_instructions = pipeline_instructions or {}
 
     # Parse knowledge base into sections
     sections = _parse_kb_sections(knowledge_base)
@@ -422,23 +436,31 @@ def compile_task_messages(
         agent_id = step.module or ""
         phase = _PHASE_MAP.get(agent_id, "unknown")
 
-        # Get agent-specific context builder
+        # Get agent-specific context builder for domain knowledge slicing
         builder_fn = _CONTEXT_BUILDERS.get(agent_id)
         if builder_fn:
-            ctx, base_instructions = builder_fn(sections, sources_guide, hypothesis)
+            ctx, domain_guidance = builder_fn(sections, sources_guide, hypothesis)
         else:
-            # Fallback for unknown agents
             ctx = ContextAugmentation()
-            base_instructions = step.description
+            domain_guidance = step.description
 
-        # Merge the planner's customized step description into instructions
+        # Build layered instructions:
+        #   1. Pipeline Architect's study-specific instructions (top priority)
+        #   2. Planner's step description
+        #   3. Domain-informed guidance from knowledge base
+        instruction_parts = []
+
+        planner_instr = pipeline_instructions.get(agent_id, "")
+        if planner_instr:
+            instruction_parts.append(f"## Study-Specific Instructions\n{planner_instr}")
+
         if step.description:
-            instructions = (
-                f"## Planner Instructions\n{step.description}\n\n"
-                f"## Domain-Informed Guidance\n{base_instructions}"
-            )
-        else:
-            instructions = base_instructions
+            instruction_parts.append(f"## Step Description\n{step.description}")
+
+        if domain_guidance:
+            instruction_parts.append(f"## Domain-Informed Guidance\n{domain_guidance}")
+
+        instructions = "\n\n".join(instruction_parts) if instruction_parts else step.description
 
         task_msg = TaskMessage(
             task_id=str(uuid.uuid4()),
@@ -452,13 +474,14 @@ def compile_task_messages(
         task_messages.append(task_msg)
 
         logger.info(
-            "  [%s] %s — context: kb=%d lit=%d meth=%d term=%d chars",
+            "  [%s] %s — context: kb=%d lit=%d meth=%d term=%d instr=%d chars",
             phase,
             agent_id,
             len(ctx.knowledge_summary),
             len(ctx.literature_findings),
             len(ctx.methodology_guidance),
             len(ctx.terminology),
+            len(instructions),
         )
 
     logger.info("Context Compiler: Generated %d task messages", len(task_messages))

@@ -9,7 +9,10 @@ class ClinicalHypothesis(BaseModel):
     title: str = ""
     population: Union[str, dict] = ""
     intervention: Union[str, dict] = ""
+    comparison: Union[str, dict] = ""
     outcome: Union[str, dict] = ""
+    hypothesis: str = ""               # Free-text hypothesis statement
+    question: str = ""                  # Free-text research question
     clinical_context: str = ""
     relationship_type: str = ""
     state: str = "not_confirmed"
