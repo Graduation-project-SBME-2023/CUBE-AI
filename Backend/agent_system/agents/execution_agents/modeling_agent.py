@@ -46,7 +46,8 @@ class ModelingAgent(AssistantAgent):
         )
         mcp_tools = await mcp_server_tools(mcp_server)
         desired_mcp_tools = ['scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',
-                             'scratchpad_write_summary', 'scratchpad_set_status', 'scratchpad_read_agent']
+                             'scratchpad_write_summary', 'scratchpad_set_status', 'scratchpad_read_agent',
+                             'write_agent_output']
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
         modelling_classification_tool_wrapper = FunctionTool(
             func=classification_modelling,

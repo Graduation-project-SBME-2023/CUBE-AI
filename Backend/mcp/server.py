@@ -21,6 +21,7 @@ from tools.database.segmentations.segmentations_status import get_segmentation_s
 from tools.save_population import save_final_output
 from tools.latex.get_final_report import get_final_report
 from tools.latex.latex_to_pdf import latex_to_pdf
+from tools.latex.template_tools import get_latex_template, list_latex_templates
 from tools.get_modeling_results import get_modeling_results
 from tools.targets_matcher import generate_targets
 
@@ -32,6 +33,8 @@ from tools.get_model_info import get_model_info
 # from tools.database.models.create_model import create_model
 
 import tools.scratchpad
+import tools.agent_output
+import tools.literature_context
 
 
 
