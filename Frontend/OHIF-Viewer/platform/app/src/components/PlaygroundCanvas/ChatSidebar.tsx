@@ -1,9 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, History, Plus, ChevronRight, Trash2, Send } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import websocketService from '../../utils/WebsocketService'; // Adjust path as needed
 import './ChatSidebar.css';
 
 const makeId = (prefix = 'id') => `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
+const renderIcon = (Icon, size) => React.createElement(Icon, { size, 'aria-hidden': true });
 
 const ChatSidebar = ({
   isOpen,
@@ -17,8 +20,14 @@ const ChatSidebar = ({
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(420);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStateRef = useRef({ startX: 0, startWidth: 420 });
   const messagesEndRef = useRef(null);
   const activeSessionIdRef = useRef(null);
+
+  const MIN_WIDTH = 340;
+  const MAX_WIDTH = 760;
   const activeSession = sessions.find(s => s.chat_id === activeSessionId) || null;
   let messages = activeSession ? activeSession.messages : [];
   // If there are no messages and an initialUserMessage is provided, show it as the first user message
@@ -49,6 +58,41 @@ const ChatSidebar = ({
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
   }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!isResizing) {
+      return undefined;
+    }
+
+    const handleMouseMove = event => {
+      const delta = resizeStateRef.current.startX - event.clientX;
+      const next = Math.max(
+        MIN_WIDTH,
+        Math.min(MAX_WIDTH, resizeStateRef.current.startWidth + delta)
+      );
+      setSidebarWidth(next);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
+
+  const handleResizeStart = event => {
+    resizeStateRef.current = {
+      startX: event.clientX,
+      startWidth: sidebarWidth,
+    };
+    setIsResizing(true);
+  };
 
   const fetchChatSessions = async () => {
     try {
@@ -182,7 +226,6 @@ const ChatSidebar = ({
     );
     setInput('');
     setIsTyping(true);
-    let dbFailed = false;
     try {
       await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
         method: 'POST',
@@ -190,7 +233,6 @@ const ChatSidebar = ({
         body: JSON.stringify({ role: 'user', text: userMsg.text }),
       });
     } catch (e) {
-      dbFailed = true;
       alert(
         'Warning: Could not save message to the database. This chat is now local-only.\n\nError: ' +
           e
@@ -199,7 +241,11 @@ const ChatSidebar = ({
     // Debug log outgoing message
     console.log('[ChatSidebar] Sending WS message:', { type: 'user', payload: userMsg.text });
     if (websocketService.isConnected()) {
-      websocketService.sendMessage({ type: 'user', payload: userMsg.text });
+      websocketService.sendMessage({
+        type: 'user',
+        payload: { text: userMsg.text, session_id: sessionId },
+        session_id: sessionId,
+      });
     } else {
       alert('WebSocket not connected. Message not sent to backend in real time.');
     }
@@ -213,6 +259,12 @@ const ChatSidebar = ({
       if (data.type !== 'msg') {
         return;
       }
+
+      const incomingSessionId = data.session_id;
+      if (incomingSessionId && activeSessionIdRef.current && incomingSessionId !== activeSessionIdRef.current) {
+        return;
+      }
+
       // const currentSessionId = activeSessionIdRef.current ?? sessions[0]?.chat_id;
       const currentSessionId = activeSessionIdRef.current;
       console.log(currentSessionId);
@@ -248,7 +300,9 @@ const ChatSidebar = ({
       } catch (err) {}
     };
     const unsubscribe = websocketService.subscribe(handleWS);
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+    };
   }, []);
   useEffect(() => {
     console.log(activeSessionId);
@@ -263,29 +317,38 @@ const ChatSidebar = ({
     return null;
   }
   return (
-    <div className="w-chat-sidebar">
+    <div
+      className={`w-chat-sidebar${isResizing ? ' is-resizing' : ''}`}
+      style={{ width: `${sidebarWidth}px` }}
+    >
+      <button
+        type="button"
+        className="w-chat-resize-handle"
+        aria-label="Resize chat sidebar"
+        onMouseDown={handleResizeStart}
+      />
       <div className="w-chat-header">
         <div className="w-chat-header-title">
-          <MessageSquare size={16} /> Assistant
+          {renderIcon(MessageSquare, 16)} Assistant
         </div>
         <div className="w-chat-header-actions">
           <button
             onClick={() => setDrawerOpen(!drawerOpen)}
             title="History"
           >
-            <History size={16} />
+            {renderIcon(History, 16)}
           </button>
           <button
             onClick={() => createNewSession()}
             title="New Chat"
           >
-            <Plus size={16} />
+            {renderIcon(Plus, 16)}
           </button>
           <button
             onClick={onClose}
             style={{ marginLeft: 8 }}
           >
-            <ChevronRight size={18} />
+            {renderIcon(ChevronRight, 18)}
           </button>
         </div>
       </div>
@@ -310,7 +373,7 @@ const ChatSidebar = ({
                   }}
                   className="w-chat-history-delete"
                 >
-                  <Trash2 size={12} />
+                  {renderIcon(Trash2, 12)}
                 </button>
               </div>
             ))}
@@ -326,7 +389,11 @@ const ChatSidebar = ({
             key={msg.id}
             className={`w-chat-message ${msg.role}`}
           >
-            <div className={`w-chat-bubble ${msg.role}`}>{msg.text}</div>
+            <div className={`w-chat-bubble ${msg.role}`}>
+              <div className="w-chat-markdown">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text || ''}</ReactMarkdown>
+              </div>
+            </div>
             <span className="w-chat-timestamp">
               {new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
@@ -350,7 +417,7 @@ const ChatSidebar = ({
             className="w-chat-send-btn"
             disabled={!input.trim() || isTyping}
           >
-            <Send size={16} />
+            {renderIcon(Send, 16)}
           </button>
         </div>
       </div>

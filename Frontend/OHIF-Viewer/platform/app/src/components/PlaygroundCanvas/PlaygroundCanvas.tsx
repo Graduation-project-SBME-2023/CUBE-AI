@@ -37,29 +37,43 @@ const SettingsIcon: any = Settings;
 const CENTER_LINE = 400; // Horizontal canvas center (Y axis)
 const START_W = 300;
 const AGENT_W = 220; // Must match w-[220px] in AgentNode
-const H_GAP = 120; // Horizontal gap between nodes
+const DEFAULT_GAP = 120;
+const MIN_GAP = 48;
+const MAX_GAP = 180;
+const START_H_ESTIMATE = 80;
+const AGENT_H_ESTIMATE = 84;
 
-// Handle anchors (must match node components + MiniFlow's HANDLE_Y_BY_TYPE)
-const AGENT_HEADER_MID = 25; // top:25 in AgentNode connection dots
-const START_HANDLE_Y = 40; // top:40 in StartNode connection dot
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-// All nodes are positioned so their handle sits at the same canvas Y.
-// Agent nodes:  node.y + AGENT_HEADER_MID = SHARED_HANDLE_Y
-// Start node:   node.y + START_HANDLE_Y   = SHARED_HANDLE_Y
-const SHARED_HANDLE_Y = CENTER_LINE;
+const getDynamicLayout = (agentCount: number) => {
+  const viewportWidth =
+    typeof window !== 'undefined' ? Math.max(window.innerWidth, 1200) : 1600;
 
-const START_NODE_Y = SHARED_HANDLE_Y - START_HANDLE_Y; // 360
-const AGENT_NODE_Y = SHARED_HANDLE_Y - AGENT_HEADER_MID; // 375
+  // Reserve room for side panels and keep comfortable side margins.
+  const usableWidth = Math.max(1000, viewportWidth - 420);
+  const gaps = Math.max(1, agentCount);
+  const nodeWidthTotal = START_W + agentCount * AGENT_W;
+  const computedGap = (usableWidth - nodeWidthTotal) / gaps;
+  const gap = clamp(Number.isFinite(computedGap) ? computedGap : DEFAULT_GAP, MIN_GAP, MAX_GAP);
+  const rowWidth = nodeWidthTotal + gap * gaps;
+  const startX = Math.max(80, (usableWidth - rowWidth) / 2 + 60);
 
-const START_X = CENTER_LINE - START_W / 2;
-const AGENT_X_OFFSET = START_X + START_W + H_GAP;
+  return {
+    gap,
+    startX,
+    startY: CENTER_LINE - START_H_ESTIMATE / 2,
+    agentY: CENTER_LINE - AGENT_H_ESTIMATE / 2,
+  };
+};
+
+const INITIAL_LAYOUT = getDynamicLayout(0);
 // ─────────────────────────────────────────────────────────────────────────────
 
 const INITIAL_NODES: FlowNode[] = [
   {
     id: '1',
     type: 'start',
-    position: { x: START_X, y: START_NODE_Y },
+    position: { x: INITIAL_LAYOUT.startX, y: INITIAL_LAYOUT.startY },
     data: { title: 'Research Hypothesis', description: 'Entry point' },
   },
 ];
@@ -114,6 +128,10 @@ export default function PlaygroundCanvas({
 
     const handleWSMessage = (data: any) => {
       const { type, payload } = data;
+      const incomingSessionId = data?.session_id;
+      if (incomingSessionId && session_id && incomingSessionId !== session_id) {
+        return;
+      }
       if (type === 'msg') {
         return;
       }
@@ -180,11 +198,12 @@ export default function PlaygroundCanvas({
 
     if (planPayload.steps) {
       const newNodes: FlowNode[] = [];
+      const layout = getDynamicLayout(planPayload.steps.length);
 
       newNodes.push({
         id: 'start',
         type: 'start',
-        position: { x: START_X, y: START_NODE_Y },
+        position: { x: layout.startX, y: layout.startY },
         data: {
           title: 'Research Hypothesis',
           description: planPayload.study_goal || initialHypothesis || 'Study workflow',
@@ -196,8 +215,8 @@ export default function PlaygroundCanvas({
           id: step.id,
           type: 'agent',
           position: {
-            x: AGENT_X_OFFSET + index * (AGENT_W + H_GAP),
-            y: AGENT_NODE_Y,
+            x: layout.startX + START_W + layout.gap + index * (AGENT_W + layout.gap),
+            y: layout.agentY,
           },
           data: {
             title: step.name || `Step ${index + 1}`,
@@ -311,10 +330,11 @@ export default function PlaygroundCanvas({
         nodes: nodesData,
         edges: edgesData,
         mode,
+        session_id,
         timestamp: new Date().toISOString(),
       });
     },
-    [mode]
+    [mode, session_id]
   );
 
   const handleNodesChange = useCallback(
@@ -419,9 +439,16 @@ export default function PlaygroundCanvas({
   const resetWorkflow = () => {
     setMode('planning');
     setIsPaused(false);
+    const layout = getDynamicLayout(0);
     const resetNodes = INITIAL_NODES.map(node =>
       node.type === 'start' && initialHypothesis
-        ? { ...node, data: { ...node.data, description: initialHypothesis } }
+        ? {
+            ...node,
+            position: { x: layout.startX, y: layout.startY },
+            data: { ...node.data, description: initialHypothesis },
+          }
+        : node.type === 'start'
+          ? { ...node, position: { x: layout.startX, y: layout.startY } }
         : node
     );
     setNodes(resetNodes);

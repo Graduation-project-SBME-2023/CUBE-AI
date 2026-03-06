@@ -112,6 +112,7 @@ class ToolEvent(BaseModel):
     source: str  # tool name or agent
     content_type: ContentType
     content: ContentPayload
+    session_id: str | None = None
     timestamp: datetime
 
 
@@ -145,8 +146,8 @@ async def run_planner(session: Session, message: str):
     """
 
     planner = ClinicalPlanner(
-        input_provider=lambda: manager.wait_for_user_message(),
-        output_callback=lambda t, d: manager.send_ws_message(t, d),
+        input_provider=lambda: manager.wait_for_user_message(session.session_id),
+        output_callback=lambda t, d: manager.send_ws_message(t, d, session_id=session.session_id),
         api_key=api_key,
         session_id=session.session_id
     )
@@ -244,22 +245,22 @@ async def run_pipeline(session: Session):
                 for msg in event.messages:
                     logger.info(f"  [{msg.source}] {msg.content}")
                 logger.info("━" * 60)
-                await send_ws_message("run_finished", "run_finished")
+                await manager.send_ws_message("run_finished", "run_finished", session_id=session.session_id)
 
             elif isinstance(event, ToolCallRequestEvent):
                 logger.info(f"🔧 [{event.source}] TOOL CALL REQUEST")
-                await send_ws_message("run_status", {"current_agent": event.source})
+                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
                 for call in event.content:
                     logger.info(f"   Tool: {call.name}  Args: {call.arguments}")
 
             elif isinstance(event, ToolCallExecutionEvent):
                 logger.info(f"🔧 [{event.source}] TOOL CALL RESULT")
-                await send_ws_message("run_status", {"current_agent": event.source})
+                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
                 for result in event.content:
                     logger.info(f"   Tool: {result.name}  Result: {result.content}")
 
             elif isinstance(event, MemoryQueryEvent):
-                await send_ws_message("run_status", {"current_agent": event.source})
+                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
                 logger.info(f"🧠 [{event.source}] MEMORY QUERY: {event.content}")
 
             elif isinstance(event, UserInputRequestedEvent):
@@ -268,19 +269,19 @@ async def run_pipeline(session: Session):
             elif isinstance(event, ThoughtEvent):
                 logger.info(f"💭 [{event.source}] THOUGHT")
                 logger.info(f"   {event.content}")
-                await send_ws_message("run_status", {"current_agent": event.source})
+                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
 
             elif isinstance(event, BaseChatMessage):
                 logger.info("─" * 60)
                 logger.info(f"💬 [{event.source}] ({type(event).__name__})")
                 logger.info(f"   {event.content}")
-                await send_ws_message("run_status", {"current_agent": event.source})
+                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
 
             elif isinstance(event, BaseAgentEvent):
                 logger.info(f"⚙️  [{event.source}] ({type(event).__name__})")
                 if hasattr(event, "content") and event.content:
                     logger.info(f"   {event.content}")
-                await send_ws_message("run_status", {"current_agent": event.source})
+                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
 
     except asyncio.CancelledError:
         logging.getLogger(
@@ -365,8 +366,32 @@ async def websocket_endpoint(websocket: WebSocket):
             # This is the only place we call receive_text()
             data = await websocket.receive_text()
 
-            # 4. Feed the Queue (This wakes up the Planner)
-            await manager.push_to_queue(data)
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError:
+                # Backward compatibility: plain text is treated as user input.
+                await manager.push_to_queue(data)
+                continue
+
+            if not isinstance(message, dict):
+                continue
+
+            msg_type = message.get("type")
+            payload = message.get("payload")
+            session_id = message.get("session_id")
+
+            # Some clients may nest session_id inside payload.
+            if not session_id and isinstance(payload, dict):
+                session_id = payload.get("session_id")
+
+            if msg_type in {"user", "user_input", "chat_input"}:
+                if isinstance(payload, dict):
+                    text = payload.get("text") or payload.get("message") or ""
+                else:
+                    text = str(payload or "")
+
+                if text.strip():
+                    await manager.push_to_queue(text, session_id=session_id)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)

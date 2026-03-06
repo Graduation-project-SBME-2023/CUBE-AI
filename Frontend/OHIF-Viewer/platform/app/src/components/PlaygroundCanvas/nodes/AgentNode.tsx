@@ -174,9 +174,9 @@ const AgentNode = memo((props: AgentNodeProps) => {
         )}
       </div>
 
-      {/* Connection Points — anchored to vertical center of the 50px header */}
-      <div className="absolute left-0 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-black bg-[#566a84]" style={{ top: 25 }} />
-      <div className="absolute right-0 h-2 w-2 translate-x-1/2 -translate-y-1/2 rounded-full border border-black bg-[#566a84]" style={{ top: 25 }} />
+      {/* Connection points stay at node center so edges look balanced even as content grows. */}
+      <div className="absolute left-0 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-black bg-[#566a84]" style={{ top: '50%' }} />
+      <div className="absolute right-0 h-2 w-2 translate-x-1/2 -translate-y-1/2 rounded-full border border-black bg-[#566a84]" style={{ top: '50%' }} />
     </div>
   );
 });
