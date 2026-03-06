@@ -27,7 +27,7 @@ class FeatureExtractionAgent(AssistantAgent):
         model_client = OllamaClient() if not model_client else model_client
 
         mcp_server = StdioServerParams(
-            command="python", args=[os.path.normpath(mcp_server_path)], env={"WORKSPACE_DIR": workspace_folder}
+            command="python", args=[os.path.normpath(mcp_server_path)], env={"WORKSPACE_DIR": workspace_folder}, read_timeout_seconds=300
         )
         mcp_tools = await mcp_server_tools(mcp_server)
         desired_mcp_tools = ['radiomics_extract_features', 'radiomics_analyze_importance', 'scratchpad_register_agent',
@@ -127,11 +127,10 @@ async def main():
         agent.run_stream(task="""Perform analysis, and find out the most important radiomics features for determining the health of the spleen. These are the inputs you'll need:
             {
                 "hypothesis": "What are the most important features for determining the health of the spleen?",
-                "image_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/volumes_data",
-                "mask_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/labels_data",
-                "target_csv": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/mas/memory/workspace/targets.csv",
+                "image_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/volumes",
+                "mask_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/masks",
                 "target_column": "target",
-                "subject_id_column": "subject_id",
+                "subject_id_column": "id",
             }
         """,
         cancellation_token=CancellationToken())
