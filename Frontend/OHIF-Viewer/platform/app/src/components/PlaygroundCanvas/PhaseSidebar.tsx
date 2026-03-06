@@ -1,17 +1,46 @@
 import React from 'react';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 
 interface PhaseSidebarProps {
     phases: any[];
     activePhase: string;
     onSelectPhase: (id: string) => void;
+    isCollapsed: boolean;
+    onToggleCollapse: () => void;
 }
 
-export default function PhaseSidebar({ phases, activePhase, onSelectPhase }: PhaseSidebarProps) {
+export default function PhaseSidebar({
+    phases,
+    activePhase,
+    onSelectPhase,
+    isCollapsed,
+    onToggleCollapse,
+}: PhaseSidebarProps) {
     return (
-        <div className="w-64 bg-[#0b1015] border-r border-[#1f2d40] flex flex-col z-10 shrink-0">
-            <div className="p-4 text-[10px] font-bold text-[#566a84] uppercase tracking-widest border-b border-[#1f2d40]/50">
-                Research Workflow
+        <div
+            className={`bg-[#0b1015] border-r border-[#1f2d40] flex flex-col z-10 shrink-0 transition-[width] duration-200 ${
+                isCollapsed ? 'w-16' : 'w-64'
+            }`}
+        >
+            <div
+                className={`h-12 border-b border-[#1f2d40]/50 flex items-center ${
+                    isCollapsed ? 'justify-center px-2' : 'justify-between px-4'
+                }`}
+            >
+                {!isCollapsed && (
+                    <span className="text-[10px] font-bold text-[#566a84] uppercase tracking-widest">
+                        Research Workflow
+                    </span>
+                )}
+                <button
+                    type="button"
+                    onClick={onToggleCollapse}
+                    className="h-7 w-7 rounded border border-[#2b3f57] text-[#7ca5be] hover:text-white hover:border-[#5acce6] flex items-center justify-center transition-colors"
+                    title={isCollapsed ? 'Expand workflow sidebar' : 'Collapse workflow sidebar'}
+                    aria-label={isCollapsed ? 'Expand workflow sidebar' : 'Collapse workflow sidebar'}
+                >
+                    {isCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+                </button>
             </div>
             
             <div className="flex-1 overflow-y-auto space-y-1 px-2 py-2">
@@ -23,12 +52,13 @@ export default function PhaseSidebar({ phases, activePhase, onSelectPhase }: Pha
                         <button
                             key={phase.id}
                             onClick={() => onSelectPhase(phase.id)}
-                            className={`w-full flex items-center gap-3 p-3 rounded-lg text-left transition-all group relative
+                            className={`w-full flex items-center ${isCollapsed ? 'justify-center px-1 py-3' : 'gap-3 p-3'} rounded-lg text-left transition-all group relative
                                 ${isActive ? 'bg-[#1f2d40] border border-[#3c5d80]' : 'hover:bg-[#151a1f] border border-transparent'}
                             `}
+                            title={isCollapsed ? `${phase.label} - ${phase.short_desc}` : undefined}
                         >
                             {/* Vertical Connector Line (behind dots) */}
-                            {index < phases.length - 1 && (
+                            {!isCollapsed && index < phases.length - 1 && (
                                 <div className={`absolute left-[27px] top-8 w-px h-full bg-[#1f2d40] -z-10`} />
                             )}
 
@@ -41,14 +71,16 @@ export default function PhaseSidebar({ phases, activePhase, onSelectPhase }: Pha
                             </div>
                             
                             {/* Text Content */}
-                            <div className="flex flex-col">
-                                <span className={`text-xs font-bold ${isActive ? 'text-white' : 'text-[#91b9cd] group-hover:text-gray-300'}`}>
-                                    {phase.label}
-                                </span>
-                                <span className="text-[9px] text-[#566a84] line-clamp-1 leading-tight mt-0.5">
-                                    {phase.short_desc}
-                                </span>
-                            </div>
+                            {!isCollapsed && (
+                                <div className="flex flex-col">
+                                    <span className={`text-xs font-bold ${isActive ? 'text-white' : 'text-[#91b9cd] group-hover:text-gray-300'}`}>
+                                        {phase.label}
+                                    </span>
+                                    <span className="text-[9px] text-[#566a84] line-clamp-1 leading-tight mt-0.5">
+                                        {phase.short_desc}
+                                    </span>
+                                </div>
+                            )}
                         </button>
                     );
                 })}
