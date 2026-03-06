@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { MessageSquare, FlaskConical, Layout, Database, Scan, BarChart3, FileText, BookOpenText } from 'lucide-react';
 
 // Components
@@ -58,26 +58,61 @@ export const RESEARCH_PHASES = [
     },
 ];
 
+const MessageSquareIcon: any = MessageSquare;
+const FlaskConicalIcon: any = FlaskConical;
+
 export default function ResearchPlayground() {
     const location = useLocation();
-    const DEFAULT_PHASE = 'planning';
-    const [activePhase, setActivePhase] = useState(DEFAULT_PHASE);
+    const navigate = useNavigate();
+    const { phaseId } = useParams<{ phaseId?: string }>();
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
+    const DEFAULT_PHASE = 'planning';
+    const isValidPhase = RESEARCH_PHASES.some(phase => phase.id === phaseId);
+    const activePhase = isValidPhase ? phaseId! : DEFAULT_PHASE;
+
+    useEffect(() => {
+        if (phaseId && !isValidPhase) {
+            navigate('/playground/planning', { replace: true, state: location.state });
+        }
+    }, [phaseId, isValidPhase, navigate, location.state]);
     
     // Retrieve hypothesis from navigation state or default
     const hypothesis = location.state?.hypothesis || 'No active hypothesis defined.';
+    const sessionId = location.state?.sessionId || null;
+    const sendInitialMessage = location.state?.sendInitialMessage || false;
 
-    // Render the correct center view based on the active phase
+    useEffect(() => {
+        console.log('[HypothesisFlow][ResearchPlayground] Route/context', {
+            path: location.pathname,
+            phaseId,
+            activePhase,
+            sessionId,
+            sendInitialMessage,
+            hasHypothesis: Boolean(hypothesis),
+            hypothesisLength: hypothesis?.length || 0,
+        });
+    }, [location.pathname, phaseId, activePhase, sessionId, sendInitialMessage, hypothesis]);
+
+    const handleSelectPhase = (id: string) => {
+        console.log('[HypothesisFlow][ResearchPlayground] Navigating phase', {
+            from: activePhase,
+            to: id,
+            sessionId,
+        });
+        navigate(`/playground/${id}`, { state: location.state });
+    };
+
+    // Render the correct center view based on the route-driven active phase
     const renderActiveView = () => {
         switch (activePhase) {
-            case 'planning': return <PlanningView initialHypothesis={hypothesis} />;
+            case 'planning': return <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} />;
             case 'literature': return <LiteratureReviewView literatureOutput={location.state?.literatureReviewOutput || location.state?.literatureContext} />;
             case 'data': return <DataCohortView />;
             case 'features': return <FeaturesView />;
             case 'modeling': return <ModelingView />;
             case 'reporting': return <ReportingView />;
-            default: return <PlanningView initialHypothesis={hypothesis} />;
+            default: return <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} />;
         }
     };
 
@@ -96,7 +131,7 @@ export default function ResearchPlayground() {
                     <div className="h-6 w-px bg-[#1f2d40]" />
                     <div className="flex items-center gap-3 text-xs">
                         <span className="text-[#5acce6] uppercase tracking-wider font-bold flex items-center gap-2">
-                            <FlaskConical size={14} /> Scope:
+                            <FlaskConicalIcon size={14} /> Scope:
                         </span>
                         <span className="text-gray-300 font-mono max-w-xl truncate opacity-90" title={hypothesis}>
                             {hypothesis}
@@ -109,7 +144,7 @@ export default function ResearchPlayground() {
                     className={`p-2 rounded border transition-colors flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider
                     ${isChatOpen ? 'bg-[#3c5d80] text-white border-[#5acce6]' : 'bg-[#151a1f] text-[#566a84] border-[#3c5d80] hover:text-white'}`}
                 >
-                    <MessageSquare size={14} /> AI Assistant
+                    <MessageSquareIcon size={14} /> AI Assistant
                 </button>
             </div>
 
@@ -120,7 +155,7 @@ export default function ResearchPlayground() {
                 <PhaseSidebar 
                     phases={RESEARCH_PHASES} 
                     activePhase={activePhase} 
-                    onSelectPhase={setActivePhase} 
+                    onSelectPhase={handleSelectPhase} 
                     isCollapsed={isPhaseSidebarCollapsed}
                     onToggleCollapse={() => setIsPhaseSidebarCollapsed(prev => !prev)}
                 />
@@ -145,16 +180,16 @@ export default function ResearchPlayground() {
                     </div>
                 </div>
 
-                {/* C. RIGHT SIDEBAR (Chat) */}
-                {isChatOpen && (
-                    <div className="shrink-0 z-30 relative animate-in slide-in-from-right duration-300">
-                        <ChatSidebar 
-                            isOpen={isChatOpen} 
-                            onClose={() => setIsChatOpen(false)} 
-                            initialUserMessage={hypothesis} 
-                        />
-                    </div>
-                )}
+                {/* C. RIGHT SIDEBAR (Chat) — always mounted to preserve WS state */}
+                <div className={`shrink-0 z-30 relative ${isChatOpen ? 'animate-in slide-in-from-right duration-300' : 'hidden'}`}>
+                    <ChatSidebar 
+                        isOpen={isChatOpen} 
+                        onClose={() => setIsChatOpen(false)} 
+                        initialUserMessage={hypothesis} 
+                        externalSessionId={sessionId}
+                        sendInitialMessage={sendInitialMessage}
+                    />
+                </div>
             </div>
         </div>
     );
