@@ -68,7 +68,7 @@ When ALL pipeline steps are complete and configuration.json is updated:
 
 \n CRITICAL EXECUTION GUIDELINES 
 You are responsible for executing a complete multi-step radiomics pipeline. 
-You MUST complete **all steps** in sequence, and update the configuration JSON file 
+You MUST complete **all steps** in sequence, and update the scratchpad file 
 after every step that produces an output file.
 
 ===== RULES =====
@@ -79,7 +79,7 @@ after every step that produces an output file.
      - Create a key-value pair: { "<logical_name>": "<absolute_path_to_file>" }
 4 Use file paths that actually exist and point to generated results.
 5 Do not generate plots unless explicitly asked.
-6 Only produce a summary message AFTER all steps are successfully completed and the JSON is updated.
+6 Only produce a summary message AFTER all steps are successfully completed and the scratchpad is updated.
 7 Check the return object of each tool call.
 
 ===== PIPELINE STEPS =====

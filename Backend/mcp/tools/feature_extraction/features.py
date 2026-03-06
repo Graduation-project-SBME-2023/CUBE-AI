@@ -197,12 +197,12 @@ class AnalyzeImportanceInput(BaseModel):
     input_path: str = Field(
         ..., description="Path to the input CSV file (features + target column)."
     )
-    output_dir: str = Field(
-        ..., description="Directory where importance CSVs, selected-feature CSVs, and plots are saved."
-    )
-    target_column: str = Field(
-        ..., description="Name of the column to predict."
-    )
+    # output_dir: str = Field(
+    #     ..., description="Directory where importance CSVs, selected-feature CSVs, and plots are saved."
+    # )
+    # target_column: str = Field(
+    #     ..., description="Name of the column to predict."
+    # )
 
     # ── List-valued param passed as comma-separated string ──────────────────
     top_features: str = Field(
@@ -608,6 +608,8 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
     _setup_logging(log_file)
     logger = logging.getLogger()
 
+    target_column = 'target'
+
     try:
         # ── Validate ────────────────────────────────────────────────────────
         if not os.path.exists(params.input_path):
@@ -623,14 +625,14 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
 
         # ── Load data ───────────────────────────────────────────────────────
         df = pd.read_csv(params.input_path)
-        if params.target_column not in df.columns:
-            raise ValueError(f"target_column '{params.target_column}' not found in data.")
+        if target_column not in df.columns:
+            raise ValueError(f"target_column {target_column} not found in data.")
 
         # Drop subject_id if present (never a feature)
-        X = df.drop(columns=[params.target_column])
+        X = df.drop(columns=[target_column])
         if "subject_id" in X.columns:
             X = X.drop(columns=["subject_id"])
-        y = df[params.target_column]
+        y = df[target_column]
 
         # ── Auto-detect task type ───────────────────────────────────────────
         if params.task_type:
@@ -670,7 +672,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
                     }
                 elif method == "target":
                     tmp = pd.concat([X[[col]], y], axis=1)
-                    means = tmp.groupby(col)[params.target_column].mean()
+                    means = tmp.groupby(col)[target_column].mean()
                     X[f"{col}_target"] = X[col].map(means)
                     X[f"{col}_freq"]   = X[col].map(X[col].value_counts(normalize=True))
                     encoding_mappings[col] = {"method": "target"}
@@ -800,7 +802,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             cols_to_save = [c for c in sel_feats if c in df.columns]
             encoded_only = [c for c in sel_feats if c not in df.columns]
 
-            out_df = df[cols_to_save + [params.target_column]].copy() if cols_to_save else pd.DataFrame({params.target_column: df[params.target_column]})
+            out_df = df[cols_to_save + [target_column]].copy() if cols_to_save else pd.DataFrame({target_column: df[target_column]})
             for col in encoded_only:
                 if col in X.columns:
                     out_df[col] = X[col].values
