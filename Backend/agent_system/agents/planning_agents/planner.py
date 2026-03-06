@@ -27,6 +27,7 @@ class ClinicalPlanner:
         input_provider: InputProvider,
         output_callback: OutputCallback,
         api_key: str,
+        session_id: str,
     ):
         self.input_provider = input_provider
         self.output_handler = output_callback
@@ -34,7 +35,7 @@ class ClinicalPlanner:
         log_dir = os.path.join(root_dir, "logs")
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_file = os.path.join(log_dir, f"planner_{timestamp}.log")
-        config_dir = os.path.join(root_dir, "workspace")
+        config_dir = os.path.join(root_dir, "workspace_" + session_id)
         self.log_path = Path(log_file)
         
         self.state_path = Path(config_dir) / "state.json"
@@ -199,7 +200,7 @@ class ClinicalPlanner:
                     break
 
                 # Feed feedback back to the agent
-                refinement_prompt = f"User Feedback: {user_feedback}. Update the JSON 'hypothesis' and 'steps' accordingly, or answer their query on the chosen aspects of each step."
+                refinement_prompt = f"User Feedback: {user_feedback}. Update the JSON 'hypothesis' and 'steps' accordingly, or answer their query on the chosen aspects of each step. Do not update or resend the json if you are just answering the query."
 
                 # Pass previous history implicitly if agent is stateful,
                 # or here we just rely on the agent's internal memory if using AutoGen agents directly.

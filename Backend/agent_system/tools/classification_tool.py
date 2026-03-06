@@ -1040,6 +1040,7 @@ async def classification_modelling(
     n_select: Optional[int] = 1,
     normalize: Optional[bool] = False,
     include_models: Optional[str] = None,
+    workspace_folder: str = None,
 ) -> Dict[str, Any]:
     """
     Asynchronously executes the full Classification Modelling pipeline.
@@ -1060,12 +1061,16 @@ async def classification_modelling(
         n_select: The number of top-performing models to select for the final blended/voting ensemble.
         normalize: If True, scales numeric features to a standard range (e.g., Z-score normalization).
         include_models: A comma-separated list of specific model IDs to include in the comparison.
+        workspace_folder: A path to the folder where the results will be stored.
     """
     
     # Hardcoded paths as per your original snippet
     # input_path = r'testing_folders\radiomic_features_label_1.csv'
-    root_dir = Path(__file__).parent.parent
-    output_dir = os.path.join(root_dir, 'workspace', 'models')
+    if not workspace_folder:
+        workspace_folder = os.path.join(Path(__file__).parent.parent, workspace_folder)
+    # root_dir = Path(__file__).parent.parent
+
+    output_dir = os.path.join(workspace_folder, 'workspace', 'models')
     target_column = "target"
 
     def run_classification_modeling():

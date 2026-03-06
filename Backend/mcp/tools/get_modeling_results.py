@@ -5,12 +5,11 @@ import pandas as pd
 import sys
 from pathlib import Path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
-from tool_logging import ToolEvent,log_tool_state, TextPayload
+from tool_logging import ToolEvent, log_tool_state, TextPayload
 
 
 @mcp.tool()
-def get_modeling_results(
-) -> str:
+def get_modeling_results() -> str:
     """
     Retrieves the latest machine learning modeling artifacts from the local file system. this will git you all the required data with one request
 
@@ -18,6 +17,7 @@ def get_modeling_results(
     1. When you need to retrieve the modeling and the feature extraction results to write your report
     """
     mode = "all"
+    WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR")
     try:
         payload = TextPayload(message='fetching results')
         start_event = ToolEvent(
@@ -28,16 +28,19 @@ def get_modeling_results(
         )
         log_tool_state(start_event)
         # 1. Resolve Paths
-        current_dir = Path(__file__).resolve().parent
-        logging_path = current_dir.parent.parent / "agent_system" / "workspace"
+        if not WORKSPACE_DIR:
+            WORKSPACE_DIR = os.path.join(Path(__file__).parent.parent.parent, "agent_system", "workspace")
+
+        # current_dir = Path(__file__).resolve().parent
+        # logging_path = current_dir.parent.parent / "agent_system" / "workspace"
 
         # Map modes to specific files (or all of them)
         all_files = {
-            "features": logging_path / "features" / "top_10_features.csv",
+            "features": WORKSPACE_DIR / "features" / "top_10_features.csv",
             # "tuning": logging_path / "model_1_results.csv",
-            "evaluation": logging_path / "models" / "models" / "model_1" / "independent_eval_results_model_1.csv",
-            "comparisons": logging_path / "models" / "model_comparison_results.csv",
-            "summary": logging_path / "models" / "model_summary.csv"
+            "evaluation": WORKSPACE_DIR / "models" / "models" / "model_1" / "independent_eval_results_model_1.csv",
+            "comparisons": WORKSPACE_DIR / "models" / "model_comparison_results.csv",
+            "summary": WORKSPACE_DIR / "models" / "model_summary.csv"
         }
 
         # Select which files to read based on the 'mode' argument
@@ -46,8 +49,8 @@ def get_modeling_results(
         results = []
 
         # 2. Check Directory
-        if not logging_path.exists():
-            return f"Error: The directory '{logging_path}' does not exist."
+        if not WORKSPACE_DIR.exists():
+            return f"Error: The directory '{WORKSPACE_DIR}' does not exist."
 
         # 3. Read Files with Error Handling
         for key, file_path in files_to_read.items():

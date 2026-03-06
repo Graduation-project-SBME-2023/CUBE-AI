@@ -96,7 +96,10 @@ export default function AgentsPlayground() {
       <div className="relative flex flex-1 overflow-hidden">
         {/* A. The Workflow Canvas */}
         <div className="relative min-w-0 flex-1">
-          <PlaygroundCanvas initialHypothesis={hypothesis} />
+          <PlaygroundCanvas
+            initialHypothesis={hypothesis}
+            session_id={sessionId}
+          />
 
           {/* B. Agent Registry (Floating Deck) */}
           {/* FIX: Connect state here */}

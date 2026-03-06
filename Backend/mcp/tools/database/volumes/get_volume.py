@@ -2,6 +2,7 @@ from pydantic import Field
 from typing import Annotated
 from ... import mcp
 import httpx
+from tool_logging import ToolEvent, log_tool_state, TextPayload
 
 @mcp.tool()
 async def get_volume(
@@ -17,6 +18,11 @@ async def get_volume(
     2. To browse or list multiple volumes when no specific UID is known (uses pagination).
     """
     async with httpx.AsyncClient() as client:
+        payload = TextPayload(message='Checking available study descriptions...')
+        start_event = ToolEvent('tool_started', 'study_population_planner_agent', 'text', payload)
+        log_tool_state(start_event)
+        log_event = ToolEvent('tool_progress', 'study_population_planner_agent', 'text', payload)
+        log_tool_state(log_event)
         if volume_series_instance_uid is not None:
             response = await client.get(f"http://localhost:8000/volumes/{volume_series_instance_uid}")
         else:
@@ -31,6 +37,9 @@ async def get_volume(
         except ValueError:
             return {"error": "Invalid JSON returned", "raw": response.text}
 
+        payload = TextPayload(message='Checking available study descriptions...')
+        finished_event = ToolEvent('tool_finished', 'study_population_planner_agent', 'text', payload)
+        log_tool_state(finished_event)
         return {"data": data}
     
 @mcp.tool()
