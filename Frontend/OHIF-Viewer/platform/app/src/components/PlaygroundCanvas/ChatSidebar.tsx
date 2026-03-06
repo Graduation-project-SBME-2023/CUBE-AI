@@ -22,12 +22,15 @@ const ChatSidebar = ({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(420);
   const [isResizing, setIsResizing] = useState(false);
+  const [maxSidebarWidth, setMaxSidebarWidth] = useState(() =>
+    Math.max(340, Math.min(760, Math.floor(window.innerWidth * 0.55)))
+  );
   const resizeStateRef = useRef({ startX: 0, startWidth: 420 });
   const messagesEndRef = useRef(null);
   const activeSessionIdRef = useRef(null);
 
   const MIN_WIDTH = 340;
-  const MAX_WIDTH = 760;
+  const MAX_WIDTH = maxSidebarWidth;
   const activeSession = sessions.find(s => s.chat_id === activeSessionId) || null;
   let messages = activeSession ? activeSession.messages : [];
   // If there are no messages and an initialUserMessage is provided, show it as the first user message
@@ -85,6 +88,19 @@ const ChatSidebar = ({
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isResizing]);
+
+  useEffect(() => {
+    const handleWindowResize = () => {
+      const nextMax = Math.max(340, Math.min(760, Math.floor(window.innerWidth * 0.55)));
+      setMaxSidebarWidth(nextMax);
+      setSidebarWidth(prev => Math.min(prev, nextMax));
+    };
+
+    window.addEventListener('resize', handleWindowResize);
+    return () => {
+      window.removeEventListener('resize', handleWindowResize);
+    };
+  }, []);
 
   const handleResizeStart = event => {
     resizeStateRef.current = {
@@ -399,7 +415,7 @@ const ChatSidebar = ({
             </span>
           </div>
         ))}
-        {isTyping && <div className="w-chat-typing">AI is thinking...</div>}
+        {isTyping && <div className="w-chat-typing">CUBE is thinking...</div>}
         <div ref={messagesEndRef} />
       </div>
       <div className="w-chat-input-area">

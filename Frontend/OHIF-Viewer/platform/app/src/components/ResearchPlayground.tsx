@@ -63,6 +63,7 @@ export default function ResearchPlayground() {
     const DEFAULT_PHASE = 'planning';
     const [activePhase, setActivePhase] = useState(DEFAULT_PHASE);
     const [isChatOpen, setIsChatOpen] = useState(false);
+    const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
     
     // Retrieve hypothesis from navigation state or default
     const hypothesis = location.state?.hypothesis || 'No active hypothesis defined.';
@@ -120,6 +121,8 @@ export default function ResearchPlayground() {
                     phases={RESEARCH_PHASES} 
                     activePhase={activePhase} 
                     onSelectPhase={setActivePhase} 
+                    isCollapsed={isPhaseSidebarCollapsed}
+                    onToggleCollapse={() => setIsPhaseSidebarCollapsed(prev => !prev)}
                 />
 
                 {/* B. CENTER STAGE (Polymorphic View) */}
@@ -144,7 +147,7 @@ export default function ResearchPlayground() {
 
                 {/* C. RIGHT SIDEBAR (Chat) */}
                 {isChatOpen && (
-                    <div className="w-[350px] border-l border-[#3c5d80] bg-[#0b1015] z-30 shadow-2xl relative animate-in slide-in-from-right duration-300">
+                    <div className="shrink-0 z-30 relative animate-in slide-in-from-right duration-300">
                         <ChatSidebar 
                             isOpen={isChatOpen} 
                             onClose={() => setIsChatOpen(false)} 
