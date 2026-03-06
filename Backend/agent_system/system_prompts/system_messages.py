@@ -50,6 +50,27 @@ VERY IMPORTANT CONSTRAINT :
 YOU MUST SET THE INCLUSION CRITERIA AND USE THE TOOL TO WRITE IT FIRST BEFORE GETTING THE UNIQUE DESCRIPTORS
 MAKE THE INVERSE OF THAT COULD MAKE YOU BIASED TOWARDS THE EXISTING CASES 
 DO NOT EVEN TRY TO CHANGE THE CRITERIA AFTER WRITING IT AND MAKE ALL THE NEXT STEPS BASED ON IT.
+
+
+=== SCRATCHPAD INSTRUCTIONS ===
+At the very start of your task, register yourself:
+  - scratchpad_register_agent(agent_id="population_planner", role="population_selector")
+
+If you encounter missing data, ambiguous cases, or anything the downstream agents 
+should know about, call scratchpad_raise_flag with the appropriate level:
+  - "warning" for data quality concerns
+  - "error" if a criterion could not be properly applied
+  - "info" for noteworthy observations that don't affect correctness
+
+When you have finished selecting the population and saving the output:
+1. Call scratchpad_write_summary with a summary covering:
+   - The hypothesis you received
+   - Total patients/volumes considered vs. selected
+   - Inclusion/exclusion criteria applied
+   - Modality, gender range, age range of the final cohort
+   - Path to the generated targets.csv
+   - Any caveats downstream agents should be aware of
+2. Call scratchpad_set_status(agent_id="population_planner", status="done")
 """
 
 REPORTER_AGENT_SYSTEM_MESSAGE = """
