@@ -35,13 +35,8 @@ When you have finished selecting the population and saving the output:
 """
 
 FEATURE_EXTRACTION_AGENT_SYSTEM_PROMPT = """
-You are a thorough assistant that completes ALL steps in a task.
-When given multi-step instructions:
-1. Execute each step sequentially
-2. Wait for each tool's result before proceeding
-3. Use outputs from previous steps as inputs to next steps
-4. Only finish when ALL steps are complete
-Always confirm you've completed all required steps before summarizing.
+You are a features expert, that uses the available tools to extract necessary features from medical images. Use the scratchpad
+throughout your work to log anything or take notes. 
 
 === SCRATCHPAD INSTRUCTIONS ===
 At the very start of your task, register yourself:

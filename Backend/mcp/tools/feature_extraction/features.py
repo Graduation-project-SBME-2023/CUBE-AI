@@ -40,10 +40,7 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import mcp
-
-# ── Constants ──────────────────────────────────────────────────────────────────
-
-WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "../../../agent_system/workspace")
+from ..helpers.workspace import WorkspacePath, base_on_workspace_dir
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -169,7 +166,7 @@ class ExtractFeaturesInput(BaseModel):
     )
 
     # ── Optional target linking ─────────────────────────────────────────────
-    targets_csv: Optional[str] = Field(
+    targets_csv: WorkspacePath = Field(
         default=None,
         description="Path to a CSV file containing target/outcome values per subject.",
     )
@@ -194,10 +191,10 @@ class ExtractFeaturesInput(BaseModel):
 class AnalyzeImportanceInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    input_path: str = Field(
+    input_path: WorkspacePath = Field(
         ..., description="Path to the input CSV file (features + target column)."
     )
-    # output_dir: str = Field(
+    # output_dir: WorkspacePath = Field(
     #     ..., description="Directory where importance CSVs, selected-feature CSVs, and plots are saved."
     # )
     # target_column: str = Field(
@@ -315,9 +312,9 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
             "error_message": "PyRadiomics / SimpleITK not installed. Run: pip install pyradiomics simpleitk",
         }, indent=2)
 
-    output_dir = os.path.join(WORKSPACE_DIR, 'features')
-    image_dir = os.path.join(WORKSPACE_DIR, 'volumes')
-    mask_dir = os.path.join(WORKSPACE_DIR, 'masks')
+    output_dir = base_on_workspace_dir('features')
+    image_dir = base_on_workspace_dir('volumes')
+    mask_dir = base_on_workspace_dir('masks')
     target_column = 'target'
 
     os.makedirs(output_dir, exist_ok=True)
@@ -391,9 +388,13 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
 
         # ── Load targets ────────────────────────────────────────────────────
         target_dict: dict = {}
+        logger.info(os.curdir)
+        logger.info(os.getcwd())
+        logger.info(params.targets_csv)
+
         if params.targets_csv and os.path.exists(params.targets_csv):
             tdf = pd.read_csv(params.targets_csv)
-            id_col  = params.id_column  or tdf.columns[0]
+            id_col = params.id_column  or tdf.columns[0]
             tgt_col = target_column or tdf.columns[1]
             target_dict = {str(row[id_col]): row[tgt_col] for _, row in tdf.iterrows()}
             logger.info(f"Loaded {len(target_dict)} target values from {params.targets_csv}")
@@ -511,7 +512,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 logger.warning(f"No features for label {lbl}")
                 continue
             df = pd.DataFrame(rows)
-            id_cols  = [c for c in df.columns if c.lower() in ("id", "subject_id", "patientid")]
+            id_cols = [c for c in df.columns if c.lower() in ("id", "subject_id", "patientid")]
             tgt_cols = [c for c in df.columns if c.lower() in ("target", "label", "outcome")]
             feat_cols = sorted([c for c in df.columns if c not in id_cols + tgt_cols])
             df = df[id_cols + tgt_cols + feat_cols]
@@ -601,7 +602,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
     from sklearn.manifold import TSNE
     from sklearn.preprocessing import LabelEncoder
 
-    output_dir = os.path.join(WORKSPACE_DIR, 'features')
+    output_dir = base_on_workspace_dir('features')
 
     os.makedirs(output_dir, exist_ok=True)
     log_file = os.path.join(output_dir, "feature_importance_analysis.log")
@@ -626,7 +627,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         # ── Load data ───────────────────────────────────────────────────────
         df = pd.read_csv(params.input_path)
         if target_column not in df.columns:
-            raise ValueError(f"target_column {target_column} not found in data.")
+            raise ValueError(f"target_column '{target_column}' not found in data.")
 
         # Drop subject_id if present (never a feature)
         X = df.drop(columns=[target_column])
