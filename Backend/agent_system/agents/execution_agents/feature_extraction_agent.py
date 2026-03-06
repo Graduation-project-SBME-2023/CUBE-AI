@@ -10,7 +10,7 @@ from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
 from descriptions.models_descriptions import FEATURE_EXTRACTION_AGENT_DESCRIPTION
 from system_prompts.system_messages import FEATURE_EXTRACTION_AGENT_SYSTEM_PROMPT
 
-from tools.feature_extraction_tools import extract_radiomic_features, analyze_feature_importance
+# from tools.feature_extraction_tools import extract_radiomic_features, analyze_feature_importance
 from autogen_core.tools import FunctionTool
 
 class FeatureExtractionAgent(AssistantAgent):
