@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { MessageSquare, FlaskConical, Layout, Database, Scan, BarChart3, FileText } from 'lucide-react';
+import { MessageSquare, FlaskConical, Layout, Database, Scan, BarChart3, FileText, BookOpenText } from 'lucide-react';
 
 // Components
 import PhaseSidebar from './PlaygroundCanvas/PhaseSidebar';
 import PlanningView from './PlaygroundCanvas/views/PlanningView';
+import LiteratureReviewView from './PlaygroundCanvas/views/LiteratureReviewView';
 import DataCohortView from './PlaygroundCanvas/views/DataCohortView';
 import FeaturesView from './PlaygroundCanvas/views/FeaturesView';
 import ModelingView from './PlaygroundCanvas/views/ModelingView';
@@ -18,7 +19,14 @@ export const RESEARCH_PHASES = [
         label: 'Study Planning', 
         short_desc: 'Design & Hypothesis',
         icon: Layout, 
-        description: 'Literature review, DOI Graph & Research Design' 
+        description: 'Define the research question, scope, and plan structure' 
+    },
+    {
+        id: 'literature',
+        label: 'Literature Review',
+        short_desc: 'Evidence Synthesis',
+        icon: BookOpenText,
+        description: 'Knowledge base, source map, and hypothesis context'
     },
     { 
         id: 'data', 
@@ -52,7 +60,8 @@ export const RESEARCH_PHASES = [
 
 export default function ResearchPlayground() {
     const location = useLocation();
-    const [activePhase, setActivePhase] = useState('planning');
+    const DEFAULT_PHASE = 'planning';
+    const [activePhase, setActivePhase] = useState(DEFAULT_PHASE);
     const [isChatOpen, setIsChatOpen] = useState(false);
     
     // Retrieve hypothesis from navigation state or default
@@ -62,6 +71,7 @@ export default function ResearchPlayground() {
     const renderActiveView = () => {
         switch (activePhase) {
             case 'planning': return <PlanningView initialHypothesis={hypothesis} />;
+            case 'literature': return <LiteratureReviewView literatureOutput={location.state?.literatureReviewOutput || location.state?.literatureContext} />;
             case 'data': return <DataCohortView />;
             case 'features': return <FeaturesView />;
             case 'modeling': return <ModelingView />;

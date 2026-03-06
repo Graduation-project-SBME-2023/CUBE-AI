@@ -45,6 +45,7 @@ class ToolEvent(BaseModel):
     source: str  # tool name or agent
     content_type: ContentType
     content: ContentPayload
+    session_id: str | None = None
     timestamp: datetime = datetime.now()
 
 

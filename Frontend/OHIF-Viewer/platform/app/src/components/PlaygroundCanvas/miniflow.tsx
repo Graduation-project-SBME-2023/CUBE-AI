@@ -1,16 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { MiniFlowProps } from './types';
 
-// These must match the visual handle positions in each node component:
-// - AgentNode pins its dots to `top: 25` (half of the 50px header)
-// - StartNode pins its dot to `top: START_HANDLE_Y` (exported from StartNode)
-const HANDLE_Y_BY_TYPE: Record<string, number> = {
-  start: 40,  // START_HANDLE_Y — vertical center of the 80px start card
-  agent: 25,  // AGENT_HEADER_MID — vertical center of the 50px header row
-};
-
-const DEFAULT_HANDLE_Y = 25;
-
 const MiniFlow: React.FC<MiniFlowProps> = ({
   nodes,
   edges,
@@ -75,7 +65,7 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
   }, []);
 
   // Returns the canvas-space XY where an edge should attach to a node side.
-  // X uses the measured DOM width; Y uses the per-type handle constant.
+  // Anchoring to measured center keeps edges visually centered for all node heights.
   const getEdgeAnchors = useCallback(
     (nodeId: string, side: 'right' | 'left') => {
       const node = nodes.find(n => n.id === nodeId);
@@ -83,11 +73,11 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
 
       const dim = nodeDims[nodeId];
       const w = dim?.w ?? 220;
-      const handleY = HANDLE_Y_BY_TYPE[node.type] ?? DEFAULT_HANDLE_Y;
+      const h = dim?.h ?? 80;
 
       return {
         x: node.position.x + (side === 'right' ? w : 0),
-        y: node.position.y + handleY,
+        y: node.position.y + h / 2,
       };
     },
     [nodes, nodeDims]

@@ -4,10 +4,6 @@ import { FlaskConical } from 'lucide-react';
 
 const START_W = 300;
 
-// The connection handle sits at this Y offset from the node's top edge.
-// Must match AGENT_HEADER_MID in MiniFlow so all edges are colinear.
-export const START_HANDLE_Y = 40;
-
 const StartNode = memo((props: StartNodeProps) => {
   const { data } = props;
 
@@ -51,7 +47,7 @@ const StartNode = memo((props: StartNodeProps) => {
         style={{
           position: 'absolute',
           right: -5,
-          top: START_HANDLE_Y,
+          top: '50%',
           transform: 'translateY(-50%)',
           width: 8,
           height: 8,

@@ -15,11 +15,11 @@ export default function PlanningView({ initialHypothesis }: PlanningViewProps) {
             {/* Reuse your existing Graph Engine */}
             <PlaygroundCanvas initialHypothesis={initialHypothesis} />
             
-            {/* Reuse your existing Registry */}
+            {/* Reuse your existing Registry
             <AgentRegistry 
                 isOpen={isRegistryOpen} 
                 onToggle={() => setIsRegistryOpen(!isRegistryOpen)} 
-            />
+            /> */}
         </div>
     );
 }
