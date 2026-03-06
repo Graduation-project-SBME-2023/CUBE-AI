@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Literal, Any, Union
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from teams.execution_team import BasicPipelineBuilder
 from autogen_agentchat.teams import GraphFlow
 from autogen_agentchat.messages import (
@@ -63,10 +63,20 @@ task_manager = TaskManager()
 class SessionControlRequest(BaseModel):
     session_id: str = Field(..., description="Session ID")
 
+    @field_validator('session_id', mode='before')
+    @classmethod
+    def coerce_session_id(cls, v):
+        return str(v)
+
 
 class PlanningRequest(BaseModel):
     message: str = Field(..., description="Initial message or clinical hypothesis from the user to start planning")
     session_id: str = Field(..., description="Session ID")
+
+    @field_validator('session_id', mode='before')
+    @classmethod
+    def coerce_session_id(cls, v):
+        return str(v)
 
 
 EventType = Literal[
@@ -128,7 +138,12 @@ api_key = os.getenv("OLLAMA_API_KEY", "cf8ed2bae88d4d659602bc340b4b2bcf.mEvRr0YQ
 async def start_planning(request: PlanningRequest):
     # chat_session_id needs to be passed in the request.
     # planning and execution tasks need to be stored and controlled, and should communicate via ws
-    print("Received planning request:", request.message)
+    logging.getLogger('HypothesisFlow').info(
+        '[HypothesisFlow][API] /plan received | session_id=%s | message_len=%s | preview=%s',
+        request.session_id,
+        len(request.message or ''),
+        (request.message or '')[:120],
+    )
     task_manager.start_planning(request.session_id, request.message, run_planner)
     # asyncio.create_task(run_planner(request.message))
     return {"task_id": request.session_id, "status": "started"}
@@ -145,6 +160,11 @@ async def run_planner(session: Session, message: str):
     the client might throw a timeout error, even though the process is still running on the server.
     """
 
+    logging.getLogger('HypothesisFlow').info(
+        '[HypothesisFlow][Planner] Starting planner | session_id=%s | message_len=%s',
+        session.session_id,
+        len(message or ''),
+    )
     planner = ClinicalPlanner(
         input_provider=lambda: manager.wait_for_user_message(session.session_id),
         output_callback=lambda t, d: manager.send_ws_message(t, d, session_id=session.session_id),
@@ -154,6 +174,10 @@ async def run_planner(session: Session, message: str):
 
     # try:
     await planner.run(start_query=message)
+    logging.getLogger('HypothesisFlow').info(
+        '[HypothesisFlow][Planner] Planner finished | session_id=%s',
+        session.session_id,
+    )
     # except Exception as e:
     #     await manager.send_ws_message("error", str(e))
 
@@ -357,6 +381,7 @@ async def receive_event(event: ToolEvent):
 async def websocket_endpoint(websocket: WebSocket):
     # 1. Register connection
     await manager.connect(websocket)
+    logging.getLogger('HypothesisFlow').info('[HypothesisFlow][WS] Client connected')
     # 2. Start your Planner Logic (in background)
     # asyncio.create_task(planner.run("Start"))
 
@@ -365,6 +390,10 @@ async def websocket_endpoint(websocket: WebSocket):
             # 3. LISTEN LOOP
             # This is the only place we call receive_text()
             data = await websocket.receive_text()
+            logging.getLogger('HypothesisFlow').info(
+                '[HypothesisFlow][WS] Message received raw | size=%s',
+                len(data or ''),
+            )
 
             try:
                 message = json.loads(data)
@@ -391,9 +420,16 @@ async def websocket_endpoint(websocket: WebSocket):
                     text = str(payload or "")
 
                 if text.strip():
+                    logging.getLogger('HypothesisFlow').info(
+                        '[HypothesisFlow][WS] Queueing user text | session_id=%s | text_len=%s | preview=%s',
+                        session_id,
+                        len(text),
+                        text[:120],
+                    )
                     await manager.push_to_queue(text, session_id=session_id)
 
     except WebSocketDisconnect:
+        logging.getLogger('HypothesisFlow').info('[HypothesisFlow][WS] Client disconnected')
         manager.disconnect(websocket)
 
 

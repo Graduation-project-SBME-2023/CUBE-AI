@@ -16,6 +16,11 @@ class TaskManager:
 
     def start_planning(self, session_id: str, starting_message: str, planner):
         session = self.get_or_create(session_id)
+        logger.info(
+            '[HypothesisFlow][TaskManager] start_planning requested | session_id=%s | message_len=%s',
+            session_id,
+            len(starting_message or ''),
+        )
 
         if session.planning_task and not session.planning_task.done():
             raise RuntimeError("Planning already running")
@@ -30,11 +35,24 @@ class TaskManager:
 
     async def _run_planning(self, session: Session, starting_message: str, planner):
         try:
+            logger.info(
+                '[HypothesisFlow][TaskManager] _run_planning started | session_id=%s',
+                session.session_id,
+            )
             await planner(session, starting_message)
             session.state = SessionState.READY
+            logger.info(
+                '[HypothesisFlow][TaskManager] _run_planning finished successfully | session_id=%s',
+                session.session_id,
+            )
         except asyncio.CancelledError:
             if not session.interrupted:
                 session.state = SessionState.CANCELLED
+            logger.info(
+                '[HypothesisFlow][TaskManager] _run_planning cancelled | session_id=%s | interrupted=%s',
+                session.session_id,
+                session.interrupted,
+            )
         except Exception as e:
             session.last_error = str(e)
             logger.info(f'Planning {session.session_id} failed, error: {e}')

@@ -1,5 +1,10 @@
 import React from 'react';
-import { CheckCircle2, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { CheckCircle2, Home, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+
+const CheckCircle2Icon: any = CheckCircle2;
+const HomeIcon: any = Home;
+const PanelLeftCloseIcon: any = PanelLeftClose;
+const PanelLeftOpenIcon: any = PanelLeftOpen;
 
 interface PhaseSidebarProps {
     phases: any[];
@@ -32,15 +37,31 @@ export default function PhaseSidebar({
                         Research Workflow
                     </span>
                 )}
-                <button
-                    type="button"
-                    onClick={onToggleCollapse}
-                    className="h-7 w-7 rounded border border-[#2b3f57] text-[#7ca5be] hover:text-white hover:border-[#5acce6] flex items-center justify-center transition-colors"
-                    title={isCollapsed ? 'Expand workflow sidebar' : 'Collapse workflow sidebar'}
-                    aria-label={isCollapsed ? 'Expand workflow sidebar' : 'Collapse workflow sidebar'}
-                >
-                    {isCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
-                </button>
+                <div className={`flex items-center ${isCollapsed ? 'gap-1' : 'gap-2'}`}>
+                    <button
+                        type="button"
+                        onClick={() => onSelectPhase('planning')}
+                        className={`h-7 w-7 rounded border flex items-center justify-center transition-colors ${
+                            activePhase === 'planning'
+                                ? 'border-[#5acce6] text-[#5acce6] bg-[#13202d]'
+                                : 'border-[#2b3f57] text-[#7ca5be] hover:text-white hover:border-[#5acce6]'
+                        }`}
+                        title="Go to home (Planning)"
+                        aria-label="Go to home (Planning)"
+                    >
+                        <HomeIcon size={14} />
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={onToggleCollapse}
+                        className="h-7 w-7 rounded border border-[#2b3f57] text-[#7ca5be] hover:text-white hover:border-[#5acce6] flex items-center justify-center transition-colors"
+                        title={isCollapsed ? 'Expand workflow sidebar' : 'Collapse workflow sidebar'}
+                        aria-label={isCollapsed ? 'Expand workflow sidebar' : 'Collapse workflow sidebar'}
+                    >
+                        {isCollapsed ? <PanelLeftOpenIcon size={14} /> : <PanelLeftCloseIcon size={14} />}
+                    </button>
+                </div>
             </div>
             
             <div className="flex-1 overflow-y-auto space-y-1 px-2 py-2">
@@ -67,7 +88,7 @@ export default function PhaseSidebar({
                                 ${isActive ? 'border-[#5acce6] text-[#5acce6] shadow-[0_0_10px_rgba(90,204,230,0.3)]' : 
                                   isPast ? 'border-[#6fe5b8] bg-[#6fe5b8]/10 text-[#6fe5b8]' : 'border-[#3c5d80] text-[#3c5d80]'}
                             `}>
-                                {isPast ? <CheckCircle2 size={14} /> : <span className="text-[10px] font-bold">{index + 1}</span>}
+                                {isPast ? <CheckCircle2Icon size={14} /> : <span className="text-[10px] font-bold">{index + 1}</span>}
                             </div>
                             
                             {/* Text Content */}

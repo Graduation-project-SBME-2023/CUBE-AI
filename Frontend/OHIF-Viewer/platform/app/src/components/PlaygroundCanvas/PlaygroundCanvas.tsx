@@ -124,12 +124,25 @@ export default function PlaygroundCanvas({
 
   useEffect(() => {
     websocketService.connect();
-    console.log(session_id);
+    console.log('[HypothesisFlow][PlaygroundCanvas] Mounted', {
+      sessionId: session_id,
+      hasHypothesis: Boolean(initialHypothesis),
+      hypothesisLength: initialHypothesis?.length || 0,
+    });
 
     const handleWSMessage = (data: any) => {
+      console.log('[HypothesisFlow][PlaygroundCanvas] WS event received', {
+        type: data?.type,
+        sessionId: data?.session_id,
+        localSessionId: session_id,
+      });
       const { type, payload } = data;
-      const incomingSessionId = data?.session_id;
-      if (incomingSessionId && session_id && incomingSessionId !== session_id) {
+      const incomingSessionId = String(data?.session_id);
+      if (incomingSessionId && session_id && incomingSessionId !== String(session_id)) {
+        console.log('[HypothesisFlow][PlaygroundCanvas] Ignoring WS event for different session', {
+          incomingSessionId,
+          localSessionId: session_id,
+        });
         return;
       }
       if (type === 'msg') {
@@ -161,10 +174,19 @@ export default function PlaygroundCanvas({
       const startPlanning = async () => {
         try {
           await new Promise(r => setTimeout(r, 500));
+          console.log('[HypothesisFlow][PlaygroundCanvas] Sending /plan request', {
+            hypothesisPreview: initialHypothesis.slice(0, 120),
+            sessionId: session_id,
+          });
           const response = await fetch('http://localhost:8150/plan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: initialHypothesis, session_id: session_id }),
+            body: JSON.stringify({ message: initialHypothesis, session_id: String(session_id) }),
+          });
+          console.log('[HypothesisFlow][PlaygroundCanvas] /plan response', {
+            ok: response.ok,
+            status: response.status,
+            sessionId: session_id,
           });
           if (!response.ok) {
             console.error('Failed to initiate planning session');
@@ -398,7 +420,7 @@ export default function PlaygroundCanvas({
     await fetch('http://localhost:8150/run/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id }),
+      body: JSON.stringify({ session_id: String(session_id) }),
     });
   };
 
@@ -408,7 +430,7 @@ export default function PlaygroundCanvas({
     await fetch(`http://localhost:8150/${next ? 'pause' : 'resume'}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id }),
+      body: JSON.stringify({ session_id: String(session_id) }),
     });
   };
 
@@ -416,7 +438,7 @@ export default function PlaygroundCanvas({
     await fetch(`http://localhost:8150/stop`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id }),
+      body: JSON.stringify({ session_id: String(session_id) }),
     });
     setIsPaused(false);
     setMode('planning');           // go back to planning so user can re-execute
@@ -428,7 +450,7 @@ export default function PlaygroundCanvas({
     await fetch(`http://localhost:8150/restart`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id }),
+      body: JSON.stringify({ session_id: String(session_id) }),
     });
     setIsPaused(false);
     setMode('executing');

@@ -117,6 +117,10 @@ const createRoutes = ({
     {
       path: '/playground',
       children: ResearchPlayground,
+    },
+    {
+      path: '/playground/:phaseId',
+      children: ResearchPlayground,
     }
   ];
   
@@ -149,7 +153,6 @@ const createRoutes = ({
     cubeStartupRoute, // CUBE startup is now the landing page
     ...routes,
     ...workflowRoutes,
-    playgroundRoutes,
     ...playgroundRoutes,
     ...(showStudyList ? [WorkListRoute] : []),
     ...(customRoutes?.routes || []),

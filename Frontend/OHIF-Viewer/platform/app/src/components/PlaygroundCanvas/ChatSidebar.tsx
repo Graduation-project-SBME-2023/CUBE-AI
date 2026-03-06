@@ -31,7 +31,7 @@ const ChatSidebar = ({
 
   const MIN_WIDTH = 340;
   const MAX_WIDTH = maxSidebarWidth;
-  const activeSession = sessions.find(s => s.chat_id === activeSessionId) || null;
+  const activeSession = sessions.find(s => String(s.chat_id) === String(activeSessionId)) || null;
   let messages = activeSession ? activeSession.messages : [];
   // If there are no messages and an initialUserMessage is provided, show it as the first user message
   if (messages.length === 0 && initialUserMessage) {
@@ -39,8 +39,34 @@ const ChatSidebar = ({
   }
 
   useEffect(() => {
+    console.log('[HypothesisFlow][ChatSidebar] Session binding effect', {
+      externalSessionId,
+      sendInitialMessage,
+      hasInitialUserMessage: Boolean(initialUserMessage),
+      initialUserMessageLength: initialUserMessage?.length || 0,
+    });
+
     if (externalSessionId) {
       setActiveSessionId(externalSessionId);
+      console.log('[HypothesisFlow][ChatSidebar] Active session set from route state', {
+        externalSessionId,
+      });
+      // Ensure a local session entry exists for this external ID
+      setSessions(prev => {
+        const exists = prev.some(s => String(s.chat_id) === String(externalSessionId));
+        if (!exists) {
+          return [{
+            chat_id: externalSessionId,
+            title: 'Research Session',
+            messages: initialUserMessage
+              ? [{ id: makeId('init'), role: 'user', text: initialUserMessage, ts: Date.now() }]
+              : [],
+            summary: '',
+            last_activity: Date.now(),
+          }, ...prev];
+        }
+        return prev;
+      });
       // Optionally refresh sessions list so the new one appears in history
       fetchChatSessions();
     }
@@ -50,11 +76,28 @@ const ChatSidebar = ({
       // } else {
       //   alert('WebSocket not connected. Message not sent to backend in real time.');
       // }
+      console.log('[HypothesisFlow][ChatSidebar] Sending initial message to chat backend', {
+        externalSessionId,
+        preview: (initialUserMessage || '').slice(0, 120),
+      });
       fetch(`http://localhost:8000/chat_messages/${externalSessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: 'user', text: initialUserMessage }),
-      });
+      })
+        .then(response => {
+          console.log('[HypothesisFlow][ChatSidebar] Initial message POST result', {
+            ok: response.ok,
+            status: response.status,
+            externalSessionId,
+          });
+        })
+        .catch(error => {
+          console.error('[HypothesisFlow][ChatSidebar] Failed to send initial message', {
+            externalSessionId,
+            error,
+          });
+        });
     }
   }, [externalSessionId]);
 
@@ -124,11 +167,23 @@ const ChatSidebar = ({
         summary: s.summary,
         last_activity: s.last_activity ? new Date(s.last_activity).getTime() : 0,
       }));
-      setSessions(mapped);
-      // if (mapped.length && !activeSessionId) {
-      //   setActiveSessionId(mapped[0].chat_id);
-      // }
-      // console.log('after fetching', activeSessionId);
+      // Merge DB sessions with existing local sessions to preserve WS-delivered messages
+      setSessions(prev => {
+        const merged = [...prev];
+        for (const dbSession of mapped) {
+          const idx = merged.findIndex(s => String(s.chat_id) === String(dbSession.chat_id));
+          if (idx === -1) {
+            merged.push(dbSession);
+          } else {
+            // Keep existing messages (from WS) if DB returned none
+            merged[idx] = {
+              ...dbSession,
+              messages: merged[idx].messages.length > 0 ? merged[idx].messages : dbSession.messages,
+            };
+          }
+        }
+        return merged;
+      });
     } catch (err) {}
   };
   const fetchMessagesForSession = async chat_id => {
@@ -138,20 +193,20 @@ const ChatSidebar = ({
         throw new Error(`HTTP ${res.status}`);
       }
       const msgs = await res.json();
+      const dbMessages = msgs.map(m => ({
+        id: `db_${m.message_id}`,
+        role: m.role,
+        text: m.text,
+        ts: new Date(m.timestamp).getTime(),
+      }));
       setSessions(prev =>
-        prev.map(s =>
-          s.chat_id === chat_id
-            ? {
-                ...s,
-                messages: msgs.map(m => ({
-                  id: `db_${m.message_id}`,
-                  role: m.role,
-                  text: m.text,
-                  ts: new Date(m.timestamp).getTime(),
-                })),
-              }
-            : s
-        )
+        prev.map(s => {
+          if (String(s.chat_id) !== String(chat_id)) return s;
+          // Merge: use DB messages as base, append any local-only messages not in DB
+          const dbIds = new Set(dbMessages.map(m => m.id));
+          const localOnly = s.messages.filter(m => !dbIds.has(m.id) && !m.id.startsWith('db_'));
+          return { ...s, messages: [...dbMessages, ...localOnly] };
+        })
       );
     } catch (err) {}
   };
@@ -235,7 +290,7 @@ const ChatSidebar = ({
     const userMsg = { id: makeId('u'), role: 'user', text: input, ts: Date.now() };
     setSessions(prev =>
       prev.map(s =>
-        s.chat_id === sessionId
+        String(s.chat_id) === String(sessionId)
           ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() }
           : s
       )
@@ -276,8 +331,8 @@ const ChatSidebar = ({
         return;
       }
 
-      const incomingSessionId = data.session_id;
-      if (incomingSessionId && activeSessionIdRef.current && incomingSessionId !== activeSessionIdRef.current) {
+      const incomingSessionId = String(data.session_id);
+      if (incomingSessionId && activeSessionIdRef.current && incomingSessionId !== String(activeSessionIdRef.current)) {
         return;
       }
 
@@ -298,14 +353,24 @@ const ChatSidebar = ({
         ts: Date.now(),
       };
       console.log(assistantMsg);
-      setSessions(prev =>
-        prev.map(s =>
-          s.chat_id === currentSessionId
-            ? { ...s, messages: [...s.messages, assistantMsg], last_activity: Date.now() }
-            : s
-        )
-      );
-      console.log(sessions);
+      setSessions(prev => {
+        const match = prev.find(s => String(s.chat_id) === String(currentSessionId));
+        if (match) {
+          return prev.map(s =>
+            String(s.chat_id) === String(currentSessionId)
+              ? { ...s, messages: [...s.messages, assistantMsg], last_activity: Date.now() }
+              : s
+          );
+        }
+        // No session exists yet — create one with this message
+        return [{
+          chat_id: currentSessionId,
+          title: 'Research Session',
+          messages: [assistantMsg],
+          summary: '',
+          last_activity: Date.now(),
+        }, ...prev];
+      });
       setIsTyping(false);
       try {
         await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
