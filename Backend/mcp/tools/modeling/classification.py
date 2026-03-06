@@ -64,7 +64,7 @@ class TrainClassifierInput(BaseModel):
         default=None, description="Experiment label. Auto-generated from timestamp if omitted."
     )
     fold: int = Field(
-        default=10, description="Number of cross-validation folds."
+        default=2, description="Number of cross-validation folds."
     )
     session_id: Optional[int] = Field(
         default=None, description="Random seed for reproducibility. Randomly chosen if omitted."
