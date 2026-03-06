@@ -58,3 +58,4 @@ Backend/agent_system/memory_output_logs
 my_models
 testing_folders
 autogen_feature.txt
+Backend/agent_system/tools/pycaret_classification_tool.py
