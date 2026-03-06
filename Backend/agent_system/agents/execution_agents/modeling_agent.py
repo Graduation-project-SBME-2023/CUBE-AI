@@ -1,4 +1,3 @@
-import asyncio
 import sys
 import os
 
@@ -7,17 +6,9 @@ root_dir = os.path.abspath(os.path.join(current_dir, "..", ".."))
 sys.path.append(root_dir)
 
 import os
-import json
-import logging
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from typing import Union, List, Dict, Any, Optional
-import ast
 
-from pathlib import Path
 from autogen_agentchat.agents import AssistantAgent
 from clients.ollamaClient import OllamaClient
-from autogen_core.models import SystemMessage
 from autogen_agentchat.ui import Console
 from autogen_core import CancellationToken
 from descriptions.models_descriptions import MODELING_AGENT_DESCRIPTION
@@ -98,5 +89,8 @@ async def main():
         agent.run_stream(task="run the classification modeling, provide as argument to the tool just experiment name, make the name experiment1",
                          cancellation_token=CancellationToken())
         )
+
+
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())

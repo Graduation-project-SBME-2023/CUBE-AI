@@ -5,6 +5,7 @@ from typing import Annotated
 from pydantic import BeforeValidator
 
 WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "../../../agent_system/workspace")
+os.makedirs(WORKSPACE_DIR, exist_ok=True)
 
 
 def get_workspace() -> str:

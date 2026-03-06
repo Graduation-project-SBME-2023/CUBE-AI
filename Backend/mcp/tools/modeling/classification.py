@@ -19,11 +19,7 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import mcp
-
-# ── Constants ──────────────────────────────────────────────────────────────────
-
-WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "../../../agent_system/workspace")
-os.makedirs(WORKSPACE_DIR, exist_ok=True)
+from ..helpers.workspace import WorkspacePath, base_on_workspace_dir
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -55,10 +51,10 @@ def _csv_list(value: Optional[str]) -> Optional[list]:
 class TrainClassifierInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    input_path: str = Field(
+    input_path: WorkspacePath = Field(
         ..., description="Path to input CSV file with training data."
     )
-    # output_dir: str = Field(
+    # output_dir: WorkspacePath = Field(
     #     ..., description="Directory where model artefacts and results will be saved."
     # )
     # target_column: str = Field(
@@ -130,13 +126,13 @@ class TrainClassifierInput(BaseModel):
 class RunInferenceInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    input_path: str = Field(
+    input_path: WorkspacePath = Field(
         ..., description="Path to CSV file containing rows to predict."
     )
-    model_path: str = Field(
+    model_path: WorkspacePath = Field(
         ..., description="Path to the saved PyCaret model (with or without .pkl extension)."
     )
-    # output_dir: Optional[str] = Field(
+    # output_dir: Optional[WorkspacePath] = Field(
     #     default=None,
     #     description="Directory to write prediction outputs. Defaults to the input file's directory.",
     # )
@@ -147,7 +143,7 @@ class RunInferenceInput(BaseModel):
             "When supplied, accuracy, AUC, F1, and a confusion matrix are calculated."
         ),
     )
-    prediction_filename: str = Field(
+    prediction_filename: WorkspacePath = Field(
         default="predictions.csv",
         description="File name for the saved predictions CSV.",
     )
@@ -199,7 +195,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
     try:
         import random
 
-        output_dir = os.path.join(WORKSPACE_DIR, 'modeling')
+        output_dir = base_on_workspace_dir('modeling')
         os.makedirs(output_dir, exist_ok=True)
 
         target_column = "target"
@@ -526,7 +522,7 @@ async def pycaret_run_inference(params: RunInferenceInput) -> str:
             precision_score, recall_score, roc_auc_score,
         )
 
-        output_dir = os.path.join(WORKSPACE_DIR, 'modeling', 'output')
+        output_dir = base_on_workspace_dir('modeling/output')
         output_dir = output_dir or os.path.dirname(params.input_path) or "."
         os.makedirs(output_dir, exist_ok=True)
         log_file = os.path.join(output_dir, "pycaret_inference.log")
