@@ -6,9 +6,10 @@ import AgentRegistry from '../../../components/PlaygroundCanvas/AgentRegistry';
 interface PlanningViewProps {
     initialHypothesis: string;
     sessionId?: string | number | null;
+    onLiteratureOutput?: (data: any) => void;
 }
 
-export default function PlanningView({ initialHypothesis, sessionId }: PlanningViewProps) {
+export default function PlanningView({ initialHypothesis, sessionId, onLiteratureOutput }: PlanningViewProps) {
     const [isRegistryOpen, setIsRegistryOpen] = useState(true);
 
     console.log('[HypothesisFlow][PlanningView] Render', {
@@ -20,7 +21,7 @@ export default function PlanningView({ initialHypothesis, sessionId }: PlanningV
     return (
         <div className="w-full h-full relative">
             {/* Reuse your existing Graph Engine */}
-            <PlaygroundCanvas initialHypothesis={initialHypothesis} session_id={sessionId as any} />
+            <PlaygroundCanvas initialHypothesis={initialHypothesis} session_id={sessionId as any} onLiteratureOutput={onLiteratureOutput} />
             
             {/* Reuse your existing Registry
             <AgentRegistry 

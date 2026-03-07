@@ -12,6 +12,10 @@ import {
   Settings,
   ZoomIn,
   ZoomOut,
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  X,
 } from 'lucide-react';
 
 import websocketService from '../../utils/WebsocketService';
@@ -32,11 +36,14 @@ const Edit3Icon: any = Edit3;
 const ActivityIcon: any = Activity;
 const CheckCircle2Icon: any = CheckCircle2;
 const SettingsIcon: any = Settings;
+const AlertCircleIcon: any = AlertCircle;
+const ChevronDownIcon: any = ChevronDown;
+const ChevronUpIcon: any = ChevronUp;
 
 // ─── Layout constants ────────────────────────────────────────────────────────
 const CENTER_LINE = 400; // Horizontal canvas center (Y axis)
-const START_W = 300;
-const AGENT_W = 220; // Must match w-[220px] in AgentNode
+const START_W = 340;
+const AGENT_W = 280; // Must match w-[280px] in AgentNode
 const DEFAULT_GAP = 120;
 const MIN_GAP = 48;
 const MAX_GAP = 180;
@@ -87,12 +94,14 @@ interface PlaygroundCanvasProps {
   initialHypothesis?: string;
   session_id?: string;
   onNodeSelect?: (node: FlowNode | null) => void;
+  onLiteratureOutput?: (data: any) => void;
 }
 
 export default function PlaygroundCanvas({
   initialHypothesis,
   session_id,
   onNodeSelect,
+  onLiteratureOutput,
 }: PlaygroundCanvasProps) {
   const [mode, setMode] = useState<'planning' | 'executing' | 'results'>('planning');
 
@@ -110,6 +119,8 @@ export default function PlaygroundCanvas({
   const [edges, setEdges] = useState<FlowEdge[]>(INITIAL_EDGES);
   const [isPaused, setIsPaused] = useState(false);
   const [isConnected, setIsConnected] = useState(websocketService.isConnected());
+  const [pendingPrompt, setPendingPrompt] = useState<{ type: string; message: string } | null>(null);
+  const [promptExpanded, setPromptExpanded] = useState(true);
 
   const isPausedRef = useRef(isPaused);
   const modeRef = useRef(mode);
@@ -146,6 +157,115 @@ export default function PlaygroundCanvas({
         return;
       }
       if (type === 'msg') {
+        return;
+      }
+      if (type === 'hypothesis') {
+        // Update start node with full PICO hypothesis data
+        setNodes(prev =>
+          prev.map(n =>
+            n.type === 'start'
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    title: payload?.title || 'Research Hypothesis',
+                    description: payload?.hypothesis || payload?.title || n.data.description,
+                    population: payload?.population,
+                    intervention: payload?.intervention,
+                    comparison: payload?.comparison,
+                    outcome: payload?.outcome,
+                    hypothesis: payload?.hypothesis,
+                    question: payload?.question,
+                    clinical_context: payload?.clinical_context,
+                    state: payload?.state,
+                  },
+                }
+              : n
+          )
+        );
+        return;
+      }
+      if (type === 'hypothesis_approval' || type === 'lit_review_choice') {
+        setPendingPrompt({ type, message: payload?.message || '' });
+        setPromptExpanded(true);
+        return;
+      }
+      if (type === 'lit_review_node') {
+        // Add a literature review agent node in active state
+        const layout = getDynamicLayout(1);
+        const litNode: FlowNode = {
+          id: 'literature_review',
+          type: 'agent',
+          position: {
+            x: layout.startX + START_W + layout.gap,
+            y: layout.agentY,
+          },
+          data: {
+            title: 'Literature Review',
+            description: 'Building domain knowledge base from medical databases',
+            status: 'active',
+            logs: [],
+            isExpanded: true,
+          },
+        };
+        setNodes(prev => {
+          const without = prev.filter(n => n.id !== 'literature_review');
+          return [...without, litNode];
+        });
+        setEdges(prev => {
+          const without = prev.filter(e => e.target !== 'literature_review');
+          const startNode = nodes.find(n => n.type === 'start');
+          const sourceId = startNode?.id || '1';
+          return [...without, {
+            id: `e${sourceId}-literature_review`,
+            source: sourceId,
+            target: 'literature_review',
+            type: 'custom',
+          }];
+        });
+        return;
+      }
+      if (type === 'lit_review_log') {
+        // Append a short log entry to the literature review node
+        setNodes(prev =>
+          prev.map(n => {
+            if (n.id !== 'literature_review' || n.type !== 'agent') return n;
+            const agentData = n.data as any;
+            const logs = agentData.logs ?? [];
+            const logEntry = {
+              source: 'knowledge_builder',
+              started_at: new Date().toISOString(),
+              last_updated_at: new Date().toISOString(),
+              status: payload?.status || 'active',
+              events: [{
+                event_type: 'tool_log' as const,
+                source: 'knowledge_builder',
+                content_type: 'text' as const,
+                content: { message: payload?.message || '' },
+                timestamp: new Date().toISOString(),
+              }],
+            };
+            return {
+              ...n,
+              data: { ...agentData, isExpanded: true, logs: [...logs, logEntry] },
+            };
+          })
+        );
+        return;
+      }
+      if (type === 'lit_review_output') {
+        // Forward literature output to parent for the Literature Review view
+        onLiteratureOutput?.(payload);
+        return;
+      }
+      if (type === 'lit_review_done') {
+        // Mark the literature review node as completed
+        setNodes(prev =>
+          prev.map(n => {
+            if (n.id !== 'literature_review' || n.type !== 'agent') return n;
+            return { ...n, data: { ...n.data, status: 'completed', isExpanded: false } };
+          })
+        );
         return;
       }
       if (type === 'node' || type === 'NODE_UPDATE') {
@@ -219,50 +339,82 @@ export default function PlaygroundCanvas({
     }
 
     if (planPayload.steps) {
-      const newNodes: FlowNode[] = [];
-      const layout = getDynamicLayout(planPayload.steps.length);
+      setNodes(prev => {
+        // Preserve existing start and literature review nodes
+        const existingStart = prev.find(n => n.type === 'start');
+        const existingLitReview = prev.find(n => n.id === 'literature_review');
 
-      newNodes.push({
-        id: 'start',
-        type: 'start',
-        position: { x: layout.startX, y: layout.startY },
-        data: {
-          title: 'Research Hypothesis',
-          description: planPayload.study_goal || initialHypothesis || 'Study workflow',
-        },
+        // Count anchor nodes that precede the plan steps
+        const anchorCount = (existingLitReview ? 2 : 1); // start + optional lit review
+        const layout = getDynamicLayout(anchorCount + planPayload.steps.length - 1);
+
+        const keptNodes: FlowNode[] = [];
+
+        // Keep existing start node (with PICO data), just reposition
+        if (existingStart) {
+          keptNodes.push({
+            ...existingStart,
+            position: { x: layout.startX, y: layout.startY },
+          });
+        } else {
+          keptNodes.push({
+            id: 'start',
+            type: 'start',
+            position: { x: layout.startX, y: layout.startY },
+            data: {
+              title: 'Research Hypothesis',
+              description: planPayload.study_goal || initialHypothesis || 'Study workflow',
+            },
+          });
+        }
+
+        // Keep existing literature review node, reposition after start
+        let nextX = layout.startX + START_W + layout.gap;
+        if (existingLitReview) {
+          keptNodes.push({
+            ...existingLitReview,
+            position: { x: nextX, y: layout.agentY },
+          });
+          nextX += AGENT_W + layout.gap;
+        }
+
+        // Append new plan step nodes after anchors
+        planPayload.steps.forEach((step: any, index: number) => {
+          keptNodes.push({
+            id: step.id,
+            type: 'agent',
+            position: {
+              x: nextX + index * (AGENT_W + layout.gap),
+              y: layout.agentY,
+            },
+            data: {
+              title: step.name || `Step ${index + 1}`,
+              description: step.description || '',
+              status: step.status || 'pending',
+              logs: [],
+              isExpanded: false,
+              matched_module: step.matched_module,
+            },
+          });
+        });
+
+        return keptNodes;
       });
 
-      planPayload.steps.forEach((step: any, index: number) => {
-        newNodes.push({
-          id: step.id,
-          type: 'agent',
-          position: {
-            x: layout.startX + START_W + layout.gap + index * (AGENT_W + layout.gap),
-            y: layout.agentY,
-          },
-          data: {
-            title: step.name || `Step ${index + 1}`,
-            description: step.description || '',
-            status: step.status || 'pending',
-            logs: [],
-            isExpanded: false,
-            matched_module: step.matched_module,
-          },
-        });
+      // Rebuild edges as a chain through all nodes
+      setNodes(currentNodes => {
+        const newEdges: FlowEdge[] = [];
+        for (let i = 0; i < currentNodes.length - 1; i++) {
+          newEdges.push({
+            id: `e${currentNodes[i].id}-${currentNodes[i + 1].id}`,
+            source: currentNodes[i].id,
+            target: currentNodes[i + 1].id,
+            type: 'custom',
+          });
+        }
+        setEdges(newEdges);
+        return currentNodes; // no mutation, just reading
       });
-
-      setNodes(newNodes);
-
-      const newEdges: FlowEdge[] = [];
-      for (let i = 0; i < newNodes.length - 1; i++) {
-        newEdges.push({
-          id: `e${newNodes[i].id}-${newNodes[i + 1].id}`,
-          source: newNodes[i].id,
-          target: newNodes[i + 1].id,
-          type: 'custom',
-        });
-      }
-      setEdges(newEdges);
     }
   };
 
@@ -656,6 +808,124 @@ export default function PlaygroundCanvas({
               )}
             </div>
           </div>
+
+          {/* Compact expandable approval notification panel */}
+          {pendingPrompt && (
+            <div className="animate-in slide-in-from-bottom-2 pointer-events-auto absolute bottom-6 right-6 z-50 duration-200">
+              <div className="w-72 overflow-hidden rounded-lg border border-[#5acce6]/60 bg-[#151a1f] shadow-[0_0_20px_rgba(90,204,230,0.15)]">
+                {/* Collapsed header — always visible */}
+                <button
+                  onClick={() => setPromptExpanded(prev => !prev)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[#1f2630]"
+                >
+                  <AlertCircleIcon size={14} className="shrink-0 animate-pulse text-[#f8ce46]" />
+                  <span className="flex-1 text-xs font-bold text-white">
+                    {pendingPrompt.type === 'hypothesis_approval'
+                      ? 'Approve Hypothesis?'
+                      : 'Run Literature Review?'}
+                  </span>
+                  {promptExpanded ? (
+                    <ChevronDownIcon size={12} className="text-[#566a84]" />
+                  ) : (
+                    <ChevronUpIcon size={12} className="text-[#566a84]" />
+                  )}
+                </button>
+
+                {/* Expanded body */}
+                {promptExpanded && (
+                  <div className="space-y-3 border-t border-[#3c5d80]/50 px-3 pb-3 pt-2">
+                    {pendingPrompt.message && (
+                      <p className="text-[11px] leading-relaxed text-[#91b9cd]">{pendingPrompt.message}</p>
+                    )}
+                    <div className="flex gap-2">
+                      {pendingPrompt.type === 'hypothesis_approval' ? (
+                        <>
+                          <button
+                            onClick={() => {
+                              websocketService.sendMessage({
+                                type: 'user_input',
+                                payload: { message: 'APPROVE' },
+                                session_id,
+                              });
+                              websocketService.dispatchLocal({
+                                type: 'chat_echo',
+                                payload: { text: 'APPROVE' },
+                                session_id,
+                              });
+                              setPendingPrompt(null);
+                            }}
+                            className="flex-1 rounded bg-[#6fe5b8] py-1.5 text-xs font-bold text-black hover:bg-[#91eac8]"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => {
+                              const feedback = window.prompt('Describe your changes:');
+                              if (feedback) {
+                                websocketService.sendMessage({
+                                  type: 'user_input',
+                                  payload: { message: feedback },
+                                  session_id,
+                                });
+                                websocketService.dispatchLocal({
+                                  type: 'chat_echo',
+                                  payload: { text: feedback },
+                                  session_id,
+                                });
+                              }
+                              setPendingPrompt(null);
+                            }}
+                            className="flex-1 rounded border border-[#3c5d80] bg-[#1f2d40] py-1.5 text-xs font-medium text-[#91b9cd] hover:bg-[#2a3a4f]"
+                          >
+                            Revise
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => {
+                              websocketService.sendMessage({
+                                type: 'user_input',
+                                payload: { message: 'YES' },
+                                session_id,
+                              });
+                              websocketService.dispatchLocal({
+                                type: 'chat_echo',
+                                payload: { text: 'Yes, Build Knowledge' },
+                                session_id,
+                              });
+                              setPendingPrompt(null);
+                            }}
+                            className="flex-1 rounded bg-[#348cfd] py-1.5 text-xs font-bold text-white hover:bg-[#599fff]"
+                          >
+                            Yes, Build Knowledge
+                          </button>
+                          <button
+                            onClick={() => {
+                              websocketService.sendMessage({
+                                type: 'user_input',
+                                payload: { message: 'NO' },
+                                session_id,
+                              });
+                              websocketService.dispatchLocal({
+                                type: 'chat_echo',
+                                payload: { text: 'Skip Literature Review' },
+                                session_id,
+                              });
+                              setPendingPrompt(null);
+                            }}
+                            className="flex-1 rounded border border-[#3c5d80] bg-[#1f2d40] py-1.5 text-xs font-medium text-[#91b9cd] hover:bg-[#2a3a4f]"
+                          >
+                            Skip
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {mode === 'results' && (
             <div className="animate-in fade-in absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-[2px] duration-500">
