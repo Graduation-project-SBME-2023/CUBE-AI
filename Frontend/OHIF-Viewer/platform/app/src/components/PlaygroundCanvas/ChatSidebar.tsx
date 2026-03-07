@@ -377,6 +377,18 @@ const ChatSidebar = ({
         typeof data.payload === 'string'
           ? data.payload
           : data.payload.text || JSON.stringify(data.payload);
+
+      // Don't display raw plan JSON in chat — it belongs in the playground canvas
+      const trimmed = textContent.trim();
+      if (trimmed.startsWith('{') && trimmed.includes('"steps"')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed.steps && Array.isArray(parsed.steps)) {
+            return;
+          }
+        } catch (_) { /* not valid JSON, show as normal */ }
+      }
+
       const assistantMsg = {
         id: makeId('a'),
         role: 'assistant',

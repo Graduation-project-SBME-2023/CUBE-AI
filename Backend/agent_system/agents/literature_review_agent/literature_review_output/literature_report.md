@@ -22,6 +22,8 @@ Critical gaps persist in multi-center validation, external generalizability asse
 
 The target population comprises adult patients with confirmed or suspected splenic pathology, particularly lymphoproliferative disorders. Cohort sizes in retrieved literature range from 139-326 patients [R1, R3], with median ages around 54 years and relatively balanced gender distribution. Studies predominantly include patients with histopathologically confirmed diagnoses, with lymphoma subtypes including Hodgkin lymphoma (HL), diffuse large B-cell lymphoma (DLBCL), mantle-cell lymphoma (MCL), and follicular lymphoma (FL). Inclusion criteria typically require contrast-enhanced CT imaging with adequate splenic visualization, while exclusion criteria often involve prior splenic intervention or inadequate image quality.
 
+
+
 ### 2.2 Intervention
 
 Radiomics pipelines in retrieved studies employ comprehensive feature extraction methodologies. Cheng et al. [R3] extracted 1,317 radiomic features per patient using PyRadiomics, with subsequent feature selection via LASSO regression identifying seven key discriminative features including first-order statistics (10th percentile, Robust Mean Absolute Deviation), shape-based features (Surface Area), and texture features (Correlation, MCC, Small Area Low Gray-level Emphasis, Low Gray-level Zone Emphasis). Machine learning classifiers predominantly utilize Random Forest architectures with 10-fold cross-validation, achieving AUC values exceeding 0.95 in optimal cases.

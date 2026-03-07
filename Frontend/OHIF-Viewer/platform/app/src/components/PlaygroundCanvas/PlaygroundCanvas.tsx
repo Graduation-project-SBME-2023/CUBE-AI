@@ -157,6 +157,18 @@ export default function PlaygroundCanvas({
         return;
       }
       if (type === 'msg') {
+        // Detect plan JSON that the backend failed to send as type 'plan'
+        const msgText = typeof payload === 'string' ? payload.trim() : '';
+        if (msgText.startsWith('{') && msgText.includes('"steps"')) {
+          try {
+            const planData = JSON.parse(msgText);
+            if (planData.steps && Array.isArray(planData.steps)) {
+              console.log('[HypothesisFlow][PlaygroundCanvas] Recovered plan from msg payload');
+              applyBackendPlan(planData);
+              return;
+            }
+          } catch (_) { /* not valid JSON, ignore */ }
+        }
         return;
       }
       if (type === 'hypothesis') {
