@@ -1,6 +1,6 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import { StartNodeProps } from '../types';
-import { FlaskConical, Users, Stethoscope, GitCompare, Target } from 'lucide-react';
+import { FlaskConical, Users, Stethoscope, GitCompare, Target, ChevronDown, ChevronUp } from 'lucide-react';
 
 const START_W = 340;
 
@@ -19,6 +19,7 @@ const PicoRow = ({ icon: Icon, label, value }: { icon: any; label: string; value
 const StartNode = memo((props: StartNodeProps) => {
   const { data } = props;
   const hasPico = data.population || data.intervention || data.comparison || data.outcome;
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <div
@@ -57,22 +58,36 @@ const StartNode = memo((props: StartNodeProps) => {
         </div>
       )}
 
-      {/* PICO Fields */}
-      {hasPico ? (
-        <div className="w-full space-y-[1px]">
+      {/* Expand / Collapse toggle */}
+      {hasPico && (
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="flex items-center justify-center gap-1 w-full py-1 text-[10px] text-[#5acce6] hover:text-[#7dd8f0] transition-colors cursor-pointer bg-transparent border-none outline-none"
+        >
+          {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          {expanded ? 'Hide PICO' : 'Show PICO'}
+        </button>
+      )}
+
+      {/* PICO Fields — visible only when expanded */}
+      {expanded && hasPico && (
+        <div className="w-full space-y-[1px] mt-1 border-t border-[#3c5d80]/40 pt-1">
           <PicoRow icon={Users} label="P" value={data.population as string} />
           <PicoRow icon={Stethoscope} label="I" value={data.intervention as string} />
           <PicoRow icon={GitCompare} label="C" value={data.comparison as string} />
           <PicoRow icon={Target} label="O" value={data.outcome as string} />
         </div>
-      ) : (
+      )}
+
+      {/* Fallback when no PICO */}
+      {!hasPico && (
         <div className="w-full text-center text-[11px] leading-tight text-gray-400">
           {data.description || 'No hypothesis set.'}
         </div>
       )}
 
-      {/* Research question */}
-      {data.question && (
+      {/* Research question — shown when expanded */}
+      {expanded && data.question && (
         <div className="mt-1 w-full border-t border-[#3c5d80]/40 pt-1 text-center text-[10px] italic leading-tight text-gray-400">
           {data.question}
         </div>

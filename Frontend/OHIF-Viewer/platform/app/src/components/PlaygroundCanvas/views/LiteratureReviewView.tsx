@@ -514,42 +514,63 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
           </div>
         )}
 
-        {/* ── Ranked Papers ─────────────────────────────────────────── */}
+        {/* ── Literature Report ────────────────────────────────────── */}
+        {parsed.report && (
+          <div className="rounded-xl border border-[#1f2d40] bg-[#0b1015] overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-[#1f2d40]/50 bg-gradient-to-r from-[#5acce608] to-transparent">
+              <FileTextIcon size={14} className="text-[#5acce6]" />
+              <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#5acce6]">Literature Report</h3>
+            </div>
+            <div className="p-4">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                {parsed.report}
+              </ReactMarkdown>
+            </div>
+          </div>
+        )}
+
+        {/* ── Ranked Papers (expandable) ────────────────────────────── */}
         {papers.length > 0 && (
           <div className="space-y-4">
             <div className="rounded-xl border border-[#1f2d40] bg-[#0b1015] overflow-hidden">
-              <div className="flex items-center gap-2 px-4 py-3 border-b border-[#1f2d40]/50 bg-gradient-to-r from-[#a78bfa08] to-transparent">
+              <button
+                onClick={() => setPapersExpanded(v => !v)}
+                className="w-full flex items-center gap-2 px-4 py-3 border-b border-[#1f2d40]/50 bg-gradient-to-r from-[#a78bfa08] to-transparent hover:from-[#a78bfa12] transition-colors cursor-pointer"
+              >
                 <AwardIcon size={14} className="text-[#a78bfa]" />
-                <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#a78bfa] flex-1">
+                <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#a78bfa] flex-1 text-left">
                   Ranked Papers
                 </h3>
-                <span className="text-[10px] text-[#566a84]">{papers.length} papers found</span>
-              </div>
-              <div className="p-4 space-y-6">
-                {Object.entries(papersByCategory).map(([category, catPapers]) => (
-                  <div key={category}>
-                    <div className="flex items-center gap-2 mb-3">
-                      <span
-                        className="text-[10px] font-bold uppercase tracking-wider rounded px-2 py-0.5"
-                        style={{
-                          color: (CATEGORY_COLORS[category] || CATEGORY_COLORS.Review).text,
-                          background: (CATEGORY_COLORS[category] || CATEGORY_COLORS.Review).bg,
-                          border: `1px solid ${(CATEGORY_COLORS[category] || CATEGORY_COLORS.Review).border}`,
-                        }}
-                      >
-                        {category}
-                      </span>
-                      <span className="text-[10px] text-[#566a84]">{catPapers.length} papers</span>
-                      <div className="flex-1 border-t border-[#1f2d40]/30" />
+                <span className="text-[10px] text-[#566a84] mr-2">{papers.length} papers found</span>
+                {papersExpanded ? <ChevronUpIcon size={14} className="text-[#566a84]" /> : <ChevronDownIcon size={14} className="text-[#566a84]" />}
+              </button>
+              {papersExpanded && (
+                <div className="p-4 space-y-6">
+                  {Object.entries(papersByCategory).map(([category, catPapers]) => (
+                    <div key={category}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <span
+                          className="text-[10px] font-bold uppercase tracking-wider rounded px-2 py-0.5"
+                          style={{
+                            color: (CATEGORY_COLORS[category] || CATEGORY_COLORS.Review).text,
+                            background: (CATEGORY_COLORS[category] || CATEGORY_COLORS.Review).bg,
+                            border: `1px solid ${(CATEGORY_COLORS[category] || CATEGORY_COLORS.Review).border}`,
+                          }}
+                        >
+                          {category}
+                        </span>
+                        <span className="text-[10px] text-[#566a84]">{catPapers.length} papers</span>
+                        <div className="flex-1 border-t border-[#1f2d40]/30" />
+                      </div>
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        {catPapers.map((paper, i) => (
+                          <PaperCard key={i} paper={paper} />
+                        ))}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                      {catPapers.map((paper, i) => (
-                        <PaperCard key={i} paper={paper} />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
