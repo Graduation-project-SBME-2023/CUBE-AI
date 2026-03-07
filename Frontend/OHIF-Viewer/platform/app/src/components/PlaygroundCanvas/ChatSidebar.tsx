@@ -327,6 +327,37 @@ const ChatSidebar = ({
     fetchChatSessions();
     const handleWS = async data => {
       console.log('[ChatSidebar] WS received:', data);
+
+      // Handle echoed user messages from notification buttons
+      if (data.type === 'chat_echo') {
+        const currentSessionId = activeSessionIdRef.current;
+        if (!currentSessionId) return;
+        const incomingSessionId = String(data.session_id);
+        if (incomingSessionId && incomingSessionId !== String(currentSessionId)) return;
+        const userMsg = {
+          id: makeId('u'),
+          role: 'user',
+          text: data.payload?.text || data.payload || '',
+          ts: Date.now(),
+        };
+        setSessions(prev =>
+          prev.map(s =>
+            String(s.chat_id) === String(currentSessionId)
+              ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() }
+              : s
+          )
+        );
+        setIsTyping(true);
+        try {
+          await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: 'user', text: userMsg.text }),
+          });
+        } catch (err) {}
+        return;
+      }
+
       if (data.type !== 'msg') {
         return;
       }

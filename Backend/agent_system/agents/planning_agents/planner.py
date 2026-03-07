@@ -79,12 +79,13 @@ class ClinicalPlanner:
         text = text.replace("APPROVE", "")
 
         # Try to extract JSON from a ```json ... ``` code fence anywhere in the text
-        fence_match = re.search(r"```json\s*(\{.*?\})\s*```", text, re.DOTALL)
+        # Use greedy .* to capture the full nested JSON object
+        fence_match = re.search(r"```json\s*(\{.*\})\s*```", text, re.DOTALL)
         if fence_match:
             return fence_match.group(1).strip()
 
         # Try plain ``` ... ``` code fence
-        fence_match = re.search(r"```\s*(\{.*?\})\s*```", text, re.DOTALL)
+        fence_match = re.search(r"```\s*(\{.*\})\s*```", text, re.DOTALL)
         if fence_match:
             return fence_match.group(1).strip()
 
@@ -239,8 +240,7 @@ class ClinicalPlanner:
                 for s in steps_data
             }
 
-        if "rationale" in data and data["rationale"]:
-            await self._send("msg", f"**Pipeline Rationale:** {data['rationale']}")
+        # Rationale is included in the plan payload for the canvas, not sent to chat
 
         if "message" in data and data["message"]:
             await self._send("msg", data["message"])
@@ -275,26 +275,36 @@ class ClinicalPlanner:
     async def _build_knowledge_base(self) -> tuple:
         """
         Run the knowledge builder (synchronous, CPU-bound) in a thread pool.
-        Returns (knowledge_base, sources_guide) strings.
+        Returns (knowledge_base, sources_guide, papers) tuple.
+        Sends short progress logs to the frontend via WebSocket.
         """
         pico = self._extract_pico_from_hypothesis()
         logger.info(f"Building knowledge base with PICO: {pico}")
         
         loop = asyncio.get_event_loop()
-        knowledge_base, sources_guide = await loop.run_in_executor(
-            None, build_knowledge_base, pico
+
+        def progress_callback(message: str):
+            """Thread-safe bridge: schedule WS send on the event loop."""
+            asyncio.run_coroutine_threadsafe(
+                self._send("lit_review_log", {"message": message, "status": "active"}),
+                loop
+            )
+
+        knowledge_base, sources_guide, papers = await loop.run_in_executor(
+            None, lambda: build_knowledge_base(pico, progress_callback=progress_callback)
         )
         
         logger.info(
             f"Knowledge base built: {len(knowledge_base):,} chars, "
-            f"sources guide: {len(sources_guide):,} chars"
+            f"sources guide: {len(sources_guide):,} chars, "
+            f"papers collected: {len(papers)}"
         )
         
         self.state.knowledge_base = knowledge_base
         self.state.sources_guide = sources_guide
         await self._save_state()
         
-        return knowledge_base, sources_guide
+        return knowledge_base, sources_guide, papers
 
     async def _save_literature_context(self, knowledge_base: str, sources_guide: str):
         """
@@ -358,9 +368,11 @@ class ClinicalPlanner:
             print(f"response from hypothesis_architect: {response.chat_message.content}")
             await self._process_hypothesis_response(response.chat_message.content)
 
-            # Hypothesis refinement loop
+            # Hypothesis refinement loop — ask client via WebSocket to approve
             while True:
-                await self._send("msg", "Review the hypothesis. Type **APPROVE** to confirm or describe changes.")
+                await self._send("hypothesis_approval", {
+                    "message": "Review the structured PICO hypothesis. Approve or request changes."
+                })
                 user_feedback = await self.input_provider()
 
                 if "APPROVE" in user_feedback.upper():
@@ -381,37 +393,72 @@ class ClinicalPlanner:
 
             # Mark hypothesis confirmed
             self.state.hypothesis.state = "confirmed"
+            await self._send("hypothesis", self.state.hypothesis.model_dump())
             await self._save_state()
 
             # ─────────────────────────────────────────────────────────────
-            # PHASE 2: LITERATURE REVIEW & KNOWLEDGE BUILDING
+            # PHASE 2: LITERATURE REVIEW & KNOWLEDGE BUILDING (user choice)
             # ─────────────────────────────────────────────────────────────
-            await self._send("msg", "**Phase 2: Literature Review & Knowledge Building**")
-            await self._send("msg", "Building domain knowledge base from PubMed, MeSH, Wikipedia, Semantic Scholar, and Europe PMC...")
+            await self._send("lit_review_choice", {
+                "message": "Would you like to build a domain knowledge base?"
+            })
+            lit_review_answer = await self.input_provider()
+            do_lit_review = "YES" in lit_review_answer.upper()
 
-            try:
-                knowledge_base, sources_guide = await self._build_knowledge_base()
-                
-                # Save literature context to workspace for the reporter agent
-                await self._save_literature_context(knowledge_base, sources_guide)
-                
-                # Report knowledge base stats to user
-                kb_size = len(knowledge_base)
-                sg_size = len(sources_guide)
-                await self._send("msg", (
-                    f"Knowledge base built successfully.\n"
-                    f"- Domain knowledge: {kb_size:,} characters\n"
-                    f"- Sources guide: {sg_size:,} characters\n\n"
-                    "Proceeding to pipeline planning informed by literature evidence..."
-                ))
-            except Exception as e:
-                logger.error(f"Knowledge building failed: {e}", exc_info=True)
-                await self._send("msg", (
-                    f"Warning: Knowledge base construction failed ({e}). "
-                    "Pipeline planning will proceed without literature augmentation."
-                ))
-                knowledge_base = ""
-                sources_guide = ""
+            knowledge_base = ""
+            sources_guide = ""
+
+            if do_lit_review:
+                # Create the literature review agent node on the canvas
+                await self._send("lit_review_node", True)
+                await self._send("lit_review_log", {"message": "Starting literature review", "status": "active"})
+
+                try:
+                    knowledge_base, sources_guide, papers = await self._build_knowledge_base()
+                    
+                    # Save literature context to workspace for the reporter agent
+                    await self._save_literature_context(knowledge_base, sources_guide)
+
+                    # Try to read a pre-existing literature report if available
+                    report_md = ""
+                    report_path = Path(__file__).parent.parent / "literature_review_agent" / "literature_review_output" / "literature_report.md"
+                    if report_path.exists():
+                        try:
+                            report_md = report_path.read_text(encoding="utf-8")
+                        except Exception:
+                            pass
+
+                    # Send the full literature output to the frontend for visualization
+                    lit_payload: dict = {
+                        "knowledge_base": knowledge_base,
+                        "sources_guide": sources_guide,
+                        "hypothesis": self.state.hypothesis.model_dump() if self.state.hypothesis else {},
+                        "papers": papers,
+                    }
+                    if report_md:
+                        lit_payload["report"] = report_md
+                    await self._send("lit_review_output", lit_payload)
+
+                    await self._send("lit_review_done", True)
+                    
+                    # Report knowledge base stats to user
+                    kb_size = len(knowledge_base)
+                    sg_size = len(sources_guide)
+                    await self._send("msg", (
+                        f"Knowledge base built successfully.\n"
+                        f"- Domain knowledge: {kb_size:,} characters\n"
+                        f"- Sources guide: {sg_size:,} characters\n\n"
+                        "Proceeding to pipeline planning informed by literature evidence..."
+                    ))
+                except Exception as e:
+                    logger.error(f"Knowledge building failed: {e}", exc_info=True)
+                    await self._send("lit_review_done", True)
+                    await self._send("msg", (
+                        f"Warning: Knowledge base construction failed ({e}). "
+                        "Pipeline planning will proceed without literature augmentation."
+                    ))
+            else:
+                await self._send("msg", "Skipping literature review. Proceeding to pipeline planning...")
 
             # ─────────────────────────────────────────────────────────────
             # PHASE 3: DYNAMIC PIPELINE PLANNING

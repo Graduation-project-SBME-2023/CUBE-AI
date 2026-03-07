@@ -1345,7 +1345,8 @@ def _build_sources_guide(concepts: Dict[str, List[str]], journal_data: Dict[str,
 # MAIN BUILDER FUNCTION
 # ══════════════════════════════════════════════════════════════════════════════
 
-def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72) -> Tuple[str, str]:
+def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72,
+                         progress_callback: Optional[callable] = None) -> Tuple[str, str, List[Dict[str, Any]]]:
     """
     Build a dynamic, PICO-specific knowledge base by querying online
     medical databases.
@@ -1357,9 +1358,12 @@ def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72) -> Tuple[s
         pico: PICO dict with keys: population, intervention, comparison,
               outcome, hypothesis (and optionally question).
         cache_hours: How long to cache fetched data (default 72 hours).
+        progress_callback: Optional callable(message: str) for short progress logs.
 
     Returns:
-        Tuple of (knowledge_base_text, search_sources_guide_text).
+        Tuple of (knowledge_base_text, search_sources_guide_text, papers_list).
+        papers_list contains structured dicts with: title, authors, year,
+        journal, abstract, source, url, citation_count, fields_of_study.
 
     The knowledge base includes:
         1. Organ anatomy & physiology (from Wikipedia)
@@ -1371,6 +1375,9 @@ def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72) -> Tuple[s
         7. Clinical guidelines (from PubMed)
         8. Dataset references (from PubMed)
     """
+    def _log(msg: str):
+        if progress_callback:
+            progress_callback(msg)
     # Check for a complete cached build
     pico_hash = hashlib.md5(json.dumps(pico, sort_keys=True).encode()).hexdigest()[:16]
     full_cache_key = f"full_kb_{pico_hash}.json"
@@ -1378,15 +1385,18 @@ def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72) -> Tuple[s
     if cached_full and isinstance(cached_full, dict):
         kb = cached_full.get("knowledge_base", "")
         sg = cached_full.get("sources_guide", "")
+        papers = cached_full.get("papers", [])
         if kb and sg:
             logger.info("Using fully cached knowledge base")
             print("[KnowledgeBuilder] Using cached knowledge base.")
-            return kb, sg
+            _log("Using cached knowledge")
+            return kb, sg, papers
 
     print("[KnowledgeBuilder] Building dynamic knowledge base from online sources...")
     print("[KnowledgeBuilder] This may take 1-3 minutes on first run (results are cached).")
 
     # ── Step 1: Extract concepts from PICO ────────────────────────────────────
+    _log("Extracting PICO concepts")
     print("[KnowledgeBuilder] Step 1/7: Extracting concepts from PICO...")
     concepts = extract_concepts_from_pico(pico)
     print(f"  Organs: {concepts['organs']}")
@@ -1395,39 +1405,46 @@ def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72) -> Tuple[s
     print(f"  Methods: {concepts['methods'][:5]}...")
 
     # ── Step 2: Fetch Wikipedia summaries ─────────────────────────────────────
+    _log("Fetching Wikipedia knowledge")
     print("[KnowledgeBuilder] Step 2/7: Fetching Wikipedia medical knowledge...")
     wiki_data = fetch_wikipedia_knowledge(concepts)
     print(f"  Retrieved {len(wiki_data)} Wikipedia articles")
 
     # ── Step 3: Fetch MeSH terminology ────────────────────────────────────────
+    _log("Querying MeSH terminology")
     print("[KnowledgeBuilder] Step 3/7: Fetching MeSH terminology hierarchy...")
     mesh_data = fetch_mesh_knowledge(concepts)
     print(f"  Retrieved {len(mesh_data)} MeSH records")
 
     # ── Step 4: Fetch PubMed review articles ──────────────────────────────────
+    _log("Searching PubMed reviews")
     print("[KnowledgeBuilder] Step 4/7: Fetching PubMed review articles...")
     review_data = fetch_review_knowledge(concepts, pico)
     total_reviews = sum(len(v) for v in review_data.values())
     print(f"  Retrieved {total_reviews} review articles across {len(review_data)} topics")
 
     # ── Step 5: Fetch Semantic Scholar method trends ──────────────────────────
+    _log("Fetching method trends")
     print("[KnowledgeBuilder] Step 5/7: Fetching method trends from Semantic Scholar...")
     trend_data = fetch_method_trends(concepts)
     total_trends = sum(len(v) for v in trend_data.values())
     print(f"  Retrieved {total_trends} trending papers across {len(trend_data)} topics")
 
     # ── Step 6: Fetch journal landscape from Europe PMC ───────────────────────
+    _log("Discovering journal landscape")
     print("[KnowledgeBuilder] Step 6/7: Discovering journal landscape...")
     journal_data = fetch_journal_landscape(concepts)
     print(f"  Discovered {len(journal_data)} publishing journals")
 
     # ── Step 7: Fetch clinical guidelines & dataset references ────────────────
+    _log("Fetching clinical guidelines")
     print("[KnowledgeBuilder] Step 7/7: Fetching guidelines and dataset references...")
     guideline_data = fetch_clinical_guidelines(concepts)
     dataset_data = fetch_dataset_references(concepts)
     print(f"  Retrieved {len(guideline_data)} guidelines, {len(dataset_data)} dataset refs")
 
-    # ── Assemble the knowledge base ───────────────────────────────────────────
+    # ── Assemble the knowledge base ───────────────────────────────────────
+    _log("Assembling knowledge base")
     primary_organ = concepts["organs"][0] if concepts["organs"] else "Medical"
     primary_pathology = concepts["pathologies"][0] if concepts["pathologies"] else "Disease"
 
@@ -1482,10 +1499,86 @@ Cached for {cache_hours} hours. Delete .knowledge_cache/ to force refresh.
 
     sources_guide = _build_sources_guide(concepts, journal_data)
 
+    # ── Collect structured paper data for frontend visualization ──────────
+    papers: List[Dict[str, Any]] = []
+    _rank = 0
+
+    # PubMed review articles
+    for topic, reviews in review_data.items():
+        for rev in reviews[:3]:
+            _rank += 1
+            pmid = rev.get("pmid", "")
+            papers.append({
+                "rank": _rank,
+                "title": rev.get("title", "Untitled"),
+                "authors": rev.get("authors", ""),
+                "year": rev.get("year", ""),
+                "journal": rev.get("journal", ""),
+                "abstract": rev.get("abstract", "")[:500],
+                "source": "PubMed",
+                "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else "",
+                "category": "Review",
+                "topic": topic,
+            })
+
+    # Semantic Scholar trending papers
+    for topic, tpapers in trend_data.items():
+        for p in tpapers[:5]:
+            _rank += 1
+            papers.append({
+                "rank": _rank,
+                "title": p.get("title", "Untitled"),
+                "authors": p.get("authors", ""),
+                "year": p.get("year", ""),
+                "journal": "",
+                "abstract": p.get("tldr", ""),
+                "source": "Semantic Scholar",
+                "url": "",
+                "category": "Trending",
+                "topic": topic,
+                "citation_count": p.get("citation_count", 0),
+                "fields_of_study": p.get("fields_of_study", []),
+            })
+
+    # Clinical guidelines
+    for g in guideline_data[:8]:
+        _rank += 1
+        pmid = g.get("pmid", "")
+        papers.append({
+            "rank": _rank,
+            "title": g.get("title", "Untitled"),
+            "authors": "",
+            "year": g.get("year", ""),
+            "journal": g.get("journal", ""),
+            "abstract": g.get("abstract", "")[:500],
+            "source": "PubMed",
+            "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else "",
+            "category": "Guideline",
+            "topic": "Clinical Guidelines",
+        })
+
+    # Dataset references
+    for d in dataset_data[:6]:
+        _rank += 1
+        pmid = d.get("pmid", "")
+        papers.append({
+            "rank": _rank,
+            "title": d.get("title", "Untitled"),
+            "authors": d.get("authors", ""),
+            "year": d.get("year", ""),
+            "journal": d.get("journal", ""),
+            "abstract": d.get("abstract", "")[:500],
+            "source": "PubMed",
+            "url": f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else "",
+            "category": "Dataset",
+            "topic": "Benchmark Datasets",
+        })
+
     # ── Cache the complete build ──────────────────────────────────────────────
     _set_cache(full_cache_key, {
         "knowledge_base": knowledge_base,
         "sources_guide": sources_guide,
+        "papers": papers,
         "concepts": concepts,
         "build_stats": {
             "wiki_articles": len(wiki_data),
@@ -1509,7 +1602,7 @@ Cached for {cache_hours} hours. Delete .knowledge_cache/ to force refresh.
     print(f"  Knowledge base size:  {len(knowledge_base):,} characters")
     print(f"  Cached to: {CACHE_DIR / full_cache_key}\n")
 
-    return knowledge_base, sources_guide
+    return knowledge_base, sources_guide, papers
 
 
 def clear_cache() -> int:

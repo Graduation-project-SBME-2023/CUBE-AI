@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { MessageSquare, FlaskConical, Layout, Database, Scan, BarChart3, FileText, BookOpenText } from 'lucide-react';
 
@@ -67,6 +67,7 @@ export default function ResearchPlayground() {
     const { phaseId } = useParams<{ phaseId?: string }>();
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
+    const [literatureOutput, setLiteratureOutput] = useState<any>(null);
     const DEFAULT_PHASE = 'planning';
     const isValidPhase = RESEARCH_PHASES.some(phase => phase.id === phaseId);
     const activePhase = isValidPhase ? phaseId! : DEFAULT_PHASE;
@@ -103,18 +104,34 @@ export default function ResearchPlayground() {
         navigate(`/playground/${id}`, { state: location.state });
     };
 
-    // Render the correct center view based on the route-driven active phase
-    const renderActiveView = () => {
-        switch (activePhase) {
-            case 'planning': return <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} />;
-            case 'literature': return <LiteratureReviewView literatureOutput={location.state?.literatureReviewOutput || location.state?.literatureContext} />;
-            case 'data': return <DataCohortView />;
-            case 'features': return <FeaturesView />;
-            case 'modeling': return <ModelingView />;
-            case 'reporting': return <ReportingView />;
-            default: return <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} />;
-        }
-    };
+    const handleLiteratureOutput = useCallback((data: any) => {
+        setLiteratureOutput(data);
+    }, []);
+
+    // All views are rendered simultaneously but only the active one is visible.
+    // This preserves component state (nodes, logs, WS subscriptions) across phase switches.
+    const renderAllViews = () => (
+        <>
+            <div className={`absolute inset-0 ${activePhase === 'planning' ? '' : 'pointer-events-none invisible'}`}>
+                <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} onLiteratureOutput={handleLiteratureOutput} />
+            </div>
+            <div className={`absolute inset-0 ${activePhase === 'literature' ? '' : 'pointer-events-none invisible'}`}>
+                <LiteratureReviewView literatureOutput={literatureOutput || location.state?.literatureReviewOutput || location.state?.literatureContext} />
+            </div>
+            <div className={`absolute inset-0 ${activePhase === 'data' ? '' : 'pointer-events-none invisible'}`}>
+                <DataCohortView />
+            </div>
+            <div className={`absolute inset-0 ${activePhase === 'features' ? '' : 'pointer-events-none invisible'}`}>
+                <FeaturesView />
+            </div>
+            <div className={`absolute inset-0 ${activePhase === 'modeling' ? '' : 'pointer-events-none invisible'}`}>
+                <ModelingView />
+            </div>
+            <div className={`absolute inset-0 ${activePhase === 'reporting' ? '' : 'pointer-events-none invisible'}`}>
+                <ReportingView />
+            </div>
+        </>
+    );
 
     return (
         <div className="w-full h-screen font-sans flex flex-col bg-[#000000] text-white overflow-hidden">
@@ -174,9 +191,9 @@ export default function ResearchPlayground() {
                         </span>
                     </div>
 
-                    {/* The Dynamic Content */}
+                    {/* The Dynamic Content — all views stay mounted, only active is visible */}
                     <div className="flex-1 relative overflow-hidden">
-                        {renderActiveView()}
+                        {renderAllViews()}
                     </div>
                 </div>
 

@@ -65,19 +65,27 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
   }, []);
 
   // Returns the canvas-space XY where an edge should attach to a node side.
-  // Anchoring to measured center keeps edges visually centered for all node heights.
+  // Agent nodes use a fixed vertical offset (status badge row) so edges stay
+  // aligned even when nodes have different heights due to text wrapping.
+  // Start nodes use measured center for visual balance.
+  const AGENT_EDGE_ANCHOR_Y = 14;
+
   const getEdgeAnchors = useCallback(
     (nodeId: string, side: 'right' | 'left') => {
       const node = nodes.find(n => n.id === nodeId);
       if (!node) return { x: 0, y: 0 };
 
       const dim = nodeDims[nodeId];
-      const w = dim?.w ?? 220;
+      const w = dim?.w ?? 280;
       const h = dim?.h ?? 80;
+
+      const anchorY = node.type === 'start'
+        ? node.position.y + h / 2
+        : node.position.y + AGENT_EDGE_ANCHOR_Y;
 
       return {
         x: node.position.x + (side === 'right' ? w : 0),
-        y: node.position.y + h / 2,
+        y: anchorY,
       };
     },
     [nodes, nodeDims]
