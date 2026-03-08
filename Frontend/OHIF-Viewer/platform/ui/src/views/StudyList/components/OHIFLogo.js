@@ -4,7 +4,7 @@ import { Svg } from '../../../components';
 function OHIFLogo() {
   return (
     <React.Fragment>
-      <Svg name="logo-ohif" />
+      <Svg name="logo-cube" />
     </React.Fragment>
   );
 }
