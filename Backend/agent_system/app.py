@@ -30,6 +30,14 @@ sys.path.append(root_dir)
 
 from socket_store import manager, send_ws_message
 from agents.planning_agents.planner import ClinicalPlanner
+from view_emitter import (
+    emit_population_output,
+    emit_segmentation_output,
+    emit_features_output,
+    emit_modeling_output,
+    emit_report_output,
+    emit_latex_output,
+)
 
 from task_manager.session import Session
 from task_manager.task_manager import TaskManager
@@ -147,6 +155,138 @@ async def start_planning(request: PlanningRequest):
     task_manager.start_planning(request.session_id, request.message, run_planner)
     # asyncio.create_task(run_planner(request.message))
     return {"task_id": request.session_id, "status": "started"}
+
+
+# ── Agent-to-view mapping for tool result emission ────────────────────────────
+
+def _parse_tool_content(content: str) -> dict:
+    """Attempt to parse tool result content as JSON."""
+    if not content:
+        return {}
+    try:
+        return json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        return {"raw": str(content)[:2000]}
+
+
+async def _read_agent_output_file(workspace_folder: str, agent_id: str) -> dict:
+    """Read a persisted agent output JSON from the workspace outputs dir."""
+    output_path = os.path.join(workspace_folder, "outputs", f"{agent_id}_output.json")
+    try:
+        if os.path.exists(output_path):
+            async with aiofiles.open(output_path, 'r') as f:
+                return json.loads(await f.read())
+    except Exception:
+        pass
+    return {}
+
+
+async def _emit_tool_result_to_view(
+    source: str, tool_name: str, content: str,
+    session_id: str, workspace_folder: str, logger
+):
+    """
+    Inspect a completed tool call and emit structured data to the matching
+    frontend view via WebSocket.
+    """
+    parsed = _parse_tool_content(content)
+
+    # ── Population Planner agent ──────────────────────────────────────────
+    if "population" in source.lower() or "study_population" in source.lower():
+        if tool_name == "write_agent_output":
+            agent_data = await _read_agent_output_file(workspace_folder, "study_population_planner_agent")
+            payload = agent_data if agent_data else parsed
+            await emit_population_output(payload, session_id)
+        elif tool_name in ("generate_targets", "get_patient", "get_volume"):
+            await emit_population_output({
+                "tool": tool_name,
+                "status": parsed.get("status", "completed"),
+                "data": parsed,
+            }, session_id)
+
+    # ── Segmentation agent ────────────────────────────────────────────────
+    elif "segmentation" in source.lower():
+        if tool_name == "write_agent_output":
+            agent_data = await _read_agent_output_file(workspace_folder, "segmentation_agent")
+            payload = agent_data if agent_data else parsed
+            await emit_segmentation_output(payload, session_id)
+        elif tool_name == "test_module":
+            await emit_segmentation_output({
+                "tool": tool_name,
+                "status": parsed.get("status", "completed"),
+                "data": parsed,
+            }, session_id)
+
+    # ── Feature Extraction agent ──────────────────────────────────────────
+    elif "feature_extraction" in source.lower():
+        if tool_name == "write_agent_output":
+            agent_data = await _read_agent_output_file(workspace_folder, "feature_extraction_agent")
+            payload = agent_data if agent_data else parsed
+            await emit_features_output(payload, session_id)
+        elif tool_name == "PyRadiomicsFeatureExtractionTool":
+            await emit_features_output({
+                "tool": "radiomic_extraction",
+                "status": parsed.get("status", "completed"),
+                "csv_paths": parsed.get("csv_paths", {}),
+                "num_subjects": parsed.get("num_subjects"),
+                "num_features": parsed.get("num_features", {}),
+                "mask_labels": parsed.get("mask_labels", []),
+                "processing_time_seconds": parsed.get("processing_time_seconds"),
+            }, session_id)
+        elif tool_name == "FeatureImportanceAnalysisTool":
+            await emit_features_output({
+                "tool": "feature_importance",
+                "status": parsed.get("status", "completed"),
+                "method": parsed.get("method"),
+                "feature_count": parsed.get("feature_count"),
+                "result_files": parsed.get("result_files", {}),
+                "target_column": parsed.get("target_column"),
+                "task_type": parsed.get("task_type"),
+            }, session_id)
+
+    # ── Modeling agent ────────────────────────────────────────────────────
+    elif "modeling" in source.lower():
+        if tool_name == "write_agent_output":
+            agent_data = await _read_agent_output_file(workspace_folder, "modeling_agent")
+            payload = agent_data if agent_data else parsed
+            await emit_modeling_output(payload, session_id)
+        elif tool_name == "classification_modelling":
+            await emit_modeling_output({
+                "tool": "classification",
+                "status": parsed.get("status", "completed"),
+                "experiment_name": parsed.get("experiment_name"),
+                "model_summary": parsed.get("model_summary"),
+                "final_model_path": parsed.get("final_model_path"),
+                "created_files": parsed.get("created_files", []),
+                "individual_model_paths": parsed.get("individual_model_paths", {}),
+                "model_test_predictions": parsed.get("model_test_predictions", {}),
+            }, session_id)
+
+    # ── Result Reporter agent ─────────────────────────────────────────────
+    elif "result_reporter" in source.lower():
+        if tool_name == "write_agent_output":
+            agent_data = await _read_agent_output_file(workspace_folder, "result_reporter_agent")
+            payload = agent_data if agent_data else parsed
+            await emit_report_output(payload, session_id)
+        elif tool_name == "get_modeling_results":
+            await emit_report_output({
+                "tool": tool_name,
+                "status": "completed",
+                "data": parsed,
+            }, session_id)
+
+    # ── LaTeX Reporter agent ──────────────────────────────────────────────
+    elif "latex" in source.lower() or "reporter" in source.lower():
+        if tool_name == "write_agent_output":
+            agent_data = await _read_agent_output_file(workspace_folder, "latex_reporter_agent")
+            payload = agent_data if agent_data else parsed
+            await emit_latex_output(payload, session_id)
+        elif tool_name == "latex_to_pdf":
+            await emit_latex_output({
+                "tool": "latex_to_pdf",
+                "status": parsed.get("status", "completed"),
+                "data": parsed,
+            }, session_id)
 
 
 async def run_planner(session: Session, message: str):
@@ -282,6 +422,11 @@ async def run_pipeline(session: Session):
                 await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
                 for result in event.content:
                     logger.info(f"   Tool: {result.name}  Result: {result.content}")
+                    # Emit view-specific updates based on which tool completed
+                    await _emit_tool_result_to_view(
+                        event.source, result.name, result.content,
+                        session.session_id, workspace_folder, logger
+                    )
 
             elif isinstance(event, MemoryQueryEvent):
                 await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)

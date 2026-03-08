@@ -11,6 +11,7 @@ import FeaturesView from './PlaygroundCanvas/views/FeaturesView';
 import ModelingView from './PlaygroundCanvas/views/ModelingView';
 import ReportingView from './PlaygroundCanvas/views/ReportingView';
 import ChatSidebar from './PlaygroundCanvas/ChatSidebar';
+import websocketService from '../utils/WebsocketService';
 
 // Configuration of the 5 Research Modules
 export const RESEARCH_PHASES = [
@@ -68,6 +69,13 @@ export default function ResearchPlayground() {
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
     const [literatureOutput, setLiteratureOutput] = useState<any>(null);
+    const [populationData, setPopulationData] = useState<any>(null);
+    const [segmentationData, setSegmentationData] = useState<any>(null);
+    const [featuresData, setFeaturesData] = useState<any>(null);
+    const [importanceData, setImportanceData] = useState<any>(null);
+    const [modelingData, setModelingData] = useState<any>(null);
+    const [reportData, setReportData] = useState<any>(null);
+    const [latexData, setLatexData] = useState<any>(null);
     const DEFAULT_PHASE = 'planning';
     const isValidPhase = RESEARCH_PHASES.some(phase => phase.id === phaseId);
     const activePhase = isValidPhase ? phaseId! : DEFAULT_PHASE;
@@ -108,6 +116,40 @@ export default function ResearchPlayground() {
         setLiteratureOutput(data);
     }, []);
 
+    // Subscribe to view-specific WebSocket events from execution agents
+    useEffect(() => {
+        const handleViewWSMessage = (data: any) => {
+            const { type, payload } = data;
+            switch (type) {
+                case 'population_output':
+                    setPopulationData(payload);
+                    break;
+                case 'segmentation_output':
+                    setSegmentationData(payload);
+                    break;
+                case 'features_output':
+                    // Backend sends tool="radiomic_extraction" or tool="feature_importance"
+                    if (payload?.tool === 'feature_importance') {
+                        setImportanceData(payload);
+                    } else {
+                        setFeaturesData(payload);
+                    }
+                    break;
+                case 'modeling_output':
+                    setModelingData(payload);
+                    break;
+                case 'report_output':
+                    setReportData(payload);
+                    break;
+                case 'latex_output':
+                    setLatexData(payload);
+                    break;
+            }
+        };
+        const unsubscribe = websocketService.subscribe(handleViewWSMessage);
+        return () => { unsubscribe(); };
+    }, []);
+
     // All views are rendered simultaneously but only the active one is visible.
     // This preserves component state (nodes, logs, WS subscriptions) across phase switches.
     const renderAllViews = () => (
@@ -119,16 +161,16 @@ export default function ResearchPlayground() {
                 <LiteratureReviewView literatureOutput={literatureOutput || location.state?.literatureReviewOutput || location.state?.literatureContext} />
             </div>
             <div className={`absolute inset-0 ${activePhase === 'data' ? '' : 'pointer-events-none invisible'}`}>
-                <DataCohortView />
+                <DataCohortView populationData={populationData} segmentationData={segmentationData} />
             </div>
             <div className={`absolute inset-0 ${activePhase === 'features' ? '' : 'pointer-events-none invisible'}`}>
-                <FeaturesView />
+                <FeaturesView featuresData={featuresData} importanceData={importanceData} />
             </div>
             <div className={`absolute inset-0 ${activePhase === 'modeling' ? '' : 'pointer-events-none invisible'}`}>
-                <ModelingView />
+                <ModelingView modelingData={modelingData} />
             </div>
             <div className={`absolute inset-0 ${activePhase === 'reporting' ? '' : 'pointer-events-none invisible'}`}>
-                <ReportingView />
+                <ReportingView reportData={reportData} latexData={latexData} />
             </div>
         </>
     );
