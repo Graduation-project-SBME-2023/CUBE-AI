@@ -1040,7 +1040,7 @@ async def classification_modelling(
     n_select: Optional[int] = 1,
     normalize: Optional[bool] = False,
     include_models: Optional[str] = None,
-    workspace_folder: Optional[str] = None,
+    workspace_folder: str = None,
 ) -> Dict[str, Any]:
     """
     Asynchronously executes the full Classification Modelling pipeline.
