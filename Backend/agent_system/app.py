@@ -38,6 +38,12 @@ from view_emitter import (
     emit_report_output,
     emit_latex_output,
 )
+from client_config import (
+    ClientConfig,
+    get_client_config,
+    set_client_config,
+    create_model_client_from_config,
+)
 
 from task_manager.session import Session
 from task_manager.task_manager import TaskManager
@@ -135,6 +141,57 @@ class ToolEvent(BaseModel):
 
 
 api_key = os.getenv("OLLAMA_API_KEY", "cf8ed2bae88d4d659602bc340b4b2bcf.mEvRr0YQ54A_OKfTT2Z92rge")
+
+
+# ----------------------------------------------------------------------
+# Client configuration endpoints
+# ----------------------------------------------------------------------
+@app.get("/client-config")
+async def get_config():
+    """Return the current global LLM client configuration."""
+    cfg = get_client_config()
+    data = cfg.model_dump()
+    # Mask the API key for security
+    if data.get("api_key"):
+        data["api_key"] = data["api_key"][:8] + "..." if len(data["api_key"]) > 8 else "***"
+    return data
+
+
+@app.post("/client-config")
+async def update_config(config: ClientConfig):
+    """Update the global LLM client configuration."""
+    set_client_config(config)
+    return {"status": "ok", "provider": config.provider, "model": config.model}
+
+
+@app.get("/client-config/providers")
+async def list_providers():
+    """Return available provider options and their required/optional fields."""
+    return {
+        "providers": [
+            {
+                "id": "openai",
+                "label": "OpenAI",
+                "fields": ["model", "api_key"],
+                "optional_fields": ["base_url", "temperature", "max_tokens", "top_p"],
+                "description": "OpenAI GPT models or any OpenAI-compatible endpoint",
+            },
+            {
+                "id": "azure_openai",
+                "label": "Azure OpenAI",
+                "fields": ["model", "api_key", "azure_endpoint", "api_version"],
+                "optional_fields": ["azure_deployment", "temperature", "max_tokens", "top_p"],
+                "description": "Azure-hosted OpenAI models",
+            },
+            {
+                "id": "ollama",
+                "label": "Ollama",
+                "fields": ["model"],
+                "optional_fields": ["base_url", "api_key", "temperature", "max_tokens", "top_p"],
+                "description": "Local or remote Ollama instance (OpenAI-compatible)",
+            },
+        ]
+    }
 # planner = ClinicalPlanner(
 #     input_provider=lambda: manager.wait_for_user_message(),
 #     output_callback=lambda t, d: manager.send_ws_message(t, d),
@@ -308,7 +365,7 @@ async def run_planner(session: Session, message: str):
     planner = ClinicalPlanner(
         input_provider=lambda: manager.wait_for_user_message(session.session_id),
         output_callback=lambda t, d: manager.send_ws_message(t, d, session_id=session.session_id),
-        api_key=api_key,
+        model_client=create_model_client_from_config(),
         session_id=session.session_id
     )
 
@@ -376,6 +433,7 @@ async def run_pipeline(session: Session):
     graph_builder = await BasicPipelineBuilder.create(
         workspace_folder=workspace_folder,
         task_messages=task_messages,
+        model_client=create_model_client_from_config(),
     )
 
     print(graph_builder.get_participants())

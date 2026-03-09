@@ -35,8 +35,9 @@ class ClinicalPlanner:
         self, 
         input_provider: InputProvider,
         output_callback: OutputCallback,
-        api_key: str,
-        session_id: str,
+        model_client=None,
+        api_key: str = None,
+        session_id: str = "",
     ):
         self.input_provider = input_provider
         self.output_handler = output_callback
@@ -50,7 +51,10 @@ class ClinicalPlanner:
         self.state_path = Path(config_dir) / "state.json"
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         
-        self.client = create_model_client(api_key)
+        if model_client is not None:
+            self.client = model_client
+        else:
+            self.client = create_model_client(api_key or "")
         self.agents = create_planner_agents(self.client, input_func=self._user_proxy_input_adapter)
         
         self.state = PlannerState()

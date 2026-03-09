@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { MessageSquare, FlaskConical, Layout, Database, Scan, BarChart3, FileText, BookOpenText } from 'lucide-react';
+import { MessageSquare, FlaskConical, Layout, Database, Scan, BarChart3, FileText, BookOpenText, Settings } from 'lucide-react';
 
 // Components
 import PhaseSidebar from './PlaygroundCanvas/PhaseSidebar';
@@ -11,6 +11,7 @@ import FeaturesView from './PlaygroundCanvas/views/FeaturesView';
 import ModelingView from './PlaygroundCanvas/views/ModelingView';
 import ReportingView from './PlaygroundCanvas/views/ReportingView';
 import ChatSidebar from './PlaygroundCanvas/ChatSidebar';
+import ClientSettingsPanel from './PlaygroundCanvas/ClientSettingsPanel';
 import websocketService from '../utils/WebsocketService';
 
 // Configuration of the 5 Research Modules
@@ -61,12 +62,14 @@ export const RESEARCH_PHASES = [
 
 const MessageSquareIcon: any = MessageSquare;
 const FlaskConicalIcon: any = FlaskConical;
+const SettingsIcon: any = Settings;
 
 export default function ResearchPlayground() {
     const location = useLocation();
     const navigate = useNavigate();
     const { phaseId } = useParams<{ phaseId?: string }>();
     const [isChatOpen, setIsChatOpen] = useState(false);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
     const [literatureOutput, setLiteratureOutput] = useState<any>(null);
     const [populationData, setPopulationData] = useState<any>(null);
@@ -198,13 +201,21 @@ export default function ResearchPlayground() {
                     </div>
                 </div>
                 
-                <button 
-                    onClick={() => setIsChatOpen(!isChatOpen)}
-                    className={`p-2 rounded border transition-colors flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider
-                    ${isChatOpen ? 'bg-[#3c5d80] text-white border-[#5acce6]' : 'bg-[#151a1f] text-[#566a84] border-[#3c5d80] hover:text-white'}`}
-                >
-                    <MessageSquareIcon size={14} /> AI Assistant
-                </button>
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => setIsSettingsOpen(true)}
+                        className="p-2 rounded border transition-colors flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider bg-[#151a1f] text-[#566a84] border-[#3c5d80] hover:text-white"
+                    >
+                        <SettingsIcon size={14} /> Model
+                    </button>
+                    <button 
+                        onClick={() => setIsChatOpen(!isChatOpen)}
+                        className={`p-2 rounded border transition-colors flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider
+                        ${isChatOpen ? 'bg-[#3c5d80] text-white border-[#5acce6]' : 'bg-[#151a1f] text-[#566a84] border-[#3c5d80] hover:text-white'}`}
+                    >
+                        <MessageSquareIcon size={14} /> AI Assistant
+                    </button>
+                </div>
             </div>
 
             {/* 2. MAIN WORKSPACE LAYOUT */}
@@ -250,6 +261,9 @@ export default function ResearchPlayground() {
                     />
                 </div>
             </div>
+
+            {/* Model Settings Modal */}
+            <ClientSettingsPanel isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
         </div>
     );
 }
