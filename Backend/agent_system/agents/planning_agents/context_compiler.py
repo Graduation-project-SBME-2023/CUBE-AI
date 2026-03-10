@@ -3,7 +3,7 @@ Context Compiler — AOT (Ahead-of-Time) task message generator.
 
 After the planner confirms a hypothesis and the knowledge builder fetches
 domain knowledge, the Context Compiler:
-  1. Parses the full knowledge base into thematic sections.
+  1. Receives pre-structured knowledge sections from the knowledge builder.
   2. Selects the relevant knowledge slice for each execution agent.
   3. Assembles structured TaskMessage objects with:
         - agent-specific instructions (contextualized to the hypothesis)
@@ -11,10 +11,11 @@ domain knowledge, the Context Compiler:
         - hypothesis summary
   4. Returns the list of TaskMessages — one per pipeline step.
 
+Pipeline: knowledge_builder → (structured sections) → context_compiler → task messages
+
 This implements the "AOT Context Compiler" from arch.html.
 """
 
-import re
 import uuid
 import logging
 from typing import List, Dict, Optional, Tuple
@@ -28,71 +29,6 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# KNOWLEDGE BASE SECTION PARSER
-# ══════════════════════════════════════════════════════════════════════════════
-
-_SECTION_HEADERS = [
-    "ANATOMY, PATHOLOGY & CLINICAL CONTEXT",
-    "MeSH CONTROLLED VOCABULARY & TERMINOLOGY HIERARCHY",
-    "STATE-OF-THE-ART EVIDENCE",
-    "METHOD & APPROACH TRENDS",
-    "JOURNAL PUBLICATION LANDSCAPE",
-    "CLINICAL GUIDELINES & PRACTICE PARAMETERS",
-    "BENCHMARK DATASETS & REFERENCE COLLECTIONS",
-]
-
-
-def _parse_kb_sections(knowledge_base: str) -> Dict[str, str]:
-    """
-    Split the knowledge base text into named sections.
-    Returns a dict mapping section header keywords → section text.
-    """
-    sections: Dict[str, str] = {}
-    if not knowledge_base:
-        return sections
-
-    # Build regex pattern to split on section headers
-    # Each section starts with a line like:  ── SECTION TITLE ──
-    pattern = re.compile(
-        r"─{2,}\s*(.*?)\s*(?:─{2,}|\(.*?\))",
-        re.IGNORECASE,
-    )
-
-    matches = list(pattern.finditer(knowledge_base))
-    for i, match in enumerate(matches):
-        header = match.group(1).strip()
-        start = match.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(knowledge_base)
-        section_text = knowledge_base[start:end].strip()
-
-        # Map to canonical keys
-        key = _header_to_key(header)
-        if key:
-            sections[key] = section_text
-
-    return sections
-
-
-def _header_to_key(header: str) -> Optional[str]:
-    """Map a section header to a canonical key."""
-    header_lower = header.lower()
-    if "anatomy" in header_lower or "pathology" in header_lower or "clinical context" in header_lower:
-        return "anatomy_pathology"
-    if "mesh" in header_lower or "terminology" in header_lower:
-        return "mesh_terminology"
-    if "evidence" in header_lower or "review" in header_lower or "state-of-the-art" in header_lower:
-        return "literature_evidence"
-    if "method" in header_lower or "trend" in header_lower:
-        return "method_trends"
-    if "journal" in header_lower:
-        return "journal_landscape"
-    if "guideline" in header_lower:
-        return "clinical_guidelines"
-    if "dataset" in header_lower or "benchmark" in header_lower:
-        return "dataset_refs"
-    return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -394,7 +330,7 @@ _CONTEXT_BUILDERS = {
 def compile_task_messages(
     hypothesis: ClinicalHypothesis,
     plan: StudyPlan,
-    knowledge_base: str,
+    knowledge_sections: Dict[str, str],
     sources_guide: str,
     pipeline_instructions: Optional[Dict[str, str]] = None,
 ) -> List[TaskMessage]:
@@ -412,7 +348,10 @@ def compile_task_messages(
     Args:
         hypothesis:            The confirmed clinical hypothesis.
         plan:                  The confirmed study plan with customized steps.
-        knowledge_base:        Full knowledge base text from knowledge_builder.
+        knowledge_sections:    Pre-structured dict from knowledge_builder mapping
+                               canonical section keys (anatomy_pathology,
+                               mesh_terminology, literature_evidence, etc.)
+                               to their text content.
         sources_guide:         Sources guide text from knowledge_builder.
         pipeline_instructions: Dict mapping agent_id → detailed instructions
                                from the Pipeline Architect (Phase 3).
@@ -422,10 +361,9 @@ def compile_task_messages(
     """
     logger.info("Context Compiler: Assembling task messages for %d steps", len(plan.steps))
     pipeline_instructions = pipeline_instructions or {}
+    sections = knowledge_sections or {}
 
-    # Parse knowledge base into sections
-    sections = _parse_kb_sections(knowledge_base)
-    logger.info("Parsed %d knowledge sections: %s", len(sections), list(sections.keys()))
+    logger.info("Using %d pre-structured knowledge sections: %s", len(sections), list(sections.keys()))
 
     # Build compact hypothesis summary (shared across all agents)
     hyp_summary = _build_hypothesis_summary(hypothesis)
@@ -523,6 +461,62 @@ def format_task_prompt(task_message: TaskMessage) -> str:
         parts.append(f"── SOURCES & REFERENCES ──\n{ctx.sources_guide}\n")
 
     return "\n".join(parts)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# KNOWLEDGE SUMMARIZER FOR PIPELINE PLANNING
+# ══════════════════════════════════════════════════════════════════════════════
+
+def summarize_knowledge_for_planning(
+    knowledge_sections: Dict[str, str],
+    hypothesis: ClinicalHypothesis,
+    max_chars: int = 6000,
+) -> str:
+    """
+    Create a balanced, structured summary of the knowledge base for the
+    Pipeline Architect prompt.
+
+    Instead of blindly truncating the full KB text (which biases towards
+    whichever section appears first), this draws from every section
+    proportionally so the planner sees anatomy, evidence, methods,
+    guidelines, and datasets — all in one concise block.
+
+    Args:
+        knowledge_sections: Pre-structured dict from knowledge_builder.
+        hypothesis:         The confirmed clinical hypothesis.
+        max_chars:          Total character budget for the summary.
+
+    Returns:
+        Summarized knowledge string for use in the pipeline planning prompt.
+    """
+    if not knowledge_sections:
+        return "No domain knowledge available."
+
+    hyp_summary = _build_hypothesis_summary(hypothesis)
+
+    # Allocate character budget across sections proportionally
+    _SECTION_CONFIG = [
+        ("anatomy_pathology",  "Clinical Context",   0.15),
+        ("literature_evidence", "Key Evidence",       0.25),
+        ("method_trends",      "Method Trends",       0.20),
+        ("clinical_guidelines", "Clinical Guidelines", 0.15),
+        ("mesh_terminology",   "Key Terminology",      0.10),
+        ("dataset_refs",       "Reference Datasets",   0.08),
+        ("journal_landscape",  "Target Journals",      0.07),
+    ]
+
+    parts = [f"── HYPOTHESIS ──\n{hyp_summary}\n"]
+    remaining = max_chars - len(parts[0])
+
+    for key, label, weight in _SECTION_CONFIG:
+        text = knowledge_sections.get(key, "")
+        if not text:
+            continue
+        budget = int(remaining * weight)
+        snippet = _truncate(text, budget)
+        parts.append(f"── {label} ──\n{snippet}")
+
+    return "\n\n".join(parts)
 
 
 def build_enriched_pipeline_prompt(task_messages: List[TaskMessage]) -> str:

@@ -60,6 +60,7 @@ class PlannerState(BaseModel):
     task_messages: List[TaskMessage] = Field(default_factory=list)
     knowledge_base: str = ""             # Full knowledge base text (cached)
     sources_guide: str = ""              # Sources guide text (cached)
+    knowledge_sections: Dict[str, str] = Field(default_factory=dict)  # Structured sections from knowledge builder
     status: str = "idle"
 
 # --- AGENT PROTOCOL (Events) ---

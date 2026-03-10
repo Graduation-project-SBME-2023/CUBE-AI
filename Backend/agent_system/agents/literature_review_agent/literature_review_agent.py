@@ -1390,7 +1390,7 @@ async def run_literature_review(
     # ── Build Dynamic Knowledge Base from Online Medical Databases ────────────
     print("\n[Pipeline] Building dynamic knowledge base from online medical databases...")
     print("[Pipeline] Sources: PubMed MeSH, Wikipedia, Semantic Scholar, Europe PMC")
-    knowledge_base, sources_guide, _papers = build_knowledge_base(pico)
+    knowledge_base, sources_guide, _papers, _sections = build_knowledge_base(pico)
     print(f"[Pipeline] Knowledge base ready ({len(knowledge_base):,} chars)")
 
     # ── Generate Agent Prompts with Dynamic Knowledge ─────────────────────────
