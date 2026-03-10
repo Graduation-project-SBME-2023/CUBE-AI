@@ -14,7 +14,7 @@ from autogen_agentchat.base import TaskResult
 from autogen_agentchat.messages import TextMessage
 from .models import PlannerState, ClinicalHypothesis, StudyPlan, StudyStep, TaskMessage
 from .planning_agents import create_planner_agents, create_model_client
-from .context_compiler import compile_task_messages, build_enriched_pipeline_prompt
+from .context_compiler import compile_task_messages, build_enriched_pipeline_prompt, summarize_knowledge_for_planning, _build_hypothesis_summary
 from agents.literature_review_agent.knowledge_builder import build_knowledge_base
 
 # Type aliases
@@ -279,7 +279,7 @@ class ClinicalPlanner:
     async def _build_knowledge_base(self) -> tuple:
         """
         Run the knowledge builder (synchronous, CPU-bound) in a thread pool.
-        Returns (knowledge_base, sources_guide, papers) tuple.
+        Returns (knowledge_base, sources_guide, papers, knowledge_sections) tuple.
         Sends short progress logs to the frontend via WebSocket.
         """
         pico = self._extract_pico_from_hypothesis()
@@ -294,21 +294,23 @@ class ClinicalPlanner:
                 loop
             )
 
-        knowledge_base, sources_guide, papers = await loop.run_in_executor(
+        knowledge_base, sources_guide, papers, knowledge_sections = await loop.run_in_executor(
             None, lambda: build_knowledge_base(pico, progress_callback=progress_callback)
         )
         
         logger.info(
             f"Knowledge base built: {len(knowledge_base):,} chars, "
             f"sources guide: {len(sources_guide):,} chars, "
-            f"papers collected: {len(papers)}"
+            f"papers collected: {len(papers)}, "
+            f"sections: {list(knowledge_sections.keys())}"
         )
         
         self.state.knowledge_base = knowledge_base
         self.state.sources_guide = sources_guide
+        self.state.knowledge_sections = knowledge_sections
         await self._save_state()
         
-        return knowledge_base, sources_guide, papers
+        return knowledge_base, sources_guide, papers, knowledge_sections
 
     async def _save_literature_context(self, knowledge_base: str, sources_guide: str):
         """
@@ -411,6 +413,7 @@ class ClinicalPlanner:
 
             knowledge_base = ""
             sources_guide = ""
+            knowledge_sections = {}
 
             if do_lit_review:
                 # Create the literature review agent node on the canvas
@@ -418,7 +421,7 @@ class ClinicalPlanner:
                 await self._send("lit_review_log", {"message": "Starting literature review", "status": "active"})
 
                 try:
-                    knowledge_base, sources_guide, papers = await self._build_knowledge_base()
+                    knowledge_base, sources_guide, papers, knowledge_sections = await self._build_knowledge_base()
                     
                     # Save literature context to workspace for the reporter agent
                     await self._save_literature_context(knowledge_base, sources_guide)
@@ -471,16 +474,14 @@ class ClinicalPlanner:
             
             pipeline_architect = self.agents["pipeline_architect"]
 
-            # Build the hypothesis summary for the pipeline architect
-            hyp = self.state.hypothesis
-            hypothesis_summary = json.dumps(hyp.model_dump(), indent=2)
-            
-            # Truncate knowledge base for prompt (keep key sections)
-            kb_context = knowledge_base[:6000] if knowledge_base else "No domain knowledge available."
+            # Summarize knowledge for the pipeline architect — balanced
+            # across all sections instead of blind truncation
+            kb_summary = summarize_knowledge_for_planning(
+                knowledge_sections, self.state.hypothesis
+            )
 
             pipeline_prompt = (
-                f"CONFIRMED HYPOTHESIS:\n{hypothesis_summary}\n\n"
-                f"DOMAIN KNOWLEDGE BASE (from literature review):\n{kb_context}\n\n"
+                f"SUMMARIZED DOMAIN KNOWLEDGE (from literature review):\n{kb_summary}\n\n"
                 "Based on this hypothesis and the domain knowledge, design an optimal "
                 "research pipeline. Select the agents needed, order them logically, and "
                 "provide detailed, study-specific instructions for each agent. "
@@ -524,11 +525,11 @@ class ClinicalPlanner:
             await self._send("msg", "Pipeline confirmed. Compiling context-enriched task messages for each agent...")
 
             try:
-                # Compile structured task messages with knowledge slices
+                # Compile structured task messages with pre-structured knowledge sections
                 task_messages = compile_task_messages(
                     hypothesis=self.state.hypothesis,
                     plan=self.state.plan,
-                    knowledge_base=knowledge_base,
+                    knowledge_sections=knowledge_sections,
                     sources_guide=sources_guide,
                     pipeline_instructions=self._pipeline_instructions,
                 )

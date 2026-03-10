@@ -1346,7 +1346,7 @@ def _build_sources_guide(concepts: Dict[str, List[str]], journal_data: Dict[str,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72,
-                         progress_callback: Optional[callable] = None) -> Tuple[str, str, List[Dict[str, Any]]]:
+                         progress_callback: Optional[callable] = None) -> Tuple[str, str, List[Dict[str, Any]], Dict[str, str]]:
     """
     Build a dynamic, PICO-specific knowledge base by querying online
     medical databases.
@@ -1361,7 +1361,11 @@ def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72,
         progress_callback: Optional callable(message: str) for short progress logs.
 
     Returns:
-        Tuple of (knowledge_base_text, search_sources_guide_text, papers_list).
+        Tuple of (knowledge_base_text, search_sources_guide_text, papers_list,
+        knowledge_sections).
+        knowledge_sections maps canonical keys to their raw text content:
+            anatomy_pathology, mesh_terminology, literature_evidence,
+            method_trends, journal_landscape, clinical_guidelines, dataset_refs.
         papers_list contains structured dicts with: title, authors, year,
         journal, abstract, source, url, citation_count, fields_of_study.
 
@@ -1386,11 +1390,12 @@ def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72,
         kb = cached_full.get("knowledge_base", "")
         sg = cached_full.get("sources_guide", "")
         papers = cached_full.get("papers", [])
+        sections = cached_full.get("knowledge_sections", {})
         if kb and sg:
             logger.info("Using fully cached knowledge base")
             print("[KnowledgeBuilder] Using cached knowledge base.")
             _log("Using cached knowledge")
-            return kb, sg, papers
+            return kb, sg, papers, sections
 
     print("[KnowledgeBuilder] Building dynamic knowledge base from online sources...")
     print("[KnowledgeBuilder] This may take 1-3 minutes on first run (results are cached).")
@@ -1443,8 +1448,19 @@ def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72,
     dataset_data = fetch_dataset_references(concepts)
     print(f"  Retrieved {len(guideline_data)} guidelines, {len(dataset_data)} dataset refs")
 
-    # ── Assemble the knowledge base ───────────────────────────────────────
+    # ── Build structured sections dict (consumed directly by context compiler) ──
     _log("Assembling knowledge base")
+    knowledge_sections = {
+        "anatomy_pathology":  _format_wiki_knowledge(wiki_data, concepts),
+        "mesh_terminology":   _format_mesh_knowledge(mesh_data),
+        "literature_evidence": _format_review_knowledge(review_data),
+        "method_trends":      _format_method_trends(trend_data),
+        "journal_landscape":  _format_journal_landscape(journal_data),
+        "clinical_guidelines": _format_guidelines(guideline_data),
+        "dataset_refs":       _format_datasets(dataset_data),
+    }
+
+    # ── Assemble the knowledge base (formatted text for display / LLM prompts) ──
     primary_organ = concepts["organs"][0] if concepts["organs"] else "Medical"
     primary_pathology = concepts["pathologies"][0] if concepts["pathologies"] else "Disease"
 
@@ -1457,37 +1473,37 @@ Focus: {primary_organ} — {primary_pathology} — {', '.join(concepts['modaliti
 
 {_fmt_section(
     "ANATOMY, PATHOLOGY & CLINICAL CONTEXT (Wikipedia + MeSH)",
-    _format_wiki_knowledge(wiki_data, concepts),
+    knowledge_sections["anatomy_pathology"],
 )}
 
 {_fmt_section(
     "MeSH CONTROLLED VOCABULARY & TERMINOLOGY HIERARCHY (NCBI MeSH)",
-    _format_mesh_knowledge(mesh_data),
+    knowledge_sections["mesh_terminology"],
 )}
 
 {_fmt_section(
     "STATE-OF-THE-ART EVIDENCE (PubMed Systematic Reviews & Meta-Analyses)",
-    _format_review_knowledge(review_data),
+    knowledge_sections["literature_evidence"],
 )}
 
 {_fmt_section(
     "METHOD & APPROACH TRENDS (Semantic Scholar — Highly Cited)",
-    _format_method_trends(trend_data),
+    knowledge_sections["method_trends"],
 )}
 
 {_fmt_section(
     "JOURNAL PUBLICATION LANDSCAPE (Europe PMC)",
-    _format_journal_landscape(journal_data),
+    knowledge_sections["journal_landscape"],
 )}
 
 {_fmt_section(
     "CLINICAL GUIDELINES & PRACTICE PARAMETERS (PubMed Guidelines)",
-    _format_guidelines(guideline_data),
+    knowledge_sections["clinical_guidelines"],
 )}
 
 {_fmt_section(
     "BENCHMARK DATASETS & REFERENCE COLLECTIONS",
-    _format_datasets(dataset_data),
+    knowledge_sections["dataset_refs"],
 )}
 
 ════════════════════════════════════════════════════════════════════════════════
@@ -1579,6 +1595,7 @@ Cached for {cache_hours} hours. Delete .knowledge_cache/ to force refresh.
         "knowledge_base": knowledge_base,
         "sources_guide": sources_guide,
         "papers": papers,
+        "knowledge_sections": knowledge_sections,
         "concepts": concepts,
         "build_stats": {
             "wiki_articles": len(wiki_data),
@@ -1602,7 +1619,7 @@ Cached for {cache_hours} hours. Delete .knowledge_cache/ to force refresh.
     print(f"  Knowledge base size:  {len(knowledge_base):,} characters")
     print(f"  Cached to: {CACHE_DIR / full_cache_key}\n")
 
-    return knowledge_base, sources_guide, papers
+    return knowledge_base, sources_guide, papers, knowledge_sections
 
 
 def clear_cache() -> int:
