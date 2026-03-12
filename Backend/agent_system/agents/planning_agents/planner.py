@@ -12,14 +12,16 @@ from typing import Callable, Awaitable, Any, List
 # Removed Team imports
 from autogen_agentchat.base import TaskResult
 from autogen_agentchat.messages import TextMessage
-from .models import PlannerState, ClinicalHypothesis, StudyPlan, StudyStep
+# from .models import PlannerState, ClinicalHypothesis, StudyPlan, StudyStep
 from .planning_agents import create_planner_agents, create_model_client
+from models.plans import *
 
 # Type aliases
 InputProvider = Callable[[], Awaitable[str]]
 OutputCallback = Callable[[str, Any], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
+
 
 class ClinicalPlanner:
     def __init__(

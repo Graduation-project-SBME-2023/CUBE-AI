@@ -1,9 +1,6 @@
 import asyncio
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Literal, Any, Union
-from datetime import datetime
-from pydantic import BaseModel, Field
 from teams.execution_team import BasicPipelineBuilder
 from autogen_agentchat.teams import GraphFlow
 from autogen_agentchat.messages import (
@@ -18,7 +15,6 @@ from autogen_agentchat.messages import (
 from autogen_agentchat.base import TaskResult
 import logging
 import json
-
 import os
 import sys
 
@@ -26,22 +22,23 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, ".."))
 sys.path.append(root_dir)
 
-from socket_store import manager, send_ws_message
+from socket_store import manager
 from agents.planning_agents.planner import ClinicalPlanner
-
-from task_manager.session import Session
-from task_manager.task_manager import TaskManager
-
+from models.session import Session
 from models.tool_logging import ToolEvent
+from models.requests import PlanningRequest, SessionControlRequest
 from tool_logging import receive_tool_event
+from services.session_service import SessionService
 
+logger = logging.getLogger(__name__)
 
 # ----------------------------------------------------------------------
-# FastAPI app definition
+# App setup
 # ----------------------------------------------------------------------
+
 app = FastAPI(
     title="MAS Orchestrator API",
-    description="Receive a clinical hypothesis, run the Planner → Executer pipeline, and return the result.",
+    description="Receive a clinical hypothesis, run the Planner → Executor pipeline.",
     version="0.1.0",
 )
 
@@ -52,127 +49,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-task_manager = TaskManager()
-
-
-# ----------------------------------------------------------------------
-# Request model
-# ----------------------------------------------------------------------
-class SessionControlRequest(BaseModel):
-    session_id: str = Field(..., description="Session ID")
-
-
-class PlanningRequest(BaseModel):
-    message: str = Field(..., description="Initial message or clinical hypothesis from the user to start planning")
-    session_id: str = Field(..., description="Session ID")
-
-
-EventType = Literal[
-    "tool_started",
-    "tool_progress",
-    "tool_log",
-    "tool_finished",
-    "run_started",
-    "run_finished",
-    "error"
-]
-
-ContentType = Literal[
-    "markdown",
-    "progress",
-    "text",  # could add more content types
-]
-
-
-class MarkdownPayload(BaseModel):
-    markdown: str
-
-
-class ProgressPayload(BaseModel):
-    current: int
-    total: int
-    label: str | None = None
-
-
-class TextPayload(BaseModel):
-    message: str
-
-
-ContentPayload = Union[
-    MarkdownPayload,
-    ProgressPayload,
-    TextPayload,
-]
-
-
-class ToolEvent(BaseModel):
-    event_type: EventType
-    source: str  # tool name or agent
-    content_type: ContentType
-    content: ContentPayload
-    timestamp: datetime
-
+# Single shared service — the only stateful object routes need to know about
+session_service = SessionService(ws_manager=manager)
 
 api_key = os.getenv("OLLAMA_API_KEY", "cf8ed2bae88d4d659602bc340b4b2bcf.mEvRr0YQ54A_OKfTT2Z92rge")
-# planner = ClinicalPlanner(
-#     input_provider=lambda: manager.wait_for_user_message(),
-#     output_callback=lambda t, d: manager.send_ws_message(t, d),
-#     api_key=api_key
-# )
 
 
-@app.post("/plan")
-async def start_planning(request: PlanningRequest):
-    # chat_session_id needs to be passed in the request.
-    # planning and execution tasks need to be stored and controlled, and should communicate via ws
-    print("Received planning request:", request.message)
-    task_manager.start_planning(request.session_id, request.message, run_planner)
-    # asyncio.create_task(run_planner(request.message))
-    return {"task_id": request.session_id, "status": "started"}
+# ----------------------------------------------------------------------
+# Planner callable — receives session + message, calls back into service
+# ----------------------------------------------------------------------
 
-
-async def run_planner(session: Session, message: str):
-    """
-    Initiates and runs the Clinical Planner synchronously.
-    The HTTP request will wait until the entire planning process (including human interaction) is complete.
-    Returns the final plan and hypothesis.
-    
-    The HTTP request to /plan will remain open (pending) for the entire duration of the planning session.
-    If the session takes longer than your HTTP client's timeout setting (usually 30–60 seconds),
-    the client might throw a timeout error, even though the process is still running on the server.
-    """
-
+async def run_planner(session: Session, message: str) -> None:
     planner = ClinicalPlanner(
         input_provider=lambda: manager.wait_for_user_message(),
         output_callback=lambda t, d: manager.send_ws_message(t, d),
         api_key=api_key,
-        session_id=session.session_id
+        session_id=session.session_id,
     )
-
-    # try:
     await planner.run(start_query=message)
-    # except Exception as e:
-    #     await manager.send_ws_message("error", str(e))
 
 
 # ----------------------------------------------------------------------
-# POST /run
+# Executor callable — receives session, calls back into service
 # ----------------------------------------------------------------------
-@app.post("/run")
-async def start_execution(request: SessionControlRequest):
-    # chat_session_id needs to be passed in the request as well
-    # task needs to be stored somehow and controlled,
-    await task_manager.start_execution(request.session_id, run_pipeline)
-    # asyncio.create_task(run_pipeline(request))
-    return {"task_id": request.session_id, "status": "started"}
 
-
-async def run_pipeline(session: Session):
-    workspace_folder = os.path.join(
-        current_dir, f"workspace_{session.session_id}"
-    )
-
-    logger = logging.getLogger("Execution Pipeline")
+async def run_pipeline(session: Session) -> None:
+    workspace_folder = os.path.join(current_dir, f"workspace_{session.session_id}")
+    pipeline_logger = logging.getLogger("Execution Pipeline")
     logging.getLogger("autogen_core").setLevel(logging.CRITICAL)
     logging.getLogger("autogen_core.events").setLevel(logging.CRITICAL)
 
@@ -180,98 +83,92 @@ async def run_pipeline(session: Session):
         open(os.path.join(workspace_folder, "state.json"))
     ).get("hypothesis", {}).get("title")
 
-    logger.info(f"workspace_folder: {workspace_folder}, hypothesis: {hypothesis}")
+    pipeline_logger.info(f"workspace_folder: {workspace_folder}, hypothesis: {hypothesis}")
 
     # Allow pause / cancel before heavy init
     await session.pause_event.wait()
     if session.cancel_event.is_set():
         raise asyncio.CancelledError()
 
-    graph_builder = await BasicPipelineBuilder.create(
-        workspace_folder=workspace_folder
-    )
-
-    print(graph_builder.get_participants())
-
+    graph_builder = await BasicPipelineBuilder.create(workspace_folder=workspace_folder)
     graph_flow = GraphFlow(
         participants=graph_builder.get_participants(),
         graph=graph_builder.build(),
     )
 
-    print(graph_flow)
+    pipeline_logger.info("Starting execution...")
 
-    logger.info("Starting execution...")
+    async for event in graph_flow.run_stream(task=hypothesis):
+        if session.cancel_event.is_set():
+            raise asyncio.CancelledError()
 
-    try:
-        async for event in graph_flow.run_stream(task=hypothesis):
-            if session.cancel_event.is_set():
-                raise asyncio.CancelledError()
-            await session.pause_event.wait()
+        await session.pause_event.wait()
 
-            if session.cancel_event.is_set():
-                raise asyncio.CancelledError()
+        if session.cancel_event.is_set():
+            raise asyncio.CancelledError()
 
-            if isinstance(event, TaskResult):
-                logger.info("━" * 60)
-                logger.info("✅ TASK COMPLETE")
-                for msg in event.messages:
-                    logger.info(f"  [{msg.source}] {msg.content}")
-                logger.info("━" * 60)
-                await send_ws_message("run_finished", "run_finished")
+        if isinstance(event, TaskResult):
+            pipeline_logger.info("━" * 60)
+            pipeline_logger.info("✅ TASK COMPLETE")
+            for msg in event.messages:
+                pipeline_logger.info(f"  [{msg.source}] {msg.content}")
+            pipeline_logger.info("━" * 60)
+            await manager.send_ws_message("run_finished", "run_finished")
 
-            elif isinstance(event, ToolCallRequestEvent):
-                logger.info(f"🔧 [{event.source}] TOOL CALL REQUEST")
-                await send_ws_message("run_status", {"current_agent": event.source})
-                for call in event.content:
-                    logger.info(f"   Tool: {call.name}  Args: {call.arguments}")
+        elif isinstance(event, ToolCallRequestEvent):
+            pipeline_logger.info(f"🔧 [{event.source}] TOOL CALL REQUEST")
+            await manager.send_ws_message("run_status", {"current_agent": event.source})
+            for call in event.content:
+                pipeline_logger.info(f"   Tool: {call.name}  Args: {call.arguments}")
 
-            elif isinstance(event, ToolCallExecutionEvent):
-                logger.info(f"🔧 [{event.source}] TOOL CALL RESULT")
-                await send_ws_message("run_status", {"current_agent": event.source})
-                for result in event.content:
-                    logger.info(f"   Tool: {result.name}  Result: {result.content}")
+        elif isinstance(event, ToolCallExecutionEvent):
+            pipeline_logger.info(f"🔧 [{event.source}] TOOL CALL RESULT")
+            await manager.send_ws_message("run_status", {"current_agent": event.source})
+            for result in event.content:
+                pipeline_logger.info(f"   Tool: {result.name}  Result: {result.content}")
 
-            elif isinstance(event, MemoryQueryEvent):
-                await send_ws_message("run_status", {"current_agent": event.source})
-                logger.info(f"🧠 [{event.source}] MEMORY QUERY: {event.content}")
+        elif isinstance(event, MemoryQueryEvent):
+            pipeline_logger.info(f"🧠 [{event.source}] MEMORY QUERY: {event.content}")
+            await manager.send_ws_message("run_status", {"current_agent": event.source})
 
-            elif isinstance(event, UserInputRequestedEvent):
-                logger.info(f"⏳ [{event.source}] WAITING FOR USER INPUT")
+        elif isinstance(event, UserInputRequestedEvent):
+            pipeline_logger.info(f"⏳ [{event.source}] WAITING FOR USER INPUT")
 
-            elif isinstance(event, ThoughtEvent):
-                logger.info(f"💭 [{event.source}] THOUGHT")
-                logger.info(f"   {event.content}")
-                await send_ws_message("run_status", {"current_agent": event.source})
+        elif isinstance(event, ThoughtEvent):
+            pipeline_logger.info(f"💭 [{event.source}] THOUGHT: {event.content}")
+            await manager.send_ws_message("run_status", {"current_agent": event.source})
 
-            elif isinstance(event, BaseChatMessage):
-                logger.info("─" * 60)
-                logger.info(f"💬 [{event.source}] ({type(event).__name__})")
-                logger.info(f"   {event.content}")
-                await send_ws_message("run_status", {"current_agent": event.source})
+        elif isinstance(event, BaseChatMessage):
+            pipeline_logger.info(f"💬 [{event.source}] ({type(event).__name__}): {event.content}")
+            await manager.send_ws_message("run_status", {"current_agent": event.source})
 
-            elif isinstance(event, BaseAgentEvent):
-                logger.info(f"⚙️  [{event.source}] ({type(event).__name__})")
-                if hasattr(event, "content") and event.content:
-                    logger.info(f"   {event.content}")
-                await send_ws_message("run_status", {"current_agent": event.source})
+        elif isinstance(event, BaseAgentEvent):
+            pipeline_logger.info(f"⚙️  [{event.source}] ({type(event).__name__})")
+            if hasattr(event, "content") and event.content:
+                pipeline_logger.info(f"   {event.content}")
+            await manager.send_ws_message("run_status", {"current_agent": event.source})
 
-    except asyncio.CancelledError:
-        logging.getLogger(
-            "Execution Pipeline - runner task"
-        ).info("Execution cancelled")
-        raise
 
-    except Exception as exc:
-        logging.exception("Execution failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+# ----------------------------------------------------------------------
+# Routes — thin, all logic delegated to session_service
+# ----------------------------------------------------------------------
 
-    # return stream
+@app.post("/plan")
+async def start_planning(request: PlanningRequest):
+    session_service.start_planning(request.session_id, request.message, run_planner)
+    return {"session_id": request.session_id, "status": "planning_started"}
+
+
+@app.post("/run")
+async def start_execution(request: SessionControlRequest):
+    await session_service.start_execution(request.session_id, run_pipeline)
+    return {"session_id": request.session_id, "status": "execution_started"}
 
 
 @app.post("/pause")
 async def pause_execution(request: SessionControlRequest):
     try:
-        task_manager.pause(request.session_id)
+        session_service.pause(request.session_id)
         return {"session_id": request.session_id, "status": "paused"}
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -280,7 +177,7 @@ async def pause_execution(request: SessionControlRequest):
 @app.post("/resume")
 async def resume_execution(request: SessionControlRequest):
     try:
-        task_manager.resume(request.session_id)
+        session_service.resume(request.session_id)
         return {"session_id": request.session_id, "status": "running"}
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -289,7 +186,7 @@ async def resume_execution(request: SessionControlRequest):
 @app.post("/stop")
 async def stop_execution(request: SessionControlRequest):
     try:
-        task_manager.stop(request.session_id)
+        session_service.stop(request.session_id)
         return {"session_id": request.session_id, "status": "stopped"}
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -298,7 +195,7 @@ async def stop_execution(request: SessionControlRequest):
 @app.post("/restart")
 async def restart_execution(request: SessionControlRequest):
     try:
-        await task_manager.restart_execution(request.session_id, run_pipeline)
+        await session_service.restart_execution(request.session_id, run_pipeline)
         return {"session_id": request.session_id, "status": "restarted"}
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -306,7 +203,7 @@ async def restart_execution(request: SessionControlRequest):
 
 @app.get("/status/{session_id}")
 async def get_status(session_id: str):
-    session = task_manager.sessions.get(session_id)
+    session = session_service.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return {
@@ -318,42 +215,29 @@ async def get_status(session_id: str):
 
 @app.post("/events")
 async def receive_event(event: ToolEvent):
-    logging.getLogger().info(f"event at /events: {event}")
+    logger.info(f"Received tool event: {event}")
     await receive_tool_event(event)
 
 
 # ----------------------------------------------------------------------
-# WebSocket /ws – Streaming interface
+# WebSocket /ws
 # ----------------------------------------------------------------------
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    # 1. Register connection
     await manager.connect(websocket)
-    # 2. Start your Planner Logic (in background)
-    # asyncio.create_task(planner.run("Start"))
-
     try:
         while True:
-            # 3. LISTEN LOOP
-            # This is the only place we call receive_text()
             data = await websocket.receive_text()
-
-            # 4. Feed the Queue (This wakes up the Planner)
             await manager.push_to_queue(data)
-
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
 
 # ----------------------------------------------------------------------
-# Run manually (uvicorn)
+# Entry point
 # ----------------------------------------------------------------------
+
 if __name__ == "__main__":
     import uvicorn
-
-    uvicorn.run(
-        "app:app",
-        host="0.0.0.0",
-        port=8150,
-        reload=True,
-    )
+    uvicorn.run("app:app", host="0.0.0.0", port=8150, reload=True)
