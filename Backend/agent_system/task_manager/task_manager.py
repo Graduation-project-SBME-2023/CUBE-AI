@@ -30,6 +30,7 @@ class TaskManager:
 
     async def _run_planning(self, session: Session, starting_message: str, planner):
         try:
+            logger.info(f"Starting planning {session.session_id}")
             await planner(session, starting_message)
             session.state = SessionState.READY
         except asyncio.CancelledError:

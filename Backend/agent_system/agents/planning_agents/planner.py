@@ -26,6 +26,7 @@ class ClinicalPlanner:
         self, 
         input_provider: InputProvider,
         output_callback: OutputCallback,
+        workspace_dir: str,
         api_key: str,
         session_id: str,
     ):
@@ -35,10 +36,9 @@ class ClinicalPlanner:
         log_dir = os.path.join(root_dir, "logs")
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_file = os.path.join(log_dir, f"planner_{timestamp}.log")
-        config_dir = os.path.join(root_dir, "workspace_" + session_id)
         self.log_path = Path(log_file)
         
-        self.state_path = Path(config_dir) / "state.json"
+        self.state_path = Path(workspace_dir) / "state.json"
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         
         self.client = create_model_client(api_key)

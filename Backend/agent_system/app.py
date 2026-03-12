@@ -142,9 +142,15 @@ async def run_planner(session: Session, message: str):
     the client might throw a timeout error, even though the process is still running on the server.
     """
 
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+    workspace_folder = os.path.join(
+        base_agents_workspace, f"workspace_{session.session_id}"
+    )
+    os.makedirs(workspace_folder, exist_ok=True)
     planner = ClinicalPlanner(
         input_provider=lambda: manager.wait_for_user_message(),
         output_callback=lambda t, d: manager.send_ws_message(t, d),
+        workspace_dir=workspace_folder,
         api_key=api_key,
         session_id=session.session_id
     )
@@ -168,8 +174,9 @@ async def start_execution(request: SessionControlRequest):
 
 
 async def run_pipeline(session: Session):
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
     workspace_folder = os.path.join(
-        current_dir, f"workspace_{session.session_id}"
+        base_agents_workspace, f"workspace_{session.session_id}"
     )
 
     logger = logging.getLogger("Execution Pipeline")
