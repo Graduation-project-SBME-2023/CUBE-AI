@@ -91,30 +91,59 @@ class BackendClient:
     # ------------------------------------------------------------------
 
     @classmethod
-    async def create_plan(cls, session_id: str, plan: StudyPlan) -> StudyPlan | None:
+    async def create_plan(cls, plan: StudyPlan) -> StudyPlan | None:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
                     f"{BASE_URL}/plans/",
-                    params={"chat_id": session_id},
+                    params={"hypothesis_id": plan.hypothesis_id},
                     json=plan.model_dump(),
                 )
                 response.raise_for_status()
                 return StudyPlan(**response.json())
             except httpx.HTTPError as e:
-                logger.error(f"Failed to create plan for session {session_id}: {e}")
+                logger.error(f"Failed to create plan for hypothesis {plan.hypothesis_id}: {e}")
                 return None
 
     @classmethod
-    async def update_plan(cls, session_id: str, plan: StudyPlan) -> StudyPlan | None:
+    async def update_plan(cls, plan: StudyPlan) -> StudyPlan | None:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.patch(
-                    f"{BASE_URL}/plans/{session_id}",
+                    f"{BASE_URL}/plans/{plan.hypothesis_id}",
                     json=plan.model_dump(),
                 )
                 response.raise_for_status()
                 return StudyPlan(**response.json())
             except httpx.HTTPError as e:
-                logger.error(f"Failed to update plan for session {session_id}: {e}")
+                logger.error(f"Failed to update plan for hypothesis {plan.hypothesis_id}: {e}")
                 return None
+
+
+if __name__ == '__main__':
+    async def main():
+        from models.plans import StudyStep
+        client = BackendClient()
+        plan = await client.create_plan(
+            hypothesis_id="21d5b06c-958d-4d78-b799-5ee3e6848f57",
+            plan=StudyPlan(
+                hypothesis_id='21d5b06c-958d-4d78-b799-5ee3e6848f57',
+                study_goal='Study Goal',
+                steps=[
+                    StudyStep(
+                        name='Study Step 1',
+                        description='Study Step 1',
+                        module='Study Step 1',
+                    ),
+                    StudyStep(
+                        name='Study Step 2',
+                        description='Study Step 2',
+                        module='Study Step 2',
+                    )
+                ]
+            )
+        )
+        print(plan)
+
+    import asyncio
+    asyncio.run(main())
