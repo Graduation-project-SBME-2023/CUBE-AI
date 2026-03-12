@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from models.session import Session, SessionState
-from models.plans import ClinicalHypothesis, StudyPlan
+from models.plans import ClinicalHypothesis, StudyPlan, StudyStep
 from .session_store import SessionStore
 from task_manager.task_manager import TaskManager
 from clients.backend_client import BackendClient
@@ -96,6 +96,56 @@ class SessionService:
     # ------------------------------------------------------------------
     # Data operations — planners / executors call these
     # ------------------------------------------------------------------
+
+    async def handle_hypothesis_update(self, session: Session, hypo_data: dict,) -> ClinicalHypothesis:
+        """
+        Called whenever the agent produces hypothesis data.
+        Decided create vs update based on hypothesis ID.
+        """
+        exisiting = session.hypothesis
+
+        if exisiting is None:
+            hypothesis = ClinicalHypothesis(**hypo_data)
+            result = await BackendClient.create_hypothesis(session.session_id, hypothesis)
+            session.hypothesis = result
+        else:
+            updated = exisiting.model_copy(update=hypo_data)
+            result = await BackendClient.update_hypothesis(updated)
+            session.hypothesis = result
+
+        await self.ws.send_ws_message("hypothesis", result.model_dump())
+        return result
+
+    async def handle_plan_update(
+            self, session: Session, steps_data: list
+    ) -> StudyPlan:
+        plan = StudyPlan(
+            hypothesis_id=session.hypothesis.id,  # service resolves this, not planner
+            study_goal=session.hypothesis.title,
+            steps=[
+                StudyStep(
+                    name=s.get("title", ""),
+                    description=s.get("description", ""),
+                    module=s.get("id", ""),
+                )
+                for s in steps_data
+            ],
+        )
+
+        if session.plan is None:
+            result = await BackendClient.create_plan(session.session_id, plan)
+            session.plan = result
+        else:
+            plan = plan.model_copy(update={"id": session.plan.id})
+            result = await BackendClient.update_plan(session.session_id, plan)
+            session.plan = result
+
+        ui_steps = [
+            {"id": s.module, "name": s.name, "description": s.description, "module": s.module}
+            for s in result.steps
+        ]
+        await self.ws.send_ws_message("plan", {"steps": ui_steps})
+        return result
 
     async def create_plan(self, session: Session, plan: StudyPlan) -> StudyPlan | None:
         result = await BackendClient.create_plan(session.session_id, plan)
