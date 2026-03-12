@@ -58,3 +58,7 @@ Backend/agent_system/memory_output_logs
 my_models
 testing_folders
 autogen_feature.txt
+
+Backend/testing_voxtell.py
+Backend/voxtell_v1.0
+Backend/voxtell_v1.1

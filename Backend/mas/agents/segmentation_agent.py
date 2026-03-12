@@ -186,26 +186,27 @@ class SegmentationModule:
         datasetlist: List[str] = input_data["datasetlist"]
 
         # plan
-        # plan = await self._run_planner(hypothesis)
-        # logger.info(f"Planner plan: {plan}")
-        # target_labels = plan["target_labels"]
-        # chosen_path = plan["chosen_path"]
-        # eligible_volumes = await self._exclude_existing_masks(
-        #     datasetlist, target_labels
-        # )
+        plan = await self._run_planner(hypothesis)
+        logger.info(f"Planner plan: {plan}")
+        target_labels = plan["target_labels"]
+        chosen_path = plan["chosen_path"]
+        eligible_volumes = await self._exclude_existing_masks(
+            datasetlist, target_labels
+        )
 
-        # logger.info(
-        #     f"Eligible volumes for segmentation: {len(eligible_volumes)}"
-        # )
-        chosen_path = "automatic"
-        eligible_volumes = datasetlist
-        target_labels = ["spleen"]
-        selected_auto_model= "segmentation_spleen" # hard test
+        logger.info(
+            f"Eligible volumes for segmentation: {len(eligible_volumes)}"
+        )
+        # chosen_path = "automatic"
+        # eligible_volumes = datasetlist
+        # target_labels = ["spleen"]
+        # selected_auto_model= "segmentation_spleen" # hard test
+        selected_auto_model = plan["automatic_models"][0] if plan["automatic_models"] else None
 
         # whether it's automatic or interactive
         if chosen_path == "automatic" and eligible_volumes:
             # selected_auto_model = plan["automatic_models"][0]
-            selected_auto_model = "segmentation_spleen" # hard test
+            # selected_auto_model = "segmentation_spleen" # hard test
             await self._run_automatic(eligible_volumes, target_labels, selected_auto_model)
 
         elif eligible_volumes:
