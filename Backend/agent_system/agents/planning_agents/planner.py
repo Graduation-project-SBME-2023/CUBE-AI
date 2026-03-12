@@ -12,9 +12,12 @@ from typing import Callable, Awaitable, Any, List
 # Removed Team imports
 from autogen_agentchat.base import TaskResult
 from autogen_agentchat.messages import TextMessage
+
+from services.session_service import SessionService
 # from .models import PlannerState, ClinicalHypothesis, StudyPlan, StudyStep
 from .planning_agents import create_planner_agents, create_model_client
 from models.plans import *
+from models.session import Session
 
 # Type aliases
 InputProvider = Callable[[], Awaitable[str]]
@@ -29,7 +32,8 @@ class ClinicalPlanner:
         input_provider: InputProvider,
         output_callback: OutputCallback,
         api_key: str,
-        session_id: str,
+        session: Session,
+        session_service: SessionService,
     ):
         self.input_provider = input_provider
         self.output_handler = output_callback
@@ -37,7 +41,7 @@ class ClinicalPlanner:
         log_dir = os.path.join(root_dir, "logs")
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         log_file = os.path.join(log_dir, f"planner_{timestamp}.log")
-        config_dir = os.path.join(root_dir, "workspace_" + session_id)
+        config_dir = os.path.join(root_dir, "workspace_" + session.session_id)
         self.log_path = Path(log_file)
         
         self.state_path = Path(config_dir) / "state.json"
@@ -48,6 +52,8 @@ class ClinicalPlanner:
         self.agents = create_planner_agents(self.client, input_func=self._user_proxy_input_adapter)
         
         self.state = PlannerState()
+        self.session = session
+        self.session_service = session_service
         self._initialize_logging()
 
     async def _user_proxy_input_adapter(self, prompt: str = None, cancellation_token=None) -> str:
@@ -106,42 +112,16 @@ class ClinicalPlanner:
             # 1. Handle Hypothesis
             # FIX: Check if data["hypothesis"] is actually a dictionary (not None)
             if "hypothesis" in data and isinstance(data["hypothesis"], dict):
-                hypo_data = data["hypothesis"]
-                
-                # Safe check for ID
-                if "id" not in hypo_data or not hypo_data["id"]: 
-                    hypo_data["id"] = self.state.hypothesis.id or str(uuid.uuid4())
-                
-                self.state.hypothesis = ClinicalHypothesis(**hypo_data)
-                await self._send("hypothesis", self.state.hypothesis.model_dump())
+                self.state.hypothesis = await self.session_service.handle_hypothesis_update(
+                    self.session, data["hypothesis"]
+                )
 
             # 2. Handle Plan (Fixed Steps Customization)
             # FIX: Check if data["steps"] is a list
             if "steps" in data and isinstance(data["steps"], list):
-                steps_data = data["steps"]
-                self.state.plan = StudyPlan(
-                    hypothesis_id=self.state.hypothesis.id,
-                    study_goal=self.state.hypothesis.title,
-                    steps=[
-                        StudyStep(
-                            name=s.get("title", ""), 
-                            description=s.get("description", ""), 
-                            module=s.get("id", "") 
-                        ) for s in steps_data
-                    ]
+                self.state.plan = await self.session_service.handle_plan_update(
+                    self.session, data["steps"]
                 )
-                
-                # Format for UI 
-                ui_steps = [
-                    {
-                        "id": s.module, 
-                        "name": s.name, 
-                        "description": s.description,
-                        "module": s.module
-                    } 
-                    for s in self.state.plan.steps
-                ]
-                await self._send("plan", {"steps": ui_steps})
 
             # 3. Message to User
             if "message" in data and data["message"]:

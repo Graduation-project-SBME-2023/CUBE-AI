@@ -64,7 +64,8 @@ async def run_planner(session: Session, message: str) -> None:
         input_provider=lambda: manager.wait_for_user_message(),
         output_callback=lambda t, d: manager.send_ws_message(t, d),
         api_key=api_key,
-        session_id=session.session_id,
+        session=session,
+        session_service=session_service,
     )
     await planner.run(start_query=message)
 

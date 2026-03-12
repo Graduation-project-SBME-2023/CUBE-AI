@@ -3,6 +3,8 @@ import asyncio
 from enum import Enum, auto
 from typing import Optional, Dict, Any
 
+from models.plans import ClinicalHypothesis, StudyPlan
+
 
 class SessionState(Enum):
     IDLE = auto()
@@ -33,6 +35,9 @@ class Session:
     agent_status: Dict[str, Any] = field(default_factory=dict)
     last_error: Optional[str] = None
     interrupted: bool = False
+
+    hypothesis: ClinicalHypothesis | None = None
+    plan: StudyPlan | None = None
 
     def __post_init__(self):
         # Create asyncio primitives here, inside the running event loop
