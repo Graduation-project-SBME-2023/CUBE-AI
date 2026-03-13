@@ -1,10 +1,10 @@
-import asyncio
 import sys
 import os
 import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+
 
 def setup_logging():
     root_dir = Path(__file__).parent.parent
@@ -27,6 +27,7 @@ def setup_logging():
     logging.info(f"Logging initialized: {log_file}")
     return log_file
 
+
 # setup_logging()
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -37,7 +38,6 @@ import asyncio
 from autogen_agentchat.agents import AssistantAgent, MessageFilterAgent, MessageFilterConfig, PerSourceFilter
 from autogen_agentchat.teams import DiGraphBuilder, GraphFlow
 from autogen_agentchat.ui import Console
-from clients.ollamaClient import OllamaClient
 
 # Import your existing custom agent classes
 from agents.planning_agents.population_planner import PopulationPlannerAgent
@@ -48,8 +48,8 @@ from agents.execution_agents.result_reporter_agent import ResultReporterAgent
 from agents.execution_agents.reporter_agent import ReporterAgent
 
 # Import task message models and context compiler
-from agents.planning_agents.models import TaskMessage, PlannerState
-from agents.planning_agents.context_compiler import format_task_prompt, build_enriched_pipeline_prompt
+from models.plans import TaskMessage
+from agents.planning_agents.context_compiler import build_enriched_pipeline_prompt
 
 
 class BasicPipelineBuilder(DiGraphBuilder):
@@ -62,7 +62,8 @@ class BasicPipelineBuilder(DiGraphBuilder):
     async def create(cls, workspace_folder=None, task_messages: Optional[List[TaskMessage]] = None, model_client=None):
         setup_logging()
 
-        population_agent = await PopulationPlannerAgent.create(model_client=model_client, workspace_folder=workspace_folder)
+        population_agent = await PopulationPlannerAgent.create(model_client=model_client,
+                                                               workspace_folder=workspace_folder)
         seg_agent = await SegmentationAgent.create(model_client=model_client, workspace_folder=workspace_folder)
         feat_agent = await FeatureExtractionAgent.create(model_client=model_client, workspace_folder=workspace_folder)
         model_agent = await ModelingAgent.create(model_client=model_client, workspace_folder=workspace_folder)
@@ -101,12 +102,12 @@ class BasicPipelineBuilder(DiGraphBuilder):
                 PerSourceFilter(source="modeling_agent", position="last", count=1)
             ])
         )
-        
+
         filtered_latex_agent = MessageFilterAgent(
-            name = "latex_reporter_agent",
+            name="latex_reporter_agent",
             wrapped_agent=latex_agent,
             filter=MessageFilterConfig(per_source=[
-                PerSourceFilter(source = "result_reporter_agent", position="last", count=1)
+                PerSourceFilter(source="result_reporter_agent", position="last", count=1)
             ]
             )
         )
@@ -141,6 +142,7 @@ class BasicPipelineBuilder(DiGraphBuilder):
             return fallback_hypothesis
         else:
             return "Run the pipeline."
+
 
 async def main() -> None:
     # 1. Initialize the raw agents
@@ -183,14 +185,14 @@ async def main() -> None:
             PerSourceFilter(source="modeling_agent", position="last", count=1)
         ])
     )
-    
+
     filtered_latex_agent = MessageFilterAgent(
-        name = "latex_reporter_agent",
+        name="latex_reporter_agent",
         wrapped_agent=latex_agent,
         filter=MessageFilterConfig(per_source=[
-            PerSourceFilter(source = "result_reporter_agent", position="last", count=1)
+            PerSourceFilter(source="result_reporter_agent", position="last", count=1)
         ]
-            
+
         )
     )
 
@@ -205,13 +207,12 @@ async def main() -> None:
     builder.add_edge(population_agent, filtered_seg_agent)
 
     builder.add_edge(filtered_seg_agent, filtered_feat_agent)
-    
-    builder.add_edge(filtered_feat_agent, filtered_model_agent)
-    
-    builder.add_edge(filtered_model_agent, filtered_report_agent)
-    
-    builder.add_edge(filtered_report_agent, filtered_latex_agent)
 
+    builder.add_edge(filtered_feat_agent, filtered_model_agent)
+
+    builder.add_edge(filtered_model_agent, filtered_report_agent)
+
+    builder.add_edge(filtered_report_agent, filtered_latex_agent)
 
     flow = GraphFlow(
         participants=builder.get_participants(),
@@ -226,10 +227,9 @@ async def main() -> None:
     print("--- Starting GraphFlow Pipeline ---")
     await Console(flow.run_stream(task=task_prompt))
 
+
 if __name__ == "__main__":
     asyncio.run(main())
-
-
 
 # task_prompt = """start the radiomics pipeline
 #                 "image_dir": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/labels_data",

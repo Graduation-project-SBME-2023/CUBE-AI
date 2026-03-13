@@ -20,10 +20,9 @@ import uuid
 import logging
 from typing import List, Dict, Optional, Tuple
 
-from .models import (
+from models.plans import (
     ClinicalHypothesis,
     StudyPlan,
-    StudyStep,
     TaskMessage,
     ContextAugmentation,
 )
