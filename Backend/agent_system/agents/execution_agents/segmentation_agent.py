@@ -17,7 +17,7 @@ from autogen_agentchat.ui import Console
 from autogen_core import CancellationToken
 # from agent_system.descriptions.models_descriptions import RESULT_AGENT_DESCRIPTION
 # from agent_system.system_prompts.system_messages import RESULT_AGENT_SYSTEM_PROMPT
-# from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
+from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
 from .segmentation_module import SegmentationModule
 from autogen_core.tools import FunctionTool
 
@@ -69,24 +69,53 @@ class SegmentationAgent(AssistantAgent):
     @classmethod
     async def create(cls, model_client = None, workspace_folder = None):
         model_client = OllamaClient() if not model_client else model_client
-        # mcp_server = StdioServerParams(
-        #     command="python", args=["Backend/mcp/server.py"]
-        #     )
-        # mcp_tools = await mcp_server_tools(mcp_server)
-        # desired_tools = ['get_modeling_results']
-        # final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
-        # final_tools = mcp_tools
+        mcp_server = StdioServerParams(
+            command="python", args=["Backend/mcp/server.py"], env={"WORKSPACE_DIR": workspace_folder}
+        )
+        mcp_tools = await mcp_server_tools(mcp_server)
+        desired_mcp_tools = ['scratchpad_register_agent', 'scratchpad_write_summary',
+                             'scratchpad_set_status', 'scratchpad_raise_flag',
+                             'write_agent_output']
+        final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
         logger.info(f"Creating segmentation agent")
-        tools = [
+        function_tools = [
             FunctionTool(
                 test_module,
                 description="the tool that starts the segmentation, it has the capability to know what to segment and install by itself"
             )
         ]
+        tools = [*function_tools, *final_mcp_tools]
         logger.info(f"Tools initialized: {tools}")
         name = "segmentation_agent"
         description = "agent to run the segmentation task, has the capability to know which volumes to segment by itself"
-        system_message = f"to start the task of the segmentation, all you need to do just run the tool you have, do not ask any questions, the workspace folder is {workspace_folder}"
+        system_message = f"""to start the task of the segmentation, all you need to do just run the tool you have, do not ask any questions, the workspace folder is {workspace_folder}
+
+=== SCRATCHPAD INSTRUCTIONS ===
+At the very start of your task, register yourself:
+  - scratchpad_register_agent(agent_id="segmentation_agent", role="roi_segmentation")
+
+When segmentation is complete:
+1. Call scratchpad_write_summary with:
+   - Segmentation method used
+   - Number of volumes segmented
+   - Any quality issues encountered
+2. Call scratchpad_set_status(agent_id="segmentation_agent", status="done")
+
+=== STRUCTURED OUTPUT INSTRUCTIONS ===
+After completing segmentation, you MUST call write_agent_output with:
+  - agent_id: "segmentation_agent"
+  - agent_role: "roi_segmentation"
+  - status: "completed" (or "failed"/"partial")
+  - inputs: {{"workspace_folder": "{workspace_folder}"}}
+  - output_files: {{"labels_dir": "labels_data/"}}
+  - output_metrics: {{
+      "segmentation_method": "<method used, e.g. MONAI Label VISTA3D>",
+      "volumes_segmented": <number>,
+      "roi_description": "<what was segmented>"
+    }}
+  - output_summary: "<concise summary of segmentation results>"
+  - warnings: [<any quality warnings>]
+"""
         return cls(
             name = name,
             model_client = model_client,
