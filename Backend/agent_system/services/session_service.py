@@ -151,7 +151,8 @@ class SessionService:
 
             session.hypothesis = result
             logger.debug(f"[{session.session_id}] Hypothesis {action}d [id={result.id}]")
-            await self._ws_send("hypothesis", result.model_dump())
+            await self._ws_send("hypothesis", session.hypothesis)
+            await self._ws_send("msg", session.hypothesis)
             return result
 
         except Exception as e:
@@ -260,7 +261,7 @@ class SessionService:
         if session.plan is not None:
             session.plan.state = "confirmed"
             try:
-                result = await BackendClient.update_plan(session.session_id, session.plan)
+                result = await BackendClient.update_plan(session.plan)
                 if result:
                     session.plan = result
                 else:

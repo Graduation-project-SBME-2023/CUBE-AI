@@ -37,17 +37,19 @@ class BackendClient:
 
     @classmethod
     async def update_session(cls, session_id: str, data: dict) -> dict | None:
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.patch(
-                    f"{BASE_URL}/sessions/{session_id}",
-                    json=data,
-                )
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPError as e:
-                logger.error(f"Failed to update session {session_id}: {e}")
-                return None
+        pass
+        # Session management not yet implemented in DB
+        # async with httpx.AsyncClient() as client:
+        #     try:
+        #         response = await client.patch(
+        #             f"{BASE_URL}/sessions/{session_id}",
+        #             json=data,
+        #         )
+        #         response.raise_for_status()
+        #         return response.json()
+        #     except httpx.HTTPError as e:
+        #         logger.error(f"Failed to update session {session_id}: {e}")
+        #         return None
 
     # ------------------------------------------------------------------
     # Hypothesis
