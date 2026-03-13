@@ -1,0 +1,18 @@
+<svg width="180" height="32" viewBox="0 0 180 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Cube Icon -->
+  <g transform="translate(0, 2)">
+    <!-- 3D Cube shape -->
+    <path d="M14 2L26 8.5V21.5L14 28L2 21.5V8.5L14 2Z" stroke="#5acce6" stroke-width="1.8" fill="none"/>
+    <path d="M14 28V15" stroke="#5acce6" stroke-width="1.8"/>
+    <path d="M2 8.5L14 15L26 8.5" stroke="#5acce6" stroke-width="1.8"/>
+    <!-- Inner glow lines -->
+    <path d="M8 5.5L14 8.5L20 5.5" stroke="#5acce6" stroke-width="0.8" opacity="0.5"/>
+    <path d="M5 18L14 22.5L23 18" stroke="#5acce6" stroke-width="0.8" opacity="0.5"/>
+  </g>
+  <!-- "CUBE" Text -->
+  <text x="36" y="23" font-family="Inter, system-ui, sans-serif" font-size="22" font-weight="700" fill="white" letter-spacing="3">CUBE</text>
+  <!-- Separator line -->
+  <line x1="118" y1="6" x2="118" y2="26" stroke="#3c5d80" stroke-width="1"/>
+  <!-- Tagline -->
+  <text x="124" y="20" font-family="Inter, system-ui, sans-serif" font-size="9" fill="#91b9cd" letter-spacing="1.5">RESEARCH</text>
+</svg>

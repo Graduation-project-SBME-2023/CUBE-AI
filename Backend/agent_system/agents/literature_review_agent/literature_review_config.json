@@ -1,0 +1,116 @@
+{
+  "literature_review_config": {
+    "search_settings": {
+      "max_results": 100,
+      "databases": [
+        "pubmed",
+        "google_scholar",
+        "arxiv",
+        "sciencedirect"
+      ],
+      "year_from": 2015,
+      "year_to": 2024,
+      "impact_factor_min": 1.5,
+      "language": "english",
+      "peer_reviewed_only": true
+    },
+    "search_filters": {
+      "clinical_trials": true,
+      "in_vivo_studies": true,
+      "validation_studies": true,
+      "exclude_conference_abstracts": false
+    },
+    "extraction_settings": {
+      "extract_keywords": true,
+      "extract_methodology": true,
+      "extract_findings": true,
+      "extract_sample_sizes": true,
+      "extract_performance_metrics": true
+    },
+    "graph_settings": {
+      "build_knowledge_graph": true,
+      "graph_type": "combined",
+      "connection_types": [
+        "citation",
+        "co_author",
+        "methodology_similarity",
+        "topic_overlap"
+      ],
+      "min_connection_weight": 0.3,
+      "graph_output_format": "html_interactive",
+      "include_temporal_analysis": true
+    },
+    "trend_analysis": {
+      "enabled": true,
+      "time_window": "yearly",
+      "metrics": [
+        "citation_count",
+        "methodology_evolution",
+        "keyword_trends",
+        "methodology_adoption"
+      ],
+      "emerging_threshold": 1.5
+    },
+    "quality_assessment": {
+      "assess_methodology_quality": true,
+      "assess_study_design": true,
+      "assess_sample_size_adequacy": true,
+      "highlight_systematic_reviews": true,
+      "minimum_study_quality_score": 0
+    },
+    "output_settings": {
+      "report_format": "markdown",
+      "include_visualizations": true,
+      "include_interactive_graphs": true,
+      "include_data_export": true,
+      "output_directory": "literature_review_output",
+      "include_bibliography": true,
+      "bibliography_format": "bibtex"
+    },
+    "advanced_settings": {
+      "use_nlp_for_abstract_analysis": true,
+      "cluster_papers_by_topic": true,
+      "detect_citation_patterns": true,
+      "identify_author_networks": true,
+      "parallel_search": true,
+      "max_parallel_requests": 5
+    }
+  },
+  "domain_specific": {
+    "radiology": {
+      "focus_areas": [
+        "Chest Imaging",
+        "Abdominal Imaging",
+        "Neuroradiology",
+        "Musculoskeletal Imaging",
+        "Intervention Radiology",
+        "Breast Imaging"
+      ],
+      "key_modalities": [
+        "CT",
+        "MRI",
+        "X-ray",
+        "Ultrasound",
+        "PET",
+        "SPECT"
+      ],
+      "relevant_techniques": [
+        "Deep Learning",
+        "Machine Learning",
+        "Segmentation",
+        "Detection",
+        "Classification",
+        "Registration",
+        "Reconstruction",
+        "Image Quality Assessment"
+      ],
+      "clinical_applications": [
+        "Automated diagnosis",
+        "Risk stratification",
+        "Treatment planning",
+        "Follow-up assessment",
+        "Quality assurance"
+      ]
+    }
+  }
+}

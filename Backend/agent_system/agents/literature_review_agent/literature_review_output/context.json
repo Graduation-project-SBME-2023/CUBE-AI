@@ -1,0 +1,127 @@
+{
+  "metadata": {
+    "generated_at": "2025-03-20T14:30:00Z",
+    "pipeline_version": "2.0",
+    "total_papers": 11,
+    "highly_relevant": 0,
+    "similar_studies": 0,
+    "pico": {
+      "population": "Adult patients (>=18 years) with confirmed or suspected splenic lesions or haematological malignancies (including lymphoma, leukaemia, and metastatic disease involving the spleen) undergoing contrast-enhanced CT, MRI, or PET-CT imaging in oncology or radiology departments.",
+      "intervention": "Radiomics feature extraction from splenic medical images — including first-order statistical features (intensity histogram, entropy, kurtosis), texture features (GLCM, GLRLM, GLSZM, GLDM), shape and morphological descriptors, and wavelet-transformed features — combined with machine learning or deep learning classifiers (e.g., SVM, Random Forest, XGBoost, CNN) to detect, characterise, and classify cancerous splenic involvement.",
+      "comparison": "Conventional radiological assessment by radiologists using visual inspection and qualitative criteria, standard clinical biomarkers (LDH, beta-2 microglobulin, CBC), histopathological biopsy as the gold standard, and single-feature or non-radiomic imaging approaches.",
+      "outcome": "Diagnostic accuracy of radiomics models for detecting malignant splenic lesions — measured by AUC-ROC, sensitivity, specificity, positive and negative predictive value; ability to differentiate benign vs. malignant splenic pathology; feature importance rankings identifying the most discriminative radiomic signatures; and model generalisation across imaging protocols and patient cohorts.",
+      "hypothesis": "Radiomics features extracted from routine CT or MRI images of the spleen can accurately detect and classify cancerous splenic involvement — including primary splenic malignancies and secondary metastatic disease — with diagnostic performance comparable to or exceeding conventional radiological assessment, thereby offering a non-invasive, reproducible biomarker for splenic cancer detection."
+    }
+  },
+  "literature_context": {
+    "key_findings": [
+      "CT-based radiomics achieves 97% diagnostic accuracy for lymphoma vs benign splenomegaly differentiation using LASSO-selected features [R1]",
+      "Radiomic features from spleen CT can differentiate lymphoma subtypes (HL, DLBCL, MCL, FL) using Random Forest classifiers [R2]",
+      "ComBat harmonization significantly improves radiomic feature stability across multi-center CT protocols when using spleen as internal reference [R3]",
+      "Multi-phase CT protocols (non-contrast, arterial, portal venous) provide optimal feature extraction for splenic radiomics [R4]",
+      "First-order statistics and texture features (GLCM, GLRLM) show highest discriminative power for malignant splenic pathology [R1, R2]"
+    ],
+    "consensus_points": [
+      "Portal venous phase CT provides optimal texture feature extraction for splenic parenchyma analysis across studies",
+      "Random Forest classifiers consistently outperform other ML algorithms for limited sample sizes in splenic radiomics",
+      "LASSO regression effectively selects discriminative features while controlling for overfitting",
+      "Texture features derived from wavelet transforms demonstrate superior discriminative power"
+    ],
+    "contested_areas": [
+      "Optimal imaging modality: limited evidence comparing CT vs MRI vs PET-CT for splenic radiomics",
+      "Segmentation methodology: manual vs semi-automated vs fully automated approaches lack comparative performance data",
+      "Multi-center harmonization: ComBat vs alternative methods require systematic comparison"
+    ],
+    "research_gaps": [
+      "Direct comparison studies between radiomics and radiologist performance for splenic lymphoma detection",
+      "Multi-center prospective validation cohorts with standardized imaging protocols",
+      "Integration of radiomics with clinical biomarkers (LDH, β2-microglobulin) for comprehensive diagnostic models",
+      "Large-scale studies assessing generalizability across diverse lymphoma subtypes and ethnic populations",
+      "Regulatory pathway definition for spleen radiomics software as medical device"
+    ],
+    "recommended_methods": [
+      "Portal venous phase CT with ≤3mm slice thickness based on [R1, R2, R4]",
+      "ComBat harmonization for multi-center datasets based on [R3]",
+      "Semi-automated segmentation with ICC >0.85 for reproducibility",
+      "LASSO feature selection followed by Random Forest classification based on [R1, R2]",
+      "External validation cohort inclusion with at least 50% of training cohort size"
+    ],
+    "benchmark_datasets": [
+      "Medical Segmentation Decathlon: spleen segmentation datasets",
+      "TCIA lymphoma imaging collections available",
+      "Currently no dedicated splenic lymphoma radiomics benchmark datasets"
+    ],
+    "key_metrics": [
+      "AUC-ROC — observed range: 0.89–0.97 across studies [R1, R2]",
+      "Sensitivity — range: 89%–95%",
+      "Specificity — range: 95%–98%",
+      "ICC for feature reproducibility — minimum threshold: >0.80"
+    ],
+    "imaging_protocols": [
+      "CT: portal venous phase, slice thickness ≤3mm — supported by [R1, R2, R4]",
+      "Contrast: standard iodine-based contrast media at 120-140 mL",
+      "MRI: limited evidence, T2-weighted and DWI sequences suggested"
+    ]
+  },
+  "top_papers": [
+    {
+      "rank": 1,
+      "title": "Machine Learning Radiomics Signature for Differentiating Lymphoma versus Benign Splenomegaly on CT",
+      "authors": "Cheng Jih-An, Lin Yu-Chun, Lin Yenpo, Wu Ren-Chin, Lu Hsin-Ying et al.",
+      "year": "2023",
+      "journal": "Diagnostics (Basel, Switzerland)",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/38132216/",
+      "relevance_score": 53.96,
+      "key_finding": "Achieved 97% diagnostic accuracy using 7 radiomic features selected via LASSO"
+    },
+    {
+      "rank": 2,
+      "title": "Radiomics Features of the Spleen as Surrogates for CT-Based Lymphoma Diagnosis and Subtype Differentiation",
+      "authors": "Enke Johanna S, Moltz Jan H, D'Anastasi Melvin, Kunz Wolfgang G, Schmidt Christian et al.",
+      "year": "2022",
+      "journal": "Cancers",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/35158980/",
+      "relevance_score": 53.68,
+      "key_finding": "Largest spleen radiomics study (326 patients) demonstrating lymphoma subtype differentiation capability"
+    },
+    {
+      "rank": 3,
+      "title": "Harmonization of radiomic feature distributions: impact on classification of hepatic tissue in CT imaging",
+      "authors": "Beaumont Hubert, Iannessi Antoine, Bertrand Anne-Sophie, Cucchi Jean Michel, Lucidarme Olivier",
+      "year": "2021",
+      "journal": "European Radiology",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/33459855/",
+      "relevance_score": 30.0,
+      "key_finding": "Demonstrated ComBat harmonization effectiveness using spleen as internal reference for multi-center radiomics"
+    },
+    {
+      "rank": 4,
+      "title": "Development of a non-invasive diagnostic model for high-risk esophageal varices based on radiomics of spleen CT",
+      "authors": "Yan Cheng, Li Min, Liu Changchun, Zhang Zhe, Zhang Jingwen et al.",
+      "year": "2024",
+      "journal": "Abdominal radiology (New York)",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/39096392/",
+      "relevance_score": 26.74,
+      "key_finding": "Multi-phase CT protocol optimization for spleen radiomics with comprehensive ML model comparison"
+    },
+    {
+      "rank": 5,
+      "title": "Are Radiomic Spleen Features Useful for Assessing the Response to Infliximab in Patients With Crohn's Disease? A Multicenter Study",
+      "authors": "Tang Chao-Tao, Yin Fang, Yin Yitian, Liu Zide, Long Shunhua et al.",
+      "year": "2024",
+      "journal": "Clinical and translational gastroenterology",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/38407213/",
+      "relevance_score": 23.63,
+      "key_finding": "Multi-center validation demonstrating spleen radiomics utility for treatment response assessment"
+    }
+  ],
+  "similar_studies": [],
+  "agent_hints": {
+    "population_planner": "Focus on adult lymphoma patients with contrast-enhanced CT imaging. Include lymphoma subtypes (HL, DLBCL, MCL, FL) as per [R2]. Target cohort size 150-300 patients based on [R1, R2], with histopathological confirmation. Exclude patients with prior splenic interventions.",
+    "segmentation_agent": "Use semi-automated spleen segmentation with expert radiologist oversight. Employ U-Net architecture as in [R6], but require ICC >0.85 for reproducibility. Segment entire spleen parenchyma including focal lesions. Use portal venous phase CT images with ≤3mm slice thickness.",
+    "feature_extraction": "Extract IBSI-compliant features using PyRadiomics. Focus on texture features (GLCM, GLRLM) and shape descriptors as discriminative power shown in [R1, R2]. Include wavelet transforms. Apply ComBat harmonization for inter-scanner variability as per [R3]. Resample to 1×1×1 mm voxels.",
+    "modeling_agent": "Implement Random Forest classifier with 500 trees based on superior performance in [R1, R2]. Use LASSO for feature selection. Apply 10-fold cross-validation. Address class imbalance with SMOTE. Train on ≥100 patients as per literature evidence.",
+    "validation_agent": "Include external validation cohort from different institution. Report AUC-ROC, sensitivity, specificity, calibration curves, and decision curve analysis. Compare performance against conventional radiologist assessment. Use DeLong test for AUC comparison. Adhere to TRIPOD reporting guidelines.",
+    "reporter_agent": "Highlight 97% diagnostic accuracy benchmark from [R1], lymphoma subtype differentiation capability from [R2], and multi-center harmonization importance from [R3]. Discuss clinical translation pathway and regulatory considerations. Address limitations in generalizability and need for prospective validation."
+  }
+}

@@ -98,6 +98,11 @@ const AgenticHome = ({ onNavigate, onBack }) => {
       return;
     }
 
+    console.log('[HypothesisFlow][AgenticHome] Search triggered', {
+      hypothesisLength: hypothesis.length,
+      hypothesisPreview: hypothesis.slice(0, 120),
+    });
+
     try {
       // 1. Create the session in the database first
       const payload = { title: hypothesis.substring(0, 30) + '...' };
@@ -112,7 +117,12 @@ const AgenticHome = ({ onNavigate, onBack }) => {
       }
 
       const data = await response.json();
-      const newSessionId = data.chat_id;
+      const newSessionId = String(data.chat_id);
+
+      console.log('[HypothesisFlow][AgenticHome] Session created', {
+        sessionId: newSessionId,
+        sendInitialMessage: true,
+      });
 
       // 2. Navigate to playground passing both hypothesis AND the new sessionId
       navigate('/playground', {
@@ -122,15 +132,21 @@ const AgenticHome = ({ onNavigate, onBack }) => {
           sendInitialMessage: true,
         },
       });
+      console.log('[HypothesisFlow][AgenticHome] Navigated to /playground with state payload');
     } catch (err) {
       console.error('Failed to create session:', err);
       // Fallback: Navigate anyway with a timestamp-based ID if DB fails
+      const fallbackSessionId = String(Date.now());
+      console.warn('[HypothesisFlow][AgenticHome] Using fallback session', {
+        fallbackSessionId,
+      });
       navigate('/playground', {
         state: {
           hypothesis,
-          sessionId: Date.now(),
+          sessionId: fallbackSessionId,
         },
       });
+      console.log('[HypothesisFlow][AgenticHome] Navigated to /playground with fallback state payload');
     }
   };
 
