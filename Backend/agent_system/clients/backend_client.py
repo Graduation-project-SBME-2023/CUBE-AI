@@ -95,10 +95,13 @@ class BackendClient:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
-                    f"{BASE_URL}/plans/",
+                    f"{BASE_URL}/plans/with_steps",
                     params={"hypothesis_id": plan.hypothesis_id},
                     json=plan.model_dump(),
                 )
+                print(response.status_code)
+                print(response.text)
+                print(response.json())
                 response.raise_for_status()
                 return StudyPlan(**response.json())
             except httpx.HTTPError as e:
@@ -110,33 +113,33 @@ class BackendClient:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.patch(
-                    f"{BASE_URL}/plans/{plan.hypothesis_id}",
+                    f"{BASE_URL}/plans/{plan.id}/with_steps",
                     json=plan.model_dump(),
                 )
                 response.raise_for_status()
                 return StudyPlan(**response.json())
             except httpx.HTTPError as e:
-                logger.error(f"Failed to update plan for hypothesis {plan.hypothesis_id}: {e}")
+                logger.error(f"Failed to update plan with id {plan.id}: {e}")
                 return None
 
 
 if __name__ == '__main__':
     async def main():
+        import time
         from models.plans import StudyStep
         client = BackendClient()
         plan = await client.create_plan(
-            hypothesis_id="21d5b06c-958d-4d78-b799-5ee3e6848f57",
             plan=StudyPlan(
                 hypothesis_id='21d5b06c-958d-4d78-b799-5ee3e6848f57',
                 study_goal='Study Goal',
                 steps=[
                     StudyStep(
-                        name='Study Step 1',
+                        title='Study Step 1',
                         description='Study Step 1',
                         module='Study Step 1',
                     ),
                     StudyStep(
-                        name='Study Step 2',
+                        title='Study Step 2',
                         description='Study Step 2',
                         module='Study Step 2',
                     )
@@ -144,6 +147,13 @@ if __name__ == '__main__':
             )
         )
         print(plan)
+
+        time.sleep(20)
+
+        plan.state = 'confirmed'
+
+        updated_plan = await client.update_plan(plan=plan)
+        print(updated_plan)
 
     import asyncio
     asyncio.run(main())
