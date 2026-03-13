@@ -218,7 +218,7 @@ async def run_planner(session: Session, message: str) -> None:
         input_provider=lambda: manager.wait_for_user_message(),
         output_callback=lambda t, d, s: manager.send_ws_message(t, d, s),
         model_client=create_model_client_from_config(),
-        workspace_dir=workspace_folder
+        workspace_dir=workspace_folder,
         session=session,
         session_service=session_service,
         api_key=api_key
