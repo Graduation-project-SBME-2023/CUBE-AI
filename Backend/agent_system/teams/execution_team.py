@@ -4,6 +4,7 @@ import os
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import List, Optional
 
 def setup_logging():
     root_dir = Path(__file__).parent.parent
@@ -28,9 +29,6 @@ def setup_logging():
 
 # setup_logging()
 
-# Optional: Silence overly verbose libraries if needed (e.g., http requests)
-# logging.getLogger("httpx").setLevel(logging.WARNING)
-
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, ".."))
 sys.path.append(root_dir)
@@ -49,18 +47,27 @@ from agents.execution_agents.modeling_agent import ModelingAgent
 from agents.execution_agents.result_reporter_agent import ResultReporterAgent
 from agents.execution_agents.reporter_agent import ReporterAgent
 
+# Import task message models and context compiler
+from agents.planning_agents.models import TaskMessage, PlannerState
+from agents.planning_agents.context_compiler import format_task_prompt, build_enriched_pipeline_prompt
+
 
 class BasicPipelineBuilder(DiGraphBuilder):
+
+    def __init__(self, task_messages: Optional[List[TaskMessage]] = None):
+        super().__init__()
+        self.task_messages = task_messages or []
+
     @classmethod
-    async def create(cls, workspace_folder=None):
+    async def create(cls, workspace_folder=None, task_messages: Optional[List[TaskMessage]] = None, model_client=None):
         setup_logging()
 
-        population_agent = await PopulationPlannerAgent.create(workspace_folder=workspace_folder)
-        seg_agent = await SegmentationAgent.create(workspace_folder=workspace_folder)
-        feat_agent = await FeatureExtractionAgent.create(workspace_folder=workspace_folder)
-        model_agent = await ModelingAgent.create(workspace_folder=workspace_folder)
-        report_agent = await ResultReporterAgent.create(workspace_folder=workspace_folder)
-        latex_agent = await ReporterAgent.create(workspace_folder=workspace_folder)
+        population_agent = await PopulationPlannerAgent.create(model_client=model_client, workspace_folder=workspace_folder)
+        seg_agent = await SegmentationAgent.create(model_client=model_client, workspace_folder=workspace_folder)
+        feat_agent = await FeatureExtractionAgent.create(model_client=model_client, workspace_folder=workspace_folder)
+        model_agent = await ModelingAgent.create(model_client=model_client, workspace_folder=workspace_folder)
+        report_agent = await ResultReporterAgent.create(model_client=model_client, workspace_folder=workspace_folder)
+        latex_agent = await ReporterAgent.create(model_client=model_client, workspace_folder=workspace_folder)
 
         filtered_seg_agent = MessageFilterAgent(
             name="segmentation_agent",
@@ -104,7 +111,7 @@ class BasicPipelineBuilder(DiGraphBuilder):
             )
         )
 
-        builder = cls()
+        builder = cls(task_messages=task_messages)
 
         # Nodes
         builder.add_node(population_agent)
@@ -122,6 +129,18 @@ class BasicPipelineBuilder(DiGraphBuilder):
         builder.add_edge(filtered_report_agent, filtered_latex_agent)
 
         return builder
+
+    def get_pipeline_prompt(self, fallback_hypothesis: str = "") -> str:
+        """
+        Build the pipeline task prompt from stored task messages.
+        Falls back to the raw hypothesis string if no task messages are available.
+        """
+        if self.task_messages:
+            return build_enriched_pipeline_prompt(self.task_messages)
+        elif fallback_hypothesis:
+            return fallback_hypothesis
+        else:
+            return "Run the pipeline."
 
 async def main() -> None:
     # 1. Initialize the raw agents

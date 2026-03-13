@@ -30,7 +30,7 @@ function Header({
 
   return (
     <NavBar
-      className="justify-between border-b-4 border-black"
+      className="justify-between border-b border-[#1a2333]"
       isSticky={isSticky}
     >
       <div className="flex flex-1 justify-between">
@@ -48,18 +48,18 @@ function Header({
             {isReturnEnabled && (
               <Icon
                 name="chevron-left"
-                className="text-primary-active w-8"
+                className="text-[#5acce6] w-8"
               />
             )}
             <div className="ml-4">
-              {WhiteLabeling?.createLogoComponentFn?.(React, props) || <Svg name="logo-ohif" />}
+              {WhiteLabeling?.createLogoComponentFn?.(React, props) || <Svg name="logo-cube" />}
             </div>
           </div>
         </div>
         <div className="flex items-center">{children}</div>
     
         <div className="flex items-center">
-          <span className="text-common-light mr-3 text-lg">{t('INVESTIGATIONAL USE ONLY')}</span>
+          <span className="text-[#91b9cd] mr-3 text-lg">{t('INVESTIGATIONAL USE ONLY')}</span>
           <Dropdown
             id="options"
             showDropdownIcon={false}
@@ -71,7 +71,7 @@ function Header({
               variant="text"
               color="inherit"
               size="initial"
-              className="text-primary-active"
+              className="text-[#5acce6]"
             >
               <Icon name="settings" />
             </IconButton>
@@ -80,7 +80,7 @@ function Header({
               variant="text"
               color="inherit"
               size="initial"
-              className="text-primary-active"
+              className="text-[#5acce6]"
             >
               <Icon name="chevron-down" />
             </IconButton>
