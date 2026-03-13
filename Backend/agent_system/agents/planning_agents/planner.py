@@ -4,14 +4,11 @@ import json
 import logging
 from datetime import datetime
 import re
-import uuid
 import asyncio
 import aiofiles
 from pathlib import Path
-from typing import Callable, Awaitable, Any, List
+from typing import Callable, Awaitable
 
-# Removed Team imports
-from autogen_agentchat.base import TaskResult
 from autogen_agentchat.messages import TextMessage
 
 from services.session_service import SessionService
@@ -83,8 +80,8 @@ class ClinicalPlanner:
     async def initialize(self):
         await self._load_state()
 
-    async def _send(self, type_: str, data: Any):
-        await self.output_handler(type_, data)
+    async def _send(self, type_: str, data: Any, session_id: str = None) -> None:
+        await self.output_handler(type_, data, self.session.session_id)
 
     def _clean_json(self, text: str) -> str:
         """Extract JSON from LLM response, handling markdown code fences anywhere."""
@@ -222,7 +219,7 @@ class ClinicalPlanner:
             # Store full instructions in task_messages for later use
             self._pipeline_instructions = {
                 s.get("id", ""): s.get("instructions", "")
-                for s in self.state.plan.steps
+                for s in data['steps']
             }
 
         # Rationale is included in the plan payload for the canvas, not sent to chat

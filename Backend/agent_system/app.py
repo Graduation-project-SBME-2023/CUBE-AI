@@ -15,7 +15,6 @@ from autogen_agentchat.messages import (
 from autogen_agentchat.base import TaskResult
 import logging
 import aiofiles
-from pathlib import Path
 import json
 import os
 import sys
@@ -27,6 +26,7 @@ sys.path.append(root_dir)
 from socket_store import manager
 from agents.planning_agents.planner import ClinicalPlanner
 from models.session import Session
+from models.plans import PlannerState
 from view_emitter import (
     emit_population_output,
     emit_segmentation_output,
@@ -70,6 +70,7 @@ app.add_middleware(
 session_service = SessionService(ws_manager=manager)
 
 api_key = os.getenv("OLLAMA_API_KEY", "cf8ed2bae88d4d659602bc340b4b2bcf.mEvRr0YQ54A_OKfTT2Z92rge")
+
 
 # ── Agent-to-view mapping for tool result emission ────────────────────────────
 
@@ -210,10 +211,11 @@ async def _emit_tool_result_to_view(
 async def run_planner(session: Session, message: str) -> None:
     planner = ClinicalPlanner(
         input_provider=lambda: manager.wait_for_user_message(),
-        output_callback=lambda t, d: manager.send_ws_message(t, d),
+        output_callback=lambda t, d, s: manager.send_ws_message(t, d, s),
         model_client=create_model_client_from_config(),
         session=session,
         session_service=session_service,
+        api_key=api_key
     )
     await planner.run(start_query=message)
     logging.getLogger('HypothesisFlow').info(
@@ -288,54 +290,53 @@ async def run_pipeline(session: Session) -> None:
                 raise asyncio.CancelledError()
             await session.pause_event.wait()
 
-        if session.cancel_event.is_set():
-            raise asyncio.CancelledError()
+            if isinstance(event, TaskResult):
+                pipeline_logger.info("━" * 60)
+                pipeline_logger.info("✅ TASK COMPLETE")
+                for msg in event.messages:
+                    pipeline_logger.info(f"  [{msg.source}] {msg.content}")
+                pipeline_logger.info("━" * 60)
+                await manager.send_ws_message("run_finished", "run_finished", session_id=session.session_id)
 
-        if isinstance(event, TaskResult):
-            pipeline_logger.info("━" * 60)
-            pipeline_logger.info("✅ TASK COMPLETE")
-            for msg in event.messages:
-                pipeline_logger.info(f"  [{msg.source}] {msg.content}")
-            pipeline_logger.info("━" * 60)
-            await manager.send_ws_message("run_finished", "run_finished", session_id=session.session_id)
+            elif isinstance(event, ToolCallRequestEvent):
+                pipeline_logger.info(f"🔧 [{event.source}] TOOL CALL REQUEST")
+                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
+                for call in event.content:
+                    pipeline_logger.info(f"   Tool: {call.name}  Args: {call.arguments}")
 
-        elif isinstance(event, ToolCallRequestEvent):
-            pipeline_logger.info(f"🔧 [{event.source}] TOOL CALL REQUEST")
-            await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
-            for call in event.content:
-                pipeline_logger.info(f"   Tool: {call.name}  Args: {call.arguments}")
+            elif isinstance(event, ToolCallExecutionEvent):
+                pipeline_logger.info(f"🔧 [{event.source}] TOOL CALL RESULT")
+                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
+                for result in event.content:
+                    pipeline_logger.info(f"   Tool: {result.name}  Result: {result.content}")
+                    await _emit_tool_result_to_view(
+                        event.source, result.name, result.content,
+                        session.session_id, workspace_folder, pipeline_logger
+                    )
 
-        elif isinstance(event, ToolCallExecutionEvent):
-            pipeline_logger.info(f"🔧 [{event.source}] TOOL CALL RESULT")
-            await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
-            for result in event.content:
-                pipeline_logger.info(f"   Tool: {result.name}  Result: {result.content}")
-                await _emit_tool_result_to_view(
-                    event.source, result.name, result.content,
-                    session.session_id, workspace_folder, pipeline_logger
-                )
+            elif isinstance(event, MemoryQueryEvent):
+                pipeline_logger.info(f"🧠 [{event.source}] MEMORY QUERY: {event.content}")
+                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
 
-        elif isinstance(event, MemoryQueryEvent):
-            pipeline_logger.info(f"🧠 [{event.source}] MEMORY QUERY: {event.content}")
-            await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
+            elif isinstance(event, UserInputRequestedEvent):
+                pipeline_logger.info(f"⏳ [{event.source}] WAITING FOR USER INPUT")
 
-        elif isinstance(event, UserInputRequestedEvent):
-            pipeline_logger.info(f"⏳ [{event.source}] WAITING FOR USER INPUT")
+            elif isinstance(event, ThoughtEvent):
+                pipeline_logger.info(f"💭 [{event.source}] THOUGHT: {event.content}")
+                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
 
-        elif isinstance(event, ThoughtEvent):
-            pipeline_logger.info(f"💭 [{event.source}] THOUGHT: {event.content}")
-            await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
+            elif isinstance(event, BaseChatMessage):
+                logger.info("─" * 60)
+                pipeline_logger.info(f"💬 [{event.source}] ({type(event).__name__}): {event.content}")
+                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
 
-        elif isinstance(event, BaseChatMessage):
-            logger.info("─" * 60)
-            pipeline_logger.info(f"💬 [{event.source}] ({type(event).__name__}): {event.content}")
-            await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
-
-        elif isinstance(event, BaseAgentEvent):
-            pipeline_logger.info(f"⚙️  [{event.source}] ({type(event).__name__})")
-            if hasattr(event, "content") and event.content:
-                pipeline_logger.info(f"   {event.content}")
-            await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
+            elif isinstance(event, BaseAgentEvent):
+                pipeline_logger.info(f"⚙️  [{event.source}] ({type(event).__name__})")
+                if hasattr(event, "content") and event.content:
+                    pipeline_logger.info(f"   {event.content}")
+                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
+    except Exception as e:
+        logger.error(e)
 
 
 # ----------------------------------------------------------------------
