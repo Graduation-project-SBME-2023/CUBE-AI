@@ -191,7 +191,7 @@ class SessionService:
                 study_goal=session.hypothesis.title,
                 steps=[
                     StudyStep(
-                        name=s.get("title", ""),
+                        title=s.get("title", ""),
                         description=s.get("description", ""),
                         module=s.get("id", ""),
                     )
@@ -218,7 +218,7 @@ class SessionService:
             ui_steps = [
                 {
                     "id": s.module,
-                    "name": s.name,
+                    "name": s.title,
                     "description": s.description,
                     "module": s.module,
                 }

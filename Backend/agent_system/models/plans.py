@@ -17,7 +17,7 @@ class ClinicalHypothesis(BaseModel):
 
 
 class StudyStep(BaseModel):
-    name: str
+    title: str
     description: str
     module: Optional[str] = None
     logs: List[str] = Field(default_factory=list)
@@ -25,6 +25,7 @@ class StudyStep(BaseModel):
 
 
 class StudyPlan(BaseModel):
+    id: str = ""
     hypothesis_id: str = ""
     study_goal: str = ""
     steps: List[StudyStep] = Field(default_factory=list)
