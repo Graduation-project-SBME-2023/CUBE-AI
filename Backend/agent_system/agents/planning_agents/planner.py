@@ -196,7 +196,7 @@ class ClinicalPlanner:
             # --- Finalize ---
             self.state.hypothesis.state = "confirmed"
             self.state.plan.state = "confirmed"
+            await self.session_service.confirm_plan(self.session)
             await self._save_state()
 
-            await self._send("msg", "Study Plan Confirmed.")
             await self._send("modules_matched", True)
