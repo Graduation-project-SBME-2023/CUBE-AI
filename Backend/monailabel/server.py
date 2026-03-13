@@ -55,12 +55,12 @@ async def lifespan(app):
     print("[INFO] 🧹 Running database seeders...")
     # all_seeders()  # sync seeders
 
-    print("[INFO] 🚀 Running initial Orthanc sync...")
-    async with AsyncSessionLocal() as db:
-        try:
-            await sync_all_from_orthanc(db)
-        except Exception as e:
-            print(f"[ERROR] Initial Orthanc sync failed: {e}")
+    # print("[INFO] 🚀 Running initial Orthanc sync...")
+    # async with AsyncSessionLocal() as db:
+    #     try:
+    #         await sync_all_from_orthanc(db)
+    #     except Exception as e:
+    #         print(f"[ERROR] Initial Orthanc sync failed: {e}")
 
     if original_lifespan:
         async with original_lifespan(app):
