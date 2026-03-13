@@ -21,11 +21,11 @@ function Header({ appLogo = OHIFLogo(), children, t }) {
         <div>{children}</div>
       </div>
       <div className="flex items-center">
-        <span className="text-common-light mr-3 text-lg">{t('FOR INVESTIGATIONAL USE ONLY')}</span>
+        <span className="text-[#91b9cd] mr-3 text-lg">{t('FOR INVESTIGATIONAL USE ONLY')}</span>
         <IconButton
           variant="text"
           color="inherit"
-          className="text-primary-active"
+          className="text-[#5acce6]"
           onClick={showSettingsDropdown}
         >
           <React.Fragment>

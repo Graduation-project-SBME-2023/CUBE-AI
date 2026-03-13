@@ -16,8 +16,18 @@
     "output_postfix": "trans",
     "separate_folder": true,
     "input_dict": {
-        "image": "/root/.cache/monailabel/dicom/277a51f05d17457dc20b8e11c9d93def/1.2.840.113704.7.32.0.5.1.4.100045.30000020092908373860900000531.nii.gz",
+        "image": "/root/.cache/monailabel/dicom/277a51f05d17457dc20b8e11c9d93def/1.2.826.0.1.3680043.8.498.15136386566608168882487015520907740870.nii.gz",
         "label_prompt": [
+            133
+        ],
+        "points": [
+            [
+                136.57284545898438,
+                295.33172607421875,
+                19
+            ]
+        ],
+        "point_labels": [
             1
         ]
     },

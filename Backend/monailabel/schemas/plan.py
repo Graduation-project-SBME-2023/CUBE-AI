@@ -1,7 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from uuid import UUID
 from typing import Optional, List
-from .steps import PlanStepOut
+from .steps import PlanStepOut,PlanStepCreate, PlanStepUpdate
 
 class PlanBase(BaseModel):
     state: Optional[str] = None
@@ -33,8 +33,7 @@ class PlanOut(BaseModel):
     study_goal: str
     state: Optional[str] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # -----------------------------------------------------
@@ -47,5 +46,12 @@ class PlanWithStepsOut(BaseModel):
     state: Optional[str] = None
     steps: List[PlanStepOut] = []
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PlanCreateWithSteps(PlanCreate):
+    steps: List[PlanStepCreate] = []
+
+
+class PlanUpdateWithSteps(PlanUpdate):
+    steps: Optional[List[PlanStepUpdate]] = None

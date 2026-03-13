@@ -36,26 +36,37 @@ const AgentNode = memo((props: AgentNodeProps) => {
   const isExecuting = !isPlanning;
 
   // Styles based on status
-  let borderColor = 'border-[#3c5d80]';
-  let bgColor = 'bg-[#151a1f]';
-  let textColor = 'text-white';
+  let borderColor = 'border-[#2a3a4e]';
+  let bgColor = 'bg-[#111820]';
+  let textColor = 'text-gray-200';
   let Icon = Circle;
   let iconColor = 'text-[#566a84]';
-  let shadow = 'shadow-none';
+  let shadow = 'shadow-md';
+  let statusLabel = 'Pending';
+  let statusBg = 'bg-[#1a2332]';
+  let statusText = 'text-[#566a84]';
+  let accentBorder = '';
 
   if (status === 'active') {
     borderColor = 'border-[#5acce6]';
-    bgColor = 'bg-[#090c29]';
+    bgColor = 'bg-[#0a1628]';
     textColor = 'text-[#5acce6]';
     Icon = Activity;
     iconColor = 'text-[#5acce6]';
-    shadow = 'shadow-[0_0_15px_rgba(90,204,230,0.3)]';
+    shadow = 'shadow-[0_0_20px_rgba(90,204,230,0.25)]';
+    statusLabel = 'Running';
+    statusBg = 'bg-[#0d2847]';
+    statusText = 'text-[#5acce6]';
+    accentBorder = 'ring-1 ring-[#5acce6]/30';
   } else if (status === 'completed') {
-    borderColor = 'border-[#5acce6]';
-    bgColor = 'bg-[#151a1f]';
-    textColor = 'text-[#5acce6]';
+    borderColor = 'border-[#2d6a4f]';
+    bgColor = 'bg-[#0d1a14]';
+    textColor = 'text-[#6fe5b8]';
     Icon = CheckCircle2;
-    iconColor = 'text-[#5acce6]';
+    iconColor = 'text-[#6fe5b8]';
+    statusLabel = 'Done';
+    statusBg = 'bg-[#0d3320]';
+    statusText = 'text-[#6fe5b8]';
   }
 
   const handleEditClick = (e: React.MouseEvent) => {
@@ -69,7 +80,7 @@ const AgentNode = memo((props: AgentNodeProps) => {
   };
 
   const handleNodeClick = () => {
-    if (isExecuting && (status === 'active' || status === 'completed')) {
+    if (status === 'active' || status === 'completed') {
       onToggleExpand?.(id);
     }
   };
@@ -87,7 +98,7 @@ const AgentNode = memo((props: AgentNodeProps) => {
           className="absolute bottom-full left-1/2 z-50 mb-2 -translate-x-1/2 animate-in fade-in duration-150"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="w-48 rounded border border-[#3c5d80] bg-[#0d1117] px-3 py-2 text-[11px] leading-relaxed text-[#91b9cd] shadow-lg">
+          <div className="w-64 rounded-lg border border-[#3c5d80] bg-[#0d1117] px-3 py-2 text-[11px] leading-relaxed text-[#91b9cd] shadow-xl">
             {description}
           </div>
           {/* Arrow */}
@@ -97,75 +108,82 @@ const AgentNode = memo((props: AgentNodeProps) => {
 
       <div
         className={`
-          relative flex w-[220px] flex-col justify-center overflow-hidden rounded 
+          relative flex w-[280px] flex-col overflow-hidden rounded-lg
           border transition-all duration-300
-          ${borderColor} ${bgColor} ${shadow}
-          ${isExecuting && (status === 'active' || status === 'completed') ? 'cursor-pointer hover:bg-[#1f2630]' : ''}
+          ${borderColor} ${bgColor} ${shadow} ${accentBorder}
+          ${(status === 'active' || status === 'completed') ? 'cursor-pointer hover:brightness-110' : ''}
         `}
       >
-        {/* Header row — connection points anchor to this */}
-        <div className="relative flex h-[50px] items-center justify-between px-3" ref={headerRef}>
-          <div className="flex items-center gap-3">
+        {/* Status badge bar */}
+        <div className={`flex items-center justify-between px-3 py-1 ${statusBg}`}>
+          <div className="flex items-center gap-1.5">
             <Icon
               className={`${iconColor} ${status === 'active' ? 'animate-spin' : ''}`}
-              size={16}
+              size={10}
             />
-            <span className={`text-sm font-medium ${textColor} select-none text-center`}>{displayTitle}</span>
+            <span className={`text-[9px] font-bold uppercase tracking-widest ${statusText}`}>{statusLabel}</span>
           </div>
-
-          {/* Edit/Delete Actions (Planning Mode) */}
-          {isPlanning && (
-            <div
-              className={`flex gap-1 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`}
-            >
-              <button
-                onClick={handleEditClick}
-                className="rounded p-1 text-[#91b9cd] hover:bg-[#000]"
-                title="Edit Description"
+          <div className="flex items-center gap-1">
+            {/* Edit/Delete Actions (Planning Mode) */}
+            {isPlanning && (
+              <div
+                className={`flex gap-0.5 transition-opacity ${isHovered ? 'opacity-100' : 'opacity-0'}`}
               >
-                <Edit3 size={14} />
-              </button>
-              <button
-                onClick={handleDeleteClick}
-                className="rounded p-1 text-red-400 hover:bg-[#000]"
-                title="Delete Step"
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-          )}
-
-          {/* Expand/Collapse Indicator (Execution Mode) */}
-          {isExecuting && (status === 'active' || status === 'completed') && (
-            <div className="text-[#566a84]">
-              {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </div>
-          )}
+                <button
+                  onClick={handleEditClick}
+                  className="rounded p-0.5 text-[#91b9cd] hover:bg-[#000]/50"
+                  title="Edit Description"
+                >
+                  <Edit3 size={11} />
+                </button>
+                <button
+                  onClick={handleDeleteClick}
+                  className="rounded p-0.5 text-red-400 hover:bg-[#000]/50"
+                  title="Delete Step"
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+            )}
+            {/* Expand/Collapse Indicator */}
+            {(status === 'active' || status === 'completed') && (
+              <div className="text-[#566a84]">
+                {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Description — planning mode only */}
-        {isPlanning && description && (
-          <div className="border-t border-[#3c5d80]/40 px-3 py-1.5">
-            <p className="select-none text-[11px] leading-relaxed text-[#566a84]">
+        {/* Title — wraps naturally to fit content */}
+        <div className="px-3 pt-2 pb-1" ref={headerRef}>
+          <span className={`text-[13px] font-semibold leading-snug ${textColor} select-none block`}>
+            {displayTitle}
+          </span>
+        </div>
+
+        {/* Description — always visible, auto-expands */}
+        {description && (
+          <div className="border-t border-[#1f2d40]/60 px-3 py-2">
+            <p className="select-none text-[11px] leading-relaxed text-[#7a8fa3]">
               {description}
             </p>
           </div>
         )}
 
-        {/* Logs / Details Section */}
-        {isExpanded && isExecuting && (
-          <div className="animate-in slide-in-from-top-2 space-y-1 border-t border-[#3c5d80] bg-[#000000] p-3 font-mono text-xs duration-200">
-            <div className="mb-2 flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-[#91b9cd]">
+        {/* Logs / Details Section — show whenever expanded and node is active/completed */}
+        {isExpanded && (status === 'active' || status === 'completed') && (
+          <div className="animate-in slide-in-from-top-2 space-y-1.5 border-t border-[#1f2d40] bg-[#080c10] p-3 font-mono text-xs duration-200">
+            <div className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase tracking-widest text-[#5a8a9e]">
               <FileText size={10} /> System Trace
             </div>
-            {logs.length === 0 && <span className="italic text-gray-600">Initializing...</span>}
+            {logs.length === 0 && <span className="italic text-[#3a4a5a]">Awaiting events…</span>}
             {logs.slice(-5).map((log, i) => (
               <div
                 key={i}
-                className="flex gap-2 text-gray-400"
+                className="flex gap-2 rounded bg-[#0d1117] px-2 py-1 text-gray-400"
               >
-                <span className="select-none text-[#5acce6] opacity-50">{'>'}</span>
-                <span>
+                <span className="select-none text-[#5acce6] opacity-40">{'▸'}</span>
+                <span className="flex-1 break-words">
                   <AgentLogRenderer log={log} />
                 </span>
               </div>
@@ -174,9 +192,9 @@ const AgentNode = memo((props: AgentNodeProps) => {
         )}
       </div>
 
-      {/* Connection Points — anchored to vertical center of the 50px header */}
-      <div className="absolute left-0 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-black bg-[#566a84]" style={{ top: 25 }} />
-      <div className="absolute right-0 h-2 w-2 translate-x-1/2 -translate-y-1/2 rounded-full border border-black bg-[#566a84]" style={{ top: 25 }} />
+      {/* Connection points anchored at the status-badge row center for clean edge alignment */}
+      <div className="absolute left-0 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#0d1117] bg-[#566a84]" style={{ top: 14 }} />
+      <div className="absolute right-0 h-2.5 w-2.5 translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#0d1117] bg-[#566a84]" style={{ top: 14 }} />
     </div>
   );
 });
