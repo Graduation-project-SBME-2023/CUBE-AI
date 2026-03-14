@@ -9,6 +9,7 @@ class PlanStepBase(BaseModel):
     module: Optional[str] = None
     status: Optional[str] = "not_confirmed"
     logs: Optional[list] = []
+    instructions: Optional[dict] = None
 
 
 class PlanStepCreate(PlanStepBase):
@@ -22,6 +23,7 @@ class PlanStepUpdate(BaseModel):
     status: Optional[str] = None
     order: Optional[int] = None  # optional for reordering
     logs: Optional[list] = None
+    instructions: Optional[dict] = None
 
 
 class PlanStepOut(PlanStepBase):
