@@ -11,7 +11,7 @@ import requests
 from pathlib import Path
 
 
-
+BACKEND_SYNC_URL = "http://localhost:8000/models/sync"
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +117,19 @@ class GenericSegmentation(BasicTrainTask):
         logger.info(f"Preprocessed data saved to: {preprocessed_data_path}")
 
         return preprocessed_data_path
+    
+    
+      
+
+
+    def notify_backend_sync(self):
+        try:
+            response = requests.post(BACKEND_SYNC_URL, timeout=15)
+            response.raise_for_status()
+            logger.info(f"Backend sync triggered: {response.json()}")
+        except Exception as e:
+            # Non-fatal — log and continue, don't break MONAI
+            logger.warning(f"Backend sync notification failed: {e}")
 
     def train(self, rank: int, world_size: int, request, datalist):
         # Train the model using the nnUNet CLI.
@@ -167,6 +180,7 @@ class GenericSegmentation(BasicTrainTask):
         try:
             message = instance.initialize_inference_task(self.model_name)
             logger.info(f"Inference task initialized: {self.model_name}")
+            self.notify_backend_sync()
         except Exception as e:
             logger.error(f"Failed to initialize inference task: {e}")
             raise RuntimeError(f"Failed to initialize inference task for model {self.model_name}")
