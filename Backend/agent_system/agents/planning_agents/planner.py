@@ -148,37 +148,42 @@ class ClinicalPlanner:
     # RESPONSE PROCESSORS
     # ══════════════════════════════════════════════════════════════════════════
 
-    async def _process_hypothesis_response(self, response_content: str):
-        """Parse hypothesis JSON from the HypothesisArchitect and update state/UI."""
-        logger.info(f"[HypothesisArchitect]: {response_content[:100]}...")
-        
+    async def _parse_llm_json(self, response_content: str) -> dict | None:
         clean_content = self._clean_json(response_content)
-        
-        # Try parsing — if invalid escapes, fix and retry
-        data = None
+
         for attempt, content in enumerate(
             [clean_content, self._fix_invalid_json_escapes(clean_content)]
         ):
             try:
-                data = json.loads(content)
-                break
-            except json.JSONDecodeError:
+                return json.loads(content)
+            except json.JSONDecodeError as e:
                 if attempt == 0:
-                    continue
+                    logger.warning(f"[Planner]: JSON attempt 1 failed ({e}), retrying with escape fix...")
+                else:
+                    logger.error(f"[Planner]: JSON parse error after escape fix: {e}")
+                    logger.error(f"[Planner]: Clean content (first 300 chars): {clean_content[:300]}")
 
-        if data is None:
-            display_text = response_content.replace("APPROVE", "").strip()
-            if display_text:
-                await self._send("msg", display_text)
-            return
+            return None
 
-        if "hypothesis" in data and isinstance(data["hypothesis"], dict):
-            self.state.hypothesis = await self.session_service.handle_hypothesis_update(
-                self.session, data["hypothesis"]
-            )
+    async def _process_hypothesis_response(self, response_content: str):
+        """Parse hypothesis JSON from the HypothesisArchitect and update state/UI."""
+        logger.info(f"[HypothesisArchitect]: {response_content[:100]}...")
+        
+        data = await self._parse_llm_json(response_content)
 
-        if "message" in data and data["message"]:
-            await self._send("msg", data["message"])
+        match data:
+            case None:
+                if display_text := response_content.replace("APPROVE", "").strip():
+                    await self._send("msg", display_text)
+                    return
+            case {"hypothesis": dict() as hypothesis, **rest}:
+                self.state.hypothesis = await self.session_service.handle_hypothesis_update(
+                    self.session, hypothesis
+                )
+                if message := rest.get("message"):
+                    await self._send("msg", message)
+            case {"message": str() as message}:
+                await self._send("msg", message)
 
         await self._save_state()
 
@@ -186,46 +191,26 @@ class ClinicalPlanner:
         """Parse pipeline plan JSON from the PipelineArchitect and update state/UI."""
         logger.info(f"[PipelineArchitect]: {response_content[:100]}...")
 
-        clean_content = self._clean_json(response_content)
+        data = await self._parse_llm_json(response_content)
 
-        # Try parsing — if invalid escapes (LaTeX, paths), fix and retry
-        data = None
-        for attempt, content in enumerate(
-            [clean_content, self._fix_invalid_json_escapes(clean_content)]
-        ):
-            try:
-                data = json.loads(content)
-                break
-            except json.JSONDecodeError as e:
-                if attempt == 0:
-                    logger.warning(f"Pipeline JSON attempt 1 failed ({e}), retrying with escape fix...")
-                    continue
-                logger.error(f"Pipeline JSON parse error after escape fix: {e}")
-                logger.error(f"Clean content (first 300 chars): {clean_content[:300]}")
-                print(f"[DEBUG] Pipeline JSON parse error: {e}")
-                print(f"[DEBUG] Clean content preview: {clean_content[:200]}...")
-
-        if data is None:
-            display_text = response_content.replace("APPROVE", "").strip()
-            if display_text:
-                await self._send("msg", display_text)
-            return
-
-        if "steps" in data and isinstance(data["steps"], list):
-            self.state.plan = await self.session_service.handle_plan_update(
-                self.session, data["steps"]
-            )
-
-            # Store full instructions in task_messages for later use
-            self._pipeline_instructions = {
-                s.get("id", ""): s.get("instructions", "")
-                for s in data['steps']
-            }
-
-        # Rationale is included in the plan payload for the canvas, not sent to chat
-
-        if "message" in data and data["message"]:
-            await self._send("msg", data["message"])
+        match data:
+            case None:
+                if display_text := response_content.replace("APPROVE", "").strip():
+                    await self._send("msg", display_text)
+                    return
+            case {"steps": list() as steps, **rest}:
+                logger.info(f"[PipelineArchitect] - steps: {steps}")
+                self.state.plan = await self.session_service.handle_plan_update(
+                    self.session, steps
+                )
+                self._pipeline_instructions = {
+                    s.get("id", ""): s.get("instructions", "")
+                    for s in steps
+                }
+                if message := rest.get("message"):
+                    await self._send("msg", message)
+            case {"message": str() as message}:
+                await self._send("msg", message)
 
         await self._save_state()
 

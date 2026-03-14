@@ -1,5 +1,6 @@
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 
+
 class OllamaClient(OllamaChatCompletionClient):
     def __init__(self,
                  model="deepseek-v3.1:671b-cloud",
