@@ -2,7 +2,8 @@ from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
-
+from typing import Dict, Any
+from typing import Union
 
 class ModelBase(BaseModel):
     name: str
@@ -11,9 +12,7 @@ class ModelBase(BaseModel):
 
     type: Optional[str] = None
     dimension: Optional[int] = None
-    labels: Optional[dict] = None
-
-
+    labels: Optional[Union[dict[str, int], list[str]]] = None
 class ModelCreate(ModelBase):
     pass
 
@@ -25,8 +24,7 @@ class ModelUpdate(BaseModel):
 
     type: Optional[str] = None
     dimension: Optional[int] = None
-    labels: Optional[dict] = None
-
+    labels: Optional[Union[dict[str, int], list[str]]] = None
 
 class Model(ModelBase):
     model_id: UUID

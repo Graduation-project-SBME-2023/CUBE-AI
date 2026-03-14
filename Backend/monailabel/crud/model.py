@@ -1,3 +1,4 @@
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from models.model import Model
@@ -44,3 +45,49 @@ async def delete_model(db: AsyncSession, model_id: UUID):
         await db.commit()
     return {"detail": "Model deleted"}
 
+
+
+# async def upsert_model(db: AsyncSession, model_data: dict):
+#     """
+#     Insert or update a model by model_name.
+#     Used by the sync endpoint.
+#     """
+#     stmt = insert(Model).values(**model_data)
+#     stmt = stmt.on_conflict_do_update(
+#         index_elements=["name"],   # unique column
+#         set_={
+#             "type": stmt.excluded.type,
+#             "labels": stmt.excluded.labels,
+#             "dimension": stmt.excluded.dimension,
+#             "description": stmt.excluded.description,
+#             "config": stmt.excluded.config,
+#         }
+#     )
+#     await db.execute(stmt)
+#     await db.commit()
+
+async def upsert_model(db: AsyncSession, model_data: dict):
+    result = await db.execute(
+        select(Model).where(Model.name == model_data["name"])
+    )
+    existing = result.scalar_one_or_none()
+
+    if not existing:
+        # Insert new
+        db.add(Model(**model_data))
+        await db.commit()
+        return "inserted"
+
+    # Check if anything actually changed
+    changed = any(
+        getattr(existing, key) != model_data.get(key)
+        for key in ["type", "labels", "dimension", "description", "config"]
+    )
+
+    if changed:
+        for key, value in model_data.items():
+            setattr(existing, key, value)
+        await db.commit()
+        return "updated"
+
+    return "unchanged"
