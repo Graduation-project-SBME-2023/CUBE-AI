@@ -31,6 +31,7 @@ import link from './../../assets/icons/link.svg';
 import listBullets from './../../assets/icons/list-bullets.svg';
 import lock from './../../assets/icons/lock.svg';
 import logoOhifSmall from './../../assets/icons/logo-ohif-small.svg';
+import logoCubeSmall from './../../assets/icons/logo-cube-small.svg';
 import magnifier from './../../assets/icons/magnifier.svg';
 import notificationwarningDiamond from './../../assets/icons/notificationwarning-diamond.svg';
 import pencil from './../../assets/icons/pencil.svg';
@@ -79,6 +80,7 @@ import uiArrowUp from './../../assets/icons/ui-arrow-up.svg';
 import uiArrowLeft from './../../assets/icons/ui-arrow-left.svg';
 import uiArrowRight from './../../assets/icons/ui-arrow-right.svg';
 import loadingOHIFMark from './../../assets/icons/loading-ohif-mark.svg';
+import loadingCubeMark from './../../assets/icons/loading-cube-mark.svg';
 import notificationsInfo from './../../assets/icons/notifications-info.svg';
 import notificationsWarning from './../../assets/icons/notifications-warning.svg';
 import notificationsError from './../../assets/icons/notifications-error.svg';
@@ -184,6 +186,7 @@ const ICONS = {
   'list-bullets': listBullets,
   lock: lock,
   'logo-ohif-small': logoOhifSmall,
+  'logo-cube-small': logoCubeSmall,
   magnifier: magnifier,
   exclamation: exclamation,
   'notificationwarning-diamond': notificationwarningDiamond,
@@ -216,6 +219,7 @@ const ICONS = {
   'checkbox-checked': checkboxChecked,
   'checkbox-unchecked': checkboxUnchecked,
   'loading-ohif-mark': loadingOHIFMark,
+  'loading-cube-mark': loadingCubeMark,
   'notifications-info': notificationsInfo,
   'notifications-error': notificationsError,
   'notifications-success': notificationsSuccess,

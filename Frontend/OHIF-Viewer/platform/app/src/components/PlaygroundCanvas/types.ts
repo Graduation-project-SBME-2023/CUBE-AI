@@ -3,6 +3,15 @@ import React from 'react';
 export interface StartNodeData {
   title: string;
   description: string;
+  // PICO hypothesis fields
+  population?: string;
+  intervention?: string;
+  comparison?: string;
+  outcome?: string;
+  hypothesis?: string;
+  question?: string;
+  clinical_context?: string;
+  state?: string;
 }
 
 export interface AgentNodeData {
