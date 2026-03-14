@@ -1,27 +1,36 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
+
 class ModelBase(BaseModel):
-    
-    model_name: str = Field(alias='model_name')
+    name: str
     description: Optional[str] = None
-    configuration: Optional[dict] = None
-    types: list[str] = Field(..., alias="types")
-    
+    config: Optional[dict] = None
+
+    type: Optional[str] = None
+    dimension: Optional[int] = None
+    labels: Optional[dict] = None
+
 
 class ModelCreate(ModelBase):
     pass
 
+
 class ModelUpdate(BaseModel):
-    model_name: Optional[str] = None
+    name: Optional[str] = None
     description: Optional[str] = None
-    configuration: Optional[dict] = None
-    types: Optional[list[str]] = None
+    config: Optional[dict] = None
+
+    type: Optional[str] = None
+    dimension: Optional[int] = None
+    labels: Optional[dict] = None
+
 
 class Model(ModelBase):
     model_id: UUID
-    created_at: datetime | None = None
+    created_at: Optional[datetime] = None
+
     class Config:
         orm_mode = True

@@ -42,5 +42,5 @@ async def delete_model(db: AsyncSession, model_id: UUID):
     if db_model:
         await db.delete(db_model)
         await db.commit()
-    return False
+    return {"detail": "Model deleted"}
 
