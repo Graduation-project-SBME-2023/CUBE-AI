@@ -27,11 +27,24 @@ class TaskManager:
 
     async def _run_planning(self, session: Session, starting_message: str, planner) -> None:
         try:
+            logger.info(
+                '[HypothesisFlow][TaskManager] _run_planning started | session_id=%s',
+                session.session_id,
+            )
             await planner(session, starting_message)
             session.state = SessionState.READY
+            logger.info(
+                '[HypothesisFlow][TaskManager] _run_planning finished successfully | session_id=%s',
+                session.session_id,
+            )
         except asyncio.CancelledError:
             if not session.interrupted:
                 session.state = SessionState.CANCELLED
+            logger.info(
+                '[HypothesisFlow][TaskManager] _run_planning cancelled | session_id=%s | interrupted=%s',
+                session.session_id,
+                session.interrupted,
+            )
         except Exception as e:
             session.last_error = str(e)
             logger.error(f"Planning failed [{session.session_id}]: {e}")

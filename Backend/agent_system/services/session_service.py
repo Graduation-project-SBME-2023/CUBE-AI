@@ -42,13 +42,13 @@ class SessionService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _ws_send(self, event: str, data) -> None:
+    async def _ws_send(self, event: str, data, session_id) -> None:
         """
         Best-effort WebSocket broadcast. Logs on failure, never raises.
         Use this everywhere instead of calling self.ws directly.
         """
         try:
-            await self.ws.send_ws_message(event, data)
+            await self.ws.send_ws_message(event, data, session_id=session_id)
         except Exception as e:
             logger.warning(f"WS broadcast failed [event={event}]: {e}")
 
@@ -104,7 +104,7 @@ class SessionService:
 
         results = await asyncio.gather(
             BackendClient.update_session(session.session_id, {"state": state.name}),
-            self._ws_send("state_update", {"state": state.name}),
+            self._ws_send("state_update", {"state": state.name}, session_id=session.session_id),
             return_exceptions=True,
         )
 
@@ -151,7 +151,7 @@ class SessionService:
 
             session.hypothesis = result
             logger.debug(f"[{session.session_id}] Hypothesis {action}d [id={result.id}]")
-            await self._ws_send("hypothesis", result.model_dump())
+            await self._ws_send("hypothesis", session.hypothesis, session_id=session.session_id)
             return result
 
         except Exception as e:
@@ -191,7 +191,7 @@ class SessionService:
                 study_goal=session.hypothesis.title,
                 steps=[
                     StudyStep(
-                        name=s.get("title", ""),
+                        title=s.get("title", ""),
                         description=s.get("description", ""),
                         module=s.get("id", ""),
                     )
@@ -218,13 +218,13 @@ class SessionService:
             ui_steps = [
                 {
                     "id": s.module,
-                    "name": s.name,
+                    "name": s.title,
                     "description": s.description,
                     "module": s.module,
                 }
                 for s in result.steps
             ]
-            await self._ws_send("plan", {"steps": ui_steps})
+            await self._ws_send("plan", {"steps": ui_steps}, session_id=session.session_id)
             return result
 
         except Exception as e:
@@ -237,12 +237,8 @@ class SessionService:
     # Confirmation — called at end of planning loop
     # ------------------------------------------------------------------
 
-    async def confirm_plan(self, session: Session) -> None:
-        """
-        Mark hypothesis and plan as confirmed, persist both, update state.
-        Individual failures are logged but don't block the others.
-        """
-        logger.info(f"[{session.session_id}] Confirming hypothesis and plan")
+    async def confirm_hypothesis(self, session: Session):
+        logger.info(f"[{session.session_id}] Confirming the hypothesis")
 
         if session.hypothesis is not None:
             session.hypothesis.state = "confirmed"
@@ -255,12 +251,21 @@ class SessionService:
             except Exception as e:
                 logger.exception(f"[{session.session_id}] Error confirming hypothesis: {e}")
         else:
-            logger.warning(f"[{session.session_id}] confirm_plan called with no hypothesis on session")
+            logger.warning(f"[{session.session_id}] confirm_hypothesis called with no hypothesis on session")
+
+        await self._ws_send("msg", "Hypothesis Confirmed.", session_id=session.session_id)
+
+    async def confirm_plan(self, session: Session) -> None:
+        """
+        Mark hypothesis and plan as confirmed, persist both, update state.
+        Individual failures are logged but don't block the others.
+        """
+        logger.info(f"[{session.session_id}] Confirming plan")
 
         if session.plan is not None:
             session.plan.state = "confirmed"
             try:
-                result = await BackendClient.update_plan(session.session_id, session.plan)
+                result = await BackendClient.update_plan(session.plan)
                 if result:
                     session.plan = result
                 else:
@@ -271,7 +276,7 @@ class SessionService:
             logger.warning(f"[{session.session_id}] confirm_plan called with no plan on session")
 
         await self.update_state(session, SessionState.READY)
-        await self._ws_send("msg", "Study Plan Confirmed.")
+        await self._ws_send("msg", "Study Plan Confirmed.", session_id=session.session_id)
 
     # ------------------------------------------------------------------
     # Queries — routes call these

@@ -13,8 +13,11 @@ interface CustomEdgeProps {
 const CustomEdge: React.FC<CustomEdgeProps> = ({ sourceX, sourceY, targetX, targetY, data }) => {
   const isAnimated = data?.animated;
 
-  // STRAIGHT HORIZONTAL PATH (Right → Left)
-  const path = `M${sourceX},${sourceY} L${targetX},${targetY}`;
+  // Smooth cubic path with adaptive curvature for cleaner visual flow.
+  const dx = Math.max(30, Math.abs(targetX - sourceX) * 0.35);
+  const c1x = sourceX + dx;
+  const c2x = targetX - dx;
+  const path = `M${sourceX},${sourceY} C${c1x},${sourceY} ${c2x},${targetY} ${targetX},${targetY}`;
 
   return (
     <g>
@@ -37,6 +40,7 @@ const CustomEdge: React.FC<CustomEdgeProps> = ({ sourceX, sourceY, targetX, targ
         stroke="#1f2d40"
         strokeWidth="4"
         fill="none"
+        strokeLinecap="round"
       />
 
       {/* Main Foreground Line */}
@@ -46,6 +50,7 @@ const CustomEdge: React.FC<CustomEdgeProps> = ({ sourceX, sourceY, targetX, targ
         strokeWidth="2"
         fill="none"
         strokeDasharray={isAnimated ? '5,5' : 'none'}
+        strokeLinecap="round"
         className={isAnimated ? 'animate-flow' : ''}
         markerEnd="url(#arrowhead)"
       />

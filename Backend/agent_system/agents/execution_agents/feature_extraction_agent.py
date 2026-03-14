@@ -30,9 +30,9 @@ class FeatureExtractionAgent(AssistantAgent):
             command="python", args=[os.path.normpath(mcp_server_path)], env={"WORKSPACE_DIR": workspace_folder}, read_timeout_seconds=300
         )
         mcp_tools = await mcp_server_tools(mcp_server)
-        desired_mcp_tools = ['radiomics_extract_features', 'radiomics_analyze_importance', 'scratchpad_register_agent',
-                             'scratchpad_write_note', 'scratchpad_raise_flag', 'scratchpad_write_summary',
-                             'scratchpad_set_status', 'scratchpad_read_agent', ]
+        desired_mcp_tools = ['radiomics_extract_features', 'radiomics_analyze_importance','scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',
+                             'scratchpad_write_summary', 'scratchpad_set_status', 'scratchpad_read_agent',
+                             'write_agent_output']
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
 
         # feature_extraction_tool_wrapper = FunctionTool(

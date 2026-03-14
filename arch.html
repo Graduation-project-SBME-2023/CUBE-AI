@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radiology Research OS (RROS) Architecture</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Phosphor Icons (for modern UI icons) -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Highlight.js for syntax highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script>hljs.highlightAll();</script>
+    
+    <!-- Mermaid.js -->
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ 
+            startOnLoad: true, 
+            theme: 'base',
+            securityLevel: 'loose',
+            fontFamily: 'Inter, sans-serif',
+            themeVariables: {
+                primaryColor: '#eff6ff',
+                primaryTextColor: '#1e3a8a',
+                primaryBorderColor: '#3b82f6',
+                lineColor: '#94a3b8',
+                secondaryColor: '#f8fafc',
+                tertiaryColor: '#fef2f2',
+                fontSize: '16px'
+            }
+        });
+    </script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+            color: #334155;
+        }
+        code {
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .mermaid-container {
+            background: #ffffff;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+            margin: 2.5rem 0;
+            overflow-x: auto;
+            border: 1px solid #e2e8f0;
+            display: flex;
+            justify-content: center;
+        }
+        .mermaid {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        .mermaid svg {
+            width: 100% !important;
+            max-width: 1000px !important;
+            height: auto !important;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .step-line {
+            position: absolute;
+            left: 24px;
+            top: 40px;
+            bottom: -20px;
+            width: 2px;
+            background: #e2e8f0;
+            z-index: 0;
+        }
+        .step-line.last {
+            display: none;
+        }
+    </style>
+</head>
+<body class="antialiased selection:bg-blue-200 selection:text-blue-900">
+
+    <!-- Navigation / Header -->
+    <nav class="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <i class="ph-fill ph-brain text-blue-600 text-3xl"></i>
+                <span class="font-bold text-xl tracking-tight text-slate-900">RROS <span class="text-slate-500 font-medium">Architecture</span></span>
+            </div>
+            <div class="hidden md:flex gap-6 text-sm font-medium text-slate-600">
+                <a href="#overview" class="hover:text-blue-600 transition-colors">Overview</a>
+                <a href="#use-case" class="hover:text-blue-600 transition-colors">Use Case</a>
+                <a href="#core-infrastructure" class="hover:text-blue-600 transition-colors">Infrastructure</a>
+                <a href="#agent-mesh" class="hover:text-blue-600 transition-colors">Agent Mesh</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <header class="bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 text-white pt-20 pb-24 px-6 border-b border-slate-700">
+        <div class="max-w-5xl mx-auto text-center">
+            <h1 class="text-4xl md:text-6xl font-extrabold mb-6 tracking-tight leading-tight">
+                Radiology Research OS <br>
+                <span class="text-blue-400 font-light">System Architecture</span>
+            </h1>
+            <p class="text-xl text-slate-300 max-w-3xl mx-auto leading-relaxed">
+                A modular, AI-driven research workspace. Invoke specialized agent swarms on-demand to execute discrete tasks, or chain them seamlessly for full end-to-end scientific discovery.
+            </p>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-6 py-16 space-y-24">
+
+        <!-- 1. Architecture Overview -->
+        <section id="overview" class="scroll-mt-24">
+            <div class="flex items-center gap-3 mb-8">
+                <div class="bg-blue-100 p-2 rounded-lg text-blue-600"><i class="ph ph-share-network text-2xl"></i></div>
+                <h2 class="text-3xl font-bold text-slate-900">1. Architecture Overview</h2>
+            </div>
+            <p class="text-lg text-slate-600 mb-8 max-w-4xl">
+                RROS acts as a highly specialized collaborative copilot. The Manager Agent receives user instructions via the UI, plans a Directed Acyclic Graph (DAG) of sub-tasks, and delegates work across an event-driven Agent Mesh.
+            </p>
+            
+            <div class="mermaid-container">
+                <pre class="mermaid">
+                    flowchart TD
+                        subgraph Client["Client Tier"]
+                            UI["Dashboard / Copilot UI"]
+                            OHIF["Embedded OHIF Viewer"]
+                        end
+
+                        API["API Gateway (REST/WebSockets)"]
+
+                        subgraph Core["Orchestration Core"]
+                            Manager["Manager Agent (Planner)"]
+                            Compiler["Context Compiler Service"]
+                        end
+
+                        subgraph AgentMesh["Agent Mesh (Phase Enclaves)"]
+                            P1["Phase 1: Protocol & Lit"]
+                            P2["Phase 2: Cohort & De-Id"]
+                            P3["Phase 3: Vision & QA"]
+                            P4["Phase 4: Models & Stats"]
+                            P5["Phase 5: Manuscript"]
+                        end
+
+                        subgraph Services["Infrastructure & Storage"]
+                            Bus{"Kafka Message Bus"}
+                            DB[("Postgres + pgvector")]
+                            Graph[("Neo4j Knowledge Graph")]
+                            S3[("S3 Object Storage")]
+                        end
+
+                        UI & OHIF &lt;--&gt; API
+                        API &lt;--&gt; Manager
+                        Manager &lt;--&gt; Compiler
+                        Manager &lt;--&gt; Bus
+                        P1 & P2 & P3 & P4 & P5 &lt;--&gt; Bus
+                        Bus &lt;--&gt; DB & Graph & S3
+
+                        classDef default fill:#fff,stroke:#cbd5e1,stroke-width:1px,color:#334155,rx:8px,ry:8px;
+                        classDef highlight fill:#eff6ff,stroke:#3b82f6,stroke-width:2px,color:#1e3a8a,rx:8px,ry:8px;
+                        classDef core fill:#fef2f2,stroke:#ef4444,stroke-width:2px,color:#991b1b,rx:8px,ry:8px;
+                        
+                        class Manager,Compiler core;
+                        class P1,P2,P3,P4,P5 highlight;
+                </pre>
+            </div>
+        </section>
+
+        <!-- 2. Detailed Use Case -->
+        <section id="use-case" class="scroll-mt-24">
+            <div class="flex items-center gap-3 mb-8">
+                <div class="bg-indigo-100 p-2 rounded-lg text-indigo-600"><i class="ph ph-map-trifold text-2xl"></i></div>
+                <h2 class="text-3xl font-bold text-slate-900">2. In Practice: Full Pipeline Use Case</h2>
+            </div>
+            <p class="text-lg text-slate-600 mb-10 max-w-4xl">
+                Let's follow a real-world scenario to see how Tasks, Context, and Agents interact. 
+                <strong>The Request:</strong> <em>"Design and execute a study to predict 12-month survival in Glioblastoma (GBM) patients using preoperative T1c and FLAIR MRIs."</em>
+            </p>
+
+            <div class="relative space-y-8 pb-8">
+                
+                <!-- Phase 1 Step -->
+                <div class="relative z-10 flex gap-6">
+                    <div class="step-line"></div>
+                    <div class="flex-shrink-0 w-12 h-12 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xl shadow-lg shadow-blue-200 border-4 border-white relative z-10">1</div>
+                    <div class="flex-grow bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <h3 class="text-xl font-bold text-slate-900">Phase 1: Protocol & Literature Synthesis</h3>
+                                <p class="text-sm font-medium text-blue-600 mt-1">Agent: LiteratureAgent & ProtocolAgent</p>
+                            </div>
+                            <span class="px-3 py-1 bg-slate-100 text-slate-600 text-xs rounded-full font-mono">Status: Completed</span>
+                        </div>
+                        
+                        <div class="grid md:grid-cols-2 gap-4 mb-4">
+                            <div class="bg-slate-50 p-4 rounded-lg border border-slate-100">
+                                <strong class="block text-slate-800 text-sm mb-2"><i class="ph ph-clipboard-text mr-1"></i> Task Description</strong>
+                                <p class="text-sm text-slate-600">Scan recent literature for GBM survival prediction markers. Draft a strict JSON protocol defining inclusion/exclusion criteria based on past failures.</p>
+                            </div>
+                            <div class="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                                <strong class="block text-blue-900 text-sm mb-2"><i class="ph ph-brain mr-1"></i> Injected Context (AOT)</strong>
+                                <p class="text-sm text-blue-800"><em>From Neo4j Graph:</em> "Project 45 (2023) failed to generalize because it included post-operative MRIs. Restrict to pre-op only."</p>
+                            </div>
+                        </div>
+                        <div class="border-t border-slate-100 pt-3">
+                            <strong class="text-sm text-slate-800 block mb-1">Output Result:</strong>
+                            <p class="text-sm text-slate-600 text-green-700 font-medium"><i class="ph ph-check-circle mr-1"></i> Protocol v1 JSON generated. Requirement locked: "Pre-operative T1c and FLAIR only. ICD-10: C71.9".</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Phase 2 Step -->
+                <div class="relative z-10 flex gap-6">
+                    <div class="step-line"></div>
+                    <div class="flex-shrink-0 w-12 h-12 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-xl shadow-lg shadow-indigo-200 border-4 border-white relative z-10">2</div>
+                    <div class="flex-grow bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <h3 class="text-xl font-bold text-slate-900">Phase 2: Cohort Discovery & De-Identification</h3>
+                                <p class="text-sm font-medium text-indigo-600 mt-1">Agent: CohortAgent & DeIdAgent</p>
+                            </div>
+                            <span class="px-3 py-1 bg-slate-100 text-slate-600 text-xs rounded-full font-mono">Status: Completed</span>
+                        </div>
+                        
+                        <div class="grid md:grid-cols-2 gap-4 mb-4">
+                            <div class="bg-slate-50 p-4 rounded-lg border border-slate-100">
+                                <strong class="block text-slate-800 text-sm mb-2"><i class="ph ph-clipboard-text mr-1"></i> Task Description</strong>
+                                <p class="text-sm text-slate-600">Translate Protocol v1 into SQL/FHIR queries to search the hospital PACS/EMR. Extract patient manifests and anonymize DICOM pixels.</p>
+                            </div>
+                            <div class="bg-indigo-50 p-4 rounded-lg border border-indigo-100">
+                                <strong class="block text-indigo-900 text-sm mb-2"><i class="ph ph-brain mr-1"></i> Injected Context (AOT)</strong>
+                                <p class="text-sm text-indigo-800"><em>From Phase 1:</em> <code>{"inclusion": {"icd10": "C71.9", "modalities": ["T1c", "FLAIR"], "surgery_status": "pre_op"}}</code></p>
+                            </div>
+                        </div>
+                        <div class="border-t border-slate-100 pt-3">
+                            <strong class="text-sm text-slate-800 block mb-1">Output Result:</strong>
+                            <p class="text-sm text-slate-600 text-green-700 font-medium"><i class="ph ph-check-circle mr-1"></i> 142 valid patients found. De-identified DICOM bundle pushed to secure S3 bucket.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Phase 3 Step (with HITL) -->
+                <div class="relative z-10 flex gap-6">
+                    <div class="step-line"></div>
+                    <div class="flex-shrink-0 w-12 h-12 rounded-full bg-purple-600 text-white flex items-center justify-center font-bold text-xl shadow-lg shadow-purple-200 border-4 border-white relative z-10">3</div>
+                    <div class="flex-grow bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <h3 class="text-xl font-bold text-slate-900">Phase 3: Vision & Tumor Segmentation</h3>
+                                <p class="text-sm font-medium text-purple-600 mt-1">Agent: AnnotationAgent & QAAgent</p>
+                            </div>
+                            <span class="px-3 py-1 bg-amber-100 text-amber-700 text-xs rounded-full font-mono flex items-center gap-1"><i class="ph ph-warning-circle"></i> Human Intervention</span>
+                        </div>
+                        
+                        <div class="grid md:grid-cols-2 gap-4 mb-4">
+                            <div class="bg-slate-50 p-4 rounded-lg border border-slate-100">
+                                <strong class="block text-slate-800 text-sm mb-2"><i class="ph ph-clipboard-text mr-1"></i> Task Description</strong>
+                                <p class="text-sm text-slate-600">Run MONAI pre-trained Brain Tumor Auto-Seg on the S3 DICOMs. Extract Whole Tumor, Enhancing Core, and Edema masks.</p>
+                            </div>
+                            <div class="bg-purple-50 p-4 rounded-lg border border-purple-100">
+                                <strong class="block text-purple-900 text-sm mb-2"><i class="ph ph-brain mr-1"></i> Injected Context (AOT)</strong>
+                                <p class="text-sm text-purple-800"><em>From Global Guidelines:</em> "Ensure spatial co-registration of FLAIR to T1c space before inference."</p>
+                            </div>
+                        </div>
+                        <div class="bg-amber-50 p-4 rounded-lg border border-amber-200 mt-4 mb-3">
+                            <strong class="block text-amber-900 text-sm mb-1"><i class="ph ph-hand-palm mr-1"></i> Human-in-the-Loop Triggered</strong>
+                            <p class="text-sm text-amber-800">QAAgent flagged low confidence (DSC < 0.6) on Patient #88. Execution paused. PI logged into OHIF UI, adjusted the edema threshold manually, and approved.</p>
+                        </div>
+                        <div class="border-t border-slate-100 pt-3">
+                            <strong class="text-sm text-slate-800 block mb-1">Output Result:</strong>
+                            <p class="text-sm text-slate-600 text-green-700 font-medium"><i class="ph ph-check-circle mr-1"></i> 142 valid NIfTI segmentations saved to DB.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Phase 4 Step -->
+                <div class="relative z-10 flex gap-6">
+                    <div class="step-line last"></div>
+                    <div class="flex-shrink-0 w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xl shadow-lg shadow-emerald-200 border-4 border-white relative z-10">4</div>
+                    <div class="flex-grow bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <h3 class="text-xl font-bold text-slate-900">Phase 4: Radiomics & Survival Modeling</h3>
+                                <p class="text-sm font-medium text-emerald-600 mt-1">Agent: RadiomicsAgent & ModelAgent</p>
+                            </div>
+                            <span class="px-3 py-1 bg-slate-100 text-slate-600 text-xs rounded-full font-mono">Status: Completed</span>
+                        </div>
+                        
+                        <div class="grid md:grid-cols-2 gap-4 mb-4">
+                            <div class="bg-slate-50 p-4 rounded-lg border border-slate-100">
+                                <strong class="block text-slate-800 text-sm mb-2"><i class="ph ph-clipboard-text mr-1"></i> Task Description</strong>
+                                <p class="text-sm text-slate-600">Extract 3D PyRadiomics features from masks. Train an XGBoost model to predict binary 12-month survival status.</p>
+                            </div>
+                            <div class="bg-emerald-50 p-4 rounded-lg border border-emerald-100">
+                                <strong class="block text-emerald-900 text-sm mb-2"><i class="ph ph-brain mr-1"></i> Injected Context (AOT)</strong>
+                                <p class="text-sm text-emerald-800"><em>From Phase 1 Protocol:</em> "Primary Endpoint: 12-Month Survival. Evaluation Metric: ROC-AUC > 0.75."</p>
+                            </div>
+                        </div>
+                        <div class="border-t border-slate-100 pt-3">
+                            <strong class="text-sm text-slate-800 block mb-1">Output Result:</strong>
+                            <p class="text-sm text-slate-600 text-green-700 font-medium"><i class="ph ph-check-circle mr-1"></i> Model trained. Performance: AUC 0.82. SHAP analysis confirms Texture (GLCM) and Core Volume as top features.</p>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- 3. Core Infrastructure (Compiler & Message Bus) -->
+        <section id="core-infrastructure" class="scroll-mt-24 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            <div class="bg-slate-50 border-b border-slate-200 p-6 flex items-center gap-3">
+                <div class="bg-slate-200 p-2 rounded-lg text-slate-700"><i class="ph ph-hard-drives text-2xl"></i></div>
+                <h2 class="text-2xl font-bold text-slate-900">3. Core Infrastructure Mechanisms</h2>
+            </div>
+            
+            <div class="p-8 grid lg:grid-cols-2 gap-12">
+                <!-- Context Compiler -->
+                <div>
+                    <h3 class="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
+                        <i class="ph-fill ph-funnel text-amber-500"></i> Ahead-Of-Time Context Compiler
+                    </h3>
+                    <p class="text-slate-600 mb-6">
+                        To eliminate the token-waste and non-determinism of runtime RAG within agent loops, RROS uses an <strong>AOT Context Compiler</strong>. Before dispatching a task, it assembles a static "Context Pad" grounded in the exact state of the project.
+                    </p>
+                    <ol class="space-y-4 text-sm text-slate-700">
+                        <li class="flex gap-3 bg-slate-50 p-3 rounded border border-slate-100">
+                            <span class="font-bold text-amber-600">1.</span>
+                            <div><strong>Task Extraction:</strong> Parses the DAG node and current project state (e.g., fetching the completed Phase 1 JSON).</div>
+                        </li>
+                        <li class="flex gap-3 bg-slate-50 p-3 rounded border border-slate-100">
+                            <span class="font-bold text-amber-600">2.</span>
+                            <div><strong>Federated Retrieval:</strong> Queries GraphDB (Neo4j) for hard past relationships and VectorDB for semantic guidelines.</div>
+                        </li>
+                        <li class="flex gap-3 bg-slate-50 p-3 rounded border border-slate-100">
+                            <span class="font-bold text-amber-600">3.</span>
+                            <div><strong>Phase-Aware Filtering:</strong> Prunes irrelevant context. Phase 4 Model Agents need the Statistical Plan, not the PICO search strings.</div>
+                        </li>
+                    </ol>
+                </div>
+
+                <!-- Message Bus -->
+                <div>
+                    <h3 class="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
+                        <i class="ph-fill ph-arrows-left-right text-emerald-500"></i> Event-Driven Message Bus
+                    </h3>
+                    <p class="text-slate-600 mb-6">
+                        The Orchestrator publishes strict JSON payloads to Kafka/RabbitMQ topics. Agents run as independent, stateless consumers, ensuring absolute decoupling and horizontal scalability.
+                    </p>
+                    
+                    <div class="space-y-4">
+                        <div class="border border-slate-200 rounded-lg p-4">
+                            <code class="text-xs bg-red-100 text-red-800 px-2 py-1 rounded mb-2 inline-block">cmd.{phase}.{agent_name}</code>
+                            <p class="text-sm text-slate-600"><strong class="text-slate-800">Command Topics:</strong> Used by the Orchestrator to issue tasks to specific agent enclaves.</p>
+                        </div>
+                        <div class="border border-slate-200 rounded-lg p-4">
+                            <code class="text-xs bg-green-100 text-green-800 px-2 py-1 rounded mb-2 inline-block">evt.{phase}.{agent}.completed</code>
+                            <p class="text-sm text-slate-600"><strong class="text-slate-800">Event Topics:</strong> Agents publish their final JSON outputs here to unblock the next DAG node.</p>
+                        </div>
+                        <div class="border border-slate-200 rounded-lg p-4">
+                            <code class="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded mb-2 inline-block">telemetry.{project_id}</code>
+                            <p class="text-sm text-slate-600"><strong class="text-slate-800">Telemetry Topics:</strong> Fire-and-forget streams. Agents emit % progress, warnings, and UI alerts here.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 4. Agent Strategy -->
+        <section id="agent-mesh" class="scroll-mt-24">
+            <div class="flex items-center gap-3 mb-8">
+                <div class="bg-rose-100 p-2 rounded-lg text-rose-600"><i class="ph ph-cube text-2xl"></i></div>
+                <h2 class="text-3xl font-bold text-slate-900">4. Agent Mesh Strategy & Contracts</h2>
+            </div>
+            
+            <div class="grid md:grid-cols-3 gap-6 mb-10">
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
+                    <div class="w-10 h-10 rounded bg-slate-100 flex items-center justify-center text-slate-700 mb-4"><i class="ph ph-arrows-split text-xl"></i></div>
+                    <h3 class="font-bold text-slate-900 mb-2">Single Responsibility</h3>
+                    <p class="text-sm text-slate-600">Agents do exactly one thing well. We don't have a generic "DataAgent"; we have a <code>CohortAgent</code> (SQL/FHIR) and a distinct <code>DeIdAgent</code> (PHI scrubbing).</p>
+                </div>
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
+                    <div class="w-10 h-10 rounded bg-slate-100 flex items-center justify-center text-slate-700 mb-4"><i class="ph ph-file-code text-xl"></i></div>
+                    <h3 class="font-bold text-slate-900 mb-2">Contract-Driven</h3>
+                    <p class="text-sm text-slate-600">Agents are defined entirely by JSON Schema Inputs/Outputs. If an agent satisfies the I/O contract of a DAG node, the Orchestrator can seamlessly use it.</p>
+                </div>
+                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
+                    <div class="w-10 h-10 rounded bg-slate-100 flex items-center justify-center text-slate-700 mb-4"><i class="ph ph-arrows-clockwise text-xl"></i></div>
+                    <h3 class="font-bold text-slate-900 mb-2">Planner-Critic Loops</h3>
+                    <p class="text-sm text-slate-600">Critical agents implement internal self-correction. They propose steps, execute external tools, and a "Critic" validates intermediate results against the Context Pad.</p>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 rounded-xl overflow-hidden shadow-lg border border-slate-700">
+                <div class="bg-slate-800 px-4 py-2 border-b border-slate-700 flex justify-between items-center">
+                    <span class="text-xs text-slate-300 font-mono">Example: Command Topic JSON Payload</span>
+                    <div class="flex gap-1">
+                        <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                        <div class="w-3 h-3 rounded-full bg-amber-500"></div>
+                        <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                    </div>
+                </div>
+                <pre class="m-0 p-6"><code class="language-json bg-transparent text-sm">
+{
+  "task_id": "uuid-v4",
+  "project_id": "proj-123",
+  "phase": "cohort_build",
+  "task_type": "cohort_query",
+  "context_augmentation": {
+    "prior_learnings": [
+      "proj-88 (failed): Exclude patients with metal implants to reduce MRI artifacts."
+    ],
+    "protocol_guidelines": "Require strict matching of Pre-op T1c."
+  },
+  "payload": {
+    "inclusion": {"modality": ["T1c"], "icd_codes": ["C71.9"]},
+    "max_patients": 500
+  }
+}
+                </code></pre>
+            </div>
+        </section>
+
+        <!-- 5. DevOps & Memory -->
+        <section class="border-t border-slate-200 pt-16 mt-16 pb-12">
+            <div class="grid md:grid-cols-2 gap-12">
+                <div>
+                    <h2 class="text-2xl font-bold text-slate-900 mb-6 flex items-center gap-2">
+                        <i class="ph-fill ph-database text-blue-500"></i> Memory Architecture
+                    </h2>
+                    <ul class="space-y-4 text-slate-600">
+                        <li><strong class="text-slate-900">Short-term (Intra-task):</strong> Redis + ephemeral LLM context logs (retained only for the duration of the task).</li>
+                        <li><strong class="text-slate-900">Phase Memory (State):</strong> PostgreSQL JSONB columns track output contracts and DAG progression.</li>
+                        <li><strong class="text-slate-900">Cross-project (Long-term):</strong> Neo4j Knowledge Graph connects past projects, modalities, and outcomes for AOT retrieval.</li>
+                    </ul>
+                </div>
+                <div>
+                    <h2 class="text-2xl font-bold text-slate-900 mb-6 flex items-center gap-2">
+                        <i class="ph-fill ph-shield-check text-green-500"></i> Security & Deployment
+                    </h2>
+                    <ul class="space-y-4 text-slate-600">
+                        <li><strong class="text-slate-900">PHI Handling:</strong> Dedicated Air-gapped <code>DeIdAgent</code> runs pixel-level scrubbing before data hits the S3 buckets.</li>
+                        <li><strong class="text-slate-900">Compute:</strong> Kubernetes cluster utilizing taint/tolerations to route heavy <code>ModelAgent</code> tasks to GPU nodepools.</li>
+                        <li><strong class="text-slate-900">Experiment Tracking:</strong> Native integration with MLflow for tracking AUC, Hyperparameters, and SHAP values.</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 py-10 text-center">
+        <div class="max-w-7xl mx-auto px-6">
+            <div class="flex justify-center items-center gap-2 mb-4">
+                <i class="ph-fill ph-brain text-slate-400 text-2xl"></i>
+            </div>
+            <p class="text-slate-500 text-sm font-medium">Radiology Research OS Architecture</p>
+            <p class="text-slate-400 text-xs mt-2">Designed for Reproducible, Scalable Medical AI Workflows</p>
+        </div>
+    </footer>
+
+</body>
+</html>
