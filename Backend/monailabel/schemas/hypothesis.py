@@ -11,6 +11,9 @@ class HypothesisBase(BaseModel):
     clinical_context: Optional[str] = None
     relationship_type: Optional[str] = None
     state: Optional[str] = None
+    hypothesis: Optional[str] = None
+    column: Optional[str] = None
+    Comparison: Optional[str] = None
 
 
 class HypothesisCreate(HypothesisBase):
@@ -27,6 +30,10 @@ class HypothesisUpdate(BaseModel):
     relationship_type: Optional[str] = None
     state: Optional[str] = None
 
+
+    hypothesis: Optional[str] = None
+    column: Optional[str] = None
+    Comparison: Optional[str] = None
 
 class HypothesisOut(HypothesisBase):
     id: UUID

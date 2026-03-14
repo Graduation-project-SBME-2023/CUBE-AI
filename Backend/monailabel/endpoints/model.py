@@ -44,3 +44,20 @@ async def delete_model_endpoint(model_id: UUID,
                                 db: Session = Depends(get_db)):
     db_model = await delete_model(db, model_id=model_id)
     return {"detail": f"Model {model_id} deleted successfully"}
+
+
+
+
+from services.monai_sync import sync_models_from_monai
+
+@router.post("/sync", response_model=dict)
+async def sync_models(db: Session = Depends(get_db)):
+    """
+    Manually trigger a sync from the MONAILabel server.
+    Call this whenever you deploy new models — not on startup.
+    """
+    try:
+        result = await sync_models_from_monai(db)
+        return {"detail": "Sync complete", **result}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Sync failed: {str(e)}")
