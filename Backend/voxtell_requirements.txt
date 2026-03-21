@@ -1,0 +1,5 @@
+voxtell
+huggingface_hub
+accelerate
+transformers
+optimum-quanto 
