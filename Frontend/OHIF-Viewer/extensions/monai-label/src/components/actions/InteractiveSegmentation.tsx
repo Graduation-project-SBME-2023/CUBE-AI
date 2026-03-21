@@ -396,7 +396,7 @@ export default class InteractiveSegmentation extends BaseTab {
     this.sam2dstate = null;
     this.currentSlice = null;
     this.resetnnInteractiveAll = false;
-
+    this.voxtellTextPrompt = '';
   }
 
   onSelectModel = (model) => {
@@ -693,6 +693,8 @@ export default class InteractiveSegmentation extends BaseTab {
         viewport: viewportInfo.viewportId,
       };
       params['resetInteractions'] = this.resetnnInteractiveAll;
+    } else if (model === 'voxtell') {
+      params['text_prompts'] = this.voxtellTextPrompt;
     } else {
       this.notification.show({
         title: 'MONAI Label - ' + model,
@@ -817,7 +819,7 @@ export default class InteractiveSegmentation extends BaseTab {
 
   getModels() {
     const { info } = this.props;
-    const allowed = ['vista', 'sam', 'nninteractive'];
+    const allowed = ['vista', 'sam', 'nninteractive','voxtell'];
     console.log(info.models);
     const models = Object.keys(info.models).filter((key) =>
       allowed.includes(key)
@@ -907,6 +909,7 @@ export default class InteractiveSegmentation extends BaseTab {
                 onColorChange={this.onColorChange}
                 onAddObjectClick={this.onAddObject}
                 onRowSelect={this.onChangeObject}
+                onTextPromptChange={(text) => this.voxtellTextPrompt = text}
               />
             }
           />
