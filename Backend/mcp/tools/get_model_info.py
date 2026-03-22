@@ -2,7 +2,7 @@ from . import mcp
 import requests
 import sys
 import os
-
+import json
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
 from tool_logging import ToolEvent, log_tool_state, TextPayload
 
@@ -52,4 +52,4 @@ async def get_model_info():
     )
     log_tool_state(finish_event)
 
-    return formatted
+    return json.dumps(formatted)

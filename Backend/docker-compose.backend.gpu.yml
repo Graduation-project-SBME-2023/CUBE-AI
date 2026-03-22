@@ -29,6 +29,7 @@ services:
     command: >
         sh -c "
         pip install psycopg2-binary &&
+        pip install -r /voxtell_requirements.txt &&
         pip install aiohttp &&
         alembic -c /alembic/alembic.ini upgrade head &&
         python /monailabel/server_start.py
@@ -55,6 +56,7 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/CustomNnUnetTrainer.py:/usr/local/lib/python3.10/dist-packages/nnunetv2/training/nnUNetTrainer/CustomNnUnetTrainer.py
       - ${COMPOSE_PROJECT_DIR}/Backend/alembic.ini:/alembic/alembic.ini
       - ${COMPOSE_PROJECT_DIR}/Backend/migrations:/alembic/migrations
+      - ${COMPOSE_PROJECT_DIR}/Backend/voxtell_requirements.txt:/voxtell_requirements.txt
     depends_on:
       - postgres
       - orthanc
