@@ -250,6 +250,7 @@ export default class MonaiLabelPanel extends Component {
       const image = value.slice(1).map((v) => parseFloat(v));
       centroidsIJK.set(segmentIndex, { image: image, world: [] });
     }
+    console.log('centroidsIJK', centroidsIJK);
 
     // Get the active display set (each series = unique segmentation ID)
     const { displaySet } = this.getActiveViewportInfo();
