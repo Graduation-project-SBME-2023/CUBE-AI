@@ -21,7 +21,7 @@ import MiniFlow from './miniflow';
 import StartNode from './nodes/StartNode';
 import AgentNode from './nodes/AgentNode';
 import CustomEdge from './edges/CustomEdges';
-import { FlowEdge, FlowNode, ToolEvent } from './types';
+import { FlowEdge, FlowNode, ToolEvent, AgentStatus } from './types';
 
 // Icon aliases
 const PlayIcon: any = Play;
@@ -51,8 +51,7 @@ const AGENT_H_ESTIMATE = 84;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const getDynamicLayout = (agentCount: number) => {
-  const viewportWidth =
-    typeof window !== 'undefined' ? Math.max(window.innerWidth, 1200) : 1600;
+  const viewportWidth = typeof window !== 'undefined' ? Math.max(window.innerWidth, 1200) : 1600;
 
   // Reserve room for side panels and keep comfortable side margins.
   const usableWidth = Math.max(1000, viewportWidth - 420);
@@ -132,7 +131,9 @@ export default function PlaygroundCanvas({
   const [edges, setEdges] = useState<FlowEdge[]>(INITIAL_EDGES);
   const [isPaused, setIsPaused] = useState(false);
   const [isConnected, setIsConnected] = useState(websocketService.isConnected());
-  const [pendingPrompt, setPendingPrompt] = useState<{ type: string; message: string } | null>(null);
+  const [pendingPrompt, setPendingPrompt] = useState<{ type: string; message: string } | null>(
+    null
+  );
   const [promptExpanded, setPromptExpanded] = useState(true);
   const [hasPlan, setHasPlan] = useState(false);
 
@@ -181,7 +182,9 @@ export default function PlaygroundCanvas({
               applyBackendPlan(planData);
               return;
             }
-          } catch (_) { /* not valid JSON, ignore */ }
+          } catch (_) {
+            /* not valid JSON, ignore */
+          }
         }
         return;
       }
@@ -198,8 +201,7 @@ export default function PlaygroundCanvas({
 
             if (Object.keys(kvParsed).length > 0) {
               parsedPayload = kvParsed;
-            }
-            else {
+            } else {
               parsedPayload.title = 'Research Hypothesis';
             }
           }
@@ -212,7 +214,8 @@ export default function PlaygroundCanvas({
                   data: {
                     ...n.data,
                     title: parsedPayload?.title || 'Research Hypothesis',
-                    description: parsedPayload?.hypothesis || parsedPayload?.title || n.data.description,
+                    description:
+                      parsedPayload?.hypothesis || parsedPayload?.title || n.data.description,
                     population: parsedPayload?.population,
                     intervention: parsedPayload?.intervention,
                     comparison: parsedPayload?.comparison,
@@ -259,12 +262,15 @@ export default function PlaygroundCanvas({
           const without = prev.filter(e => e.target !== 'literature_review');
           const startNode = nodes.find(n => n.type === 'start');
           const sourceId = startNode?.id || '1';
-          return [...without, {
-            id: `e${sourceId}-literature_review`,
-            source: sourceId,
-            target: 'literature_review',
-            type: 'custom',
-          }];
+          return [
+            ...without,
+            {
+              id: `e${sourceId}-literature_review`,
+              source: sourceId,
+              target: 'literature_review',
+              type: 'custom',
+            },
+          ];
         });
         return;
       }
@@ -272,7 +278,9 @@ export default function PlaygroundCanvas({
         // Append a short log entry to the literature review node
         setNodes(prev =>
           prev.map(n => {
-            if (n.id !== 'literature_review' || n.type !== 'agent') return n;
+            if (n.id !== 'literature_review' || n.type !== 'agent') {
+              return n;
+            }
             const agentData = n.data as any;
             const logs = agentData.logs ?? [];
             const logEntry = {
@@ -280,13 +288,15 @@ export default function PlaygroundCanvas({
               started_at: new Date().toISOString(),
               last_updated_at: new Date().toISOString(),
               status: payload?.status || 'active',
-              events: [{
-                event_type: 'tool_log' as const,
-                source: 'knowledge_builder',
-                content_type: 'text' as const,
-                content: { message: payload?.message || '' },
-                timestamp: new Date().toISOString(),
-              }],
+              events: [
+                {
+                  event_type: 'tool_log' as const,
+                  source: 'knowledge_builder',
+                  content_type: 'text' as const,
+                  content: { message: payload?.message || '' },
+                  timestamp: new Date().toISOString(),
+                },
+              ],
             };
             return {
               ...n,
@@ -305,7 +315,9 @@ export default function PlaygroundCanvas({
         // Mark the literature review node as completed
         setNodes(prev =>
           prev.map(n => {
-            if (n.id !== 'literature_review' || n.type !== 'agent') return n;
+            if (n.id !== 'literature_review' || n.type !== 'agent') {
+              return n;
+            }
             return { ...n, data: { ...n.data, status: 'completed', isExpanded: false } };
           })
         );
@@ -325,6 +337,9 @@ export default function PlaygroundCanvas({
       }
       if (type === 'run_finished') {
         updateCurrentAgent('run_finished');
+      }
+      if (type === 'Pipeline_agent_status') {
+        updateAgentStatus(payload.agents);
       }
     };
 
@@ -389,7 +404,7 @@ export default function PlaygroundCanvas({
         const existingLitReview = prev.find(n => n.id === 'literature_review');
 
         // Count anchor nodes that precede the plan steps
-        const anchorCount = (existingLitReview ? 2 : 1); // start + optional lit review
+        const anchorCount = existingLitReview ? 2 : 1; // start + optional lit review
         const layout = getDynamicLayout(anchorCount + planPayload.steps.length - 1);
 
         const keptNodes: FlowNode[] = [];
@@ -460,6 +475,45 @@ export default function PlaygroundCanvas({
         return currentNodes; // no mutation, just reading
       });
     }
+  };
+
+  const updateAgentStatus = (agents_status: AgentStatus[]) => {
+    console.log(agents_status);
+
+    const statusMap = new Map((agents_status ?? []).map(a => [a.name, a.status]));
+
+    setNodes(prev =>
+      prev.map(node => {
+        if (node.type !== 'agent') {
+          return node;
+        }
+
+        const newStatus = statusMap.get(node.id);
+        if (!newStatus) {
+          return node;
+        }
+
+        let _newStatus;
+        if (newStatus === 'RUNNING') {
+          _newStatus = 'active';
+        }
+        if (newStatus === 'COMPLETED') {
+          _newStatus = 'completed';
+        }
+        if (newStatus === 'FAILED') {
+          _newStatus = 'error';
+        }
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            status: _newStatus,
+            isExpanded: _newStatus === 'active',
+          },
+        };
+      })
+    );
   };
 
   const updateCurrentAgent = (current_agent: string) => {
@@ -637,8 +691,8 @@ export default function PlaygroundCanvas({
       body: JSON.stringify({ session_id: String(session_id) }),
     });
     setIsPaused(false);
-    setMode('planning');           // go back to planning so user can re-execute
-    setNodes(resetNodeLogs);       // keep nodes, wipe logs only
+    setMode('planning'); // go back to planning so user can re-execute
+    setNodes(resetNodeLogs); // keep nodes, wipe logs only
     setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
   };
 
@@ -650,7 +704,7 @@ export default function PlaygroundCanvas({
     });
     setIsPaused(false);
     setMode('executing');
-    setNodes(resetNodeLogs);       // keep nodes, wipe logs only
+    setNodes(resetNodeLogs); // keep nodes, wipe logs only
     setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
   };
 
@@ -667,7 +721,7 @@ export default function PlaygroundCanvas({
           }
         : node.type === 'start'
           ? { ...node, position: { x: layout.startX, y: layout.startY } }
-        : node
+          : node
     );
     setNodes(resetNodes);
     setEdges(INITIAL_EDGES);
@@ -754,9 +808,11 @@ export default function PlaygroundCanvas({
                 onClick={startExecution}
                 disabled={!hasPlan}
                 className={`flex items-center gap-2 rounded px-4 py-1.5 text-xs font-medium text-white shadow-lg transition-colors
-                    ${hasPlan 
-                      ? 'bg-[#348cfd] hover:bg-[#599fff]' 
-                      : 'bg-gray-400 cursor-not-allowed opacity-60'}
+                    ${
+                      hasPlan
+                        ? 'bg-[#348cfd] hover:bg-[#599fff]'
+                        : 'cursor-not-allowed bg-[#348cfd] opacity-50'
+                    }
                     `}
               >
                 <Play
@@ -768,9 +824,11 @@ export default function PlaygroundCanvas({
 
               {/* Tooltip */}
               {!hasPlan && (
-                <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-max -translate-x-1/2
+                <div
+                  className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-max -translate-x-1/2
                         rounded bg-black px-2 py-1 text-[10px] text-white opacity-0
-                        transition-opacity group-hover:opacity-100">
+                        transition-opacity group-hover:opacity-100"
+                >
                   Generate a plan first
                 </div>
               )}
@@ -878,16 +936,25 @@ export default function PlaygroundCanvas({
                   onClick={() => setPromptExpanded(prev => !prev)}
                   className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[#1f2630]"
                 >
-                  <AlertCircleIcon size={14} className="shrink-0 animate-pulse text-[#f8ce46]" />
+                  <AlertCircleIcon
+                    size={14}
+                    className="shrink-0 animate-pulse text-[#f8ce46]"
+                  />
                   <span className="flex-1 text-xs font-bold text-white">
                     {pendingPrompt.type === 'hypothesis_approval'
                       ? 'Approve Hypothesis?'
                       : 'Run Literature Review?'}
                   </span>
                   {promptExpanded ? (
-                    <ChevronDownIcon size={12} className="text-[#566a84]" />
+                    <ChevronDownIcon
+                      size={12}
+                      className="text-[#566a84]"
+                    />
                   ) : (
-                    <ChevronUpIcon size={12} className="text-[#566a84]" />
+                    <ChevronUpIcon
+                      size={12}
+                      className="text-[#566a84]"
+                    />
                   )}
                 </button>
 
@@ -895,7 +962,9 @@ export default function PlaygroundCanvas({
                 {promptExpanded && (
                   <div className="space-y-3 border-t border-[#3c5d80]/50 px-3 pb-3 pt-2">
                     {pendingPrompt.message && (
-                      <p className="text-[11px] leading-relaxed text-[#91b9cd]">{pendingPrompt.message}</p>
+                      <p className="text-[11px] leading-relaxed text-[#91b9cd]">
+                        {pendingPrompt.message}
+                      </p>
                     )}
                     <div className="flex gap-2">
                       {pendingPrompt.type === 'hypothesis_approval' ? (
