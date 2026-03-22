@@ -30,20 +30,20 @@ sys.modules["core"] = core_module
 #     sys.path.insert(0, monailabel_dir)
 
 
-from monailabel.core.database import Base
-from Backend.monailabel.models.model import Model
-from Backend.monailabel.models.volume import Volume
-from Backend.monailabel.models.segmentation import Segmentation
-from Backend.monailabel.models.study import Study
-from Backend.monailabel.models.patient import Patient
-from Backend.monailabel.models.radiomics import Radiomics
-from Backend.monailabel.models.chat_messages import ChatMessage
-from Backend.monailabel.models.chat_sessions import ChatSession
-from Backend.monailabel.models.workflow import Workflow
-from Backend.monailabel.models.workflow_details import WorkflowDetail
-from Backend.monailabel.models.hypothesis import Hypothesis
-from Backend.monailabel.models.plan import Plan
-from Backend.monailabel.models.steps import PlanStep
+# from monailabel.core.database import Base
+# from Backend.monailabel.models.model import Model
+# from Backend.monailabel.models.volume import Volume
+# from Backend.monailabel.models.segmentation import Segmentation
+# from Backend.monailabel.models.study import Study
+# from Backend.monailabel.models.patient import Patient
+# from Backend.monailabel.models.radiomics import Radiomics
+# from Backend.monailabel.models.chat_messages import ChatMessage
+# from Backend.monailabel.models.chat_sessions import ChatSession
+# from Backend.monailabel.models.workflow import Workflow
+# from Backend.monailabel.models.workflow_details import WorkflowDetail
+# from Backend.monailabel.models.hypothesis import Hypothesis
+# from Backend.monailabel.models.plan import Plan
+# from Backend.monailabel.models.steps import PlanStep
 
 
 from sqlalchemy import engine_from_config
@@ -77,8 +77,8 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
-target_metadata = Base.metadata
-# target_metadata=None  # Replace with actual MetaData object
+# target_metadata = Base.metadata
+target_metadata=None  # Replace with actual MetaData object
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
