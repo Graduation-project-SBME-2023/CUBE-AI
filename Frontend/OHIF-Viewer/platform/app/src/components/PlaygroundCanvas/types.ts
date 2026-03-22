@@ -1,4 +1,5 @@
 import React from 'react';
+import { string } from 'prop-types';
 
 export interface StartNodeData {
   title: string;
@@ -124,4 +125,12 @@ export interface ToolLog {
   last_updated_at: string
   events: ToolEvent[]
   status: 'active' | 'completed' | 'error'
+}
+
+export interface AgentStatus {
+  name: string
+  status: string
+  started_at: any
+  finished_at: any
+  error: any
 }

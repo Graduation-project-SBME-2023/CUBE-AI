@@ -334,7 +334,6 @@ async def run_pipeline(session: Session) -> None:
                 case MemoryQueryEvent(source=src, content=content):
                     pipeline_logger.info(f"🧠 [{src}] MEMORY QUERY: {content}")
                     await monitor.on_agent_active(src)
-                    await manager.send_ws_message("run_status", {"current_agent": src}, session_id=session.session_id)
 
                 case UserInputRequestedEvent(source=src):
                     pipeline_logger.info(f"⏳ [{src}] WAITING FOR USER INPUT")
@@ -342,20 +341,17 @@ async def run_pipeline(session: Session) -> None:
                 case ThoughtEvent(source=src, content=content):
                     pipeline_logger.info(f"💭 [{src}] THOUGHT: {content}")
                     await monitor.on_agent_active(src)
-                    await manager.send_ws_message("run_status", {"current_agent": src}, session_id=session.session_id)
 
                 case BaseChatMessage(source=src):
                     logger.info("━" * 60)
                     pipeline_logger.info(f"💬 [{src}] ({type(event).__name__}): {event.content}")
                     await monitor.on_agent_active(src)
-                    await manager.send_ws_message("run_status", {"current_agent": src}, session_id=session.session_id)
 
                 case BaseAgentEvent(source=src):
                     pipeline_logger.info(f"⚙️  [{src}] ({type(event).__name__})")
                     if hasattr(event, "content") and event.content:
                         pipeline_logger.info(f"   {event.content}")
                     await monitor.on_agent_active(src)
-                    await manager.send_ws_message("run_status", {"current_agent": src}, session_id=session.session_id)
 
     except asyncio.CancelledError:
         await monitor.on_pipeline_error(Exception("Pipeline Cancelled"))
