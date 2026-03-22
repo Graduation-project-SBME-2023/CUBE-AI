@@ -29,6 +29,7 @@ class BackendClient:
             outcome=data["outcome"],
             clinical_context=data["clinical_context"],
             relationship_type=data["relationship_type"],
+            comparison=data["comparison"],
         )
 
     # ------------------------------------------------------------------
@@ -127,7 +128,26 @@ class BackendClient:
 
 
 if __name__ == '__main__':
-    async def main():
+    async def hypothesis_test():
+        from models.plans import ClinicalHypothesis
+
+        client = BackendClient()
+        hypothesis = ClinicalHypothesis(
+            title='Hypothesis Title',
+            population='Population',
+            intervention='Intervention',
+            outcome='Outcome',
+            clinical_context='Clinical Context',
+            relationship_type='Relationship Type',
+            comparison='Comparison',
+            question='Question',
+            state='State',
+        )
+
+        hypothesis = await client.create_hypothesis('cf8b8a59-317b-4d6c-960e-dd7e60b81bd2', hypothesis)
+        print(hypothesis)
+
+    async def plan_test():
         import time
         from models.plans import StudyStep
         client = BackendClient()
@@ -159,4 +179,4 @@ if __name__ == '__main__':
         print(updated_plan)
 
     import asyncio
-    asyncio.run(main())
+    asyncio.run(hypothesis_test())
