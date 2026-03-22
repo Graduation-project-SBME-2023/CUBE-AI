@@ -75,8 +75,13 @@ async def run_planner(agent, hypothesis):
         - selected_model: Highest metric automatic model if available, else best interactive model
         - fallback_path: "interactive" if automatic models are unavailable, else "none"
         - Always exclude existing masks for the same label
-        - Output ONLY valid JSON, no explanations, no markdown
+        - Return a valid JSON object following the schema. Do not include explanations.
         """
 
     result = await agent.run(task=task)
-    return json.loads(result.messages[-1].content)
+    content = result.messages[-1].content
+
+    try:
+        return json.loads(content)
+    except Exception as e:
+        raise RuntimeError(f"Invalid JSON from PlannerAgent: {content}")

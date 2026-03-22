@@ -53,7 +53,7 @@ class SegmentationModule:
      )
         # MCP server connection
         current_file = Path(__file__).resolve()
-        backend_dir = current_file.parent.parent.parent.parent
+        backend_dir = current_file.parent.parent.parent.parent.parent
         server_path = backend_dir / "mcp" / "server.py"   
         logger.info(f"Starting MCP server at: {server_path}")     
         math_server = StdioServerParams(
@@ -131,7 +131,7 @@ async def test_module():
         await agent.initialize()
         
         current_file = Path(__file__)
-        config_path =os.path.join(current_file.parent.parent.parent.parent,"mas","memory", "workspace", "configurations.json")
+        config_path =os.path.join(current_file.parent.parent.parent.parent.parent,"mas","memory", "workspace", "configurations.json")
         logger.info(f"Running with config: {config_path}")
         
         result = await agent.run(config_path)
