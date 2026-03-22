@@ -13,7 +13,7 @@ class HypothesisBase(BaseModel):
     state: Optional[str] = None
     hypothesis: Optional[str] = None
     column: Optional[str] = None
-    Comparison: Optional[str] = None
+    comparison: Optional[str] = None
 
 
 class HypothesisCreate(HypothesisBase):
@@ -33,7 +33,7 @@ class HypothesisUpdate(BaseModel):
 
     hypothesis: Optional[str] = None
     column: Optional[str] = None
-    Comparison: Optional[str] = None
+    comparison: Optional[str] = None
 
 class HypothesisOut(HypothesisBase):
     id: UUID

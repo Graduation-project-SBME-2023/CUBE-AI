@@ -28,7 +28,7 @@ class Hypothesis(Base):
     intervention = Column(Text)
     hypothesis = Column(Text)
     column= Column(Text)
-    Comparison = Column(Text)   
+    comparison = Column(Text)
     outcome = Column(Text)
     clinical_context = Column(Text)
     relationship_type = Column(String(50))
