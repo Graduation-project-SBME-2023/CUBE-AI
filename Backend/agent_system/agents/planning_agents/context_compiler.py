@@ -403,7 +403,7 @@ def compile_task_messages(
             task_id=str(uuid.uuid4()),
             phase=phase,
             agent_id=agent_id,
-            agent_title=step.name,
+            agent_title=step.title,
             instructions=instructions,
             context_augmentation=ctx,
             hypothesis_summary=hyp_summary,

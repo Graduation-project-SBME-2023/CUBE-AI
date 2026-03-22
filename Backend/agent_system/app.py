@@ -211,10 +211,16 @@ async def _emit_tool_result_to_view(
 # ----------------------------------------------------------------------
 
 async def run_planner(session: Session, message: str) -> None:
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+    workspace_folder = os.path.join(
+        base_agents_workspace, f"workspace_{session.session_id}"
+    )
+    os.makedirs(workspace_folder, exist_ok=True)
     planner = ClinicalPlanner(
         input_provider=lambda: manager.wait_for_user_message(),
         output_callback=lambda t, d, s: manager.send_ws_message(t, d, s),
         model_client=create_model_client_from_config(),
+        workspace_dir=workspace_folder,
         session=session,
         session_service=session_service,
         api_key=api_key
@@ -231,7 +237,8 @@ async def run_planner(session: Session, message: str) -> None:
 # ----------------------------------------------------------------------
 
 async def run_pipeline(session: Session) -> None:
-    workspace_folder = os.path.join(current_dir, f"workspace_{session.session_id}")
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session.session_id}")
     pipeline_logger = logging.getLogger("Execution Pipeline")
     logging.getLogger("autogen_core").setLevel(logging.CRITICAL)
     logging.getLogger("autogen_core.events").setLevel(logging.CRITICAL)
