@@ -88,36 +88,36 @@ class SegmentationModule:
         # plan
         plan = await run_planner(self.PlannerAgent,hypothesis)
         logger.info(f"Planner plan: {plan}")
-        target_labels = plan["target_labels"]
-        chosen_path = plan["chosen_path"]
-        eligible_volumes = await exclude_existing_masks(
-            datasetlist, target_labels
-        )
+        # target_labels = plan["target_labels"]
+        # chosen_path = plan["chosen_path"]
+        # eligible_volumes = await exclude_existing_masks(
+        #     datasetlist, target_labels
+        # )
 
-        logger.info(
-            f"Eligible volumes for segmentation: {len(eligible_volumes)}"
-        )
+        # logger.info(
+        #     f"Eligible volumes for segmentation: {len(eligible_volumes)}"
+        # )
         # chosen_path = "automatic"
         # eligible_volumes = datasetlist
         # target_labels = ["spleen"]
         # selected_auto_model= "segmentation_spleen" # hard test
 
         # whether it's automatic or interactive
-        if chosen_path == "automatic" and eligible_volumes:
-            selected_auto_model = plan["automatic_models"][0]
-            # selected_auto_model = "segmentation_spleen" # hard test
-            await run_automatic_pipeline(eligible_volumes, target_labels, selected_auto_model, self.segmentation_service)
+        # if chosen_path == "automatic" and eligible_volumes:
+        #     selected_auto_model = plan["automatic_models"][0]
+        #     # selected_auto_model = "segmentation_spleen" # hard test
+        #     await run_automatic_pipeline(eligible_volumes, target_labels, selected_auto_model, self.segmentation_service)
 
-        elif eligible_volumes:
-            await run_interactive_pipeline(self.UserFallbackAgent, self.UserProxyAgent, target_labels)
+        # elif eligible_volumes:
+        #     await run_interactive_pipeline(self.UserFallbackAgent, self.UserProxyAgent, target_labels)
             
         # finally download the volumes with its label masks 
-        await asyncio.sleep(120)  
-        await download_and_pair_volumes(
-                datasetlist, 
-                chosen_path=chosen_path, 
-                selected_auto_model_for_volume=plan["automatic_models"][0] if plan["automatic_models"] else None
-            )
+        # await asyncio.sleep(120)  
+        # await download_and_pair_volumes(
+        #         datasetlist, 
+        #         chosen_path=chosen_path, 
+        #         selected_auto_model_for_volume=plan["automatic_models"][0] if plan["automatic_models"] else None
+        #     )
 
         return {"status": "finished"}
     
@@ -131,7 +131,7 @@ async def test_module():
         await agent.initialize()
         
         current_file = Path(__file__)
-        config_path =os.path.join(current_file.parent.parent.parent, "memory", "workspace", "configurations.json")
+        config_path =os.path.join(current_file.parent.parent.parent.parent,"mas","memory", "workspace", "configurations.json")
         logger.info(f"Running with config: {config_path}")
         
         result = await agent.run(config_path)
