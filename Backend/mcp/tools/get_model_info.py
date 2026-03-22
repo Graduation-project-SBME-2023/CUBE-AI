@@ -52,4 +52,4 @@ async def get_model_info():
     )
     log_tool_state(finish_event)
 
-    return json.dumps(formatted)
+    return formatted
