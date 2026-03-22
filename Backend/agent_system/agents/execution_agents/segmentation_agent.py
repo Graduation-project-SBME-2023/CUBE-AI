@@ -18,9 +18,10 @@ from autogen_core import CancellationToken
 # from agent_system.descriptions.models_descriptions import RESULT_AGENT_DESCRIPTION
 # from agent_system.system_prompts.system_messages import RESULT_AGENT_SYSTEM_PROMPT
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
-from .segmentation_module import SegmentationModule
+# from .segmentation_module import SegmentationModule
 from autogen_core.tools import FunctionTool
 
+from .segmentation.module import SegmentationModule
 
 async def test_module(workspace_folder: str | None = None):
     """Test function for the SegmentationModule with return value
