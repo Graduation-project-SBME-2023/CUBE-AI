@@ -1,0 +1,11 @@
+{
+  "hypothesis": "i have hypothesis about spleen using radiomics features",
+  "image_dir": "D:\\GP_2026\\Dataset001_Neuroblastoma\\imagesTr",
+  "mask_dir": "D:\\GP_2026\\Dataset001_Neuroblastoma\\labelsTr",
+  "output_dir": "D:\\GP_2026\\Github\\agenticsystem\\OHIF-Standalone\\Backend\\mas\\memory\\workspace",
+  "targets_csv":"D:\\GP_2026\\Dataset001_Neuroblastoma\\outcome2.csv",
+  "target_column":"target",
+  "datasetlist": [
+  "1.2.826.0.1.3680043.8.498.12073285427930663774611907954116957406"
+  ]
+}
