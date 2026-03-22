@@ -69,6 +69,7 @@ class BackendClient:
                 response.raise_for_status()
                 return cls._parse_hypothesis(response.json())
             except httpx.HTTPError as e:
+                logger.info(e)
                 logger.error(f"Failed to create hypothesis for session {session_id}: {e}")
                 return None
 

@@ -485,8 +485,10 @@ class ClinicalPlanner:
                 refinement_prompt = (
                     f"User Feedback: {user_feedback}\n\n"
                     "Update the pipeline plan based on their feedback. "
+                    "If the user is only asking a question that doesn't change the plan, answer them thoroughly "
+                    "without updating the plan. "
                     "You can add, remove, or reorder steps. Update instructions as needed. "
-                    "Return JSON with updated 'steps', 'rationale', and 'message'."
+                    "Return JSON with updated 'steps' if updated, 'rationale', and 'message'."
                 )
 
                 response = await pipeline_architect.on_messages(
