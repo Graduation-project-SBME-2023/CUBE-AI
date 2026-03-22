@@ -22,6 +22,7 @@ Backend/test_label.py
 # Workspace files
 Backend/agent_system/workspace_*/
 Backend/agent_system/workspace/
+Backend/agents_workspace
 Backend/mas/memory/
 Backend/agent_system/agents/literature_review_agent/.knowledge_cache/
 Backend/agent_system/agents/literature_review_agent/literature_review_output
