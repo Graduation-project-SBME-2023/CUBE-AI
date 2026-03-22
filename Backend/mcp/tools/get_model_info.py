@@ -38,6 +38,8 @@ async def get_model_info():
         {
             "name": m["model_name"],
             "type": m["types"],  # ["automatic"], ["interactive"], or both
+            ### to do : get the dice score from the db and not from the response of the server
+            "dice_score": m.get("dice_score", 0.0), # here the dice must be from the db
             "supports": infer_capabilities(m),
             "description": m["description"]
         }
