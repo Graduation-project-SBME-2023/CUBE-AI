@@ -151,7 +151,7 @@ class SessionService:
 
             session.hypothesis = result
             logger.debug(f"[{session.session_id}] Hypothesis {action}d [id={result.id}]")
-            await self._ws_send("hypothesis", session.hypothesis, session_id=session.session_id)
+            await self._ws_send("hypothesis", session.hypothesis.model_dump(), session_id=session.session_id)
             return result
 
         except Exception as e:

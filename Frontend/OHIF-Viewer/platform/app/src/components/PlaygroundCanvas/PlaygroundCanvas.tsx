@@ -1,21 +1,19 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Play,
-  Pause,
-  RotateCcw,
-  Wifi,
-  WifiOff,
   Activity,
-  CheckCircle2,
-  MousePointer2,
-  Edit3,
-  Settings,
-  ZoomIn,
-  ZoomOut,
   AlertCircle,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
-  X,
+  Edit3,
+  MousePointer2,
+  Pause,
+  Play,
+  RotateCcw,
+  Settings,
+  Wifi,
+  WifiOff,
+  ZoomIn,
 } from 'lucide-react';
 
 import websocketService from '../../utils/WebsocketService';
@@ -23,7 +21,7 @@ import MiniFlow from './miniflow';
 import StartNode from './nodes/StartNode';
 import AgentNode from './nodes/AgentNode';
 import CustomEdge from './edges/CustomEdges';
-import { FlowNode, FlowEdge, ToolEvent } from './types';
+import { FlowEdge, FlowNode, ToolEvent } from './types';
 
 // Icon aliases
 const PlayIcon: any = Play;
@@ -73,6 +71,21 @@ const getDynamicLayout = (agentCount: number) => {
   };
 };
 
+function parseKeyValueString(str) {
+  const result = {};
+
+  // Matches: key='value' OR key="value"
+  const regex = /(\w+)\s*=\s*['"]([^'"]*)['"]/g;
+
+  let match;
+  while ((match = regex.exec(str)) !== null) {
+    const key = match[1];
+    result[key] = match[2];
+  }
+
+  return result;
+}
+
 const INITIAL_LAYOUT = getDynamicLayout(0);
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -121,6 +134,7 @@ export default function PlaygroundCanvas({
   const [isConnected, setIsConnected] = useState(websocketService.isConnected());
   const [pendingPrompt, setPendingPrompt] = useState<{ type: string; message: string } | null>(null);
   const [promptExpanded, setPromptExpanded] = useState(true);
+  const [hasPlan, setHasPlan] = useState(false);
 
   const isPausedRef = useRef(isPaused);
   const modeRef = useRef(mode);
@@ -173,6 +187,23 @@ export default function PlaygroundCanvas({
       }
       if (type === 'hypothesis') {
         // Update start node with full PICO hypothesis data
+        console.log('hypothesis recieved: ', payload);
+
+        let parsedPayload = payload;
+        if (typeof payload === 'string') {
+          try {
+            parsedPayload = JSON.parse(payload);
+          } catch (e) {
+            const kvParsed = parseKeyValueString(payload);
+
+            if (Object.keys(kvParsed).length > 0) {
+              parsedPayload = kvParsed;
+            }
+            else {
+              parsedPayload.title = 'Research Hypothesis';
+            }
+          }
+        }
         setNodes(prev =>
           prev.map(n =>
             n.type === 'start'
@@ -180,16 +211,16 @@ export default function PlaygroundCanvas({
                   ...n,
                   data: {
                     ...n.data,
-                    title: payload?.title || 'Research Hypothesis',
-                    description: payload?.hypothesis || payload?.title || n.data.description,
-                    population: payload?.population,
-                    intervention: payload?.intervention,
-                    comparison: payload?.comparison,
-                    outcome: payload?.outcome,
-                    hypothesis: payload?.hypothesis,
-                    question: payload?.question,
-                    clinical_context: payload?.clinical_context,
-                    state: payload?.state,
+                    title: parsedPayload?.title || 'Research Hypothesis',
+                    description: parsedPayload?.hypothesis || parsedPayload?.title || n.data.description,
+                    population: parsedPayload?.population,
+                    intervention: parsedPayload?.intervention,
+                    comparison: parsedPayload?.comparison,
+                    outcome: parsedPayload?.outcome,
+                    hypothesis: parsedPayload?.hypothesis,
+                    question: parsedPayload?.question,
+                    clinical_context: parsedPayload?.clinical_context,
+                    state: parsedPayload?.state,
                   },
                 }
               : n
@@ -339,6 +370,7 @@ export default function PlaygroundCanvas({
 
   // ─── Data handlers ──────────────────────────────────────────────────────────
   const applyBackendPlan = (planPayload: any) => {
+    setHasPlan(true);
     if (planPayload.nodes) {
       setNodes(planPayload.nodes);
       if (planPayload.edges) {
@@ -504,7 +536,7 @@ export default function PlaygroundCanvas({
 
   const resetNodeLogs = (prev: FlowNode[]) =>
     prev.map(n =>
-      n.type === 'agent'
+      n.type === 'agent' && n.id !== 'literature_review'
         ? { ...n, data: { ...n.data, status: 'pending', logs: [], isExpanded: false } }
         : n
     );
@@ -717,16 +749,32 @@ export default function PlaygroundCanvas({
 
         <div className="flex items-center gap-2">
           {mode === 'planning' && (
-            <button
-              onClick={startExecution}
-              className="flex items-center gap-2 rounded bg-[#348cfd] px-4 py-1.5 text-xs font-medium text-white shadow-lg transition-colors hover:bg-[#599fff]"
-            >
-              <Play
-                size={14}
-                fill="currentColor"
-              />{' '}
-              Execute
-            </button>
+            <div>
+              <button
+                onClick={startExecution}
+                disabled={!hasPlan}
+                className={`flex items-center gap-2 rounded px-4 py-1.5 text-xs font-medium text-white shadow-lg transition-colors
+                    ${hasPlan 
+                      ? 'bg-[#348cfd] hover:bg-[#599fff]' 
+                      : 'bg-gray-400 cursor-not-allowed opacity-60'}
+                    `}
+              >
+                <Play
+                  size={14}
+                  fill="currentColor"
+                />{' '}
+                Execute
+              </button>
+
+              {/* Tooltip */}
+              {!hasPlan && (
+                <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 w-max -translate-x-1/2
+                        rounded bg-black px-2 py-1 text-[10px] text-white opacity-0
+                        transition-opacity group-hover:opacity-100">
+                  Generate a plan first
+                </div>
+              )}
+            </div>
           )}
           {mode === 'executing' && (
             <>
