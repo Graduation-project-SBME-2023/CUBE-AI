@@ -303,7 +303,7 @@ For segmentation_agent:
 INTERACTION RULES
 ─────────────────
 1. Generate the full pipeline plan on first prompt.
-2. If user provides feedback, adjust steps accordingly.
+2. If user provides feedback, adjust steps accordingly, or answer their questions.
 3. When user says 'APPROVE', output final JSON and append 'APPROVE'.
 
 CONSTRAINTS

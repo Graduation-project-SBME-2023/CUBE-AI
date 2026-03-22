@@ -23,11 +23,11 @@ class FeatureExtractionAgent(AssistantAgent):
                         max_tool_iterations=max_tool_iterations)
     
     @classmethod
-    async def create(cls, model_client = None, workspace_folder = None, mcp_server_path='Backend/mcp/server.py'):
+    async def create(cls, model_client = None, workspace_folder = None, mcp_server_path='Backend/mcp/server.py', session_id = None):
         model_client = OllamaClient() if not model_client else model_client
 
         mcp_server = StdioServerParams(
-            command="python", args=[os.path.normpath(mcp_server_path)], env={"WORKSPACE_DIR": workspace_folder}, read_timeout_seconds=300
+            command="python", args=[os.path.normpath(mcp_server_path)], env={"WORKSPACE_DIR": workspace_folder, "SESSION_ID": session_id}, read_timeout_seconds=300
         )
         mcp_tools = await mcp_server_tools(mcp_server)
         desired_mcp_tools = ['radiomics_extract_features', 'radiomics_analyze_importance','scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',

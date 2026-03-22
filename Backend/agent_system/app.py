@@ -270,6 +270,7 @@ async def run_pipeline(session: Session) -> None:
         workspace_folder=workspace_folder,
         task_messages=task_messages,
         model_client=create_model_client_from_config(),
+        session_id=session.session_id,
     )
 
     print(graph_builder.get_participants())
