@@ -130,12 +130,12 @@ export default function ResearchPlayground() {
                 case 'segmentation_output':
                     setSegmentationData(payload);
                     break;
-                case 'features_output':
+                case 'REVIEW_REQUIRED':
                     // Backend sends tool="radiomic_extraction" or tool="feature_importance"
                     if (payload?.tool === 'feature_importance') {
-                        setImportanceData(payload);
+                        setImportanceData(payload.frontend_data || payload);
                     } else {
-                        setFeaturesData(payload);
+                        setFeaturesData(payload.frontend_data || payload);
                     }
                     break;
                 case 'modeling_output':

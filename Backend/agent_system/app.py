@@ -1,5 +1,6 @@
 import asyncio
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from teams.execution_team import BasicPipelineBuilder
 from autogen_agentchat.teams import GraphFlow
@@ -58,6 +59,10 @@ app = FastAPI(
     description="Receive a clinical hypothesis, run the Planner → Executor pipeline.",
     version="0.1.0",
 )
+# Mount the workspace folder so files can be accessed via URL
+# Adjust the path to point exactly to your workspace folder
+workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "workspace"))
+app.mount("/static", StaticFiles(directory=workspace_dir), name="static")
 
 app.add_middleware(
     CORSMiddleware,
