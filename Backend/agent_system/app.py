@@ -3,6 +3,8 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from teams.execution_team import BasicPipelineBuilder
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from autogen_agentchat.teams import GraphFlow
 from autogen_agentchat.messages import (
     ToolCallRequestEvent,
@@ -59,17 +61,26 @@ app = FastAPI(
     description="Receive a clinical hypothesis, run the Planner → Executor pipeline.",
     version="0.1.0",
 )
-# Mount the workspace folder so files can be accessed via URL
-# Adjust the path to point exactly to your workspace folder
-workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "workspace"))
-app.mount("/static", StaticFiles(directory=workspace_dir), name="static")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+class CoopCoepMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Cross-Origin-Resource-Policy"] = "cross-origin"
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+
+app.add_middleware(CoopCoepMiddleware)
+# Mount the workspace folder so files can be accessed via URL
+# Adjust the path to point exactly to your workspace folder
+workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "workspace"))
+app.mount("/static", StaticFiles(directory=workspace_dir), name="static")
+
+
 
 # Single shared service — the only stateful object routes need to know about
 session_service = SessionService(ws_manager=manager)
@@ -527,7 +538,15 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         logging.getLogger('HypothesisFlow').info('[HypothesisFlow][WS] Client disconnected')
         manager.disconnect(websocket)
-
+        
+@app.post("/ws-broadcast")
+async def ws_broadcast(data: dict):
+    await manager.send_ws_message(
+        data["type"],
+        data["payload"],
+        session_id=data.get("session_id")
+    )
+    return {"status": "ok"}
 
 # ----------------------------------------------------------------------
 # Entry point

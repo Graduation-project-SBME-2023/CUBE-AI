@@ -11,7 +11,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Dict, Any, Union, List
-from agent_system.socket_store import send_ws_message, wait_for_user_message
+# from agent_system.socket_store import send_ws_message, wait_for_user_message
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 from .planner import create_planner_agent, run_planner
 from .pipelines.automatic import run_automatic_pipeline
@@ -21,7 +21,7 @@ from .services import SegmentationService
 from .utils import exclude_existing_masks, download_and_pair_volumes, generate_gif_overlays
 from .logging_config import setup_logging
 import logging
-
+from .ws_client_sender import send_ws_message_remote, wait_for_user_message_remote
 
 setup_logging()
 
@@ -88,47 +88,47 @@ class SegmentationModule:
         datasetlist: List[str] = input_data["datasetlist"]
 
         #1. plan
-        plan = await run_planner(self.PlannerAgent,hypothesis)
-        logger.info(f"Planner plan: {plan}")
-        target_labels = plan["target_labels"]
-        chosen_path = plan["chosen_path"]
-        eligible_volumes = await exclude_existing_masks(
-            datasetlist, target_labels
-        )
+        # plan = await run_planner(self.PlannerAgent,hypothesis)
+        # logger.info(f"Planner plan: {plan}")
+        # target_labels = plan["target_labels"]
+        # chosen_path = plan["chosen_path"]
+        # eligible_volumes = await exclude_existing_masks(
+        #     datasetlist, target_labels
+        # )
         
-        # plan={'target_labels': ['prostate'], 'chosen_path': 'interactive', 'automatic_models': [], 'interactive_models': [], 'selected_model': 'spleen_nnunet', 'fallback_path': 'interactive', 'exclusion_rule': 'exclude_existing_masks_for_same_label'}
+        plan={'target_labels': ['prostate'], 'chosen_path': 'interactive', 'automatic_models': [], 'interactive_models': [], 'selected_model': 'text_prompting_prostate', 'fallback_path': 'interactive', 'exclusion_rule': 'exclude_existing_masks_for_same_label'}
 
-        logger.info(
-            f"Eligible volumes for segmentation: {len(eligible_volumes)}"
-        )
+        # logger.info(
+        #     f"Eligible volumes for segmentation: {len(eligible_volumes)}"
+        # )
         # chosen_path = "automatic"
         # eligible_volumes = datasetlist
         # target_labels = ["spleen"]
         # selected_auto_model= "segmentation_spleen" # hard test
 
         # whether it's automatic or interactive
-        if chosen_path == "automatic" and eligible_volumes:
-            selected_auto_model = plan["automatic_models"][0]
-            # selected_auto_model = "segmentation_spleen" # hard test
-            await run_automatic_pipeline(eligible_volumes, target_labels, selected_auto_model, self.segmentation_service)
+        # if chosen_path == "automatic" and eligible_volumes:
+        #     selected_auto_model = plan["automatic_models"][0]
+        #     # selected_auto_model = "segmentation_spleen" # hard test
+        #     await run_automatic_pipeline(eligible_volumes, target_labels, selected_auto_model, self.segmentation_service)
 
-        elif eligible_volumes:
-            await run_interactive_pipeline(self.UserFallbackAgent, self.UserProxyAgent, target_labels)
+        # elif eligible_volumes:
+        #     await run_interactive_pipeline(self.UserFallbackAgent, self.UserProxyAgent, target_labels)
             
-        finally download the volumes with its label masks 
-        await asyncio.sleep(120)  
+        # finally download the volumes with its label masks 
+        # await asyncio.sleep(120)  
         
-        downloaded_uids = await download_and_pair_volumes(
-                    datasetlist, 
-                    chosen_path=chosen_path, 
-                    selected_auto_model_for_volume=plan["automatic_models"][0] if plan["automatic_models"] else None
-        )
-        # downloaded_uids = ["1.2.826.0.1.3680043.8.498.12073285427930663774611907954116957406",
-        #                  "1.2.826.0.1.3680043.8.498.15136386566608168882487015520907740870",
-        #                  "1.2.826.0.1.3680043.8.498.39690361926593906696712695770248244325",
-        #                  "1.2.826.0.1.3680043.8.498.66527749693564068057441707562288227105",
-        #                  "1.2.826.0.1.3680043.8.498.90966193394235914543895670294526949480"
-        #                  ] 
+        # downloaded_uids = await download_and_pair_volumes(
+        #             datasetlist, 
+        #             chosen_path=chosen_path, 
+        #             selected_auto_model_for_volume=plan["automatic_models"][0] if plan["automatic_models"] else None
+        # )
+        downloaded_uids = ["1.2.826.0.1.3680043.8.498.12073285427930663774611907954116957406",
+                         "1.2.826.0.1.3680043.8.498.15136386566608168882487015520907740870",
+                         "1.2.826.0.1.3680043.8.498.39690361926593906696712695770248244325",
+                         "1.2.826.0.1.3680043.8.498.66527749693564068057441707562288227105",
+                         "1.2.826.0.1.3680043.8.498.90966193394235914543895670294526949480"
+                         ] 
         
 
         # Generate Overlays
@@ -143,6 +143,7 @@ class SegmentationModule:
                 generate_gif_overlays, 
                 FINAL_DIR_IMG, FINAL_DIR_LABEL, OVERLAYS_DIR, downloaded_uids
             )
+            logger.info(f"gif_volumes sample: {gif_volumes[:1]}")
 
         # Prepare data for the frontend
         frontend_data = {
@@ -154,15 +155,16 @@ class SegmentationModule:
 
         # sending data to fronted for review
         logger.info("Module sending data to frontend for review...")
-        await send_ws_message(
+        await send_ws_message_remote(
             msg_type="REVIEW_REQUIRED", 
             payload=frontend_data, 
             # session_id= # i must send it with the task manager session id
         )
         # wait untill fornt reply "save" to get the result
         logger.info("Module paused: Waiting for human review...")
-        user_response_raw = await wait_for_user_message(
-          # session_id= # i must send it with the task manager session id
+        user_response_raw = await wait_for_user_message_remote(
+            # session_id="your_session_id" 
+            
         )
 
         # The module wakes up! Here are the UIDs the user accepted:
