@@ -17,7 +17,7 @@ from pydicom.uid import generate_uid
 import nibabel as nib
 import logging
 logger = logging.getLogger(__name__)
-
+from PIL import Image
 # ===============================
 # MASK HELPERS
 # ===============================
@@ -312,10 +312,10 @@ async def download_and_pair_volumes(datasetlist, chosen_path, selected_auto_mode
     current_file = Path(__file__)
     current_dir = current_file.parent.parent.parent.parent
 
-    DOWNLOAD_DIR_IMG = os.path.join(current_dir, "apps", "radiology", "General_Data")
-    DOWNLOAD_DIR_LABEL = os.path.join(current_dir, "apps", "radiology", "Labels")
-    FINAL_DIR_IMG = os.path.join(current_dir, "agent_system", "workspace", "volumes")
-    FINAL_DIR_LABEL = os.path.join(current_dir, "agent_system", "workspace", "masks")
+    DOWNLOAD_DIR_IMG = os.path.join(current_dir, "workspace","General_Data")
+    DOWNLOAD_DIR_LABEL = os.path.join(current_dir, "workspace", "Labels")
+    FINAL_DIR_IMG = os.path.join(current_dir,"workspace", "volumes")
+    FINAL_DIR_LABEL = os.path.join(current_dir,"workspace", "masks")
 
     os.makedirs(DOWNLOAD_DIR_IMG, exist_ok=True)
     os.makedirs(DOWNLOAD_DIR_LABEL, exist_ok=True)
@@ -551,4 +551,86 @@ async def download_and_pair_volumes(datasetlist, chosen_path, selected_auto_mode
     
     logger.info("="*60)
     logger.info("DOWNLOAD AND PAIRING COMPLETED SUCCESSFULLY!")
+    return volumes_to_download
 
+
+def generate_gif_overlays(volumes_dir, masks_dir, output_dir, uids):
+    """
+    Generates animated GIF overlays slicing through the Z-axis where the mask is present.
+    Returns a list of dictionaries formatted for the React frontend.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    generated_volumes = []
+
+    for uid in uids:
+        vol_path = os.path.join(volumes_dir, f"{uid}.nii.gz")
+        mask_path = os.path.join(masks_dir, f"{uid}.nii.gz")
+        gif_filename = f"{uid}.gif"
+        gif_path = os.path.join(output_dir, gif_filename)
+
+        if not os.path.exists(vol_path) or not os.path.exists(mask_path):
+            logger.warning(f"Missing files for {uid}. Skipping GIF generation.")
+            continue
+
+        try:
+            # Load NIfTI data
+            vol_data = nib.load(vol_path).get_fdata()
+            mask_data = nib.load(mask_path).get_fdata()
+
+            # Find slices where mask is present (assuming Z is the 3rd axis)
+            z_indices = np.any(mask_data > 0, axis=(0, 1))
+            active_slices = np.where(z_indices)[0]
+
+            if len(active_slices) == 0:
+                logger.warning(f"Empty mask for {uid}.")
+                continue
+            
+            # Add a padding of 2 slices before and after the mask
+            start_z = max(0, active_slices[0] - 2)
+            end_z = min(vol_data.shape[2], active_slices[-1] + 3)
+
+            frames = []
+            for z in range(start_z, end_z):
+                v_slice = vol_data[:, :, z]
+                m_slice = mask_data[:, :, z]
+
+                # Normalize the medical image window to 0-255
+                v_min, v_max = np.percentile(v_slice, (1, 99)) 
+                if v_max - v_min == 0:
+                    v_norm = np.zeros_like(v_slice, dtype=np.uint8)
+                else:
+                    v_norm = np.clip((v_slice - v_min) / (v_max - v_min) * 255, 0, 255).astype(np.uint8)
+                
+                # Convert grayscale to RGB
+                rgb_frame = np.stack([v_norm]*3, axis=-1)
+
+                # Overlay the mask with the React UI's cyan color (#5acce6 -> RGB: 90, 204, 230)
+                mask_idx = m_slice > 0
+                rgb_frame[mask_idx] = [90, 204, 230]
+
+                # Rotate 90 degrees to make it upright (common for NIfTI axial views)
+                rgb_frame = np.rot90(rgb_frame)
+
+                frames.append(Image.fromarray(rgb_frame))
+
+            # Save as animated GIF (100ms per frame = 10 FPS)
+            if frames:
+                frames[0].save(
+                    gif_path,
+                    save_all=True,
+                    append_images=frames[1:],
+                    duration=100, 
+                    loop=0
+                )
+                
+                # Construct the object expected by the React frontend
+                generated_volumes.append({
+                    "seriesInstanceUid": uid,
+                    "gifUrl": f"http://localhost:8150/static/overlays/{gif_filename}" 
+                })
+                logger.info(f"Generated GIF for {uid}")
+
+        except Exception as e:
+            logger.error(f"Failed to generate GIF for {uid}: {e}", exc_info=True)
+
+    return generated_volumes
