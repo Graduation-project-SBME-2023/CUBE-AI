@@ -11,10 +11,11 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/mcp:/app/Backend/mcp
     environment:
       AGENTS_WORKSPACE_DIR: /app/agents_workspace
+      OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
     depends_on:
       - postgres
       - monailabel
-    restart: unless-stopped
+  #   restart: unless-stopped
 
   monailabel:
     # build:
