@@ -409,6 +409,7 @@ def compile_task_messages(
             hypothesis_summary=hyp_summary,
         )
         task_messages.append(task_msg)
+        step.task_message = task_msg
 
         logger.info(
             "  [%s] %s — context: kb=%d lit=%d meth=%d term=%d instr=%d chars",

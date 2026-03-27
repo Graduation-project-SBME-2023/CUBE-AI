@@ -19,9 +19,9 @@ async def get_patient(
     """
     async with httpx.AsyncClient() as client:
         payload = TextPayload(message='Checking patients\' demographics...')
-        start_event = ToolEvent('tool_started', 'study_population_planner_agent', 'text', payload)
+        start_event = ToolEvent('tool_started', 'text', payload)
         log_tool_state(start_event)
-        log_event = ToolEvent('tool_progress', 'study_population_planner_agent', 'text', payload)
+        log_event = ToolEvent('tool_progress', 'text', payload)
         log_tool_state(log_event)
         if patient_id is not None:
             response = await client.get(f"http://localhost:8000/patients/{patient_id}")
@@ -38,6 +38,6 @@ async def get_patient(
             return {"error": "Invalid JSON returned", "raw": response.text}
 
         payload = TextPayload(message='Checking patients\' demographics...')
-        finished_event = ToolEvent('tool_finished', 'study_population_planner_agent', 'text', payload)
+        finished_event = ToolEvent('tool_finished', 'text', payload)
         log_tool_state(finished_event)
         return {"data": data}

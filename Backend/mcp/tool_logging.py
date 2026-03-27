@@ -1,6 +1,5 @@
 from dataclasses import dataclass, asdict, field
 from typing import Literal, Union
-import json
 import time
 import requests
 import os
@@ -49,9 +48,9 @@ ContentPayload = Union[
 @dataclass
 class ToolEvent:
     event_type: EventType
-    source: str  # tool name or agent
     content_type: ContentType
     content: ContentPayload
+    source: str  = field(default=os.environ.get("AGENT_ID"))
     timestamp: float = field(default_factory=time.time)
     session_id: str = None
 

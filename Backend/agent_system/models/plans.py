@@ -19,22 +19,6 @@ class ClinicalHypothesis(BaseModel):
     message: Optional[str] = None
 
 
-class StudyStep(BaseModel):
-    title: str
-    description: str
-    module: Optional[str] = None
-    logs: List[str] = Field(default_factory=list)
-    status: str = "pending"
-
-
-class StudyPlan(BaseModel):
-    id: str = ""
-    hypothesis_id: str = ""
-    study_goal: str = ""
-    steps: List[StudyStep] = Field(default_factory=list)
-    state: str = "not_confirmed"
-
-
 # --- CONTEXT AUGMENTATION & TASK MESSAGES ---
 
 class ContextAugmentation(BaseModel):
@@ -58,10 +42,26 @@ class TaskMessage(BaseModel):
     payload: Dict[str, Any] = Field(default_factory=dict)  # Agent-specific parameters
 
 
+class StudyStep(BaseModel):
+    title: str
+    description: str
+    module: Optional[str] = None
+    task_message: TaskMessage = None
+    logs: List[str] = Field(default_factory=list)
+    status: str = "pending"
+
+
+class StudyPlan(BaseModel):
+    id: str = ""
+    hypothesis_id: str = ""
+    study_goal: str = ""
+    steps: List[StudyStep] = Field(default_factory=list)
+    state: str = "not_confirmed"
+
+
 class PlannerState(BaseModel):
     hypothesis: ClinicalHypothesis = Field(default_factory=ClinicalHypothesis)
     plan: StudyPlan = Field(default_factory=StudyPlan)
-    task_messages: List[TaskMessage] = Field(default_factory=list)
     knowledge_base: str = ""  # Full knowledge base text (cached)
     sources_guide: str = ""  # Sources guide text (cached)
     knowledge_sections: Dict[str, str] = Field(default_factory=dict)  # Structured sections from knowledge builder

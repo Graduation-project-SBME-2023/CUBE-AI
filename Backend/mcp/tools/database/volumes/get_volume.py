@@ -19,9 +19,9 @@ async def get_volume(
     """
     async with httpx.AsyncClient() as client:
         payload = TextPayload(message='Checking available study descriptions...')
-        start_event = ToolEvent('tool_started', 'study_population_planner_agent', 'text', payload)
+        start_event = ToolEvent('tool_started', 'text', payload)
         log_tool_state(start_event)
-        log_event = ToolEvent('tool_progress', 'study_population_planner_agent', 'text', payload)
+        log_event = ToolEvent('tool_progress', 'text', payload)
         log_tool_state(log_event)
         if volume_series_instance_uid is not None:
             response = await client.get(f"http://localhost:8000/volumes/{volume_series_instance_uid}")
@@ -38,7 +38,7 @@ async def get_volume(
             return {"error": "Invalid JSON returned", "raw": response.text}
 
         payload = TextPayload(message='Checking available study descriptions...')
-        finished_event = ToolEvent('tool_finished', 'study_population_planner_agent', 'text', payload)
+        finished_event = ToolEvent('tool_finished', 'text', payload)
         log_tool_state(finished_event)
         return {"data": data}
     

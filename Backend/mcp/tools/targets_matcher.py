@@ -22,8 +22,7 @@ async def generate_targets(
     payload = TextPayload(message='assigning labels')
     start_event = ToolEvent(
         event_type='tool_started',
-        source="study_population_planner_agent",
-        content_type='text' ,
+        content_type='text',
         content=payload
     )
     log_tool_state(start_event)
@@ -49,10 +48,9 @@ async def generate_targets(
 
     payload = TextPayload(message="Fetching labels...")
     finish_event = ToolEvent(
-    event_type='tool_finished',
-    source='study_population_planner_agent',
-    content_type='text',
-    content=payload
+        event_type='tool_finished',
+        content_type='text',
+        content=payload
     )
     log_tool_state(finish_event)
 
