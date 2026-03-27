@@ -289,7 +289,8 @@ async def run_pipeline(session: Session) -> None:
 
     # Build the pipeline prompt: use structured task messages if available,
     # otherwise fall back to the raw hypothesis string
-    task_prompt = graph_builder.get_pipeline_prompt(fallback_hypothesis=hypothesis)
+    # task_prompt = graph_builder.get_pipeline_prompt(fallback_hypothesis=hypothesis)
+    task_prompt = hypothesis
     pipeline_logger.info(f"Pipeline prompt length: {len(task_prompt)} chars")
 
     pipeline_logger.info("Starting execution...")

@@ -498,7 +498,6 @@ class ClinicalPlanner:
                     sources_guide=sources_guide,
                     pipeline_instructions=self._pipeline_instructions,
                 )
-                self.state.task_messages = task_messages
                 await self._save_state()
 
                 await self._send("msg", f"Generated {len(task_messages)} context-enriched task messages.")

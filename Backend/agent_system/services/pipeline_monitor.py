@@ -57,6 +57,8 @@ class PipelineMonitor:
             self._last_active = source
             await self._broadcast()
 
+        await self.on_agent_active(source)
+
     async def on_pipeline_complete(self):
         """Mark the last running agent and pipeline as done."""
         if self._last_active:

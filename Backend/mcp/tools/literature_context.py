@@ -12,6 +12,7 @@ import json
 import os
 
 from . import mcp
+from tool_logging import ToolEvent, log_tool_state, TextPayload
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -47,8 +48,17 @@ async def read_literature_context() -> str:
         str: JSON with 'knowledge_base', 'sources_guide', and 'hypothesis' fields.
     """
     lit_path = os.path.join(WORKSPACE_DIR, "literature_context.json")
+
+    payload = TextPayload(message=f'Reading literature context.')
+    start_event = ToolEvent('tool_started', 'text', payload)
+    log_tool_state(start_event)
+    finished_event = ToolEvent('tool_finished', 'text', payload)
+    log_tool_state(finished_event)
     
     if not os.path.exists(lit_path):
+        payload = TextPayload(message=f'Literature Review Context not found.')
+        failed_event = ToolEvent('error', 'text', payload)
+        log_tool_state(failed_event)
         return json.dumps({
             "status": "not_available",
             "message": "No literature context found. The planner may not have run the literature review phase.",
@@ -57,6 +67,10 @@ async def read_literature_context() -> str:
     try:
         with open(lit_path, "r", encoding="utf-8") as f:
             data = json.load(f)
+
+        payload = TextPayload(message=f'Literature context successfully retrieved.')
+        finished_event = ToolEvent('tool_finished', 'text', payload)
+        log_tool_state(finished_event)
         
         return json.dumps({
             "status": "ok",
@@ -65,6 +79,9 @@ async def read_literature_context() -> str:
             "hypothesis": data.get("hypothesis", {}),
         }, indent=2)
     except Exception as e:
+        payload = TextPayload(message=f'Failed to read literature context.')
+        failed_event = ToolEvent('error', 'text', payload)
+        log_tool_state(failed_event)
         return json.dumps({
             "status": "error",
             "message": f"Failed to read literature context: {str(e)}",

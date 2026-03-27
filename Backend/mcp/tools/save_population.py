@@ -29,9 +29,9 @@ async def save_final_output(data: dict):
     study_count = len(data['datasetlist'])
 
     payload = TextPayload(message=f'Selected {study_count} volumes from {patient_count} patients.')
-    start_event = ToolEvent('tool_started', 'study_population_planner_agent', 'text', payload)
+    start_event = ToolEvent('tool_started', 'text', payload)
     log_tool_state(start_event)
-    finished_event = ToolEvent('tool_finished', 'study_population_planner_agent', 'text', payload)
+    finished_event = ToolEvent('tool_finished', 'text', payload)
     log_tool_state(finished_event)
 
     # Ensure it's serializable

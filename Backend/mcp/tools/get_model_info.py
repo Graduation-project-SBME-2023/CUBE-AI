@@ -16,7 +16,6 @@ async def get_model_info():
     payload = TextPayload(message="Fetching models info")
     start_event = ToolEvent(
         event_type='tool_started',
-        source='segmentation_agent',
         content_type='text',
         content=payload
     )
@@ -46,7 +45,6 @@ async def get_model_info():
     payload = TextPayload(message="Models Fetched")
     finish_event = ToolEvent(
         event_type='tool_finished',
-        source='segmentation_agent',
         content_type='text',
         content=payload
     )
