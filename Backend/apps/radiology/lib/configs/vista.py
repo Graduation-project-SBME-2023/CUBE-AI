@@ -150,7 +150,7 @@ class VISTAPOINT3D(TaskConfig):
 
         if not os.path.exists(self.path[0]):
             # Google Drive file ID (extracted from the URL)
-            file_id = "1wg5z5eBnci3YMMbE3tMGHMQwt429hnsW"
+            file_id = "1L7rNfTIliBpT10Ty8p2GB2GbuQSBY9ib"
 
             # Download the file
             url = f"https://drive.google.com/uc?id={file_id}"
