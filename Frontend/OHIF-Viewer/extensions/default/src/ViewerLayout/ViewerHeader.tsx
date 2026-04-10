@@ -118,7 +118,14 @@ function ViewerHeader({ hotkeysManager, extensionManager, servicesManager }) {
       WhiteLabeling={appConfig.whiteLabeling}
     >
       <ErrorBoundary context="Primary Toolbar">
-        <div className="relative flex justify-center">
+        <div className="relative flex items-center justify-center gap-3">
+          <button
+            className="rounded-md border border-[#2b4f66] bg-[#0f1f2e] px-3 py-1 text-sm font-semibold text-[#5acce6] transition-colors hover:border-[#5acce6] hover:bg-[#123149]"
+            onClick={() => navigate('/agentic-home')}
+            title="Open Research Playground"
+          >
+            Research Playground
+          </button>
           <Toolbar servicesManager={servicesManager} />
         </div>
       </ErrorBoundary>

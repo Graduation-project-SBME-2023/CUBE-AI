@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "ignoreDeprecations": "6.0",
     "baseUrl": "./",
     "checkJs": true,
     // Ensure that Babel can safely transpile files in the TypeScript project
