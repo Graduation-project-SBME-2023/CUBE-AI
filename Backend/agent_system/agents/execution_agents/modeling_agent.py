@@ -33,7 +33,7 @@ class ModelingAgent(AssistantAgent):
     async def create(cls, model_client=None, workspace_folder=None, mcp_server_path='Backend/mcp/server.py'):
         model_client = OllamaClient() if not model_client else model_client
         mcp_server = StdioServerParams(
-            command="python", args=[os.path.normpath(mcp_server_path)], env={"WORKSPACE_DIR": workspace_folder}, read_timeout_seconds=300
+            command=sys.executable, args=[os.path.normpath(mcp_server_path)], env={"WORKSPACE_DIR": workspace_folder}, read_timeout_seconds=300
         )
         mcp_tools = await mcp_server_tools(mcp_server)
         desired_mcp_tools = ['pycaret_train_classifier', 'pycaret_run_inference', 'scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',
