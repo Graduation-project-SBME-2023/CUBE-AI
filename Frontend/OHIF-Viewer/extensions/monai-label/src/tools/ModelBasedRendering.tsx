@@ -85,16 +85,25 @@ const MODE_CONFIG = {
     row1: { box: false, pos: true, neg: true, reset: true, objectId: false, color: false },
     row2: { resetAll: false },
     row3: { addObject: false },
+    textPrompt: false,
   },
   nninteractive: {
     row1: { box: false, pos: true, neg: true, reset: true, objectId: false, color: false },
     row2: { resetAll: true },
     row3: { addObject: false },
+    textPrompt: false,
   },
   sam: {
     row1: { box: true, pos: true, neg: true, reset: false, objectId: true, color: true },
     row2: { resetAll: false },
     row3: { addObject: true },
+    textPrompt: false,
+  },
+  voxtell: {
+    row1: { box: false, pos: false, neg: false, reset: false, objectId: false, color: false },
+    row2: { resetAll: false },
+    row3: { addObject: false },
+    textPrompt: true,
   },
 };
 
@@ -105,6 +114,7 @@ export default class ModelBasedRendering extends Component {
       { id: 1, color: "#ff0000" } // start with one object
     ],
     selectedId: 1,
+    textPrompt: '',
   };
   rgbaToHex=(r, g, b, a = 255) =>{
     return (
@@ -237,6 +247,39 @@ renderRow1(config = {}) {
     );
   }
 
+  handleTextPromptChange = (e) => {
+    const textPrompt = e.target.value;
+    this.setState({ textPrompt });
+    if (this.props.onTextPromptChange) {
+      this.props.onTextPromptChange(textPrompt);
+    }
+  };
+
+  renderTextPromptInput(config = {}) {
+    if (!config.textPrompt) return null;
+    return (
+      <div style={{ marginBottom: "10px" }}>
+        <label style={{ display: "block", marginBottom: "6px", fontWeight: "bold", fontSize: "14px" }}>
+          What do you want to segment?
+        </label>
+        <input
+          type="text"
+          placeholder="e.g., spleen, liver, kidney"
+          value={this.state.textPrompt}
+          onChange={this.handleTextPromptChange}
+          style={{
+            width: "100%",
+            padding: "8px",
+            fontSize: "14px",
+            border: "2px solid #929295ff",
+            borderRadius: "6px",
+            boxSizing: "border-box",
+          }}
+        />
+      </div>
+    );
+  }
+
   render() {
     const { mode } = this.props;
     const config = MODE_CONFIG[mode] || { row1: {}, row2: {}, row3: {} };
@@ -247,6 +290,9 @@ renderRow1(config = {}) {
 
     return (
       <div style={{ padding: "10px" }}>
+        {/* Text Prompt Input */}
+        {this.renderTextPromptInput(config)}
+
         {/* Row 1 */}
         {this.renderRow1(config.row1)}
 

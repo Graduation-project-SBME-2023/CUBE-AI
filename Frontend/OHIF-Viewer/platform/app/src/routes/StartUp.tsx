@@ -156,7 +156,7 @@ const CubeStartUp = () => {
                     <div onMouseEnter={() => setHovered('standard')} onMouseLeave={() => setHovered(null)}>
                       <Card
                         title="Standard Pipeline"
-                        description="Execute fixed, pre-defined research protocols. Ideal for data preprocessing, standard validation, and deterministic analysis."
+                        description="View and manage your medical imaging cases, extract regions of interest, build your datasets faster through interactive AI assisted segmentation, and build your custom AI models with ease."
                         icon={<LayoutIcon size={28} className={`${hovered === 'standard' ? 'text-white' : 'text-[#5acce6]'}`} />}
                         ctaText="Enter Worklist"
                         onClick={() => handleModeSelection('standard')}
@@ -169,12 +169,12 @@ const CubeStartUp = () => {
                     <div onMouseEnter={() => setHovered('agentic')} onMouseLeave={() => setHovered(null)} style={hovered === 'agentic' ? { boxShadow: '0 20px 40px rgba(90,204,230,0.12)' } : undefined}>
                       <Card
                         title="Agentic Researcher"
-                        description="Delegate complex tasks to CUBE. It autonomously formulates plans, analyzes findings, and adapts the study workflow dynamically."
-                        icon={<div className="relative w-full h-full flex items-center justify-center"><span className="flex h-3 w-3 relative mr-3"><span className={hovered === 'agentic' ? 'animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-[#5acce6]' : 'hidden'}></span><span className={hovered === 'agentic' ? 'relative inline-flex rounded-full h-3 w-3 bg-[#5acce6]' : 'relative inline-flex rounded-full h-3 w-3 bg-[#566a84]'}></span></span><BotIcon size={28} className={`${hovered === 'agentic' ? 'text-[#023a7d]' : 'text-[#5acce6]'}`} /></div>}
+                        description="Perform end-to-end research tasks through natural language instructions, leveraging the full capabilities of CUBE's AI agents to assist you in data analysis, hypothesis testing, and iterative experimentation."
+                        icon={<BotIcon size={28} className={`${hovered === 'agentic' ? 'text-[#023a7d]' : 'text-[#5acce6]'}`} />}
                         ctaText="Launch Playground"
                         onClick={() => handleModeSelection('agentic')}
                         variant="agentic"
-                        className={`${hovered === 'agentic' ? 'scale-105 z-10 border-[#5acce6] shadow-[#5acce6]/12' : hovered === 'standard' ? 'bg-[#151a1f]/50 border-[#3c5d80] opacity-50 scale-95 blur-[1px]' : 'border-[#3c5d80] hover:border-[#5acce6]'}`}
+                        className={`${hovered === 'agentic' ? 'scale-100 z-10 border-[#5acce6] shadow-[#5acce6]/12' : hovered === 'standard' ? 'bg-[#151a1f]/50 border-[#3c5d80] opacity-50 scale-95 blur-[1px]' : 'border-[#3c5d80] hover:border-[#5acce6]'}`}
                       />
                     </div>
                 </div>

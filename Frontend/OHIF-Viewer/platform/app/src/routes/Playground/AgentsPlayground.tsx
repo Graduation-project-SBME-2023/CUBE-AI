@@ -20,7 +20,7 @@ import Button from '../../components/ui/Button';
 import { useLocation } from 'react-router-dom';
 
 // Components
-import PlaygroundCanvas from '../../components/PlaygroundCanvas';
+import PlaygroundCanvas from '../../components/PlaygroundCanvas/PlaygroundCanvas';
 import AgentRegistry from '../../components/PlaygroundCanvas/AgentRegistry';
 import ChatSidebar from '../../components/PlaygroundCanvas/ChatSidebar';
 
@@ -62,7 +62,6 @@ export default function AgentsPlayground() {
             <span className="text-xs text-gray-500">/</span>
             <span className="text-xs font-medium text-gray-300">Workspace</span>
           </div>
-
           {/* Hypothesis Context */}
           {hypothesis && (
             <>

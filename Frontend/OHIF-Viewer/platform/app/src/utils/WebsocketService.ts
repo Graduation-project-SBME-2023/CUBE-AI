@@ -68,6 +68,14 @@ class WebSocketService {
     }
   }
 
+  /**
+   * Dispatch a message locally to all subscribers without sending it to the server.
+   * Useful for cross-component communication (e.g., notification panel → chat sidebar).
+   */
+  dispatchLocal(data: any) {
+    this.listeners.forEach((cb) => cb(data));
+  }
+
   subscribe(callback: (data: any) => void) {
     this.listeners.add(callback);
     return () => this.listeners.delete(callback);
