@@ -712,20 +712,7 @@ export default class MonaiLabelPanel extends Component {
                 getActiveViewportInfo={this.getActiveViewportInfo}
                 commandsManager={this.props.commandsManager}
               />
-              <AgentChat
-                ref={this.actions['AgentChat']}
-                tabIndex={3}
-                activeTab={this.state.activeTab}
-                info={this.state.info}
-                servicesManager={this.props.servicesManager}
-                client={this.client}
-                notification={this.notification}
-                updateView={this.updateView}
-                onSelectActionTab={this.onSelectActionTab}
-                onOptionsConfig={this.onOptionsConfig}
-                getActiveViewportInfo={this.getActiveViewportInfo}
-                commandsManager={this.props.commandsManager}
-              />
+
 
               {/* <SmartEdit
               ref={this.actions['smartedit']}

@@ -1,0 +1,205 @@
+{
+  "templates": {
+    "ieee_research_paper": {
+      "description": "Full IEEE conference-style research paper (6-10 pages). Best for comprehensive studies with complete pipeline results, large cohorts, and rigorous methodology.",
+      "use_when": "The study has a complete pipeline run with segmentation, feature extraction, modeling, and result analysis — AND the cohort size is >= 30 patients — AND model performance is noteworthy (AUC > 0.7).",
+      "template_file": "ieee_research_paper.tex",
+      "placeholders": {
+        "TITLE": {
+          "description": "Paper title derived from the hypothesis",
+          "source_agents": ["population_planner"],
+          "source_fields": ["inputs.hypothesis"]
+        },
+        "ABSTRACT": {
+          "description": "200-300 word structured abstract: Background, Purpose, Methods, Results, Conclusion",
+          "source_agents": ["population_planner", "feature_extractor", "modeling_agent", "result_agent"]
+        },
+        "KEYWORDS": {
+          "description": "5-8 comma-separated keywords from hypothesis, modality, and disease"
+        },
+        "INTRODUCTION": {
+          "description": "2-3 paragraphs: clinical problem, radiomics background, study objective",
+          "source_agents": ["population_planner", "result_agent"],
+          "instructions": "Use literature findings from context_augmentation for clinical context."
+        },
+        "RELATED_WORK": {
+          "description": "Review of relevant literature and prior studies",
+          "source_agents": ["result_agent"],
+          "instructions": "Use the literature_findings from the context_augmentation data and the knowledge base. Reference key papers, consensus points, and research gaps identified by the literature review agent. Cite benchmark performance from prior studies."
+        },
+        "STUDY_POPULATION": {
+          "description": "Population selection methodology and cohort demographics",
+          "source_agents": ["population_planner"],
+          "source_fields": ["outputs.metrics.cohort_size", "outputs.metrics.modality", "outputs.metrics.age_range", "outputs.metrics.gender_distribution", "outputs.metrics.inclusion_criteria", "outputs.metrics.exclusion_criteria"]
+        },
+        "SEGMENTATION_METHODS": {
+          "description": "ROI segmentation approach and tools used",
+          "source_agents": ["segmentation_agent"],
+          "source_fields": ["outputs.metrics.segmentation_method", "outputs.metrics.volumes_segmented"]
+        },
+        "FEATURE_EXTRACTION_METHODS": {
+          "description": "Radiomics feature extraction and selection methodology",
+          "source_agents": ["feature_extractor"],
+          "source_fields": ["outputs.metrics.feature_classes", "outputs.metrics.total_features_extracted", "outputs.metrics.feature_selection_method"]
+        },
+        "MODELING_METHODS": {
+          "description": "Machine learning modeling approach, validation strategy",
+          "source_agents": ["modeling_agent"],
+          "source_fields": ["outputs.metrics.model_types", "outputs.metrics.validation_method"]
+        },
+        "POPULATION_RESULTS": {
+          "description": "Cohort demographics table (LaTeX tabular)",
+          "source_agents": ["population_planner"]
+        },
+        "FEATURE_RESULTS": {
+          "description": "Top features table with importance scores",
+          "source_agents": ["feature_extractor"],
+          "source_fields": ["outputs.metrics.top_features"]
+        },
+        "MODEL_PERFORMANCE": {
+          "description": "Model comparison table with all metrics",
+          "source_agents": ["modeling_agent"],
+          "source_fields": ["outputs.metrics"]
+        },
+        "HYPOTHESIS_EVALUATION": {
+          "description": "Accept/reject decision with statistical justification",
+          "source_agents": ["result_agent"],
+          "source_fields": ["outputs.metrics.decision", "outputs.metrics.justification"]
+        },
+        "DISCUSSION": {
+          "description": "Interpretation of results, comparison with literature, clinical implications",
+          "source_agents": ["result_agent", "modeling_agent"]
+        },
+        "LIMITATIONS": {
+          "description": "Study limitations compiled from all agent warnings",
+          "source_agents": ["population_planner", "feature_extractor", "modeling_agent", "result_agent"],
+          "source_fields": ["warnings"]
+        },
+        "CONCLUSION": {
+          "description": "2-3 sentences: key finding, hypothesis decision, future directions"
+        },
+        "REFERENCES": {
+          "description": "IEEE-format bibliography using \\bibitem entries",
+          "instructions": "Include references to PyRadiomics, ML methods used, and key domain papers from the literature review."
+        }
+      }
+    },
+    "short_study": {
+      "description": "Concise study report (3-5 pages). Combines methods into a single section, includes a compact model comparison table.",
+      "use_when": "The study has complete results but doesn't need the full depth of an IEEE paper — OR the cohort is moderate (15-30 patients) — OR this is meant as a preliminary or pilot study report.",
+      "template_file": "short_study.tex",
+      "placeholders": {
+        "TITLE": {
+          "description": "Paper title from hypothesis",
+          "source_agents": ["population_planner"]
+        },
+        "ABSTRACT": {
+          "description": "150-200 word abstract covering objective, methods, key results, conclusion",
+          "source_agents": ["population_planner", "modeling_agent", "result_agent"]
+        },
+        "KEYWORDS": {
+          "description": "4-6 comma-separated keywords"
+        },
+        "INTRODUCTION": {
+          "description": "1-2 paragraphs: clinical context and study objective. Use literature findings for background.",
+          "source_agents": ["population_planner"]
+        },
+        "STUDY_POPULATION": {
+          "description": "Brief cohort description: size, demographics, inclusion criteria",
+          "source_agents": ["population_planner"],
+          "source_fields": ["outputs.metrics"]
+        },
+        "IMAGE_ANALYSIS_PIPELINE": {
+          "description": "Combined segmentation description",
+          "source_agents": ["segmentation_agent"],
+          "source_fields": ["outputs.metrics"]
+        },
+        "FEATURE_MODELING": {
+          "description": "Combined feature extraction and modeling methodology in one subsection",
+          "source_agents": ["feature_extractor", "modeling_agent"],
+          "source_fields": ["outputs.metrics"]
+        },
+        "RESULTS_SUMMARY": {
+          "description": "1-2 paragraphs of narrative results before the table",
+          "source_agents": ["modeling_agent", "result_agent"]
+        },
+        "MODEL_COMPARISON_TABLE": {
+          "description": "Table rows: Model & Accuracy & AUC & Sensitivity & Specificity",
+          "source_agents": ["modeling_agent"],
+          "source_fields": ["outputs.metrics"],
+          "instructions": "Format each model as a LaTeX table row, e.g.: Random Forest & 0.92 & 0.89 & 0.91 & 0.93 \\\\"
+        },
+        "KEY_FEATURES": {
+          "description": "Brief list of top discriminative features",
+          "source_agents": ["feature_extractor"],
+          "source_fields": ["outputs.metrics.top_features"]
+        },
+        "HYPOTHESIS_DECISION": {
+          "description": "Accept/reject with brief justification",
+          "source_agents": ["result_agent"],
+          "source_fields": ["outputs.metrics.decision", "outputs.metrics.justification"]
+        },
+        "DISCUSSION_LIMITATIONS": {
+          "description": "Combined discussion and limitations (1-2 paragraphs)",
+          "source_agents": ["result_agent"],
+          "source_fields": ["warnings"]
+        },
+        "CONCLUSION": {
+          "description": "2-3 sentences summarizing key finding"
+        },
+        "REFERENCES": {
+          "description": "Brief reference list"
+        }
+      }
+    },
+    "one_page_abstract": {
+      "description": "One-page structured abstract with key metrics table. Ideal for quick summaries, conference submissions, or when only partial results are available.",
+      "use_when": "The user asked for a quick summary — OR only partial pipeline results are available — OR the cohort is small (< 15 patients) — OR this is an intermediate progress report.",
+      "template_file": "one_page_abstract.tex",
+      "placeholders": {
+        "TITLE": {
+          "description": "Study title from hypothesis",
+          "source_agents": ["population_planner"]
+        },
+        "BACKGROUND": {
+          "description": "2-3 sentences on clinical context and motivation",
+          "source_agents": ["population_planner"]
+        },
+        "OBJECTIVE": {
+          "description": "1-2 sentences stating the study aim",
+          "source_agents": ["population_planner"]
+        },
+        "METHODS": {
+          "description": "3-4 sentences covering: cohort, segmentation, features, modeling",
+          "source_agents": ["population_planner", "segmentation_agent", "feature_extractor", "modeling_agent"]
+        },
+        "RESULTS": {
+          "description": "2-3 sentences with key numeric results and hypothesis decision",
+          "source_agents": ["modeling_agent", "result_agent"]
+        },
+        "CONCLUSION": {
+          "description": "1-2 sentences: main finding and clinical relevance",
+          "source_agents": ["result_agent"]
+        },
+        "KEY_METRICS_TABLE": {
+          "description": "LaTeX table rows: Metric & Value pairs",
+          "source_agents": ["population_planner", "modeling_agent", "result_agent"],
+          "instructions": "Format as LaTeX rows, e.g.: Cohort Size & 45 \\\\ Best Model & Random Forest \\\\ AUC & 0.89 \\\\ Accuracy & 0.92 \\\\ Decision & Accepted \\\\"
+        },
+        "KEYWORDS": {
+          "description": "3-5 comma-separated keywords"
+        }
+      }
+    }
+  },
+  "selection_criteria": {
+    "description": "The reporter agent should select the template based on these criteria, evaluated in order:",
+    "rules": [
+      "1. If pipeline_status is 'has_failures' or agent_count < 4, use 'one_page_abstract' (partial results only warrant a summary)",
+      "2. If any agent has status 'partial' or cohort_size < 15, use 'one_page_abstract'",
+      "3. If cohort_size >= 30 AND all agents completed AND model AUC > 0.7, use 'ieee_research_paper'",
+      "4. Otherwise, use 'short_study' as the default balanced option"
+    ]
+  },
+  "filling_instructions": "For each placeholder marked with <<PLACEHOLDER_NAME>> in the chosen template, replace it with appropriate LaTeX content. Use the source_agents and source_fields to locate data in agent output JSON files. Escape LaTeX special characters: % -> \\%, & -> \\&, _ -> \\_. Tables should use booktabs (\\toprule, \\midrule, \\bottomrule)."
+}

@@ -138,6 +138,9 @@ module.exports = (env, argv, { SRC_DIR, ENTRY }) => {
       },
       // Which directories to search when resolving modules
       modules: [
+        // Keep default Node/Webpack behavior so nested dependencies resolve correctly
+        // (for example: package-local node_modules inside transitive deps).
+        'node_modules',
         // Modules specific to this package
         path.resolve(__dirname, '../node_modules'),
         // Hoisted Yarn Workspace Modules
@@ -147,7 +150,7 @@ module.exports = (env, argv, { SRC_DIR, ENTRY }) => {
         SRC_DIR,
       ],
       // Attempt to resolve these extensions in order.
-      extensions: ['.js', '.jsx', '.json', '.ts', '.tsx', '*'],
+      extensions: ['.mjs', '.js', '.jsx', '.json', '.ts', '.tsx'],
       // symlinked resources are resolved to their real path, not their symlinked location
       symlinks: true,
       fallback: {
