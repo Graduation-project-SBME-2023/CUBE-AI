@@ -33,7 +33,7 @@ class ResultReporterAgent(AssistantAgent):
     async def create(cls, model_client = None, workspace_folder=None):
         model_client = OllamaClient() if not model_client else model_client
         mcp_server = StdioServerParams(
-            command="python", args=["Backend/mcp/server.py"], env={"WORKSPACE_DIR": workspace_folder}
+            command=sys.executable, args=["Backend/mcp/server.py"], env={"WORKSPACE_DIR": workspace_folder}
             )
         mcp_tools = await mcp_server_tools(mcp_server)
         desired_tools = ['get_modeling_results', 'scratchpad_register_agent', 'scratchpad_write_note',
