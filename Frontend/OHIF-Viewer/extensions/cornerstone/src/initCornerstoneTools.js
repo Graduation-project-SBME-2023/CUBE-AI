@@ -33,39 +33,50 @@ import {
 import CalibrationLineTool from './tools/CalibrationLineTool';
 import ImageOverlayViewerTool from './tools/ImageOverlayViewerTool';
 
+function safeAddTool(tool) {
+  try {
+    addTool(tool);
+  } catch (error) {
+    const message = error?.message || '';
+    if (!message.includes('has already been added globally')) {
+      throw error;
+    }
+  }
+}
+
 export default function initCornerstoneTools(configuration = {}) {
   CrosshairsTool.isAnnotation = false;
   ReferenceLinesTool.isAnnotation = false;
 
   init(configuration);
-  addTool(PanTool);
-  addTool(WindowLevelTool);
-  addTool(StackScrollMouseWheelTool);
-  addTool(StackScrollTool);
-  addTool(ZoomTool);
-  addTool(ProbeTool);
-  addTool(VolumeRotateMouseWheelTool);
-  addTool(MIPJumpToClickTool);
-  addTool(LengthTool);
-  addTool(RectangleROITool);
-  addTool(EllipticalROITool);
-  addTool(CircleROITool);
-  addTool(BidirectionalTool);
-  addTool(ArrowAnnotateTool);
-  addTool(DragProbeTool);
-  addTool(AngleTool);
-  addTool(CobbAngleTool);
-  addTool(PlanarFreehandROITool);
-  addTool(MagnifyTool);
-  addTool(CrosshairsTool);
-  addTool(SegmentationDisplayTool);
-  addTool(ReferenceLinesTool);
-  addTool(CalibrationLineTool);
-  addTool(TrackballRotateTool);
-  addTool(CircleScissorsTool);
-  addTool(RectangleScissorsTool);
-  addTool(SphereScissorsTool);
-  addTool(ImageOverlayViewerTool);
+  safeAddTool(PanTool);
+  safeAddTool(WindowLevelTool);
+  safeAddTool(StackScrollMouseWheelTool);
+  safeAddTool(StackScrollTool);
+  safeAddTool(ZoomTool);
+  safeAddTool(ProbeTool);
+  safeAddTool(VolumeRotateMouseWheelTool);
+  safeAddTool(MIPJumpToClickTool);
+  safeAddTool(LengthTool);
+  safeAddTool(RectangleROITool);
+  safeAddTool(EllipticalROITool);
+  safeAddTool(CircleROITool);
+  safeAddTool(BidirectionalTool);
+  safeAddTool(ArrowAnnotateTool);
+  safeAddTool(DragProbeTool);
+  safeAddTool(AngleTool);
+  safeAddTool(CobbAngleTool);
+  safeAddTool(PlanarFreehandROITool);
+  safeAddTool(MagnifyTool);
+  safeAddTool(CrosshairsTool);
+  safeAddTool(SegmentationDisplayTool);
+  safeAddTool(ReferenceLinesTool);
+  safeAddTool(CalibrationLineTool);
+  safeAddTool(TrackballRotateTool);
+  safeAddTool(CircleScissorsTool);
+  safeAddTool(RectangleScissorsTool);
+  safeAddTool(SphereScissorsTool);
+  safeAddTool(ImageOverlayViewerTool);
 
   // Modify annotation tools to use dashed lines on SR
   const annotationStyle = {

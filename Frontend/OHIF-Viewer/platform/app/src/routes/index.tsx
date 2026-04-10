@@ -13,6 +13,8 @@ import WorkflowDetailPage from './Workflow/WorkflowDetails';
 import PrivateRoute from './PrivateRoute';
 import CubeStartUp from './StartUp';
 import agenticHome from './agenticHome';
+import ResearchPlayground from '../components/ResearchPlayground';
+import AgentsPlayground from './Playground/AgentsPlayground';
 import PropTypes from 'prop-types';
 import { Link } from 'react-router-dom';
 
@@ -40,7 +42,7 @@ const NotFoundStudy = () => {
           One or more of the requested studies are not available at this time. Return to the{' '}
           <Link
             className="text-primary-light"
-            to={'/'}
+            to={'/worklist'}
           >
             study list
           </Link>{' '}
@@ -80,7 +82,7 @@ const bakedInRoutes = [
 ];
 
 // NOT FOUND (404)
-const notFoundRoute = { component: NotFound };
+const notFoundRoute = { path: '*', children: NotFound };
 
 const createRoutes = ({
   modes,
@@ -117,9 +119,27 @@ const createRoutes = ({
     private: false,
   };
 
+  const researchPlaygroundRoute = {
+    path: '/playground',
+    children: ResearchPlayground,
+    private: false,
+  };
+
+  const researchPlaygroundPhaseRoute = {
+    path: '/playground/:phaseId',
+    children: ResearchPlayground,
+    private: false,
+  };
+
+  const agentsPlaygroundRoute = {
+    path: '/agents-playground',
+    children: AgentsPlayground,
+    private: false,
+  };
+
   // CUBE Startup Route - Landing Page
   const cubeStartupRoute = {
-    path: '/home',
+    path: '/',
     children: CubeStartUp,
     private: false, // Set to true if authentication is required
   };
@@ -128,7 +148,7 @@ const createRoutes = ({
 
   // WorkList Route (now moved to /worklist path since CUBE takes root)
   const WorkListRoute = {
-    path: '/',
+    path: '/worklist',
     children: DataSourceWrapper,
     private: true, //Change to test the appliaction
     props: { children: WorkList, servicesManager, extensionManager },
@@ -144,6 +164,9 @@ const createRoutes = ({
     ...(customRoutes?.routes || []),
     ...bakedInRoutes,
     agenticHomeRoute,
+    researchPlaygroundRoute,
+    researchPlaygroundPhaseRoute,
+    agentsPlaygroundRoute,
 
     customRoutes?.notFoundRoute || notFoundRoute,
   ];

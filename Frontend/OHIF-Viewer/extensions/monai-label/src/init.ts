@@ -6,6 +6,17 @@ import ProbeMONAILabelToolPos from './tools/ProbeMONAILabelToolPos';
 import ProbeMONAILabelToolNeg from './tools/ProbeMONAILabelToolNeg';
 import RecROIToolMONAILabel from './tools/RecROIToolMONAILabel';
 
+function safeAddTool(tool) {
+  try {
+    addTool(tool);
+  } catch (error) {
+    const message = error?.message || '';
+    if (!message.includes('has already been added globally')) {
+      throw error;
+    }
+  }
+}
+
 /**
  * @param {object} configuration
  */
@@ -13,7 +24,7 @@ export default function init({
   servicesManager,
   configuration = {},
 }: Types.Extensions.ExtensionParams): void {
-  addTool(ProbeMONAILabelToolPos);
-  addTool(ProbeMONAILabelToolNeg);
-  addTool(RecROIToolMONAILabel);
+  safeAddTool(ProbeMONAILabelToolPos);
+  safeAddTool(ProbeMONAILabelToolNeg);
+  safeAddTool(RecROIToolMONAILabel);
 }
