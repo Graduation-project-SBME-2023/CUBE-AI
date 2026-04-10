@@ -4,7 +4,7 @@ from models.volume import Volume
 from schemas.volume import VolumeCreate, VolumeUpdate
 from sqlalchemy.exc import SQLAlchemyError
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, select, or_, not_
 from models.study import Study
 from uuid import UUID
 import aiohttp
@@ -121,6 +121,25 @@ async def search_volumes(db: AsyncSession, modality: str | None = None, keyword:
         return result.scalars().all()
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    
+async def search_volumes_by_description(db:AsyncSession, words_to_include: list[str], words_to_exclude: list[str] | None = None):
+    try:
+        query = select(Volume.volume_series_instance_uid)
+        if words_to_include:
+            include_conditions = [
+                Volume.series_description.ilike(f"%{word}%") for word in words_to_include
+            ]
+        query = query.where(or_(*include_conditions))
+        if words_to_exclude:
+            exclude_conditions = [
+                Volume.series_description.ilike(f"%{word}%") for word in words_to_exclude
+            ]
+            query = query.where(not_(or_(*exclude_conditions)))
+        results = await db.execute(query)
+        uids = results.scalars().all()
+        return uids
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500,detail=f"Database error: {str(e)}")
 
 async def count_volumes_by_study(db: AsyncSession, study_uid: str):
     try:
