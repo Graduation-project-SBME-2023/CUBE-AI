@@ -10,11 +10,9 @@ import Debug from './Debug';
 import NotFound from './NotFound';
 import buildModeRoutes from './buildModeRoutes';
 import WorkflowDetailPage from './Workflow/WorkflowDetails';
-import AgentsPlayground from './Playground/AgentsPlayground';
 import PrivateRoute from './PrivateRoute';
 import CubeStartUp from './StartUp';
 import agenticHome from './agenticHome';
-import ResearchPlayground from '../components/ResearchPlayground';
 import PropTypes from 'prop-types';
 import { Link } from 'react-router-dom';
 
@@ -113,17 +111,6 @@ const createRoutes = ({
     },
   ];
 
-  const playgroundRoutes = [
-    {
-      path: '/playground',
-      children: ResearchPlayground,
-    },
-    {
-      path: '/playground/:phaseId',
-      children: ResearchPlayground,
-    }
-  ];
-  
   const agenticHomeRoute = {
     path: '/agentic-home',
     children: agenticHome,
@@ -153,7 +140,6 @@ const createRoutes = ({
     cubeStartupRoute, // CUBE startup is now the landing page
     ...routes,
     ...workflowRoutes,
-    ...playgroundRoutes,
     ...(showStudyList ? [WorkListRoute] : []),
     ...(customRoutes?.routes || []),
     ...bakedInRoutes,

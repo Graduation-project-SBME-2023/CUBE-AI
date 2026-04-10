@@ -40,7 +40,8 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
-CACHE_DIR = Path(__file__).parent / ".knowledge_cache"
+DEFAULT_CACHE_DIR = Path(__file__).parent / ".knowledge_cache"
+CACHE_DIR = DEFAULT_CACHE_DIR
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 NCBI_API_KEY: str = os.environ.get("NCBI_API_KEY", "")
@@ -51,6 +52,14 @@ SEMANTIC_SCHOLAR_DELAY: float = 3.5  # S2 rate-limits aggressively without API k
 # Maximum reviews/papers to fetch per concept for knowledge extraction
 MAX_REVIEWS_PER_CONCEPT = 5
 MAX_WIKI_CONCEPTS = 12
+
+
+def set_cache_dir(cache_dir: Optional[Path]) -> Path:
+    """Set the cache directory for this process and ensure it exists."""
+    global CACHE_DIR
+    CACHE_DIR = Path(cache_dir) if cache_dir else DEFAULT_CACHE_DIR
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    return CACHE_DIR
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1346,7 +1355,8 @@ def _build_sources_guide(concepts: Dict[str, List[str]], journal_data: Dict[str,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72,
-                         progress_callback: Optional[callable] = None) -> Tuple[str, str, List[Dict[str, Any]], Dict[str, str]]:
+                         progress_callback: Optional[callable] = None,
+                         cache_dir: Optional[Path] = None) -> Tuple[str, str, List[Dict[str, Any]], Dict[str, str]]:
     """
     Build a dynamic, PICO-specific knowledge base by querying online
     medical databases.
@@ -1382,6 +1392,11 @@ def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72,
     def _log(msg: str):
         if progress_callback:
             progress_callback(msg)
+
+    # Allow callers (e.g., planner sessions) to scope cache to their workspace.
+    if cache_dir is not None:
+        set_cache_dir(cache_dir)
+
     # Check for a complete cached build
     pico_hash = hashlib.md5(json.dumps(pico, sort_keys=True).encode()).hexdigest()[:16]
     full_cache_key = f"full_kb_{pico_hash}.json"
@@ -1622,10 +1637,13 @@ Cached for {cache_hours} hours. Delete .knowledge_cache/ to force refresh.
     return knowledge_base, sources_guide, papers, knowledge_sections
 
 
-def clear_cache() -> int:
+def clear_cache(cache_dir: Optional[Path] = None) -> int:
     """
     Clear all cached knowledge data. Returns number of files removed.
     """
+    if cache_dir is not None:
+        set_cache_dir(cache_dir)
+
     count = 0
     if CACHE_DIR.exists():
         for f in CACHE_DIR.glob("*.json"):
