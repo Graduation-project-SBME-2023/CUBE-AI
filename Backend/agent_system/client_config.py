@@ -136,7 +136,7 @@ def create_model_client_from_config(config: ClientConfig | None = None):
         kwargs = {
             "model": config.model,
             "model_info": model_info,
-            "base_url": config.base_url or "http://localhost:11434/v1",
+            "base_url": config.base_url or os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
             "api_key": config.api_key or "ollama",
         }
         if config.temperature is not None:
