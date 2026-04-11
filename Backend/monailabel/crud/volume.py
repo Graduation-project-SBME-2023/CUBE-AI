@@ -171,3 +171,22 @@ async def get_study_by_volume(db: AsyncSession, volume_series_instance_uid: str)
 
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+async def get_unique_series_descriptions(db: AsyncSession) -> list[str]:
+    try:
+        # Select distinct descriptions and ignore any NULL values
+        query = (
+            select(Volume.series_description)
+            .distinct()
+            .where(Volume.series_description.is_not(None))
+        )
+        
+        results = await db.execute(query)
+        
+        # scalars().all() flattens the result into a simple list of strings
+        unique_descriptions = results.scalars().all()
+        return unique_descriptions
+        
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
