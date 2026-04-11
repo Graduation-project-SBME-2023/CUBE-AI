@@ -1,8 +1,8 @@
 from schemas.study import StudyRead
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from schemas.volume import Volume, VolumeCreate, VolumeUpdate
-from crud.volume import count_volumes_by_study, delete_volume, get_volume, get_volumes, create_volume, get_volumes_by_study, search_volumes, search_volumes, update_volume, get_study_by_volume
+from crud.volume import count_volumes_by_study, delete_volume, get_volume, get_volumes, create_volume, get_volumes_by_study, search_volumes, search_volumes, update_volume, get_study_by_volume, search_volumes_by_description, get_unique_series_descriptions
 from core.database import get_db
 
 router = APIRouter(prefix="/volumes", tags=["volumes"])
@@ -72,3 +72,34 @@ async def read_study_by_volume(
     Get the Study associated with a specific volume_series_instance_uid.
     """
     return await get_study_by_volume(db, volume_series_instance_uid)
+
+@router.get("/search/description/", response_model=list[str])
+async def search_volumes_description_endpoint(
+    words_to_include: list[str] = Query(
+        ..., 
+        description="List of words to include. Pass multiple times like: ?words_to_include=brain&words_to_include=mri"
+    ),
+    words_to_exclude: list[str] | None = Query(
+        None, 
+        description="List of words to exclude. Pass multiple times like: ?words_to_exclude=contrast"
+    ),
+    db: Session = Depends(get_db)
+):
+    """
+    Search volume UIDs based on included and excluded words in the series description.
+    """
+    return await search_volumes_by_description(
+        db=db, 
+        words_to_include=words_to_include, 
+        words_to_exclude=words_to_exclude
+    )
+    
+@router.get("/descriptions/unique/", response_model=list[str])
+async def get_unique_descriptions_endpoint(
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve a list of all unique volume series descriptions available in the database.
+    Useful for populating dropdown menus or showing users available search terms.
+    """
+    return await get_unique_series_descriptions(db=db)
