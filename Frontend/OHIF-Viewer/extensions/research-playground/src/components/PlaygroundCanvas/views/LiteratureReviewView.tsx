@@ -206,33 +206,33 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string
 
 const mdComponents: Record<string, React.FC<any>> = {
   h1: ({ children }: any) => (
-    <h1 className="text-[16px] font-bold text-white mt-6 mb-3 pb-2 border-b border-[#1f2d40]">
+    <h1 className="text-[18px] font-semibold text-slate-100 mt-6 mb-3 pb-2 border-b border-slate-700">
       {children}
     </h1>
   ),
   h2: ({ children }: any) => (
-    <h2 className="text-[14px] font-bold text-[#a3c9e2] mt-5 mb-2 pb-1.5 border-b border-[#1f2d40]/60">
+    <h2 className="text-[15px] font-semibold text-sky-300 mt-5 mb-2 pb-1.5 border-b border-slate-700/70">
       {children}
     </h2>
   ),
   h3: ({ children }: any) => (
-    <h3 className="text-[12px] font-bold text-[#8fb8d0] uppercase tracking-wide mt-4 mb-2 border-b border-[#1f2d40]/40 pb-1">
+    <h3 className="text-[12px] font-semibold text-slate-300 uppercase tracking-wide mt-4 mb-2 border-b border-slate-700/50 pb-1">
       {children}
     </h3>
   ),
   h4: ({ children }: any) => (
-    <h4 className="text-[11.5px] font-semibold text-[#91b9cd] mt-3 mb-1.5">{children}</h4>
+    <h4 className="text-[12px] font-semibold text-sky-300 mt-3 mb-1.5">{children}</h4>
   ),
   p: ({ children }: any) => (
-    <p className="text-[11.5px] leading-[1.7] text-gray-300 mb-2">{children}</p>
+    <p className="text-[12px] leading-7 text-slate-300 mb-2">{children}</p>
   ),
   strong: ({ children }: any) => (
     <strong className="text-white font-semibold">{children}</strong>
   ),
   em: ({ children }: any) => (
-    <em className="text-[#91b9cd] not-italic text-[11px]">{children}</em>
+    <em className="text-sky-300 not-italic text-[11px]">{children}</em>
   ),
-  hr: () => <hr className="border-[#1f2d40] my-4" />,
+  hr: () => <hr className="border-slate-700 my-4" />,
   ul: ({ children }: any) => (
     <ul className="space-y-1 my-2 ml-1">{children}</ul>
   ),
@@ -240,10 +240,10 @@ const mdComponents: Record<string, React.FC<any>> = {
     <ol className="space-y-1 my-2 ml-4 list-decimal">{children}</ol>
   ),
   li: ({ children }: any) => (
-    <li className="text-[11.5px] leading-[1.6] text-gray-300">{children}</li>
+    <li className="text-[12px] leading-[1.65] text-slate-300">{children}</li>
   ),
   blockquote: ({ children }: any) => (
-    <blockquote className="border-l-2 border-[#5acce6]/40 pl-3 my-1.5 text-[11px] text-[#91b9cd] italic">
+    <blockquote className="border-l-2 border-cyan-500/50 pl-3 my-1.5 text-[11px] text-slate-300 italic">
       {children}
     </blockquote>
   ),
@@ -253,20 +253,20 @@ const mdComponents: Record<string, React.FC<any>> = {
     </a>
   ),
   table: ({ children }: any) => (
-    <div className="overflow-x-auto my-3 rounded-lg border border-[#1f2d40]">
+    <div className="overflow-x-auto my-3 rounded-lg border border-slate-700">
       <table className="w-full text-[11px] text-left">{children}</table>
     </div>
   ),
   thead: ({ children }: any) => (
-    <thead className="bg-[#0d1a28] text-[#8fb8d0]">{children}</thead>
+    <thead className="bg-slate-900 text-sky-300">{children}</thead>
   ),
-  tbody: ({ children }: any) => <tbody className="divide-y divide-[#1f2d40]/50">{children}</tbody>,
-  tr: ({ children }: any) => <tr className="hover:bg-[#0d1a28]/50">{children}</tr>,
+  tbody: ({ children }: any) => <tbody className="divide-y divide-slate-700/60">{children}</tbody>,
+  tr: ({ children }: any) => <tr className="hover:bg-slate-800/40">{children}</tr>,
   th: ({ children }: any) => (
     <th className="px-3 py-2 font-semibold text-[10.5px] uppercase tracking-wider">{children}</th>
   ),
   td: ({ children }: any) => (
-    <td className="px-3 py-2 text-gray-300">{children}</td>
+    <td className="px-3 py-2 text-slate-300">{children}</td>
   ),
 };
 
@@ -294,8 +294,8 @@ function SectionCard({ section }: { section: KBSection }) {
   const source = section.title.match(/\((.+?)\)/)?.[1];
 
   return (
-    <div className="rounded-xl border border-[#1f2d40] bg-[#0b1015] overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-[#1f2d40]/50" style={{ background: `linear-gradient(135deg, ${color}08, transparent)` }}>
+    <div className="rounded-xl border border-slate-700 bg-slate-900/75 overflow-hidden shadow-sm">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-700/60" style={{ background: `linear-gradient(135deg, ${color}10, transparent)` }}>
         <div style={{ color }}>{icon}</div>
         <h3 className="text-[11px] font-bold uppercase tracking-wider flex-1" style={{ color }}>
           {displayTitle}
@@ -320,7 +320,7 @@ function PaperCard({ paper }: { paper: Paper }) {
   const cat = CATEGORY_COLORS[paper.category || ''] || CATEGORY_COLORS.Review;
 
   return (
-    <div className="rounded-lg border border-[#1f2d40] bg-[#0b1015] p-4 hover:border-[#2a3f5a] transition-colors">
+    <div className="rounded-lg border border-slate-700 bg-slate-900/75 p-4 hover:border-slate-500 transition-all duration-200 hover:shadow-md">
       <div className="flex items-center gap-2 mb-2">
         {paper.rank && (
           <span className="w-6 h-6 rounded-full bg-[#0d2847] text-[#5acce6] text-[10px] font-bold flex items-center justify-center border border-[#5acce6]/30">
@@ -336,7 +336,7 @@ function PaperCard({ paper }: { paper: Paper }) {
           </span>
         )}
         {paper.source && (
-          <span className="text-[9px] text-[#566a84] ml-auto">{paper.source}</span>
+          <span className="text-[10px] text-slate-500 ml-auto">{paper.source}</span>
         )}
       </div>
       <h4 className="text-[12.5px] font-semibold text-white leading-snug mb-1.5">
@@ -347,9 +347,9 @@ function PaperCard({ paper }: { paper: Paper }) {
           </a>
         ) : paper.title}
       </h4>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-[#7a94af] mb-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-slate-400 mb-2">
         {paper.authors && <span>{paper.authors}</span>}
-        {paper.journal && <span className="font-medium text-[#91b9cd]">{paper.journal}</span>}
+        {paper.journal && <span className="font-medium text-sky-300">{paper.journal}</span>}
         {paper.year && <span>({paper.year})</span>}
         {(paper.citation_count != null && paper.citation_count > 0) && (
           <span className="flex items-center gap-1">
@@ -367,7 +367,7 @@ function PaperCard({ paper }: { paper: Paper }) {
         </div>
       )}
       {paper.topic && (
-        <div className="text-[10px] text-[#566a84] mb-2">
+        <div className="text-[10px] text-slate-500 mb-2">
           <span className="font-medium">Topic:</span> {paper.topic}
         </div>
       )}
@@ -383,8 +383,8 @@ function PaperCard({ paper }: { paper: Paper }) {
           {expanded && (
             <div className="rounded-lg bg-[#060d14] border border-[#1f2d40]/50 p-3 mt-1">
               <div className="flex items-start gap-2">
-                <QuoteIcon size={12} className="text-[#566a84] shrink-0 mt-0.5" />
-                <p className="text-[11px] leading-[1.7] text-[#b0c4d8]">{paper.abstract}</p>
+                <QuoteIcon size={12} className="text-slate-500 shrink-0 mt-0.5" />
+                <p className="text-[11px] leading-7 text-slate-300">{paper.abstract}</p>
               </div>
             </div>
           )}
@@ -427,14 +427,14 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
   // Empty / loading state
   if (!hasData) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-[#000000]">
+      <div className="w-full h-full flex items-center justify-center bg-slate-950">
         <div className="text-center space-y-4 max-w-md">
-          <div className="mx-auto w-16 h-16 rounded-full bg-[#0d1a28] flex items-center justify-center border border-[#1f2d40]">
-            <Loader2Icon size={24} className="text-[#5acce6] animate-spin" />
+          <div className="mx-auto w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center border border-slate-700">
+            <Loader2Icon size={24} className="text-cyan-400 animate-spin" />
           </div>
           <div>
-            <h2 className="text-sm font-semibold text-white mb-1">Literature Review</h2>
-            <p className="text-[12px] text-[#566a84] leading-relaxed">
+            <h2 className="text-sm font-semibold text-slate-100 mb-1">Literature Review</h2>
+            <p className="text-[12px] text-slate-500 leading-relaxed">
               Waiting for the knowledge base to be built. The literature review will appear here
               once the agent finishes searching PubMed, Semantic Scholar, and other databases.
             </p>
@@ -445,26 +445,26 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
   }
 
   return (
-    <div className="w-full h-full overflow-auto bg-[#000000]">
+    <div className="w-full h-full overflow-auto bg-slate-950">
       <div className="max-w-5xl mx-auto p-6 space-y-5">
 
         {/* ── Header ──────────────────────────────────────────────────── */}
-        <div className="rounded-xl border border-[#1f2d40] bg-[#0b1015] px-5 py-4 flex items-center gap-4">
+        <div className="rounded-xl border border-slate-700 bg-slate-900/75 px-5 py-4 flex items-center gap-4 shadow-sm">
           <div className="w-10 h-10 rounded-lg bg-[#0d2847] flex items-center justify-center border border-[#5acce6]/30">
             <BookOpenTextIcon size={20} className="text-[#5acce6]" />
           </div>
           <div className="flex-1">
-            <p className="text-[11px] uppercase tracking-widest text-[#566a84] font-bold">Literature Review</p>
-            <p className="text-sm text-white font-medium">Domain Knowledge Base &amp; Evidence Summary</p>
+            <p className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">Literature Review</p>
+            <p className="text-sm text-slate-100 font-medium">Domain Knowledge Base &amp; Evidence Summary</p>
           </div>
           <div className="flex items-center gap-2">
             {papers.length > 0 && (
-              <span className="text-[10px] rounded-full px-3 py-1 bg-[#0d2847] text-[#5acce6] font-bold border border-[#5acce6]/30">
+              <span className="text-[10px] rounded-full px-3 py-1 bg-cyan-950/70 text-cyan-300 font-semibold border border-cyan-500/30">
                 {papers.length} papers
               </span>
             )}
             {kbSections.length > 0 && (
-              <span className="text-[10px] rounded-full px-3 py-1 bg-[#0d3320] text-[#6fe5b8] font-bold border border-[#2d6a4f]">
+              <span className="text-[10px] rounded-full px-3 py-1 bg-emerald-950/60 text-emerald-300 font-semibold border border-emerald-500/30">
                 {kbSections.length} sections
               </span>
             )}

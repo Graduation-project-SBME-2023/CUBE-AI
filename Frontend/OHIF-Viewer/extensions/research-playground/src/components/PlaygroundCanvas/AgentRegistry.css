@@ -1,7 +1,7 @@
 /* AgentRegistry component styles */
 .w-agent-registry {
-  background: #151a1f;
-  border-top: 1px solid #3c5d80;
+  background: #0f172a;
+  border-top: 1px solid #334155;
   transition: all 0.3s;
   display: flex;
   flex-direction: column;
@@ -19,22 +19,22 @@
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
-  background: #1f2630;
-  border-bottom: 1px solid #3c5d80;
+  background: #111827;
+  border-bottom: 1px solid #334155;
   user-select: none;
 }
 .w-agent-registry-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: bold;
-  color: #91b9cd;
+  font-weight: 600;
+  color: #cbd5e1;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 1px;
 }
 .w-agent-registry-chevron {
-  color: #566a84;
+  color: #64748b;
 }
 .w-agent-registry-list {
   flex: 1;
@@ -42,14 +42,14 @@
   padding: 16px;
   display: flex;
   gap: 16px;
-  background: #000000;
+  background: #020617;
 }
 .w-agent-card {
   min-width: 140px;
   height: 100px;
-  background: #1f2d40;
-  border: 1px solid #3c5d80;
-  border-radius: 8px;
+  background: #111827;
+  border: 1px solid #334155;
+  border-radius: 10px;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -58,16 +58,17 @@
   gap: 8px;
   cursor: grab;
   transition: all 0.2s;
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.2);
 }
 .w-agent-card:hover {
-  border-color: #5acce6;
-  background: #253345;
+  border-color: #22d3ee;
+  background: #0f1b2e;
 }
 .w-agent-card-icon {
   padding: 8px;
-  background: #090c29;
+  background: #0b1320;
   border-radius: 50%;
-  color: #5acce6;
+  color: #22d3ee;
   transition: transform 0.2s;
 }
 .w-agent-card:hover .w-agent-card-icon {
@@ -76,30 +77,30 @@
 .w-agent-card-name {
   font-size: 12px;
   font-weight: 500;
-  color: #dadada;
+  color: #e2e8f0;
   text-align: center;
 }
 .w-agent-card-type {
-  font-size: 9px;
+  font-size: 10px;
   padding: 2px 6px;
-  border-radius: 4px;
-  background: #3c5d80;
-  color: #fff;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #cbd5e1;
   font-family: monospace;
 }
 .w-agent-card-add {
   min-width: 140px;
   height: 100px;
-  border: 1px dashed #3c5d80;
-  border-radius: 8px;
+  border: 1px dashed #334155;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #566a84;
+  color: #64748b;
   cursor: pointer;
   transition: color 0.2s, border-color 0.2s;
 }
 .w-agent-card-add:hover {
-  color: #5acce6;
-  border-color: #5acce6;
+  color: #22d3ee;
+  border-color: #22d3ee;
 }
