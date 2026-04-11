@@ -140,7 +140,7 @@ class ToolEvent(BaseModel):
     timestamp: datetime
 
 
-api_key = os.getenv("OLLAMA_API_KEY", "cf8ed2bae88d4d659602bc340b4b2bcf.mEvRr0YQ54A_OKfTT2Z92rge")
+api_key = os.getenv("OLLAMA_API_KEY", "")
 
 
 # ----------------------------------------------------------------------

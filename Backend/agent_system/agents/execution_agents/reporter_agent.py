@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import os
+import logging
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "..", ".."))
@@ -16,6 +17,8 @@ from descriptions.models_descriptions import REPORTER_AGENT_DESCRIPTION
 from system_prompts.system_messages import REPORTER_AGENT_SYSTEM_MESSAGE
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
 
+logger = logging.getLogger(__name__)
+
 
 class ReporterAgent(AssistantAgent):
     def __init__(self, name, model_client, tools, description, system_message, max_tool_iterations):
@@ -29,10 +32,21 @@ class ReporterAgent(AssistantAgent):
     @classmethod
     async def create(cls, model_client = None, workspace_folder = None):
         model_client = OllamaClient() if not model_client else model_client
+        mcp_server_path = os.path.abspath(
+            os.path.join(current_dir, "..", "..", "..", "mcp", "server.py")
+        )
+        if not os.path.exists(mcp_server_path):
+            raise FileNotFoundError(f"MCP server not found at: {mcp_server_path}")
         mcp_server = StdioServerParams(
-            command=sys.executable, args=["Backend/mcp/server.py"], env={"WORKSPACE_DIR": workspace_folder}
+            command=sys.executable,
+            args=[mcp_server_path],
+            env={"WORKSPACE_DIR": workspace_folder}
             )
-        mcp_tools = await mcp_server_tools(mcp_server)
+        try:
+            mcp_tools = await mcp_server_tools(mcp_server)
+        except Exception as exc:
+            logger.exception("Failed to initialize MCP tools from %s", mcp_server_path)
+            raise RuntimeError(f"Failed to initialize MCP tools from {mcp_server_path}") from exc
         desired_tools = ['latex_to_pdf', 'scratchpad_read_report', 'read_all_agent_outputs',
                          'list_latex_templates', 'get_latex_template', 'read_literature_context']
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
