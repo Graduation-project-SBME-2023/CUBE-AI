@@ -63,6 +63,16 @@ class SegmentationService:
         ) 
         FrameOfReferenceUID = None 
         study_instance_uid = None
+        # =========== get the label info & organs ================
+        
+        if isinstance(label_info, list):
+            organ_list = [str(o).strip().lower() for o in label_info if str(o).strip()]
+
+        elif isinstance(label_info, str):
+            organ_list = [o.strip().lower() for o in label_info.split(",") if o.strip()]
+        else:
+            organ_list = ["segmentation"]
+        
         # =========== get the study from the series UID ===========
         get_study_url = f"{self.monai_url}/volumes/{series_instance_uid}/study"
         async with httpx.AsyncClient(timeout=timeout_config) as client:
@@ -206,7 +216,7 @@ class SegmentationService:
         print(f"Labelmap shape: {labelmap_np.shape}")
         description_segment = hd.seg.SegmentDescription(
             segment_number=1,
-            segment_label='spleen',
+            segment_label=organ_list[0] if organ_list else "Segment",
             segmented_property_category=codes.cid7150.Tissue,
             segmented_property_type=codes.cid7166.ConnectiveTissue,
             algorithm_type=hd.seg.SegmentAlgorithmTypeValues.AUTOMATIC,

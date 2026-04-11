@@ -18,6 +18,8 @@ import nibabel as nib
 import logging
 logger = logging.getLogger(__name__)
 from PIL import Image
+import csv
+import pandas as pd
 # ===============================
 # MASK HELPERS
 # ===============================
@@ -28,7 +30,6 @@ def matches_label(segmentation_type, label):
     label_norm = "".join(c for c in label.lower() if c.isalpha())
 
     return label_norm in seg_norm
-
 
 async def exclude_existing_masks(volumes, labels):
 
@@ -70,7 +71,6 @@ async def exclude_existing_masks(volumes, labels):
             logger.info(f"Volume {volume_uid} excluded (matching mask exists)")
 
     return eligible
-
 
 async def check_having_mask(volume_uid):
     """
@@ -132,7 +132,6 @@ def parse_multipart_response(headers, body):
     # Return in same order as original TS → data first, then centroids
     return nrrd_bytes, json_data.get('centroids', {})
 
-
 def split_multipart(buffer, boundary):
     """ 
     Splits the buffer into parts using the boundary.
@@ -160,7 +159,6 @@ def split_multipart(buffer, boundary):
 
         return parts
 
-
 def find_subarray(haystack, needle, start=0):
     """
     Returns the starting index of the first occurrence of needle in haystack[start:],
@@ -180,8 +178,6 @@ def find_subarray(haystack, needle, start=0):
 
     return -1
 
-
-
 def find_double_crlf(buffer):
     """      
     Finds the position right after the first \r\n\r\n occurrence.
@@ -195,7 +191,6 @@ def find_double_crlf(buffer):
             return i + 4              # position after second \r\n
 
     return -1
-
 
 
 # ===============================
@@ -276,8 +271,6 @@ def rgb_to_dicom_cielab(rgb):
     
     return [int(round(v)) for v in [L, a, b]]
 
-
-
 def ensure_required_patient_tags(datasets):
 
     new_for_uid = generate_uid()
@@ -296,10 +289,12 @@ def ensure_required_patient_tags(datasets):
         ds.setdefault("ReferringPhysicianName", "")
         ds.setdefault("SeriesInstanceUID", ds.SeriesInstanceUID)
         ds.setdefault("Modality", ds.get("Modality", "OT"))
+
 #  ================================
 #  Download Data
 #  ================================
-async def download_and_pair_volumes(datasetlist, chosen_path, selected_auto_model_for_volume):
+
+async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, selected_auto_model_for_volume):
     """
     Downloads volumes and their associated labels.
     """
@@ -309,13 +304,11 @@ async def download_and_pair_volumes(datasetlist, chosen_path, selected_auto_mode
     DOWNLOAD_LABELS_URL = "http://localhost:8000/datastore/labels"
     TASK_NAME = "final"
 
-    current_file = Path(__file__)
-    current_dir = current_file.parent.parent.parent.parent
 
-    DOWNLOAD_DIR_IMG = os.path.join(current_dir, "workspace","General_Data")
-    DOWNLOAD_DIR_LABEL = os.path.join(current_dir, "workspace", "Labels")
-    FINAL_DIR_IMG = os.path.join(current_dir,"workspace", "volumes")
-    FINAL_DIR_LABEL = os.path.join(current_dir,"workspace", "masks")
+    DOWNLOAD_DIR_IMG = os.path.join(workspace_dir, "General_Data")
+    DOWNLOAD_DIR_LABEL = os.path.join(workspace_dir, "Labels")
+    FINAL_DIR_IMG = os.path.join(workspace_dir, "volumes")
+    FINAL_DIR_LABEL = os.path.join(workspace_dir, "masks")
 
     os.makedirs(DOWNLOAD_DIR_IMG, exist_ok=True)
     os.makedirs(DOWNLOAD_DIR_LABEL, exist_ok=True)
@@ -553,12 +546,20 @@ async def download_and_pair_volumes(datasetlist, chosen_path, selected_auto_mode
     logger.info("DOWNLOAD AND PAIRING COMPLETED SUCCESSFULLY!")
     return volumes_to_download
 
+#  ================================
+#  Generate GIF Overlays for front view
+#  ================================
 
-def generate_gif_overlays(volumes_dir, masks_dir, output_dir, uids):
+def generate_gif_overlays(workspace_dir, uids):
+    
     """
     Generates animated GIF overlays slicing through the Z-axis where the mask is present.
     Returns a list of dictionaries formatted for the React frontend.
     """
+    volumes_dir = os.path.join(workspace_dir, "volumes")
+    masks_dir = os.path.join(workspace_dir, "masks")
+    output_dir = os.path.join(workspace_dir, "overlays")
+
     os.makedirs(output_dir, exist_ok=True)
     generated_volumes = []
 
@@ -634,3 +635,71 @@ def generate_gif_overlays(volumes_dir, masks_dir, output_dir, uids):
             logger.error(f"Failed to generate GIF for {uid}: {e}", exc_info=True)
 
     return generated_volumes
+
+#  ================================
+#  check the cababilities of voxtell
+#  ================================
+
+def check_voxtell_label_availability(target_label):    
+    """
+    Checks if Voxtell can generate labels for the given target anatomical labels.
+    """
+    # todo:supported label should be exist in db
+    target_label = target_label.lower().strip()
+    
+    current_file = Path(__file__)
+    csv_filepath =os.path.join(current_file.parent.parent.parent.parent,"workspace", "supported.csv") 
+    try:
+        with open(csv_filepath, mode='r', encoding='utf-8') as file:
+            reader = csv.DictReader(file)
+            
+            for row in reader:
+                prompt = row['Prompt'].lower().strip()
+                
+                # Check if the target matches the prompt return the dice score then
+                if target_label == prompt:
+                    return True
+                    
+    except FileNotFoundError:
+        print(f"Error: The file {csv_filepath} was not found.")
+        return None
+
+    # Return False if the loop finishes without finding a match
+    return False
+# ==================================
+#  get the Benchmark dice score of selected model (todo: should be in db)
+# ==================================
+
+def get_model_dice_score(model_name, target_label):
+    if model_name.lower() == "voxtell":
+        current_file = Path(__file__)
+        csv_filepath =os.path.join(current_file.parent.parent.parent.parent,"workspace", "supported.csv") 
+        df = pd.read_csv(csv_filepath)
+        dice_score = df.loc[df['Prompt'].str.lower().str.strip() == target_label, 'voxTell']
+    else:
+        dice_score = 90.0 # default score for other models (todo: should be in db)
+    return dice_score
+
+# =================================
+#  remove volumes and labels from working space that was discarded by user
+# =================================
+
+def cleanup_discarded(workspace_dir, uids_to_keep):
+    """
+    Removes volume and label files from the working directories if their UIDs are not in the keep list.
+    """
+    volumes_dir = os.path.join(workspace_dir, "volumes")
+    masks_dir = os.path.join(workspace_dir, "masks")
+    for fname in os.listdir(volumes_dir):
+        if fname.lower().endswith(".nii.gz"):
+            uid = fname.replace(".nii.gz", "")
+            if uid not in uids_to_keep:
+                os.remove(os.path.join(volumes_dir, fname))
+                logger.info(f"Removed discarded volume: {fname}")
+
+    for fname in os.listdir(masks_dir):
+        if fname.lower().endswith(".nii.gz"):
+            uid = fname.replace(".nii.gz", "")
+            if uid not in uids_to_keep:
+                os.remove(os.path.join(masks_dir, fname))
+                logger.info(f"Removed discarded mask: {fname}")
