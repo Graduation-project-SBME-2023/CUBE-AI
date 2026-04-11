@@ -3,7 +3,7 @@ import logging
 from autogen_agentchat.ui import Console
 from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
 logger = logging.getLogger(__name__)
-from .utils import check_voxtell_support
+from ..utils import check_voxtell_label_availability
 
 def create_interactive_agent(model_client, discovery_tools):
 
@@ -49,13 +49,13 @@ async def run_interactive_pipeline(
             logger.info(f"[{idx}/{len(volumes)}] Guiding user through interactive segmentation for volume: {volume_uid}")
             try:
                 for label in labels:
-                    is_voxtell_supported = check_voxtell_support(label)
+                    is_voxtell_supported = check_voxtell_label_availability(label)
                     if is_voxtell_supported:
                         selected_model = "voxtell"
                         result = await segmentation_service.run_segmentation(
                         model="voxtell",
                         series_instance_uid=volume_uid,
-                        label_info=labels
+                        label_info=label,
                         params={"text_prompts": label}
                 )
                         logger.info(f"Completed segmentation for volume: {volume_uid} with label: {label}")
