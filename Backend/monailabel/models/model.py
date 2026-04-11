@@ -10,8 +10,10 @@ class Model(Base):
         server_default=text('gen_random_uuid()')
     )
 
-    model_name = Column(String, nullable=False)
-    types = Column(JSON, nullable=False, default=[])  # <-- multiple types
+    name = Column(String, nullable=False)
+    type = Column(String, nullable=False)
+    dimension = Column(Integer, nullable=True)
+    labels = Column(JSON, nullable=True)
     description = Column(String, nullable=True)
-    configuration = Column(JSON, nullable=True)
+    config = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=True)

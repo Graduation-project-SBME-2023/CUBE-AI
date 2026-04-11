@@ -24,9 +24,9 @@ async def latex_to_pdf(
     try:
         with tempfile.TemporaryDirectory() as temp:
             payload = TextPayload(message='Generating pdf...')
-            start_event = ToolEvent('tool_started', 'latex_reporter_agent', 'text', payload)
+            start_event = ToolEvent('tool_started', 'text', payload)
             log_tool_state(start_event)
-            log_event = ToolEvent('tool_progress', 'latex_reporter_agent', 'text', payload)
+            log_event = ToolEvent('tool_progress', 'text', payload)
             log_tool_state(log_event)
             tex_path = os.path.join(temp, "document.tex")
 
@@ -35,7 +35,7 @@ async def latex_to_pdf(
                 f.write(latex_text)
 
             payload = TextPayload(message='Compiling...')
-            compiling_latex_event = ToolEvent('tool_progress', 'latex_reporter_agent', 'text', payload)
+            compiling_latex_event = ToolEvent('tool_progress', 'text', payload)
             log_tool_state(compiling_latex_event)
             # Compile using pdflatex
             result = subprocess.run(
@@ -49,7 +49,7 @@ async def latex_to_pdf(
             # Check for compilation errors
             if result.returncode != 0:
                 payload = TextPayload(message='LaTeX compilation failed.')
-                error_compilation_event = ToolEvent('error','latex_reporter_agent', 'text', payload)
+                error_compilation_event = ToolEvent('error', 'text', payload)
                 log_tool_state(error_compilation_event)
 
                 stdout = result.stdout.decode("utf-8", errors="ignore")
@@ -61,7 +61,7 @@ async def latex_to_pdf(
 
             if not os.path.exists(pdf_path):
                 payload = TextPayload(message='Possible LaTeX error.')
-                error_compilation_event = ToolEvent('error','latex_reporter_agent', 'text', payload)
+                error_compilation_event = ToolEvent('error', 'text', payload)
                 log_tool_state(error_compilation_event)
                 return "PDF was not generated. Possible LaTeX error."
 
@@ -83,7 +83,7 @@ async def latex_to_pdf(
         with open(final_path, "wb") as f:
             f.write(pdf_bytes)
         payload = TextPayload(message='PDF generated successfully.')
-        error_compilation_event = ToolEvent('tool_finished','latex_reporter_agent', 'text', payload)
+        error_compilation_event = ToolEvent('tool_finished', 'text', payload)
         log_tool_state(error_compilation_event)
         return f"PDF generated successfully and saved as: {output_filename}"
 

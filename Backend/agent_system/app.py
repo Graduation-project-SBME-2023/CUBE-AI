@@ -3,6 +3,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+
 from teams.execution_team import BasicPipelineBuilder
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import FileResponse, Response
@@ -51,6 +52,7 @@ from models.tool_logging import ToolEvent
 from models.requests import PlanningRequest, SessionControlRequest
 from tool_logging import receive_tool_event
 from services.session_service import SessionService
+from services.pipeline_monitor import PipelineMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +307,7 @@ async def run_pipeline(session: Session) -> None:
         workspace_folder=workspace_folder,
         task_messages=task_messages,
         model_client=create_model_client_from_config(),
+        session_id=session.session_id,
     )
 
     print(graph_builder.get_participants())
@@ -316,10 +319,15 @@ async def run_pipeline(session: Session) -> None:
 
     # Build the pipeline prompt: use structured task messages if available,
     # otherwise fall back to the raw hypothesis string
-    task_prompt = graph_builder.get_pipeline_prompt(fallback_hypothesis=hypothesis)
+    # task_prompt = graph_builder.get_pipeline_prompt(fallback_hypothesis=hypothesis)
+    task_prompt = hypothesis
     pipeline_logger.info(f"Pipeline prompt length: {len(task_prompt)} chars")
 
     pipeline_logger.info("Starting execution...")
+
+    monitor = PipelineMonitor(session_service, session)
+
+    await monitor._broadcast()
 
     try:
         async for event in graph_flow.run_stream(task=task_prompt):
@@ -327,53 +335,61 @@ async def run_pipeline(session: Session) -> None:
                 raise asyncio.CancelledError()
             await session.pause_event.wait()
 
-            if isinstance(event, TaskResult):
-                pipeline_logger.info("━" * 60)
-                pipeline_logger.info("✅ TASK COMPLETE")
-                for msg in event.messages:
-                    pipeline_logger.info(f"  [{msg.source}] {msg.content}")
-                pipeline_logger.info("━" * 60)
-                await manager.send_ws_message("run_finished", "run_finished", session_id=session.session_id)
+            match event:
+                case TaskResult(messages=msgs):
+                    pipeline_logger.info("━" * 60)
+                    pipeline_logger.info("✅ TASK COMPLETE")
+                    for msg in msgs:
+                        pipeline_logger.info(f"  [{msg.source}] {msg.content}")
+                    pipeline_logger.info("━" * 60)
+                    await monitor.on_pipeline_complete()
+                    await manager.send_ws_message("run_finished", "run_finished", session_id=session.session_id)
 
-            elif isinstance(event, ToolCallRequestEvent):
-                pipeline_logger.info(f"🔧 [{event.source}] TOOL CALL REQUEST")
-                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
-                for call in event.content:
-                    pipeline_logger.info(f"   Tool: {call.name}  Args: {call.arguments}")
+                case ToolCallRequestEvent(source=src, content=content):
+                    pipeline_logger.info(f"🔧 [{src}] TOOL CALL REQUEST")
+                    await monitor.on_agent_active(src)
+                    for call in content:
+                        pipeline_logger.info(f"     Tool: {call.name}  Args: {call.arguments}")
 
-            elif isinstance(event, ToolCallExecutionEvent):
-                pipeline_logger.info(f"🔧 [{event.source}] TOOL CALL RESULT")
-                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
-                for result in event.content:
-                    pipeline_logger.info(f"   Tool: {result.name}  Result: {result.content}")
-                    await _emit_tool_result_to_view(
-                        event.source, result.name, result.content,
-                        session.session_id, workspace_folder, pipeline_logger
-                    )
+                case ToolCallExecutionEvent(source=src, content=content):
+                    pipeline_logger.info(f"🔧 [{src}] TOOL CALL RESULT")
+                    for result in content:
+                        await monitor.on_tool_result(src, result.name, result.content)
+                        pipeline_logger.info(f"     Tool: {result.name}  Result: {result.content}")
+                        # move this to the pipeline monitor I think?
+                        await _emit_tool_result_to_view(
+                            src, result.name, result.content,
+                            session.session_id, workspace_folder, pipeline_logger
+                        )
 
-            elif isinstance(event, MemoryQueryEvent):
-                pipeline_logger.info(f"🧠 [{event.source}] MEMORY QUERY: {event.content}")
-                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
+                case MemoryQueryEvent(source=src, content=content):
+                    pipeline_logger.info(f"🧠 [{src}] MEMORY QUERY: {content}")
+                    await monitor.on_agent_active(src)
 
-            elif isinstance(event, UserInputRequestedEvent):
-                pipeline_logger.info(f"⏳ [{event.source}] WAITING FOR USER INPUT")
+                case UserInputRequestedEvent(source=src):
+                    pipeline_logger.info(f"⏳ [{src}] WAITING FOR USER INPUT")
 
-            elif isinstance(event, ThoughtEvent):
-                pipeline_logger.info(f"💭 [{event.source}] THOUGHT: {event.content}")
-                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
+                case ThoughtEvent(source=src, content=content):
+                    pipeline_logger.info(f"💭 [{src}] THOUGHT: {content}")
+                    await monitor.on_agent_active(src)
 
-            elif isinstance(event, BaseChatMessage):
-                logger.info("─" * 60)
-                pipeline_logger.info(f"💬 [{event.source}] ({type(event).__name__}): {event.content}")
-                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
+                case BaseChatMessage(source=src):
+                    logger.info("━" * 60)
+                    pipeline_logger.info(f"💬 [{src}] ({type(event).__name__}): {event.content}")
+                    await monitor.on_agent_active(src)
 
-            elif isinstance(event, BaseAgentEvent):
-                pipeline_logger.info(f"⚙️  [{event.source}] ({type(event).__name__})")
-                if hasattr(event, "content") and event.content:
-                    pipeline_logger.info(f"   {event.content}")
-                await manager.send_ws_message("run_status", {"current_agent": event.source}, session_id=session.session_id)
+                case BaseAgentEvent(source=src):
+                    pipeline_logger.info(f"⚙️  [{src}] ({type(event).__name__})")
+                    if hasattr(event, "content") and event.content:
+                        pipeline_logger.info(f"   {event.content}")
+                    await monitor.on_agent_active(src)
+
+    except asyncio.CancelledError:
+        await monitor.on_pipeline_error(Exception("Pipeline Cancelled"))
+        raise
     except Exception as e:
         logger.error(e)
+        await monitor.on_pipeline_error(e)
 
 
 # ----------------------------------------------------------------------

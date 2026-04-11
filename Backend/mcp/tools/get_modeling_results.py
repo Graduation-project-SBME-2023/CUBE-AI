@@ -22,8 +22,7 @@ def get_modeling_results() -> str:
         payload = TextPayload(message='fetching results')
         start_event = ToolEvent(
             event_type='tool_started',
-            source="result_reporter_agent",
-            content_type='text' ,
+            content_type='text',
             content=payload
         )
         log_tool_state(start_event)
@@ -71,10 +70,9 @@ def get_modeling_results() -> str:
                 results.append(f"### {header}\n*Error reading CSV: {str(e)}*")
         payload = TextPayload(message="study data results Fetched")
         finish_event = ToolEvent(
-        event_type='tool_finished',
-        source='result_reporter_agent',
-        content_type='text',
-        content=payload
+            event_type='tool_finished',
+            content_type='text',
+            content=payload
         )
         log_tool_state(finish_event)
         return "\n\n".join(results)

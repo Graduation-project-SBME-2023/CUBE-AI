@@ -60,7 +60,7 @@ class SegmentationModule:
     Implements the SEGMENTATION Team Pipeline using explicit agents and a SelectorGroupChat team.
     Handles automatic and interactive segmentation workflows.
     """
-    def __init__(self, config_path: str = "config.json", model_name: str = "gpt-oss:120b-cloud"):
+    def __init__(self, config_path: str = "config.json", model_name: str = "gpt-oss:120b-cloud", session_id: str = None):
         self.config_path = config_path
         self.model_name = model_name
         self.model_client = None
@@ -71,6 +71,7 @@ class SegmentationModule:
         self.ExecutionAgent = None
         self.UserFallbackAgent = None
         self.team = None
+        self.session_id = session_id
 
     async def initialize(self):
         self.model_client = OllamaChatCompletionClient(
@@ -192,14 +193,16 @@ class SegmentationModule:
             event_type='tool_started',
             source='segmentation_agent',
             content_type='text',
-            content=payload
+            content=payload,
+            session_id=self.session_id,
         )
         await receive_tool_event(plan_log_event)
         plan_log_event = ToolEvent(
             event_type='tool_finished',
             source='segmentation_agent',
             content_type='text',
-            content=payload
+            content=payload,
+            session_id=self.session_id,
         )
         await receive_tool_event(plan_log_event)
 
@@ -221,7 +224,8 @@ class SegmentationModule:
             event_type='tool_finished',
             source='segmentation_agent',
             content_type='text',
-            content=payload
+            content=payload,
+            session_id=self.session_id,
         )
         await receive_tool_event(segmentation_tool_event)
             
@@ -232,14 +236,16 @@ class SegmentationModule:
             event_type='tool_started',
             source='segmentation_agent',
             content_type='text',
-            content=payload
+            content=payload,
+            session_id=self.session_id,
         )
         await receive_tool_event(environment_setup_event)
         environment_setup_event = ToolEvent(
             event_type='tool_progress',
             source='segmentation_agent',
             content_type='text',
-            content=payload
+            content=payload,
+            session_id=self.session_id,
         )
         await receive_tool_event(environment_setup_event)
         await asyncio.sleep(120)  
@@ -338,14 +344,16 @@ class SegmentationModule:
             event_type='tool_started',
             source='segmentation_agent',
             content_type='text',
-            content=payload
+            content=payload,
+            session_id=self.session_id,
         )
         await receive_tool_event(tool_started)
         tool_progress = ToolEvent(
             event_type='tool_progress',
             source='segmentation_agent',
             content_type='progress',
-            content=payload
+            content=payload,
+            session_id=self.session_id,
         )
         await receive_tool_event(tool_progress)
 
@@ -366,7 +374,8 @@ class SegmentationModule:
                 event_type='tool_progress',
                 source='segmentation_agent',
                 content_type='progress',
-                content=payload
+                content=payload,
+                session_id=self.session_id,
             )
             await receive_tool_event(tool_progress)
             logger.info(f"[{idx}/{len(volumes)}] Running segmentation for volume: {volume_uid}")
