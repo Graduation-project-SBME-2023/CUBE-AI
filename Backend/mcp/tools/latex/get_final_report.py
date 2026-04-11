@@ -1,8 +1,7 @@
-from pathlib import Path
+import os
 import json
 from typing import Annotated
 from pydantic import Field
-import asyncio
 from .. import mcp
 
 #TODO the path of the generated report is fixed, this needs to be dynamic
@@ -17,11 +16,9 @@ async def get_final_report(
     Use this tool in scenarios such as:
     1. When you need to read the 'final_report.json' to start converting it to latex.
     """
-    # Resolve the directory relative to this script
-    current_dir = Path(__file__).resolve().parent
 
     # Go one level up (parent folder), then into memory/workspace/
-    workspace_dir = current_dir.parent.parent.parent / "mas" / "memory" / "workspace"
+    workspace_dir = os.environ.get("WORKSPACE_DIR")
     file_path = workspace_dir / report_filename
 
     if not file_path.exists():

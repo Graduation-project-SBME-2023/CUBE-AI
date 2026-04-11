@@ -31,6 +31,7 @@ from typing import Any, Dict, Literal, Optional
 
 from . import mcp
 from pydantic import BaseModel, ConfigDict, Field
+from tool_logging import log_tool_state, ToolEvent, TextPayload
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,8 @@ WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "../../agent_system/workspace")
 SCRATCHPAD_FILE = os.path.join(WORKSPACE_DIR, "scratchpad.json")
 AgentStatus = Literal["in_progress", "done", "blocked", "failed"]
 FlagLevel = Literal["info", "warning", "error", "critical"]
+
+current_agent_id = os.environ.get("AGENT_ID")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -86,11 +89,6 @@ def _log_activity(data: Dict[str, Any], agent_id: str, role: str, action: str, d
 class RegisterAgentInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    agent_id: str = Field(
-        ...,
-        description="Unique identifier (id) for this agent",
-        min_length=1, max_length=64,
-    )
     role: str = Field(
         ...,
         description="The agent's role in the system (e.g. 'researcher', 'writer', 'validator').",
@@ -101,7 +99,6 @@ class RegisterAgentInput(BaseModel):
 class WriteNoteInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    agent_id: str = Field(..., description="The calling agent's unique ID.", min_length=1, max_length=64)
     content: str = Field(
         ...,
         description="Private working note — intermediate thoughts, observations, partial results.",
@@ -112,7 +109,6 @@ class WriteNoteInput(BaseModel):
 class WriteSummaryInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    agent_id: str = Field(..., description="The calling agent's unique ID.", min_length=1, max_length=64)
     summary: str = Field(
         ...,
         description=(
@@ -130,7 +126,6 @@ class WriteSummaryInput(BaseModel):
 class RaiseFlagInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    agent_id: str = Field(..., description="The calling agent's unique ID.", min_length=1, max_length=64)
     level: FlagLevel = Field(
         ...,
         description=(
@@ -151,7 +146,6 @@ class RaiseFlagInput(BaseModel):
 class SetStatusInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    agent_id: str = Field(..., description="The calling agent's unique ID.", min_length=1, max_length=64)
     status: AgentStatus = Field(
         ...,
         description=(
@@ -167,7 +161,7 @@ class SetStatusInput(BaseModel):
 class ReadAgentInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    agent_id: str = Field(..., description="ID of the agent whose section to read.", min_length=1, max_length=64)
+    target_agent_id: str = Field(..., description="ID of the agent whose section to read.", min_length=1, max_length=64)
     include_notes: bool = Field(
         default=True,
         description="Whether to include the agent's private working notes.",
@@ -194,21 +188,20 @@ async def scratchpad_register_agent(params: RegisterAgentInput) -> str:
 
     Args:
         params (RegisterAgentInput):
-            - agent_id (str): Unique agent identifier.
             - role (str): Agent's role (e.g. 'researcher', 'writer', 'ROI extractor', 'modeler').
 
     Returns:
         str: JSON confirmation, or error if agent_id is already registered.
     """
     data = _load()
-    if params.agent_id in data["agents"]:
+    if current_agent_id in data["agents"]:
         return json.dumps({
             "status": "error",
-            "message": f"Agent '{params.agent_id}' is already registered.",
+            "message": f"Agent '{current_agent_id}' is already registered.",
         }, indent=2)
 
-    data["agents"][params.agent_id] = {
-        "agent_id": params.agent_id,
+    data["agents"][current_agent_id] = {
+        "agent_id": current_agent_id,
         "role": params.role,
         "status": "in_progress",
         "registered_at": _now(),
@@ -216,9 +209,16 @@ async def scratchpad_register_agent(params: RegisterAgentInput) -> str:
         "flags": [],
         "summary": None,
     }
-    _log_activity(data, params.agent_id, params.role, "registered", f"Role: {params.role}")
+    _log_activity(data, current_agent_id, params.role, "registered", f"Role: {params.role}")
     _save(data)
-    return json.dumps({"status": "ok", "agent_id": params.agent_id, "role": params.role}, indent=2)
+
+    payload = TextPayload(message=f'Registering agent {current_agent_id}.')
+    start_event = ToolEvent('tool_started', 'text', payload)
+    log_tool_state(start_event)
+    finished_event = ToolEvent('tool_finished', 'text', payload)
+    log_tool_state(finished_event)
+
+    return json.dumps({"status": "ok", "agent_id": current_agent_id, "role": params.role}, indent=2)
 
 
 @mcp.tool(
@@ -240,7 +240,6 @@ async def scratchpad_write_note(params: WriteNoteInput) -> str:
 
     Args:
         params (WriteNoteInput):
-            - agent_id (str): The calling agent's ID.
             - content (str): Note text.
 
     Returns:
@@ -248,13 +247,13 @@ async def scratchpad_write_note(params: WriteNoteInput) -> str:
     """
     data = _load()
     try:
-        agent = _require_agent(data, params.agent_id)
+        agent = _require_agent(data, current_agent_id)
     except ValueError as e:
         return json.dumps({"status": "error", "message": str(e)}, indent=2)
 
     note = {"content": params.content, "created_at": _now()}
     agent["notes"].append(note)
-    _log_activity(data, params.agent_id, agent["role"], "wrote_note",
+    _log_activity(data, current_agent_id, agent["role"], "wrote_note",
                   f"Note #{len(agent['notes']) - 1}")
     _save(data)
     return json.dumps({"status": "ok", "note_index": len(agent["notes"]) - 1}, indent=2)
@@ -279,7 +278,6 @@ async def scratchpad_raise_flag(params: RaiseFlagInput) -> str:
 
     Args:
         params (RaiseFlagInput):
-            - agent_id (str): The calling agent's ID.
             - level (str): 'info' | 'warning' | 'error' | 'critical'
             - message (str): Description of the issue.
 
@@ -288,13 +286,13 @@ async def scratchpad_raise_flag(params: RaiseFlagInput) -> str:
     """
     data = _load()
     try:
-        agent = _require_agent(data, params.agent_id)
+        agent = _require_agent(data, current_agent_id)
     except ValueError as e:
         return json.dumps({"status": "error", "message": str(e)}, indent=2)
 
     flag = {"level": params.level, "message": params.message, "created_at": _now()}
     agent["flags"].append(flag)
-    _log_activity(data, params.agent_id, agent["role"], "raised_flag",
+    _log_activity(data, current_agent_id, agent["role"], "raised_flag",
                   f"[{params.level.upper()}] {params.message[:120]}")
     _save(data)
     return json.dumps({"status": "ok", "flag_index": len(agent["flags"]) - 1}, indent=2)
@@ -319,7 +317,6 @@ async def scratchpad_set_status(params: SetStatusInput) -> str:
 
     Args:
         params (SetStatusInput):
-            - agent_id (str): The calling agent's ID.
             - status (str): 'in_progress' | 'done' | 'blocked' | 'failed'
 
     Returns:
@@ -327,13 +324,13 @@ async def scratchpad_set_status(params: SetStatusInput) -> str:
     """
     data = _load()
     try:
-        agent = _require_agent(data, params.agent_id)
+        agent = _require_agent(data, current_agent_id)
     except ValueError as e:
         return json.dumps({"status": "error", "message": str(e)}, indent=2)
 
     previous = agent["status"]
     agent["status"] = params.status
-    _log_activity(data, params.agent_id, agent["role"], "status_change",
+    _log_activity(data, current_agent_id, agent["role"], "status_change",
                   f"{previous} → {params.status}")
     _save(data)
     return json.dumps({"status": "ok", "previous_status": previous, "new_status": params.status}, indent=2)
@@ -359,7 +356,6 @@ async def scratchpad_write_summary(params: WriteSummaryInput) -> str:
 
     Args:
         params (WriteSummaryInput):
-            - agent_id (str): The calling agent's ID.
             - summary (str): Full summary text.
             - overwrite (bool): Replace existing summary (default False).
 
@@ -368,7 +364,7 @@ async def scratchpad_write_summary(params: WriteSummaryInput) -> str:
     """
     data = _load()
     try:
-        agent = _require_agent(data, params.agent_id)
+        agent = _require_agent(data, current_agent_id)
     except ValueError as e:
         return json.dumps({"status": "error", "message": str(e)}, indent=2)
 
@@ -379,9 +375,16 @@ async def scratchpad_write_summary(params: WriteSummaryInput) -> str:
         }, indent=2)
 
     agent["summary"] = {"content": params.summary, "updated_at": _now()}
-    _log_activity(data, params.agent_id, agent["role"], "wrote_summary",
+    _log_activity(data, current_agent_id, agent["role"], "wrote_summary",
                   f"{len(params.summary)} chars")
     _save(data)
+
+    payload = TextPayload(message=f'Writing a Summary.')
+    start_event = ToolEvent('tool_started', 'text', payload)
+    log_tool_state(start_event)
+    finished_event = ToolEvent('tool_finished', 'text', payload)
+    log_tool_state(finished_event)
+
     return json.dumps({"status": "ok", "message": "Summary saved."}, indent=2)
 
 
@@ -418,6 +421,13 @@ async def scratchpad_read_agent(params: ReadAgentInput) -> str:
         }, indent=2)
 
     result = {k: v for k, v in agent.items() if k != "notes" or params.include_notes}
+
+    payload = TextPayload(message=f'Reading {params.agent_id}\'s notes.')
+    start_event = ToolEvent('tool_started', 'text', payload)
+    log_tool_state(start_event)
+    finished_event = ToolEvent('tool_finished', 'text', payload)
+    log_tool_state(finished_event)
+
     return json.dumps(result, indent=2)
 
 

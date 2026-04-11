@@ -144,37 +144,42 @@ class ClinicalPlanner:
     # RESPONSE PROCESSORS
     # ══════════════════════════════════════════════════════════════════════════
 
-    async def _process_hypothesis_response(self, response_content: str):
-        """Parse hypothesis JSON from the HypothesisArchitect and update state/UI."""
-        logger.info(f"[HypothesisArchitect]: {response_content[:100]}...")
-        
+    async def _parse_llm_json(self, response_content: str) -> dict | None:
         clean_content = self._clean_json(response_content)
-        
-        # Try parsing — if invalid escapes, fix and retry
-        data = None
+
         for attempt, content in enumerate(
             [clean_content, self._fix_invalid_json_escapes(clean_content)]
         ):
             try:
-                data = json.loads(content)
-                break
-            except json.JSONDecodeError:
+                return json.loads(content)
+            except json.JSONDecodeError as e:
                 if attempt == 0:
-                    continue
+                    logger.warning(f"[Planner]: JSON attempt 1 failed ({e}), retrying with escape fix...")
+                else:
+                    logger.error(f"[Planner]: JSON parse error after escape fix: {e}")
+                    logger.error(f"[Planner]: Clean content (first 300 chars): {clean_content[:300]}")
 
-        if data is None:
-            display_text = response_content.replace("APPROVE", "").strip()
-            if display_text:
-                await self._send("msg", display_text)
-            return
+            return None
 
-        if "hypothesis" in data and isinstance(data["hypothesis"], dict):
-            self.state.hypothesis = await self.session_service.handle_hypothesis_update(
-                self.session, data["hypothesis"]
-            )
+    async def _process_hypothesis_response(self, response_content: str):
+        """Parse hypothesis JSON from the HypothesisArchitect and update state/UI."""
+        logger.info(f"[HypothesisArchitect]: {response_content[:100]}...")
+        
+        data = await self._parse_llm_json(response_content)
 
-        if "message" in data and data["message"]:
-            await self._send("msg", data["message"])
+        match data:
+            case None:
+                if display_text := response_content.replace("APPROVE", "").strip():
+                    await self._send("msg", display_text)
+                    return
+            case {"hypothesis": dict() as hypothesis, **rest}:
+                self.state.hypothesis = await self.session_service.handle_hypothesis_update(
+                    self.session, hypothesis
+                )
+                if message := rest.get("message"):
+                    await self._send("msg", message)
+            case {"message": str() as message}:
+                await self._send("msg", message)
 
         await self._save_state()
 
@@ -547,8 +552,10 @@ class ClinicalPlanner:
                 refinement_prompt = (
                     f"User Feedback: {user_feedback}\n\n"
                     "Update the pipeline plan based on their feedback. "
+                    "If the user is only asking a question that doesn't change the plan, answer them thoroughly "
+                    "without updating the plan. "
                     "You can add, remove, or reorder steps. Update instructions as needed. "
-                    "Return JSON with updated 'steps', 'rationale', and 'message'."
+                    "Return JSON with updated 'steps' if updated, 'rationale', and 'message'."
                 )
 
                 response = await pipeline_architect.on_messages(
@@ -573,7 +580,6 @@ class ClinicalPlanner:
                     sources_guide=sources_guide,
                     pipeline_instructions=self._pipeline_instructions,
                 )
-                self.state.task_messages = task_messages
                 await self._save_state()
 
                 await self._send("msg", f"Generated {len(task_messages)} context-enriched task messages.")

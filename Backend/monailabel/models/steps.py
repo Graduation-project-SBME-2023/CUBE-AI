@@ -26,7 +26,7 @@ class PlanStep(Base):
     description = Column(Text)
     module = Column(String(255))
     status = Column(String(50), default="pending")
-
+    instructions = Column(JSONB, nullable=True, server_default='{}')
     order = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     logs = Column(JSONB, nullable=True, server_default='[]')

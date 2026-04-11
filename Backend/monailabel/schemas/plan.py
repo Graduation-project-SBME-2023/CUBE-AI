@@ -5,7 +5,8 @@ from .steps import PlanStepOut,PlanStepCreate, PlanStepUpdate
 
 class PlanBase(BaseModel):
     state: Optional[str] = None
-    
+    rationale: Optional[str] = None
+
 
 
 # -----------------------------------------------------
@@ -14,6 +15,7 @@ class PlanBase(BaseModel):
 # -----------------------------------------------------
 class PlanCreate(BaseModel):
     state: Optional[str] = "not_confirmed"
+    rationale: Optional[str] = None
 
 
 # -----------------------------------------------------
@@ -21,6 +23,7 @@ class PlanCreate(BaseModel):
 # -----------------------------------------------------
 class PlanUpdate(BaseModel):
     state: Optional[str] = None
+    rationale: Optional[str] = None
 
 
 # -----------------------------------------------------
@@ -32,6 +35,7 @@ class PlanOut(BaseModel):
     hypothesis_id: UUID
     study_goal: str
     state: Optional[str] = None
+    rationale: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -45,6 +49,7 @@ class PlanWithStepsOut(BaseModel):
     study_goal: str
     state: Optional[str] = None
     steps: List[PlanStepOut] = []
+    rationale: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

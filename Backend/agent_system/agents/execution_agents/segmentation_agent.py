@@ -33,7 +33,8 @@ async def test_module(workspace_folder: str | None = None):
         # Initialize
         if workspace_folder is None:
             return RuntimeError("Please specify a workspace folder")
-        agent = SegmentationModule()
+        session_id = workspace_folder.split("/")[-1][10:] if workspace_folder.split("/")[-1][10:] else None # replace this ugly line
+        agent = SegmentationModule(session_id=session_id)
         await agent.initialize()
         
         # current_file = Path(__file__)
@@ -68,7 +69,7 @@ class SegmentationAgent(AssistantAgent):
                         max_tool_iterations=max_tool_iterations)
         
     @classmethod
-    async def create(cls, model_client = None, workspace_folder = None):
+    async def create(cls, model_client = None, workspace_folder = None, session_id = None):
         model_client = OllamaClient() if not model_client else model_client
         mcp_server_path = os.path.abspath(
             os.path.join(current_dir, "..", "..", "..", "mcp", "server.py")
@@ -78,7 +79,7 @@ class SegmentationAgent(AssistantAgent):
         mcp_server = StdioServerParams(
             command=sys.executable,
             args=[mcp_server_path],
-            env={"WORKSPACE_DIR": workspace_folder}
+            env={"WORKSPACE_DIR": workspace_folder, "SESSION_ID": session_id, "AGENT_ID": 'segmentation_agent'}
         )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)
