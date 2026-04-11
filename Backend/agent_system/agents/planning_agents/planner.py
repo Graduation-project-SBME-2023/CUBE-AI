@@ -18,6 +18,7 @@ from models.plans import *
 from models.session import Session
 from .context_compiler import compile_task_messages, build_enriched_pipeline_prompt, summarize_knowledge_for_planning, _build_hypothesis_summary
 from agents.literature_review_agent.knowledge_builder import build_knowledge_base
+from agents.literature_review_agent.literature_review_agent import run_literature_review
 
 # Type aliases
 InputProvider = Callable[[], Awaitable[str]]
@@ -88,23 +89,18 @@ class ClinicalPlanner:
         text = text.strip()
         text = text.replace("APPROVE", "")
 
-        # Try to extract JSON from a ```json ... ``` code fence anywhere in the text
-        # Use greedy .* to capture the full nested JSON object
         fence_match = re.search(r"```json\s*(\{.*\})\s*```", text, re.DOTALL)
         if fence_match:
             return fence_match.group(1).strip()
 
-        # Try plain ``` ... ``` code fence
         fence_match = re.search(r"```\s*(\{.*\})\s*```", text, re.DOTALL)
         if fence_match:
             return fence_match.group(1).strip()
 
-        # Strip leading/trailing code fences (original behavior)
         text = re.sub(r"^```json\s*", "", text)
         text = re.sub(r"^```", "", text)
         text = re.sub(r"```$", "", text)
 
-        # Last resort: extract the outermost { ... } block
         brace_match = re.search(r"\{.*\}", text, re.DOTALL)
         if brace_match:
             return brace_match.group(0).strip()
@@ -201,7 +197,9 @@ class ClinicalPlanner:
                     logger.warning(f"Pipeline JSON attempt 1 failed ({e}), retrying with escape fix...")
                     continue
                 logger.error(f"Pipeline JSON parse error after escape fix: {e}")
-                logger.error(f"Clean content (first 300 chars): {clean_content[:300]}")
+                # Avoid Windows cp1252 console encoding crashes on non-ASCII chars.
+                preview = clean_content[:300].encode("ascii", errors="replace").decode("ascii")
+                logger.error(f"Clean content (first 300 chars): {preview}")
                 print(f"[DEBUG] Pipeline JSON parse error: {e}")
                 print(f"[DEBUG] Clean content preview: {clean_content[:200]}...")
 
@@ -273,7 +271,12 @@ class ClinicalPlanner:
             )
 
         knowledge_base, sources_guide, papers, knowledge_sections = await loop.run_in_executor(
-            None, lambda: build_knowledge_base(pico, progress_callback=progress_callback)
+            None,
+            lambda: build_knowledge_base(
+                pico,
+                progress_callback=progress_callback,
+                cache_dir=self.state_path.parent / ".knowledge_cache",
+            ),
         )
 
         logger.info(
@@ -290,7 +293,12 @@ class ClinicalPlanner:
 
         return knowledge_base, sources_guide, papers, knowledge_sections
 
-    async def _save_literature_context(self, knowledge_base: str, sources_guide: str):
+    async def _save_literature_context(
+        self,
+        knowledge_base: str,
+        sources_guide: str,
+        generated_context: Any = None,
+    ):
         """
         Save the literature review context (knowledge base + sources guide)
         to the workspace as a structured JSON file that the reporter agent
@@ -304,7 +312,9 @@ class ClinicalPlanner:
             "sources_guide": sources_guide,
             "hypothesis": self.state.hypothesis.model_dump() if self.state.hypothesis else {},
         }
-
+        if generated_context and isinstance(generated_context, dict):
+            context_data.update(generated_context)
+        
         try:
             async with aiofiles.open(lit_context_path, 'w', encoding='utf-8') as f:
                 await f.write(json.dumps(context_data, indent=2, ensure_ascii=False))
@@ -359,7 +369,7 @@ class ClinicalPlanner:
                 })
                 user_feedback = await self.input_provider()
 
-                if "APPROVE" in user_feedback.upper():
+                if "APPROVE" in user_feedback.upper(): #We keep it in the front as boxes
                     break
 
                 refinement_prompt = (
@@ -402,12 +412,54 @@ class ClinicalPlanner:
                 try:
                     knowledge_base, sources_guide, papers, knowledge_sections = await self._build_knowledge_base()
 
-                    # Save literature context to workspace for the reporter agent
-                    await self._save_literature_context(knowledge_base, sources_guide)
+                    # Run full literature-review multi-agent pipeline using the
+                    # prebuilt knowledge base to avoid duplicate builder calls.
+                    workspace_dir = self.state_path.parent
+                    lit_output_dir = workspace_dir / "literature_review_output"
+                    await self._send("lit_review_log", {
+                        "message": "Running literature review multi-agent pipeline",
+                        "status": "active",
+                    })
+                    await run_literature_review(
+                        pico=self._extract_pico_from_hypothesis(),
+                        model=getattr(self.client, "model", None) or "deepseek-v3.1:671b-cloud",
+                        output_dir=lit_output_dir,
+                        cache_dir=workspace_dir / ".knowledge_cache",
+                        prebuilt_knowledge={
+                            "knowledge_base": knowledge_base,
+                            "sources_guide": sources_guide,
+                            "papers": papers,
+                            "knowledge_sections": knowledge_sections,
+                        },
+                    )
+                    
+                    generated_context = {}
+                    ranked_papers = []
 
-                    # Try to read a pre-existing literature report if available
+                    context_path = lit_output_dir / "context.json"
+                    if context_path.exists():
+                        try:
+                            generated_context = json.loads(context_path.read_text(encoding="utf-8"))
+                        except Exception:
+                            generated_context = {}
+
+                    ranked_path = lit_output_dir / "ranked_papers.json"
+                    if ranked_path.exists():
+                        try:
+                            ranked_papers = json.loads(ranked_path.read_text(encoding="utf-8"))
+                        except Exception:
+                            ranked_papers = []
+
+                    # Save literature context to workspace for the reporter agent
+                    await self._save_literature_context(
+                        knowledge_base,
+                        sources_guide,
+                        generated_context=generated_context,
+                    )
+
+                    # Try to read generated literature report if available
                     report_md = ""
-                    report_path = Path(__file__).parent.parent / "literature_review_agent" / "literature_review_output" / "literature_report.md"
+                    report_path = lit_output_dir / "literature_report.md"
                     if report_path.exists():
                         try:
                             report_md = report_path.read_text(encoding="utf-8")
@@ -423,6 +475,10 @@ class ClinicalPlanner:
                     }
                     if report_md:
                         lit_payload["report"] = report_md
+                    if generated_context:
+                        lit_payload["context"] = generated_context
+                    if ranked_papers:
+                        lit_payload["ranked_papers"] = ranked_papers
                     await self._send("lit_review_output", lit_payload)
 
                     await self._send("lit_review_done", True)
@@ -459,8 +515,14 @@ class ClinicalPlanner:
                 knowledge_sections, self.state.hypothesis
             )
 
+            hypothesis_payload = self.state.hypothesis.model_dump()
+
             pipeline_prompt = (
+                "CONFIRMED HYPOTHESIS (JSON):\n"
+                f"{json.dumps(hypothesis_payload, ensure_ascii=False, indent=2)}\n\n"
                 f"SUMMARIZED DOMAIN KNOWLEDGE (from literature review):\n{kb_summary}\n\n"
+                "Use the confirmed hypothesis as the primary source of study intent. "
+                "Do not ask for missing hypothesis details unless the hypothesis JSON is empty.\n\n"
                 "Based on this hypothesis and the domain knowledge, design an optimal "
                 "research pipeline. Select the agents needed, order them logically, and "
                 "provide detailed, study-specific instructions for each agent. "

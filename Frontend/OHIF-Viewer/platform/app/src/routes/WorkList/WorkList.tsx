@@ -331,7 +331,7 @@ function WorkList({
     });
 
     navigate({
-      pathname: '/',
+      pathname: '/worklist',
       search: search ? `?${search}` : undefined,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -673,7 +673,15 @@ function WorkList({
         menuOptions={menuOptions}
         isReturnEnabled={false}
         WhiteLabeling={appConfig.whiteLabeling}
-      />
+      >
+        <button
+          className="rounded-md border border-[#2b4f66] bg-[#0f1f2e] px-3 py-1 text-sm font-semibold text-[#5acce6] transition-colors hover:border-[#5acce6] hover:bg-[#123149]"
+          onClick={() => navigate('/agentic-home')}
+          title="Open Research Playground"
+        >
+          Research Playground
+        </button>
+      </Header>
       <div className="flex flex-row justify-center gap-4 ">
         <div className="ohif-scrollbar flex max-w-[75%] grow flex-col overflow-y-auto pl-4">
           <StudyListFilter

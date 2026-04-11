@@ -1,0 +1,106 @@
+/* AgentRegistry component styles */
+.w-agent-registry {
+  background: #0f172a;
+  border-top: 1px solid #334155;
+  transition: all 0.3s;
+  display: flex;
+  flex-direction: column;
+}
+.w-agent-registry.open {
+  height: 180px;
+}
+.w-agent-registry.closed {
+  height: 40px;
+}
+.w-agent-registry-header {
+  height: 40px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  background: #111827;
+  border-bottom: 1px solid #334155;
+  user-select: none;
+}
+.w-agent-registry-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #cbd5e1;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.w-agent-registry-chevron {
+  color: #64748b;
+}
+.w-agent-registry-list {
+  flex: 1;
+  overflow-x: auto;
+  padding: 16px;
+  display: flex;
+  gap: 16px;
+  background: #020617;
+}
+.w-agent-card {
+  min-width: 140px;
+  height: 100px;
+  background: #111827;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: grab;
+  transition: all 0.2s;
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.2);
+}
+.w-agent-card:hover {
+  border-color: #22d3ee;
+  background: #0f1b2e;
+}
+.w-agent-card-icon {
+  padding: 8px;
+  background: #0b1320;
+  border-radius: 50%;
+  color: #22d3ee;
+  transition: transform 0.2s;
+}
+.w-agent-card:hover .w-agent-card-icon {
+  transform: scale(1.1);
+}
+.w-agent-card-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #e2e8f0;
+  text-align: center;
+}
+.w-agent-card-type {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #1e293b;
+  color: #cbd5e1;
+  font-family: monospace;
+}
+.w-agent-card-add {
+  min-width: 140px;
+  height: 100px;
+  border: 1px dashed #334155;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+.w-agent-card-add:hover {
+  color: #22d3ee;
+  border-color: #22d3ee;
+}

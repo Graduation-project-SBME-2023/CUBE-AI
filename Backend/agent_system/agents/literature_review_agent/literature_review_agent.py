@@ -47,7 +47,6 @@ import os
 import re
 import sys
 import urllib.parse
-import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -62,7 +61,13 @@ if _current_dir not in sys.path:
 # ──────────────────────────────────────────────────────────────────────────────
 # Dynamic Knowledge Builder
 # ──────────────────────────────────────────────────────────────────────────────
-from knowledge_builder import build_knowledge_base
+from knowledge_builder import (
+  build_knowledge_base,
+  _http_get,
+  NCBI_API_KEY,
+  PUBMED_DELAY,
+  GENERIC_DELAY,
+)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # AutoGen
@@ -79,6 +84,14 @@ from autogen_ext.models.ollama import OllamaChatCompletionClient
 # ──────────────────────────────────────────────────────────────────────────────
 OUTPUT_DIR = Path("./literature_review_output")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def set_output_dir(output_dir: Optional[Path]) -> Path:
+  """Set output directory for literature review artifacts in this process."""
+  global OUTPUT_DIR
+  OUTPUT_DIR = Path(output_dir) if output_dir else Path("./literature_review_output")
+  OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+  return OUTPUT_DIR
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -119,41 +132,6 @@ class OllamaClient(OllamaChatCompletionClient):
 # ══════════════════════════════════════════════════════════════════════════════
 
 import time
-
-# ── NCBI API key — optional but raises rate limit from 3 → 10 req/sec ────────
-# Set the environment variable NCBI_API_KEY before running, or paste key here.
-NCBI_API_KEY: str = os.environ.get("NCBI_API_KEY", "")
-
-# ── Inter-query delay (seconds) — prevents 429s on repeated PubMed calls ─────
-PUBMED_DELAY: float = 0.4      # 0.34s = ~3 req/s without key; 0.1s with key
-GENERIC_DELAY: float = 0.2
-
-
-def _http_get(url: str, timeout: int = 20, retries: int = 3) -> bytes:
-    """
-    HTTP GET with exponential-backoff retry and a descriptive User-Agent.
-    Retries on 429 (rate limit) and transient 5xx errors.
-    """
-    req = urllib.request.Request(
-        url,
-        headers={"User-Agent": "PICO-LitReview-Agent/2.0 (radiology research)"}
-    )
-    last_exc: Exception = RuntimeError("No attempts made")
-    for attempt in range(retries):
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                return resp.read()
-        except urllib.error.HTTPError as exc:
-            last_exc = exc
-            if exc.code in (429, 500, 502, 503, 504):
-                wait = 2 ** attempt          # 1s, 2s, 4s
-                time.sleep(wait)
-                continue
-            raise                            # 4xx errors are not retryable
-        except Exception as exc:
-            last_exc = exc
-            time.sleep(2 ** attempt)
-    raise last_exc
 
 
 def _safe_text(element, namespace: dict, tag: str, default: str = "") -> str:
@@ -521,7 +499,7 @@ def score_paper_relevance(paper_json: str, pico_json: str) -> str:
 
 def save_output(filename: str, content: str) -> str:
     """
-    Save string content to the ./literature_review_output/ directory.
+  Save string content to the configured literature review output directory.
 
     Args:
         filename : Target filename (e.g., 'context.json', 'report.md').
@@ -1368,6 +1346,10 @@ async def run_literature_review(
     pico: Dict[str, str],
     model: str = OllamaClient.DEFAULT_MODEL,
     max_turns: int = 30,
+  output_dir: Optional[Path] = None,
+  cache_dir: Optional[Path] = None,
+  prebuilt_knowledge: Optional[Dict[str, Any]] = None,
+  progress_callback: Optional[callable] = None,
 ) -> Dict[str, Any]:
     """
     Execute the full 5-agent PICO Literature Review pipeline.
@@ -1375,8 +1357,13 @@ async def run_literature_review(
     Args:
         pico      : Dict with keys: population, intervention, comparison,
                     outcome, hypothesis, and optionally question.
-        model     : Ollama model tag to use.
-        max_turns : Hard cap on total agent turns.
+        model              : Ollama model tag to use.
+        max_turns          : Hard cap on total agent turns.
+        output_dir         : Optional output directory for generated artifacts.
+        cache_dir          : Optional cache directory for knowledge builder.
+        prebuilt_knowledge : Optional dict containing precomputed
+                 knowledge_base/sources_guide to avoid rebuilding.
+        progress_callback  : Optional callback for knowledge-builder progress.
 
     Returns:
         Dict with resolved paths to the three generated output files.
@@ -1387,11 +1374,23 @@ async def run_literature_review(
     if missing:
         raise ValueError(f"PICO input is missing required keys: {missing}")
 
-    # ── Build Dynamic Knowledge Base from Online Medical Databases ────────────
-    print("\n[Pipeline] Building dynamic knowledge base from online medical databases...")
-    print("[Pipeline] Sources: PubMed MeSH, Wikipedia, Semantic Scholar, Europe PMC")
-    knowledge_base, sources_guide, _papers, _sections = build_knowledge_base(pico)
-    print(f"[Pipeline] Knowledge base ready ({len(knowledge_base):,} chars)")
+    # ── Configure output path (workspace-scoped when provided) ───────────────
+    set_output_dir(output_dir)
+
+    # ── Build or reuse Dynamic Knowledge Base ─────────────────────────────────
+    if prebuilt_knowledge and prebuilt_knowledge.get("knowledge_base") and prebuilt_knowledge.get("sources_guide"):
+      print("\n[Pipeline] Using prebuilt knowledge base from planner.")
+      knowledge_base = prebuilt_knowledge["knowledge_base"]
+      sources_guide = prebuilt_knowledge["sources_guide"]
+    else:
+      print("\n[Pipeline] Building dynamic knowledge base from online medical databases...")
+      print("[Pipeline] Sources: PubMed MeSH, Wikipedia, Semantic Scholar, Europe PMC")
+      knowledge_base, sources_guide, _papers, _sections = build_knowledge_base(
+        pico,
+        progress_callback=progress_callback,
+        cache_dir=cache_dir,
+      )
+      print(f"[Pipeline] Knowledge base ready ({len(knowledge_base):,} chars)")
 
     # ── Generate Agent Prompts with Dynamic Knowledge ─────────────────────────
     pico_analyst_prompt    = build_pico_analyst_prompt(knowledge_base, sources_guide)

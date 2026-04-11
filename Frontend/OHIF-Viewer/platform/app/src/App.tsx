@@ -1,5 +1,5 @@
 // External
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import i18n from '@ohif/i18n';
 import { I18nextProvider } from 'react-i18next';
@@ -34,13 +34,34 @@ let commandsManager: CommandsManager,
 
 function App({ config, defaultExtensions, defaultModes }) {
   const [init, setInit] = useState(null);
+  const hasInitializedRef = useRef(false);
+
   useEffect(() => {
+    if (hasInitializedRef.current) {
+      return;
+    }
+
+    hasInitializedRef.current = true;
+    let isMounted = true;
+
     const run = async () => {
-      appInit(config, defaultExtensions, defaultModes).then(setInit).catch(console.error);
+      try {
+        const appInitResult = await appInit(config, defaultExtensions, defaultModes);
+        if (isMounted) {
+          setInit(appInitResult);
+        }
+      } catch (error) {
+        console.error(error);
+      }
     };
+
     registerAllLogRenderers();
     websocketService.connect();
     run();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   if (!init) {
