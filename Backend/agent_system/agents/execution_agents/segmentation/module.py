@@ -1,6 +1,5 @@
 """
 SegmentationModule – automates ROI segmentation.
-
 The module receives an imaging protocol and raw volumes, then runs a
 segmentation model (e.g., nnUNet, MONAI) to produce binary masks for the
 structure
@@ -18,9 +17,10 @@ from .pipelines.automatic import run_automatic_pipeline
 from .pipelines.interactive import run_interactive_pipeline, create_interactive_agent, create_user_proxy_agent
 from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
 from .services import SegmentationService
-from .utils import exclude_existing_masks, download_and_pair_volumes, generate_gif_overlays
+from .utils import exclude_existing_masks, download_and_pair_volumes, generate_gif_overlays, cleanup_discarded, get_model_dice_score
 from .logging_config import setup_logging
 import logging
+# before integratinon make it to the default messages from the socket_store
 from .ws_client_sender import send_ws_message_remote, wait_for_user_message_remote
 
 setup_logging()
@@ -79,91 +79,90 @@ class SegmentationModule:
         self.segmentation_service = SegmentationService()
 
 
-    async def run(self, input_data: Union[str, Dict[str, Any]]):
+    async def run(self, input_data: Union[str, Dict[str, Any]], workspace_dir: str):
         if isinstance(input_data, str):
             with open(input_data, "r") as f:
                 input_data = json.load(f)
 
         hypothesis: str = input_data["hypothesis"]
         datasetlist: List[str] = input_data["datasetlist"]
-
+        session_id = workspace_dir.split("workspace_")[-1]
         #1. plan
-        # plan = await run_planner(self.PlannerAgent,hypothesis)
-        # logger.info(f"Planner plan: {plan}")
-        # target_labels = plan["target_labels"]
-        # chosen_path = plan["chosen_path"]
-        # eligible_volumes = await exclude_existing_masks(
-        #     datasetlist, target_labels
-        # )
+        plan = await run_planner(self.PlannerAgent,hypothesis)
+        logger.info(f"Planner plan: {plan}")
+        target_labels = plan["target_labels"]
+        chosen_path = plan["chosen_path"]
+        eligible_volumes = await exclude_existing_masks(
+            datasetlist, target_labels
+        )
         
-        plan={'target_labels': ['prostate'], 'chosen_path': 'interactive', 'automatic_models': [], 'interactive_models': [], 'selected_model': 'text_prompting_prostate', 'fallback_path': 'interactive', 'exclusion_rule': 'exclude_existing_masks_for_same_label'}
+        # =========== test ===============
 
-        # logger.info(
-        #     f"Eligible volumes for segmentation: {len(eligible_volumes)}"
-        # )
-        # chosen_path = "automatic"
-        # eligible_volumes = datasetlist
-        # target_labels = ["spleen"]
-        # selected_auto_model= "segmentation_spleen" # hard test
+        # plan={'target_labels': ['Spleen'], 'chosen_path': 'interactive','selected_model': ['Spleen_Automatic_model']}
+        # =================================
+        
+        logger.info(
+            f"Eligible volumes for segmentation: {len(eligible_volumes)}"
+        )
+        #whether it's automatic or interactive
+        if chosen_path == "automatic" and eligible_volumes:
+            selected_auto_models = plan["selected_models"] if plan["selected_models"] else None
+            await run_automatic_pipeline(eligible_volumes, target_labels, selected_auto_models, self.segmentation_service)
 
-        # whether it's automatic or interactive
-        # if chosen_path == "automatic" and eligible_volumes:
-        #     selected_auto_model = plan["automatic_models"][0]
-        #     # selected_auto_model = "segmentation_spleen" # hard test
-        #     await run_automatic_pipeline(eligible_volumes, target_labels, selected_auto_model, self.segmentation_service)
-
-        # elif eligible_volumes:
-        #     await run_interactive_pipeline(self.UserFallbackAgent, self.UserProxyAgent, target_labels)
+        elif eligible_volumes:
+            selected_interactive_model = await run_interactive_pipeline(self.UserFallbackAgent, self.UserProxyAgent, eligible_volumes, target_labels, self.segmentation_service)
             
-        # finally download the volumes with its label masks 
-        # await asyncio.sleep(120)  
+        #finally download the volumes with its label masks 
+        await asyncio.sleep(120)  
         
-        # downloaded_uids = await download_and_pair_volumes(
-        #             datasetlist, 
-        #             chosen_path=chosen_path, 
-        #             selected_auto_model_for_volume=plan["automatic_models"][0] if plan["automatic_models"] else None
-        # )
-        downloaded_uids = ["1.2.826.0.1.3680043.8.498.12073285427930663774611907954116957406",
-                         "1.2.826.0.1.3680043.8.498.15136386566608168882487015520907740870",
-                         "1.2.826.0.1.3680043.8.498.39690361926593906696712695770248244325",
-                         "1.2.826.0.1.3680043.8.498.66527749693564068057441707562288227105",
-                         "1.2.826.0.1.3680043.8.498.90966193394235914543895670294526949480"
-                         ] 
+        # todo : send to the function the workspace path to download into it
+        downloaded_uids = await download_and_pair_volumes(
+                    workspace_dir,
+                    datasetlist, 
+                    chosen_path=chosen_path, 
+                    selected_auto_model_for_volume = plan["selected_models"] if plan["selected_models"] else None
+        )
         
-
-        # Generate Overlays
+        #============================ test segmentation view ===================================
+        # downloaded_uids = ["1.2.826.0.1.3680043.8.498.12073285427930663774611907954116957406",
+        #                  "1.2.826.0.1.3680043.8.498.15136386566608168882487015520907740870",
+        #                  "1.2.826.0.1.3680043.8.498.39690361926593906696712695770248244325",
+        #                  "1.2.826.0.1.3680043.8.498.66527749693564068057441707562288227105",
+        #                  "1.2.826.0.1.3680043.8.498.90966193394235914543895670294526949480"
+        #                  ] 
+        # ======================================================================================
+        
+        # ================== Generate Overlays ===========================================
+        # make it the workspace from the service
         gif_volumes = []
         if downloaded_uids:
-            current_dir = Path(__file__).parent.parent.parent.parent
-            FINAL_DIR_IMG = os.path.join(current_dir, "workspace", "volumes")
-            FINAL_DIR_LABEL = os.path.join(current_dir, "workspace", "masks")
-            OVERLAYS_DIR = os.path.join(current_dir, "workspace", "overlays")
-
+            
             gif_volumes = await asyncio.to_thread(
                 generate_gif_overlays, 
-                FINAL_DIR_IMG, FINAL_DIR_LABEL, OVERLAYS_DIR, downloaded_uids
+                workspace_dir, downloaded_uids
             )
             logger.info(f"gif_volumes sample: {gif_volumes[:1]}")
 
-        # Prepare data for the frontend
+        #=========== Prepare data for the frontend(payload)==============================
+        #todo: handle list of labels and models in front view
         frontend_data = {
             "targetRoi": plan['target_labels'][0], 
-            "selectedModel": plan["selected_model"], 
-            "diceScore": None, # for now none untill db handle that
+            "selectedModel": plan["selected_models"][0] if plan["selected_models"] else None, 
+            "diceScore": get_model_dice_score(plan["selected_auto_models"][0]) if (plan["chosen_path"] == "automatic") and plan["selected_auto_models"] else get_model_dice_score(selected_interactive_model), 
             "volumes": gif_volumes
         }
 
-        # sending data to fronted for review
+        # ==========sending data to fronted for review====================
         logger.info("Module sending data to frontend for review...")
         await send_ws_message_remote(
             msg_type="REVIEW_REQUIRED", 
             payload=frontend_data, 
-            # session_id= # i must send it with the task manager session id
+            session_id= session_id
         )
         # wait untill fornt reply "save" to get the result
         logger.info("Module paused: Waiting for human review...")
         user_response_raw = await wait_for_user_message_remote(
-            # session_id="your_session_id" 
+            session_id= session_id
             
         )
 
@@ -172,7 +171,8 @@ class SegmentationModule:
         final_accepted_uids = user_results.get("accepted", [])
         logger.info(f"Module resumed! User accepted: {final_accepted_uids}")
 
-        # todo: the accepted uid just kept in the folder !
+        #============= accepted uid just kept only in the folder=================
+        cleanup_discarded(workspace_dir, final_accepted_uids)
 
 
         return {"status": "finished"}
@@ -189,8 +189,8 @@ async def test_module():
         current_file = Path(__file__)
         config_path =os.path.join(current_file.parent.parent.parent.parent.parent,"mas","memory", "workspace", "configurations.json")
         logger.info(f"Running with config: {config_path}")
-        
-        result = await agent.run(config_path)
+        workspace_folder = os.path.join(current_file.parent.parent.parent.parent,"workspace")
+        result = await agent.run(config_path, workspace_folder)
         
         logger.info("Test completed successfully!")
         logger.info(f"Result: {result}")
