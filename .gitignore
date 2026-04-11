@@ -10,6 +10,9 @@ __pycache__/
 # venvs and envs
 **/*venv
 
+.env
+
+
 # models checkpoints
 Backend/apps/radiology/model/
 Backend/apps/radiology/sam2/checkpoints/sam2.1_hiera_large.pt

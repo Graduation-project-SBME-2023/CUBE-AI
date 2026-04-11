@@ -99,7 +99,7 @@ def serve_static_pdf(file_path: str):
 # Single shared service — the only stateful object routes need to know about
 session_service = SessionService(ws_manager=manager)
 
-api_key = os.getenv("OLLAMA_API_KEY", "cf8ed2bae88d4d659602bc340b4b2bcf.mEvRr0YQ54A_OKfTT2Z92rge")
+api_key = os.getenv("OLLAMA_API_KEY", "")
 
 
 # ── Agent-to-view mapping for tool result emission ────────────────────────────

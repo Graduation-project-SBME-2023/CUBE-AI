@@ -70,10 +70,21 @@ class SegmentationAgent(AssistantAgent):
     @classmethod
     async def create(cls, model_client = None, workspace_folder = None):
         model_client = OllamaClient() if not model_client else model_client
-        mcp_server = StdioServerParams(
-            command="python", args=["Backend/mcp/server.py"], env={"WORKSPACE_DIR": workspace_folder}
+        mcp_server_path = os.path.abspath(
+            os.path.join(current_dir, "..", "..", "..", "mcp", "server.py")
         )
-        mcp_tools = await mcp_server_tools(mcp_server)
+        if not os.path.exists(mcp_server_path):
+            raise FileNotFoundError(f"MCP server not found at: {mcp_server_path}")
+        mcp_server = StdioServerParams(
+            command=sys.executable,
+            args=[mcp_server_path],
+            env={"WORKSPACE_DIR": workspace_folder}
+        )
+        try:
+            mcp_tools = await mcp_server_tools(mcp_server)
+        except Exception as exc:
+            logger.exception("Failed to initialize MCP tools from %s", mcp_server_path)
+            raise RuntimeError(f"Failed to initialize MCP tools from {mcp_server_path}") from exc
         desired_mcp_tools = ['scratchpad_register_agent', 'scratchpad_write_summary',
                              'scratchpad_set_status', 'scratchpad_raise_flag',
                              'write_agent_output']

@@ -1,5 +1,6 @@
 import sys
 import os
+import logging
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "..", ".."))
@@ -18,6 +19,7 @@ from tools.classification_tool import classification_modelling
 from autogen_core.tools import FunctionTool
 
 modelling_classification_tool = classification_modelling
+logger = logging.getLogger(__name__)
 
 
 class ModelingAgent(AssistantAgent):
@@ -30,12 +32,24 @@ class ModelingAgent(AssistantAgent):
                          max_tool_iterations=max_tool_iterations)
 
     @classmethod
-    async def create(cls, model_client=None, workspace_folder=None, mcp_server_path='Backend/mcp/server.py'):
+    async def create(cls, model_client=None, workspace_folder=None, mcp_server_path=None):
         model_client = OllamaClient() if not model_client else model_client
+        if not mcp_server_path:
+            mcp_server_path = os.path.abspath(
+                os.path.join(current_dir, "..", "..", "..", "mcp", "server.py")
+            )
+        else:
+            mcp_server_path = os.path.abspath(mcp_server_path)
+        if not os.path.exists(mcp_server_path):
+            raise FileNotFoundError(f"MCP server not found at: {mcp_server_path}")
         mcp_server = StdioServerParams(
-            command="python", args=[os.path.normpath(mcp_server_path)], env={"WORKSPACE_DIR": workspace_folder}, read_timeout_seconds=300
+            command=sys.executable, args=[mcp_server_path], env={"WORKSPACE_DIR": workspace_folder}, read_timeout_seconds=300
         )
-        mcp_tools = await mcp_server_tools(mcp_server)
+        try:
+            mcp_tools = await mcp_server_tools(mcp_server)
+        except Exception as exc:
+            logger.exception("Failed to initialize MCP tools from %s", mcp_server_path)
+            raise RuntimeError(f"Failed to initialize MCP tools from {mcp_server_path}") from exc
         desired_mcp_tools = ['pycaret_train_classifier', 'pycaret_run_inference', 'scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',
                              'scratchpad_write_summary', 'scratchpad_set_status', 'scratchpad_read_agent',
                              'write_agent_output']

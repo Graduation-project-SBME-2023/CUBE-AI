@@ -89,7 +89,10 @@ class SegmentationModule:
         server_path = backend_dir / "mcp" / "server.py"   
         logger.info(f"Starting MCP server at: {server_path}")     
         math_server = StdioServerParams(
-            command="python", args=[str(server_path)], timeout=None
+            command=sys.executable,
+            args=[str(server_path)],
+            timeout=None,
+            cwd=str(backend_dir / "mcp")
         )
         try:
             tools = await mcp_server_tools(math_server)
