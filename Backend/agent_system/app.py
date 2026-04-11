@@ -1,9 +1,11 @@
 import asyncio
+import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from teams.execution_team import BasicPipelineBuilder
 from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.responses import FileResponse, Response
 from starlette.requests import Request
 from autogen_agentchat.teams import GraphFlow
 from autogen_agentchat.messages import (
@@ -75,13 +77,25 @@ class CoopCoepMiddleware(BaseHTTPMiddleware):
         return response
 
 app.add_middleware(CoopCoepMiddleware)
-# Mount the workspace folder so files can be accessed via URL
-# Adjust the path to point exactly to your workspace folder
+# todo: make it after the planner set the session id and create the workspace associated with the session id
 workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "workspace"))
-app.mount("/static", StaticFiles(directory=workspace_dir), name="static")
 
-
-
+@app.get("/static/{file_path:path}")
+def serve_static_pdf(file_path: str):
+    full_path = os.path.join(workspace_dir, file_path)
+    
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # PDFs → inline to allow view in browser
+    if file_path.endswith(".pdf"):
+        return FileResponse(
+            path=full_path,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline; filename={os.path.basename(file_path)}"},
+            content_disposition_type="inline"
+        )
+    return FileResponse(path=full_path)
 # Single shared service — the only stateful object routes need to know about
 session_service = SessionService(ws_manager=manager)
 
