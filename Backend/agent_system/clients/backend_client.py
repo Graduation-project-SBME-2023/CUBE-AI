@@ -30,6 +30,9 @@ class BackendClient:
             clinical_context=data["clinical_context"],
             relationship_type=data["relationship_type"],
             comparison=data["comparison"],
+            hypothesis=data.get("hypothesis", ""),
+            question=data.get("question", ""),
+            message=data.get("message"),
         )
 
     # ------------------------------------------------------------------
@@ -90,6 +93,21 @@ class BackendClient:
                 logger.error(f"Failed to update hypothesis {hypothesis.id}: {e}")
                 return None
 
+    @classmethod
+    async def get_hypothesis_by_chat(cls, session_id: str) -> ClinicalHypothesis | None:
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{BASE_URL}/hypotheses/by-chat/{session_id}",
+                )
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                return cls._parse_hypothesis(response.json())
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to fetch hypothesis for session {session_id}: {e}")
+                return None
+
     # ------------------------------------------------------------------
     # Plan
     # ------------------------------------------------------------------
@@ -124,6 +142,21 @@ class BackendClient:
                 return StudyPlan(**response.json())
             except httpx.HTTPError as e:
                 logger.error(f"Failed to update plan with id {plan.id}: {e}")
+                return None
+
+    @classmethod
+    async def get_plan_by_hypothesis(cls, hypothesis_id: str) -> StudyPlan | None:
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{BASE_URL}/plans/by-hypothesis/{hypothesis_id}",
+                )
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                return StudyPlan(**response.json())
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to fetch plan for hypothesis {hypothesis_id}: {e}")
                 return None
 
 
