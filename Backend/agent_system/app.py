@@ -56,6 +56,7 @@ from services.pipeline_monitor import PipelineMonitor
 
 logger = logging.getLogger(__name__)
 
+logging.getLogger("watchfiles").setLevel(logging.WARNING)
 # ----------------------------------------------------------------------
 # App setup
 # ----------------------------------------------------------------------
