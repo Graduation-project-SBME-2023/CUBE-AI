@@ -6,8 +6,8 @@ import { I18nextProvider } from 'react-i18next';
 import { BrowserRouter } from 'react-router-dom';
 import Compose from './routes/Mode/Compose';
 import ChatWidget from "./components/ChatWidget";
-import { registerAllLogRenderers } from './components/PlaygroundCanvas/logs/registerRenderers';
-import websocketService from './utils/WebsocketService';
+// import { registerAllLogRenderers } from './components/PlaygroundCanvas/logs/registerRenderers';
+// import websocketService from './utils/WebsocketService';
 import { ServicesManager, ExtensionManager, CommandsManager, HotkeysManager } from '@ohif/core';
 import {
   DialogProvider,
@@ -55,8 +55,8 @@ function App({ config, defaultExtensions, defaultModes }) {
       }
     };
 
-    registerAllLogRenderers();
-    websocketService.connect();
+    // registerAllLogRenderers();
+    // websocketService.connect();
     run();
 
     return () => {

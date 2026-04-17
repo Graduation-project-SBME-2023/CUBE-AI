@@ -248,7 +248,7 @@ async def run_planner(session: Session, message: str) -> None:
     )
     os.makedirs(workspace_folder, exist_ok=True)
     planner = ClinicalPlanner(
-        input_provider=lambda: manager.wait_for_user_message(),
+        input_provider=lambda: manager.wait_for_user_message(session.session_id),
         output_callback=lambda t, d, s: manager.send_ws_message(t, d, s),
         model_client=create_model_client_from_config(),
         workspace_dir=workspace_folder,

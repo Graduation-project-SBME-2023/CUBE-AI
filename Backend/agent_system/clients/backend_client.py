@@ -154,7 +154,16 @@ class BackendClient:
                 if response.status_code == 404:
                     return None
                 response.raise_for_status()
-                return StudyPlan(**response.json())
+                payload = response.json()
+                if not payload:
+                    return None
+
+                if isinstance(payload, list):
+                    first_plan = payload[0]
+                else:
+                    first_plan = payload
+
+                return StudyPlan(**first_plan)
             except httpx.HTTPError as e:
                 logger.error(f"Failed to fetch plan for hypothesis {hypothesis_id}: {e}")
                 return None
