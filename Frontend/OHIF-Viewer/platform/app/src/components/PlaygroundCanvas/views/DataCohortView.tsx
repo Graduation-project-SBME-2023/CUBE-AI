@@ -213,8 +213,8 @@ export default function DataCohortView({ populationData, segmentationData }: Dat
                     </div>
                     <div className="flex gap-2 text-xs font-mono">
                         {accumulatedPop.uids.length > 0 && (
-                            <span className="px-3 py-1.5 bg-[#152e2e] text-[#5ce6b0] border border-[#234d4d] rounded flex items-center gap-2">
-                                <ActivityIcon size={12}/> Secure Link Established
+                            <span className="px-3 py-1.5 bg-[#152e2e] text-[#5ce6b0] border border-[#234d4d] rounded flex items-center gap-2 shadow-[0_0_10px_rgba(92,230,176,0.2)]">
+                                <ActivityIcon size={12} className="animate-pulse" /> Cohort Secured & Loading Previews
                             </span>
                         )}
                     </div>
@@ -225,23 +225,50 @@ export default function DataCohortView({ populationData, segmentationData }: Dat
                     {/* Render Real UIDs if we have them */}
                     {accumulatedPop.uids.length > 0 ? (
                         accumulatedPop.uids.map((uid, i) => (
-                            <div key={i} className="aspect-square bg-black rounded border border-[#3c5d80]/50 hover:border-[#5acce6] transition-all cursor-pointer relative group overflow-hidden">
-                                <div className="absolute inset-0 flex items-center justify-center opacity-30 group-hover:opacity-60 transition-opacity bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#1f2d40] via-[#0b1015] to-black">
-                                    <div className="flex flex-col items-center">
-                                        <DatabaseIcon size={24} className="text-[#3c5d80] mb-2" />
-                                        {/* Show truncated UID for security/aesthetics */}
-                                        <span className="text-[9px] font-mono text-[#91b9cd]">...{uid.slice(-8)}</span>
+                            <div key={uid} className="aspect-square bg-black rounded border border-[#3c5d80]/50 hover:border-[#5acce6] transition-all relative group overflow-hidden flex flex-col">
+                                
+                                {/* Image / GIF Container */}
+                                <div className="flex-1 relative bg-[#05080a] overflow-hidden">
+                                    {/* This points to your backend API which fetches/generates the GIF from Orthanc. 
+                                        Adjust the port/URL to match your actual backend API.
+                                    */}
+                                    <img 
+                                        src={`http://localhost:8000/volumes/${uid}/preview.gif`} 
+                                        alt={`Volume ${uid}`}
+                                        className="w-full h-full object-cover opacity-50 group-hover:opacity-90 transition-opacity duration-300"
+                                        onError={(e) => {
+                                            // Fallback if the GIF hasn't been generated yet or fails
+                                            (e.target as HTMLImageElement).style.display = 'none';
+                                            (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
+                                        }}
+                                    />
+                                    
+                                    {/* Fallback Icon if Image Fails */}
+                                    <div className="hidden absolute inset-0 flex items-center justify-center bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#1f2d40] via-[#0b1015] to-black">
+                                        <DatabaseIcon size={24} className="text-[#3c5d80]" />
+                                    </div>
+
+                                    {/* Status Badge */}
+                                    <div className="absolute top-2 right-2 z-10">
+                                        <div className="bg-[#152e2e]/90 backdrop-blur text-[#5ce6b0] border border-[#5ce6b0]/30 text-[8px] font-bold px-1.5 py-0.5 rounded uppercase shadow-lg">
+                                            READY
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="absolute top-2 right-2">
-                                    <div className="bg-[#5acce6]/20 text-[#5acce6] border border-[#5acce6]/30 text-[8px] font-bold px-1.5 py-0.5 rounded uppercase">READY</div>
+
+                                {/* UID Footer */}
+                                <div className="h-7 bg-[#0b1015] border-t border-[#1f2d40] flex items-center justify-center px-2 shrink-0 group-hover:bg-[#151a1f] transition-colors">
+                                    <span className="text-[10px] font-mono text-[#91b9cd] truncate w-full text-center" title={uid}>
+                                        ...{uid.slice(-12)}
+                                    </span>
                                 </div>
+
                             </div>
                         ))
                     ) : (
                         /* Fallback Mock Skeleton Loading State */
                         Array.from({ length: 12 }).map((_, i) => (
-                            <div key={i} className="aspect-square bg-[#0b1015] rounded border border-[#1f2d40] relative overflow-hidden animate-pulse">
+                            <div key={`skeleton-${i}`} className="aspect-square bg-[#0b1015] rounded border border-[#1f2d40] relative overflow-hidden animate-pulse">
                                 <div className="absolute inset-0 flex items-center justify-center">
                                     <span className="text-[10px] font-mono text-gray-700">Awaiting Data</span>
                                 </div>
