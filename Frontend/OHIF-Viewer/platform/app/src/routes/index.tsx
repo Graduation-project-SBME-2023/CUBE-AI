@@ -11,10 +11,7 @@ import NotFound from './NotFound';
 import buildModeRoutes from './buildModeRoutes';
 import WorkflowDetailPage from './Workflow/WorkflowDetails';
 import PrivateRoute from './PrivateRoute';
-import CubeStartUp from './StartUp';
-import agenticHome from './agenticHome';
-import ResearchPlayground from '../components/ResearchPlayground';
-import AgentsPlayground from './Playground/AgentsPlayground';
+
 import PropTypes from 'prop-types';
 import { Link } from 'react-router-dom';
 
@@ -113,37 +110,6 @@ const createRoutes = ({
     },
   ];
 
-  const agenticHomeRoute = {
-    path: '/agentic-home',
-    children: agenticHome,
-    private: false,
-  };
-
-  const researchPlaygroundRoute = {
-    path: '/playground',
-    children: ResearchPlayground,
-    private: false,
-  };
-
-  const researchPlaygroundPhaseRoute = {
-    path: '/playground/:phaseId',
-    children: ResearchPlayground,
-    private: false,
-  };
-
-  const agentsPlaygroundRoute = {
-    path: '/agents-playground',
-    children: AgentsPlayground,
-    private: false,
-  };
-
-  // CUBE Startup Route - Landing Page
-  const cubeStartupRoute = {
-    path: '/',
-    children: CubeStartUp,
-    private: false, // Set to true if authentication is required
-  };
-
   const { customizationService } = servicesManager.services;
 
   // WorkList Route (now moved to /worklist path since CUBE takes root)
@@ -155,18 +121,14 @@ const createRoutes = ({
   };
 
   const customRoutes = customizationService.getGlobalCustomization('customRoutes');
-
+  console.log("DYNAMIC ROUTES:", customRoutes); // <--- ADD THIS
   const allRoutes = [
-    cubeStartupRoute, // CUBE startup is now the landing page
+    ...(customRoutes?.routes || []),
     ...routes,
     ...workflowRoutes,
     ...(showStudyList ? [WorkListRoute] : []),
-    ...(customRoutes?.routes || []),
     ...bakedInRoutes,
-    agenticHomeRoute,
-    researchPlaygroundRoute,
-    researchPlaygroundPhaseRoute,
-    agentsPlaygroundRoute,
+
 
     customRoutes?.notFoundRoute || notFoundRoute,
   ];

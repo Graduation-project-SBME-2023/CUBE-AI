@@ -17,6 +17,7 @@ modes.push("@ohif/mode-segmentation");
 modes.push("@ohif/mode-tmtv");
 modes.push("@ohif/mode-microscopy");
 modes.push("@ohif/mode-monai-label");
+modes.push("@ohif/extension-research-playground");
 
 
 // Add a dynamic runtime loader
