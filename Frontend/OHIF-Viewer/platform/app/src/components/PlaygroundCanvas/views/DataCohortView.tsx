@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Users, Filter, Database, AlertTriangle, Check, Activity, Layers } from 'lucide-react';
 
 const CheckIcon: any = Check;
@@ -21,7 +21,13 @@ interface PopulationData {
         summary?: string;
         files?: Record<string, string>;
     };
+    // Side-channel properties we added
     tool?: string;
+    count?: number;
+    uid_list?: string[];
+    inclusion_criteria?: string[]; // <--- ADDED
+    exclusion_criteria?: string[]; // <--- ADDED
+    modality?: string;
     data?: any;
 }
 
@@ -47,20 +53,62 @@ interface DataCohortViewProps {
 }
 
 export default function DataCohortView({ populationData, segmentationData }: DataCohortViewProps) {
-    const popMetrics = populationData?.outputs?.metrics;
+    
+    // --- 1. LOCAL ACCUMULATOR STATE ---
+    // Because the backend sends updates tool-by-tool, we merge them here so the UI doesn't flicker.
+    const [accumulatedPop, setAccumulatedPop] = useState({
+        count: null as number | null,
+        uids: [] as string[],
+        inclusion: [] as string[],
+        exclusion: [] as string[],
+        modality: "Awaiting...",
+        summary: "",
+        matchRate: null as number | null
+    });
+
+    useEffect(() => {
+        if (!populationData) return;
+
+        setAccumulatedPop(prev => {
+            const next = { ...prev };
+
+            // A. Catch output from the write_inclusion_criteria tool
+            if (populationData.tool === 'write_inclusion_criteria') {
+                if (populationData.inclusion_criteria) next.inclusion = populationData.inclusion_criteria;
+                if (populationData.exclusion_criteria) next.exclusion = populationData.exclusion_criteria;
+                if (populationData.modality) next.modality = populationData.modality;
+            }
+
+            // B. Catch output from the secure search tool (The side-channel!)
+            if (populationData.tool === 'search_volumes_by_description') {
+                if (populationData.count !== undefined) next.count = populationData.count;
+                if (populationData.uid_list) next.uids = populationData.uid_list;
+            }
+
+            // C. Catch final output from the standardized write_agent_output tool
+            if (populationData.outputs?.metrics) {
+                const metrics = populationData.outputs.metrics;
+                if (metrics.cohort_size) next.count = metrics.cohort_size;
+                if (metrics.match_rate) next.matchRate = metrics.match_rate;
+                if (metrics.inclusion_criteria) next.inclusion = metrics.inclusion_criteria;
+                if (metrics.exclusion_criteria) next.exclusion = metrics.exclusion_criteria;
+                if (populationData.outputs.summary) next.summary = populationData.outputs.summary;
+            }
+
+            return next;
+        });
+    }, [populationData]);
+
     const segMetrics = segmentationData?.outputs?.metrics;
-    const cohortSize = popMetrics?.cohort_size ?? null;
-    const matchRate = popMetrics?.match_rate ?? null;
-    const inclusionCriteria = popMetrics?.inclusion_criteria ?? [];
-    const exclusionCriteria = popMetrics?.exclusion_criteria ?? [];
     const volumesSegmented = segMetrics?.volumes_segmented ?? null;
     const segMethod = segMetrics?.segmentation_method ?? null;
     const roiDesc = segMetrics?.roi_description ?? null;
-
     const hasPopData = populationData && populationData.status !== undefined;
     const hasSegData = segmentationData && segmentationData.status !== undefined;
+
     return (
         <div className="p-6 w-full h-full flex gap-6 bg-[#000000] overflow-hidden">
+            
             {/* LEFT: Criteria Panel */}
             <div className="w-80 flex flex-col gap-4 shrink-0">
                 <div className="bg-[#151a1f] rounded-xl border border-[#3c5d80] p-4 flex flex-col gap-4">
@@ -68,22 +116,28 @@ export default function DataCohortView({ populationData, segmentationData }: Dat
                         <FilterIcon size={14} /> Study Criteria
                     </h3>
                     
+                    {/* Dynamic Modality Tag */}
+                    {accumulatedPop.modality && accumulatedPop.modality !== "Awaiting..." && (
+                        <div className="text-xs bg-[#3c5d80]/20 border border-[#3c5d80] text-[#91b9cd] px-2 py-1 rounded inline-block w-max">
+                            Target: <span className="font-bold text-white">{accumulatedPop.modality}</span>
+                        </div>
+                    )}
+                    
                     {/* Inclusion Box */}
                     <div className="space-y-2">
                         <span className="text-[#6fe5b8] text-[10px] font-bold uppercase tracking-wide bg-[#6fe5b8]/10 px-2 py-0.5 rounded border border-[#6fe5b8]/20 inline-block">
                             Inclusion
                         </span>
-                        <div className="bg-[#0b1015] rounded p-3 border border-[#3c5d80]/30 text-xs text-gray-300 space-y-1">
-                            {inclusionCriteria.length > 0 ? (
-                                inclusionCriteria.map((c, i) => (
-                                    <div key={i} className="flex items-center gap-2"><CheckIcon size={10} className="text-[#6fe5b8]"/> {c}</div>
+                        <div className="bg-[#0b1015] rounded p-3 border border-[#3c5d80]/30 text-xs text-gray-300 space-y-1 min-h-[60px]">
+                            {accumulatedPop.inclusion.length > 0 ? (
+                                accumulatedPop.inclusion.map((c, i) => (
+                                    <div key={i} className="flex items-start gap-2">
+                                        <CheckIcon size={12} className="text-[#6fe5b8] mt-0.5 shrink-0"/> 
+                                        <span>{c}</span>
+                                    </div>
                                 ))
                             ) : (
-                                <>
-                                    <div className="flex items-center gap-2"><CheckIcon size={10} className="text-[#6fe5b8]"/> Modality: CT Chest</div>
-                                    <div className="flex items-center gap-2"><CheckIcon size={10} className="text-[#6fe5b8]"/> Contrast: Enhanced</div>
-                                    <div className="flex items-center gap-2"><CheckIcon size={10} className="text-[#6fe5b8]"/> Age: {'>'} 45 years</div>
-                                </>
+                                <div className="text-gray-600 italic">Waiting for agent to define criteria...</div>
                             )}
                         </div>
                     </div>
@@ -93,16 +147,16 @@ export default function DataCohortView({ populationData, segmentationData }: Dat
                         <span className="text-[#ff6b6b] text-[10px] font-bold uppercase tracking-wide bg-[#ff6b6b]/10 px-2 py-0.5 rounded border border-[#ff6b6b]/20 inline-block">
                             Exclusion
                         </span>
-                        <div className="bg-[#0b1015] rounded p-3 border border-[#3c5d80]/30 text-xs text-gray-300 space-y-1">
-                            {exclusionCriteria.length > 0 ? (
-                                exclusionCriteria.map((c, i) => (
-                                    <div key={i} className="flex items-center gap-2"><AlertTriangleIcon size={10} className="text-[#ff6b6b]"/> {c}</div>
+                        <div className="bg-[#0b1015] rounded p-3 border border-[#3c5d80]/30 text-xs text-gray-300 space-y-1 min-h-[60px]">
+                            {accumulatedPop.exclusion.length > 0 ? (
+                                accumulatedPop.exclusion.map((c, i) => (
+                                    <div key={i} className="flex items-start gap-2">
+                                        <AlertTriangleIcon size={12} className="text-[#ff6b6b] mt-0.5 shrink-0"/> 
+                                        <span>{c}</span>
+                                    </div>
                                 ))
                             ) : (
-                                <>
-                                    <div className="flex items-center gap-2"><AlertTriangleIcon size={10} className="text-[#ff6b6b]"/> Motion Artifacts {'>'} 10%</div>
-                                    <div className="flex items-center gap-2"><AlertTriangleIcon size={10} className="text-[#ff6b6b]"/> Prior Resection</div>
-                                </>
+                                <div className="text-gray-600 italic">Waiting for exclusion logic...</div>
                             )}
                         </div>
                     </div>
@@ -111,19 +165,21 @@ export default function DataCohortView({ populationData, segmentationData }: Dat
                 {/* Cohort Summary */}
                 <div className="bg-[#151a1f] rounded-xl border border-[#3c5d80] p-4">
                     <h3 className="text-[#91b9cd] font-bold uppercase tracking-wider text-xs mb-2">Cohort Summary</h3>
-                    <div className="text-3xl font-bold text-white mb-1">
-                        {cohortSize ?? '—'} <span className="text-sm font-normal text-gray-500">patients</span>
+                    <div className="text-3xl font-bold text-white mb-1 transition-all">
+                        {accumulatedPop.count ?? '—'} <span className="text-sm font-normal text-gray-500">patients</span>
                     </div>
-                    {matchRate !== null && (
+                    {accumulatedPop.matchRate !== null && (
                         <>
-                            <div className="h-2 w-full bg-[#0b1015] rounded-full overflow-hidden">
-                                <div className="h-full bg-[#5acce6]" style={{ width: `${matchRate}%` }}></div>
+                            <div className="h-2 w-full bg-[#0b1015] rounded-full overflow-hidden mt-2">
+                                <div className="h-full bg-[#5acce6] transition-all duration-1000" style={{ width: `${accumulatedPop.matchRate}%` }}></div>
                             </div>
-                            <div className="text-[10px] text-gray-500 mt-1 text-right">{matchRate}% Match Rate</div>
+                            <div className="text-[10px] text-gray-500 mt-1 text-right">{accumulatedPop.matchRate}% Match Rate</div>
                         </>
                     )}
-                    {populationData?.outputs?.summary && (
-                        <p className="text-xs text-gray-400 mt-2">{populationData.outputs.summary}</p>
+                    {accumulatedPop.summary && (
+                        <p className="text-xs text-[#5acce6] mt-3 p-2 bg-[#0b1015] border border-[#1f2d40] rounded leading-relaxed">
+                            {accumulatedPop.summary}
+                        </p>
                     )}
                 </div>
 
@@ -138,9 +194,6 @@ export default function DataCohortView({ populationData, segmentationData }: Dat
                             <div className="text-2xl font-bold text-white">{volumesSegmented} <span className="text-sm font-normal text-gray-500">volumes</span></div>
                         )}
                         {roiDesc && <div className="text-xs text-gray-400 mt-1">{roiDesc}</div>}
-                        {segmentationData?.outputs?.summary && (
-                            <p className="text-xs text-gray-400 mt-2">{segmentationData.outputs.summary}</p>
-                        )}
                     </div>
                 )}
             </div>
@@ -152,34 +205,49 @@ export default function DataCohortView({ populationData, segmentationData }: Dat
                         <h2 className="text-lg font-bold text-white flex items-center gap-2">
                             <DatabaseIcon size={18} className="text-[#5acce6]" /> Data Acquisition
                         </h2>
-                        <p className="text-xs text-gray-400">
-                            {hasPopData
-                                ? `Population status: ${populationData?.status ?? 'pending'}`
-                                : 'Reviewing PACS query results for Study UID: 1.2.840.113...'}
+                        <p className="text-xs text-gray-400 mt-1">
+                            {hasPopData 
+                                ? `Agent Activity: Processing ${populationData?.tool?.replace(/_/g, ' ') || 'finalizing'}...` 
+                                : 'Waiting for Population Agent to initiate DB search...'}
                         </p>
                     </div>
-                    <div className="flex gap-2">
-                        <button className="px-3 py-1.5 bg-[#1f2d40] text-[#91b9cd] border border-[#3c5d80] rounded text-xs hover:text-white transition-colors">Query PACS</button>
-                        <button className="px-3 py-1.5 bg-[#348cfd] text-white rounded text-xs font-medium hover:bg-[#599fff] transition-colors shadow-lg">Run QA Check</button>
+                    <div className="flex gap-2 text-xs font-mono">
+                        {accumulatedPop.uids.length > 0 && (
+                            <span className="px-3 py-1.5 bg-[#152e2e] text-[#5ce6b0] border border-[#234d4d] rounded flex items-center gap-2">
+                                <ActivityIcon size={12}/> Secure Link Established
+                            </span>
+                        )}
                     </div>
                 </div>
 
-                {/* Mock Grid */}
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 overflow-y-auto pr-2">
-                    {Array.from({ length: volumesSegmented || 12 }).map((_, i) => (
-                        <div key={i} className="aspect-square bg-black rounded border border-[#3c5d80]/30 hover:border-[#5acce6] transition-all cursor-pointer relative group overflow-hidden">
-                            <div className="absolute inset-0 flex items-center justify-center opacity-20 group-hover:opacity-40 transition-opacity bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-gray-700 via-gray-900 to-black">
-                                <span className="text-[10px] font-mono text-gray-500">DICOM / {i + 100}</span>
+                {/* Dynamic Data Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 overflow-y-auto pr-2 pb-4">
+                    {/* Render Real UIDs if we have them */}
+                    {accumulatedPop.uids.length > 0 ? (
+                        accumulatedPop.uids.map((uid, i) => (
+                            <div key={i} className="aspect-square bg-black rounded border border-[#3c5d80]/50 hover:border-[#5acce6] transition-all cursor-pointer relative group overflow-hidden">
+                                <div className="absolute inset-0 flex items-center justify-center opacity-30 group-hover:opacity-60 transition-opacity bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#1f2d40] via-[#0b1015] to-black">
+                                    <div className="flex flex-col items-center">
+                                        <DatabaseIcon size={24} className="text-[#3c5d80] mb-2" />
+                                        {/* Show truncated UID for security/aesthetics */}
+                                        <span className="text-[9px] font-mono text-[#91b9cd]">...{uid.slice(-8)}</span>
+                                    </div>
+                                </div>
+                                <div className="absolute top-2 right-2">
+                                    <div className="bg-[#5acce6]/20 text-[#5acce6] border border-[#5acce6]/30 text-[8px] font-bold px-1.5 py-0.5 rounded uppercase">READY</div>
+                                </div>
                             </div>
-                            <div className="absolute top-2 right-2">
-                                {i % 4 === 0 ? (
-                                    <div className="bg-[#ff6b6b] text-black text-[8px] font-bold px-1.5 py-0.5 rounded">FAIL</div>
-                                ) : (
-                                    <div className="bg-[#6fe5b8] text-black text-[8px] font-bold px-1.5 py-0.5 rounded">PASS</div>
-                                )}
+                        ))
+                    ) : (
+                        /* Fallback Mock Skeleton Loading State */
+                        Array.from({ length: 12 }).map((_, i) => (
+                            <div key={i} className="aspect-square bg-[#0b1015] rounded border border-[#1f2d40] relative overflow-hidden animate-pulse">
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <span className="text-[10px] font-mono text-gray-700">Awaiting Data</span>
+                                </div>
                             </div>
-                        </div>
-                    ))}
+                        ))
+                    )}
                 </div>
             </div>
         </div>
