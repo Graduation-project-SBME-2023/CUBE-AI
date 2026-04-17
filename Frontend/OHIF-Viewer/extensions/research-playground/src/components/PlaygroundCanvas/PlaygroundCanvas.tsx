@@ -24,6 +24,8 @@ import StartNode from './nodes/StartNode';
 import AgentNode from './nodes/AgentNode';
 import CustomEdge from './edges/CustomEdges';
 import { FlowNode, FlowEdge, ToolEvent } from './types';
+import { registerAllLogRenderers } from './logs/registerRenderers';
+import { AgentNodeData } from './types';
 
 // Icon aliases
 const PlayIcon: any = Play;
@@ -287,7 +289,54 @@ export default function PlaygroundCanvas({
         applyBackendPlan(payload || data.data || data);
       }
       if (type === 'tool_update') {
-        updateToolProgress(payload);
+        // Append logs to the respective agent
+        const agentName = payload?.agent_name;
+        const logEntry = payload?.log;
+        if (agentName && logEntry) {
+          setNodes(prevNodes =>
+            prevNodes.map(node => {
+              if (node.type === 'agent' && 'name' in node.data) {
+                const agentData = payload?.agents?.find((agent: { name: string }) => agent.name === (node.data as AgentNodeData).name);
+                if (agentData) {
+                  return {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      logs: [...(node.data.logs || []), logEntry],
+                    },
+                  };
+                }
+              }
+              return node;
+            })
+          );
+        }
+        return;
+      }
+      if (type === 'Pipeline_agent_status') {
+        // Update agent statuses
+        const agents = payload?.agents || [];
+        setNodes(prevNodes => {
+          const updatedNodes = prevNodes.map(node => {
+            if (node.type === 'agent' && 'name' in node.data) {
+              const agentData = payload?.agents?.find((agent: { name: string }) => agent.name === (node.data as AgentNodeData).name);
+              if (agentData) {
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    status: agentData.status,
+                    started_at: agentData.started_at,
+                    completed_at: agentData.completed_at,
+                  },
+                };
+              }
+            }
+            return node;
+          });
+          return [...updatedNodes]; // Ensure a new array reference
+        });
+        return;
       }
       if (type === 'run_status') {
         updateCurrentAgent(payload.current_agent);
@@ -695,6 +744,11 @@ export default function PlaygroundCanvas({
       })),
     [nodes, mode, deleteNode, editNode, toggleExpand]
   );
+
+  useEffect(() => {
+    // Register log renderers during extension initialization
+    registerAllLogRenderers();
+  }, []);
 
   return (
     <div className="relative flex h-full w-full flex-col bg-[#000000]">
