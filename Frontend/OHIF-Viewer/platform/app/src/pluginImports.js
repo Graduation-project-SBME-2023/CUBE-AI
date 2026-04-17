@@ -11,6 +11,7 @@ window.modes = modes;
 extensions.push("@ohif/extension-default");
 extensions.push("@ohif/extension-cornerstone");
 extensions.push("@ohif/extension-monai-label");
+extensions.push("@ohif/extension-research-playground");
 modes.push("@ohif/mode-longitudinal");
 modes.push("@ohif/mode-segmentation");
 modes.push("@ohif/mode-tmtv");
@@ -69,6 +70,10 @@ async function loadModule(module) {
     const imported = await import("@ohif/extension-monai-label");
     return imported.default;
   }
+  if( module==="@ohif/extension-research-playground") {
+    const imported = await import("@ohif/extension-research-playground");
+    return imported.default;
+  }
   if( module==="@ohif/mode-longitudinal") {
     const imported = await import("@ohif/mode-longitudinal");
     return imported.default;
@@ -95,6 +100,10 @@ async function loadModule(module) {
   }
   if( module==="@ohif/mode-monai-label") {
     const imported = await import("@ohif/mode-monai-label");
+    return imported.default;
+  }
+  if( module==="@ohif/extension-research-playground") {
+    const imported = await import("@ohif/extension-research-playground");
     return imported.default;
   }
   return (await import(/* webpackIgnore: true */ module)).default;

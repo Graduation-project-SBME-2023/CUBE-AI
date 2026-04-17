@@ -1,6 +1,6 @@
 import React from 'react';
 import clsx from 'clsx';
-import theme from '../../theme';
+import theme from './theme';
 
 export type SystemVariant = 'standard' | 'agentic';
 

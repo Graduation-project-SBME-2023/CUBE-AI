@@ -197,8 +197,8 @@ export default function PlaygroundCanvas({
         );
         return;
       }
-      if (type === 'hypothesis_approval' || type === 'lit_review_choice') {
-        setPendingPrompt({ type, message: payload?.message || '' });
+      if (type === 'hypothesis_approval' || type === 'lit_review_choice' || type === 'plan_approval') {
+        setPendingPrompt({ type, message: payload?.message || payload?.text || '' });
         setPromptExpanded(true);
         return;
       }
@@ -436,8 +436,9 @@ export default function PlaygroundCanvas({
         if (node.type !== 'agent') {
           return node;
         }
+        const agentData = node.data as any;
         const isCurrent = node.id === current_agent;
-        const wasActive = node.data.status === 'active';
+        const wasActive = agentData.status === 'active';
         if (isCurrent) {
           return { ...node, data: { ...node.data, status: 'active', isExpanded: true } };
         }
@@ -455,7 +456,8 @@ export default function PlaygroundCanvas({
         if (node.type !== 'agent' || node.id !== event.source) {
           return node;
         }
-        const logs = node.data.logs ?? [];
+        const agentData = node.data as any;
+        const logs = agentData.logs ?? [];
         if (event.event_type === 'tool_started') {
           return {
             ...node,
@@ -834,7 +836,9 @@ export default function PlaygroundCanvas({
                   <span className="flex-1 text-xs font-bold text-white">
                     {pendingPrompt.type === 'hypothesis_approval'
                       ? 'Approve Hypothesis?'
-                      : 'Run Literature Review?'}
+                      : pendingPrompt.type === 'plan_approval'
+                        ? 'Approve Pipeline Plan?'
+                        : 'Run Literature Review?'}
                   </span>
                   {promptExpanded ? (
                     <ChevronDownIcon size={12} className="text-[#566a84]" />
@@ -850,7 +854,7 @@ export default function PlaygroundCanvas({
                       <p className="text-[11px] leading-relaxed text-[#91b9cd]">{pendingPrompt.message}</p>
                     )}
                     <div className="flex gap-2">
-                      {pendingPrompt.type === 'hypothesis_approval' ? (
+                      {pendingPrompt.type === 'hypothesis_approval' || pendingPrompt.type === 'plan_approval' ? (
                         <>
                           <button
                             onClick={() => {
