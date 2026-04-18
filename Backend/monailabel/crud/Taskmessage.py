@@ -63,7 +63,7 @@ async def get_task_message(db: AsyncSession, tm_id: UUID) -> TaskMessage:
         result = await db.execute(
             select(TaskMessage)
             .options(selectinload(TaskMessage.context_augmentation))
-            .where(TaskMessage.id == tm_id)the plan
+            .where(TaskMessage.id == tm_id)
         )
         obj = result.scalar_one_or_none()
         if not obj:
