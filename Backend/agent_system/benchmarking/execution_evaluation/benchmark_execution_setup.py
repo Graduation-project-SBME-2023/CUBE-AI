@@ -32,6 +32,20 @@ AGENT_IDS = [
     "latex_reporter_agent",
 ]
 
+# Normalize historical or prompt-level aliases to runtime agent IDs.
+AGENT_ID_ALIASES: Dict[str, str] = {
+    "population_planner": "study_population_planner_agent",
+    "study_population_planner": "study_population_planner_agent",
+    "feature_extractor": "feature_extraction_agent",
+    "result_agent": "result_reporter_agent",
+}
+
+
+def normalize_agent_id(agent_id: Optional[str]) -> str:
+    if not agent_id:
+        return ""
+    return AGENT_ID_ALIASES.get(agent_id, agent_id)
+
 # Latest identified fallback case workspaces and hypothesis ids from old runs.
 FALLBACK_CASES: Dict[str, Dict[str, str]] = {
     "heart": {
@@ -66,7 +80,7 @@ def _now_stamp() -> str:
 def _normalize_step(step: Dict[str, Any], index: int) -> Dict[str, Any]:
     title = step.get("title") or step.get("name") or f"Step {index + 1}"
     description = step.get("description") or ""
-    module = step.get("module") or ""
+    module = normalize_agent_id(step.get("module") or "")
     status = step.get("status") or "pending"
 
     return {
@@ -82,7 +96,9 @@ def _normalize_step(step: Dict[str, Any], index: int) -> Dict[str, Any]:
 def _build_task_message_from_step(step: Dict[str, Any], index: int) -> Dict[str, Any]:
     # Prefer explicit task_message if present.
     if isinstance(step.get("task_message"), dict):
-        return step["task_message"]
+        task_message = dict(step["task_message"])
+        task_message["agent_id"] = normalize_agent_id(task_message.get("agent_id"))
+        return task_message
 
     # Some DB payloads store structured instructions under `instructions`.
     if isinstance(step.get("instructions"), dict):
@@ -94,7 +110,7 @@ def _build_task_message_from_step(step: Dict[str, Any], index: int) -> Dict[str,
     return {
         "task_id": f"task_{index + 1}",
         "phase": "unknown",
-        "agent_id": normalized["module"],
+        "agent_id": normalize_agent_id(normalized["module"]),
         "agent_title": normalized["title"],
         "instructions": normalized["description"],
         "context_augmentation": {
@@ -118,7 +134,84 @@ def _normalize_plan(plan_payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def _collect_task_messages(plan_payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     steps = plan_payload.get("steps") or []
-    return [_build_task_message_from_step(step, i) for i, step in enumerate(steps)]
+    task_messages = [_build_task_message_from_step(step, i) for i, step in enumerate(steps)]
+    for tm in task_messages:
+        if isinstance(tm, dict):
+            tm["agent_id"] = normalize_agent_id(tm.get("agent_id"))
+    return task_messages
+
+
+def _agent_chain() -> Dict[str, Dict[str, List[str]]]:
+    return {
+        "study_population_planner_agent": {
+            "upstream_agents": [],
+            "downstream_agents": ["segmentation_agent"],
+        },
+        "segmentation_agent": {
+            "upstream_agents": ["study_population_planner_agent"],
+            "downstream_agents": ["feature_extraction_agent"],
+        },
+        "feature_extraction_agent": {
+            "upstream_agents": ["segmentation_agent"],
+            "downstream_agents": ["modeling_agent"],
+        },
+        "modeling_agent": {
+            "upstream_agents": ["feature_extraction_agent"],
+            "downstream_agents": ["result_reporter_agent"],
+        },
+        "result_reporter_agent": {
+            "upstream_agents": ["modeling_agent"],
+            "downstream_agents": ["latex_reporter_agent"],
+        },
+        "latex_reporter_agent": {
+            "upstream_agents": ["result_reporter_agent"],
+            "downstream_agents": [],
+        },
+    }
+
+
+def _expected_contract_for_agent(agent_id: str) -> Dict[str, Any]:
+    # This benchmark-side expectation is derived from the agent IO docs.
+    contracts: Dict[str, Dict[str, Any]] = {
+        "study_population_planner_agent": {
+            "structured_output_required": True,
+            "required_top_keys": ["agent_id", "agent_role", "status", "inputs", "outputs"],
+            "required_output_files_any_of": ["targets_csv", "config_json"],
+            "required_output_metrics_any_of": ["cohort_size", "inclusion_criteria", "target_distribution"],
+        },
+        "segmentation_agent": {
+            "structured_output_required": True,
+            "required_top_keys": ["agent_id", "agent_role", "status", "inputs", "outputs"],
+            "required_output_files_any_of": ["labels_dir", "masks_dir"],
+            "required_output_metrics_any_of": ["segmentation_method", "volumes_segmented"],
+        },
+        "feature_extraction_agent": {
+            "structured_output_required": True,
+            "required_top_keys": ["agent_id", "agent_role", "status", "inputs", "outputs"],
+            "required_output_files_any_of": ["radiomics_features", "top_10_features"],
+            "required_output_metrics_any_of": ["total_features_extracted", "total_samples"],
+        },
+        "modeling_agent": {
+            "structured_output_required": True,
+            "required_top_keys": ["agent_id", "agent_role", "status", "inputs", "outputs"],
+            "required_output_files_any_of": ["model_comparison", "model_summary", "best_model_results"],
+            "required_output_metrics_any_of": ["best_model", "accuracy", "auc"],
+        },
+        "result_reporter_agent": {
+            "structured_output_required": True,
+            "required_top_keys": ["agent_id", "agent_role", "status", "inputs", "outputs"],
+            "required_output_files_any_of": [],
+            "required_output_metrics_any_of": ["decision", "justification", "primary_metric"],
+        },
+        "latex_reporter_agent": {
+            "structured_output_required": False,
+            "required_top_keys": [],
+            "required_output_files_any_of": ["final_report_pdf"],
+            "required_output_metrics_any_of": [],
+            "terminal_artifact_note": "Expected PDF artifact in workspace/reports/",
+        },
+    }
+    return contracts.get(agent_id, {})
 
 
 def _derive_workspace_dir(hypothesis_payload: Dict[str, Any]) -> Optional[str]:
@@ -181,8 +274,9 @@ def _ensure_agent_scaffolding(
     task_messages: List[Dict[str, Any]],
     hypothesis: Dict[str, Any],
 ) -> None:
+    chain = _agent_chain()
     task_by_agent = {
-        (tm.get("agent_id") or ""): tm
+        normalize_agent_id(tm.get("agent_id") or ""): tm
         for tm in task_messages
         if isinstance(tm, dict)
     }
@@ -198,11 +292,14 @@ def _ensure_agent_scaffolding(
                 "state": hypothesis.get("state"),
             },
             "task_message": task_by_agent.get(agent_id),
+            "upstream_agents": chain.get(agent_id, {}).get("upstream_agents", []),
         }
         expected_output = {
             "agent_id": agent_id,
             "status": "pending",
-            "notes": "Fill expected outputs for this benchmark case.",
+            "downstream_agents": chain.get(agent_id, {}).get("downstream_agents", []),
+            "io_contract": _expected_contract_for_agent(agent_id),
+            "notes": "Expected output schema derived from Backend/agent_system/agents/agent_io_docs.",
         }
 
         _safe_json_dump(expected_input, agent_dir / "expected_input.json")
