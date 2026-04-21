@@ -43,6 +43,7 @@ Backend/agent_system/benchmarking/*.pdf
 Backend/agent_system/benchmarking/*.json
 Backend/agent_system/benchmarking/benchmarking_output
 Backend/agent_system/benchmarking/benchmark_results
+Backend/agent_system/benchmarking/execution_evaluation/runs
 Backend/apps/radiology/bin/
 Backend/apps/radiology/General_Data/
 Backend/apps/radiology/Labels/
