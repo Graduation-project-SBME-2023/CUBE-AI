@@ -1,10 +1,12 @@
 # app/routers/async_plan.py
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from uuid import UUID
 from typing import List
 
 from schemas.steps import PlanStepOut
+from models.steps import PlanStep
 from core.database import get_db
 from crud.plan import (
     create_plan,
@@ -63,9 +65,23 @@ async def read_plan_with_steps(plan_id: UUID, db: AsyncSession = Depends(get_db)
         steps=steps
     )
 
-@router.get("/by-hypothesis/{hypothesis_id}", response_model=PlanWithStepsOut)
+@router.get("/by-hypothesis/{hypothesis_id}", response_model=List[PlanWithStepsOut])
 async def read_plan_by_hypothesis(hypothesis_id: UUID, db: AsyncSession = Depends(get_db)):
-    return await get_plans_for_hypothesis(db, hypothesis_id)
+    plans = await get_plans_for_hypothesis(db, hypothesis_id)
+    results = []
+    for plan in plans:
+        steps_result = await db.execute(select(PlanStep).where(PlanStep.plan_id == plan.id))
+        steps = steps_result.scalars().all()
+        results.append(
+            PlanWithStepsOut(
+                id=plan.id,
+                hypothesis_id=plan.hypothesis_id,
+                study_goal=plan.study_goal,
+                state=plan.state,
+                steps=steps
+            )
+        )
+    return results
 
 @router.patch("/{plan_id}", response_model=PlanOut)
 async def edit_plan(plan_id: UUID, plan_in: PlanUpdate, db: AsyncSession = Depends(get_db)):

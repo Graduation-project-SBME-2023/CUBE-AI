@@ -578,7 +578,9 @@ class ClinicalPlanner:
 
             # Pipeline refinement loop
             while True:
-                await self._send("msg", "Review the pipeline plan. Type **APPROVE** to confirm or describe changes.")
+                await self._send("plan_approval", {
+                    "message": "Review the pipeline plan. Approve it or describe changes."
+                })
                 user_feedback = await self.input_provider()
 
                 if "APPROVE" in user_feedback.upper():

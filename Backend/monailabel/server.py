@@ -23,6 +23,8 @@ from endpoints import (
     hypothesis,
     plan,   
     steps,
+    Taskmessage,
+    contextaugmentation
 
     
     
@@ -47,6 +49,9 @@ monai_server_app.include_router(sync.router)
 monai_server_app.include_router(hypothesis.router)
 monai_server_app.include_router(plan.router)
 monai_server_app.include_router(steps.router)
+monai_server_app.include_router(Taskmessage.router)
+monai_server_app.include_router(contextaugmentation.router)
+
 
 original_lifespan = monai_server_app.router.lifespan_context
 

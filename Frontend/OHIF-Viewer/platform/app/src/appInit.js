@@ -117,6 +117,11 @@ async function appInit(appConfigOrFunc, defaultExtensions, defaultModes) {
     if (!mode || typeof mode !== 'object') {
       continue;
     }
+    // Validate that mode has the required isValidMode function
+    if (typeof mode.isValidMode !== 'function') {
+      console.warn(`Mode "${id}" is missing required 'isValidMode' function. Skipping.`);
+      continue;
+    }
     appConfig.loadedModes.push(mode);
   }
   // Hack alert - don't touch the original modes definition,
