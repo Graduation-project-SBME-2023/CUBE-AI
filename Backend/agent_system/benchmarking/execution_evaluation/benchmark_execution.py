@@ -18,21 +18,44 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from client_config import create_model_client_from_config
+from typing import Any, Dict, List, Optional, Set
 
-from .benchmark_config import (
-    BENCHMARK_MODE_FULL_SYSTEM,
-    BENCHMARK_MODE_SINGLE_AGENT,
-    ExecutionBenchmarkConfig,
-)
-from .benchmark_execution_setup import (
-    AGENT_IDS,
-    setup_execution_benchmark_from_fallback_case,
-    setup_execution_benchmark_from_hypothesis_id,
-)
+# Support both invocation styles:
+# - python -m benchmarking.execution_evaluation.benchmark_execution
+# - python Backend/agent_system/benchmarking/execution_evaluation/benchmark_execution.py
+if __package__ in (None, ""):
+    AGENT_SYSTEM_DIR = Path(__file__).resolve().parents[2]
+    if str(AGENT_SYSTEM_DIR) not in sys.path:
+        sys.path.insert(0, str(AGENT_SYSTEM_DIR))
+
+    from client_config import create_model_client_from_config
+    from benchmarking.execution_evaluation.benchmark_config import (
+        BENCHMARK_MODE_FULL_SYSTEM,
+        BENCHMARK_MODE_SINGLE_AGENT,
+        ExecutionBenchmarkConfig,
+    )
+    from benchmarking.execution_evaluation.benchmark_execution_setup import (
+        AGENT_IDS,
+        normalize_agent_id,
+        setup_execution_benchmark_from_fallback_case,
+        setup_execution_benchmark_from_hypothesis_id,
+    )
+else:
+    from client_config import create_model_client_from_config
+    from .benchmark_config import (
+        BENCHMARK_MODE_FULL_SYSTEM,
+        BENCHMARK_MODE_SINGLE_AGENT,
+        ExecutionBenchmarkConfig,
+    )
+    from .benchmark_execution_setup import (
+        AGENT_IDS,
+        normalize_agent_id,
+        setup_execution_benchmark_from_fallback_case,
+        setup_execution_benchmark_from_hypothesis_id,
+    )
 
 
 def _safe_json_dump(obj: Any, path: Path) -> None:
@@ -189,8 +212,9 @@ def _load_benchmark_inputs(run_dir: Path) -> Dict[str, Any]:
 
 
 def _pick_agent_task(task_messages: List[Dict[str, Any]], agent_id: str) -> Optional[Dict[str, Any]]:
+    normalized_agent_id = normalize_agent_id(agent_id)
     for tm in task_messages:
-        if isinstance(tm, dict) and tm.get("agent_id") == agent_id:
+        if isinstance(tm, dict) and normalize_agent_id(tm.get("agent_id")) == normalized_agent_id:
             return tm
     return None
 
@@ -243,6 +267,7 @@ async def _create_agent(agent_id: str, workspace_dir: str, session_id: Optional[
     from agents.execution_agents.segmentation_agent import SegmentationAgent
     from agents.planning_agents.population_planner import PopulationPlannerAgent
 
+    agent_id = normalize_agent_id(agent_id)
     client = create_model_client_from_config()
 
     if agent_id == "study_population_planner_agent":
@@ -285,6 +310,118 @@ async def _create_agent(agent_id: str, workspace_dir: str, session_id: Optional[
     raise ValueError(f"Unsupported agent id: {agent_id}")
 
 
+def _validate_structured_output_contracts(
+    workspace_dir: str,
+    expected_agents: Set[str],
+) -> Dict[str, Any]:
+    workspace = Path(workspace_dir)
+    outputs_dir = workspace / "outputs"
+
+    result: Dict[str, Any] = {
+        "workspace_dir": str(workspace),
+        "outputs_dir": str(outputs_dir),
+        "expected_agents": sorted(expected_agents),
+        "checks": {},
+        "summary": {
+            "agents_checked": 0,
+            "agents_passed": 0,
+            "agents_failed": 0,
+        },
+    }
+
+    status_allowed = {"completed", "partial", "failed"}
+
+    for agent_id in sorted(expected_agents):
+        check: Dict[str, Any] = {
+            "agent_id": agent_id,
+            "ok": True,
+            "issues": [],
+            "structured_output_path": str(outputs_dir / f"{agent_id}_output.json"),
+        }
+
+        if agent_id == "latex_reporter_agent":
+            reports_dir = workspace / "reports"
+            pdfs = sorted([p.name for p in reports_dir.glob("*.pdf")]) if reports_dir.exists() else []
+            check["pdf_reports"] = pdfs
+            if not pdfs:
+                check["ok"] = False
+                check["issues"].append("Missing PDF artifact in workspace/reports")
+            result["checks"][agent_id] = check
+            result["summary"]["agents_checked"] += 1
+            result["summary"]["agents_passed" if check["ok"] else "agents_failed"] += 1
+            continue
+
+        path = outputs_dir / f"{agent_id}_output.json"
+        if not path.exists():
+            check["ok"] = False
+            check["issues"].append("Missing structured output file")
+            result["checks"][agent_id] = check
+            result["summary"]["agents_checked"] += 1
+            result["summary"]["agents_passed" if check["ok"] else "agents_failed"] += 1
+            continue
+
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception as exc:
+            check["ok"] = False
+            check["issues"].append(f"Invalid JSON: {exc}")
+            result["checks"][agent_id] = check
+            result["summary"]["agents_checked"] += 1
+            result["summary"]["agents_passed" if check["ok"] else "agents_failed"] += 1
+            continue
+
+        required_top = ["agent_id", "agent_role", "status", "inputs", "outputs"]
+        for key in required_top:
+            if key not in payload:
+                check["ok"] = False
+                check["issues"].append(f"Missing top-level key: {key}")
+
+        payload_agent_id = normalize_agent_id(payload.get("agent_id"))
+        if payload_agent_id != agent_id:
+            check["ok"] = False
+            check["issues"].append(
+                f"agent_id mismatch: expected '{agent_id}', got '{payload.get('agent_id')}'"
+            )
+
+        status = payload.get("status")
+        if status not in status_allowed:
+            check["ok"] = False
+            check["issues"].append(
+                f"Invalid status '{status}', expected one of {sorted(status_allowed)}"
+            )
+
+        outputs = payload.get("outputs") if isinstance(payload.get("outputs"), dict) else {}
+        files = outputs.get("files") if isinstance(outputs.get("files"), dict) else {}
+        metrics = outputs.get("metrics") if isinstance(outputs.get("metrics"), dict) else {}
+        summary_text = outputs.get("summary")
+
+        if not isinstance(summary_text, str):
+            check["ok"] = False
+            check["issues"].append("outputs.summary must be a string")
+
+        if not isinstance(files, dict):
+            check["ok"] = False
+            check["issues"].append("outputs.files must be an object")
+
+        if not isinstance(metrics, dict):
+            check["ok"] = False
+            check["issues"].append("outputs.metrics must be an object")
+
+        check["observed"] = {
+            "status": status,
+            "file_keys": sorted(files.keys()) if isinstance(files, dict) else [],
+            "metric_keys": sorted(metrics.keys()) if isinstance(metrics, dict) else [],
+        }
+
+        result["checks"][agent_id] = check
+        result["summary"]["agents_checked"] += 1
+        result["summary"]["agents_passed" if check["ok"] else "agents_failed"] += 1
+
+    result["summary"]["ok"] = result["summary"]["agents_failed"] == 0
+    return result
+
+
 async def _run_full_system(config: ExecutionBenchmarkConfig, run_dir: Path) -> Dict[str, Any]:
     from agents.planning_agents.context_compiler import build_enriched_pipeline_prompt
     from autogen_agentchat.teams import GraphFlow
@@ -324,6 +461,13 @@ async def _run_full_system(config: ExecutionBenchmarkConfig, run_dir: Path) -> D
 
     output_files = _write_grouped_outputs(run_dir, events, prefix="full_system")
     grouped = _group_events(events)
+    active_agents = {
+        source
+        for source in grouped["counts"]["by_agent"].keys()
+        if source in AGENT_IDS
+    }
+    contract_validation = _validate_structured_output_contracts(workspace_dir, active_agents)
+    _safe_json_dump(contract_validation, run_dir / "contract_validation.json")
 
     summary = {
         "mode": BENCHMARK_MODE_FULL_SYSTEM,
@@ -332,6 +476,7 @@ async def _run_full_system(config: ExecutionBenchmarkConfig, run_dir: Path) -> D
         "events_count": grouped["counts"]["total_events"],
         "event_count_by_source": grouped["counts"]["by_agent"],
         "event_count_by_type": grouped["counts"]["by_type"],
+        "contract_validation_ok": contract_validation["summary"]["ok"],
         "output_files": output_files,
         "run_dir": str(run_dir),
     }
@@ -354,36 +499,40 @@ async def _run_single_agent(config: ExecutionBenchmarkConfig, run_dir: Path) -> 
     )
     session_id = str(hypothesis.get("chat_id") or "benchmark_session")
 
-    task_message = _pick_agent_task(task_messages, config.target_agent_id)
+    target_agent_id = normalize_agent_id(config.target_agent_id)
+    task_message = _pick_agent_task(task_messages, target_agent_id)
     prompt = _build_single_agent_prompt(
         hypothesis=hypothesis,
-        agent_id=config.target_agent_id,
+        agent_id=target_agent_id,
         task_message=task_message,
         prompt_prefix=config.prompt_prefix,
     )
 
-    agent = await _create_agent(config.target_agent_id, workspace_dir, session_id)
+    agent = await _create_agent(target_agent_id, workspace_dir, session_id)
 
     events: List[Dict[str, Any]] = []
     async for event in agent.run_stream(task=prompt):
         events.append(_serialize_event(event))
 
-    agent_dir = run_dir / "agents" / config.target_agent_id
+    agent_dir = run_dir / "agents" / target_agent_id
     _safe_json_dump({"prompt": prompt}, agent_dir / "prompt_used.json")
 
-    output_files = _write_grouped_outputs(run_dir, events, prefix=f"single_agent_{config.target_agent_id}")
+    output_files = _write_grouped_outputs(run_dir, events, prefix=f"single_agent_{target_agent_id}")
     grouped = _group_events(events)
     _safe_json_dump({"events": events}, agent_dir / "actual_output.json")
     _safe_json_dump(grouped, agent_dir / "actual_output_grouped.json")
+    contract_validation = _validate_structured_output_contracts(workspace_dir, {target_agent_id})
+    _safe_json_dump(contract_validation, run_dir / "contract_validation.json")
 
     summary = {
         "mode": BENCHMARK_MODE_SINGLE_AGENT,
-        "target_agent_id": config.target_agent_id,
+        "target_agent_id": target_agent_id,
         "workspace_dir": workspace_dir,
         "session_id": session_id,
         "events_count": grouped["counts"]["total_events"],
         "event_count_by_source": grouped["counts"]["by_agent"],
         "event_count_by_type": grouped["counts"]["by_type"],
+        "contract_validation_ok": contract_validation["summary"]["ok"],
         "output_files": output_files,
         "run_dir": str(run_dir),
     }
@@ -463,6 +612,20 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 async def _main_async() -> None:
     parser = _build_arg_parser()
     args = parser.parse_args()
+
+    # Validate CLI argument combinations early to provide actionable CLI errors
+    # instead of a runtime traceback from config.validate().
+    if args.use_fallback and args.hypothesis_id:
+        parser.error("--hypothesis-id cannot be used together with --use-fallback")
+
+    if args.use_fallback and not args.fallback_case:
+        parser.error("--fallback-case is required when --use-fallback is set")
+
+    if not args.use_fallback and not args.hypothesis_id:
+        parser.error("--hypothesis-id is required unless --use-fallback is set")
+
+    if args.mode == BENCHMARK_MODE_SINGLE_AGENT and not args.agent_id:
+        parser.error("--agent-id is required when --mode single_agent")
 
     config = ExecutionBenchmarkConfig(
         hypothesis_id=args.hypothesis_id,

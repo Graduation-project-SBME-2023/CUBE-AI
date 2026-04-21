@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from .benchmark_execution_setup import AGENT_IDS, DEFAULT_BACKEND_API_BASE, DEFAULT_OUTPUT_ROOT
+from .benchmark_execution_setup import (
+    AGENT_IDS,
+    DEFAULT_BACKEND_API_BASE,
+    DEFAULT_OUTPUT_ROOT,
+    normalize_agent_id,
+)
 
 
 BENCHMARK_MODE_FULL_SYSTEM = "full_system"
@@ -48,6 +53,7 @@ class ExecutionBenchmarkConfig:
         if self.mode == BENCHMARK_MODE_SINGLE_AGENT:
             if not self.target_agent_id:
                 raise ValueError("target_agent_id is required for single_agent mode")
+            self.target_agent_id = normalize_agent_id(self.target_agent_id)
             if self.target_agent_id not in AGENT_IDS:
                 allowed = ", ".join(AGENT_IDS)
                 raise ValueError(
