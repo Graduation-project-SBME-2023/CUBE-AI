@@ -40,7 +40,8 @@ from autogen_agentchat.teams import DiGraphBuilder, GraphFlow
 from autogen_agentchat.ui import Console
 
 # Import your existing custom agent classes
-from agents.planning_agents.population_planner import PopulationPlannerAgent
+# from agents.planning_agents.population_planner import PopulationPlannerAgent
+from agents.execution_agents.population_agent import PopulationPlannerAgent
 from agents.execution_agents.segmentation_agent import SegmentationAgent
 from agents.execution_agents.feature_extraction_agent import FeatureExtractionAgent
 from agents.execution_agents.modeling_agent import ModelingAgent
