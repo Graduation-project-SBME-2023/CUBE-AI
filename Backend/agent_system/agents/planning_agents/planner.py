@@ -7,13 +7,14 @@ import re
 import asyncio
 import aiofiles
 from pathlib import Path
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, Any
 
 from autogen_agentchat.messages import TextMessage
 
 from services.session_service import SessionService
 # from .models import PlannerState, ClinicalHypothesis, StudyPlan, StudyStep
 from .planning_agents import create_planner_agents, create_model_client
+from .db_state_store import PlannerDbStateStore
 from models.plans import *
 from models.session import Session
 from .context_compiler import compile_task_messages, build_enriched_pipeline_prompt, summarize_knowledge_for_planning, _build_hypothesis_summary
@@ -53,8 +54,11 @@ class ClinicalPlanner:
         log_file = os.path.join(log_dir, f"planner_{timestamp}.log")
         self.log_path = Path(log_file)
         
+
         self.state_path = Path(workspace_dir) / "state.json"
+
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
+        
         
         if model_client is not None:
             self.client = model_client
@@ -63,6 +67,7 @@ class ClinicalPlanner:
         self.agents = create_planner_agents(self.client, input_func=self._user_proxy_input_adapter)
         
         self.state = PlannerState()
+        self.db_state_store = PlannerDbStateStore()
         self.session = session
         self.session_service = session_service
         self._initialize_logging()
@@ -121,6 +126,7 @@ class ClinicalPlanner:
         """
         return re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
 
+    # We need to remove this file 
     async def _save_state(self):
         os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
         try:
@@ -130,13 +136,21 @@ class ClinicalPlanner:
             logger.error(f"Save Error: {e}")
 
     async def _load_state(self):
-        if not self.state_path.exists(): return
         try:
-            logger.info(f"will read state from file {self.state_path}")
-            async with aiofiles.open(self.state_path, 'r', encoding='utf-8') as f:
-                content = await f.read()
-                if content.strip():
-                    self.state = PlannerState.model_validate_json(content)
+            db_state = await self.db_state_store.load_state(self.session.session_id)
+            self.state = db_state
+            if self.state.hypothesis.id:
+                logger.info(
+                    "Loaded planner state from DB for session %s (hypothesis=%s, plan_steps=%d)",
+                    self.session.session_id,
+                    self.state.hypothesis.id,
+                    len(self.state.plan.steps),
+                )
+            else:
+                logger.info(
+                    "No persisted planner state found in DB for session %s",
+                    self.session.session_id,
+                )
         except Exception as e:
             logger.error(f"Load Error: {e}")
 
@@ -170,12 +184,17 @@ class ClinicalPlanner:
         match data:
             case None:
                 if display_text := response_content.replace("APPROVE", "").strip():
-                    await self._send("msg", display_text)
+                    await self._send("msg", display_text) ##Here we send the message with the agent
                     return
             case {"hypothesis": dict() as hypothesis, **rest}:
-                self.state.hypothesis = await self.session_service.handle_hypothesis_update(
+                persisted_hypothesis = await self.session_service.handle_hypothesis_update(
                     self.session, hypothesis
                 )
+                if persisted_hypothesis is not None:
+                    self.state.hypothesis = persisted_hypothesis
+                else:
+                    # Keep local planner state usable even when backend persistence fails.
+                    self.state.hypothesis = self.state.hypothesis.model_copy(update=hypothesis)
                 if message := rest.get("message"):
                     await self._send("msg", message)
             case {"message": str() as message}:
@@ -215,9 +234,22 @@ class ClinicalPlanner:
             return
 
         if "steps" in data and isinstance(data["steps"], list):
-            self.state.plan = await self.session_service.handle_plan_update(
+            persisted_plan = await self.session_service.handle_plan_update(
                 self.session, data["steps"]
             )
+            if persisted_plan is not None:
+                self.state.plan = persisted_plan
+            else:
+                # Preserve in-memory plan so UX can continue despite transient backend errors.
+                self.state.plan.steps = [
+                    StudyStep(
+                        title=s.get("title", ""),
+                        description=s.get("description", ""),
+                        module=s.get("id", ""),
+                    )
+                    for s in data["steps"]
+                ]
+                self.state.plan.study_goal = self.state.hypothesis.title
 
             # Store full instructions in task_messages for later use
             self._pipeline_instructions = {
@@ -280,7 +312,7 @@ class ClinicalPlanner:
             lambda: build_knowledge_base(
                 pico,
                 progress_callback=progress_callback,
-                cache_dir=self.state_path.parent / ".knowledge_cache",
+                cache_dir=self.state_path.parent / ".knowledge_cache", ## the cache won't be changed in the future it's an on device information 
             ),
         )
 
@@ -310,7 +342,8 @@ class ClinicalPlanner:
         can read via the read_literature_context MCP tool.
         """
         workspace_dir = self.state_path.parent
-        lit_context_path = workspace_dir / "literature_context.json"
+        lit_context_path = workspace_dir / "literature_context.json"  #Here we will change the place we save the literature context 
+
 
         context_data = {
             "knowledge_base": knowledge_base,
@@ -332,12 +365,14 @@ class ClinicalPlanner:
     # ══════════════════════════════════════════════════════════════════════════
 
     async def run(self, start_query: str = "Start"):
+        await self._load_state()
         print(f"Planner {start_query} state before run:", self.state)
         self._pipeline_instructions = {}
 
         # Only run if not already confirmed
         if self.state.hypothesis.state != "confirmed":
             print("state not confirmed, planning phases engaged")
+            logger.info("state not confirmed, planning phases engaged session_id = %s", self.session.session_id)
 
             # ─────────────────────────────────────────────────────────────
             # PHASE 1: HYPOTHESIS STRUCTURING
@@ -347,7 +382,7 @@ class ClinicalPlanner:
             hypothesis_architect = self.agents["hypothesis_architect"]
 
             # Get initial user input
-            if start_query and not self.state.hypothesis.title:
+            if start_query and not self.state.hypothesis.title: ##Potential problem
                 user_input = start_query
             else:
                 await self._send("msg", "Please enter your clinical observation or research idea.")
@@ -395,7 +430,7 @@ class ClinicalPlanner:
             await self.session_service.confirm_hypothesis(self.session)
             await self._send("hypothesis", self.state.hypothesis.model_dump())
             await self._save_state()
-
+            await self._load_state()
             # ─────────────────────────────────────────────────────────────
             # PHASE 2: LITERATURE REVIEW & KNOWLEDGE BUILDING (user choice)
             # ─────────────────────────────────────────────────────────────
@@ -543,7 +578,9 @@ class ClinicalPlanner:
 
             # Pipeline refinement loop
             while True:
-                await self._send("msg", "Review the pipeline plan. Type **APPROVE** to confirm or describe changes.")
+                await self._send("plan_approval", {
+                    "message": "Review the pipeline plan. Approve it or describe changes."
+                })
                 user_feedback = await self.input_provider()
 
                 if "APPROVE" in user_feedback.upper():
@@ -569,6 +606,7 @@ class ClinicalPlanner:
             # ─────────────────────────────────────────────────────────────
             await self._save_state()
             await self.session_service.confirm_plan(self.session)
+            await self._load_state()
             await self._send("msg", "Pipeline confirmed. Compiling context-enriched task messages for each agent...")
 
             try:
@@ -581,6 +619,7 @@ class ClinicalPlanner:
                     pipeline_instructions=self._pipeline_instructions,
                 )
                 await self._save_state()
+                await self.session_service.confirm_plan(self.session)
 
                 await self._send("msg", f"Generated {len(task_messages)} context-enriched task messages.")
 

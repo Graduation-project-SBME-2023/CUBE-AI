@@ -1,5 +1,57 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Users, Filter, Database, AlertTriangle, Check, Activity, Layers } from 'lucide-react';
+
+// --- NEW HELPER COMPONENT ---
+const PausableGif = ({ uid, isHovered }: { uid: string, isHovered: boolean }) => {
+    const canvasRef = React.useRef<HTMLCanvasElement>(null);
+    const imgRef = React.useRef<HTMLImageElement>(null);
+    const [failed, setFailed] = React.useState(false);
+
+    const handleLoad = () => {
+        // When the GIF loads, instantly draw its first frame onto the canvas to "freeze" it
+        if (imgRef.current && canvasRef.current) {
+            const img = imgRef.current;
+            const canvas = canvasRef.current;
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                ctx.drawImage(img, 0, 0); 
+            }
+        }
+    };
+
+    // If the image doesn't exist on the server, show the fallback icon
+    if (failed) {
+        return (
+            <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#1f2d40] via-[#0b1015] to-black">
+                <DatabaseIcon size={24} className="text-[#3c5d80]" />
+            </div>
+        );
+    }
+
+    return (
+        <div className="absolute inset-0 w-full h-full">
+            {/* 1. The Canvas: Shows the frozen snapshot when NOT hovered */}
+            <canvas
+                ref={canvasRef}
+                className="absolute inset-0 w-full h-full object-cover"
+                style={{ opacity: isHovered ? 0 : 0.5, transition: 'opacity 0.3s ease-in-out' }}
+            />
+            
+            {/* 2. The GIF: Loads in the background, takes over on hover */}
+            <img
+                ref={imgRef}
+                src={`http://localhost:8000/volumes/${uid}/preview.gif`}
+                alt={`Volume ${uid}`}
+                className="absolute inset-0 w-full h-full object-cover"
+                style={{ opacity: isHovered ? 0.9 : 0, transition: 'opacity 0.3s ease-in-out' }}
+                onLoad={handleLoad}
+                onError={() => setFailed(true)}
+            />
+        </div>
+    );
+};
 
 const CheckIcon: any = Check;
 const AlertTriangleIcon: any = AlertTriangle;
@@ -21,7 +73,13 @@ interface PopulationData {
         summary?: string;
         files?: Record<string, string>;
     };
+    // Side-channel properties we added
     tool?: string;
+    count?: number;
+    uid_list?: string[];
+    inclusion_criteria?: string[]; // <--- ADDED
+    exclusion_criteria?: string[]; // <--- ADDED
+    modality?: string;
     data?: any;
 }
 
@@ -47,139 +105,221 @@ interface DataCohortViewProps {
 }
 
 export default function DataCohortView({ populationData, segmentationData }: DataCohortViewProps) {
-    const popMetrics = populationData?.outputs?.metrics;
+    
+    // --- 1. LOCAL ACCUMULATOR STATE ---
+    // Because the backend sends updates tool-by-tool, we merge them here so the UI doesn't flicker.
+    const [accumulatedPop, setAccumulatedPop] = useState({
+        count: null as number | null,
+        uids: [] as string[],
+        inclusion: [] as string[],
+        exclusion: [] as string[],
+        modality: "Awaiting...",
+        summary: "",
+        matchRate: null as number | null
+    });
+    const [hoveredUid, setHoveredUid] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!populationData) return;
+
+        setAccumulatedPop(prev => {
+            const next = { ...prev };
+
+            // A. Catch output from the write_inclusion_criteria tool
+            if (populationData.tool === 'write_inclusion_criteria') {
+                if (populationData.inclusion_criteria) next.inclusion = populationData.inclusion_criteria;
+                if (populationData.exclusion_criteria) next.exclusion = populationData.exclusion_criteria;
+                if (populationData.modality) next.modality = populationData.modality;
+            }
+
+            // B. Catch output from the secure search tool (The side-channel!)
+            if (populationData.tool === 'search_volumes_by_description') {
+                if (populationData.count !== undefined) next.count = populationData.count;
+                if (populationData.uid_list) next.uids = populationData.uid_list;
+            }
+
+            // C. Catch final output from the standardized write_agent_output tool
+            if (populationData.outputs?.metrics) {
+                const metrics = populationData.outputs.metrics;
+                if (metrics.cohort_size) next.count = metrics.cohort_size;
+                if (metrics.match_rate) next.matchRate = metrics.match_rate;
+                if (metrics.inclusion_criteria) next.inclusion = metrics.inclusion_criteria;
+                if (metrics.exclusion_criteria) next.exclusion = metrics.exclusion_criteria;
+                if (populationData.outputs.summary) next.summary = populationData.outputs.summary;
+            }
+
+            return next;
+        });
+    }, [populationData]);
+
     const segMetrics = segmentationData?.outputs?.metrics;
-    const cohortSize = popMetrics?.cohort_size ?? null;
-    const matchRate = popMetrics?.match_rate ?? null;
-    const inclusionCriteria = popMetrics?.inclusion_criteria ?? [];
-    const exclusionCriteria = popMetrics?.exclusion_criteria ?? [];
     const volumesSegmented = segMetrics?.volumes_segmented ?? null;
     const segMethod = segMetrics?.segmentation_method ?? null;
     const roiDesc = segMetrics?.roi_description ?? null;
-
     const hasPopData = populationData && populationData.status !== undefined;
     const hasSegData = segmentationData && segmentationData.status !== undefined;
+
     return (
-        <div className="p-6 w-full h-full flex flex-col xl:flex-row gap-6 bg-slate-950 overflow-hidden rounded-2xl">
+        <div className="p-6 w-full h-full flex gap-6 bg-[#000000] overflow-hidden">
+            
             {/* LEFT: Criteria Panel */}
-            <div className="w-full xl:w-80 flex flex-col gap-4 shrink-0">
-                <div className="bg-slate-900/70 rounded-xl border border-slate-700 p-5 flex flex-col gap-4 shadow-sm">
-                    <h3 className="text-cyan-400 font-semibold uppercase tracking-wider text-xs flex items-center gap-2">
+            <div className="w-80 flex flex-col gap-4 shrink-0">
+                <div className="bg-[#151a1f] rounded-xl border border-[#3c5d80] p-4 flex flex-col gap-4">
+                    <h3 className="text-[#5acce6] font-bold uppercase tracking-wider text-xs flex items-center gap-2">
                         <FilterIcon size={14} /> Study Criteria
                     </h3>
                     
+                    {/* Dynamic Modality Tag */}
+                    {accumulatedPop.modality && accumulatedPop.modality !== "Awaiting..." && (
+                        <div className="text-xs bg-[#3c5d80]/20 border border-[#3c5d80] text-[#91b9cd] px-2 py-1 rounded inline-block w-max">
+                            Target: <span className="font-bold text-white">{accumulatedPop.modality}</span>
+                        </div>
+                    )}
+                    
                     {/* Inclusion Box */}
                     <div className="space-y-2">
-                        <span className="text-emerald-300 text-[11px] font-semibold uppercase tracking-wide bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 inline-block">
+                        <span className="text-[#6fe5b8] text-[10px] font-bold uppercase tracking-wide bg-[#6fe5b8]/10 px-2 py-0.5 rounded border border-[#6fe5b8]/20 inline-block">
                             Inclusion
                         </span>
-                        <div className="bg-slate-950 rounded p-3 border border-slate-700/70 text-sm text-slate-300 space-y-1.5 leading-relaxed">
-                            {inclusionCriteria.length > 0 ? (
-                                inclusionCriteria.map((c, i) => (
-                                    <div key={i} className="flex items-center gap-2"><CheckIcon size={11} className="text-emerald-400"/> {c}</div>
+                        <div className="bg-[#0b1015] rounded p-3 border border-[#3c5d80]/30 text-xs text-gray-300 space-y-1 min-h-[60px]">
+                            {accumulatedPop.inclusion.length > 0 ? (
+                                accumulatedPop.inclusion.map((c, i) => (
+                                    <div key={i} className="flex items-start gap-2">
+                                        <CheckIcon size={12} className="text-[#6fe5b8] mt-0.5 shrink-0"/> 
+                                        <span>{c}</span>
+                                    </div>
                                 ))
                             ) : (
-                                <>
-                                    <div className="flex items-center gap-2"><CheckIcon size={11} className="text-emerald-400"/> Modality: CT Chest</div>
-                                    <div className="flex items-center gap-2"><CheckIcon size={11} className="text-emerald-400"/> Contrast: Enhanced</div>
-                                    <div className="flex items-center gap-2"><CheckIcon size={11} className="text-emerald-400"/> Age: {'>'} 45 years</div>
-                                </>
+                                <div className="text-gray-600 italic">Waiting for agent to define criteria...</div>
                             )}
                         </div>
                     </div>
 
                     {/* Exclusion Box */}
                     <div className="space-y-2">
-                        <span className="text-rose-300 text-[11px] font-semibold uppercase tracking-wide bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20 inline-block">
+                        <span className="text-[#ff6b6b] text-[10px] font-bold uppercase tracking-wide bg-[#ff6b6b]/10 px-2 py-0.5 rounded border border-[#ff6b6b]/20 inline-block">
                             Exclusion
                         </span>
-                        <div className="bg-slate-950 rounded p-3 border border-slate-700/70 text-sm text-slate-300 space-y-1.5 leading-relaxed">
-                            {exclusionCriteria.length > 0 ? (
-                                exclusionCriteria.map((c, i) => (
-                                    <div key={i} className="flex items-center gap-2"><AlertTriangleIcon size={11} className="text-rose-400"/> {c}</div>
+                        <div className="bg-[#0b1015] rounded p-3 border border-[#3c5d80]/30 text-xs text-gray-300 space-y-1 min-h-[60px]">
+                            {accumulatedPop.exclusion.length > 0 ? (
+                                accumulatedPop.exclusion.map((c, i) => (
+                                    <div key={i} className="flex items-start gap-2">
+                                        <AlertTriangleIcon size={12} className="text-[#ff6b6b] mt-0.5 shrink-0"/> 
+                                        <span>{c}</span>
+                                    </div>
                                 ))
                             ) : (
-                                <>
-                                    <div className="flex items-center gap-2"><AlertTriangleIcon size={11} className="text-rose-400"/> Motion Artifacts {'>'} 10%</div>
-                                    <div className="flex items-center gap-2"><AlertTriangleIcon size={11} className="text-rose-400"/> Prior Resection</div>
-                                </>
+                                <div className="text-gray-600 italic">Waiting for exclusion logic...</div>
                             )}
                         </div>
                     </div>
                 </div>
 
                 {/* Cohort Summary */}
-                <div className="bg-slate-900/70 rounded-xl border border-slate-700 p-5 shadow-sm">
-                    <h3 className="text-sky-300 font-semibold uppercase tracking-wider text-xs mb-2">Cohort Summary</h3>
-                    <div className="text-3xl font-semibold text-slate-100 mb-1">
-                        {cohortSize ?? '—'} <span className="text-sm font-normal text-slate-500">patients</span>
+                <div className="bg-[#151a1f] rounded-xl border border-[#3c5d80] p-4">
+                    <h3 className="text-[#91b9cd] font-bold uppercase tracking-wider text-xs mb-2">Cohort Summary</h3>
+                    <div className="text-3xl font-bold text-white mb-1 transition-all">
+                        {accumulatedPop.count ?? '—'} <span className="text-sm font-normal text-gray-500">patients</span>
                     </div>
-                    {matchRate !== null && (
+                    {accumulatedPop.matchRate !== null && (
                         <>
-                            <div className="h-2 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-700/60">
-                                <div className="h-full bg-cyan-400" style={{ width: `${matchRate}%` }}></div>
+                            <div className="h-2 w-full bg-[#0b1015] rounded-full overflow-hidden mt-2">
+                                <div className="h-full bg-[#5acce6] transition-all duration-1000" style={{ width: `${accumulatedPop.matchRate}%` }}></div>
                             </div>
-                            <div className="text-[11px] text-slate-500 mt-1 text-right">{matchRate}% Match Rate</div>
+                            <div className="text-[10px] text-gray-500 mt-1 text-right">{accumulatedPop.matchRate}% Match Rate</div>
                         </>
                     )}
-                    {populationData?.outputs?.summary && (
-                        <p className="text-sm text-slate-400 mt-2 leading-relaxed">{populationData.outputs.summary}</p>
+                    {accumulatedPop.summary && (
+                        <p className="text-xs text-[#5acce6] mt-3 p-2 bg-[#0b1015] border border-[#1f2d40] rounded leading-relaxed">
+                            {accumulatedPop.summary}
+                        </p>
                     )}
                 </div>
 
                 {/* Segmentation Summary */}
                 {hasSegData && (
-                    <div className="bg-slate-900/70 rounded-xl border border-slate-700 p-5 shadow-sm">
-                        <h3 className="text-cyan-400 font-semibold uppercase tracking-wider text-xs mb-2 flex items-center gap-2">
+                    <div className="bg-[#151a1f] rounded-xl border border-[#3c5d80] p-4">
+                        <h3 className="text-[#5acce6] font-bold uppercase tracking-wider text-xs mb-2 flex items-center gap-2">
                             <LayersIcon size={14} /> Segmentation
                         </h3>
-                        {segMethod && <div className="text-sm text-slate-300 mb-1"><span className="text-slate-500">Method:</span> {segMethod}</div>}
+                        {segMethod && <div className="text-xs text-gray-300 mb-1"><span className="text-gray-500">Method:</span> {segMethod}</div>}
                         {volumesSegmented !== null && (
-                            <div className="text-2xl font-semibold text-slate-100">{volumesSegmented} <span className="text-sm font-normal text-slate-500">volumes</span></div>
+                            <div className="text-2xl font-bold text-white">{volumesSegmented} <span className="text-sm font-normal text-gray-500">volumes</span></div>
                         )}
-                        {roiDesc && <div className="text-sm text-slate-400 mt-1 leading-relaxed">{roiDesc}</div>}
-                        {segmentationData?.outputs?.summary && (
-                            <p className="text-sm text-slate-400 mt-2 leading-relaxed">{segmentationData.outputs.summary}</p>
-                        )}
+                        {roiDesc && <div className="text-xs text-gray-400 mt-1">{roiDesc}</div>}
                     </div>
                 )}
             </div>
 
             {/* RIGHT: Data Grid */}
-            <div className="flex-1 bg-slate-900/60 rounded-xl border border-slate-700 p-6 flex flex-col min-h-0 shadow-sm">
+            <div className="flex-1 bg-[#151a1f] rounded-xl border border-[#3c5d80] p-6 flex flex-col min-h-0">
                 <div className="flex justify-between items-center mb-6">
                     <div>
-                        <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
-                            <DatabaseIcon size={18} className="text-cyan-400" /> Data Acquisition
+                        <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                            <DatabaseIcon size={18} className="text-[#5acce6]" /> Data Acquisition
                         </h2>
-                        <p className="text-sm text-slate-400 mt-1">
-                            {hasPopData
-                                ? `Population status: ${populationData?.status ?? 'pending'}`
-                                : 'Reviewing PACS query results for Study UID: 1.2.840.113...'}
+                        <p className="text-xs text-gray-400 mt-1">
+                            {hasPopData 
+                                ? `Agent Activity: Processing ${populationData?.tool?.replace(/_/g, ' ') || 'finalizing'}...` 
+                                : 'Waiting for Population Agent to initiate DB search...'}
                         </p>
                     </div>
-                    <div className="flex gap-2">
-                        <button className="px-3 py-1.5 bg-slate-800 text-sky-300 border border-slate-600 rounded-lg text-xs hover:text-slate-100 transition-all duration-200">Query PACS</button>
-                        <button className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-500 transition-all duration-200 shadow-lg shadow-blue-500/20">Run QA Check</button>
+                    <div className="flex gap-2 text-xs font-mono">
+                        {accumulatedPop.uids.length > 0 && (
+                            <span className="px-3 py-1.5 bg-[#152e2e] text-[#5ce6b0] border border-[#234d4d] rounded flex items-center gap-2 shadow-[0_0_10px_rgba(92,230,176,0.2)]">
+                                <ActivityIcon size={12} className="animate-pulse" /> Cohort Secured & Loading Previews
+                            </span>
+                        )}
                     </div>
                 </div>
 
-                {/* Mock Grid */}
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 overflow-y-auto pr-2">
-                    {Array.from({ length: volumesSegmented || 12 }).map((_, i) => (
-                        <div key={i} className="aspect-square bg-slate-950 rounded-lg border border-slate-700/70 hover:border-cyan-500/70 transition-all duration-200 cursor-pointer relative group overflow-hidden hover:shadow-md">
-                            <div className="absolute inset-0 flex items-center justify-center opacity-25 group-hover:opacity-45 transition-opacity bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-slate-700 via-slate-900 to-black">
-                                <span className="text-[11px] font-mono text-slate-500">DICOM / {i + 100}</span>
+                {/* Dynamic Data Grid */}
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 overflow-y-auto pr-2 pb-4">
+                    {/* Render Real UIDs if we have them */}
+                    {accumulatedPop.uids.length > 0 ? (
+                        accumulatedPop.uids.map((uid, i) => (
+                            <div 
+                                key={uid} 
+                                className="aspect-square bg-black rounded border border-[#3c5d80]/50 hover:border-[#5acce6] transition-all relative group overflow-hidden flex flex-col"
+                                onMouseEnter={() => setHoveredUid(uid)}
+                                onMouseLeave={() => setHoveredUid(null)}
+                            >
+                                {/* Image / GIF Container */}
+                                <div className="flex-1 relative bg-[#05080a] overflow-hidden">
+                                    
+                                    {/* --- USE OUR NEW PAUSABLE GIF TRICK --- */}
+                                    <PausableGif 
+                                        uid={uid} 
+                                        isHovered={hoveredUid === uid} 
+                                    />
+
+                                    {/* Status Badge */}
+                                    <div className="absolute top-2 right-2 z-10 pointer-events-none">
+                                        <div className="bg-[#152e2e]/90 backdrop-blur text-[#5ce6b0] border border-[#5ce6b0]/30 text-[8px] font-bold px-1.5 py-0.5 rounded uppercase shadow-lg">
+                                            READY
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                {/* UID Footer */}
+                                <div className="h-7 bg-[#0b1015] border-t border-[#1f2d40] flex items-center justify-center px-2 shrink-0 group-hover:bg-[#151a1f] transition-colors">
+                                    <span className="text-[10px] font-mono text-[#91b9cd] truncate w-full text-center" title={uid}>
+                                        ...{uid.slice(-12)}
+                                    </span>
+                                </div>
+
                             </div>
-                            <div className="absolute top-2 right-2">
-                                {i % 4 === 0 ? (
-                                    <div className="bg-rose-400 text-rose-950 text-[10px] font-semibold px-1.5 py-0.5 rounded">FAIL</div>
-                                ) : (
-                                    <div className="bg-emerald-300 text-emerald-950 text-[10px] font-semibold px-1.5 py-0.5 rounded">PASS</div>
-                                )}
+                        ))
+                    ) : (
+                        /* Fallback Mock Skeleton Loading State */
+                        Array.from({ length: 12 }).map((_, i) => (
+                            <div key={`skeleton-${i}`} className="aspect-square bg-[#0b1015] rounded border border-[#1f2d40] relative overflow-hidden animate-pulse">
+                                <div className="absolute inset-0 flex items-center justify-center">
+                                    <span className="text-[10px] font-mono text-gray-700">Awaiting Data</span>
+                                </div>
                             </div>
-                        </div>
-                    ))}
+                        ))
+                    )}
                 </div>
             </div>
         </div>

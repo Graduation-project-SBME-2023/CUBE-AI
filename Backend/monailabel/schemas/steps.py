@@ -2,7 +2,7 @@ from pydantic import BaseModel, ConfigDict
 from uuid import UUID
 from typing import Optional
 
-
+from .Taskmessage import TaskMessageCreate, TaskMessageUpdate, TaskMessageRead
 class PlanStepBase(BaseModel):
     title: str
     description: Optional[str] = None
@@ -14,7 +14,8 @@ class PlanStepBase(BaseModel):
 
 class PlanStepCreate(PlanStepBase):
     pass  # order and id are auto-generated
-
+    # Optionally dispatch a TaskMessage at creation time
+    task_message: Optional[TaskMessageCreate] = None
 
 class PlanStepUpdate(BaseModel):
     title: Optional[str] = None
@@ -24,10 +25,13 @@ class PlanStepUpdate(BaseModel):
     order: Optional[int] = None  # optional for reordering
     logs: Optional[list] = None
     instructions: Optional[dict] = None
+    task_message: Optional[TaskMessageUpdate] = None
 
 
 class PlanStepOut(PlanStepBase):
     id: UUID
     plan_id: UUID
     order: int
+    task_message: Optional[TaskMessageRead] = None
+
     model_config = ConfigDict(from_attributes=True)

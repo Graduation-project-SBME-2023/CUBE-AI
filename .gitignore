@@ -39,7 +39,11 @@ Backend/apps/radiology/logs/app.log
 
 Backend/agent_system/agents/literature_review_agent/.knowledge_cache
 Backend/agent_system/agents/literature_review_agent/literature_review_output
-Backend/agent_system/benchmarking
+Backend/agent_system/benchmarking/*.pdf
+Backend/agent_system/benchmarking/*.json
+Backend/agent_system/benchmarking/benchmarking_output
+Backend/agent_system/benchmarking/benchmark_results
+Backend/agent_system/benchmarking/execution_evaluation/runs
 Backend/apps/radiology/bin/
 Backend/apps/radiology/General_Data/
 Backend/apps/radiology/Labels/
