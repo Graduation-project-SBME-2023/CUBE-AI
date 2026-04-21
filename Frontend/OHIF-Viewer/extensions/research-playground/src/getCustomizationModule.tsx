@@ -1,8 +1,7 @@
 import ResearchPlayground from './components/ResearchPlayground';
 import AgentsPlayground from './routes/Playground/AgentsPlayground';
-import { Navigate } from 'react-router-dom';
-
-const RootToPlayground = () => <Navigate to="/playground" replace />;
+import AgenticHome from './routes/agenticHome';
+import StartUp from './routes/StartUp';
 
 export default function getCustomizationModule() {
   return [
@@ -14,19 +13,28 @@ export default function getCustomizationModule() {
           routes: [
             {
               path: '/',
-              children: RootToPlayground,
+              children: StartUp,
+              private: false, 
+            },
+            {
+              path: '/agentic-home',
+              children: AgenticHome,
+              private: false,
             },
             {
               path: '/playground',
               children: ResearchPlayground,
+              private: false,
             },
             {
               path: '/playground/:phaseId',
               children: ResearchPlayground,
+              private: false,
             },
             {
               path: '/agents-playground',
               children: AgentsPlayground,
+              private: false,
             },
           ],
         },

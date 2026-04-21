@@ -32,3 +32,10 @@ class PlanStep(Base):
     logs = Column(JSONB, nullable=True, server_default='[]')
 
     plan = relationship("Plan", back_populates="steps")
+
+    task_message = relationship(
+        "TaskMessage",
+        back_populates="plan_step",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )

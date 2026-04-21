@@ -1,8 +1,7 @@
 window.config = {
   routerBasename: '/',
   // whiteLabeling: {},
-  extensions: [],
-  modes: [],
+  extensions: ['@ohif/extension-research-playground'],  modes: [],
   customizationService: {},
   showStudyList: true,
   // some windows systems have issues with more than 3 web workers

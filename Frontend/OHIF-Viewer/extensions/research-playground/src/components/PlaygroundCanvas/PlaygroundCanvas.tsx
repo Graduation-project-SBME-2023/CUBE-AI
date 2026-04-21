@@ -24,6 +24,8 @@ import StartNode from './nodes/StartNode';
 import AgentNode from './nodes/AgentNode';
 import CustomEdge from './edges/CustomEdges';
 import { FlowNode, FlowEdge, ToolEvent } from './types';
+import { registerAllLogRenderers } from './logs/registerRenderers';
+import { AgentNodeData } from './types';
 
 // Icon aliases
 const PlayIcon: any = Play;
@@ -197,8 +199,8 @@ export default function PlaygroundCanvas({
         );
         return;
       }
-      if (type === 'hypothesis_approval' || type === 'lit_review_choice') {
-        setPendingPrompt({ type, message: payload?.message || '' });
+      if (type === 'hypothesis_approval' || type === 'lit_review_choice' || type === 'plan_approval') {
+        setPendingPrompt({ type, message: payload?.message || payload?.text || '' });
         setPromptExpanded(true);
         return;
       }
@@ -287,7 +289,54 @@ export default function PlaygroundCanvas({
         applyBackendPlan(payload || data.data || data);
       }
       if (type === 'tool_update') {
-        updateToolProgress(payload);
+        // Append logs to the respective agent
+        const agentName = payload?.agent_name;
+        const logEntry = payload?.log;
+        if (agentName && logEntry) {
+          setNodes(prevNodes =>
+            prevNodes.map(node => {
+              if (node.type === 'agent' && 'name' in node.data) {
+                const agentData = payload?.agents?.find((agent: { name: string }) => agent.name === (node.data as AgentNodeData).name);
+                if (agentData) {
+                  return {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      logs: [...(node.data.logs || []), logEntry],
+                    },
+                  };
+                }
+              }
+              return node;
+            })
+          );
+        }
+        return;
+      }
+      if (type === 'Pipeline_agent_status') {
+        // Update agent statuses
+        const agents = payload?.agents || [];
+        setNodes(prevNodes => {
+          const updatedNodes = prevNodes.map(node => {
+            if (node.type === 'agent' && 'name' in node.data) {
+              const agentData = payload?.agents?.find((agent: { name: string }) => agent.name === (node.data as AgentNodeData).name);
+              if (agentData) {
+                return {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    status: agentData.status,
+                    started_at: agentData.started_at,
+                    completed_at: agentData.completed_at,
+                  },
+                };
+              }
+            }
+            return node;
+          });
+          return [...updatedNodes]; // Ensure a new array reference
+        });
+        return;
       }
       if (type === 'run_status') {
         updateCurrentAgent(payload.current_agent);
@@ -436,8 +485,9 @@ export default function PlaygroundCanvas({
         if (node.type !== 'agent') {
           return node;
         }
+        const agentData = node.data as any;
         const isCurrent = node.id === current_agent;
-        const wasActive = node.data.status === 'active';
+        const wasActive = agentData.status === 'active';
         if (isCurrent) {
           return { ...node, data: { ...node.data, status: 'active', isExpanded: true } };
         }
@@ -455,7 +505,8 @@ export default function PlaygroundCanvas({
         if (node.type !== 'agent' || node.id !== event.source) {
           return node;
         }
-        const logs = node.data.logs ?? [];
+        const agentData = node.data as any;
+        const logs = agentData.logs ?? [];
         if (event.event_type === 'tool_started') {
           return {
             ...node,
@@ -694,6 +745,11 @@ export default function PlaygroundCanvas({
     [nodes, mode, deleteNode, editNode, toggleExpand]
   );
 
+  useEffect(() => {
+    // Register log renderers during extension initialization
+    registerAllLogRenderers();
+  }, []);
+
   return (
     <div className="relative flex h-full w-full flex-col bg-[#000000]">
       <div className="absolute top-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-4 rounded-lg border border-[#3c5d80] bg-[#151a1f]/90 p-2 shadow-2xl backdrop-blur-md">
@@ -834,7 +890,9 @@ export default function PlaygroundCanvas({
                   <span className="flex-1 text-xs font-bold text-white">
                     {pendingPrompt.type === 'hypothesis_approval'
                       ? 'Approve Hypothesis?'
-                      : 'Run Literature Review?'}
+                      : pendingPrompt.type === 'plan_approval'
+                        ? 'Approve Pipeline Plan?'
+                        : 'Run Literature Review?'}
                   </span>
                   {promptExpanded ? (
                     <ChevronDownIcon size={12} className="text-[#566a84]" />
@@ -850,7 +908,7 @@ export default function PlaygroundCanvas({
                       <p className="text-[11px] leading-relaxed text-[#91b9cd]">{pendingPrompt.message}</p>
                     )}
                     <div className="flex gap-2">
-                      {pendingPrompt.type === 'hypothesis_approval' ? (
+                      {pendingPrompt.type === 'hypothesis_approval' || pendingPrompt.type === 'plan_approval' ? (
                         <>
                           <button
                             onClick={() => {
