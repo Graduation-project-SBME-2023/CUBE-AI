@@ -65,7 +65,7 @@ export default class AutoSegmentation extends BaseTab {
   }
 
   
-  // Update your handleClassChange to store the selected class object
+  // Update your handleClassChange to store the selected class object for vista
   handleClassChange = (event) => {
     const selectedName = event.target.value;
     const selectedClass = this.state.vistaClasses.find(cls => cls.name === selectedName);
