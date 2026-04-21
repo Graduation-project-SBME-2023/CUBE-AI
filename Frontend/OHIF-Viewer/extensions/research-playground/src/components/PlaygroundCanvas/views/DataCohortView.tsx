@@ -1,6 +1,58 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Filter, Database, AlertTriangle, Check, Activity, Layers } from 'lucide-react';
 
+// --- NEW HELPER COMPONENT ---
+const PausableGif = ({ uid, isHovered }: { uid: string, isHovered: boolean }) => {
+    const canvasRef = React.useRef<HTMLCanvasElement>(null);
+    const imgRef = React.useRef<HTMLImageElement>(null);
+    const [failed, setFailed] = React.useState(false);
+
+    const handleLoad = () => {
+        // When the GIF loads, instantly draw its first frame onto the canvas to "freeze" it
+        if (imgRef.current && canvasRef.current) {
+            const img = imgRef.current;
+            const canvas = canvasRef.current;
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+                ctx.drawImage(img, 0, 0); 
+            }
+        }
+    };
+
+    // If the image doesn't exist on the server, show the fallback icon
+    if (failed) {
+        return (
+            <div className="absolute inset-0 flex items-center justify-center bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#1f2d40] via-[#0b1015] to-black">
+                <DatabaseIcon size={24} className="text-[#3c5d80]" />
+            </div>
+        );
+    }
+
+    return (
+        <div className="absolute inset-0 w-full h-full">
+            {/* 1. The Canvas: Shows the frozen snapshot when NOT hovered */}
+            <canvas
+                ref={canvasRef}
+                className="absolute inset-0 w-full h-full object-cover"
+                style={{ opacity: isHovered ? 0 : 0.5, transition: 'opacity 0.3s ease-in-out' }}
+            />
+            
+            {/* 2. The GIF: Loads in the background, takes over on hover */}
+            <img
+                ref={imgRef}
+                src={`http://localhost:8000/volumes/${uid}/preview.gif`}
+                alt={`Volume ${uid}`}
+                className="absolute inset-0 w-full h-full object-cover"
+                style={{ opacity: isHovered ? 0.9 : 0, transition: 'opacity 0.3s ease-in-out' }}
+                onLoad={handleLoad}
+                onError={() => setFailed(true)}
+            />
+        </div>
+    );
+};
+
 const CheckIcon: any = Check;
 const AlertTriangleIcon: any = AlertTriangle;
 const FilterIcon: any = Filter;
@@ -65,6 +117,7 @@ export default function DataCohortView({ populationData, segmentationData }: Dat
         summary: "",
         matchRate: null as number | null
     });
+    const [hoveredUid, setHoveredUid] = useState<string | null>(null);
 
     useEffect(() => {
         if (!populationData) return;
@@ -225,37 +278,29 @@ export default function DataCohortView({ populationData, segmentationData }: Dat
                     {/* Render Real UIDs if we have them */}
                     {accumulatedPop.uids.length > 0 ? (
                         accumulatedPop.uids.map((uid, i) => (
-                            <div key={uid} className="aspect-square bg-black rounded border border-[#3c5d80]/50 hover:border-[#5acce6] transition-all relative group overflow-hidden flex flex-col">
-                                
+                            <div 
+                                key={uid} 
+                                className="aspect-square bg-black rounded border border-[#3c5d80]/50 hover:border-[#5acce6] transition-all relative group overflow-hidden flex flex-col"
+                                onMouseEnter={() => setHoveredUid(uid)}
+                                onMouseLeave={() => setHoveredUid(null)}
+                            >
                                 {/* Image / GIF Container */}
                                 <div className="flex-1 relative bg-[#05080a] overflow-hidden">
-                                    {/* This points to your backend API which fetches/generates the GIF from Orthanc. 
-                                        Adjust the port/URL to match your actual backend API.
-                                    */}
-                                    <img 
-                                        src={`http://localhost:8000/volumes/${uid}/preview.gif`} 
-                                        alt={`Volume ${uid}`}
-                                        className="w-full h-full object-cover opacity-50 group-hover:opacity-90 transition-opacity duration-300"
-                                        onError={(e) => {
-                                            // Fallback if the GIF hasn't been generated yet or fails
-                                            (e.target as HTMLImageElement).style.display = 'none';
-                                            (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
-                                        }}
-                                    />
                                     
-                                    {/* Fallback Icon if Image Fails */}
-                                    <div className="hidden absolute inset-0 flex items-center justify-center bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#1f2d40] via-[#0b1015] to-black">
-                                        <DatabaseIcon size={24} className="text-[#3c5d80]" />
-                                    </div>
+                                    {/* --- USE OUR NEW PAUSABLE GIF TRICK --- */}
+                                    <PausableGif 
+                                        uid={uid} 
+                                        isHovered={hoveredUid === uid} 
+                                    />
 
                                     {/* Status Badge */}
-                                    <div className="absolute top-2 right-2 z-10">
+                                    <div className="absolute top-2 right-2 z-10 pointer-events-none">
                                         <div className="bg-[#152e2e]/90 backdrop-blur text-[#5ce6b0] border border-[#5ce6b0]/30 text-[8px] font-bold px-1.5 py-0.5 rounded uppercase shadow-lg">
                                             READY
                                         </div>
                                     </div>
                                 </div>
-
+                                
                                 {/* UID Footer */}
                                 <div className="h-7 bg-[#0b1015] border-t border-[#1f2d40] flex items-center justify-center px-2 shrink-0 group-hover:bg-[#151a1f] transition-colors">
                                     <span className="text-[10px] font-mono text-[#91b9cd] truncate w-full text-center" title={uid}>
