@@ -31,7 +31,7 @@ def create_gif_in_thread(responses):
         
         gif_io = BytesIO()
         # loop=0 makes it loop forever
-        imageio.mimsave(gif_io, frames, format='GIF', duration=0.2, loop=0)
+        imageio.mimsave(gif_io, frames, format='GIF', duration=1.0, loop=0)
         gif_io.seek(0)
         return gif_io
     except Exception as e:
@@ -67,9 +67,12 @@ async def get_volume_preview_gif(volume_series_instance_uid: str):
                     raise HTTPException(status_code=404, detail="No instances found")
 
                 # 2. Select roughly 10 slices across the volume
+                # 2. Select the desired number of slices across the volume
+                num_slices = 30 # Change this number to whatever you want (e.g., 20, 30, 50)
+                
                 count = len(instances)
-                step = max(1, count // 10)
-                sample_ids = [instances[i]['ID'] for i in range(0, count, step)][:10]
+                step = max(1, count // num_slices)
+                sample_ids = [instances[i]['ID'] for i in range(0, count, step)][:num_slices]
                 
                 # 3. Fetch previews in parallel
                 tasks = [client.get(f"{ORTHANC_URL}/instances/{iid}/preview") for iid in sample_ids]
