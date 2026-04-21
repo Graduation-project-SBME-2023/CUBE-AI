@@ -94,6 +94,22 @@ async def search_volumes_by_description(
         with open(json_path, 'w', encoding='utf-8') as file:
             json.dump(json_data, file, indent=4)
             
+        async with httpx.AsyncClient() as broadcast_client:
+            await broadcast_client.post(
+                "http://localhost:8150/ws-broadcast", 
+                json={
+                    "type": "population_output",
+                    "payload": {
+                        "tool": "search_volumes_by_description",
+                        "status": "completed",
+                        "count": len(uids_list),
+                        "uid_list": uids_list, # <--- The frontend gets the sensitive data here
+                        "saved_path": str(json_path)
+                    }
+                }
+            )
+        
+            
         return {
             "status": "success",
             "message": f"number of the {len(uids_list)}",

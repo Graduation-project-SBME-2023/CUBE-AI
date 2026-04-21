@@ -13,7 +13,7 @@ from autogen_agentchat.ui import Console
 from autogen_core import CancellationToken
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
 from descriptions.models_descriptions import POPULATION_PLANNER_AGENT_DESCRIPTION
-from system_prompts.system_messages import POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE
+from system_prompts.system_messages import POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE, POPULATION_EXEC_SYSTEM_MESSAGE
 import asyncio
 import logging
 import pandas as pd
@@ -105,22 +105,24 @@ class PopulationPlannerAgent(AssistantAgent):
     @classmethod
     async def create(cls, model_client = None):
         model_client = OllamaClient() if not model_client else model_client
-        # mcp_server = StdioServerParams(
-        #     command="python", args=["Backend/mcp/server.py"]
-        #     )
-        # mcp_tools = await mcp_server_tools(mcp_server)
-        # desired_tools = ['generate_targets', 'get_patient', 'get_volume', 'save_final_output']
-        # final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
-        # logger.info(f"Started population selection with available tools: {len(final_tools)}")
-        # for tool in final_tools:
-        #     logger.info(f"Tool selected: {tool.name}")
+        mcp_server = StdioServerParams(
+            command="python", args=["Backend/mcp/server.py"]
+            )
+        mcp_tools = await mcp_server_tools(mcp_server)
+        desired_tools = ['get_unique_series_descriptions', 'search_volumes_by_description', 'write_inclusion_criteria', 'save_final_output',
+                        'scratchpad_register_agent', 'scratchpad_raise_flag',
+                        'scratchpad_write_summary', 'scratchpad_set_status']
+        final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
+        logger.info(f"Started population selection with available tools: {len(final_tools)}")
+        for tool in final_tools:
+            logger.info(f"Tool selected: {tool.name}")
         name = "study_population_planner_agent"
         description = POPULATION_PLANNER_AGENT_DESCRIPTION
-        system_message = POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE
+        system_message = POPULATION_EXEC_SYSTEM_MESSAGE
         return cls(
             name = name,
             model_client = model_client,
-            tools = [write_inclusion_criteria, search_using_keywords, get_unique_descriptions],
+            tools = final_tools,
             description = description,
             system_message = system_message,
             max_tool_iterations = 20

@@ -1,11 +1,105 @@
+import httpx
+import imageio.v2 as imageio # Using v2 to avoid deprecation warnings
+from io import BytesIO
+from fastapi.responses import StreamingResponse
+import asyncio
 from schemas.study import StudyRead
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from schemas.volume import Volume, VolumeCreate, VolumeUpdate
 from crud.volume import count_volumes_by_study, delete_volume, get_volume, get_volumes, create_volume, get_volumes_by_study, search_volumes, search_volumes, update_volume, get_study_by_volume, search_volumes_by_description, get_unique_series_descriptions
 from core.database import get_db
+from starlette.concurrency import run_in_threadpool
 
 router = APIRouter(prefix="/volumes", tags=["volumes"])
+
+# Define your Orthanc URL and credentials here
+ORTHANC_URL = "http://orthanc:8042"
+ORTHANC_AUTH = ("orthanc", "orthanc")
+
+
+MAX_CONCURRENT_GIFS = asyncio.Semaphore(5)
+
+def create_gif_in_thread(responses):
+    """
+    CPU-bound task: reads JPEG bytes and encodes the GIF.
+    """
+    try:
+        frames = [imageio.imread(r.content) for r in responses if r.status_code == 200]
+        if not frames:
+            return None
+        
+        gif_io = BytesIO()
+        # loop=0 makes it loop forever
+        imageio.mimsave(gif_io, frames, format='GIF', duration=1.0, loop=0)
+        gif_io.seek(0)
+        return gif_io
+    except Exception as e:
+        print(f"GIF Encoding Error: {e}")
+        return None
+
+@router.get("/{volume_series_instance_uid}/preview.gif")
+async def get_volume_preview_gif(volume_series_instance_uid: str):
+    async with MAX_CONCURRENT_GIFS:
+        # Increased timeout to 60s for heavy DICOM rendering
+        async with httpx.AsyncClient(auth=ORTHANC_AUTH, timeout=60.0) as client:
+            try:
+                # 1. TRANSLATE UID TO ORTHANC ID
+                # We post the UID to lookup to get the internal Orthanc UUID
+                lookup_res = await client.post(
+                    f"{ORTHANC_URL}/tools/lookup", 
+                    content=volume_series_instance_uid
+                )
+                lookup_res.raise_for_status()
+                lookup_data = lookup_res.json()
+
+                if not lookup_data or lookup_data[0]["Type"] != "Series":
+                    raise HTTPException(status_code=404, detail="Series UID not found in Orthanc")
+                
+                orthanc_series_id = lookup_data[0]["ID"]
+
+                # 2. FETCH INSTANCES USING THE INTERNAL ID
+                res = await client.get(f"{ORTHANC_URL}/series/{orthanc_series_id}/instances")
+                res.raise_for_status()
+                instances = res.json()
+                
+                if not instances:
+                    raise HTTPException(status_code=404, detail="No instances found")
+
+                # 2. Select roughly 10 slices across the volume
+                # 2. Select the desired number of slices across the volume
+                num_slices = 30 # Change this number to whatever you want (e.g., 20, 30, 50)
+                
+                count = len(instances)
+                step = max(1, count // num_slices)
+                sample_ids = [instances[i]['ID'] for i in range(0, count, step)][:num_slices]
+                
+                # 3. Fetch previews in parallel
+                tasks = [client.get(f"{ORTHANC_URL}/instances/{iid}/preview") for iid in sample_ids]
+                image_responses = await asyncio.gather(*tasks)
+                
+                # 4. Offload CPU-heavy work (imageio) to the threadpool
+                gif_buffer = await run_in_threadpool(create_gif_in_thread, image_responses)
+                
+                if not gif_buffer:
+                    raise HTTPException(status_code=500, detail="GIF generation failed")
+
+                return StreamingResponse(
+                    gif_buffer, 
+                    media_type="image/gif",
+                    headers={
+                        "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
+                        "Content-Disposition": "inline",
+                        "Cross-Origin-Resource-Policy": "cross-origin"
+                    }
+                )
+                
+            except httpx.ConnectError:
+                raise HTTPException(status_code=502, detail="Backend cannot reach Orthanc. Check Docker networking.")
+            except httpx.HTTPStatusError as e:
+                raise HTTPException(status_code=e.response.status_code, detail=f"Orthanc error: {e.response.text}")
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{volume_series_instance_uid}", response_model=Volume)
 async def read_volume(volume_series_instance_uid: str, db: Session = Depends(get_db)):
