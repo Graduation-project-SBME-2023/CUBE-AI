@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, History, Plus, ChevronRight, Trash2, Send } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import websocketService from '../../utils/WebsocketService'; // Adjust path as needed
+import websocketService from '../../utils/WebsocketService';
 import './ChatSidebar.css';
 
 const makeId = (prefix = 'id') => `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
@@ -14,6 +14,7 @@ const ChatSidebar = ({
   initialUserMessage,
   externalSessionId,
   sendInitialMessage = false,
+  onPlanApprovalNeeded,
 }) => {
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
@@ -274,8 +275,9 @@ const ChatSidebar = ({
       setActiveSessionId(null);
     }
   };
-  const sendMessage = async () => {
-    if (!input.trim()) {
+  const sendMessage = async (messageText?: string) => {
+    const textToSend = messageText || input.trim();
+    if (!textToSend) {
       return;
     }
     let sessionId = activeSessionId;
@@ -287,7 +289,7 @@ const ChatSidebar = ({
         return;
       }
     }
-    const userMsg = { id: makeId('u'), role: 'user', text: input, ts: Date.now() };
+    const userMsg = { id: makeId('u'), role: 'user', text: textToSend, ts: Date.now() };
     setSessions(prev =>
       prev.map(s =>
         String(s.chat_id) === String(sessionId)
@@ -295,7 +297,9 @@ const ChatSidebar = ({
           : s
       )
     );
-    setInput('');
+    if (!messageText) {
+      setInput('');
+    }
     setIsTyping(true);
     try {
       await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
@@ -437,6 +441,20 @@ const ChatSidebar = ({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
+
+  // Detect plan approval requests and notify parent
+  useEffect(() => {
+    if (messages && messages.length > 0 && onPlanApprovalNeeded) {
+      const lastMessage = messages[messages.length - 1];
+      if (
+        lastMessage.role === 'assistant' &&
+        lastMessage.text &&
+        lastMessage.text.includes('Review the pipeline plan')
+      ) {
+        onPlanApprovalNeeded();
+      }
+    }
+  }, [messages, onPlanApprovalNeeded]);
   if (!isOpen) {
     return null;
   }

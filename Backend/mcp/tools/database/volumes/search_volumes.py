@@ -4,6 +4,7 @@ from pydantic import Field
 import httpx
 import json
 from pathlib import Path
+import os
 
 @mcp.tool()
 async def search_volumes(
@@ -36,73 +37,110 @@ async def search_volumes(
             return {"error": "Invalid JSON returned", "raw": response.text}
 
         return {"data": data}
-    
+
+
 @mcp.tool() 
 async def search_volumes_by_description(
     words_to_include: Annotated[list[str], Field(description="List of keywords that MUST be present in the volume description.")],
     words_to_exclude: Annotated[list[str] | None, Field(description="Optional list of keywords that MUST NOT be present in the volume description.")] = None
-):
+) -> dict:
     """
     Search for volume UIDs based on included and excluded words in the series description,
-    and save the resulting list of UIDs to the population workspace.
+    and save the resulting list of UIDs to the workspace config.
 
     Use this tool in these scenarios:
     1. To find volumes matching specific descriptive terms (e.g., ["brain", "mri"]).
     2. To refine searches by filtering out unwanted terms (e.g., excluding ["contrast"]).
     """
+    
+    uids_list = []
+    
     # 1. Fetch the data from the FastAPI endpoint
     async with httpx.AsyncClient() as client:
-        params = {
-            "words_to_include": words_to_include
-        }
-        
+        params = {"words_to_include": words_to_include}
         if words_to_exclude is not None:
             params["words_to_exclude"] = words_to_exclude
             
-        response = await client.get(
-            "http://localhost:8000/volumes/search/description/",
-            params=params
-        )
-        response.raise_for_status()
+        try:
+            response = await client.get(
+                "http://localhost:8000/volumes/search/description/",
+                params=params
+            )
+            response.raise_for_status()
+            uids_list = response.json()
+            
+        except httpx.HTTPStatusError as e:
+            return {"status": "error", "message": f"HTTP error occurred: {str(e)}"}
+        except ValueError:
+            return {"status": "error", "message": "Invalid JSON returned from API", "raw": response.text}
+        except Exception as e:
+            return {"status": "error", "message": f"An unexpected API error occurred: {str(e)}"}
+
+    # Setup file-saving variables
+    workspace_dir = os.environ.get("WORKSPACE_DIR")
+    json_path = None
+    file_status_msg = "File not saved (WORKSPACE_DIR env variable not set)."
+    file_saved = False
+
+    # 2. Handle File Saving (Only if WORKSPACE_DIR exists)
+    if workspace_dir:
+        json_path = Path(workspace_dir) / "config.json"
         
         try:
-            uids_list = response.json()
-        except ValueError:
-            return {"error": "Invalid JSON returned from API", "raw": response.text}
+            # Ensure the directory exists
+            json_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Read existing JSON data if the file exists
+            json_data = {}
+            if json_path.exists():
+                try:
+                    with open(json_path, 'r', encoding='utf-8') as file:
+                        json_data = json.load(file)
+                except json.JSONDecodeError:
+                    json_data = {} 
 
-    # 2. Resolve the path to the population.json file
-    current_file_path = Path(__file__).resolve()
-    backend_dir = current_file_path.parent.parent.parent.parent.parent # Go up 4 levels
-    json_path = backend_dir / "agent_system" / "workspace" / "populations" / "populations" / "population.json"
+            # Update the datasetlist with the newly found UIDs
+            json_data["datasetlist"] = uids_list
 
-    # 3. Read existing JSON data if the file exists
-    json_data = {}
-    if json_path.exists():
-        try:
-            with open(json_path, 'r', encoding='utf-8') as file:
-                json_data = json.load(file)
-        except json.JSONDecodeError:
-            json_data = {} 
-    else:
-        json_path.parent.mkdir(parents=True, exist_ok=True)
+            # Save the updated JSON back to the file
+            with open(json_path, 'w', encoding='utf-8') as file:
+                json.dump(json_data, file, indent=4)
+                
+            file_saved = True
+            file_status_msg = f"Successfully updated datasetlist in {json_path}"
+            
+        except Exception as e:
+            # Catch the error but DO NOT return, allowing the broadcast to proceed
+            file_status_msg = f"Failed to save to disk: {str(e)}"
 
-    # 4. Update the datasetlist with the newly found UIDs
-    json_data["datasetlist"] = uids_list
-
-    # 5. Save the updated JSON back to the file
+    # 3. ALWAYS Broadcast to the Frontend
     try:
-        with open(json_path, 'w', encoding='utf-8') as file:
-            json.dump(json_data, file, indent=4)
+        async with httpx.AsyncClient() as broadcast_client:
+            await broadcast_client.post(
+                "http://localhost:8150/ws-broadcast", 
+                json={
+                    "type": "population_output",
+                    "payload": {
+                        "tool": "search_volumes_by_description",
+                        "status": "completed",
+                        "count": len(uids_list),
+                        "uid_list": uids_list,
+                        "saved_path": str(json_path) if file_saved else "N/A"
+                    }
+                }
+            )
             
         return {
             "status": "success",
-            "message": f"number of the {len(uids_list)}",
+            "message": f"Found {len(uids_list)} volumes. Broadcast successful. {file_status_msg}",
             "count": len(uids_list),
-            "saved_path": str(json_path)
+            "saved_path": str(json_path) if file_saved else "N/A"
         }
+        
     except Exception as e:
+        # Hard error only if the broadcast itself fails
         return {
             "status": "error",
-            "message": f"Search succeeded, but failed to save to population.json: {str(e)}",
+            "message": f"Search succeeded, but broadcast failed: {str(e)}. File status: {file_status_msg}",
             "count": len(uids_list)
         }

@@ -100,7 +100,7 @@ class SessionService:
         """
         prev = session.state
         session.state = state
-        logger.info(f"[{session.session_id}] State: {prev.name} → {state.name}")
+        logger.info(f"[{session.session_id}] State: {prev.name} -> {state.name}")
 
         results = await asyncio.gather(
             BackendClient.update_session(session.session_id, {"state": state.name}),

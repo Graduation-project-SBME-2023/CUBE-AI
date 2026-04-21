@@ -1,0 +1,151 @@
+/* Plan Approval Modal Styles */
+
+.plan-approval-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.plan-approval-modal {
+  background-color: #1a1a1a;
+  border: 1px solid #404040;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  max-width: 500px;
+  width: 90%;
+  animation: slideUp 0.3s ease-out;
+  overflow: hidden;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.plan-approval-modal-header {
+  padding: 24px 24px 16px 24px;
+  border-bottom: 1px solid #404040;
+}
+
+.plan-approval-modal-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plan-approval-modal-content {
+  padding: 24px;
+  color: #dadada;
+  line-height: 1.5;
+}
+
+.plan-approval-modal-content p {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+}
+
+.plan-approval-modal-content p:last-child {
+  margin-bottom: 0;
+}
+
+.plan-approval-modal-hint {
+  color: #808080;
+  font-size: 13px !important;
+  font-style: italic;
+}
+
+.plan-approval-modal-actions {
+  display: flex;
+  gap: 12px;
+  padding: 16px 24px;
+  border-top: 1px solid #404040;
+  justify-content: flex-end;
+}
+
+.plan-approval-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border: 1px solid #404040;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background-color: transparent;
+  color: #dadada;
+}
+
+.plan-approval-btn:hover:not(:disabled) {
+  border-color: #606060;
+  background-color: #262626;
+}
+
+.plan-approval-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.plan-approval-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.plan-approval-btn-reject {
+  color: #ff6b6b;
+  border-color: #404040;
+}
+
+.plan-approval-btn-reject:hover:not(:disabled) {
+  border-color: #ff6b6b;
+  background-color: rgba(255, 107, 107, 0.1);
+  color: #ff8787;
+}
+
+.plan-approval-btn-approve {
+  background-color: #0944b3;
+  border-color: #0944b3;
+  color: #ffffff;
+}
+
+.plan-approval-btn-approve:hover:not(:disabled) {
+  background-color: #0d58d6;
+  border-color: #0d58d6;
+}
+
+.plan-approval-btn-approve:active:not(:disabled) {
+  background-color: #0735a0;
+}
+
+/* Icon styling */
+.plan-approval-btn svg {
+  flex-shrink: 0;
+  stroke-width: 2.5;
+}

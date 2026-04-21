@@ -28,26 +28,26 @@ const StartNode = memo((props: StartNodeProps) => {
         display: 'flex',
         flexDirection: 'column',
         borderRadius: '12px',
-        background: '#0f172a',
-        border: '1px solid #334155',
-        color: '#cbd5e1',
-        padding: '12px 16px',
+        background: '#151a1f',
+        border: '2px solid #3c5d80',
+        color: '#91b9cd',
+        padding: '10px 16px',
         boxSizing: 'border-box',
         userSelect: 'none',
         position: 'relative',
         cursor: 'default',
-        boxShadow: '0 10px 24px rgba(2, 6, 23, 0.35)',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
         minHeight: 80,
       }}
     >
       {/* Header */}
-      <div className="mb-1.5 flex items-center justify-center gap-2">
-        <FlaskConical size={14} className="text-cyan-400" />
-        <span className="text-xs font-semibold uppercase tracking-wider text-cyan-300">
+      <div className="mb-1 flex items-center justify-center gap-2">
+        <FlaskConical size={14} className="text-[#5acce6]" />
+        <span className="text-xs font-bold uppercase tracking-wider text-[#5acce6]">
           {data.title || 'Start'}
         </span>
         {data.state === 'confirmed' && (
-          <span className="rounded bg-emerald-500/15 border border-emerald-500/35 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">APPROVED</span>
+          <span className="rounded bg-[#0d3320] px-1.5 py-0.5 text-[9px] font-bold text-[#6fe5b8]">APPROVED</span>
         )}
       </div>
 

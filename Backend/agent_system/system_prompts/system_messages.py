@@ -523,6 +523,8 @@ Step 4: Execute the Search
 -Note on Tool Usage: You only need to execute the search tool with the correct parameters. The tool is designed to automatically write the resultant UIDs
 into the population report. Do not attempt to manually list the UIDs in your text response.
 
+Step 5: Use the save_final_output tool 
+
 Constraints & Rules
 Do not hallucinate database columns or values; always verify using your tools if unsure.
 Ensure your clinical reasoning is sound and directly supports the provided hypothesis.
@@ -582,6 +584,9 @@ Step 4: Execute the Search
 -Use your Database Search Tool to find the cases that meet all criteria.
 -Note on Tool Usage: You only need to execute the search tool with the correct parameters. The tool is designed to automatically write the resultant UIDs
 into the population report. Do not attempt to manually list the UIDs in your text response.
+
+Step 5: Use the generate_targets Tool 
+- this function MUST be used to assign the targets to the cases
 
 Constraints & Rules
 Do not hallucinate database columns or values; always verify using your tools if unsure.

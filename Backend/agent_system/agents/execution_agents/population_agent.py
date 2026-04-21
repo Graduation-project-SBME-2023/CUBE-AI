@@ -13,7 +13,7 @@ from autogen_agentchat.ui import Console
 from autogen_core import CancellationToken
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
 from descriptions.models_descriptions import POPULATION_PLANNER_AGENT_DESCRIPTION
-from system_prompts.system_messages import POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE
+from system_prompts.system_messages import POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE, POPULATION_EXEC_SYSTEM_MESSAGE
 import asyncio
 import logging
 import pandas as pd
@@ -103,24 +103,37 @@ class PopulationPlannerAgent(AssistantAgent):
                         max_tool_iterations=max_tool_iterations)
     
     @classmethod
-    async def create(cls, model_client = None):
+    async def create(cls, model_client = None, workspace_folder=None, session_id=None):
         model_client = OllamaClient() if not model_client else model_client
-        # mcp_server = StdioServerParams(
-        #     command="python", args=["Backend/mcp/server.py"]
-        #     )
-        # mcp_tools = await mcp_server_tools(mcp_server)
-        # desired_tools = ['generate_targets', 'get_patient', 'get_volume', 'save_final_output']
-        # final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
-        # logger.info(f"Started population selection with available tools: {len(final_tools)}")
-        # for tool in final_tools:
-        #     logger.info(f"Tool selected: {tool.name}")
+        mcp_server_path = os.path.abspath(
+            os.path.join(current_dir, "..", "..", "..", "mcp", "server.py")
+        )
+        if not os.path.exists(mcp_server_path):
+            raise FileNotFoundError(f"MCP server not found at: {mcp_server_path}")
+        mcp_server = StdioServerParams(
+            command=sys.executable,
+            args=[mcp_server_path],
+            env={"WORKSPACE_DIR": workspace_folder, "SESSION_ID": session_id, "AGENT_ID": "study_population_planner_agent"},
+            )
+        try:
+            mcp_tools = await mcp_server_tools(mcp_server)
+        except Exception as exc:
+            logger.exception("Failed to initialize MCP tools from %s", mcp_server_path)
+            raise RuntimeError(f"Failed to initialize MCP tools from {mcp_server_path}") from exc
+        desired_tools = ['get_unique_series_descriptions', 'search_volumes_by_description', 'write_inclusion_criteria', 'generate_targets',
+                        'scratchpad_register_agent', 'scratchpad_raise_flag',
+                        'scratchpad_write_summary', 'scratchpad_set_status']
+        final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
+        logger.info(f"Started population selection with available tools: {len(final_tools)}")
+        for tool in final_tools:
+            logger.info(f"Tool selected: {tool.name}")
         name = "study_population_planner_agent"
         description = POPULATION_PLANNER_AGENT_DESCRIPTION
-        system_message = POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE
+        system_message = POPULATION_EXEC_SYSTEM_MESSAGE
         return cls(
             name = name,
             model_client = model_client,
-            tools = [write_inclusion_criteria, search_using_keywords, get_unique_descriptions],
+            tools = final_tools,
             description = description,
             system_message = system_message,
             max_tool_iterations = 20

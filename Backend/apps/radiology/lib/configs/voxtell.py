@@ -71,9 +71,9 @@ class voxtell(TaskConfig):
         # Downloading text encoding model 
         self.text_encoding_model_name = "qwen3-4b-embedding"
         self.text_encoding_model_path = os.path.join(self.model_dir, self.text_encoding_model_name)
-        if not os.path.exists(self.text_encoding_model_path):
-            logger.info(f"Downloading text encoding model to {self.text_encoding_model_path}")
-            self.__download_text_encoding_checkpoints(self.text_encoding_model_name, self.model_dir)
+        # if not os.path.exists(self.text_encoding_model_path):
+        #     logger.info(f"Downloading text encoding model to {self.text_encoding_model_path}")
+        #     # self.__download_text_encoding_checkpoints(self.text_encoding_model_name, self.model_dir)
         
         # Network
         self.network = UNet(
