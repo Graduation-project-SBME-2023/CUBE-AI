@@ -17,7 +17,7 @@ def create_planner_agent(model_client, discovery_tools):
         3. Analyze the returned models and their metrics (e.g., Dice scores).
         4. Decide whether segmentation should be automatic or interactive based on available models .
 
-        After calling the tool and receiving the model information, you MUST analyze the results and output ONLY a JSON object (no other text) that STRICTLY follows this schema:
+        After calling the tool and receiving the models information, you MUST analyze the results and output ONLY a JSON object (no other text) that STRICTLY follows this schema:
 
         {
             "target_labels": ["label1", "label2"],
@@ -31,7 +31,8 @@ def create_planner_agent(model_client, discovery_tools):
         - selected_models: List of selected models (automatic or interactive)
         - Output ONLY valid JSON, no explanations, no markdown
         """ ,     
-        reflect_on_tool_use=True
+        # reflect_on_tool_use=True,
+        max_tool_iterations=2
     )
 
     return planner

@@ -69,8 +69,8 @@ class SegmentationModule:
             logger.error(f"Failed to connect: {e}")
             raise 
         
-        self.discovery_tools = [t for t in tools if t.name == "get_model_info"]
-        assert self.discovery_tools, "Missing get_model_info" 
+        self.discovery_tools = [t for t in tools if t.name == "list_models"]
+        assert self.discovery_tools, "Missing list_models" 
         
         # intialize agents and services
         self.PlannerAgent = create_planner_agent(self.model_client, self.discovery_tools)
@@ -115,7 +115,6 @@ class SegmentationModule:
         #finally download the volumes with its label masks 
         await asyncio.sleep(120)  
         
-        # todo : send to the function the workspace path to download into it
         downloaded_uids = await download_and_pair_volumes(
                     workspace_dir,
                     datasetlist, 
@@ -133,7 +132,6 @@ class SegmentationModule:
         # ======================================================================================
         
         # ================== Generate Overlays ===========================================
-        # make it the workspace from the service
         gif_volumes = []
         if downloaded_uids:
             
@@ -144,18 +142,18 @@ class SegmentationModule:
             logger.info(f"gif_volumes sample: {gif_volumes[:1]}")
 
         #=========== Prepare data for the frontend(payload)==============================
-        #todo: handle list of labels and models in front view
+        #todo: handle list of labels and models in front view and in function
         frontend_data = {
             "targetRoi": plan['target_labels'][0], 
             "selectedModel": plan["selected_models"][0] if plan["selected_models"] else None, 
-            "diceScore": get_model_dice_score(plan["selected_auto_models"][0]) if (plan["chosen_path"] == "automatic") and plan["selected_auto_models"] else get_model_dice_score(selected_interactive_model), 
+            "diceScore": get_model_dice_score(plan["selected_models"][0],plan["target_labels"][0]) if plan["selected_models"] else None, 
             "volumes": gif_volumes
         }
 
         # ==========sending data to fronted for review====================
         logger.info("Module sending data to frontend for review...")
         await send_ws_message_remote(
-            msg_type="REVIEW_REQUIRED", 
+            msg_type="features_output", 
             payload=frontend_data, 
             session_id= session_id
         )

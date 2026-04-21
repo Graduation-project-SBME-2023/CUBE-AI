@@ -44,7 +44,7 @@ export default class InteractiveSegmentation extends BaseTab {
 
 
 
-  initPromptObject = (objectId) => {
+  initPromptObject = (objectId) => {                 //[[{POINTS:[[[25,10]],[1]], BOXES:[]}],[],]
     if (!this.prompts[objectId]) {
       this.prompts[objectId] = {
         points: [[], []],  // [coords[], labels[]]

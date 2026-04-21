@@ -15,7 +15,7 @@ services:
   #   depends_on:
   #     - postgres
   #     - monailabel
-  # #   restart: unless-stopped
+  #   restart: unless-stopped
 
   monailabel:
     # build:
