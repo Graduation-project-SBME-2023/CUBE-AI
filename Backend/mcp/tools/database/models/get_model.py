@@ -2,6 +2,9 @@ from ... import mcp
 import httpx
 from typing import Annotated
 from pydantic import Field
+import os
+
+base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
 
 
 @mcp.tool()
@@ -19,10 +22,10 @@ async def get_model(
     """
     async with httpx.AsyncClient() as client:
         if model_id is not None:
-            response = await client.get(f"http://localhost:8000/models/{model_id}")
+            response = await client.get(f"{base_url}/models/{model_id}")
         else:
             response = await client.get(
-                "http://localhost:8000/models/",
+                base_url + "/models/",
                 params={"skip": skip, "limit": limit}
             )
 

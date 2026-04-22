@@ -133,16 +133,17 @@ api.mount("/mcp", mcp.sse_app())
 if __name__ == "__main__":
     tool_count = len(getattr(mcp, "_tools", {}))
     print(f"\n🚀 Starting server with {tool_count} tools loaded")
-    print(f"📍 FastAPI endpoints: http://localhost:8000")
-    print(f"📍 API Docs: http://localhost:8000/docs")
-    print(f"📍 Tools List: http://localhost:8000/tools\n")
+    base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+    print(f"📍 FastAPI endpoints: {base_url}")
+    print(f"📍 API Docs: {base_url}/docs")
+    print(f"📍 Tools List: {base_url}/tools\n")
 
 
     # Run FastAPI with uvicorn in hot-reload mode
     uvicorn.run(
         "app:api",           # path to your FastAPI instance
         host="0.0.0.0",
-        port=8000,
+        port=8500,
         reload=True,         # Enable hot reload
         workers=1            # Recommended for reload mode
     )

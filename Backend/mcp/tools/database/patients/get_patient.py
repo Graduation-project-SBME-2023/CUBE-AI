@@ -3,6 +3,10 @@ from ... import mcp
 from typing import Annotated
 from pydantic import Field
 from tool_logging import ToolEvent, log_tool_state, TextPayload
+import os
+
+
+base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
 
 
 @mcp.tool()
@@ -24,10 +28,10 @@ async def get_patient(
         log_event = ToolEvent('tool_progress', 'text', payload)
         log_tool_state(log_event)
         if patient_id is not None:
-            response = await client.get(f"http://localhost:8000/patients/{patient_id}")
+            response = await client.get(f"{base_url}/patients/{patient_id}")
         else:
             response = await client.get(
-                "http://localhost:8000/patients/",
+                base_url + "/patients/",
                 params={"skip": skip, "limit": limit}
             )
 

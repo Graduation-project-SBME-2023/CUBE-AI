@@ -2,6 +2,9 @@ from ... import mcp
 from pydantic import Field
 from typing import Annotated
 import httpx
+import os
+
+base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
 
 @mcp.tool()
 async def count_volumes_in_study(
@@ -14,7 +17,7 @@ async def count_volumes_in_study(
     1. To quickly get the quantity of volumes for a study using the 'study_uid' (e.g., "How many volumes are in Study X?") without retrieving the full list of volume details.
     """
     async with httpx.AsyncClient() as client:
-        response = await client.get(f"http://localhost:8000/volumes/count/{study_uid}")
+        response = await client.get(f"{base_url}/volumes/count/{study_uid}")
         response.raise_for_status()
         try:
             data = response.json()

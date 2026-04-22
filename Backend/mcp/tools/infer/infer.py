@@ -6,10 +6,12 @@ from typing import Dict, Optional
 from .. import mcp
 
 
+
+
 @mcp.tool()
 async def monailabel_infer(
     model: str,
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     image: str = "",
     file_path: Optional[str] = None,
     session_id: str = "",
