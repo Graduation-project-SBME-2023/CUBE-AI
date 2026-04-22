@@ -2,6 +2,9 @@ from ... import mcp
 from typing import Annotated
 from pydantic import Field
 import httpx
+import os
+
+base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
 
 
 @mcp.tool()
@@ -22,7 +25,7 @@ async def search_patient(
         if gender is not None:
             params["gender"] = gender
         response = await client.get(
-            f"http://localhost:8000/patients/search",
+            f"{base_url}/patients/search",
             params=params
             )
         response.raise_for_status()

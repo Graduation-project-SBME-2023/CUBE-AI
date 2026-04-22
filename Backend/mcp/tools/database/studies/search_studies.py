@@ -2,6 +2,10 @@ from ... import mcp
 from typing import Annotated
 from pydantic import Field
 import httpx
+import os
+
+
+base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
 
 
 @mcp.tool()
@@ -25,7 +29,7 @@ async def search_studies(
             params["keyword"] = keyword
             
         response = await client.get(
-            "http://localhost:8000/studies/search/",
+            base_url + "/studies/search/",
             params=params
         )
         response.raise_for_status()

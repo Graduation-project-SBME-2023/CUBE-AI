@@ -3,6 +3,7 @@ import httpx
 from pathlib import Path
 from typing import Dict, Optional, Literal
 from .. import mcp
+import os
 
 
 # =============================================================================
@@ -12,7 +13,7 @@ from .. import mcp
 @mcp.tool()
 async def monailabel_infer(
     model: str,
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     image: str = "",
     file_path: Optional[str] = None,
     session_id: str = "",
@@ -57,7 +58,7 @@ async def monailabel_infer(
 
 @mcp.tool()
 async def monailabel_get_datastore(
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     output: Literal["train", "stats", "all"] = "stats",
     api_token: Optional[str] = None,
     ctx: Dict | None = None,
@@ -86,7 +87,7 @@ async def monailabel_get_datastore(
 @mcp.tool()
 async def monailabel_add_image(
     file_path: str,
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     image_id: Optional[str] = None,
     params: Optional[Dict] = None,
     api_token: Optional[str] = None,
@@ -123,7 +124,7 @@ async def monailabel_add_image(
 @mcp.tool()
 async def monailabel_remove_image(
     image_id: str,
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     api_token: Optional[str] = None,
     ctx: Dict | None = None,
 ) -> str:
@@ -151,7 +152,7 @@ async def monailabel_remove_image(
 @mcp.tool()
 async def monailabel_download_image(
     image_id: str,
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     api_token: Optional[str] = None,
     ctx: Dict | None = None,
 ) -> str:
@@ -180,7 +181,7 @@ async def monailabel_download_image(
 @mcp.tool()
 async def monailabel_get_image_info(
     image_id: str,
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     api_token: Optional[str] = None,
     ctx: Dict | None = None,
 ) -> str:
@@ -209,7 +210,7 @@ async def monailabel_get_image_info(
 async def monailabel_update_image_info(
     image_id: str,
     info: Dict,
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     api_token: Optional[str] = None,
     ctx: Dict | None = None,
 ) -> str:
@@ -240,7 +241,7 @@ async def monailabel_update_image_info(
 async def monailabel_save_label(
     image_id: str,
     label_path: str,
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     tag: str = "final",
     params: Optional[Dict] = None,
     api_token: Optional[str] = None,
@@ -279,7 +280,7 @@ async def monailabel_save_label(
 async def monailabel_remove_label(
     label_id: str,
     tag: str,
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     api_token: Optional[str] = None,
     ctx: Dict | None = None,
 ) -> str:
@@ -309,7 +310,7 @@ async def monailabel_remove_label(
 async def monailabel_download_label(
     label_id: str,
     tag: str,
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     api_token: Optional[str] = None,
     ctx: Dict | None = None,
 ) -> str:
@@ -340,7 +341,7 @@ async def monailabel_download_label(
 async def monailabel_get_label_info(
     label_id: str,
     tag: str,
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     api_token: Optional[str] = None,
     ctx: Dict | None = None,
 ) -> str:
@@ -371,7 +372,7 @@ async def monailabel_update_label_info(
     label_id: str,
     tag: str,
     info: Dict,
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     api_token: Optional[str] = None,
     ctx: Dict | None = None,
 ) -> str:
@@ -401,7 +402,7 @@ async def monailabel_update_label_info(
 
 @mcp.tool()
 async def monailabel_download_dataset(
-    base_url: str = "http://localhost:8000",
+    base_url: str = os.environ.get("MONAI_URL", "http://localhost:8000"),
     limit_cases: Optional[int] = None,
     api_token: Optional[str] = None,
     ctx: Dict | None = None,

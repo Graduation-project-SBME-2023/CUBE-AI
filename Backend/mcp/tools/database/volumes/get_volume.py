@@ -3,6 +3,9 @@ from typing import Annotated
 from ... import mcp
 import httpx
 from tool_logging import ToolEvent, log_tool_state, TextPayload
+import os
+
+base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
 
 @mcp.tool()
 async def get_volume(
@@ -24,10 +27,10 @@ async def get_volume(
         log_event = ToolEvent('tool_progress', 'text', payload)
         log_tool_state(log_event)
         if volume_series_instance_uid is not None:
-            response = await client.get(f"http://localhost:8000/volumes/{volume_series_instance_uid}")
+            response = await client.get(f"{base_url}/volumes/{volume_series_instance_uid}")
         else:
             response = await client.get(
-                "http://localhost:8000/volumes/",
+                base_url + "/volumes/",
                 params={"skip": skip, "limit": limit}
             )
 
@@ -53,7 +56,7 @@ async def get_volumes_by_study(
     1. To retrieve a list of scan volumes when you have a known 'study_uid' (e.g., "Show me the volumes for Study 12345").
     """
     async with httpx.AsyncClient() as client:
-        response = await client.get(f"http://localhost:8000/volumes/by_study/{study_uid}")
+        response = await client.get(f"{base_url}/volumes/by_study/{study_uid}")
         response.raise_for_status()
         try:
             data = response.json()

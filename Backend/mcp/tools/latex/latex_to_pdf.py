@@ -86,7 +86,7 @@ async def latex_to_pdf(
         payload = TextPayload(message='PDF generated successfully.')
         error_compilation_event = ToolEvent('tool_finished', 'text', payload)
         log_tool_state(error_compilation_event)
-        
+
         # ================  report view ================
         frontend_data = {
         "latex_pdf": f"http://localhost:8150/static/overlays/document.pdf"
@@ -97,8 +97,7 @@ async def latex_to_pdf(
         # session_id=session_id
     )
         # =============================================
-        return f"PDF generated successfully and saved as: {output_filename}"
-
+        return f"PDF generated successfully and saved as: {final_path}"
 
     except Exception as e:
         return f"Error: {str(e)}"
