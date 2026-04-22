@@ -73,7 +73,7 @@ class voxtell(TaskConfig):
         self.text_encoding_model_path = os.path.join(self.model_dir, self.text_encoding_model_name)
         if not os.path.exists(self.text_encoding_model_path):
             logger.info(f"Downloading text encoding model to {self.text_encoding_model_path}")
-            self.__download_voxtell_checkpoints(self.text_encoding_model_name, self.model_dir)
+            self.__download_text_encoding_checkpoints(self.text_encoding_model_name, self.text_encoding_model_path)
         
         # Network
         self.network = UNet(
@@ -158,5 +158,10 @@ class voxtell(TaskConfig):
         local_dir=download_dir
             )
         
-    
-  
+    def __download_text_encoding_checkpoints(self, model_name, download_dir):
+        
+        download_path = snapshot_download(
+        repo_id="hiyouga/Qwen3-4B-Embedding",
+        allow_patterns=[f"{model_name}/*", "*.json"],
+        local_dir=download_dir
+            )
