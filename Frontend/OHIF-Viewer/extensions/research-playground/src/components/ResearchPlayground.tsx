@@ -68,7 +68,7 @@ export default function ResearchPlayground() {
     const location = useLocation();
     const navigate = useNavigate();
     const { phaseId } = useParams<{ phaseId?: string }>();
-    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [isChatOpen, setIsChatOpen] = useState(true);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
     const [literatureOutput, setLiteratureOutput] = useState<any>(null);
