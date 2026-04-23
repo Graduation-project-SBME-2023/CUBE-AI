@@ -50,10 +50,11 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/voxtell_requirements.txt:/voxtell_requirements.txt
     command: >
         sh -c "
-        pip install psycopg2-binary aiohttp &&
+        pip install psycopg2-binary &&
+        pip install -r /voxtell_requirements.txt &&
+        pip install aiohttp &&
         alembic -c /alembic/alembic.ini upgrade head &&
         python /monailabel/server_start.py
-        pip install -r /voxtell_requirements.txt &&
         "
     depends_on:
       - postgres
