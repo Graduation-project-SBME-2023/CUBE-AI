@@ -1,12 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
-    Target, Cpu, Percent, Check, X, CheckSquare, XSquare, Save, Loader2,
-    Scan, BrainCircuit, List, CheckCircle, FileSpreadsheet, Clock, BarChart3,
-    ChevronDown, ChevronUp
+    Scan, BrainCircuit, BarChart3, TrendingUp,
+    GitMerge, Layers, CheckCircle, Clock, FileSpreadsheet,
+    ChevronDown, ChevronUp, Activity, X, Maximize2
 } from 'lucide-react';
+import {
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+    ResponsiveContainer, Cell, LineChart, Line, ScatterChart,
+    Scatter, ReferenceLine,
+} from 'recharts';
 import websocketService from '../../../utils/WebsocketService';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface VolumeGif {
     seriesInstanceUid: string;
@@ -22,6 +27,23 @@ export interface FeaturesData {
     processing_time_seconds?: number;
 }
 
+interface ImportanceBar  { feature: string; importance: number | null; }
+interface CumulativePt   { n_features: number; cumulative_pct: number; }
+interface ScatterPt      { x: number; y: number; target: string; }
+interface PcaData        { points: ScatterPt[]; explained_variance: number[]; n_features: number; }
+interface TsneData       { points: ScatterPt[]; n_features: number; }
+interface CorrelationData{ labels: string[]; matrix: (number | null)[][]; }
+
+export interface ChartData {
+    importance_bars?: ImportanceBar[];
+    cumulative?: CumulativePt[];
+    correlation?: CorrelationData | null;
+    pca?: PcaData | null;
+    tsne?: TsneData | null;
+    task_type?: string;
+    method?: string;
+}
+
 export interface FeatureImportanceData {
     status: string;
     method?: string;
@@ -31,192 +53,418 @@ export interface FeatureImportanceData {
     targetRoi?: string;
     selectedModel?: string;
     diceScore?: number | null;
+    chart_data?: ChartData | null;
 }
 
-export interface ReviewViewProps {
-    targetRoi: string;
-    selectedModel: string;
-    diceScore: number | null;
-    volumes: VolumeGif[];
-    onSave: (results: { accepted: string[]; rejected: string[] }) => void;
-    isLoading: boolean;
-    featuresData?: FeaturesData | null;
-    importanceData?: FeatureImportanceData | null;
+// ─── Palette ──────────────────────────────────────────────────────────────────
+
+const TARGET_PALETTE = [
+    '#5acce6', '#6fe5b8', '#a78bfa', '#f59e0b',
+    '#f472b6', '#34d399', '#fb923c', '#60a5fa',
+];
+
+function targetColor(target: string, all: string[]): string {
+    return TARGET_PALETTE[all.indexOf(target) % TARGET_PALETTE.length] ?? TARGET_PALETTE[0];
 }
 
-// ─── Collapsible Section ──────────────────────────────────────────────────────
+function corrBg(v: number | null): string {
+    if (v == null) return '#0b1015';
+    const abs = Math.abs(v);
+    return v > 0
+        ? `rgba(90,204,230,${0.08 + abs * 0.85})`
+        : `rgba(239,68,68,${0.08 + abs * 0.85})`;
+}
+
+function corrText(v: number | null): string {
+    if (v == null) return '#3c5d80';
+    return Math.abs(v) > 0.5 ? '#fff' : '#91b9cd';
+}
+
+// ─── Expand modal ─────────────────────────────────────────────────────────────
+
+function ExpandModal({ title, onClose, children }: {
+    title: string; onClose: () => void; children: React.ReactNode;
+}) {
+    useEffect(() => {
+        const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+        window.addEventListener('keydown', h);
+        return () => window.removeEventListener('keydown', h);
+    }, [onClose]);
+
+    return (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center"
+            style={{ background: 'rgba(0,0,0,0.78)' }}
+            onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+            <div className="bg-[#0b1015] border border-[#1f2d40] rounded-2xl shadow-2xl flex flex-col"
+                style={{ width: 'min(90vw, 1100px)', maxHeight: '88vh' }}>
+                <div className="flex items-center justify-between px-5 py-3 border-b border-[#1f2d40] shrink-0">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-[#91b9cd]">{title}</span>
+                    <button onClick={onClose}
+                        className="p-1.5 rounded-lg border border-[#1f2d40] text-[#566a84] hover:text-white hover:border-[#3c5d80] transition-colors">
+                        <X size={13} />
+                    </button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-5">{children}</div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Series toggle pill ───────────────────────────────────────────────────────
+
+function SeriesToggle({ label, color, active, onClick }: {
+    label: string; color: string; active: boolean; onClick: () => void;
+}) {
+    return (
+        <button onClick={onClick}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border transition-all"
+            style={{
+                borderColor: active ? color : '#1f2d40',
+                background: active ? `${color}18` : 'transparent',
+                color: active ? color : '#3c5d80',
+                opacity: active ? 1 : 0.45,
+                textDecoration: active ? 'none' : 'line-through',
+            }}>
+            <span className="w-2 h-2 rounded-full flex-shrink-0"
+                style={{ background: active ? color : '#3c5d80' }} />
+            {label}
+        </button>
+    );
+}
+
+// ─── Collapsible section (metadata panel) ─────────────────────────────────────
 
 function CollapsibleSection({
-    title,
-    icon,
-    defaultOpen = true,
-    children,
-    accentColor = '#5acce6',
+    title, icon, defaultOpen = true, children, accent = '#5acce6',
 }: {
-    title: string;
-    icon: React.ReactNode;
-    defaultOpen?: boolean;
-    children: React.ReactNode;
-    accentColor?: string;
+    title: string; icon: React.ReactNode; defaultOpen?: boolean;
+    children: React.ReactNode; accent?: string;
 }) {
     const [open, setOpen] = useState(defaultOpen);
     return (
-        <div className="bg-[#151a1f] rounded-xl border border-[#3c5d80] overflow-hidden">
-            <button
-                onClick={() => setOpen(o => !o)}
-                className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/5 transition-colors"
-            >
-                <span className="flex items-center gap-2 text-[10px] uppercase font-semibold tracking-wider" style={{ color: accentColor }}>
+        <div className="bg-[#151a1f] rounded-xl border border-[#1f2d40] overflow-hidden">
+            <button onClick={() => setOpen(o => !o)}
+                className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/[0.025] transition-colors">
+                <span className="flex items-center gap-2 text-[10px] uppercase font-semibold tracking-wider" style={{ color: accent }}>
                     {icon} {title}
                 </span>
-                {open ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
+                {open ? <ChevronUp size={13} className="text-[#566a84]" /> : <ChevronDown size={13} className="text-[#566a84]" />}
             </button>
             {open && <div className="px-4 pb-4">{children}</div>}
         </div>
     );
 }
 
-// ─── Right Panel ──────────────────────────────────────────────────────────────
+// ─── Chart panel wrapper (with expand) ───────────────────────────────────────
 
-function RightPanel({
-    targetRoi,
-    selectedModel,
-    diceScore,
-    featuresData,
-    importanceData,
-}: Pick<ReviewViewProps, 'targetRoi' | 'selectedModel' | 'diceScore' | 'featuresData' | 'importanceData'>) {
-    const hasFeatures = featuresData && featuresData.status === 'success';
-    const hasImportance = importanceData && importanceData.status === 'success';
+function ChartPanel({ title, expandContent, children }: {
+    title: string; expandContent?: React.ReactNode; children: React.ReactNode;
+}) {
+    const [expanded, setExpanded] = useState(false);
+    return (
+        <>
+            <div className="flex-1 overflow-y-auto bg-[#0b1015] rounded-xl border border-[#1f2d40]"
+                onDoubleClick={() => expandContent && setExpanded(true)}>
+                <div className="flex items-center justify-between px-4 py-2 border-b border-[#1f2d40] bg-[#151a1f]/60">
+                    <span className="text-[10px] text-[#566a84]">{title}</span>
+                    {expandContent && (
+                        <button onClick={e => { e.stopPropagation(); setExpanded(true); }}
+                            className="p-1 rounded border border-[#1f2d40] text-[#3c5d80] hover:text-[#5acce6] hover:border-[#3c5d80] transition-colors"
+                            title="Expand (or double-click)">
+                            <Maximize2 size={11} />
+                        </button>
+                    )}
+                </div>
+                <div className="p-4">{children}</div>
+            </div>
+            {expanded && expandContent && (
+                <ExpandModal title={title} onClose={() => setExpanded(false)}>
+                    {expandContent}
+                </ExpandModal>
+            )}
+        </>
+    );
+}
 
-    const featureEntries = Object.entries(featuresData?.num_features || {});
-    const totalFeatures = featureEntries.reduce((sum, [, c]) => sum + c, 0);
-    const csvEntries = Object.entries(featuresData?.csv_paths || {});
+// ─── Feature importance bar chart ─────────────────────────────────────────────
+
+function ImportanceBars({ bars, hiddenFeatures, onToggle, compact = true }: {
+    bars: ImportanceBar[];
+    hiddenFeatures: Set<string>;
+    onToggle: (f: string) => void;
+    compact?: boolean;
+}) {
+    const visible = bars.filter(b => !hiddenFeatures.has(b.feature));
+    const max = Math.max(...visible.map(b => b.importance ?? 0), 0);
+
+    // Show top-N toggles to avoid overflow — all visible in expanded modal
+    const TOGGLE_LIMIT = compact ? 8 : bars.length;
+    const toggleBars = bars.slice(0, TOGGLE_LIMIT);
 
     return (
-        <div className="w-72 flex flex-col gap-3 shrink-0 overflow-y-auto pr-0.5">
+        <div>
+            <div className="flex gap-1.5 mb-3 flex-wrap">
+                {toggleBars.map((b, i) => (
+                    <SeriesToggle key={b.feature}
+                        label={b.feature.length > 24 ? '…' + b.feature.slice(-23) : b.feature}
+                        color={`rgba(90,204,230,${0.3 + (i / toggleBars.length) * 0.7})`}
+                        active={!hiddenFeatures.has(b.feature)}
+                        onClick={() => onToggle(b.feature)} />
+                ))}
+                {bars.length > TOGGLE_LIMIT && (
+                    <span className="text-[9px] text-[#3c5d80] self-center">+{bars.length - TOGGLE_LIMIT} more</span>
+                )}
+            </div>
+            <ResponsiveContainer width="100%" height={Math.min(compact ? 360 : 700, visible.length * 22 + 40)}>
+                <BarChart data={visible} layout="vertical" margin={{ left: 4, right: 24, top: 4, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2d40" horizontal={false} />
+                    <XAxis type="number" tick={{ fill: '#566a84', fontSize: 9 }}
+                        domain={[0, max * 1.05]} tickFormatter={v => v.toFixed(4)} />
+                    <YAxis type="category" dataKey="feature" width={180} tick={{ fill: '#91b9cd', fontSize: 9 }}
+                        tickFormatter={v => v.length > 28 ? v.slice(0, 27) + '…' : v} />
+                    <Tooltip contentStyle={{ background: '#0b1015', border: '1px solid #1f2d40', borderRadius: 8, fontSize: 11 }}
+                        formatter={(v: number) => [v.toFixed(6), 'Importance']} labelStyle={{ color: '#5acce6' }} />
+                    <Bar dataKey="importance" radius={[0, 4, 4, 0]}>
+                        {visible.map((b, i) => {
+                            const intensity = max > 0 ? (b.importance ?? 0) / max : 0;
+                            return <Cell key={i} fill={`rgba(90,204,230,${0.2 + intensity * 0.8})`} />;
+                        })}
+                    </Bar>
+                </BarChart>
+            </ResponsiveContainer>
+        </div>
+    );
+}
 
-            {/* Segmentation Meta */}
-            <CollapsibleSection title="Segmentation Info" icon={<Target size={12} />} accentColor="#5acce6">
-                <div className="flex flex-col gap-4 pt-1">
-                    <div>
-                        <p className="text-gray-500 text-[10px] uppercase flex items-center gap-1 mb-0.5">
-                            <Target size={11} /> Target ROI
-                        </p>
-                        <div className="text-base font-bold text-[#5acce6]">{targetRoi}</div>
-                    </div>
-                    <div>
-                        <p className="text-gray-500 text-[10px] uppercase flex items-center gap-1 mb-0.5">
-                            <Cpu size={11} /> Selected Model
-                        </p>
-                        <div className="text-sm font-bold text-white">{selectedModel}</div>
-                    </div>
-                    <div>
-                        <p className="text-gray-500 text-[10px] uppercase flex items-center gap-1 mb-0.5">
-                            <Percent size={11} /> Benchmarking Dice Score
-                        </p>
-                        <div className="text-xl font-mono font-bold text-[#6fe5b8]">
-                            {diceScore !== null ? diceScore.toFixed(3) : '—'}
+// ─── Cumulative importance curve ──────────────────────────────────────────────
+
+const THRESHOLDS = [
+    { pct: 80, color: '#6fe5b8', label: '80%' },
+    { pct: 90, color: '#5acce6', label: '90%' },
+    { pct: 95, color: '#a78bfa', label: '95%' },
+    { pct: 99, color: '#f59e0b', label: '99%' },
+];
+
+function CumulativeCurve({ data, hiddenThresholds, onToggle, height = 220 }: {
+    data: CumulativePt[];
+    hiddenThresholds: Set<number>;
+    onToggle: (pct: number) => void;
+    height?: number;
+}) {
+    if (!data.length) return null;
+    return (
+        <div>
+            <div className="flex gap-1.5 mb-3 flex-wrap">
+                {THRESHOLDS.map(t => (
+                    <SeriesToggle key={t.pct} label={t.label} color={t.color}
+                        active={!hiddenThresholds.has(t.pct)} onClick={() => onToggle(t.pct)} />
+                ))}
+            </div>
+            <ResponsiveContainer width="100%" height={height}>
+                <LineChart data={data} margin={{ top: 8, right: 40, bottom: 24, left: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2d40" />
+                    <XAxis dataKey="n_features" tick={{ fill: '#566a84', fontSize: 9 }}
+                        label={{ value: 'Number of features', position: 'insideBottom', offset: -10, fill: '#566a84', fontSize: 10 }} />
+                    <YAxis domain={[0, 100]} tick={{ fill: '#566a84', fontSize: 9 }}
+                        tickFormatter={v => `${v}%`}
+                        label={{ value: 'Cumulative %', angle: -90, position: 'insideLeft', fill: '#566a84', fontSize: 10 }} />
+                    <Tooltip contentStyle={{ background: '#0b1015', border: '1px solid #1f2d40', borderRadius: 8, fontSize: 11 }}
+                        formatter={(v: number) => [`${v.toFixed(1)}%`, 'Cumulative importance']}
+                        labelFormatter={v => `Top ${v} features`} labelStyle={{ color: '#5acce6' }} />
+                    {THRESHOLDS.map(t => !hiddenThresholds.has(t.pct) && (
+                        <ReferenceLine key={t.pct} y={t.pct} stroke={t.color}
+                            strokeDasharray="4 3" strokeWidth={1}
+                            label={{ value: t.label, position: 'right', fill: t.color, fontSize: 9 }} />
+                    ))}
+                    <Line dataKey="cumulative_pct" dot={false} stroke="#5acce6" strokeWidth={2} />
+                </LineChart>
+            </ResponsiveContainer>
+        </div>
+    );
+}
+
+// ─── Correlation heatmap ──────────────────────────────────────────────────────
+
+function CorrelationHeatmap({ data }: { data: CorrelationData }) {
+    const { labels, matrix } = data;
+    const cellSize = Math.max(28, Math.min(48, Math.floor(480 / labels.length)));
+
+    return (
+        <div className="overflow-auto">
+            <div style={{ display: 'inline-block' }}>
+                <div style={{ display: 'flex', marginLeft: cellSize + 4 }}>
+                    {labels.map((l, i) => (
+                        <div key={i} style={{ width: cellSize, flexShrink: 0 }}
+                            className="text-[8px] text-[#566a84] text-center font-mono overflow-hidden"
+                            title={l}>
+                            {l.length > 6 ? l.slice(-5) : l}
                         </div>
-                    </div>
+                    ))}
                 </div>
-            </CollapsibleSection>
-
-            {/* Feature Extraction Summary */}
-            {hasFeatures ? (
-                <CollapsibleSection title="Feature Extraction" icon={<CheckCircle size={12} />} accentColor="#6fe5b8">
-                    <div className="flex flex-col gap-3 pt-1">
-                        <div className="grid grid-cols-2 gap-2">
-                            <div className="bg-[#0b1015] rounded-lg p-3 border border-[#3c5d80]/40">
-                                <div className="text-[10px] text-gray-500 uppercase mb-1">Subjects</div>
-                                <div className="text-lg font-semibold text-gray-100">{featuresData.num_subjects ?? '—'}</div>
-                            </div>
-                            <div className="bg-[#0b1015] rounded-lg p-3 border border-[#3c5d80]/40">
-                                <div className="text-[10px] text-gray-500 uppercase mb-1">Features</div>
-                                <div className="text-lg font-semibold text-gray-100">{totalFeatures}</div>
-                            </div>
+                {matrix.map((row, ri) => (
+                    <div key={ri} style={{ display: 'flex', alignItems: 'center', marginBottom: 2 }}>
+                        <div style={{ width: cellSize, flexShrink: 0, marginRight: 4 }}
+                            className="text-[8px] text-[#566a84] font-mono text-right pr-1 overflow-hidden"
+                            title={labels[ri]}>
+                            {labels[ri].length > 8 ? '…' + labels[ri].slice(-7) : labels[ri]}
                         </div>
-
-                        {featuresData.mask_labels && featuresData.mask_labels.length > 0 && (
-                            <div>
-                                <div className="text-[10px] text-gray-500 uppercase mb-1">Labels</div>
-                                <div className="flex flex-wrap gap-1">
-                                    {featuresData.mask_labels.map(l => (
-                                        <span key={l} className="text-[10px] bg-[#3c5d80]/30 text-[#5acce6] px-2 py-0.5 rounded font-mono">{l}</span>
-                                    ))}
-                                </div>
+                        {row.map((val, ci) => (
+                            <div key={ci}
+                                style={{
+                                    width: cellSize, height: cellSize, flexShrink: 0,
+                                    background: corrBg(val), color: corrText(val),
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    fontSize: 8, fontFamily: 'monospace', borderRadius: 2,
+                                    marginRight: 2, cursor: 'default',
+                                }}
+                                title={val != null ? `${labels[ri]} × ${labels[ci]}: ${val.toFixed(3)}` : '—'}>
+                                {val != null && cellSize >= 36 ? val.toFixed(2) : ''}
                             </div>
-                        )}
-
-                        {featuresData.processing_time_seconds != null && (
-                            <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
-                                <Clock size={11} /> {featuresData.processing_time_seconds.toFixed(1)}s processing time
-                            </div>
-                        )}
-
-                        {featureEntries.length > 0 && (
-                            <div>
-                                <div className="text-[10px] text-gray-500 uppercase mb-2">By Label</div>
-                                <div className="space-y-1">
-                                    {featureEntries.map(([label, count]) => (
-                                        <div key={label} className="flex justify-between items-center text-xs py-0.5">
-                                            <span className="text-gray-400">Label {label}</span>
-                                            <span className="text-gray-100 font-mono">{count}</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
+                        ))}
                     </div>
-                </CollapsibleSection>
-            ) : (
-                <CollapsibleSection title="Feature Extraction" icon={<Scan size={12} />} accentColor="#3c5d80">
-                    <div className="flex flex-col items-center py-4 gap-3 text-center">
-                        <div className="relative">
-                            <Scan size={36} className="text-gray-600" />
-                            <BrainCircuit size={18} className="text-[#5acce6] absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse" />
+                ))}
+                <div className="flex items-center gap-2 mt-3 px-1">
+                    <span className="text-[9px] text-[#ef4444]">−1</span>
+                    <div style={{
+                        flex: 1, height: 6, borderRadius: 3,
+                        background: 'linear-gradient(to right, rgba(239,68,68,0.9), #1f2d40, rgba(90,204,230,0.9))',
+                    }} />
+                    <span className="text-[9px] text-[#5acce6]">+1</span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Scatter plot (PCA / t-SNE) ───────────────────────────────────────────────
+
+function ScatterPlot({ points, xLabel, yLabel, hiddenClasses, onToggle }: {
+    points: ScatterPt[]; xLabel: string; yLabel: string;
+    hiddenClasses: Set<string>; onToggle: (cls: string) => void;
+}) {
+    const allTargets = useMemo(() => [...new Set(points.map(p => p.target))].sort(), [points]);
+    const grouped = useMemo(() =>
+        allTargets.map(t => ({
+            target: t,
+            color: targetColor(t, allTargets),
+            data: hiddenClasses.has(t) ? [] : points.filter(p => p.target === t),
+        })), [points, allTargets, hiddenClasses]);
+
+    return (
+        <div>
+            <div className="flex gap-1.5 mb-3 flex-wrap">
+                {allTargets.map(t => (
+                    <SeriesToggle key={t} label={`Class ${t}`}
+                        color={targetColor(t, allTargets)}
+                        active={!hiddenClasses.has(t)} onClick={() => onToggle(t)} />
+                ))}
+            </div>
+            <ResponsiveContainer width="100%" height={240}>
+                <ScatterChart margin={{ top: 8, right: 16, bottom: 24, left: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2d40" />
+                    <XAxis type="number" dataKey="x" name={xLabel} tick={{ fill: '#566a84', fontSize: 9 }}
+                        label={{ value: xLabel, position: 'insideBottom', offset: -10, fill: '#566a84', fontSize: 10 }} />
+                    <YAxis type="number" dataKey="y" name={yLabel} tick={{ fill: '#566a84', fontSize: 9 }}
+                        label={{ value: yLabel, angle: -90, position: 'insideLeft', fill: '#566a84', fontSize: 10 }} />
+                    <Tooltip contentStyle={{ background: '#0b1015', border: '1px solid #1f2d40', borderRadius: 8, fontSize: 11 }}
+                        cursor={{ strokeDasharray: '3 3', stroke: '#3c5d80' }}
+                        formatter={(v: number, name) => [v.toFixed(3), name]} />
+                    {grouped.map(g => (
+                        <Scatter key={g.target} name={`Class ${g.target}`} data={g.data}
+                            fill={g.color} fillOpacity={0.75} r={3} />
+                    ))}
+                </ScatterChart>
+            </ResponsiveContainer>
+        </div>
+    );
+}
+
+// ─── Metadata panel ───────────────────────────────────────────────────────────
+
+function MetaPanel({ featuresData, importanceData }: {
+    featuresData?: FeaturesData | null;
+    importanceData?: FeatureImportanceData | null;
+}) {
+    const hasFeatures   = featuresData?.status === 'success';
+    const hasImportance = importanceData?.status === 'success';
+    const cd = importanceData?.chart_data;
+
+    const featureEntries = Object.entries(featuresData?.num_features || {});
+    const totalFeatures  = featureEntries.reduce((s, [, c]) => s + c, 0);
+    const csvEntries     = Object.entries(featuresData?.csv_paths || {});
+
+    return (
+        <div className="w-64 flex flex-col gap-3 shrink-0 overflow-y-auto pr-0.5">
+            {hasFeatures && (
+                <CollapsibleSection title="Extraction Summary" icon={<CheckCircle size={11} />} accent="#6fe5b8">
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                        <div className="bg-[#0b1015] rounded-lg p-3 border border-[#1f2d40]">
+                            <div className="text-[9px] text-[#566a84] uppercase mb-1">Subjects</div>
+                            <div className="text-lg font-semibold text-gray-100">{featuresData?.num_subjects ?? '—'}</div>
                         </div>
-                        <p className="text-[11px] text-gray-500 leading-relaxed">
-                            Feature extraction not yet complete. Results will appear here once ready.
-                        </p>
-                        <button className="px-4 py-1.5 border border-[#3c5d80] text-[#5acce6] rounded-lg text-[11px] hover:bg-[#3c5d80]/20 transition-colors flex items-center gap-1.5">
-                            <List size={11} /> Configure Radiomics
-                        </button>
+                        <div className="bg-[#0b1015] rounded-lg p-3 border border-[#1f2d40]">
+                            <div className="text-[9px] text-[#566a84] uppercase mb-1">Features</div>
+                            <div className="text-lg font-semibold text-gray-100">{totalFeatures}</div>
+                        </div>
+                    </div>
+                    {!!featuresData?.mask_labels?.length && (
+                        <div className="mt-2">
+                            <div className="text-[9px] text-[#566a84] uppercase mb-1">Labels</div>
+                            <div className="flex flex-wrap gap-1">
+                                {featuresData.mask_labels.map(l => (
+                                    <span key={l} className="text-[9px] bg-[#3c5d80]/30 text-[#5acce6] px-2 py-0.5 rounded font-mono">{l}</span>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    {featuresData?.processing_time_seconds != null && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-[#566a84] mt-2">
+                            <Clock size={10} /> {featuresData.processing_time_seconds.toFixed(1)}s
+                        </div>
+                    )}
+                    {featureEntries.length > 0 && (
+                        <div className="mt-2 space-y-1">
+                            {featureEntries.map(([label, count]) => (
+                                <div key={label} className="flex justify-between text-[10px]">
+                                    <span className="text-[#566a84]">Label {label}</span>
+                                    <span className="text-[#91b9cd] font-mono">{count}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </CollapsibleSection>
+            )}
+
+            {hasImportance && cd && (
+                <CollapsibleSection title="Analysis Info" icon={<BarChart3 size={11} />} accent="#a78bfa">
+                    <div className="space-y-2 pt-1 text-[11px]">
+                        <div className="flex justify-between">
+                            <span className="text-[#566a84]">Method</span>
+                            <span className="text-[#91b9cd] font-mono">{cd.method ?? importanceData.method}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-[#566a84]">Task</span>
+                            <span className="text-[#91b9cd] font-mono">{cd.task_type}</span>
+                        </div>
+                        <div className="flex justify-between">
+                            <span className="text-[#566a84]">Total Features</span>
+                            <span className="text-[#91b9cd] font-mono">{importanceData.feature_count}</span>
+                        </div>
                     </div>
                 </CollapsibleSection>
             )}
 
-            {/* Feature Importance */}
-            {hasImportance && (
-                <CollapsibleSection title="Importance Analysis" icon={<BarChart3 size={12} />} accentColor="#a78bfa">
-                    <div className="flex flex-col gap-2 pt-1 text-xs">
-                        <div className="flex justify-between">
-                            <span className="text-gray-500">Method</span>
-                            <span className="text-gray-100">{importanceData.method}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-gray-500">Features Analyzed</span>
-                            <span className="text-gray-100">{importanceData.feature_count}</span>
-                        </div>
-                        {importanceData.result_files && (
-                            <div className="text-[11px] text-gray-600 mt-1">
-                                {Object.keys(importanceData.result_files).length} result files generated
-                            </div>
-                        )}
-                    </div>
-                </CollapsibleSection>
-            )}
-
-            {/* CSV Outputs */}
             {hasFeatures && csvEntries.length > 0 && (
-                <CollapsibleSection title="Feature Files" icon={<FileSpreadsheet size={12} />} defaultOpen={false} accentColor="#f59e0b">
+                <CollapsibleSection title="Feature Files" icon={<FileSpreadsheet size={11} />}
+                    defaultOpen={false} accent="#f59e0b">
                     <div className="flex flex-col gap-2 pt-1">
                         {csvEntries.map(([label, path]) => (
-                            <div key={label} className="bg-[#0b1015] rounded-lg border border-[#3c5d80]/40 p-3 hover:border-[#5acce6]/40 transition-colors">
-                                <div className="flex items-center justify-between mb-1">
-                                    <span className="text-[11px] font-medium text-gray-200">{label}</span>
-                                    <span className="text-[9px] bg-[#6fe5b8]/20 text-[#6fe5b8] font-semibold px-1.5 py-0.5 rounded uppercase">Ready</span>
+                            <div key={label} className="bg-[#0b1015] rounded-lg border border-[#1f2d40] p-2 hover:border-[#5acce6]/40 transition-colors">
+                                <div className="flex justify-between items-center">
+                                    <span className="text-[10px] font-medium text-[#91b9cd]">{label}</span>
+                                    <span className="text-[9px] bg-[#6fe5b8]/20 text-[#6fe5b8] font-semibold px-1.5 py-0.5 rounded">CSV</span>
                                 </div>
-                                <div className="text-[10px] text-gray-600 font-mono truncate">{path}</div>
+                                <div className="text-[9px] text-[#3c5d80] font-mono truncate mt-0.5">{path.split(/[/\\]/).pop()}</div>
                             </div>
                         ))}
                     </div>
@@ -226,232 +474,179 @@ function RightPanel({
     );
 }
 
-// ─── Review View (Main) ───────────────────────────────────────────────────────
+// ─── Empty placeholder ────────────────────────────────────────────────────────
 
-function ReviewView({
-    targetRoi,
-    selectedModel,
-    diceScore,
-    volumes = [],
-    onSave,
-    isLoading,
-    featuresData,
-    importanceData,
-}: ReviewViewProps) {
-    const [reviewStatus, setReviewStatus] = useState<Record<string, 'accepted' | 'rejected' | 'pending'>>({});
-
-    useEffect(() => {
-        const initial: Record<string, 'accepted' | 'rejected' | 'pending'> = {};
-        volumes.forEach(v => { initial[v.seriesInstanceUid] = 'pending'; });
-        setReviewStatus(initial);
-    }, [volumes]);
-
-    const handleToggle = (uid: string, status: 'accepted' | 'rejected') =>
-        setReviewStatus(prev => ({ ...prev, [uid]: status }));
-
-    const handleAcceptAll = () => {
-        const s: Record<string, 'accepted' | 'rejected' | 'pending'> = {};
-        volumes.forEach(v => { s[v.seriesInstanceUid] = 'accepted'; });
-        setReviewStatus(s);
-    };
-
-    const handleRejectAll = () => {
-        const s: Record<string, 'accepted' | 'rejected' | 'pending'> = {};
-        volumes.forEach(v => { s[v.seriesInstanceUid] = 'rejected'; });
-        setReviewStatus(s);
-    };
-
-    const handleSave = () => {
-        const accepted = Object.keys(reviewStatus).filter(uid => reviewStatus[uid] === 'accepted');
-        const rejected = Object.keys(reviewStatus).filter(uid => reviewStatus[uid] === 'rejected');
-        onSave({ accepted, rejected });
-    };
-
+function EmptyCharts() {
     return (
-        <div className="p-6 w-full h-full flex flex-col gap-6 bg-[#000000] overflow-hidden">
-            <div className="flex gap-6 flex-1 min-h-0">
-
-                {/* ── MAIN: Segmentation Review Grid ── */}
-                <div className="flex-1 bg-[#151a1f] rounded-xl border border-[#3c5d80] p-4 flex flex-col min-h-0 relative overflow-hidden">
-
-                    {/* Bulk actions */}
-                    <div className="flex justify-start gap-3 mb-4 shrink-0 border-b border-[#3c5d80]/50 pb-4">
-                        <button
-                            onClick={handleRejectAll}
-                            disabled={volumes.length === 0 || isLoading}
-                            className="px-4 py-2 bg-[#1a1515] border border-red-900/50 text-red-400 hover:bg-red-900/20 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm flex items-center gap-2 transition-colors"
-                        >
-                            <XSquare size={16} /> Reject All
-                        </button>
-                        <button
-                            onClick={handleAcceptAll}
-                            disabled={volumes.length === 0 || isLoading}
-                            className="px-4 py-2 bg-[#151f1a] border border-[#6fe5b8]/30 text-[#6fe5b8] hover:bg-[#6fe5b8]/10 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm flex items-center gap-2 transition-colors"
-                        >
-                            <CheckSquare size={16} /> Accept All
-                        </button>
-                    </div>
-
-                    {/* Loading overlay */}
-                    {isLoading && volumes.length === 0 && (
-                        <div className="absolute inset-0 top-[70px] flex flex-col items-center justify-center z-20 bg-[#151a1f]/90 backdrop-blur-sm">
-                            <div className="bg-[#0b1015] p-8 rounded-2xl border border-[#3c5d80] flex flex-col items-center text-center max-w-md shadow-2xl">
-                                <div className="w-16 h-16 bg-[#3c5d80]/20 rounded-full flex items-center justify-center mb-4">
-                                    <Loader2 size={32} className="text-[#5acce6] animate-spin" />
-                                </div>
-                                <h3 className="text-xl font-bold text-white mb-2">Awaiting Segmentation</h3>
-                                <p className="text-gray-400 text-sm">
-                                    Please wait until the segmentation agent finishes and sends the results.
-                                </p>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* GIF Grid */}
-                    <div className="flex-1 overflow-y-auto pr-2">
-                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-4">
-                            {volumes.map((volume) => {
-                                const status = reviewStatus[volume.seriesInstanceUid];
-                                const isAccepted = status === 'accepted';
-                                const isRejected = status === 'rejected';
-
-                                return (
-                                    <div
-                                        key={volume.seriesInstanceUid}
-                                        style={{
-                                            height: '220px',
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            borderRadius: '12px',
-                                            overflow: 'hidden',
-                                            border: `2px solid ${isAccepted ? '#6fe5b8' : isRejected ? '#ef4444' : 'rgba(60,93,128,0.5)'}`,
-                                            background: '#0b1015',
-                                            transition: 'border-color 0.2s',
-                                        }}
-                                    >
-                                        {/* Card Header */}
-                                        <div style={{ height: '36px', flexShrink: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px', borderBottom: '1px solid rgba(60,93,128,0.3)' }}>
-                                            <span style={{ fontSize: '10px', color: '#d1d5db', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>
-                                                {volume.seriesInstanceUid.slice(-8)}
-                                            </span>
-                                            <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                                                <button
-                                                    onClick={() => handleToggle(volume.seriesInstanceUid, 'rejected')}
-                                                    style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: isRejected ? '#ef4444' : 'transparent', color: isRejected ? '#fff' : '#9ca3af' }}
-                                                >
-                                                    <X size={14} />
-                                                </button>
-                                                <button
-                                                    onClick={() => handleToggle(volume.seriesInstanceUid, 'accepted')}
-                                                    style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: isAccepted ? '#6fe5b8' : 'transparent', color: isAccepted ? '#000' : '#9ca3af' }}
-                                                >
-                                                    <Check size={14} strokeWidth={3} />
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        {/* GIF */}
-                                        <div style={{ height: '184px', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                                            <img
-                                                src={volume.gifUrl}
-                                                alt={volume.seriesInstanceUid.slice(-8)}
-                                                style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-                                            />
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                </div>
-
-                {/* ── RIGHT: Meta + Features Panel ── */}
-                <RightPanel
-                    targetRoi={targetRoi}
-                    selectedModel={selectedModel}
-                    diceScore={diceScore}
-                    featuresData={featuresData}
-                    importanceData={importanceData}
-                />
+        <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center p-8">
+            <div className="relative">
+                <Scan size={48} className="text-[#1f2d40]" />
+                <BrainCircuit size={22} className="text-[#5acce6] absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse" />
             </div>
-
-            {/* Save button */}
-            <div className="w-full flex justify-center shrink-0 pt-2">
-                <button
-                    onClick={handleSave}
-                    disabled={isLoading || volumes.length === 0}
-                    className="px-12 py-3 bg-[#5acce6] hover:bg-[#4ab5cc] disabled:bg-[#3c5d80] disabled:text-gray-400 disabled:cursor-not-allowed text-black font-bold rounded-full flex items-center gap-2 transition-colors shadow-[0_0_15px_rgba(90,204,230,0.3)]"
-                >
-                    <Save size={18} /> Save Review Results
-                </button>
+            <div>
+                <p className="text-[#566a84] text-sm font-medium">Feature analysis not yet complete</p>
+                <p className="text-[#3c5d80] text-xs mt-1">Charts will appear once the importance agent finishes.</p>
             </div>
         </div>
     );
 }
 
-// ─── Container ────────────────────────────────────────────────────────────────
+// ─── Tab definitions ──────────────────────────────────────────────────────────
 
-interface ReviewContainerProps {
+type TabId = 'importance' | 'cumulative' | 'correlation' | 'pca' | 'tsne';
+
+const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
+    { id: 'importance',  label: 'Importance',   icon: <BarChart3 size={11} /> },
+    { id: 'cumulative',  label: 'Cumulative',   icon: <TrendingUp size={11} /> },
+    { id: 'correlation', label: 'Correlation',  icon: <GitMerge size={11} /> },
+    { id: 'pca',         label: 'PCA',          icon: <Layers size={11} /> },
+    { id: 'tsne',        label: 't-SNE',        icon: <Activity size={11} /> },
+];
+
+// ─── Main export ──────────────────────────────────────────────────────────────
+
+interface FeaturesViewProps {
     featuresData?: FeaturesData | null;
     importanceData?: FeatureImportanceData | null;
 }
 
-export default function ReviewContainer({ featuresData, importanceData }: ReviewContainerProps) {
-    const [data, setData] = useState<{
-        targetRoi: string;
-        selectedModel: string;
-        diceScore: number | null;
-        volumes: VolumeGif[];
-    }>({
-        targetRoi: '-',
-        selectedModel: '-',
-        diceScore: null,
-        volumes: [],
-    });
+export default function FeaturesView({ featuresData, importanceData }: FeaturesViewProps) {
+    const [activeTab, setActiveTab] = useState<TabId>('importance');
 
-    const [isLoading, setIsLoading] = useState(true);
+    // Per-chart hidden series/classes
+    const [hiddenFeatures,    setHiddenFeatures]    = useState<Set<string>>(new Set());
+    const [hiddenThresholds,  setHiddenThresholds]  = useState<Set<number>>(new Set());
+    const [hiddenPcaClasses,  setHiddenPcaClasses]  = useState<Set<string>>(new Set());
+    const [hiddenTsneClasses, setHiddenTsneClasses] = useState<Set<string>>(new Set());
 
-    useEffect(() => {
-        const source = importanceData?.volumes?.length ? importanceData
-                     : featuresData?.volumes?.length   ? featuresData as any
-                     : null;
+    const toggleFeature    = useCallback((f: string) =>
+        setHiddenFeatures(prev => { const s = new Set(prev); s.has(f) ? s.delete(f) : s.add(f); return s; }), []);
+    const toggleThreshold  = useCallback((p: number) =>
+        setHiddenThresholds(prev => { const s = new Set(prev); s.has(p) ? s.delete(p) : s.add(p); return s; }), []);
+    const togglePcaClass   = useCallback((c: string) =>
+        setHiddenPcaClasses(prev => { const s = new Set(prev); s.has(c) ? s.delete(c) : s.add(c); return s; }), []);
+    const toggleTsneClass  = useCallback((c: string) =>
+        setHiddenTsneClasses(prev => { const s = new Set(prev); s.has(c) ? s.delete(c) : s.add(c); return s; }), []);
 
-        if (source) {
-            setData({
-                targetRoi:     source.targetRoi     || '-',
-                selectedModel: source.selectedModel || '-',
-                diceScore:     source.diceScore     ?? null,
-                volumes:       source.volumes,
-            });
-            setIsLoading(false);
-        } else {
-            setIsLoading(true);
-        }
-    }, [featuresData, importanceData]);
+    const cd = importanceData?.chart_data;
+    const hasCharts = !!(cd && (
+        cd.importance_bars?.length ||
+        cd.cumulative?.length ||
+        cd.correlation ||
+        cd.pca ||
+        cd.tsne
+    ));
 
-    const handleSaveResults = (results: { accepted: string[]; rejected: string[] }) => {
-        try {
-            websocketService.send(JSON.stringify({
-                accepted: results.accepted,
-                rejected: results.rejected,
-            }));
-            alert('Review saved! The AI module will now resume.');
-        } catch (error) {
-            console.error('Failed to send review results:', error);
-            alert('Failed to connect to the AI agent. Please try again.');
-        }
+    const available: Record<TabId, boolean> = {
+        importance:  !!(cd?.importance_bars?.length),
+        cumulative:  !!(cd?.cumulative?.length),
+        correlation: !!(cd?.correlation),
+        pca:         !!(cd?.pca),
+        tsne:        !!(cd?.tsne),
     };
+    const displayTab = available[activeTab]
+        ? activeTab
+        : ((Object.keys(available) as TabId[]).find(t => available[t]) ?? 'importance');
 
     return (
-        <ReviewView
-            targetRoi={data.targetRoi}
-            selectedModel={data.selectedModel}
-            diceScore={data.diceScore}
-            volumes={data.volumes}
-            onSave={handleSaveResults}
-            isLoading={isLoading}
-            featuresData={featuresData}
-            importanceData={importanceData}
-        />
+        <div className="p-4 w-full h-full flex flex-col gap-4 bg-[#000000] overflow-hidden">
+            <div className="flex gap-4 flex-1 min-h-0">
+
+                {/* ── MAIN charts area ── */}
+                <div className="flex-1 flex flex-col min-h-0 min-w-0">
+                    {hasCharts && cd ? (
+                        <>
+                            {/* Tab bar */}
+                            <div className="flex items-center gap-1 mb-3 flex-wrap shrink-0">
+                                {TABS.map(tab => (
+                                    <button key={tab.id}
+                                        onClick={() => available[tab.id] && setActiveTab(tab.id)}
+                                        disabled={!available[tab.id]}
+                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-medium border transition-colors ${
+                                            displayTab === tab.id
+                                                ? 'bg-[#5acce6]/15 text-[#5acce6] border-[#5acce6]/50'
+                                                : available[tab.id]
+                                                    ? 'text-[#566a84] border-[#1f2d40] hover:text-[#91b9cd]'
+                                                    : 'text-[#2a3a4a] border-[#1a2530] cursor-not-allowed opacity-40'
+                                        }`}>
+                                        {tab.icon} {tab.label}
+                                    </button>
+                                ))}
+                                <span className="text-[9px] text-[#3c5d80] ml-auto">
+                                    Double-click to expand · click pills to toggle
+                                </span>
+                            </div>
+
+                            {/* Active tab content */}
+                            {displayTab === 'importance' && cd.importance_bars?.length && (
+                                <ChartPanel
+                                    title={`Top ${cd.importance_bars.length} features — method: ${cd.method ?? '—'}`}
+                                    expandContent={
+                                        <ImportanceBars bars={cd.importance_bars}
+                                            hiddenFeatures={hiddenFeatures} onToggle={toggleFeature}
+                                            compact={false} />
+                                    }>
+                                    <ImportanceBars bars={cd.importance_bars}
+                                        hiddenFeatures={hiddenFeatures} onToggle={toggleFeature} />
+                                </ChartPanel>
+                            )}
+
+                            {displayTab === 'cumulative' && cd.cumulative?.length && (
+                                <ChartPanel
+                                    title="Cumulative importance — features needed to explain X% of variance"
+                                    expandContent={
+                                        <CumulativeCurve data={cd.cumulative}
+                                            hiddenThresholds={hiddenThresholds}
+                                            onToggle={toggleThreshold} height={400} />
+                                    }>
+                                    <CumulativeCurve data={cd.cumulative}
+                                        hiddenThresholds={hiddenThresholds}
+                                        onToggle={toggleThreshold} />
+                                </ChartPanel>
+                            )}
+
+                            {displayTab === 'correlation' && cd.correlation && (
+                                <ChartPanel
+                                    title="Pairwise correlation — top 20 features (teal = positive, red = negative)"
+                                    expandContent={<CorrelationHeatmap data={cd.correlation} />}>
+                                    <CorrelationHeatmap data={cd.correlation} />
+                                </ChartPanel>
+                            )}
+
+                            {displayTab === 'pca' && cd.pca && (
+                                <ChartPanel
+                                    title={`PCA — top ${cd.pca.n_features} features (PC1 ${(cd.pca.explained_variance[0]*100).toFixed(1)}%, PC2 ${(cd.pca.explained_variance[1]*100).toFixed(1)}%)`}
+                                    expandContent={
+                                        <ScatterPlot points={cd.pca.points} xLabel="PC1" yLabel="PC2"
+                                            hiddenClasses={hiddenPcaClasses} onToggle={togglePcaClass} />
+                                    }>
+                                    <ScatterPlot points={cd.pca.points} xLabel="PC1" yLabel="PC2"
+                                        hiddenClasses={hiddenPcaClasses} onToggle={togglePcaClass} />
+                                </ChartPanel>
+                            )}
+
+                            {displayTab === 'tsne' && cd.tsne && (
+                                <ChartPanel
+                                    title={`t-SNE — top ${cd.tsne.n_features} features`}
+                                    expandContent={
+                                        <ScatterPlot points={cd.tsne.points} xLabel="D1" yLabel="D2"
+                                            hiddenClasses={hiddenTsneClasses} onToggle={toggleTsneClass} />
+                                    }>
+                                    <ScatterPlot points={cd.tsne.points} xLabel="D1" yLabel="D2"
+                                        hiddenClasses={hiddenTsneClasses} onToggle={toggleTsneClass} />
+                                </ChartPanel>
+                            )}
+                        </>
+                    ) : (
+                        <div className="flex-1 bg-[#0b1015] rounded-xl border border-[#1f2d40] flex flex-col">
+                            <EmptyCharts />
+                        </div>
+                    )}
+                </div>
+
+                {/* ── RIGHT metadata panel ── */}
+                <MetaPanel featuresData={featuresData} importanceData={importanceData} />
+            </div>
+        </div>
     );
 }
