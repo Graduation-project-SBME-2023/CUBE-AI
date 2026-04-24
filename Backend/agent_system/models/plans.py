@@ -43,6 +43,7 @@ class TaskMessage(BaseModel):
 
 
 class StudyStep(BaseModel):
+    id: str = ""
     title: str
     description: str
     module: Optional[str] = None

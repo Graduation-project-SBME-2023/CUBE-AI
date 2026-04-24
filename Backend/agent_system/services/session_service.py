@@ -1,5 +1,7 @@
 import asyncio
 import logging
+from typing import Dict
+
 from models.session import Session, SessionState
 from models.plans import ClinicalHypothesis, StudyPlan, StudyStep
 from .session_store import SessionStore
@@ -287,3 +289,126 @@ class SessionService:
 
     def require_session(self, session_id: str) -> Session:
         return self.store.require(session_id)
+
+    # ------------------------------------------------------------------
+    # Execution sync — PipelineMonitor calls these
+    # ------------------------------------------------------------------
+
+    async def handle_pipeline_update(
+            self,
+            session: Session,
+            agents: list[dict],
+    ) -> None:
+        """
+        Persist agent status changes to their corresponding plan steps,
+        then broadcast to the frontend.
+
+        Maps agent name → plan step by `module` field.
+        Appends error text to the step's logs JSONB column if failed.
+        """
+        if session.plan is None:
+            logger.warning(
+                f"[{session.session_id}] handle_pipeline_update called with no plan"
+            )
+            await self._ws_send(
+                "pipeline_agent_status", {"agents": agents}, session_id=session.session_id
+            )
+            return
+
+        # Build a name→step_id index from the in-memory plan
+        step_index: dict[str, str] = {
+            s.module: str(s.id)
+            for s in session.plan.steps
+            if s.id and s.module
+        }
+
+        persist_tasks = []
+        for agent in agents:
+            step_id = step_index.get(agent["name"])
+            if not step_id:
+                continue  # agent not mapped to a plan step — skip
+
+            patch: dict = {"status": agent["status"]}
+
+            if agent.get("error"):
+                patch["logs"] = [
+                    {
+                        "timestamp": agent.get("finished_at"),
+                        "level": "error",
+                        "message": agent["error"],
+                    }
+                ]
+
+            persist_tasks.append(BackendClient.update_plan_step(step_id, patch))
+
+        results = await asyncio.gather(*persist_tasks, return_exceptions=True)
+
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(
+                    f"[{session.session_id}] Failed to persist step update: {result}"
+                )
+
+        await self._ws_send(
+            "pipeline_agent_status", {"agents": agents}, session_id=session.session_id
+        )
+
+    async def update_agent_tool_logs(self, session: Session, agent: str, log: Dict) -> None:
+        # use backend client first to update the logs of the specific step
+        # then update the frontend via ws
+
+        step_id = next(
+            step.id for step in session.plan.steps
+            if step.module == agent
+        )
+        body = {
+            "status": "RUNNING",
+            "log": log,
+        }
+        await BackendClient.update_plan_step(step_id, body)
+        await self._ws_send(log.get('type'), log.get('payload'), log.get('session_id'))
+
+    async def update_tool_views(self, session, agent, msg_type, payload):
+        step_id = next(
+            step.id for step in session.plan.steps
+            if step.module == agent
+        )
+
+        body = {
+            "status": "RUNNING",
+            "log": {
+                'type': msg_type,
+                'payload': payload,
+                'session_id': session.session_id
+            },
+        }
+
+        await BackendClient.update_plan_step(step_id, body)
+
+    async def recover_execution_state(self, session_id: str) -> dict | None:
+        """
+        Called by a route when the frontend reconnects.
+        Fetches persisted step statuses and returns a pipeline_agent_status
+        shaped payload the frontend can replay directly.
+        """
+        session = await self.store.get_async(session_id)
+        if session is None or session.plan is None:
+            return None
+
+        steps = await BackendClient.get_plan_steps(str(session.plan.id))
+        if not steps:
+            return None
+
+        agents = [
+            {
+                "name": s["module"],
+                "status": s["status"],
+                "started_at": None,  # not stored — only current status matters
+                "finished_at": None,
+                "error": s.get("logs", [{}])[-1].get("message") if s.get("logs") else None,
+            }
+            for s in steps
+            if s.get("module")
+        ]
+
+        return {"agents": agents}
