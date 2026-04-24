@@ -176,7 +176,8 @@ export default class AutoSegmentation extends BaseTab {
       if (
         model.type === 'segmentation' &&
         name !== 'sam' &&
-        name !== 'nninteractive'
+        name !== 'nninteractive' &&
+        name !== 'voxtell'
       ) {
         models.push(name);
       }

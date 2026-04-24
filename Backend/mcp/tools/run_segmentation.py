@@ -14,7 +14,7 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
-MONAI_LABEL_URL = "http://localhost:8000"  
+MONAI_LABEL_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
 
 from typing import List, Dict, Any, Union
 

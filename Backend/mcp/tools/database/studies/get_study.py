@@ -2,6 +2,9 @@ import httpx
 from ... import mcp
 from typing import Annotated
 from pydantic import Field
+import os
+
+base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
 
 
 @mcp.tool()
@@ -19,10 +22,10 @@ async def get_study(
     """
     async with httpx.AsyncClient() as client:
         if study_uid is not None:
-            response = await client.get(f"http://localhost:8000/studies/{study_uid}")
+            response = await client.get(f"{base_url}/studies/{study_uid}")
         else:
             response = await client.get(
-                "http://localhost:8000/studies/",
+                base_url + "/studies/",
                 params={"skip": skip, "limit": limit}
             )
 
@@ -45,7 +48,7 @@ async def get_study_by_patient(
     1. To retrieve a patient's full medical history or list of scans when you have the 'patient_id' (e.g., "Show me studies for Patient 101").
     """
     async with httpx.AsyncClient() as client:
-        response = await client.get(f"http://localhost:8000/studies/by_patient/{patient_id}")
+        response = await client.get(f"{base_url}/studies/by_patient/{patient_id}")
         response.raise_for_status()
         try:
             data = response.json()

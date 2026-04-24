@@ -1,10 +1,11 @@
 import httpx
 import logging
 from models.plans import ClinicalHypothesis, StudyPlan
+import os
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = os.environ.get("MONAI_URL","http://localhost:8000")
 
 
 class BackendClient:

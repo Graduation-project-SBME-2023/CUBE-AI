@@ -123,6 +123,7 @@ export default function PlaygroundCanvas({
   const [isConnected, setIsConnected] = useState(websocketService.isConnected());
   const [pendingPrompt, setPendingPrompt] = useState<{ type: string; message: string } | null>(null);
   const [promptExpanded, setPromptExpanded] = useState(true);
+  const [canExecute, setCanExecute] = useState(false);
 
   const isPausedRef = useRef(isPaused);
   const modeRef = useRef(mode);
@@ -286,6 +287,7 @@ export default function PlaygroundCanvas({
         updateNodeData(data.nodeId || data.id || payload?.nodeId, payload || data.data);
       }
       if (type === 'plan' || type === 'PLAN_UPDATE') {
+        setCanExecute(true);
         applyBackendPlan(payload || data.data || data);
       }
       if (type === 'tool_update') {
@@ -775,13 +777,14 @@ export default function PlaygroundCanvas({
           {mode === 'planning' && (
             <button
               onClick={startExecution}
-              className="flex items-center gap-2 rounded bg-[#348cfd] px-4 py-1.5 text-xs font-medium text-white shadow-lg transition-colors hover:bg-[#599fff]"
+              disabled={!canExecute}
+              className={`flex items-center gap-2 rounded px-4 py-1.5 text-xs font-medium text-white shadow-lg transition-colors ${
+                canExecute
+                  ? 'bg-[#348cfd] hover:bg-[#599fff] cursor-pointer'
+                  : 'bg-[#348cfd] opacity-50 cursor-not-allowed'
+              }`}
             >
-              <Play
-                size={14}
-                fill="currentColor"
-              />{' '}
-              Execute
+              <Play size={14} fill="currentColor" /> Execute
             </button>
           )}
           {mode === 'executing' && (
