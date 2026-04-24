@@ -5,6 +5,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from groq import BaseModel
 
 from teams.execution_team import BasicPipelineBuilder
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -314,14 +315,20 @@ async def get_status(session_id: str):
     }
 
 
+class latex_output(BaseModel):
+    event_type: str
+    content: dict
+    session_id: str
+
+
 @app.post("/events")
-async def receive_event(event: ToolEvent | dict):
+async def receive_event(event: ToolEvent | latex_output):
     logger.info(f"Received tool event: {event}")
-    if isinstance(event, dict):
+    if isinstance(event, latex_output):
         await send_ws_message(
             msg_type="latex_output",
-            payload=event.get("content").get("frontend_data"),
-            session_id=event.get("session_id")
+            payload=event.content.get("frontend_data"),
+            session_id=event.session_id
         )
         return
 
