@@ -130,13 +130,9 @@ async def _read_agent_output_file(workspace_folder: str, agent_id: str) -> dict:
 
 
 async def _emit_tool_result_to_view(
-    source: str, tool_name: str, content: str,
-    session_id: str, workspace_folder: str, logger
+        source: str, tool_name: str, content: str,
+        session_id: str, workspace_folder: str, logger
 ):
-    """
-    Inspect a completed tool call and emit structured data to the matching
-    frontend view via WebSocket.
-    """
     parsed = _parse_tool_content(content)
 
     # ── Population Planner agent ──────────────────────────────────────────
@@ -171,7 +167,9 @@ async def _emit_tool_result_to_view(
             agent_data = await _read_agent_output_file(workspace_folder, "feature_extraction_agent")
             payload = agent_data if agent_data else parsed
             await emit_features_output(payload, session_id)
-        elif tool_name == "PyRadiomicsFeatureExtractionTool":
+
+        elif tool_name == "radiomics_extract_features":
+            # No chart_data from extraction — just counts and paths
             await emit_features_output({
                 "tool": "radiomic_extraction",
                 "status": parsed.get("status", "completed"),
@@ -181,7 +179,9 @@ async def _emit_tool_result_to_view(
                 "mask_labels": parsed.get("mask_labels", []),
                 "processing_time_seconds": parsed.get("processing_time_seconds"),
             }, session_id)
-        elif tool_name == "FeatureImportanceAnalysisTool":
+
+        elif tool_name == "radiomics_analyze_importance":
+            # Forward chart_data directly — this is what drives the frontend charts
             await emit_features_output({
                 "tool": "feature_importance",
                 "status": parsed.get("status", "completed"),
@@ -190,6 +190,8 @@ async def _emit_tool_result_to_view(
                 "result_files": parsed.get("result_files", {}),
                 "target_column": parsed.get("target_column"),
                 "task_type": parsed.get("task_type"),
+                # NEW — full chart payload for React components
+                "chart_data": parsed.get("chart_data"),
             }, session_id)
 
     # ── Modeling agent ────────────────────────────────────────────────────
@@ -198,7 +200,9 @@ async def _emit_tool_result_to_view(
             agent_data = await _read_agent_output_file(workspace_folder, "modeling_agent")
             payload = agent_data if agent_data else parsed
             await emit_modeling_output(payload, session_id)
-        elif tool_name == "classification_modelling":
+
+        elif tool_name == "pycaret_train_classifier":
+            # Forward chart_data directly — drives all frontend chart components
             await emit_modeling_output({
                 "tool": "classification",
                 "status": parsed.get("status", "completed"),
@@ -208,6 +212,8 @@ async def _emit_tool_result_to_view(
                 "created_files": parsed.get("created_files", []),
                 "individual_model_paths": parsed.get("individual_model_paths", {}),
                 "model_test_predictions": parsed.get("model_test_predictions", {}),
+                # NEW — full chart payload for React components
+                "chart_data": parsed.get("chart_data"),
             }, session_id)
 
     # ── Result Reporter agent ─────────────────────────────────────────────

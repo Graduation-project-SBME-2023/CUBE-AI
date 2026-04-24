@@ -3,6 +3,7 @@ import tempfile
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
+from agent_system.socket_store import send_ws_message, wait_for_user_message
 import asyncio
 from .. import mcp
 from pydantic import Field
@@ -85,7 +86,18 @@ async def latex_to_pdf(
         payload = TextPayload(message='PDF generated successfully.')
         error_compilation_event = ToolEvent('tool_finished', 'text', payload)
         log_tool_state(error_compilation_event)
-        return f"PDF generated successfully and saved as: {output_filename}"
+
+        # ================  report view ================
+        frontend_data = {
+        "latex_pdf": f"http://localhost:8150/static/overlays/document.pdf"
+        }
+        await send_ws_message(
+        msg_type="latex_output",
+        payload=frontend_data,
+        # session_id=session_id
+    )
+        # =============================================
+        return f"PDF generated successfully and saved as: {final_path}"
 
     except Exception as e:
         return f"Error: {str(e)}"
