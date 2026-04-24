@@ -37,5 +37,6 @@ class PlanStep(Base):
         "TaskMessage",
         back_populates="plan_step",
         uselist=False,
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        lazy="selectin" 
     )
