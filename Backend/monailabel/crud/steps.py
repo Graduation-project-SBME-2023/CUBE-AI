@@ -159,3 +159,28 @@ async def delete_step(db: AsyncSession, step_id: UUID) -> dict:
     except SQLAlchemyError as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+from sqlalchemy import func
+
+async def update_step_status(
+    db: AsyncSession, step_id: UUID, status: str, log: dict | None = None
+) -> PlanStep:
+    step = await get_step(db, step_id)
+
+    step.status = status
+
+    if log is not None:
+        # Append to the existing JSONB array safely
+        current_logs = step.logs or []
+        step.logs = current_logs + [log]
+        # Tell SQLAlchemy the JSONB column mutated
+        from sqlalchemy.orm.attributes import flag_modified
+        flag_modified(step, "logs")
+
+    try:
+        await db.commit()
+        return await get_step(db, step_id)
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")

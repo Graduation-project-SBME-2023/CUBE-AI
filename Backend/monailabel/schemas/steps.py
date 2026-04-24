@@ -27,6 +27,9 @@ class PlanStepUpdate(BaseModel):
     instructions: Optional[dict] = None
     task_message: Optional[TaskMessageUpdate] = None
 
+class PlanStepStatusUpdate(BaseModel):
+    status: str
+    log: Optional[dict] = None  # single log entry to append
 
 class PlanStepOut(PlanStepBase):
     id: UUID

@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from typing import List
 
+from crud.steps import update_step_status
+from schemas.steps import PlanStepStatusUpdate
 from core.database import get_db
 from crud.steps import (
     add_step_to_plan,
@@ -57,6 +59,18 @@ async def edit_step(
     """
     return await update_step(db, step_id, step_in)
 
+
+@router.patch("/{step_id}/status", response_model=PlanStepOut)
+async def update_step_status_endpoint(
+    step_id: UUID,
+    status_in: PlanStepStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update a step's status and optionally append a log entry.
+
+    """
+    return await update_step_status(db, step_id, status_in.status, status_in.log)
 
 @router.delete("/{step_id}")
 async def remove_step(step_id: UUID, db: AsyncSession = Depends(get_db)):
