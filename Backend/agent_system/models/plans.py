@@ -47,7 +47,7 @@ class StudyStep(BaseModel):
     title: str
     description: str
     module: Optional[str] = None
-    task_message: TaskMessage = None
+    task_message: Optional[TaskMessage] = None
     logs: List[str] = Field(default_factory=list)
     status: str = "pending"
 
