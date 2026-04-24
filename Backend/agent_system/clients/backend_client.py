@@ -1,6 +1,6 @@
 import httpx
 import logging
-from models.plans import ClinicalHypothesis, StudyPlan
+from models.plans import ClinicalHypothesis, StudyPlan, StudyStep
 import os
 
 logger = logging.getLogger(__name__)
@@ -168,6 +168,41 @@ class BackendClient:
             except httpx.HTTPError as e:
                 logger.error(f"Failed to fetch plan for hypothesis {hypothesis_id}: {e}")
                 return None
+
+    # ------------------------------------------------------------------
+    # Plan Steps (execution sync)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def update_plan_step(
+            cls, step_id: str, data: dict
+    ) -> dict | None:
+        """Patch a single plan step's status and/or logs."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.patch(
+                    f"{BASE_URL}/steps/{step_id}/status",
+                    json=data,
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to update plan step {step_id}: {e}")
+                return None
+
+    @classmethod
+    async def get_plan_steps(cls, plan_id: str) -> list[dict]:
+        """Fetch all steps for a plan — used to recover execution state."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{BASE_URL}/steps/plan/{plan_id}",
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to fetch steps for plan {plan_id}: {e}")
+                return []
 
 
 if __name__ == '__main__':
