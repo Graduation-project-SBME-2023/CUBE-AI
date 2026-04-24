@@ -1,13 +1,11 @@
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import aiofiles
 import json
 
-from models.session import Session
 from models.execution import AgentState, AgentStatus
 from models.tool_logging import ToolEvent
-from services.session_service import SessionService
 
 from view_emitter import (
     emit_population_output,
@@ -18,6 +16,9 @@ from view_emitter import (
     emit_latex_output,
 )
 
+if TYPE_CHECKING:
+    from models.session import Session
+    from services.session_service import SessionService
 
 # ── Agent-to-view mapping for tool result emission ────────────────────────────
 
@@ -189,7 +190,7 @@ class PipelineMonitor:
         "latex_reporter_agent",
     ]
 
-    def __init__(self, session_service: SessionService, session: Session):
+    def __init__(self, session_service: "SessionService", session: "Session"):
         self.session_service = session_service
         self.session = session
         self.agents: dict[str, AgentState] = {
