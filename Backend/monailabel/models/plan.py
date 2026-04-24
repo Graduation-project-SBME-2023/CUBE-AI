@@ -30,4 +30,9 @@ class Plan(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     hypothesis = relationship("Hypothesis", back_populates="plan")
-    steps = relationship("PlanStep", back_populates="plan", cascade="all, delete-orphan")
+    steps = relationship(
+    "PlanStep",
+    back_populates="plan",
+    cascade="all, delete-orphan",
+    lazy="selectin"  
+)
