@@ -1,4 +1,6 @@
 import asyncio
+from typing import Dict
+
 import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -29,7 +31,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, ".."))
 sys.path.append(root_dir)
 
-from socket_store import manager
+from socket_store import manager, send_ws_message
 from agents.planning_agents.planner import ClinicalPlanner
 from models.session import Session
 from models.plans import PlannerState
@@ -73,24 +75,24 @@ class CoopCoepMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(CoopCoepMiddleware)
 # todo: make it after the planner set the session id and create the workspace associated with the session id
-workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "workspace"))
+# workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "workspace"))
 
 @app.get("/static/{file_path:path}")
 def serve_static_pdf(file_path: str):
-    full_path = os.path.join(workspace_dir, file_path)
+    # full_path = os.path.join(workspace_dir, file_path)
     
-    if not os.path.exists(full_path):
+    if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
     
     # PDFs → inline to allow view in browser
     if file_path.endswith(".pdf"):
         return FileResponse(
-            path=full_path,
+            path=file_path,
             media_type="application/pdf",
             headers={"Content-Disposition": f"inline; filename={os.path.basename(file_path)}"},
             content_disposition_type="inline"
         )
-    return FileResponse(path=full_path)
+    return FileResponse(path=file_path)
 # Single shared service — the only stateful object routes need to know about
 session_service = SessionService(ws_manager=manager)
 
@@ -313,8 +315,16 @@ async def get_status(session_id: str):
 
 
 @app.post("/events")
-async def receive_event(event: ToolEvent):
+async def receive_event(event: ToolEvent | dict):
     logger.info(f"Received tool event: {event}")
+    if isinstance(event, dict):
+        await send_ws_message(
+            msg_type="latex_output",
+            payload=event.get("content").get("frontend_data"),
+            session_id=event.get("session_id")
+        )
+        return
+
     await receive_tool_event(event)
 
 
