@@ -99,8 +99,35 @@ export default function ResearchPlayground() {
     
     // Retrieve hypothesis from navigation state or default
     const hypothesis = location.state?.hypothesis || 'No active hypothesis defined.';
-    const sessionId = location.state?.sessionId || null;
+    const sessionId = location.state?.sessionId || location.state?.session_id || null;
     const sendInitialMessage = location.state?.sendInitialMessage || false;
+
+    // Load state from endpoints when session_id is provided
+    useEffect(() => {
+        const loadSessionState = async () => {
+            if (!sessionId) return;
+            
+            try {
+                // Load plan state
+                const planRes = await fetch(`http://localhost:8150/session/${sessionId}/plan-state`);
+                if (planRes.ok) {
+                    const planData = await planRes.json();
+                    console.log('[ResearchPlayground] Loaded plan state:', planData);
+                }
+                
+                // Load execution state
+                const execRes = await fetch(`http://localhost:8150/session/${sessionId}/execution-state`);
+                if (execRes.ok) {
+                    const execData = await execRes.json();
+                    console.log('[ResearchPlayground] Loaded execution state:', execData);
+                }
+            } catch (err) {
+                console.error('[ResearchPlayground] Failed to load session state:', err);
+            }
+        };
+        
+        loadSessionState();
+    }, [sessionId]);
 
     useEffect(() => {
         console.log('[HypothesisFlow][ResearchPlayground] Route/context', {

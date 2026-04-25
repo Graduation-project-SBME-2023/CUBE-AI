@@ -8,7 +8,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = os.environ.get("MONAI_URL","http://localhost:8000")
+BASE_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
 
 
 class BackendClient:
@@ -131,7 +131,9 @@ class BackendClient:
                 return cls._parse_hypothesis(response.json())
             except httpx.HTTPError as e:
                 logger.info(e)
-                logger.error(f"Failed to create hypothesis for session {session_id}: {e}")
+                logger.error(
+                    f"Failed to create hypothesis for session {session_id}: {e}"
+                )
                 return None
 
     @classmethod
@@ -176,7 +178,9 @@ class BackendClient:
                 response.raise_for_status()
                 return cls._parse_hypothesis(response.json())
             except httpx.HTTPError as e:
-                logger.error(f"Failed to fetch hypothesis for session {session_id}: {e}")
+                logger.error(
+                    f"Failed to fetch hypothesis for session {session_id}: {e}"
+                )
                 return None
 
     # ------------------------------------------------------------------
@@ -217,7 +221,9 @@ class BackendClient:
                 response.raise_for_status()
                 return StudyPlan(**response.json())
             except httpx.HTTPError as e:
-                logger.error(f"Failed to create plan for hypothesis {plan.hypothesis_id}: {e}")
+                logger.error(
+                    f"Failed to create plan for hypothesis {plan.hypothesis_id}: {e}"
+                )
                 return None
 
     @classmethod
@@ -284,7 +290,9 @@ class BackendClient:
 
                 return StudyPlan(**first_plan)
             except httpx.HTTPError as e:
-                logger.error(f"Failed to fetch plan for hypothesis {hypothesis_id}: {e}")
+                logger.error(
+                    f"Failed to fetch plan for hypothesis {hypothesis_id}: {e}"
+                )
                 return None
 
     # ------------------------------------------------------------------
@@ -292,9 +300,7 @@ class BackendClient:
     # ------------------------------------------------------------------
 
     @classmethod
-    async def update_plan_step(
-            cls, step_id: str, data: dict
-    ) -> dict | None:
+    async def update_plan_step(cls, step_id: str, data: dict) -> dict | None:
         """Patch a single plan step's status and/or logs."""
         async with httpx.AsyncClient() as client:
             try:
@@ -334,7 +340,9 @@ class BackendClient:
     ) -> dict | None:
         """Create/update task message for a step_id."""
         if not cls._is_valid_uuid(step_id):
-            logger.warning("Skipping task message save: step_id is not a UUID (%r)", step_id)
+            logger.warning(
+                "Skipping task message save: step_id is not a UUID (%r)", step_id
+            )
             return None
 
         payload = cls._build_task_message_payload(task_message)
@@ -360,7 +368,9 @@ class BackendClient:
     async def get_task_message_by_step_id(cls, step_id: str) -> dict | None:
         """Read task message by step_id."""
         if not cls._is_valid_uuid(step_id):
-            logger.warning("Skipping task message read: step_id is not a UUID (%r)", step_id)
+            logger.warning(
+                "Skipping task message read: step_id is not a UUID (%r)", step_id
+            )
             return None
 
         async with httpx.AsyncClient() as client:
@@ -384,7 +394,9 @@ class BackendClient:
         payload = {
             "knowledge_summary": context_augmentation.get("knowledge_summary", ""),
             "literature_findings": context_augmentation.get("literature_findings", ""),
-            "methodology_guidance": context_augmentation.get("methodology_guidance", ""),
+            "methodology_guidance": context_augmentation.get(
+                "methodology_guidance", ""
+            ),
             "terminology": context_augmentation.get("terminology", ""),
             "sources_guide": context_augmentation.get("sources_guide", ""),
         }
@@ -398,7 +410,9 @@ class BackendClient:
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
-                logger.error(f"Failed to save context augmentation for task {task_id}: {e}")
+                logger.error(
+                    f"Failed to save context augmentation for task {task_id}: {e}"
+                )
                 return None
 
     @classmethod
@@ -414,60 +428,122 @@ class BackendClient:
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
-                logger.error(f"Failed to read context augmentation for task {task_id}: {e}")
+                logger.error(
+                    f"Failed to read context augmentation for task {task_id}: {e}"
+                )
                 return None
 
+    # ------------------------------------------------------------------
+    # Hypothesis History
+    # ------------------------------------------------------------------
 
-if __name__ == '__main__':
+    @classmethod
+    async def get_hypothesis_history(cls, limit: int = 20) -> list[dict]:
+        """Fetch hypothesis history: recent chat sessions with their hypotheses."""
+        async with httpx.AsyncClient() as client:
+            try:
+                sessions_resp = await client.get(
+                    f"{BASE_URL}/chat_sessions/",
+                    params={"active_only": False},
+                )
+                if sessions_resp.status_code != 200:
+                    logger.error(
+                        f"Failed to fetch chat sessions: {sessions_resp.status_code}"
+                    )
+                    return []
+
+                sessions = sessions_resp.json()
+                history = []
+
+                for session in sessions[:limit]:
+                    chat_id = session.get("chat_id")
+                    if not chat_id:
+                        continue
+
+                    title = session.get("title", "Untitled")
+                    try:
+                        hyp_resp = await client.get(
+                            f"{BASE_URL}/hypotheses/by-chat/{chat_id}"
+                        )
+                        if hyp_resp.status_code == 200:
+                            hypothesis = hyp_resp.json()
+                            title = hypothesis.get("title", title)
+                    except httpx.HTTPError:
+                        pass
+
+                    history.append(
+                        {
+                            "id": str(chat_id),
+                            "title": title,
+                            "date": session.get("last_activity")
+                            or session.get("started_at"),
+                            "status": "Completed"
+                            if session.get("is_active", True)
+                            else "Draft",
+                        }
+                    )
+                logger.info(f"Fetched hypothesis history: {len(history)} items")    
+                return history
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to fetch hypothesis history: {e}")
+                return []
+
+
+if __name__ == "__main__":
+
     async def hypothesis_test():
         from models.plans import ClinicalHypothesis
 
         client = BackendClient()
         hypothesis = ClinicalHypothesis(
-            title='Hypothesis Title',
-            population='Population',
-            intervention='Intervention',
-            outcome='Outcome',
-            clinical_context='Clinical Context',
-            relationship_type='Relationship Type',
-            comparison='Comparison',
-            question='Question',
-            state='State',
+            title="Hypothesis Title",
+            population="Population",
+            intervention="Intervention",
+            outcome="Outcome",
+            clinical_context="Clinical Context",
+            relationship_type="Relationship Type",
+            comparison="Comparison",
+            question="Question",
+            state="State",
         )
 
-        hypothesis = await client.create_hypothesis('cf8b8a59-317b-4d6c-960e-dd7e60b81bd2', hypothesis)
+        hypothesis = await client.create_hypothesis(
+            "cf8b8a59-317b-4d6c-960e-dd7e60b81bd2", hypothesis
+        )
         print(hypothesis)
 
     async def plan_test():
         import time
         from models.plans import StudyStep
+
         client = BackendClient()
         plan = await client.create_plan(
             plan=StudyPlan(
-                hypothesis_id='21d5b06c-958d-4d78-b799-5ee3e6848f57',
-                study_goal='Study Goal',
+                hypothesis_id="21d5b06c-958d-4d78-b799-5ee3e6848f57",
+                study_goal="Study Goal",
                 steps=[
                     StudyStep(
-                        title='Study Step 1',
-                        description='Study Step 1',
-                        module='Study Step 1',
+                        title="Study Step 1",
+                        description="Study Step 1",
+                        module="Study Step 1",
                     ),
                     StudyStep(
-                        title='Study Step 2',
-                        description='Study Step 2',
-                        module='Study Step 2',
-                    )
-                ]
+                        title="Study Step 2",
+                        description="Study Step 2",
+                        module="Study Step 2",
+                    ),
+                ],
             )
         )
         print(plan)
 
         time.sleep(20)
 
-        plan.state = 'confirmed'
+        plan.state = "confirmed"
 
         updated_plan = await client.update_plan(plan=plan)
         print(updated_plan)
 
     import asyncio
+
     asyncio.run(hypothesis_test())
