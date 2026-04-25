@@ -7,6 +7,16 @@ import './ChatSidebar.css';
 
 const makeId = (prefix = 'id') => `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 const renderIcon = (Icon, size) => React.createElement(Icon, { size, 'aria-hidden': true });
+const isUuid = (value: unknown) =>
+  typeof value === 'string' &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+
+const makeLocalSessionId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
 
 const ChatSidebar = ({
   isOpen,
@@ -81,6 +91,9 @@ const ChatSidebar = ({
         externalSessionId,
         preview: (initialUserMessage || '').slice(0, 120),
       });
+      if (!isUuid(String(externalSessionId))) {
+        return;
+      }
       fetch(`http://localhost:8000/chat_messages/${externalSessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -188,6 +201,9 @@ const ChatSidebar = ({
     } catch (err) {}
   };
   const fetchMessagesForSession = async chat_id => {
+    if (!isUuid(String(chat_id))) {
+      return;
+    }
     try {
       const res = await fetch(`http://localhost:8000/chat_messages/${chat_id}`);
       if (!res.ok) {
@@ -242,7 +258,7 @@ const ChatSidebar = ({
       setDrawerOpen(false);
     } catch (err) {
       // Fallback: create a local-only session if DB fails
-      const fallbackId = Date.now();
+      const fallbackId = makeLocalSessionId();
       const newSession = {
         chat_id: fallbackId,
         title: `Local Chat ${sessions.length + 1}`,
@@ -267,9 +283,11 @@ const ChatSidebar = ({
     }
   };
   const deleteSession = async chat_id => {
-    try {
-      await fetch(`http://localhost:8000/chat_sessions/${chat_id}`, { method: 'DELETE' });
-    } catch (err) {}
+    if (isUuid(String(chat_id))) {
+      try {
+        await fetch(`http://localhost:8000/chat_sessions/${chat_id}`, { method: 'DELETE' });
+      } catch (err) {}
+    }
     setSessions(s => s.filter(x => x.chat_id !== chat_id));
     if (activeSessionId === chat_id) {
       setActiveSessionId(null);
@@ -302,11 +320,13 @@ const ChatSidebar = ({
     }
     setIsTyping(true);
     try {
-      await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: 'user', text: userMsg.text }),
-      });
+      if (isUuid(String(sessionId))) {
+        await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'user', text: userMsg.text }),
+        });
+      }
     } catch (e) {
       alert(
         'Warning: Could not save message to the database. This chat is now local-only.\n\nError: ' +
@@ -353,11 +373,13 @@ const ChatSidebar = ({
         );
         setIsTyping(true);
         try {
-          await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role: 'user', text: userMsg.text }),
-          });
+          if (isUuid(String(currentSessionId))) {
+            await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ role: 'user', text: userMsg.text }),
+            });
+          }
         } catch (err) {}
         return;
       }
@@ -420,11 +442,13 @@ const ChatSidebar = ({
       });
       setIsTyping(false);
       try {
-        await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role: 'assistant', text: assistantMsg.text }),
-        });
+        if (isUuid(String(currentSessionId))) {
+          await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: 'assistant', text: assistantMsg.text }),
+          });
+        }
       } catch (err) {}
     };
     const unsubscribe = websocketService.subscribe(handleWS);

@@ -29,11 +29,94 @@ import json
 import os
 import re
 import sys
+import threading
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+
+
+_AUTOGEN_LOOP: Optional[asyncio.AbstractEventLoop] = None
+_AUTOGEN_LOOP_THREAD: Optional[threading.Thread] = None
+_AUTOGEN_LOOP_LOCK = threading.Lock()
+
+
+def _parse_env_file(env_path: Path) -> Dict[str, str]:
+    """Parse a simple .env file into key/value pairs."""
+    parsed: Dict[str, str] = {}
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return parsed
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export ") :].strip()
+        if "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+
+        if not key:
+            continue
+
+        # Strip optional surrounding single/double quotes.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+
+        parsed[key] = value
+
+    return parsed
+
+
+def _discover_env_files() -> List[Path]:
+    """Discover candidate .env files from cwd and parent folders."""
+    candidates: List[Path] = []
+    cwd = Path.cwd().resolve()
+
+    # Prioritize closer files first: cwd/.env then parent/.env ...
+    for directory in [cwd, *cwd.parents]:
+        env_file = directory / ".env"
+        if env_file.exists():
+            candidates.append(env_file)
+
+    # Optional local override files at cwd.
+    for name in (".env.local",):
+        env_file = cwd / name
+        if env_file.exists():
+            candidates.insert(0, env_file)
+
+    # De-duplicate while preserving order.
+    seen = set()
+    deduped: List[Path] = []
+    for path in candidates:
+        resolved = str(path)
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        deduped.append(path)
+    return deduped
+
+
+def _load_env_into_process() -> None:
+    """Load environment variables from discovered .env files without overriding existing vars."""
+    loaded_files: List[str] = []
+    for env_file in _discover_env_files():
+        parsed = _parse_env_file(env_file)
+        if not parsed:
+            continue
+        for key, value in parsed.items():
+            os.environ.setdefault(key, value)
+        loaded_files.append(str(env_file))
+
+    if loaded_files:
+        print(f"Loaded env vars from: {', '.join(loaded_files)}")
 
 
 @dataclass
@@ -47,6 +130,7 @@ class JudgeConfig:
     timeout_seconds: int = 180
     max_tokens: Optional[int] = None
     use_autogen: bool = True  # Use AutoGen client instead of raw HTTP
+    fallback_models: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -198,6 +282,29 @@ def _normalize_base_url(base_url: str) -> str:
     return f"{url}/v1"
 
 
+def _normalize_model_for_autogen(model_name: str) -> str:
+    """Normalize cloud aliases for AutoGen model mapping to avoid mismatch warnings."""
+    normalized = (model_name or "").strip()
+    if normalized.endswith("-cloud"):
+        return normalized[: -len("-cloud")]
+    return normalized
+
+
+def _score_band(score: Optional[float]) -> str:
+    """Human-friendly score interpretation used in markdown reports."""
+    if score is None:
+        return "N/A"
+    if score >= 0.9:
+        return "excellent"
+    if score >= 0.75:
+        return "strong"
+    if score >= 0.6:
+        return "adequate"
+    if score >= 0.4:
+        return "needs improvement"
+    return "poor"
+
+
 def _extract_content(response_json: Dict[str, Any]) -> str:
     """Extract chat content from OpenAI-compatible or Ollama-native responses."""
     # OpenAI-compatible shape
@@ -340,6 +447,7 @@ async def _post_chat_autogen(
     This uses the OpenAI-compatible endpoint that Ollama exposes at /v1,
     which is the same approach used by the rest of this project.
     """
+    client = None
     try:
         from autogen_ext.models.openai import OpenAIChatCompletionClient
         from autogen_core.models import UserMessage, SystemMessage, AssistantMessage
@@ -364,8 +472,10 @@ async def _post_chat_autogen(
         if not base_url.endswith("/v1"):
             base_url = f"{base_url}/v1"
 
+        autogen_model = _normalize_model_for_autogen(config.model)
+
         client = OpenAIChatCompletionClient(
-            model=config.model,
+            model=autogen_model,
             model_info=model_info,
             base_url=base_url,
             api_key=config.api_key or "ollama",
@@ -416,6 +526,7 @@ async def _post_chat_autogen(
                 "usage": usage,
             },
             "api_format": "autogen-openai",
+            "model_used": autogen_model,
         }
 
     except Exception as exc:
@@ -423,6 +534,53 @@ async def _post_chat_autogen(
             "ok": False,
             "error": f"AutoGen request failed: {type(exc).__name__}: {exc}",
         }
+    finally:
+        # Explicitly close the model client before the loop ends to avoid
+        # "Event loop is closed" errors from deferred transport cleanup.
+        if client is not None:
+            try:
+                close_result = None
+                if hasattr(client, "close"):
+                    close_result = client.close()
+                elif hasattr(client, "aclose"):
+                    close_result = client.aclose()
+
+                if asyncio.iscoroutine(close_result):
+                    await close_result
+            except Exception:
+                pass
+
+
+def _ensure_autogen_loop() -> asyncio.AbstractEventLoop:
+    """Create a single background event loop used for sync AutoGen calls."""
+    global _AUTOGEN_LOOP, _AUTOGEN_LOOP_THREAD
+
+    with _AUTOGEN_LOOP_LOCK:
+        if _AUTOGEN_LOOP is not None and _AUTOGEN_LOOP.is_running():
+            return _AUTOGEN_LOOP
+
+        loop = asyncio.new_event_loop()
+
+        def _run_loop() -> None:
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+
+        thread = threading.Thread(target=_run_loop, name="llm-judge-autogen-loop", daemon=True)
+        thread.start()
+
+        _AUTOGEN_LOOP = loop
+        _AUTOGEN_LOOP_THREAD = thread
+        return loop
+
+
+def _run_autogen_sync(config: JudgeConfig, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+    """Run async AutoGen request from sync code on a persistent event loop."""
+    loop = _ensure_autogen_loop()
+    future = asyncio.run_coroutine_threadsafe(
+        _post_chat_autogen(config, messages),
+        loop,
+    )
+    return future.result(timeout=config.timeout_seconds + 5)
 
 
 def _post_chat_sync(
@@ -442,28 +600,25 @@ def _post_chat_sync(
             # Check if AutoGen OpenAI is available before attempting async call
             from autogen_ext.models.openai import OpenAIChatCompletionClient  # noqa: F401
 
-            # Run async function in event loop
-            try:
-                loop = asyncio.get_running_loop()
-                # If we're already in an async context, create a new loop in a thread
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(
-                        lambda: asyncio.run(_post_chat_autogen(config, messages))
-                    )
-                    result = future.result(timeout=config.timeout_seconds)
-            except RuntimeError:
-                # No running loop, create one
-                result = asyncio.run(_post_chat_autogen(config, messages))
+            result = _run_autogen_sync(config, messages)
 
             # If AutoGen succeeded, return result
             if result.get("ok"):
+                result["model"] = result.get("model_used", config.model)
                 return result
 
             # If AutoGen failed for non-import reasons, fall back to raw HTTP
             error_msg = result.get("error", "")
-            if "not available" not in error_msg.lower():
+            normalized_error = error_msg.lower()
+            # Missing-model errors are expected during model fallback probing; avoid noisy logs.
+            is_model_not_found = (
+                "notfounderror" in normalized_error
+                or "model \"" in normalized_error and "not found" in normalized_error
+                or "model '" in normalized_error and "not found" in normalized_error
+                or "404" in normalized_error and "not found" in normalized_error
+            )
+
+            if "not available" not in normalized_error and not is_model_not_found:
                 # Log the AutoGen error and try raw HTTP
                 print(f"AutoGen request failed, falling back to raw HTTP: {error_msg}")
 
@@ -472,7 +627,65 @@ def _post_chat_sync(
             pass
 
     # Use raw HTTP (tries /v1/chat/completions first, then /api/chat)
-    return _post_chat(config, messages)
+    result = _post_chat(config, messages)
+    if result.get("ok"):
+        result["model"] = config.model
+    return result
+
+
+def _candidate_models(config: JudgeConfig) -> List[str]:
+    """Build ordered model candidates, including cloud/local alias fallbacks."""
+    ordered: List[str] = [config.model]
+    ordered.extend(config.fallback_models or [])
+
+    aliases: List[str] = []
+    for model_name in list(ordered):
+        if model_name.endswith("-cloud"):
+            aliases.append(model_name[: -len("-cloud")])
+        else:
+            aliases.append(f"{model_name}-cloud")
+
+    ordered.extend(aliases)
+
+    deduped: List[str] = []
+    seen = set()
+    for model_name in ordered:
+        normalized = (model_name or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
+
+
+def _post_chat_with_fallbacks(
+    config: JudgeConfig,
+    messages: List[Dict[str, str]],
+) -> Dict[str, Any]:
+    """Try configured model candidates in order until one succeeds."""
+    errors: List[str] = []
+    for model_name in _candidate_models(config):
+        attempt_config = JudgeConfig(
+            model=model_name,
+            base_url=config.base_url,
+            api_key=config.api_key,
+            temperature=config.temperature,
+            timeout_seconds=config.timeout_seconds,
+            max_tokens=config.max_tokens,
+            use_autogen=config.use_autogen,
+            fallback_models=[],
+        )
+        result = _post_chat_sync(attempt_config, messages)
+        if result.get("ok"):
+            result["tried_models"] = _candidate_models(config)
+            return result
+        errors.append(f"{model_name}: {result.get('error', 'unknown error')}")
+
+    return {
+        "ok": False,
+        "error": "All model candidates failed. " + " | ".join(errors),
+        "tried_models": _candidate_models(config),
+    }
 
 
 def load_rubrics(rubrics_path: str | Path) -> Dict[str, RubricConfig]:
@@ -663,7 +876,7 @@ def call_judge(
     # Pre-compute fallback token estimates.
     prompt_est = approx_tokens_from_text(system_msg) + approx_tokens_from_text(user_msg)
 
-    call_result = _post_chat_sync(config, messages)
+    call_result = _post_chat_with_fallbacks(config, messages)
     if not call_result.get("ok"):
         return {
             "ok": False,
@@ -674,6 +887,8 @@ def call_judge(
                 "completion_tokens": 0,
                 "total_tokens": prompt_est,
                 "token_source": "estimated",
+                "model_used": None,
+                "tried_models": call_result.get("tried_models", []),
             },
         }
 
@@ -704,6 +919,8 @@ def call_judge(
         "usage": {
             **usage,
             "token_source": token_source,
+            "model_used": call_result.get("model", config.model),
+            "tried_models": call_result.get("tried_models", []),
         },
     }
 
@@ -736,7 +953,7 @@ def evaluate_with_rubrics(
 
     prompt_est = approx_tokens_from_text(system_msg) + approx_tokens_from_text(user_msg)
 
-    call_result = _post_chat_sync(config, messages)
+    call_result = _post_chat_with_fallbacks(config, messages)
     if not call_result.get("ok"):
         return EvaluationResult(
             ok=False,
@@ -746,6 +963,8 @@ def evaluate_with_rubrics(
                 "completion_tokens": 0,
                 "total_tokens": prompt_est,
                 "token_source": "estimated",
+                "model_used": None,
+                "tried_models": call_result.get("tried_models", []),
             },
         )
 
@@ -773,7 +992,12 @@ def evaluate_with_rubrics(
             ok=False,
             error="Judge output was not valid JSON.",
             raw_content=content,
-            usage={**usage, "token_source": token_source},
+            usage={
+                **usage,
+                "token_source": token_source,
+                "model_used": call_result.get("model", config.model),
+                "tried_models": call_result.get("tried_models", []),
+            },
         )
 
     # Calculate weighted overall score if not provided
@@ -797,7 +1021,12 @@ def evaluate_with_rubrics(
         recommendations=parsed.get("recommendations", []),
         verdict=parsed.get("verdict", ""),
         raw_content=content,
-        usage={**usage, "token_source": token_source},
+        usage={
+            **usage,
+            "token_source": token_source,
+            "model_used": call_result.get("model", config.model),
+            "tried_models": call_result.get("tried_models", []),
+        },
     )
 
 
@@ -898,6 +1127,7 @@ def evaluate_output_folder(
     rubrics_path: str | Path,
     preset: str = "full_evaluation",
     max_text_length: int = 8000,
+    keep_case_results: bool = False,
 ) -> Dict[str, Any]:
     """
     Evaluate a benchmark output folder (or a single case/workspace folder).
@@ -956,8 +1186,16 @@ def evaluate_output_folder(
             "artifacts_summary": judge_artifacts.get("workspace_summary", {}),
         }
 
-        with open(case_dir / "judge_result.json", "w", encoding="utf-8") as f:
-            json.dump(case_output, f, ensure_ascii=False, indent=2)
+        case_result_path = case_dir / "judge_result.json"
+        if keep_case_results:
+            with open(case_result_path, "w", encoding="utf-8") as f:
+                json.dump(case_output, f, ensure_ascii=False, indent=2)
+        elif case_result_path.exists():
+            # Keep run output lean unless explicit per-case files are requested.
+            try:
+                case_result_path.unlink()
+            except OSError:
+                pass
 
         summaries.append(case_output)
 
@@ -976,9 +1214,30 @@ def evaluate_output_folder(
         "base_url": _normalize_base_url(config.base_url),
         "preset": preset,
         "rubrics": [r.name for r in selected_rubrics],
+        "case_result_files": "kept" if keep_case_results else "removed",
         "cases_evaluated": len(summaries),
         "cases_ok": sum(1 for s in summaries if s.get("ok")),
         "average_overall_score": avg_score,
+        "average_overall_band": _score_band(avg_score),
+        "report_metadata": {
+            "field_explanations": {
+                "overall_score": "Weighted score from 0.0 to 1.0 where higher is better.",
+                "rubric_scores": "Per-rubric scores (0.0-1.0) returned by the judge.",
+                "dimension_scores": "Per-dimension scores inside each rubric for detailed diagnosis.",
+                "strengths": "Concrete aspects the output did well.",
+                "weaknesses": "Concrete shortcomings observed in output artifacts.",
+                "recommendations": "Actionable changes likely to improve future runs.",
+                "usage": "Token accounting (actual when provided by provider, otherwise estimated).",
+                "artifacts_summary": "Which workspace files were loaded, missing, or had parse issues.",
+            },
+            "score_bands": {
+                "0.90-1.00": "excellent",
+                "0.75-0.89": "strong",
+                "0.60-0.74": "adequate",
+                "0.40-0.59": "needs improvement",
+                "0.00-0.39": "poor",
+            },
+        },
         "summaries": summaries,
         "token_usage": {
             "prompt_tokens": sum(
@@ -1006,9 +1265,32 @@ def evaluate_output_folder(
         f"- Model: {config.model}",
         f"- Endpoint: {_normalize_base_url(config.base_url)}",
         f"- Preset: {preset}",
+        f"- Per-case judge_result.json files: {'kept' if keep_case_results else 'removed'}",
         f"- Cases evaluated: {report['cases_evaluated']}",
         f"- Cases OK: {report['cases_ok']}",
-        f"- Average overall score: {report['average_overall_score']}",
+        f"- Average overall score: {report['average_overall_score']} ({report['average_overall_band']})",
+        "",
+        "## Metric Guide",
+        "",
+        "- overall_score: weighted quality score from 0.0 to 1.0.",
+        "- rubric_scores: score for each selected rubric.",
+        "- dimension_scores: fine-grained scores under each rubric.",
+        "- strengths / weaknesses: evidence-based findings from artifacts.",
+        "- recommendations: prioritized actions to improve future runs.",
+        "- usage: prompt/completion tokens (actual if provider returns usage, otherwise estimated).",
+        "",
+        "### Score Bands",
+        "- 0.90-1.00: excellent",
+        "- 0.75-0.89: strong",
+        "- 0.60-0.74: adequate",
+        "- 0.40-0.59: needs improvement",
+        "- 0.00-0.39: poor",
+        "",
+        "## Run Token Usage",
+        "",
+        f"- Prompt tokens: {report['token_usage']['prompt_tokens']:,}",
+        f"- Completion tokens: {report['token_usage']['completion_tokens']:,}",
+        f"- Total tokens: {report['token_usage']['total_tokens']:,}",
         "",
         "| Case | Score | Status |",
         "|------|-------|--------|",
@@ -1016,9 +1298,79 @@ def evaluate_output_folder(
 
     for s in summaries:
         score = s.get("overall_score")
+  
         score_text = f"{float(score):.3f}" if score is not None else "-"
         status = "ok" if s.get("ok") else f"error: {s.get('error') or 'unknown'}"
         md_lines.append(f"| {s.get('case_id')} | {score_text} | {status} |")
+
+    md_lines.extend(["", "## Case Details", ""])
+
+    for s in summaries:
+        score = s.get("overall_score")
+        score_text = f"{float(score):.3f}" if score is not None else "N/A"
+        md_lines.append(f"### {s.get('case_id')}")
+        md_lines.append(f"- Status: {'ok' if s.get('ok') else 'error'}")
+        md_lines.append(f"- Overall score: {score_text} ({_score_band(score)})")
+
+        usage = s.get("usage") or {}
+        md_lines.append(
+            "- Tokens: "
+            f"prompt={int(usage.get('prompt_tokens', 0)):,}, "
+            f"completion={int(usage.get('completion_tokens', 0)):,}, "
+            f"total={int(usage.get('total_tokens', 0)):,} "
+            f"[{usage.get('token_source', 'unknown')}]"
+        )
+        md_lines.append(f"- Model used: {usage.get('model_used', config.model)}")
+
+        rubric_scores = s.get("rubric_scores") or {}
+        if rubric_scores:
+            md_lines.append("- Rubric scores:")
+            for rubric_name, rubric_score in rubric_scores.items():
+                md_lines.append(
+                    f"  - {rubric_name}: {float(rubric_score):.3f} ({_score_band(float(rubric_score))})"
+                )
+
+        dimension_scores = s.get("dimension_scores") or {}
+        if dimension_scores:
+            md_lines.append("- Dimension scores:")
+            for rubric_name, dims in dimension_scores.items():
+                md_lines.append(f"  - {rubric_name}:")
+                if isinstance(dims, dict):
+                    for dim_name, dim_score in dims.items():
+                        md_lines.append(
+                            f"    - {dim_name}: {float(dim_score):.3f} ({_score_band(float(dim_score))})"
+                        )
+
+        verdict = (s.get("verdict") or "").strip()
+        if verdict:
+            md_lines.append(f"- Verdict: {verdict}")
+
+        strengths = s.get("strengths") or []
+        if strengths:
+            md_lines.append("- Strengths:")
+            for item in strengths:
+                md_lines.append(f"  - {item}")
+
+        weaknesses = s.get("weaknesses") or []
+        if weaknesses:
+            md_lines.append("- Weaknesses:")
+            for item in weaknesses:
+                md_lines.append(f"  - {item}")
+
+        recommendations = s.get("recommendations") or []
+        if recommendations:
+            md_lines.append("- Recommendations:")
+            for item in recommendations:
+                md_lines.append(f"  - {item}")
+
+        artifacts_summary = s.get("artifacts_summary") or {}
+        parse_errors = artifacts_summary.get("parse_errors") or []
+        if parse_errors:
+            md_lines.append("- Artifact parse issues:")
+            for item in parse_errors:
+                md_lines.append(f"  - {item}")
+
+        md_lines.append("")
 
     with open(report_md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(md_lines) + "\n")
@@ -1037,7 +1389,50 @@ def _default_ollama_model() -> str:
     return os.getenv("JUDGE_MODEL", "qwen2.5-coder:7b")
 
 
+def _default_base_url() -> str:
+    """Prefer explicit judge override, then shared Ollama env, then localhost."""
+    return os.getenv("JUDGE_BASE_URL", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
+
+
+def _default_fallback_models() -> List[str]:
+    """Read optional comma-separated fallback models from env."""
+    raw = os.getenv("JUDGE_FALLBACK_MODELS", "")
+    if not raw.strip():
+        return []
+    return [m.strip() for m in raw.split(",") if m.strip()]
+
+
+def _default_temperature() -> float:
+    """Read judge temperature from env with safe fallback."""
+    raw = os.getenv("JUDGE_TEMPERATURE", "0.0").strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.0
+
+
+def _default_max_tokens() -> Optional[int]:
+    """Read optional max tokens from env (empty means unlimited)."""
+    raw = os.getenv("JUDGE_MAX_TOKENS", "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _default_use_autogen() -> bool:
+    """Read judge client mode from env. True unless explicitly disabled."""
+    raw = os.getenv("JUDGE_USE_AUTOGEN", "true").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
 def main() -> None:
+    # Load .env values first so argparse defaults can read JUDGE_* vars.
+    _load_env_into_process()
+
     parser = argparse.ArgumentParser(
         description=(
             "Evaluate benchmark outputs in a folder using LLM-as-judge "
@@ -1058,13 +1453,33 @@ def main() -> None:
     )
     parser.add_argument(
         "--base-url",
-        default=os.getenv("JUDGE_BASE_URL", "http://localhost:11434"),
+        default=_default_base_url(),
         help="Ollama base URL (default: http://localhost:11434).",
     )
     parser.add_argument(
         "--api-key",
         default=os.getenv("JUDGE_API_KEY", os.getenv("OLLAMA_API_KEY", "ollama")),
         help="API key for OpenAI-compatible endpoint (Ollama can use any placeholder).",
+    )
+    parser.add_argument(
+        "--fallback-models",
+        default=",".join(_default_fallback_models()),
+        help=(
+            "Comma-separated fallback models to try if the primary model fails. "
+            "Example: deepseek-v3.1:671b-cloud,qwen2.5-coder:32b"
+        ),
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=_default_temperature(),
+        help="Sampling temperature (env: JUDGE_TEMPERATURE, default: 0.0).",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=_default_max_tokens(),
+        help="Optional max completion tokens (env: JUDGE_MAX_TOKENS).",
     )
     parser.add_argument(
         "--timeout",
@@ -1093,15 +1508,26 @@ def main() -> None:
         default=8000,
         help="Maximum chars per text artifact passed to the judge.",
     )
+    parser.add_argument(
+        "--keep-case-results",
+        action="store_true",
+        help="Keep per-case judge_result.json files (default removes them to keep only aggregate reports).",
+    )
 
     args = parser.parse_args()
+
+    fallback_models = [m.strip() for m in args.fallback_models.split(",") if m.strip()]
+    use_autogen = _default_use_autogen() and (not args.no_autogen)
 
     config = JudgeConfig(
         model=args.model,
         base_url=args.base_url,
         api_key=args.api_key,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
         timeout_seconds=args.timeout,
-        use_autogen=not args.no_autogen,
+        use_autogen=use_autogen,
+        fallback_models=fallback_models,
     )
 
     rubrics_path = _resolve_rubrics_path(args.rubrics_path)
@@ -1111,6 +1537,7 @@ def main() -> None:
         rubrics_path=rubrics_path,
         preset=args.preset,
         max_text_length=args.max_text_length,
+        keep_case_results=args.keep_case_results,
     )
 
     print("\nLLM Judge completed")
