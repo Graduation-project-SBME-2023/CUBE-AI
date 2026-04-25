@@ -2,13 +2,11 @@ import subprocess
 import tempfile
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
-from agent_system.socket_store import send_ws_message, wait_for_user_message
 import asyncio
 from .. import mcp
 from pydantic import Field
 from typing import Annotated
-from tool_logging import ToolEvent, log_tool_state, TextPayload
+from tool_logging import ToolEvent, log_tool_state, TextPayload, log_pdf_tool_view
 
 @mcp.tool()
 async def latex_to_pdf(
@@ -89,7 +87,7 @@ async def latex_to_pdf(
 
         # ================  report view ================
         frontend_data = {
-        "latex_pdf": f"http://localhost:8150/static/overlays/document.pdf"
+        "latex_pdf": f"http://localhost:8150/static/overlays/{final_path}"
         }
         await send_ws_message(
         msg_type="latex_output",

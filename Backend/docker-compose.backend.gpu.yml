@@ -71,6 +71,7 @@ services:
               capabilities: [gpu]
               # only for the workstation, gpu (rtx 3060) with specific id
               device_ids: ["0"]
+    restart: unless-stopped
 
   orthanc:
     image: jodogne/orthanc-plugins

@@ -59,6 +59,7 @@ services:
     depends_on:
       - postgres
       - orthanc
+    restart: unless-stopped
 
   orthanc:
     image: jodogne/orthanc-plugins
