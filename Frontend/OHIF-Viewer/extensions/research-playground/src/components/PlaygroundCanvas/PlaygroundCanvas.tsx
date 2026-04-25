@@ -291,28 +291,66 @@ export default function PlaygroundCanvas({
         applyBackendPlan(payload || data.data || data);
       }
       if (type === 'tool_update') {
-        // Append logs to the respective agent
-        const agentName = payload?.agent_name;
-        const logEntry = payload?.log;
-        if (agentName && logEntry) {
+        const toolEvent = payload as ToolEvent;
+        const agentName = toolEvent?.source;
+      
+        if (agentName) {
           setNodes(prevNodes =>
             prevNodes.map(node => {
-              if (node.type === 'agent' && 'name' in node.data) {
-                const agentData = payload?.agents?.find((agent: { name: string }) => agent.name === (node.data as AgentNodeData).name);
-                if (agentData) {
-                  return {
-                    ...node,
-                    data: {
-                      ...node.data,
-                      logs: [...(node.data.logs || []), logEntry],
-                    },
+              if (node.type !== 'agent' || node.id !== agentName) return node;
+      
+              const agentData = node.data as AgentNodeData;
+              const existingLogs: ToolLog[] = agentData.logs ?? [];
+              let updatedLogs: ToolLog[];
+      
+              if (toolEvent.event_type === 'tool_started') {
+                // Always open a fresh ToolLog entry
+                const newLog: ToolLog = {
+                  source: toolEvent.source,
+                  started_at: toolEvent.timestamp,
+                  last_updated_at: toolEvent.timestamp,
+                  events: [toolEvent],
+                  status: 'active',
+                };
+                updatedLogs = [...existingLogs, newLog];
+              } else {
+                if (existingLogs.length === 0) {
+                  // Defensive fallback — no prior log exists
+                  const fallbackLog: ToolLog = {
+                    source: toolEvent.source,
+                    started_at: toolEvent.timestamp,
+                    last_updated_at: toolEvent.timestamp,
+                    events: [toolEvent],
+                    status: toolEvent.event_type === 'tool_finished' ? 'completed'
+                          : toolEvent.event_type === 'error'         ? 'error'
+                          : 'active',
                   };
+                  updatedLogs = [fallbackLog];
+                } else {
+                  // Append to the last log entry
+                  const last = existingLogs[existingLogs.length - 1];
+                  const updatedLast: ToolLog = {
+                    ...last,
+                    last_updated_at: toolEvent.timestamp,
+                    events: [...last.events, toolEvent],
+                    status: toolEvent.event_type === 'tool_finished' ? 'completed'
+                          : toolEvent.event_type === 'error'         ? 'error'
+                          : 'active',
+                  };
+                  updatedLogs = [...existingLogs.slice(0, -1), updatedLast];
                 }
               }
-              return node;
+      
+              return {
+                ...node,
+                data: { ...node.data, logs: updatedLogs },
+              };
             })
           );
+        } else {
+          console.warn('⚠️ Missing source on toolEvent', toolEvent);
         }
+      
         return;
       }
       if (type === 'Pipeline_agent_status') {
@@ -351,7 +389,7 @@ export default function PlaygroundCanvas({
 
         const agents: Array<{
           name: string;
-          status: 'RUNNING' | 'COMPLETED' | 'PENDING' | string;
+          status: 'RUNNING' | 'COMPLETED' | 'PENDING' | 'FAILED' | string;
           started_at: string | null;
           finished_at: string | null;
         }> = Array.isArray(payload.agents) ? payload.agents : [];
@@ -361,7 +399,7 @@ export default function PlaygroundCanvas({
         // Build a quick lookup so we only iterate nodes once
         const statusMap = new Map(
           agents
-            .filter(a => a.status === 'RUNNING' || a.status === 'COMPLETED')
+            .filter(a => a.status === 'RUNNING' || a.status === 'COMPLETED' || a.status === 'FAILED')
             .map(a => [a.name, a])
         );
 
@@ -400,7 +438,9 @@ export default function PlaygroundCanvas({
             });
 
             const nextStatus =
-              match.status === 'RUNNING' ? 'active' : 'completed';
+              match.status === 'RUNNING'   ? 'active'    :
+              match.status === 'FAILED'    ? 'failed'    :
+              'completed';
 
             const updatedNode = {
               ...node,
@@ -878,7 +918,7 @@ export default function PlaygroundCanvas({
                 onClick={restartExecution}
                 className="flex items-center gap-2 rounded border border-[#3c5d80] bg-[#151a1f] px-3 py-1.5 text-xs text-[#91b9cd] transition-colors hover:bg-[#2c1a1f] hover:text-[#ff6b6b]"
               >
-                <RotateCcw size={14} /> Stop
+                <RotateCcw size={14} /> Restart
               </button>
             </>
           )}

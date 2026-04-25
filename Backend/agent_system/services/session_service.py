@@ -88,7 +88,7 @@ class SessionService:
 
     async def restart_execution(self, session_id: str, executor) -> None:
         logger.info(f"[{session_id}] Restarting execution")
-        session = self.store.require(session_id)
+        session = await self.store.require_async(session_id)
         await self.tasks.restart_execution(session, executor)
 
     # ------------------------------------------------------------------

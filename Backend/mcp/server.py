@@ -45,4 +45,8 @@ from tools.feature_extraction.features import radiomics_extract_features, radiom
 
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    try:
+        mcp.run(transport="stdio")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
