@@ -4,6 +4,7 @@ from models.plans import ClinicalHypothesis, StudyPlan, StudyStep
 import os
 import json
 from uuid import UUID
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,16 @@ class BackendClient:
             question="",
             message=None,
         )
+
+    @staticmethod
+    def _build_task_message_payload(task_message: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "phase": task_message.get("phase", ""),
+            "agent_title": task_message.get("agent_title", ""),
+            "instructions": task_message.get("instructions", ""),
+            "hypothesis_summary": task_message.get("hypothesis_summary", ""),
+            "payload": task_message.get("payload", {}) or {},
+        }
 
     # ------------------------------------------------------------------
     # Session
@@ -310,6 +321,101 @@ class BackendClient:
             except httpx.HTTPError as e:
                 logger.error(f"Failed to fetch steps for plan {plan_id}: {e}")
                 return []
+
+    # ------------------------------------------------------------------
+    # Task Messages + Context Augmentation
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def save_task_message_by_step_id(
+        cls,
+        step_id: str,
+        task_message: dict[str, Any],
+    ) -> dict | None:
+        """Create/update task message for a step_id."""
+        if not cls._is_valid_uuid(step_id):
+            logger.warning("Skipping task message save: step_id is not a UUID (%r)", step_id)
+            return None
+
+        payload = cls._build_task_message_payload(task_message)
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    f"{BASE_URL}/task-messages/step/{step_id}",
+                    json=payload,
+                )
+                if response.status_code == 409:
+                    response = await client.patch(
+                        f"{BASE_URL}/task-messages/step/{step_id}",
+                        json=payload,
+                    )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to save task message for step {step_id}: {e}")
+                return None
+
+    @classmethod
+    async def get_task_message_by_step_id(cls, step_id: str) -> dict | None:
+        """Read task message by step_id."""
+        if not cls._is_valid_uuid(step_id):
+            logger.warning("Skipping task message read: step_id is not a UUID (%r)", step_id)
+            return None
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(f"{BASE_URL}/task-messages/step/{step_id}")
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to read task message for step {step_id}: {e}")
+                return None
+
+    @classmethod
+    async def save_context_augmentation_by_task_id(
+        cls,
+        task_id: str,
+        context_augmentation: dict[str, Any],
+    ) -> dict | None:
+        """Update context augmentation by task_id."""
+        payload = {
+            "knowledge_summary": context_augmentation.get("knowledge_summary", ""),
+            "literature_findings": context_augmentation.get("literature_findings", ""),
+            "methodology_guidance": context_augmentation.get("methodology_guidance", ""),
+            "terminology": context_augmentation.get("terminology", ""),
+            "sources_guide": context_augmentation.get("sources_guide", ""),
+        }
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.patch(
+                    f"{BASE_URL}/context-augmentations/task/{task_id}",
+                    json=payload,
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to save context augmentation for task {task_id}: {e}")
+                return None
+
+    @classmethod
+    async def get_context_augmentation_by_task_id(cls, task_id: str) -> dict | None:
+        """Read context augmentation by task_id."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{BASE_URL}/context-augmentations/task/{task_id}"
+                )
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to read context augmentation for task {task_id}: {e}")
+                return None
 
 
 if __name__ == '__main__':

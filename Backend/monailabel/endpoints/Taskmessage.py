@@ -8,6 +8,7 @@ from crud.Taskmessage import (
     create_task_message,
     get_task_message,
     get_task_message_by_step,
+    get_task_message_by_task_id,
     update_task_message,
     update_task_message_by_step,
     delete_task_message,
@@ -32,6 +33,12 @@ async def create_for_step(
 async def read_by_step(step_id: UUID, db: AsyncSession = Depends(get_db)):
     """Fetch the TaskMessage that belongs to a given PlanStep."""
     return await get_task_message_by_step(db, agent_id=step_id)
+
+
+@router.get("/task/{task_id}", response_model=TaskMessageRead)
+async def read_by_task_id(task_id: str, db: AsyncSession = Depends(get_db)):
+    """Fetch the TaskMessage by task_id."""
+    return await get_task_message_by_task_id(db, task_id=task_id)
  
  
 @router.patch("/step/{step_id}", response_model=TaskMessageRead)
