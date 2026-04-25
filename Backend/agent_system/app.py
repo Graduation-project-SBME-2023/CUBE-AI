@@ -247,6 +247,7 @@ async def run_pipeline(session: Session) -> None:
         await session.execution_monitor.on_pipeline_error(Exception("Pipeline Cancelled"))
         raise
     except Exception as e:
+        logger.error(f"here, {e} occured, check in this method")
         logger.error(e)
         await session.execution_monitor.on_pipeline_error(e)
 
