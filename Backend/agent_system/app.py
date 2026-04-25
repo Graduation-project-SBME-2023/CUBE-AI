@@ -67,6 +67,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
 class CoopCoepMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -74,26 +76,32 @@ class CoopCoepMiddleware(BaseHTTPMiddleware):
         response.headers["Access-Control-Allow-Origin"] = "*"
         return response
 
+
 app.add_middleware(CoopCoepMiddleware)
 # todo: make it after the planner set the session id and create the workspace associated with the session id
 # workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "workspace"))
 
+
 @app.get("/static/{file_path:path}")
 def serve_static_pdf(file_path: str):
     # full_path = os.path.join(workspace_dir, file_path)
-    
+
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
-    
+
     # PDFs → inline to allow view in browser
     if file_path.endswith(".pdf"):
         return FileResponse(
             path=file_path,
             media_type="application/pdf",
-            headers={"Content-Disposition": f"inline; filename={os.path.basename(file_path)}"},
-            content_disposition_type="inline"
+            headers={
+                "Content-Disposition": f"inline; filename={os.path.basename(file_path)}"
+            },
+            content_disposition_type="inline",
         )
     return FileResponse(path=file_path)
+
+
 # Single shared service — the only stateful object routes need to know about
 session_service = SessionService(ws_manager=manager)
 
@@ -103,6 +111,7 @@ api_key = os.getenv("OLLAMA_API_KEY", "")
 # ----------------------------------------------------------------------
 # Planner callable — receives session + message, calls back into service
 # ----------------------------------------------------------------------
+
 
 async def run_planner(session: Session, message: str) -> None:
     base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
@@ -117,11 +126,11 @@ async def run_planner(session: Session, message: str) -> None:
         workspace_dir=workspace_folder,
         session=session,
         session_service=session_service,
-        api_key=api_key
+        api_key=api_key,
     )
     await planner.run(start_query=message)
-    logging.getLogger('HypothesisFlow').info(
-        '[HypothesisFlow][Planner] Planner finished | session_id=%s',
+    logging.getLogger("HypothesisFlow").info(
+        "[HypothesisFlow][Planner] Planner finished | session_id=%s",
         session.session_id,
     )
 
@@ -130,9 +139,12 @@ async def run_planner(session: Session, message: str) -> None:
 # Executor callable — receives session, calls back into service
 # ----------------------------------------------------------------------
 
+
 async def run_pipeline(session: Session) -> None:
     base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session.session_id}")
+    workspace_folder = os.path.join(
+        base_agents_workspace, f"workspace_{session.session_id}"
+    )
     pipeline_logger = logging.getLogger("Execution Pipeline")
     logging.getLogger("autogen_core").setLevel(logging.CRITICAL)
     logging.getLogger("autogen_core.events").setLevel(logging.CRITICAL)
@@ -143,7 +155,7 @@ async def run_pipeline(session: Session) -> None:
     hypothesis = None
     try:
         if os.path.exists(state_file):
-            async with aiofiles.open(state_file, 'r') as f:
+            async with aiofiles.open(state_file, "r") as f:
                 content = await f.read()
                 if content.strip():
                     planner_state = PlannerState.model_validate_json(content)
@@ -156,11 +168,11 @@ async def run_pipeline(session: Session) -> None:
         logger.warning(f"Could not load planner state: {e}. Using raw hypothesis.")
 
     if not hypothesis:
-        hypothesis = json.load(
-            open(state_file)
-        ).get("hypothesis", {}).get("title")
+        hypothesis = json.load(open(state_file)).get("hypothesis", {}).get("title")
 
-    pipeline_logger.info(f"workspace_folder: {workspace_folder}, hypothesis: {hypothesis}")
+    pipeline_logger.info(
+        f"workspace_folder: {workspace_folder}, hypothesis: {hypothesis}"
+    )
 
     # Allow pause / cancel before heavy init
     await session.pause_event.wait()
@@ -207,19 +219,27 @@ async def run_pipeline(session: Session) -> None:
                         pipeline_logger.info(f"  [{msg.source}] {msg.content}")
                     pipeline_logger.info("━" * 60)
                     await session.execution_monitor.on_pipeline_complete()
-                    await manager.send_ws_message("run_finished", "run_finished", session_id=session.session_id)
+                    await manager.send_ws_message(
+                        "run_finished", "run_finished", session_id=session.session_id
+                    )
 
                 case ToolCallRequestEvent(source=src, content=content):
                     pipeline_logger.info(f"🔧 [{src}] TOOL CALL REQUEST")
                     await session.execution_monitor.on_agent_active(src)
                     for call in content:
-                        pipeline_logger.info(f"     Tool: {call.name}  Args: {call.arguments}")
+                        pipeline_logger.info(
+                            f"     Tool: {call.name}  Args: {call.arguments}"
+                        )
 
                 case ToolCallExecutionEvent(source=src, content=content):
                     pipeline_logger.info(f"🔧 [{src}] TOOL CALL RESULT")
                     for result in content:
-                        await session.execution_monitor.on_tool_result(src, result.name, result.content, workspace_folder)
-                        pipeline_logger.info(f"     Tool: {result.name}  Result: {result.content}")
+                        await session.execution_monitor.on_tool_result(
+                            src, result.name, result.content, workspace_folder
+                        )
+                        pipeline_logger.info(
+                            f"     Tool: {result.name}  Result: {result.content}"
+                        )
 
                 case MemoryQueryEvent(source=src, content=content):
                     pipeline_logger.info(f"🧠 [{src}] MEMORY QUERY: {content}")
@@ -234,7 +254,9 @@ async def run_pipeline(session: Session) -> None:
 
                 case BaseChatMessage(source=src):
                     logger.info("━" * 60)
-                    pipeline_logger.info(f"💬 [{src}] ({type(event).__name__}): {event.content}")
+                    pipeline_logger.info(
+                        f"💬 [{src}] ({type(event).__name__}): {event.content}"
+                    )
                     await session.execution_monitor.on_agent_active(src)
 
                 case BaseAgentEvent(source=src):
@@ -244,7 +266,9 @@ async def run_pipeline(session: Session) -> None:
                     await session.execution_monitor.on_agent_active(src)
 
     except asyncio.CancelledError:
-        await session.execution_monitor.on_pipeline_error(Exception("Pipeline Cancelled"))
+        await session.execution_monitor.on_pipeline_error(
+            Exception("Pipeline Cancelled")
+        )
         raise
     except Exception as e:
         logger.error(f"here, {e} occured, check in this method")
@@ -255,6 +279,7 @@ async def run_pipeline(session: Session) -> None:
 # ----------------------------------------------------------------------
 # Routes — thin, all logic delegated to session_service
 # ----------------------------------------------------------------------
+
 
 @app.post("/plan")
 async def start_planning(request: PlanningRequest):
@@ -329,7 +354,7 @@ async def receive_event(event: ToolEvent | latex_output):
         await send_ws_message(
             msg_type="latex_output",
             payload=event.content.get("frontend_data"),
-            session_id=event.session_id
+            session_id=event.session_id,
         )
         return
 
@@ -340,6 +365,7 @@ async def receive_event(event: ToolEvent | latex_output):
 # Client configuration endpoints
 # ----------------------------------------------------------------------
 
+
 @app.get("/client-config")
 async def get_config():
     """Return the current global LLM client configuration."""
@@ -347,7 +373,9 @@ async def get_config():
     data = cfg.model_dump()
     # Mask the API key for security
     if data.get("api_key"):
-        data["api_key"] = data["api_key"][:8] + "..." if len(data["api_key"]) > 8 else "***"
+        data["api_key"] = (
+            data["api_key"][:8] + "..." if len(data["api_key"]) > 8 else "***"
+        )
     return data
 
 
@@ -374,26 +402,78 @@ async def list_providers():
                 "id": "azure_openai",
                 "label": "Azure OpenAI",
                 "fields": ["model", "api_key", "azure_endpoint", "api_version"],
-                "optional_fields": ["azure_deployment", "temperature", "max_tokens", "top_p"],
+                "optional_fields": [
+                    "azure_deployment",
+                    "temperature",
+                    "max_tokens",
+                    "top_p",
+                ],
                 "description": "Azure-hosted OpenAI models",
             },
             {
                 "id": "ollama",
                 "label": "Ollama",
                 "fields": ["model"],
-                "optional_fields": ["base_url", "api_key", "temperature", "max_tokens", "top_p"],
+                "optional_fields": [
+                    "base_url",
+                    "api_key",
+                    "temperature",
+                    "max_tokens",
+                    "top_p",
+                ],
                 "description": "Local or remote Ollama instance (OpenAI-compatible)",
             },
         ]
     }
 
+
 # ----------------------------------------------------------------------
 # State Recovery
 # ----------------------------------------------------------------------
 
+
 @app.get("/session/{session_id}/plan-state")
 async def get_plan_state(session_id: str):
-    pass
+    """
+    Get plan state, hypothesis, and task messages for a session.
+    Used when recovering a session from hypothesis history.
+    """
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+
+    if not os.path.exists(workspace_folder):
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    state_file = os.path.join(workspace_folder, "state.json")
+    result = {
+        "session_id": session_id,
+        "workspace_dir": workspace_folder,
+        "hypothesis": None,
+        "task_messages": [],
+    }
+
+    if os.path.exists(state_file):
+        try:
+            async with aiofiles.open(state_file, "r") as f:
+                content = await f.read()
+                if content.strip():
+                    state_data = json.loads(content)
+                    result["hypothesis"] = state_data.get("hypothesis")
+
+                    task_messages = state_data.get("task_messages", [])
+                    task_messages_json = state_data.get("task_messages_json", [])
+
+                    if task_messages_json:
+                        try:
+                            result["task_messages"] = json.loads(task_messages_json)
+                        except:
+                            result["task_messages"] = task_messages
+        except Exception as e:
+            logger.warning(f"Could not load plan state: {e}")
+
+    return result
+
 
 @app.get("/session/{session_id}/execution-state")
 async def get_execution_state(session_id: str):
@@ -403,22 +483,59 @@ async def get_execution_state(session_id: str):
     return state
 
 
+@app.get("/session/{session_id}/chat-messages")
+async def get_session_chat_messages(session_id: str):
+    """
+    Fetch chat messages for a session from the MONAI server.
+    Used when recovering a session from hypothesis history.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                f"http://localhost:8000/chat_messages/{session_id}", timeout=10.0
+            )
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return []
+        except Exception as e:
+            logger.warning(f"Could not fetch chat messages: {e}")
+            return []
+
+
+# ----------------------------------------------------------------------
+# Hypothesis History
+# ----------------------------------------------------------------------
+
+
+@app.get("/hypothesis-history")
+async def get_hypothesis_history(limit: int = 20):
+    """
+    Fetch hypothesis history from the backend API.
+    Returns list of recent hypotheses with their chat session info.
+    """
+    history = await session_service.get_hypothesis_history(limit)
+
+    return history
+
+
 # ----------------------------------------------------------------------
 # WebSocket /ws
 # ----------------------------------------------------------------------
 
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
-    logging.getLogger('HypothesisFlow').info('[HypothesisFlow][WS] Client connected')
+    logging.getLogger("HypothesisFlow").info("[HypothesisFlow][WS] Client connected")
 
     try:
         while True:
             data = await websocket.receive_text()
             await manager.push_to_queue(data)
-            logging.getLogger('HypothesisFlow').info(
-                '[HypothesisFlow][WS] Message received raw | size=%s',
-                len(data or ''),
+            logging.getLogger("HypothesisFlow").info(
+                "[HypothesisFlow][WS] Message received raw | size=%s",
+                len(data or ""),
             )
 
             try:
@@ -446,8 +563,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     text = str(payload or "")
 
                 if text.strip():
-                    logging.getLogger('HypothesisFlow').info(
-                        '[HypothesisFlow][WS] Queueing user text | session_id=%s | text_len=%s | preview=%s',
+                    logging.getLogger("HypothesisFlow").info(
+                        "[HypothesisFlow][WS] Queueing user text | session_id=%s | text_len=%s | preview=%s",
                         session_id,
                         len(text),
                         text[:120],
@@ -455,17 +572,19 @@ async def websocket_endpoint(websocket: WebSocket):
                     await manager.push_to_queue(text, session_id=session_id)
 
     except WebSocketDisconnect:
-        logging.getLogger('HypothesisFlow').info('[HypothesisFlow][WS] Client disconnected')
+        logging.getLogger("HypothesisFlow").info(
+            "[HypothesisFlow][WS] Client disconnected"
+        )
         manager.disconnect(websocket)
-        
+
+
 @app.post("/ws-broadcast")
 async def ws_broadcast(data: dict):
     await manager.send_ws_message(
-        data["type"],
-        data["payload"],
-        session_id=data.get("session_id")
+        data["type"], data["payload"], session_id=data.get("session_id")
     )
     return {"status": "ok"}
+
 
 # ----------------------------------------------------------------------
 # Entry point
@@ -473,4 +592,5 @@ async def ws_broadcast(data: dict):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("app:app", host="0.0.0.0", port=8150, reload=True)
