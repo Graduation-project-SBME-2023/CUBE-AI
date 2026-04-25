@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -42,6 +43,7 @@ class WorkspaceArtifacts:
     # Validation info
     missing_files: List[str] = field(default_factory=list)
     loaded_files: List[str] = field(default_factory=list)
+    parse_errors: List[str] = field(default_factory=list)
 
     def is_valid(self) -> bool:
         """Check if minimum required artifacts are present."""
@@ -73,17 +75,49 @@ class WorkspaceArtifacts:
             "knowledge_base_length": len(self.knowledge_base or ""),
             "loaded_files": self.loaded_files,
             "missing_files": self.missing_files,
+            "parse_errors": self.parse_errors,
         }
 
 
-def _safe_load_json(path: Path) -> Optional[Dict[str, Any]]:
-    """Safely load a JSON file, returning None on failure."""
+def _safe_load_json(
+    path: Path,
+    artifacts: Optional[WorkspaceArtifacts] = None,
+) -> Optional[Any]:
+    """Safely load a JSON file, returning None on failure.
+
+    Includes a tolerant fallback for common formatting issues in generated JSON
+    such as trailing commas or JS-style comments.
+    """
     try:
         if path.exists():
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
+    except json.JSONDecodeError as e:
+        # Tolerant fallback for malformed generated files.
+        try:
+            raw = path.read_text(encoding="utf-8")
+            cleaned = re.sub(r"/\*.*?\*/", "", raw, flags=re.DOTALL)
+            cleaned = re.sub(r"//.*?$", "", cleaned, flags=re.MULTILINE)
+            cleaned = re.sub(r",(\s*[}\]])", r"\1", cleaned)
+            parsed = json.loads(cleaned)
+            logger.warning(
+                f"Recovered malformed JSON from {path} using tolerant parser: {e}"
+            )
+            if artifacts is not None:
+                artifacts.parse_errors.append(
+                    f"Recovered malformed JSON: {path.name} ({e})"
+                )
+            return parsed
+        except (json.JSONDecodeError, OSError) as fallback_error:
+            logger.warning(f"Failed to load JSON from {path}: {fallback_error}")
+            if artifacts is not None:
+                artifacts.parse_errors.append(
+                    f"Failed JSON parse: {path.name} ({fallback_error})"
+                )
+    except OSError as e:
         logger.warning(f"Failed to load JSON from {path}: {e}")
+        if artifacts is not None:
+            artifacts.parse_errors.append(f"Failed JSON read: {path.name} ({e})")
     return None
 
 
@@ -129,36 +163,60 @@ def load_workspace(workspace_path: str | Path) -> WorkspaceArtifacts:
     elif folder_name.startswith("benchmark_"):
         artifacts.session_id = folder_name
 
-    # Define file mappings for different workspace structures
-    file_mappings = {
-        # Planning outputs - direct workspace structure
-        "state.json": ("planner_state", _safe_load_json),
-        "hypothesis.json": ("hypothesis", _safe_load_json),
-        "plan.json": ("plan", _safe_load_json),
-        "task_messages.json": ("task_messages", _safe_load_json),
-        # Literature review outputs - direct workspace structure
-        "literature_context.json": ("literature_context", _safe_load_json),
-        "literature_review_output/context.json": (
-            "literature_context",
-            _safe_load_json,
-        ),
-        "literature_review_output/ranked_papers.json": (
-            "ranked_papers",
-            _safe_load_json,
-        ),
-        "literature_review_output/literature_report.md": (
-            "literature_report",
-            _safe_load_text,
-        ),
-        # Benchmark output structure (from benchmark_planning.py)
-        "final_state.json": ("planner_state", _safe_load_json),
-    }
+    # Keep loading focused on files expected for each structure to avoid
+    # unnecessary "missing file" noise.
+    is_benchmark_case = (workspace / "final_state.json").exists() or (
+        workspace.parent.name.startswith("run_")
+        and "benchmark_results" in str(workspace.parent.parent)
+    )
+
+    if is_benchmark_case:
+        file_mappings = {
+            "final_state.json": ("planner_state", _safe_load_json),
+            "literature_review_output/context.json": (
+                "literature_context",
+                _safe_load_json,
+            ),
+            "literature_review_output/ranked_papers.json": (
+                "ranked_papers",
+                _safe_load_json,
+            ),
+            "literature_review_output/literature_report.md": (
+                "literature_report",
+                _safe_load_text,
+            ),
+        }
+    else:
+        file_mappings = {
+            # Planning outputs - direct workspace structure
+            "state.json": ("planner_state", _safe_load_json),
+            "hypothesis.json": ("hypothesis", _safe_load_json),
+            "plan.json": ("plan", _safe_load_json),
+            "task_messages.json": ("task_messages", _safe_load_json),
+            # Literature review outputs - direct workspace structure
+            "literature_context.json": ("literature_context", _safe_load_json),
+            "literature_review_output/context.json": (
+                "literature_context",
+                _safe_load_json,
+            ),
+            "literature_review_output/ranked_papers.json": (
+                "ranked_papers",
+                _safe_load_json,
+            ),
+            "literature_review_output/literature_report.md": (
+                "literature_report",
+                _safe_load_text,
+            ),
+        }
 
     # Load files based on mappings
     for rel_path, (attr_name, loader) in file_mappings.items():
         full_path = workspace / rel_path
         if full_path.exists():
-            data = loader(full_path)
+            if loader is _safe_load_json:
+                data = loader(full_path, artifacts)
+            else:
+                data = loader(full_path)
             if data is not None:
                 # Handle special case where attribute might already be set
                 current_value = getattr(artifacts, attr_name)

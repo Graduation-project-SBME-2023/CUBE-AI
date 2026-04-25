@@ -2,6 +2,8 @@ import httpx
 import logging
 from models.plans import ClinicalHypothesis, StudyPlan, StudyStep
 import os
+import json
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -19,21 +21,57 @@ class BackendClient:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_valid_uuid(value: str | None) -> bool:
+        if not value:
+            return False
+        try:
+            UUID(str(value))
+            return True
+        except (ValueError, TypeError, AttributeError):
+            return False
+
+    @staticmethod
+    def _stringify(value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value)
+
+    @classmethod
+    def _build_hypothesis_payload(cls, hypothesis: ClinicalHypothesis) -> dict:
+        # Match monailabel.schemas.hypothesis.HypothesisCreate exactly.
+        return {
+            "title": hypothesis.title or "Untitled Hypothesis",
+            "population": cls._stringify(hypothesis.population),
+            "intervention": cls._stringify(hypothesis.intervention),
+            "comparison": cls._stringify(hypothesis.comparison),
+            "outcome": cls._stringify(hypothesis.outcome),
+            "hypothesis": cls._stringify(hypothesis.hypothesis),
+            "clinical_context": cls._stringify(hypothesis.clinical_context),
+            "relationship_type": cls._stringify(hypothesis.relationship_type),
+            "state": cls._stringify(hypothesis.state) or "not_confirmed",
+        }
+
     @classmethod
     def _parse_hypothesis(cls, data: dict) -> ClinicalHypothesis:
         return ClinicalHypothesis(
-            id=data["id"],
-            state=data["state"],
-            title=data["title"],
-            population=data["population"],
-            intervention=data["intervention"],
-            outcome=data["outcome"],
-            clinical_context=data["clinical_context"],
-            relationship_type=data["relationship_type"],
-            comparison=data["comparison"],
+            id=str(data.get("id", "")),
+            state=data.get("state", "not_confirmed"),
+            title=data.get("title", ""),
+            population=data.get("population", ""),
+            intervention=data.get("intervention", ""),
+            outcome=data.get("outcome", ""),
+            clinical_context=data.get("clinical_context", ""),
+            relationship_type=data.get("relationship_type", ""),
+            comparison=data.get("comparison", ""),
             hypothesis=data.get("hypothesis", ""),
-            question=data.get("question", ""),
-            message=data.get("message"),
+            # These fields are not persisted in monailabel hypothesis schema.
+            question="",
+            message=None,
         )
 
     # ------------------------------------------------------------------
@@ -64,12 +102,19 @@ class BackendClient:
     async def create_hypothesis(
         cls, session_id: str, hypothesis: ClinicalHypothesis
     ) -> ClinicalHypothesis | None:
+        if not cls._is_valid_uuid(session_id):
+            logger.warning(
+                "Skipping hypothesis persistence: session_id is not a UUID (%r)",
+                session_id,
+            )
+            return None
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
                     f"{BASE_URL}/hypotheses/",
                     params={"chat_id": session_id},
-                    json=hypothesis.model_dump(),
+                    json=cls._build_hypothesis_payload(hypothesis),
                 )
                 response.raise_for_status()
                 return cls._parse_hypothesis(response.json())
@@ -82,11 +127,18 @@ class BackendClient:
     async def update_hypothesis(
         cls, hypothesis: ClinicalHypothesis
     ) -> ClinicalHypothesis | None:
+        if not cls._is_valid_uuid(hypothesis.id):
+            logger.warning(
+                "Skipping hypothesis update: hypothesis.id is not a UUID (%r)",
+                hypothesis.id,
+            )
+            return None
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.patch(
                     f"{BASE_URL}/hypotheses/{hypothesis.id}",
-                    json=hypothesis.model_dump(),
+                    json=cls._build_hypothesis_payload(hypothesis),
                 )
                 response.raise_for_status()
                 return cls._parse_hypothesis(response.json())
@@ -96,6 +148,13 @@ class BackendClient:
 
     @classmethod
     async def get_hypothesis_by_chat(cls, session_id: str) -> ClinicalHypothesis | None:
+        if not cls._is_valid_uuid(session_id):
+            logger.warning(
+                "Skipping hypothesis fetch: session_id is not a UUID (%r)",
+                session_id,
+            )
+            return None
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
@@ -115,16 +174,35 @@ class BackendClient:
 
     @classmethod
     async def create_plan(cls, plan: StudyPlan) -> StudyPlan | None:
+        if not cls._is_valid_uuid(plan.hypothesis_id):
+            logger.warning(
+                "Skipping plan persistence: hypothesis_id is not a UUID (%r)",
+                plan.hypothesis_id,
+            )
+            return None
+
+        payload = {
+            "state": plan.state,
+            "steps": [
+                {
+                    "title": step.title,
+                    "description": step.description,
+                    "module": step.module,
+                    "status": step.status,
+                    "logs": step.logs,
+                    "instructions": {},
+                }
+                for step in plan.steps
+            ],
+        }
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
                     f"{BASE_URL}/plans/with_steps",
                     params={"hypothesis_id": plan.hypothesis_id},
-                    json=plan.model_dump(),
+                    json=payload,
                 )
-                print(response.status_code)
-                print(response.text)
-                print(response.json())
                 response.raise_for_status()
                 return StudyPlan(**response.json())
             except httpx.HTTPError as e:
@@ -133,11 +211,33 @@ class BackendClient:
 
     @classmethod
     async def update_plan(cls, plan: StudyPlan) -> StudyPlan | None:
+        if not cls._is_valid_uuid(plan.id):
+            logger.warning(
+                "Skipping plan update: plan.id is not a UUID (%r)",
+                plan.id,
+            )
+            return None
+
+        payload = {
+            "state": plan.state,
+            "steps": [
+                {
+                    "title": step.title,
+                    "description": step.description,
+                    "module": step.module,
+                    "status": step.status,
+                    "logs": step.logs,
+                    "instructions": {},
+                }
+                for step in plan.steps
+            ],
+        }
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.patch(
                     f"{BASE_URL}/plans/{plan.id}/with_steps",
-                    json=plan.model_dump(),
+                    json=payload,
                 )
                 response.raise_for_status()
                 return StudyPlan(**response.json())
@@ -147,6 +247,13 @@ class BackendClient:
 
     @classmethod
     async def get_plan_by_hypothesis(cls, hypothesis_id: str) -> StudyPlan | None:
+        if not cls._is_valid_uuid(hypothesis_id):
+            logger.warning(
+                "Skipping plan fetch: hypothesis_id is not a UUID (%r)",
+                hypothesis_id,
+            )
+            return None
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
