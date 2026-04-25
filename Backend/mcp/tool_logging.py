@@ -1,5 +1,5 @@
 from dataclasses import dataclass, asdict, field
-from typing import Literal, Union
+from typing import Literal, Union, Dict
 import time
 import requests
 import os
@@ -61,5 +61,18 @@ def log_tool_state(event: ToolEvent):
     requests.post(
         "http://localhost:8150/events",
         json=asdict(event),
+        timeout=1,
+    )
+
+def log_pdf_tool_view(event: Dict):
+    session_id = os.environ.get("SESSION_ID")
+    payload = {
+        "event_type": "latex_output",
+        "content": event,
+        "session_id": session_id,
+    }
+    requests.post(
+        "http://localhost:8150/events",
+        json=payload,
         timeout=1,
     )

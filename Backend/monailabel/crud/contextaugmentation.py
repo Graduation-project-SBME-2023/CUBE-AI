@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from models.contextaugmentation import ContextAugmentation
+from models.Taskmessage import TaskMessage
 from schemas.contextaugmentation import ContextAugmentationCreate, ContextAugmentationUpdate
 
 
@@ -56,6 +57,46 @@ async def delete_context_augmentation(db: AsyncSession, ca_id: UUID) -> dict:
         await db.delete(obj)
         await db.commit()
         return {"detail": "ContextAugmentation deleted"}
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+async def get_context_augmentation_by_task_id(
+    db: AsyncSession,
+    task_id: str,
+) -> ContextAugmentation:
+    """Resolve ContextAugmentation by TaskMessage.task_id."""
+    try:
+        result = await db.execute(
+            select(ContextAugmentation)
+            .join(TaskMessage, TaskMessage.context_augmentation_id == ContextAugmentation.id)
+            .where(TaskMessage.task_id == task_id)
+        )
+        obj = result.scalar_one_or_none()
+        if not obj:
+            raise HTTPException(
+                status_code=404,
+                detail="ContextAugmentation not found for this task_id",
+            )
+        return obj
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+async def update_context_augmentation_by_task_id(
+    db: AsyncSession,
+    task_id: str,
+    data: ContextAugmentationUpdate,
+) -> ContextAugmentation:
+    """Update ContextAugmentation by TaskMessage.task_id."""
+    obj = await get_context_augmentation_by_task_id(db, task_id)
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(obj, field, value)
+    try:
+        await db.commit()
+        await db.refresh(obj)
+        return obj
     except SQLAlchemyError as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")

@@ -13,6 +13,13 @@ const ArrowRightIcon: any = ArrowRight;
 const ArrowLeftIcon: any = ArrowLeft;
 const SearchIcon: any = Search;
 
+const makeFallbackSessionId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
 // ==========================================
 // STYLE CONFIGURATION
 // ==========================================
@@ -135,8 +142,8 @@ const AgenticHome = ({ onNavigate, onBack }) => {
       console.log('[HypothesisFlow][AgenticHome] Navigated to /playground with state payload');
     } catch (err) {
       console.error('Failed to create session:', err);
-      // Fallback: Navigate anyway with a timestamp-based ID if DB fails
-      const fallbackSessionId = String(Date.now());
+      // Fallback: use a UUID-shaped local ID to avoid UUID parsing errors downstream.
+      const fallbackSessionId = makeFallbackSessionId();
       console.warn('[HypothesisFlow][AgenticHome] Using fallback session', {
         fallbackSessionId,
       });

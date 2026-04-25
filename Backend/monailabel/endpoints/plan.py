@@ -4,9 +4,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
 from typing import List
+from sqlalchemy.orm import selectinload
 
 from schemas.steps import PlanStepOut
 from models.steps import PlanStep
+from models.Taskmessage import TaskMessage
+from models.contextaugmentation import ContextAugmentation
 from core.database import get_db
 from crud.plan import (
     create_plan,
@@ -70,7 +73,14 @@ async def read_plan_by_hypothesis(hypothesis_id: UUID, db: AsyncSession = Depend
     plans = await get_plans_for_hypothesis(db, hypothesis_id)
     results = []
     for plan in plans:
-        steps_result = await db.execute(select(PlanStep).where(PlanStep.plan_id == plan.id))
+        steps_result = await db.execute(
+            select(PlanStep)
+            .where(PlanStep.plan_id == plan.id)
+            .options(
+                selectinload(PlanStep.task_message)
+                .selectinload(TaskMessage.context_augmentation)
+            )
+        )
         steps = steps_result.scalars().all()
         results.append(
             PlanWithStepsOut(

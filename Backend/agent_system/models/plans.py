@@ -43,11 +43,12 @@ class TaskMessage(BaseModel):
 
 
 class StudyStep(BaseModel):
+    id: str = ""
     title: str
     description: str
     module: Optional[str] = None
-    task_message: TaskMessage = None
-    logs: List[str] = Field(default_factory=list)
+    task_message: Optional[TaskMessage] = None
+    logs: List[dict] = Field(default_factory=list)
     status: str = "pending"
 
 
