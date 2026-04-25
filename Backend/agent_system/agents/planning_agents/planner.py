@@ -649,6 +649,15 @@ class ClinicalPlanner:
 
                 await self._send("msg", f"Generated {len(task_messages)} context-enriched task messages.")
 
+                persisted_messages = await self.session_service.save_task_messages_for_plan(
+                    self.session,
+                    task_messages,
+                )
+                await self._send(
+                    "msg",
+                    f"Persisted {len(persisted_messages)}/{len(task_messages)} task messages with context augmentation to DB.",
+                )
+
                 # Send task message summaries to UI
                 task_summaries = [
                     {

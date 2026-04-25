@@ -37,6 +37,7 @@ class TaskMessageUpdate(BaseModel):
  
 class TaskMessageRead(TaskMessageBase):
     id:                      UUID
+    task_id:                 str
     agent_id:                UUID           # == the PlanStep.id
     context_augmentation_id: Optional[UUID]
     context_augmentation:    Optional[ContextAugmentationRead] = None

@@ -1,9 +1,9 @@
 import asyncio
 import logging
-from typing import Dict
+from typing import Dict, Any, List
 
 from models.session import Session, SessionState
-from models.plans import ClinicalHypothesis, StudyPlan, StudyStep
+from models.plans import ClinicalHypothesis, StudyPlan, StudyStep, TaskMessage
 from .session_store import SessionStore
 from task_manager.task_manager import TaskManager
 from clients.backend_client import BackendClient
@@ -293,6 +293,84 @@ class SessionService:
     # ------------------------------------------------------------------
     # Execution sync — PipelineMonitor calls these
     # ------------------------------------------------------------------
+
+    async def save_task_messages_for_plan(
+        self,
+        session: Session,
+        task_messages: List[TaskMessage],
+    ) -> List[Dict[str, Any]]:
+        """
+        Persist compiled task messages using step_id and then persist
+        context augmentation by task_id.
+        """
+        if session.plan is None:
+            logger.warning(
+                f"[{session.session_id}] save_task_messages_for_plan called with no plan"
+            )
+            return []
+
+        # Map module name -> step id for step-scoped persistence endpoint.
+        step_index: Dict[str, str] = {
+            (step.module or ""): str(step.id)
+            for step in session.plan.steps
+            if step.id and step.module
+        }
+
+        persisted: List[Dict[str, Any]] = []
+        task_only_saved = 0
+
+        for tm in task_messages:
+            step_id = step_index.get(tm.agent_id)
+            if not step_id:
+                logger.warning(
+                    f"[{session.session_id}] No step_id found for agent_id={tm.agent_id}; skipping task message persistence"
+                )
+                continue
+
+            tm_payload = tm.model_dump()
+            tm_result = await BackendClient.save_task_message_by_step_id(step_id, tm_payload)
+            if not tm_result:
+                continue
+
+            task_only_saved += 1
+
+            task_id = str(tm_result.get("task_id") or tm.task_id)
+            context_payload = (tm_payload.get("context_augmentation") or {})
+            context_result = await BackendClient.save_context_augmentation_by_task_id(
+                task_id,
+                context_payload,
+            )
+
+            if context_result is None:
+                logger.warning(
+                    f"[{session.session_id}] Context augmentation save failed for task_id={task_id}"
+                )
+                continue
+
+            persisted.append(
+                {
+                    "step_id": step_id,
+                    "task_id": task_id,
+                    "task_message": tm_result,
+                    "context_augmentation": context_result,
+                }
+            )
+
+        logger.info(
+            f"[{session.session_id}] Persisted {len(persisted)}/{len(task_messages)} task messages with context augmentation "
+            f"(task rows saved: {task_only_saved})"
+        )
+        return persisted
+
+    async def read_task_message_by_step_id(self, step_id: str) -> Dict[str, Any] | None:
+        """Read task message payload by plan step id."""
+        return await BackendClient.get_task_message_by_step_id(step_id)
+
+    async def read_context_augmentation_by_task_id(
+        self, task_id: str
+    ) -> Dict[str, Any] | None:
+        """Read context augmentation payload by task id."""
+        return await BackendClient.get_context_augmentation_by_task_id(task_id)
 
     async def handle_pipeline_update(
             self,

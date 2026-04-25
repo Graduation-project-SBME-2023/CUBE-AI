@@ -37,6 +37,7 @@ import tools.population.unique_descriptions
 import tools.scratchpad
 import tools.agent_output
 import tools.literature_context
+import tools.task_context
 from tools.modeling.classification import pycaret_train_classifier, pycaret_run_inference
 from tools.modeling.regression import pycaret_train_regressor, pycaret_run_regression_inference
 

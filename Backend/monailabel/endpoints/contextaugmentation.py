@@ -9,6 +9,8 @@ from crud.contextaugmentation import (
     get_context_augmentation,
     update_context_augmentation,
     delete_context_augmentation,
+    get_context_augmentation_by_task_id,
+    update_context_augmentation_by_task_id,
 )
 from schemas.contextaugmentation import (
     ContextAugmentationCreate,
@@ -29,9 +31,23 @@ async def read(ca_id: UUID, db: AsyncSession = Depends(get_db)):
     return await get_context_augmentation(db, ca_id)
 
 
+@router.get("/task/{task_id}", response_model=ContextAugmentationRead)
+async def read_by_task_id(task_id: str, db: AsyncSession = Depends(get_db)):
+    return await get_context_augmentation_by_task_id(db, task_id)
+
+
 @router.patch("/{ca_id}", response_model=ContextAugmentationRead)
 async def update(ca_id: UUID, data: ContextAugmentationUpdate, db: AsyncSession = Depends(get_db)):
     return await update_context_augmentation(db, ca_id, data)
+
+
+@router.patch("/task/{task_id}", response_model=ContextAugmentationRead)
+async def update_by_task_id(
+    task_id: str,
+    data: ContextAugmentationUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    return await update_context_augmentation_by_task_id(db, task_id, data)
 
 
 @router.delete("/{ca_id}")
