@@ -448,7 +448,7 @@ export default function PlaygroundCanvas({
                 ...node.data,
                 status: nextStatus,
                 started_at: match.started_at ?? (node.data as any).started_at,
-                isExpanded: nextStatus === 'active',
+                isExpanded: nextStatus === 'active' || nextStatus === 'failed',
               },
             };
 
