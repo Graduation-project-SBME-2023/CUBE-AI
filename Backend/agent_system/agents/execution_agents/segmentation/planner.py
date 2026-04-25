@@ -67,7 +67,7 @@ async def run_planner(agent, hypothesis):
 
         Rules:
         - chosen_path: "automatic" if automatic models exist and are suitable, otherwise "interactive"
-        - selected_models: automatic model if available, else voxtell for interactive path
+        - selected_models: automatic model if available, or any of the available interactive models in the model bank
         - Return a valid JSON object following the schema. Do not include explanations.
         """
 

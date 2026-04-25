@@ -7,6 +7,7 @@ import PhaseSidebar from './PlaygroundCanvas/PhaseSidebar';
 import PlanningView from './PlaygroundCanvas/views/PlanningView';
 import LiteratureReviewView from './PlaygroundCanvas/views/LiteratureReviewView';
 import DataCohortView from './PlaygroundCanvas/views/DataCohortView';
+import SegmentationView from './PlaygroundCanvas/views/SegmentationView'
 import FeaturesView from './PlaygroundCanvas/views/FeaturesView';
 import ModelingView from './PlaygroundCanvas/views/ModelingView';
 import ReportingView from './PlaygroundCanvas/views/ReportingView';
@@ -36,6 +37,13 @@ export const RESEARCH_PHASES = [
         short_desc: 'Cohort Selection',
         icon: Database, 
         description: 'Inclusion Criteria, Cohort Selection & QA' 
+    },
+    {
+        id: 'segmentation',
+        label: 'Segmentation QC',
+        short_desc: 'Segmentation HITL',
+        icon: Scan,
+        description: 'Radiologists Approval of Segmentations'
     },
     { 
         id: 'features', 
@@ -165,6 +173,9 @@ export default function ResearchPlayground() {
             </div>
             <div className={`absolute inset-0 ${activePhase === 'data' ? '' : 'pointer-events-none invisible'}`}>
                 <DataCohortView populationData={populationData} segmentationData={segmentationData} />
+            </div>
+            <div className={`absolute inset-0 ${activePhase === 'segmentation' ? '' : 'pointer-events-none invisible'}`}>
+                <SegmentationView segmentationData={segmentationData} />
             </div>
             <div className={`absolute inset-0 ${activePhase === 'features' ? '' : 'pointer-events-none invisible'}`}>
                 <FeaturesView featuresData={featuresData} importanceData={importanceData} />

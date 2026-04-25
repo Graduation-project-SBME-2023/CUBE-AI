@@ -1,7 +1,9 @@
 import asyncio
 import logging
+from typing import Dict, Any, List
+
 from models.session import Session, SessionState
-from models.plans import ClinicalHypothesis, StudyPlan, StudyStep
+from models.plans import ClinicalHypothesis, StudyPlan, StudyStep, TaskMessage
 from .session_store import SessionStore
 from task_manager.task_manager import TaskManager
 from clients.backend_client import BackendClient
@@ -86,7 +88,7 @@ class SessionService:
 
     async def restart_execution(self, session_id: str, executor) -> None:
         logger.info(f"[{session_id}] Restarting execution")
-        session = self.store.require(session_id)
+        session = await self.store.require_async(session_id)
         await self.tasks.restart_execution(session, executor)
 
     # ------------------------------------------------------------------
@@ -287,3 +289,204 @@ class SessionService:
 
     def require_session(self, session_id: str) -> Session:
         return self.store.require(session_id)
+
+    # ------------------------------------------------------------------
+    # Execution sync — PipelineMonitor calls these
+    # ------------------------------------------------------------------
+
+    async def save_task_messages_for_plan(
+        self,
+        session: Session,
+        task_messages: List[TaskMessage],
+    ) -> List[Dict[str, Any]]:
+        """
+        Persist compiled task messages using step_id and then persist
+        context augmentation by task_id.
+        """
+        if session.plan is None:
+            logger.warning(
+                f"[{session.session_id}] save_task_messages_for_plan called with no plan"
+            )
+            return []
+
+        # Map module name -> step id for step-scoped persistence endpoint.
+        step_index: Dict[str, str] = {
+            (step.module or ""): str(step.id)
+            for step in session.plan.steps
+            if step.id and step.module
+        }
+
+        persisted: List[Dict[str, Any]] = []
+        task_only_saved = 0
+
+        for tm in task_messages:
+            step_id = step_index.get(tm.agent_id)
+            if not step_id:
+                logger.warning(
+                    f"[{session.session_id}] No step_id found for agent_id={tm.agent_id}; skipping task message persistence"
+                )
+                continue
+
+            tm_payload = tm.model_dump()
+            tm_result = await BackendClient.save_task_message_by_step_id(step_id, tm_payload)
+            if not tm_result:
+                continue
+
+            task_only_saved += 1
+
+            task_id = str(tm_result.get("task_id") or tm.task_id)
+            context_payload = (tm_payload.get("context_augmentation") or {})
+            context_result = await BackendClient.save_context_augmentation_by_task_id(
+                task_id,
+                context_payload,
+            )
+
+            if context_result is None:
+                logger.warning(
+                    f"[{session.session_id}] Context augmentation save failed for task_id={task_id}"
+                )
+                continue
+
+            persisted.append(
+                {
+                    "step_id": step_id,
+                    "task_id": task_id,
+                    "task_message": tm_result,
+                    "context_augmentation": context_result,
+                }
+            )
+
+        logger.info(
+            f"[{session.session_id}] Persisted {len(persisted)}/{len(task_messages)} task messages with context augmentation "
+            f"(task rows saved: {task_only_saved})"
+        )
+        return persisted
+
+    async def read_task_message_by_step_id(self, step_id: str) -> Dict[str, Any] | None:
+        """Read task message payload by plan step id."""
+        return await BackendClient.get_task_message_by_step_id(step_id)
+
+    async def read_context_augmentation_by_task_id(
+        self, task_id: str
+    ) -> Dict[str, Any] | None:
+        """Read context augmentation payload by task id."""
+        return await BackendClient.get_context_augmentation_by_task_id(task_id)
+
+    async def handle_pipeline_update(
+            self,
+            session: Session,
+            agents: list[dict],
+    ) -> None:
+        """
+        Persist agent status changes to their corresponding plan steps,
+        then broadcast to the frontend.
+
+        Maps agent name → plan step by `module` field.
+        Appends error text to the step's logs JSONB column if failed.
+        """
+        if session.plan is None:
+            logger.warning(
+                f"[{session.session_id}] handle_pipeline_update called with no plan"
+            )
+            await self._ws_send(
+                "pipeline_agent_status", {"agents": agents}, session_id=session.session_id
+            )
+            return
+
+        # Build a name→step_id index from the in-memory plan
+        step_index: dict[str, str] = {
+            s.module: str(s.id)
+            for s in session.plan.steps
+            if s.id and s.module
+        }
+
+        persist_tasks = []
+        for agent in agents:
+            step_id = step_index.get(agent["name"])
+            if not step_id:
+                continue  # agent not mapped to a plan step — skip
+
+            patch: dict = {"status": agent["status"]}
+
+            if agent.get("error"):
+                patch["logs"] = [
+                    {
+                        "timestamp": agent.get("finished_at"),
+                        "level": "error",
+                        "message": agent["error"],
+                    }
+                ]
+
+            persist_tasks.append(BackendClient.update_plan_step(step_id, patch))
+
+        results = await asyncio.gather(*persist_tasks, return_exceptions=True)
+
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(
+                    f"[{session.session_id}] Failed to persist step update: {result}"
+                )
+
+        await self._ws_send(
+            "pipeline_agent_status", {"agents": agents}, session_id=session.session_id
+        )
+
+    async def update_agent_tool_logs(self, session: Session, agent: str, log: Dict) -> None:
+        # use backend client first to update the logs of the specific step
+        # then update the frontend via ws
+
+        step_id = next(
+            step.id for step in session.plan.steps
+            if step.module == agent
+        )
+        body = {
+            "status": "RUNNING",
+            "log": log,
+        }
+        await BackendClient.update_plan_step(step_id, body)
+        await self._ws_send(log.get('type'), log.get('payload'), log.get('session_id'))
+
+    async def update_tool_views(self, session, agent, msg_type, payload):
+        step_id = next(
+            step.id for step in session.plan.steps
+            if step.module == agent
+        )
+
+        body = {
+            "status": "RUNNING",
+            "log": {
+                'type': msg_type,
+                'payload': payload,
+                'session_id': session.session_id
+            },
+        }
+
+        await BackendClient.update_plan_step(step_id, body)
+
+    async def recover_execution_state(self, session_id: str) -> dict | None:
+        """
+        Called by a route when the frontend reconnects.
+        Fetches persisted step statuses and returns a pipeline_agent_status
+        shaped payload the frontend can replay directly.
+        """
+        session = await self.store.get_async(session_id)
+        if session is None or session.plan is None:
+            return None
+
+        steps = await BackendClient.get_plan_steps(str(session.plan.id))
+        if not steps:
+            return None
+
+        agents = [
+            {
+                "name": s["module"],
+                "status": s["status"],
+                "started_at": None,  # not stored — only current status matters
+                "finished_at": None,
+                "error": s.get("logs", [{}])[-1].get("message") if s.get("logs") else None,
+            }
+            for s in steps
+            if s.get("module")
+        ]
+
+        return {"agents": agents}

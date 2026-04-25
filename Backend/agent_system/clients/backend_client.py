@@ -1,7 +1,10 @@
 import httpx
 import logging
-from models.plans import ClinicalHypothesis, StudyPlan
+from models.plans import ClinicalHypothesis, StudyPlan, StudyStep
 import os
+import json
+from uuid import UUID
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -19,22 +22,68 @@ class BackendClient:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_valid_uuid(value: str | None) -> bool:
+        if not value:
+            return False
+        try:
+            UUID(str(value))
+            return True
+        except (ValueError, TypeError, AttributeError):
+            return False
+
+    @staticmethod
+    def _stringify(value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            return json.dumps(value, ensure_ascii=False)
+        return str(value)
+
+    @classmethod
+    def _build_hypothesis_payload(cls, hypothesis: ClinicalHypothesis) -> dict:
+        # Match monailabel.schemas.hypothesis.HypothesisCreate exactly.
+        return {
+            "title": hypothesis.title or "Untitled Hypothesis",
+            "population": cls._stringify(hypothesis.population),
+            "intervention": cls._stringify(hypothesis.intervention),
+            "comparison": cls._stringify(hypothesis.comparison),
+            "outcome": cls._stringify(hypothesis.outcome),
+            "hypothesis": cls._stringify(hypothesis.hypothesis),
+            "clinical_context": cls._stringify(hypothesis.clinical_context),
+            "relationship_type": cls._stringify(hypothesis.relationship_type),
+            "state": cls._stringify(hypothesis.state) or "not_confirmed",
+        }
+
     @classmethod
     def _parse_hypothesis(cls, data: dict) -> ClinicalHypothesis:
         return ClinicalHypothesis(
-            id=data["id"],
-            state=data["state"],
-            title=data["title"],
-            population=data["population"],
-            intervention=data["intervention"],
-            outcome=data["outcome"],
-            clinical_context=data["clinical_context"],
-            relationship_type=data["relationship_type"],
-            comparison=data["comparison"],
+            id=str(data.get("id", "")),
+            state=data.get("state", "not_confirmed"),
+            title=data.get("title", ""),
+            population=data.get("population", ""),
+            intervention=data.get("intervention", ""),
+            outcome=data.get("outcome", ""),
+            clinical_context=data.get("clinical_context", ""),
+            relationship_type=data.get("relationship_type", ""),
+            comparison=data.get("comparison", ""),
             hypothesis=data.get("hypothesis", ""),
-            question=data.get("question", ""),
-            message=data.get("message"),
+            # These fields are not persisted in monailabel hypothesis schema.
+            question="",
+            message=None,
         )
+
+    @staticmethod
+    def _build_task_message_payload(task_message: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "phase": task_message.get("phase", ""),
+            "agent_title": task_message.get("agent_title", ""),
+            "instructions": task_message.get("instructions", ""),
+            "hypothesis_summary": task_message.get("hypothesis_summary", ""),
+            "payload": task_message.get("payload", {}) or {},
+        }
 
     # ------------------------------------------------------------------
     # Session
@@ -64,12 +113,19 @@ class BackendClient:
     async def create_hypothesis(
         cls, session_id: str, hypothesis: ClinicalHypothesis
     ) -> ClinicalHypothesis | None:
+        if not cls._is_valid_uuid(session_id):
+            logger.warning(
+                "Skipping hypothesis persistence: session_id is not a UUID (%r)",
+                session_id,
+            )
+            return None
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
                     f"{BASE_URL}/hypotheses/",
                     params={"chat_id": session_id},
-                    json=hypothesis.model_dump(),
+                    json=cls._build_hypothesis_payload(hypothesis),
                 )
                 response.raise_for_status()
                 return cls._parse_hypothesis(response.json())
@@ -82,11 +138,18 @@ class BackendClient:
     async def update_hypothesis(
         cls, hypothesis: ClinicalHypothesis
     ) -> ClinicalHypothesis | None:
+        if not cls._is_valid_uuid(hypothesis.id):
+            logger.warning(
+                "Skipping hypothesis update: hypothesis.id is not a UUID (%r)",
+                hypothesis.id,
+            )
+            return None
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.patch(
                     f"{BASE_URL}/hypotheses/{hypothesis.id}",
-                    json=hypothesis.model_dump(),
+                    json=cls._build_hypothesis_payload(hypothesis),
                 )
                 response.raise_for_status()
                 return cls._parse_hypothesis(response.json())
@@ -96,6 +159,13 @@ class BackendClient:
 
     @classmethod
     async def get_hypothesis_by_chat(cls, session_id: str) -> ClinicalHypothesis | None:
+        if not cls._is_valid_uuid(session_id):
+            logger.warning(
+                "Skipping hypothesis fetch: session_id is not a UUID (%r)",
+                session_id,
+            )
+            return None
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
@@ -115,16 +185,35 @@ class BackendClient:
 
     @classmethod
     async def create_plan(cls, plan: StudyPlan) -> StudyPlan | None:
+        if not cls._is_valid_uuid(plan.hypothesis_id):
+            logger.warning(
+                "Skipping plan persistence: hypothesis_id is not a UUID (%r)",
+                plan.hypothesis_id,
+            )
+            return None
+
+        payload = {
+            "state": plan.state,
+            "steps": [
+                {
+                    "title": step.title,
+                    "description": step.description,
+                    "module": step.module,
+                    "status": step.status,
+                    "logs": step.logs,
+                    "instructions": {},
+                }
+                for step in plan.steps
+            ],
+        }
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
                     f"{BASE_URL}/plans/with_steps",
                     params={"hypothesis_id": plan.hypothesis_id},
-                    json=plan.model_dump(),
+                    json=payload,
                 )
-                print(response.status_code)
-                print(response.text)
-                print(response.json())
                 response.raise_for_status()
                 return StudyPlan(**response.json())
             except httpx.HTTPError as e:
@@ -133,11 +222,33 @@ class BackendClient:
 
     @classmethod
     async def update_plan(cls, plan: StudyPlan) -> StudyPlan | None:
+        if not cls._is_valid_uuid(plan.id):
+            logger.warning(
+                "Skipping plan update: plan.id is not a UUID (%r)",
+                plan.id,
+            )
+            return None
+
+        payload = {
+            "state": plan.state,
+            "steps": [
+                {
+                    "title": step.title,
+                    "description": step.description,
+                    "module": step.module,
+                    "status": step.status,
+                    "logs": step.logs,
+                    "instructions": {},
+                }
+                for step in plan.steps
+            ],
+        }
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.patch(
                     f"{BASE_URL}/plans/{plan.id}/with_steps",
-                    json=plan.model_dump(),
+                    json=payload,
                 )
                 response.raise_for_status()
                 return StudyPlan(**response.json())
@@ -147,6 +258,13 @@ class BackendClient:
 
     @classmethod
     async def get_plan_by_hypothesis(cls, hypothesis_id: str) -> StudyPlan | None:
+        if not cls._is_valid_uuid(hypothesis_id):
+            logger.warning(
+                "Skipping plan fetch: hypothesis_id is not a UUID (%r)",
+                hypothesis_id,
+            )
+            return None
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
@@ -167,6 +285,136 @@ class BackendClient:
                 return StudyPlan(**first_plan)
             except httpx.HTTPError as e:
                 logger.error(f"Failed to fetch plan for hypothesis {hypothesis_id}: {e}")
+                return None
+
+    # ------------------------------------------------------------------
+    # Plan Steps (execution sync)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def update_plan_step(
+            cls, step_id: str, data: dict
+    ) -> dict | None:
+        """Patch a single plan step's status and/or logs."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.patch(
+                    f"{BASE_URL}/steps/{step_id}/status",
+                    json=data,
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to update plan step {step_id}: {e}")
+                return None
+
+    @classmethod
+    async def get_plan_steps(cls, plan_id: str) -> list[dict]:
+        """Fetch all steps for a plan — used to recover execution state."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{BASE_URL}/steps/plan/{plan_id}",
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to fetch steps for plan {plan_id}: {e}")
+                return []
+
+    # ------------------------------------------------------------------
+    # Task Messages + Context Augmentation
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def save_task_message_by_step_id(
+        cls,
+        step_id: str,
+        task_message: dict[str, Any],
+    ) -> dict | None:
+        """Create/update task message for a step_id."""
+        if not cls._is_valid_uuid(step_id):
+            logger.warning("Skipping task message save: step_id is not a UUID (%r)", step_id)
+            return None
+
+        payload = cls._build_task_message_payload(task_message)
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    f"{BASE_URL}/task-messages/step/{step_id}",
+                    json=payload,
+                )
+                if response.status_code == 409:
+                    response = await client.patch(
+                        f"{BASE_URL}/task-messages/step/{step_id}",
+                        json=payload,
+                    )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to save task message for step {step_id}: {e}")
+                return None
+
+    @classmethod
+    async def get_task_message_by_step_id(cls, step_id: str) -> dict | None:
+        """Read task message by step_id."""
+        if not cls._is_valid_uuid(step_id):
+            logger.warning("Skipping task message read: step_id is not a UUID (%r)", step_id)
+            return None
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(f"{BASE_URL}/task-messages/step/{step_id}")
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to read task message for step {step_id}: {e}")
+                return None
+
+    @classmethod
+    async def save_context_augmentation_by_task_id(
+        cls,
+        task_id: str,
+        context_augmentation: dict[str, Any],
+    ) -> dict | None:
+        """Update context augmentation by task_id."""
+        payload = {
+            "knowledge_summary": context_augmentation.get("knowledge_summary", ""),
+            "literature_findings": context_augmentation.get("literature_findings", ""),
+            "methodology_guidance": context_augmentation.get("methodology_guidance", ""),
+            "terminology": context_augmentation.get("terminology", ""),
+            "sources_guide": context_augmentation.get("sources_guide", ""),
+        }
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.patch(
+                    f"{BASE_URL}/context-augmentations/task/{task_id}",
+                    json=payload,
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to save context augmentation for task {task_id}: {e}")
+                return None
+
+    @classmethod
+    async def get_context_augmentation_by_task_id(cls, task_id: str) -> dict | None:
+        """Read context augmentation by task_id."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{BASE_URL}/context-augmentations/task/{task_id}"
+                )
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to read context augmentation for task {task_id}: {e}")
                 return None
 
 

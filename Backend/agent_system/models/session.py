@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 import asyncio
 from enum import Enum, auto
 from typing import Optional, Dict, Any
+from services.pipeline_monitor import PipelineMonitor
 
 from models.plans import ClinicalHypothesis, StudyPlan
 
@@ -25,6 +26,8 @@ class Session:
     execution_task: Optional[asyncio.Task] = field(default=None)
 
     state: SessionState = field(default=SessionState.IDLE)
+
+    execution_monitor: PipelineMonitor | None = field(init=False, default=None)
 
     # Don't use default_factory for asyncio primitives
     pause_event: asyncio.Event = field(default=None)
