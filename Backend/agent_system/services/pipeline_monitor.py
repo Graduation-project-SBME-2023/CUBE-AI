@@ -263,7 +263,7 @@ class PipelineMonitor:
     async def on_tool_event(self, event: ToolEvent) -> None:
         agent = event.source
         msg_type = "tool_update"
-        payload = event.model_dump()
+        payload = event.model_dump(mode="json")
         session_id = event.session_id
 
         log = {
@@ -275,7 +275,6 @@ class PipelineMonitor:
         # send to both front and db via session_service
 
     async def _broadcast(self):
-        # TODO: Expand this to handle logs as well (tool logs, view emitters, final outputs...)
         agents = [
             {
                 "name": a.name,
