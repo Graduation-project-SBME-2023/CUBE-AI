@@ -7,7 +7,7 @@ import httpx
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
 from tool_logging import ToolEvent, log_tool_state, TextPayload
 
-base_url = os.envrion.get("MONAI_URL", "http://localhost:8000")
+base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
 
 
 @mcp.tool()
