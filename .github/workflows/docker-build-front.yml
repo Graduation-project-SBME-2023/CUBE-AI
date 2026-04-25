@@ -35,8 +35,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/webapp:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/webapp:${{ github.sha }}
+            ${{ secrets.CUBE_AI_DOCKERHUB_USERNAME }}/webapp:latest
+            ${{ secrets.CUBE_AI_DOCKERHUB_USERNAME }}/webapp:${{ github.sha }}
           # Layer cache speeds up repeat builds significantly
           cache-from: type=gha
           cache-to: type=gha,mode=max
