@@ -34,7 +34,7 @@ WORKDIR /usr/src/app
 COPY ./ /usr/src/app/
 
 # For arm builds since parcel doesn't have prebuilt binaries for arm yet
-RUN apt-get update && apt-get install -y build-essential python3
+RUN apt-get update && apt-get install -y build-essential python3 git
 
 
 # ADD . /usr/src/app/
