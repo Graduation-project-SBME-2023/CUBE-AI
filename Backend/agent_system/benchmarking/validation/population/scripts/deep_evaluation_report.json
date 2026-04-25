@@ -1,0 +1,266 @@
+{
+    "evaluation_metadata": {
+        "total_cases_in_db": 420,
+        "models_tested": [
+            "deepseek-v3.1:671b-cloud"
+        ],
+        "timestamp": "2026-04-25 04:15:18"
+    },
+    "model_results": {
+        "deepseek-v3.1:671b-cloud": {
+            "papers": {
+                "paper_1_cervical_lymph": {
+                    "execution_time_seconds": 41.64,
+                    "total_unique_selected": 69,
+                    "metrics": {
+                        "precision": 0.8955,
+                        "recall": 1.0,
+                        "f1_score": 0.9449,
+                        "specificity": 0.9806,
+                        "jaccard_index_iou": 0.8955,
+                        "confusion_matrix": {
+                            "true_positives": 60,
+                            "false_positives": 7,
+                            "true_negatives": 353,
+                            "false_negatives": 0
+                        },
+                        "false_positive_sources": {
+                            "paper_4_breast_nml": 6,
+                            "negative_control": 1
+                        }
+                    },
+                    "qualitative_extraction": {
+                        "golden_inclusion": [
+                            "Enhanced arterial phase CT images of the neck",
+                            "Single or multiple enlarged lymph nodes with shortest diameter > 1cm on CT",
+                            "Pathology confirmed by surgery, biopsy, or clinical follow-up"
+                        ],
+                        "agent_inclusion": [
+                            "Patients with cervical lymph node imaging studies",
+                            "Studies showing enlarged cervical lymph nodes",
+                            "Cross-sectional imaging modalities (CT, MRI, ultrasound)",
+                            "Adults (age \u2265 18 years)"
+                        ],
+                        "golden_exclusion": [
+                            "Lesion reexamination after treatment",
+                            "CT images with artefacts affecting observation/measurement"
+                        ],
+                        "agent_exclusion": [
+                            "Pediatric patients (age < 18 years)",
+                            "Studies without visible cervical lymph nodes",
+                            "Non-cross-sectional imaging (e.g., plain films)",
+                            "Studies with significant artifacts affecting lymph node assessment",
+                            "Patients with known head and neck malignancies (to focus on benign/unknown etiology)",
+                            "Post-treatment or post-surgical cases"
+                        ]
+                    }
+                },
+                "paper_2_rectal_cancer": {
+                    "execution_time_seconds": 52.75,
+                    "total_unique_selected": 100,
+                    "metrics": {
+                        "precision": 0.6,
+                        "recall": 1.0,
+                        "f1_score": 0.75,
+                        "specificity": 0.8889,
+                        "jaccard_index_iou": 0.6,
+                        "confusion_matrix": {
+                            "true_positives": 60,
+                            "false_positives": 40,
+                            "true_negatives": 320,
+                            "false_negatives": 0
+                        },
+                        "false_positive_sources": {
+                            "paper_1_cervical_lymph": 24,
+                            "paper_3_lung_adenocarcinoma": 9,
+                            "negative_control": 7
+                        }
+                    },
+                    "qualitative_extraction": {
+                        "golden_inclusion": [
+                            "Histopathological confirmation of malignant rectal tumors with no prior antitumor treatment",
+                            "Performance of contrast-enhanced transrectal ultrasound (CETRUS) stored in standardized format",
+                            "Completion of contrast-enhanced CT of chest/abdomen/pelvis and liver ultrasound",
+                            "No previous history of other malignancies"
+                        ],
+                        "agent_inclusion": [
+                            "Rectal cancer patients",
+                            "Contrast-enhanced transrectal ultrasound imaging",
+                            "Patients with documented distant metastasis status",
+                            "No previous local or systemic treatment for rectal cancer",
+                            "Images with sufficient technical quality for radiomics analysis"
+                        ],
+                        "golden_exclusion": [
+                            "Poor-quality ultrasonographic images",
+                            "Multiple primary colorectal cancers",
+                            "Incomplete clinical data"
+                        ],
+                        "agent_exclusion": [
+                            "Non-rectal cancer diagnoses",
+                            "Non-contrast ultrasound studies",
+                            "Patients with incomplete metastasis status documentation",
+                            "Previous rectal cancer treatment (chemotherapy, radiation, surgery)",
+                            "Images with significant artifacts affecting analysis",
+                            "Post-treatment surveillance imaging"
+                        ]
+                    }
+                },
+                "paper_3_lung_adenocarcinoma": {
+                    "execution_time_seconds": 62.45,
+                    "total_unique_selected": 100,
+                    "metrics": {
+                        "precision": 0.6211,
+                        "recall": 0.9833,
+                        "f1_score": 0.7613,
+                        "specificity": 0.9,
+                        "jaccard_index_iou": 0.6146,
+                        "confusion_matrix": {
+                            "true_positives": 59,
+                            "false_positives": 36,
+                            "true_negatives": 324,
+                            "false_negatives": 1
+                        },
+                        "false_positive_sources": {
+                            "paper_2_rectal_cancer": 27,
+                            "negative_control": 9
+                        }
+                    },
+                    "qualitative_extraction": {
+                        "golden_inclusion": [
+                            "Complete surgical resection and pathologically confirmed invasive adenocarcinoma (IAC)",
+                            "Pathology reports containing complete percentages of each High-Grade Pattern (HGP)",
+                            "Chest CT scans performed 2 weeks prior to surgery with DICOM files available",
+                            "Clinical staging of stage IA"
+                        ],
+                        "agent_inclusion": [
+                            "Pathologically confirmed stage IA lung adenocarcinoma",
+                            "CT scans performed prior to surgical resection",
+                            "Visible pulmonary nodule(s) consistent with adenocarcinoma",
+                            "Slice thickness \u2264 1.5mm for adequate radiomic feature extraction",
+                            "Non-contrast or contrast-enhanced CT scans (portal venous phase if enhanced)",
+                            "Patients age 18 years or older"
+                        ],
+                        "golden_exclusion": [
+                            "Variant adenocarcinoma (mucinous, colloid, etc.) or mixed lung carcinoma",
+                            "Multiple primary invasive lung adenocarcinoma",
+                            "Poor image quality due to severe respiratory artefacts",
+                            "CT image layer thickness > 2.5 mm",
+                            "Preoperative history of radiotherapy and chemotherapy"
+                        ],
+                        "agent_exclusion": [
+                            "Previous lung cancer treatment (chemotherapy, radiation, surgery)",
+                            "Significant motion artifacts affecting nodule evaluation",
+                            "Nodule size < 6mm or > 30mm (to exclude ground-glass opacities and large tumors)",
+                            "Presence of multiple primary lung cancers",
+                            "Severe emphysema or interstitial lung disease affecting image interpretation",
+                            "Metastatic disease to lungs from other primary sites"
+                        ]
+                    }
+                },
+                "paper_4_breast_nml": {
+                    "execution_time_seconds": 53.1,
+                    "total_unique_selected": 147,
+                    "metrics": {
+                        "precision": 0.411,
+                        "recall": 1.0,
+                        "f1_score": 0.5825,
+                        "specificity": 0.7611,
+                        "jaccard_index_iou": 0.411,
+                        "confusion_matrix": {
+                            "true_positives": 60,
+                            "false_positives": 86,
+                            "true_negatives": 274,
+                            "false_negatives": 0
+                        },
+                        "false_positive_sources": {
+                            "paper_5_breast_aln": 54,
+                            "negative_control": 23,
+                            "paper_2_rectal_cancer": 9
+                        }
+                    },
+                    "qualitative_extraction": {
+                        "golden_inclusion": [
+                            "Ultrasound diagnosis of breast Non-Mass Lesions (NML)",
+                            "Breast density confirmed by ultrasound or mammography",
+                            "Complete clinical data and definite pathological results via biopsy or resection"
+                        ],
+                        "agent_inclusion": [
+                            "Female patients with dense breast tissue (BI-RADS density categories C or D)",
+                            "Non-mass lesions on breast ultrasound",
+                            "Patients with confirmed benign or malignant diagnosis (biopsy-proven)",
+                            "Complete ultrasound imaging available including radiomic feature extraction capability"
+                        ],
+                        "golden_exclusion": [
+                            "Preoperative history of neoadjuvant chemotherapy, radiotherapy, or endocrine therapy",
+                            "Poor ultrasonic image quality, artifacts, or noise",
+                            "Lesions cannot be measured on ultrasound images"
+                        ],
+                        "agent_exclusion": [
+                            "Male patients",
+                            "Patients with breast implants or previous breast surgery",
+                            "Mass lesions (focal masses with defined borders)",
+                            "Insufficient image quality for radiomic analysis",
+                            "Patients without definitive pathological diagnosis",
+                            "Non-dense breast tissue (BI-RADS A or B density)"
+                        ]
+                    }
+                },
+                "paper_5_breast_aln": {
+                    "execution_time_seconds": 52.41,
+                    "total_unique_selected": 153,
+                    "metrics": {
+                        "precision": 0.3947,
+                        "recall": 1.0,
+                        "f1_score": 0.566,
+                        "specificity": 0.7444,
+                        "jaccard_index_iou": 0.3947,
+                        "confusion_matrix": {
+                            "true_positives": 60,
+                            "false_positives": 92,
+                            "true_negatives": 268,
+                            "false_negatives": 0
+                        },
+                        "false_positive_sources": {
+                            "paper_4_breast_nml": 60,
+                            "negative_control": 23,
+                            "paper_2_rectal_cancer": 9
+                        }
+                    },
+                    "qualitative_extraction": {
+                        "golden_inclusion": [
+                            "Female patients aged > 18 years",
+                            "Histologically confirmed staged I-III invasive breast cancer",
+                            "Treated with surgery and SLNB or axillary lymph node dissection (ALND)",
+                            "Pathologically confirmed ALN status"
+                        ],
+                        "agent_inclusion": [
+                            "Female patients",
+                            "Diagnosed with breast cancer",
+                            "Ultrasound examinations of breast and axilla",
+                            "Examinations performed for lymph node assessment",
+                            "Clinical or pathological documentation available",
+                            "Age 18 years or older"
+                        ],
+                        "golden_exclusion": [
+                            "Preoperative chemotherapy or endocrine therapy",
+                            "Metastatic breast cancer",
+                            "Pregnant or lactating",
+                            "Nipple discharge or skin diseases",
+                            "Lost to follow-up or incomplete clinicopathological data"
+                        ],
+                        "agent_exclusion": [
+                            "Male patients",
+                            "No breast cancer diagnosis",
+                            "Ultrasound studies without axillary assessment",
+                            "Prior axillary surgery or intervention",
+                            "Insufficient clinical documentation",
+                            "Contrast-enhanced ultrasound studies",
+                            "Studies with significant artifacts impairing interpretation"
+                        ]
+                    }
+                }
+            },
+            "overall_macro_f1": 0.7209
+        }
+    }
+}
