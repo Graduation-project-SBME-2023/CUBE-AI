@@ -318,6 +318,12 @@ class SessionService:
     def require_session(self, session_id: str) -> Session:
         return self.store.require(session_id)
 
+    async def async_get_session(self, session_id: str) -> Session | None:
+        return await self.store.get_async(session_id)
+
+    async def async_require_session(self, session_id: str) -> Session | None:
+        return await self.store.require_async(session_id)
+
     # ------------------------------------------------------------------
     # Execution sync — PipelineMonitor calls these
     # ------------------------------------------------------------------
