@@ -346,6 +346,84 @@ export default function PlaygroundCanvas({
       if (type === 'run_finished') {
         updateCurrentAgent('run_finished');
       }
+      if (type === 'pipeline_agent_status') {
+        console.log('[WS] pipeline_agent_status RAW payload:', payload);
+
+        const agents: Array<{
+          name: string;
+          status: 'RUNNING' | 'COMPLETED' | 'PENDING' | string;
+          started_at: string | null;
+          finished_at: string | null;
+        }> = Array.isArray(payload.agents) ? payload.agents : [];
+
+        console.log('[WS] Parsed agents:', agents);
+
+        // Build a quick lookup so we only iterate nodes once
+        const statusMap = new Map(
+          agents
+            .filter(a => a.status === 'RUNNING' || a.status === 'COMPLETED')
+            .map(a => [a.name, a])
+        );
+
+        console.log('[WS] Filtered statusMap entries:', Array.from(statusMap.entries()));
+
+        if (statusMap.size === 0) {
+          console.warn('[WS] No RUNNING or COMPLETED agents found.');
+          return;
+        }
+
+        setNodes(prev => {
+          console.log('[WS] Previous nodes:', prev);
+
+          const updatedNodes = prev.map(node => {
+            if (node.type !== 'agent') return node;
+
+            const agentData = node.data as AgentNodeData;
+            const key = agentData.name ?? agentData.title;
+
+            console.log('[WS] Checking node:', {
+              nodeId: node.id,
+              key,
+              nodeData: agentData,
+            });
+
+            const match = statusMap.get(node.id);
+
+            if (!match) {
+              console.log('[WS] No match found for:', key);
+              return node;
+            }
+
+            console.log('[WS] Match found:', {
+              key,
+              match,
+            });
+
+            const nextStatus =
+              match.status === 'RUNNING' ? 'active' : 'completed';
+
+            const updatedNode = {
+              ...node,
+              data: {
+                ...node.data,
+                status: nextStatus,
+                started_at: match.started_at ?? (node.data as any).started_at,
+                isExpanded: nextStatus === 'active',
+              },
+            };
+
+            console.log('[WS] Updated node:', updatedNode);
+
+            return updatedNode;
+          });
+
+          console.log('[WS] Updated nodes result:', updatedNodes);
+
+          return updatedNodes;
+        });
+
+        return;
+      }
     };
 
     const handleStatus = (status: boolean) => setIsConnected(status);
