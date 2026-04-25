@@ -82,11 +82,15 @@ class SegmentationModule:
 
 
     async def run(self, input_data: Union[str, Dict[str, Any]], workspace_dir: str):
+        # input data is config_path
         if isinstance(input_data, str):
+            state_path = input_data.replace('config', 'state')
+            with open(state_path, 'r') as f:
+                state = json.load(f)
             with open(input_data, "r") as f:
                 input_data = json.load(f)
 
-        hypothesis: str = input_data["hypothesis"]
+        hypothesis: str = state["hypothesis"]["hypothesis"]
         datasetlist: List[str] = input_data["datasetlist"]
         #1. plan
         plan = await run_planner(self.PlannerAgent,hypothesis)

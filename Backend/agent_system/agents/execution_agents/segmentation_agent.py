@@ -117,7 +117,7 @@ class SegmentationAgent(AssistantAgent):
                 f"Failed to initialize MCP tools from {mcp_server_path}"
             ) from exc
         desired_mcp_tools = [
-            "read_agent_task_context",
+            # "read_agent_task_context",
             "scratchpad_register_agent",
             "scratchpad_write_summary",
             "scratchpad_set_status",
