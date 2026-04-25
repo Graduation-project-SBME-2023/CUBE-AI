@@ -161,7 +161,7 @@ class voxtell(TaskConfig):
     def __download_text_encoding_checkpoints(self, model_name, download_dir):
         
         download_path = snapshot_download(
-        repo_id="hiyouga/Qwen3-4B-Embedding",
-        allow_patterns=[f"{model_name}/*", "*.json"],
+        repo_id="Qwen/Qwen3-Embedding-4B",
+        ignore_patterns=["*.gguf"],
         local_dir=download_dir
             )
