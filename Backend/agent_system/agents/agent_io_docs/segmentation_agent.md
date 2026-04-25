@@ -14,7 +14,7 @@ Runs ROI segmentation workflow and prepares mask outputs for feature extraction.
 - Internally runs `test_module(workspace_folder)` that executes segmentation module on workspace config.
 
 ## Tools used
-- Function tool:
+- Function tool: 
   - `test_module`
 - Scratchpad tools:
   - `scratchpad_register_agent`
