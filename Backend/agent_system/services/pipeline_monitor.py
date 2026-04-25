@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, Dict, Any
 import aiofiles
 import json
 
@@ -22,12 +22,20 @@ if TYPE_CHECKING:
 
 # ── Agent-to-view mapping for tool result emission ────────────────────────────
 
-def _parse_tool_content(content: str) -> dict:
-    """Attempt to parse tool result content as JSON."""
+def _parse_tool_content(content: str) -> Dict[str, Any]:
+    """Attempt to parse tool result content as JSON, always returning a dict."""
     if not content:
         return {}
+
     try:
-        return json.loads(content)
+        parsed = json.loads(content)
+
+        # Enforce dict output
+        if isinstance(parsed, dict):
+            return parsed
+        else:
+            return {"data": parsed}
+
     except (json.JSONDecodeError, TypeError):
         return {"raw": str(content)[:2000]}
 
@@ -60,6 +68,7 @@ async def _emit_tool_result_to_view(
             data = payload
             await emit_population_output(payload, session_id)
         elif tool_name in ("generate_targets", "get_patient", "get_volume"):
+            print(type(parsed))
             data = {
                 "tool": tool_name,
                 "status": parsed.get("status", "completed"),
@@ -209,7 +218,7 @@ class PipelineMonitor:
         if self._last_active and self._last_active != source:
             await self._mark_completed(self._last_active)
 
-        if agent.status == AgentStatus.PENDING:
+        if agent.status in (AgentStatus.PENDING, AgentStatus.FAILED):
             agent.status = AgentStatus.RUNNING
             agent.started_at = datetime.now()
             self._last_active = source
@@ -221,7 +230,7 @@ class PipelineMonitor:
             return
 
         lowered = content.lower()
-        is_error = any(kw in lowered for kw in ["error", "exception", "failed", "traceback", "warning"])
+        is_error = any(kw in lowered for kw in ["error", "exception", "failed", "traceback"])
 
         if is_error:
             agent = self.agents[source]
@@ -231,10 +240,14 @@ class PipelineMonitor:
             self._last_active = source
             await self._broadcast()
 
+        print("could be emitting tool result to view")
+
         msg_type, data = await _emit_tool_result_to_view(
             source, tool_name, content,
             self.session.session_id, workspace_folder
         )
+
+        print("finished emitting tool result to view")
 
         await self.on_agent_active(source)
         await self.session_service.update_tool_views(self.session, source, msg_type, data)
