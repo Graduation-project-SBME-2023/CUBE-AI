@@ -7,16 +7,19 @@ import httpx
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
 from tool_logging import ToolEvent, log_tool_state, TextPayload
 
+base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+
 
 @mcp.tool()
 async def list_models():
 
-    payload = TextPayload(message="Fetching models info")
-    log_tool_state(ToolEvent("tool_started", "text", payload))
+    payload = TextPayload(message=f'Fetching models info')
+    start_event = ToolEvent('tool_started', 'text', payload)
+    log_tool_state(start_event)
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get("http://localhost:8000/models/")
+            response = await client.get(f"{base_url}/models/")
             response.raise_for_status()
             models = response.json()
     except Exception as e:

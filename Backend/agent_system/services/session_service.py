@@ -106,7 +106,9 @@ class SessionService:
 
         results = await asyncio.gather(
             BackendClient.update_session(session.session_id, {"state": state.name}),
-            self._ws_send("state_update", {"state": state.name}, session_id=session.session_id),
+            self._ws_send(
+                "state_update", {"state": state.name}, session_id=session.session_id
+            ),
             return_exceptions=True,
         )
 
@@ -133,12 +135,16 @@ class SessionService:
         """
         existing = session.hypothesis
         action = "update" if existing is not None else "create"
-        logger.info(f"[{session.session_id}] Hypothesis {action} — title: {hypo_data.get('title', '?')!r}")
+        logger.info(
+            f"[{session.session_id}] Hypothesis {action} — title: {hypo_data.get('title', '?')!r}"
+        )
 
         try:
             if existing is None:
                 hypothesis = ClinicalHypothesis(**hypo_data)
-                result = await BackendClient.create_hypothesis(session.session_id, hypothesis)
+                result = await BackendClient.create_hypothesis(
+                    session.session_id, hypothesis
+                )
             else:
                 updated = existing.model_copy(update=hypo_data)
                 result = await BackendClient.update_hypothesis(updated)
@@ -152,8 +158,14 @@ class SessionService:
                 return None
 
             session.hypothesis = result
-            logger.debug(f"[{session.session_id}] Hypothesis {action}d [id={result.id}]")
-            await self._ws_send("hypothesis", session.hypothesis.model_dump(), session_id=session.session_id)
+            logger.debug(
+                f"[{session.session_id}] Hypothesis {action}d [id={result.id}]"
+            )
+            await self._ws_send(
+                "hypothesis",
+                session.hypothesis.model_dump(),
+                session_id=session.session_id,
+            )
             return result
 
         except Exception as e:
@@ -226,7 +238,9 @@ class SessionService:
                 }
                 for s in result.steps
             ]
-            await self._ws_send("plan", {"steps": ui_steps}, session_id=session.session_id)
+            await self._ws_send(
+                "plan", {"steps": ui_steps}, session_id=session.session_id
+            )
             return result
 
         except Exception as e:
@@ -249,13 +263,21 @@ class SessionService:
                 if result:
                     session.hypothesis = result
                 else:
-                    logger.error(f"[{session.session_id}] Failed to confirm hypothesis in backend")
+                    logger.error(
+                        f"[{session.session_id}] Failed to confirm hypothesis in backend"
+                    )
             except Exception as e:
-                logger.exception(f"[{session.session_id}] Error confirming hypothesis: {e}")
+                logger.exception(
+                    f"[{session.session_id}] Error confirming hypothesis: {e}"
+                )
         else:
-            logger.warning(f"[{session.session_id}] confirm_hypothesis called with no hypothesis on session")
+            logger.warning(
+                f"[{session.session_id}] confirm_hypothesis called with no hypothesis on session"
+            )
 
-        await self._ws_send("msg", "Hypothesis Confirmed.", session_id=session.session_id)
+        await self._ws_send(
+            "msg", "Hypothesis Confirmed.", session_id=session.session_id
+        )
 
     async def confirm_plan(self, session: Session) -> None:
         """
@@ -271,14 +293,20 @@ class SessionService:
                 if result:
                     session.plan = result
                 else:
-                    logger.error(f"[{session.session_id}] Failed to confirm plan in backend")
+                    logger.error(
+                        f"[{session.session_id}] Failed to confirm plan in backend"
+                    )
             except Exception as e:
                 logger.exception(f"[{session.session_id}] Error confirming plan: {e}")
         else:
-            logger.warning(f"[{session.session_id}] confirm_plan called with no plan on session")
+            logger.warning(
+                f"[{session.session_id}] confirm_plan called with no plan on session"
+            )
 
         await self.update_state(session, SessionState.READY)
-        await self._ws_send("msg", "Study Plan Confirmed.", session_id=session.session_id)
+        await self._ws_send(
+            "msg", "Study Plan Confirmed.", session_id=session.session_id
+        )
 
     # ------------------------------------------------------------------
     # Queries — routes call these
@@ -289,6 +317,12 @@ class SessionService:
 
     def require_session(self, session_id: str) -> Session:
         return self.store.require(session_id)
+
+    async def async_get_session(self, session_id: str) -> Session | None:
+        return await self.store.get_async(session_id)
+
+    async def async_require_session(self, session_id: str) -> Session | None:
+        return await self.store.require_async(session_id)
 
     # ------------------------------------------------------------------
     # Execution sync — PipelineMonitor calls these
@@ -328,14 +362,16 @@ class SessionService:
                 continue
 
             tm_payload = tm.model_dump()
-            tm_result = await BackendClient.save_task_message_by_step_id(step_id, tm_payload)
+            tm_result = await BackendClient.save_task_message_by_step_id(
+                step_id, tm_payload
+            )
             if not tm_result:
                 continue
 
             task_only_saved += 1
 
             task_id = str(tm_result.get("task_id") or tm.task_id)
-            context_payload = (tm_payload.get("context_augmentation") or {})
+            context_payload = tm_payload.get("context_augmentation") or {}
             context_result = await BackendClient.save_context_augmentation_by_task_id(
                 task_id,
                 context_payload,
@@ -373,9 +409,9 @@ class SessionService:
         return await BackendClient.get_context_augmentation_by_task_id(task_id)
 
     async def handle_pipeline_update(
-            self,
-            session: Session,
-            agents: list[dict],
+        self,
+        session: Session,
+        agents: list[dict],
     ) -> None:
         """
         Persist agent status changes to their corresponding plan steps,
@@ -389,15 +425,15 @@ class SessionService:
                 f"[{session.session_id}] handle_pipeline_update called with no plan"
             )
             await self._ws_send(
-                "pipeline_agent_status", {"agents": agents}, session_id=session.session_id
+                "pipeline_agent_status",
+                {"agents": agents},
+                session_id=session.session_id,
             )
             return
 
         # Build a name→step_id index from the in-memory plan
         step_index: dict[str, str] = {
-            s.module: str(s.id)
-            for s in session.plan.steps
-            if s.id and s.module
+            s.module: str(s.id) for s in session.plan.steps if s.id and s.module
         }
 
         persist_tasks = []
@@ -431,33 +467,29 @@ class SessionService:
             "pipeline_agent_status", {"agents": agents}, session_id=session.session_id
         )
 
-    async def update_agent_tool_logs(self, session: Session, agent: str, log: Dict) -> None:
+    async def update_agent_tool_logs(
+        self, session: Session, agent: str, log: Dict
+    ) -> None:
         # use backend client first to update the logs of the specific step
         # then update the frontend via ws
 
-        step_id = next(
-            step.id for step in session.plan.steps
-            if step.module == agent
-        )
+        step_id = next(step.id for step in session.plan.steps if step.module == agent)
         body = {
             "status": "RUNNING",
             "log": log,
         }
         await BackendClient.update_plan_step(step_id, body)
-        await self._ws_send(log.get('type'), log.get('payload'), log.get('session_id'))
+        await self._ws_send(log.get("type"), log.get("payload"), log.get("session_id"))
 
     async def update_tool_views(self, session, agent, msg_type, payload):
-        step_id = next(
-            step.id for step in session.plan.steps
-            if step.module == agent
-        )
+        step_id = next(step.id for step in session.plan.steps if step.module == agent)
 
         body = {
             "status": "RUNNING",
             "log": {
-                'type': msg_type,
-                'payload': payload,
-                'session_id': session.session_id
+                "type": msg_type,
+                "payload": payload,
+                "session_id": session.session_id,
             },
         }
 
@@ -483,10 +515,16 @@ class SessionService:
                 "status": s["status"],
                 "started_at": None,  # not stored — only current status matters
                 "finished_at": None,
-                "error": s.get("logs", [{}])[-1].get("message") if s.get("logs") else None,
+                "error": s.get("logs", [{}])[-1].get("message")
+                if s.get("logs")
+                else None,
             }
             for s in steps
             if s.get("module")
         ]
 
         return {"agents": agents}
+
+    async def get_hypothesis_history(self, limit: int = 20) -> list[dict]:
+        """Fetch hypothesis history from the backend API."""
+        return await BackendClient.get_hypothesis_history(limit)

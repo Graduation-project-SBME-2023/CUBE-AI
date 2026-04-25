@@ -88,8 +88,31 @@ const styles = {
 // ==========================================
 const AgenticHome = ({ onNavigate, onBack }) => {
   const [hypothesis, setHypothesis] = useState('');
+  const [history, setHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
   const textareaRef = useRef(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const response = await fetch('http://localhost:8150/hypothesis-history?limit=20');
+        if (response.ok) {
+          const data = await response.json();
+          setHistory(data);
+          console.log('[HypothesisFlow][AgenticHome] Fetched history', {
+            count: data.length,
+            sample: data.slice(0, 3),
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch history:', err);
+      } finally {
+        setLoadingHistory(false);
+      }
+    };
+    fetchHistory();
+  }, []);
 
   // Auto-resize textarea as content grows
   useEffect(() => {
@@ -166,30 +189,25 @@ const AgenticHome = ({ onNavigate, onBack }) => {
   };
 
   const handleProjectClick = project => {
-    // Use the prop to navigate
+    // Navigate to the playground with the session_id
     if (onNavigate) {
-      onNavigate('/cube-workflow', { state: { projectId: project.id } });
+      onNavigate('/playground', { state: { session_id: project.id } });
     }
   };
 
-  const MOCK_HISTORY = [
-    {
-      id: 1,
-      title: 'Liver Tumor Segmentation Analysis',
-      date: '2 hours ago',
-      status: 'In Progress',
-    },
-    { id: 2, title: 'Brain MRI Anomaly Detection v2', date: 'Yesterday', status: 'Completed' },
-    {
-      id: 3,
-      title: 'Chest X-Ray Pneumonia Classification',
-      date: '3 days ago',
-      status: 'Completed',
-    },
-    { id: 4, title: 'Cardiac MRI Flow Dynamics', date: 'Last week', status: 'Draft' },
-    { id: 5, title: 'Spine Fracture Localization', date: 'Last week', status: 'Completed' },
-    { id: 6, title: 'Retinal Scan Diabetic Retinopathy', date: '2 weeks ago', status: 'Draft' },
-  ];
+  // Helper to format date
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'Unknown';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+    if (diffHours < 24) return `${Math.floor(diffHours)} hours ago`;
+    const diffDays = diffHours / 24;
+    if (diffDays < 2) return 'Yesterday';
+    if (diffDays < 7) return `${Math.floor(diffDays)} days ago`;
+    return 'Last week';
+  };
 
   return (
     <div className={styles.container}>
@@ -290,27 +308,32 @@ const AgenticHome = ({ onNavigate, onBack }) => {
         </div>
 
         <div className={styles.projectsGrid}>
-          {/* History Items */}
-          {MOCK_HISTORY.map(project => (
-            <div
-              key={project.id}
-              onClick={() => handleProjectClick(project)}
-            >
-              <Card
-                title={project.title}
-                description={`Edited ${project.date}`}
-                icon={
-                  <BotIcon
-                    size={24}
-                    className="text-[#5acce6] opacity-80"
-                  />
-                }
-                ctaText={project.status}
+          {loadingHistory ? (
+            <div className="text-[#566a84]">Loading...</div>
+          ) : history.length === 0 ? (
+            <div className="text-[#566a84]">No recent hypotheses</div>
+          ) : (
+            history.map(project => (
+              <div
+                key={project.id}
                 onClick={() => handleProjectClick(project)}
-                className="group"
-              />
-            </div>
-          ))}
+              >
+                <Card
+                  title={project.title}
+                  description={`Edited ${formatDate(project.date)}`}
+                  icon={
+                    <BotIcon
+                      size={24}
+                      className="text-[#5acce6] opacity-80"
+                    />
+                  }
+                  ctaText={project.status}
+                  onClick={() => handleProjectClick(project)}
+                  className="group"
+                />
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

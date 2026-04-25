@@ -240,14 +240,10 @@ class PipelineMonitor:
             self._last_active = source
             await self._broadcast()
 
-        print("could be emitting tool result to view")
-
         msg_type, data = await _emit_tool_result_to_view(
             source, tool_name, content,
             self.session.session_id, workspace_folder
         )
-
-        print("finished emitting tool result to view")
 
         await self.on_agent_active(source)
         await self.session_service.update_tool_views(self.session, source, msg_type, data)

@@ -42,12 +42,10 @@ async def test_module(workspace_folder: str | None = None):
         # Initialize
         if workspace_folder is None:
             return RuntimeError("Please specify a workspace folder")
-        session_id = (
-            workspace_folder.split("/")[-1][10:]
-            if workspace_folder.split("/")[-1][10:]
-            else None
-        )  # replace this ugly line
-        agent = SegmentationModule(session_id)
+
+        folder_name = Path(workspace_folder).name
+        session_id = folder_name.removeprefix("workspace_")
+        agent = SegmentationModule(session_id=session_id)
         await agent.initialize()
 
         # current_file = Path(__file__)

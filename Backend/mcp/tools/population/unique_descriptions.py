@@ -1,8 +1,10 @@
 import httpx
 from .. import mcp
+import os
 
 # Assuming your mcp instance is imported here
-# from your_mcp_server import mcp 
+# from your_mcp_server import mcp
+base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
 
 @mcp.tool()
 async def get_unique_series_descriptions() -> dict:
@@ -16,7 +18,7 @@ async def get_unique_series_descriptions() -> dict:
     async with httpx.AsyncClient() as client:
         try:
             # Make the request to your new FastAPI endpoint
-            response = await client.get("http://localhost:8000/volumes/descriptions/unique/")
+            response = await client.get(f"{base_url}/volumes/descriptions/unique/")
             response.raise_for_status()
             
             # Parse the list of strings
