@@ -20,6 +20,7 @@ from .services import SegmentationService
 from .utils import exclude_existing_masks, download_and_pair_volumes, generate_gif_overlays, cleanup_discarded, get_model_dice_score
 from .logging_config import setup_logging
 import logging
+from client_config import create_model_client_from_config
 # before integratinon make it to the default messages from the socket_store
 from .ws_client_sender import send_ws_message_remote, wait_for_user_message_remote
 from agent_system.models.tool_logging import ProgressPayload, TextPayload, ToolEvent
@@ -44,17 +45,19 @@ class SegmentationModule:
 
     async def initialize(self):
         # intialize model client
-        self.model_client = OllamaChatCompletionClient(
-        model=self.model_name,
-        model_info={
-            "vision": False,
-            "function_calling": True,
-            "json_output": True,
-            "structured_output": True,
-            "family": "unknown"
-        },
-        api_key=os.environ.get("APIKEY")
-     )
+        self.model_client = create_model_client_from_config()
+     #    self.model_client = OllamaChatCompletionClient(
+     #    model=self.model_name,
+     #    model_info={
+     #        "vision": False,
+     #        "function_calling": True,
+     #        "json_output": True,
+     #        "structured_output": True,
+     #        "family": "unknown"
+     #    },
+     #    api_key=os.environ.get("APIKEY"),
+     #
+     # )
         # MCP server connection
         current_file = Path(__file__).resolve()
         backend_dir = current_file.parent.parent.parent.parent.parent
