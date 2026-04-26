@@ -123,6 +123,7 @@ export default function PlaygroundCanvas({
   const [isConnected, setIsConnected] = useState(websocketService.isConnected());
   const [pendingPrompt, setPendingPrompt] = useState<{ type: string; message: string } | null>(null);
   const [promptExpanded, setPromptExpanded] = useState(true);
+  const [canExecute, setCanExecute] = useState(false);
 
   const isPausedRef = useRef(isPaused);
   const modeRef = useRef(mode);
@@ -286,31 +287,70 @@ export default function PlaygroundCanvas({
         updateNodeData(data.nodeId || data.id || payload?.nodeId, payload || data.data);
       }
       if (type === 'plan' || type === 'PLAN_UPDATE') {
+        setCanExecute(true);
         applyBackendPlan(payload || data.data || data);
       }
       if (type === 'tool_update') {
-        // Append logs to the respective agent
-        const agentName = payload?.agent_name;
-        const logEntry = payload?.log;
-        if (agentName && logEntry) {
+        const toolEvent = payload as ToolEvent;
+        const agentName = toolEvent?.source;
+      
+        if (agentName) {
           setNodes(prevNodes =>
             prevNodes.map(node => {
-              if (node.type === 'agent' && 'name' in node.data) {
-                const agentData = payload?.agents?.find((agent: { name: string }) => agent.name === (node.data as AgentNodeData).name);
-                if (agentData) {
-                  return {
-                    ...node,
-                    data: {
-                      ...node.data,
-                      logs: [...(node.data.logs || []), logEntry],
-                    },
+              if (node.type !== 'agent' || node.id !== agentName) return node;
+      
+              const agentData = node.data as AgentNodeData;
+              const existingLogs: ToolLog[] = agentData.logs ?? [];
+              let updatedLogs: ToolLog[];
+      
+              if (toolEvent.event_type === 'tool_started') {
+                // Always open a fresh ToolLog entry
+                const newLog: ToolLog = {
+                  source: toolEvent.source,
+                  started_at: toolEvent.timestamp,
+                  last_updated_at: toolEvent.timestamp,
+                  events: [toolEvent],
+                  status: 'active',
+                };
+                updatedLogs = [...existingLogs, newLog];
+              } else {
+                if (existingLogs.length === 0) {
+                  // Defensive fallback — no prior log exists
+                  const fallbackLog: ToolLog = {
+                    source: toolEvent.source,
+                    started_at: toolEvent.timestamp,
+                    last_updated_at: toolEvent.timestamp,
+                    events: [toolEvent],
+                    status: toolEvent.event_type === 'tool_finished' ? 'completed'
+                          : toolEvent.event_type === 'error'         ? 'error'
+                          : 'active',
                   };
+                  updatedLogs = [fallbackLog];
+                } else {
+                  // Append to the last log entry
+                  const last = existingLogs[existingLogs.length - 1];
+                  const updatedLast: ToolLog = {
+                    ...last,
+                    last_updated_at: toolEvent.timestamp,
+                    events: [...last.events, toolEvent],
+                    status: toolEvent.event_type === 'tool_finished' ? 'completed'
+                          : toolEvent.event_type === 'error'         ? 'error'
+                          : 'active',
+                  };
+                  updatedLogs = [...existingLogs.slice(0, -1), updatedLast];
                 }
               }
-              return node;
+      
+              return {
+                ...node,
+                data: { ...node.data, logs: updatedLogs },
+              };
             })
           );
+        } else {
+          console.warn('⚠️ Missing source on toolEvent', toolEvent);
         }
+      
         return;
       }
       if (type === 'Pipeline_agent_status') {
@@ -343,6 +383,86 @@ export default function PlaygroundCanvas({
       }
       if (type === 'run_finished') {
         updateCurrentAgent('run_finished');
+      }
+      if (type === 'pipeline_agent_status') {
+        console.log('[WS] pipeline_agent_status RAW payload:', payload);
+
+        const agents: Array<{
+          name: string;
+          status: 'RUNNING' | 'COMPLETED' | 'PENDING' | 'FAILED' | string;
+          started_at: string | null;
+          finished_at: string | null;
+        }> = Array.isArray(payload.agents) ? payload.agents : [];
+
+        console.log('[WS] Parsed agents:', agents);
+
+        // Build a quick lookup so we only iterate nodes once
+        const statusMap = new Map(
+          agents
+            .filter(a => a.status === 'RUNNING' || a.status === 'COMPLETED' || a.status === 'FAILED')
+            .map(a => [a.name, a])
+        );
+
+        console.log('[WS] Filtered statusMap entries:', Array.from(statusMap.entries()));
+
+        if (statusMap.size === 0) {
+          console.warn('[WS] No RUNNING or COMPLETED agents found.');
+          return;
+        }
+
+        setNodes(prev => {
+          console.log('[WS] Previous nodes:', prev);
+
+          const updatedNodes = prev.map(node => {
+            if (node.type !== 'agent') return node;
+
+            const agentData = node.data as AgentNodeData;
+            const key = agentData.name ?? agentData.title;
+
+            console.log('[WS] Checking node:', {
+              nodeId: node.id,
+              key,
+              nodeData: agentData,
+            });
+
+            const match = statusMap.get(node.id);
+
+            if (!match) {
+              console.log('[WS] No match found for:', key);
+              return node;
+            }
+
+            console.log('[WS] Match found:', {
+              key,
+              match,
+            });
+
+            const nextStatus =
+              match.status === 'RUNNING'   ? 'active'    :
+              match.status === 'FAILED'    ? 'failed'    :
+              'completed';
+
+            const updatedNode = {
+              ...node,
+              data: {
+                ...node.data,
+                status: nextStatus,
+                started_at: match.started_at ?? (node.data as any).started_at,
+                isExpanded: nextStatus === 'active' || nextStatus === 'failed',
+              },
+            };
+
+            console.log('[WS] Updated node:', updatedNode);
+
+            return updatedNode;
+          });
+
+          console.log('[WS] Updated nodes result:', updatedNodes);
+
+          return updatedNodes;
+        });
+
+        return;
       }
     };
 
@@ -775,13 +895,14 @@ export default function PlaygroundCanvas({
           {mode === 'planning' && (
             <button
               onClick={startExecution}
-              className="flex items-center gap-2 rounded bg-[#348cfd] px-4 py-1.5 text-xs font-medium text-white shadow-lg transition-colors hover:bg-[#599fff]"
+              disabled={!canExecute}
+              className={`flex items-center gap-2 rounded px-4 py-1.5 text-xs font-medium text-white shadow-lg transition-colors ${
+                canExecute
+                  ? 'bg-[#348cfd] hover:bg-[#599fff] cursor-pointer'
+                  : 'bg-[#348cfd] opacity-50 cursor-not-allowed'
+              }`}
             >
-              <Play
-                size={14}
-                fill="currentColor"
-              />{' '}
-              Execute
+              <Play size={14} fill="currentColor" /> Execute
             </button>
           )}
           {mode === 'executing' && (
@@ -797,7 +918,7 @@ export default function PlaygroundCanvas({
                 onClick={restartExecution}
                 className="flex items-center gap-2 rounded border border-[#3c5d80] bg-[#151a1f] px-3 py-1.5 text-xs text-[#91b9cd] transition-colors hover:bg-[#2c1a1f] hover:text-[#ff6b6b]"
               >
-                <RotateCcw size={14} /> Stop
+                <RotateCcw size={14} /> Restart
               </button>
             </>
           )}

@@ -195,6 +195,10 @@ class ClinicalPlanner:
                 else:
                     # Keep local planner state usable even when backend persistence fails.
                     self.state.hypothesis = self.state.hypothesis.model_copy(update=hypothesis)
+                # Keep the in-memory session coherent even when backend calls fail.
+                self.session.hypothesis = self.state.hypothesis
+                # Always emit structured hypothesis updates so the start node renders immediately.
+                await self._send("hypothesis", self.state.hypothesis.model_dump())
                 if message := rest.get("message"):
                     await self._send("msg", message)
             case {"message": str() as message}:
@@ -250,6 +254,28 @@ class ClinicalPlanner:
                     for s in data["steps"]
                 ]
                 self.state.plan.study_goal = self.state.hypothesis.title
+
+            # Keep in-memory session coherent even when backend plan persistence fails.
+            self.session.plan = self.state.plan
+
+            # Always emit plan steps so the planning canvas can render immediately.
+            ui_steps = [
+                {
+                    "id": s.module,
+                    "name": s.title,
+                    "description": s.description,
+                    "module": s.module,
+                    "status": s.status,
+                }
+                for s in self.state.plan.steps
+            ]
+            await self._send(
+                "plan",
+                {
+                    "study_goal": self.state.plan.study_goal or self.state.hypothesis.title,
+                    "steps": ui_steps,
+                },
+            )
 
             # Store full instructions in task_messages for later use
             self._pipeline_instructions = {
@@ -622,6 +648,15 @@ class ClinicalPlanner:
                 await self.session_service.confirm_plan(self.session)
 
                 await self._send("msg", f"Generated {len(task_messages)} context-enriched task messages.")
+
+                persisted_messages = await self.session_service.save_task_messages_for_plan(
+                    self.session,
+                    task_messages,
+                )
+                await self._send(
+                    "msg",
+                    f"Persisted {len(persisted_messages)}/{len(task_messages)} task messages with context augmentation to DB.",
+                )
 
                 # Send task message summaries to UI
                 task_summaries = [

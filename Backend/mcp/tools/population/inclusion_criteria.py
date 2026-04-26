@@ -18,6 +18,7 @@ async def write_inclusion_criteria(
     """
     
     workspace_dir = os.environ.get("WORKSPACE_DIR")
+    session_id = os.environ.get("SESSION_ID")
     json_path = None
     file_status_msg = "File not saved (WORKSPACE_DIR env variable not set)."
     file_saved = False
@@ -68,7 +69,8 @@ async def write_inclusion_criteria(
                         "inclusion_criteria": inclusion_criteria,
                         "exclusion_criteria": exclusion_criteria,
                         "modality": modality
-                    }
+                    },
+                    "session_id": session_id
                 }
             )
             

@@ -1,8 +1,11 @@
 import asyncio
+from typing import Dict
+
 import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from groq import BaseModel
 
 from teams.execution_team import BasicPipelineBuilder
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -29,18 +32,11 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, ".."))
 sys.path.append(root_dir)
 
-from socket_store import manager
+from socket_store import manager as ws_manager, send_ws_message
 from agents.planning_agents.planner import ClinicalPlanner
 from models.session import Session
 from models.plans import PlannerState
-from view_emitter import (
-    emit_population_output,
-    emit_segmentation_output,
-    emit_features_output,
-    emit_modeling_output,
-    emit_report_output,
-    emit_latex_output,
-)
+from models.logs import WS_Log
 from client_config import (
     ClientConfig,
     get_client_config,
@@ -53,6 +49,7 @@ from models.requests import PlanningRequest, SessionControlRequest
 from tool_logging import receive_tool_event
 from services.session_service import SessionService
 from services.pipeline_monitor import PipelineMonitor
+from clients.backend_client import BackendClient
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +69,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
 class CoopCoepMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -79,173 +78,42 @@ class CoopCoepMiddleware(BaseHTTPMiddleware):
         response.headers["Access-Control-Allow-Origin"] = "*"
         return response
 
+
 app.add_middleware(CoopCoepMiddleware)
 # todo: make it after the planner set the session id and create the workspace associated with the session id
-workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "workspace"))
+# workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "workspace"))
+
 
 @app.get("/static/{file_path:path}")
 def serve_static_pdf(file_path: str):
-    full_path = os.path.join(workspace_dir, file_path)
-    
-    if not os.path.exists(full_path):
+    # full_path = os.path.join(workspace_dir, file_path)
+
+    if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
-    
+
     # PDFs → inline to allow view in browser
     if file_path.endswith(".pdf"):
         return FileResponse(
-            path=full_path,
+            path=file_path,
             media_type="application/pdf",
-            headers={"Content-Disposition": f"inline; filename={os.path.basename(file_path)}"},
-            content_disposition_type="inline"
+            headers={
+                "Content-Disposition": f"inline; filename={os.path.basename(file_path)}"
+            },
+            content_disposition_type="inline",
         )
-    return FileResponse(path=full_path)
+    return FileResponse(path=file_path)
+
+
 # Single shared service — the only stateful object routes need to know about
-session_service = SessionService(ws_manager=manager)
+session_service = SessionService(ws_manager=ws_manager)
 
 api_key = os.getenv("OLLAMA_API_KEY", "")
-
-
-# ── Agent-to-view mapping for tool result emission ────────────────────────────
-
-def _parse_tool_content(content: str) -> dict:
-    """Attempt to parse tool result content as JSON."""
-    if not content:
-        return {}
-    try:
-        return json.loads(content)
-    except (json.JSONDecodeError, TypeError):
-        return {"raw": str(content)[:2000]}
-
-
-async def _read_agent_output_file(workspace_folder: str, agent_id: str) -> dict:
-    """Read a persisted agent output JSON from the workspace outputs dir."""
-    output_path = os.path.join(workspace_folder, "outputs", f"{agent_id}_output.json")
-    try:
-        if os.path.exists(output_path):
-            async with aiofiles.open(output_path, 'r') as f:
-                return json.loads(await f.read())
-    except Exception:
-        pass
-    return {}
-
-
-async def _emit_tool_result_to_view(
-        source: str, tool_name: str, content: str,
-        session_id: str, workspace_folder: str, logger
-):
-    parsed = _parse_tool_content(content)
-
-    # ── Population Planner agent ──────────────────────────────────────────
-    if "population" in source.lower() or "study_population" in source.lower():
-        if tool_name == "write_agent_output":
-            agent_data = await _read_agent_output_file(workspace_folder, "study_population_planner_agent")
-            payload = agent_data if agent_data else parsed
-            await emit_population_output(payload, session_id)
-        elif tool_name in ("generate_targets", "get_patient", "get_volume"):
-            await emit_population_output({
-                "tool": tool_name,
-                "status": parsed.get("status", "completed"),
-                "data": parsed,
-            }, session_id)
-
-    # ── Segmentation agent ────────────────────────────────────────────────
-    elif "segmentation" in source.lower():
-        if tool_name == "write_agent_output":
-            agent_data = await _read_agent_output_file(workspace_folder, "segmentation_agent")
-            payload = agent_data if agent_data else parsed
-            await emit_segmentation_output(payload, session_id)
-        elif tool_name == "test_module":
-            await emit_segmentation_output({
-                "tool": tool_name,
-                "status": parsed.get("status", "completed"),
-                "data": parsed,
-            }, session_id)
-
-    # ── Feature Extraction agent ──────────────────────────────────────────
-    elif "feature_extraction" in source.lower():
-        if tool_name == "write_agent_output":
-            agent_data = await _read_agent_output_file(workspace_folder, "feature_extraction_agent")
-            payload = agent_data if agent_data else parsed
-            await emit_features_output(payload, session_id)
-
-        elif tool_name == "radiomics_extract_features":
-            # No chart_data from extraction — just counts and paths
-            await emit_features_output({
-                "tool": "radiomic_extraction",
-                "status": parsed.get("status", "completed"),
-                "csv_paths": parsed.get("csv_paths", {}),
-                "num_subjects": parsed.get("num_subjects"),
-                "num_features": parsed.get("num_features", {}),
-                "mask_labels": parsed.get("mask_labels", []),
-                "processing_time_seconds": parsed.get("processing_time_seconds"),
-            }, session_id)
-
-        elif tool_name == "radiomics_analyze_importance":
-            # Forward chart_data directly — this is what drives the frontend charts
-            await emit_features_output({
-                "tool": "feature_importance",
-                "status": parsed.get("status", "completed"),
-                "method": parsed.get("method"),
-                "feature_count": parsed.get("feature_count"),
-                "result_files": parsed.get("result_files", {}),
-                "target_column": parsed.get("target_column"),
-                "task_type": parsed.get("task_type"),
-                # NEW — full chart payload for React components
-                "chart_data": parsed.get("chart_data"),
-            }, session_id)
-
-    # ── Modeling agent ────────────────────────────────────────────────────
-    elif "modeling" in source.lower():
-        if tool_name == "write_agent_output":
-            agent_data = await _read_agent_output_file(workspace_folder, "modeling_agent")
-            payload = agent_data if agent_data else parsed
-            await emit_modeling_output(payload, session_id)
-
-        elif tool_name == "pycaret_train_classifier":
-            # Forward chart_data directly — drives all frontend chart components
-            await emit_modeling_output({
-                "tool": "classification",
-                "status": parsed.get("status", "completed"),
-                "experiment_name": parsed.get("experiment_name"),
-                "model_summary": parsed.get("model_summary"),
-                "final_model_path": parsed.get("final_model_path"),
-                "created_files": parsed.get("created_files", []),
-                "individual_model_paths": parsed.get("individual_model_paths", {}),
-                "model_test_predictions": parsed.get("model_test_predictions", {}),
-                # NEW — full chart payload for React components
-                "chart_data": parsed.get("chart_data"),
-            }, session_id)
-
-    # ── Result Reporter agent ─────────────────────────────────────────────
-    elif "result_reporter" in source.lower():
-        if tool_name == "write_agent_output":
-            agent_data = await _read_agent_output_file(workspace_folder, "result_reporter_agent")
-            payload = agent_data if agent_data else parsed
-            await emit_report_output(payload, session_id)
-        elif tool_name == "get_modeling_results":
-            await emit_report_output({
-                "tool": tool_name,
-                "status": "completed",
-                "data": parsed,
-            }, session_id)
-
-    # ── LaTeX Reporter agent ──────────────────────────────────────────────
-    elif "latex" in source.lower() or "reporter" in source.lower():
-        if tool_name == "write_agent_output":
-            agent_data = await _read_agent_output_file(workspace_folder, "latex_reporter_agent")
-            payload = agent_data if agent_data else parsed
-            await emit_latex_output(payload, session_id)
-        elif tool_name == "latex_to_pdf":
-            await emit_latex_output({
-                "tool": "latex_to_pdf",
-                "status": parsed.get("status", "completed"),
-                "data": parsed,
-            }, session_id)
 
 
 # ----------------------------------------------------------------------
 # Planner callable — receives session + message, calls back into service
 # ----------------------------------------------------------------------
+
 
 async def run_planner(session: Session, message: str) -> None:
     base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
@@ -254,17 +122,17 @@ async def run_planner(session: Session, message: str) -> None:
     )
     os.makedirs(workspace_folder, exist_ok=True)
     planner = ClinicalPlanner(
-        input_provider=lambda: manager.wait_for_user_message(session.session_id),
-        output_callback=lambda t, d, s: manager.send_ws_message(t, d, s),
+        input_provider=lambda: ws_manager.wait_for_user_message(session.session_id),
+        output_callback=lambda t, d, s: ws_manager.send_ws_message(t, d, s),
         model_client=create_model_client_from_config(),
         workspace_dir=workspace_folder,
         session=session,
         session_service=session_service,
-        api_key=api_key
+        api_key=api_key,
     )
     await planner.run(start_query=message)
-    logging.getLogger('HypothesisFlow').info(
-        '[HypothesisFlow][Planner] Planner finished | session_id=%s',
+    logging.getLogger("HypothesisFlow").info(
+        "[HypothesisFlow][Planner] Planner finished | session_id=%s",
         session.session_id,
     )
 
@@ -273,9 +141,12 @@ async def run_planner(session: Session, message: str) -> None:
 # Executor callable — receives session, calls back into service
 # ----------------------------------------------------------------------
 
+
 async def run_pipeline(session: Session) -> None:
     base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session.session_id}")
+    workspace_folder = os.path.join(
+        base_agents_workspace, f"workspace_{session.session_id}"
+    )
     pipeline_logger = logging.getLogger("Execution Pipeline")
     logging.getLogger("autogen_core").setLevel(logging.CRITICAL)
     logging.getLogger("autogen_core.events").setLevel(logging.CRITICAL)
@@ -286,7 +157,7 @@ async def run_pipeline(session: Session) -> None:
     hypothesis = None
     try:
         if os.path.exists(state_file):
-            async with aiofiles.open(state_file, 'r') as f:
+            async with aiofiles.open(state_file, "r") as f:
                 content = await f.read()
                 if content.strip():
                     planner_state = PlannerState.model_validate_json(content)
@@ -299,11 +170,11 @@ async def run_pipeline(session: Session) -> None:
         logger.warning(f"Could not load planner state: {e}. Using raw hypothesis.")
 
     if not hypothesis:
-        hypothesis = json.load(
-            open(state_file)
-        ).get("hypothesis", {}).get("title")
+        hypothesis = json.load(open(state_file)).get("hypothesis", {}).get("title")
 
-    pipeline_logger.info(f"workspace_folder: {workspace_folder}, hypothesis: {hypothesis}")
+    pipeline_logger.info(
+        f"workspace_folder: {workspace_folder}, hypothesis: {hypothesis}"
+    )
 
     # Allow pause / cancel before heavy init
     await session.pause_event.wait()
@@ -332,9 +203,9 @@ async def run_pipeline(session: Session) -> None:
 
     pipeline_logger.info("Starting execution...")
 
-    monitor = PipelineMonitor(session_service, session)
+    session.execution_monitor = PipelineMonitor(session_service, session)
 
-    await monitor._broadcast()
+    await session.execution_monitor._broadcast()
 
     try:
         async for event in graph_flow.run_stream(task=task_prompt):
@@ -349,59 +220,68 @@ async def run_pipeline(session: Session) -> None:
                     for msg in msgs:
                         pipeline_logger.info(f"  [{msg.source}] {msg.content}")
                     pipeline_logger.info("━" * 60)
-                    await monitor.on_pipeline_complete()
-                    await manager.send_ws_message("run_finished", "run_finished", session_id=session.session_id)
+                    await session.execution_monitor.on_pipeline_complete()
+                    await ws_manager.send_ws_message(
+                        "run_finished", "run_finished", session_id=session.session_id
+                    )
 
                 case ToolCallRequestEvent(source=src, content=content):
                     pipeline_logger.info(f"🔧 [{src}] TOOL CALL REQUEST")
-                    await monitor.on_agent_active(src)
+                    await session.execution_monitor.on_agent_active(src)
                     for call in content:
-                        pipeline_logger.info(f"     Tool: {call.name}  Args: {call.arguments}")
+                        pipeline_logger.info(
+                            f"     Tool: {call.name}  Args: {call.arguments}"
+                        )
 
                 case ToolCallExecutionEvent(source=src, content=content):
                     pipeline_logger.info(f"🔧 [{src}] TOOL CALL RESULT")
                     for result in content:
-                        await monitor.on_tool_result(src, result.name, result.content)
-                        pipeline_logger.info(f"     Tool: {result.name}  Result: {result.content}")
-                        # move this to the pipeline monitor I think?
-                        await _emit_tool_result_to_view(
-                            src, result.name, result.content,
-                            session.session_id, workspace_folder, pipeline_logger
+                        await session.execution_monitor.on_tool_result(
+                            src, result.name, result.content, workspace_folder
+                        )
+                        pipeline_logger.info(
+                            f"     Tool: {result.name}  Result: {result.content}"
                         )
 
                 case MemoryQueryEvent(source=src, content=content):
                     pipeline_logger.info(f"🧠 [{src}] MEMORY QUERY: {content}")
-                    await monitor.on_agent_active(src)
+                    await session.execution_monitor.on_agent_active(src)
 
                 case UserInputRequestedEvent(source=src):
                     pipeline_logger.info(f"⏳ [{src}] WAITING FOR USER INPUT")
 
                 case ThoughtEvent(source=src, content=content):
                     pipeline_logger.info(f"💭 [{src}] THOUGHT: {content}")
-                    await monitor.on_agent_active(src)
+                    await session.execution_monitor.on_agent_active(src)
 
                 case BaseChatMessage(source=src):
                     logger.info("━" * 60)
-                    pipeline_logger.info(f"💬 [{src}] ({type(event).__name__}): {event.content}")
-                    await monitor.on_agent_active(src)
+                    pipeline_logger.info(
+                        f"💬 [{src}] ({type(event).__name__}): {event.content}"
+                    )
+                    await session.execution_monitor.on_agent_active(src)
 
                 case BaseAgentEvent(source=src):
                     pipeline_logger.info(f"⚙️  [{src}] ({type(event).__name__})")
                     if hasattr(event, "content") and event.content:
                         pipeline_logger.info(f"   {event.content}")
-                    await monitor.on_agent_active(src)
+                    await session.execution_monitor.on_agent_active(src)
 
     except asyncio.CancelledError:
-        await monitor.on_pipeline_error(Exception("Pipeline Cancelled"))
+        await session.execution_monitor.on_pipeline_error(
+            Exception("Pipeline Cancelled")
+        )
         raise
     except Exception as e:
+        logger.error(f"here, {e} occured, check in this method")
         logger.error(e)
-        await monitor.on_pipeline_error(e)
+        await session.execution_monitor.on_pipeline_error(e)
 
 
 # ----------------------------------------------------------------------
 # Routes — thin, all logic delegated to session_service
 # ----------------------------------------------------------------------
+
 
 @app.post("/plan")
 async def start_planning(request: PlanningRequest):
@@ -463,15 +343,30 @@ async def get_status(session_id: str):
     }
 
 
+class latex_output(BaseModel):
+    event_type: str
+    content: dict
+    session_id: str
+
+
 @app.post("/events")
-async def receive_event(event: ToolEvent):
+async def receive_event(event: ToolEvent | latex_output):
     logger.info(f"Received tool event: {event}")
+    if isinstance(event, latex_output):
+        await send_ws_message(
+            msg_type="latex_output",
+            payload=event.content.get("frontend_data"),
+            session_id=event.session_id,
+        )
+        return
+
     await receive_tool_event(event)
 
 
 # ----------------------------------------------------------------------
 # Client configuration endpoints
 # ----------------------------------------------------------------------
+
 
 @app.get("/client-config")
 async def get_config():
@@ -480,7 +375,9 @@ async def get_config():
     data = cfg.model_dump()
     # Mask the API key for security
     if data.get("api_key"):
-        data["api_key"] = data["api_key"][:8] + "..." if len(data["api_key"]) > 8 else "***"
+        data["api_key"] = (
+            data["api_key"][:8] + "..." if len(data["api_key"]) > 8 else "***"
+        )
     return data
 
 
@@ -507,14 +404,25 @@ async def list_providers():
                 "id": "azure_openai",
                 "label": "Azure OpenAI",
                 "fields": ["model", "api_key", "azure_endpoint", "api_version"],
-                "optional_fields": ["azure_deployment", "temperature", "max_tokens", "top_p"],
+                "optional_fields": [
+                    "azure_deployment",
+                    "temperature",
+                    "max_tokens",
+                    "top_p",
+                ],
                 "description": "Azure-hosted OpenAI models",
             },
             {
                 "id": "ollama",
                 "label": "Ollama",
                 "fields": ["model"],
-                "optional_fields": ["base_url", "api_key", "temperature", "max_tokens", "top_p"],
+                "optional_fields": [
+                    "base_url",
+                    "api_key",
+                    "temperature",
+                    "max_tokens",
+                    "top_p",
+                ],
                 "description": "Local or remote Ollama instance (OpenAI-compatible)",
             },
         ]
@@ -522,28 +430,129 @@ async def list_providers():
 
 
 # ----------------------------------------------------------------------
+# State Recovery
+# ----------------------------------------------------------------------
+
+@app.get("/session/{session_id}/replay-logs")
+async def replay_logs(session_id: str):
+    logs: list[WS_Log] = await BackendClient.get_logs(session_id)
+    for log in logs:
+        if log.msg_type in ('msg'): continue
+        await ws_manager.send_ws_message(log.msg_type, log.payload, log.session_id, replaying=True)
+
+
+
+@app.get("/session/{session_id}/plan-state")
+async def get_plan_state(session_id: str):
+    """
+    Get plan state, hypothesis, and task messages for a session.
+    Used when recovering a session from hypothesis history.
+    """
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+
+    if not os.path.exists(workspace_folder):
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    state_file = os.path.join(workspace_folder, "state.json")
+    result = {
+        "session_id": session_id,
+        "workspace_dir": workspace_folder,
+        "hypothesis": None,
+        "task_messages": [],
+    }
+
+    if os.path.exists(state_file):
+        try:
+            async with aiofiles.open(state_file, "r") as f:
+                content = await f.read()
+                if content.strip():
+                    state_data = json.loads(content)
+                    result["hypothesis"] = state_data.get("hypothesis")
+
+                    task_messages = state_data.get("task_messages", [])
+                    task_messages_json = state_data.get("task_messages_json", [])
+
+                    if task_messages_json:
+                        try:
+                            result["task_messages"] = json.loads(task_messages_json)
+                        except:
+                            result["task_messages"] = task_messages
+        except Exception as e:
+            logger.warning(f"Could not load plan state: {e}")
+
+    return result
+
+
+@app.get("/session/{session_id}/execution-state")
+async def get_execution_state(session_id: str):
+    state = await session_service.recover_execution_state(session_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="No execution state found")
+    return state
+
+
+@app.get("/session/{session_id}/chat-messages")
+async def get_session_chat_messages(session_id: str):
+    """
+    Fetch chat messages for a session from the MONAI server.
+    Used when recovering a session from hypothesis history.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                f"http://localhost:8000/chat_messages/{session_id}", timeout=10.0
+            )
+            if response.status_code == 200:
+                return response.json()
+            else:
+                return []
+        except Exception as e:
+            logger.warning(f"Could not fetch chat messages: {e}")
+            return []
+
+
+# ----------------------------------------------------------------------
+# Hypothesis History
+# ----------------------------------------------------------------------
+
+
+@app.get("/hypothesis-history")
+async def get_hypothesis_history(limit: int = 20):
+    """
+    Fetch hypothesis history from the backend API.
+    Returns list of recent hypotheses with their chat session info.
+    """
+    history = await session_service.get_hypothesis_history(limit)
+
+    return history
+
+
+# ----------------------------------------------------------------------
 # WebSocket /ws
 # ----------------------------------------------------------------------
 
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    logging.getLogger('HypothesisFlow').info('[HypothesisFlow][WS] Client connected')
+    await ws_manager.connect(websocket)
+    logging.getLogger("HypothesisFlow").info("[HypothesisFlow][WS] Client connected")
 
     try:
         while True:
             data = await websocket.receive_text()
-            await manager.push_to_queue(data)
-            logging.getLogger('HypothesisFlow').info(
-                '[HypothesisFlow][WS] Message received raw | size=%s',
-                len(data or ''),
+            await ws_manager.push_to_queue(data)
+            logging.getLogger("HypothesisFlow").info(
+                "[HypothesisFlow][WS] Message received raw | size=%s",
+                len(data or ""),
             )
 
             try:
                 message = json.loads(data)
             except json.JSONDecodeError:
                 # Backward compatibility: plain text is treated as user input.
-                await manager.push_to_queue(data)
+                await ws_manager.push_to_queue(data)
                 continue
 
             if not isinstance(message, dict):
@@ -564,26 +573,28 @@ async def websocket_endpoint(websocket: WebSocket):
                     text = str(payload or "")
 
                 if text.strip():
-                    logging.getLogger('HypothesisFlow').info(
-                        '[HypothesisFlow][WS] Queueing user text | session_id=%s | text_len=%s | preview=%s',
+                    logging.getLogger("HypothesisFlow").info(
+                        "[HypothesisFlow][WS] Queueing user text | session_id=%s | text_len=%s | preview=%s",
                         session_id,
                         len(text),
                         text[:120],
                     )
-                    await manager.push_to_queue(text, session_id=session_id)
+                    await ws_manager.push_to_queue(text, session_id=session_id)
 
     except WebSocketDisconnect:
-        logging.getLogger('HypothesisFlow').info('[HypothesisFlow][WS] Client disconnected')
-        manager.disconnect(websocket)
-        
+        logging.getLogger("HypothesisFlow").info(
+            "[HypothesisFlow][WS] Client disconnected"
+        )
+        ws_manager.disconnect(websocket)
+
+
 @app.post("/ws-broadcast")
 async def ws_broadcast(data: dict):
-    await manager.send_ws_message(
-        data["type"],
-        data["payload"],
-        session_id=data.get("session_id")
+    await ws_manager.send_ws_message(
+        data["type"], data["payload"], session_id=data.get("session_id")
     )
     return {"status": "ok"}
+
 
 # ----------------------------------------------------------------------
 # Entry point
@@ -591,4 +602,5 @@ async def ws_broadcast(data: dict):
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("app:app", host="0.0.0.0", port=8150, reload=True)

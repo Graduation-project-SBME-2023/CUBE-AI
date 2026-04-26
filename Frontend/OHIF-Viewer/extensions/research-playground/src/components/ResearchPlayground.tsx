@@ -7,6 +7,7 @@ import PhaseSidebar from './PlaygroundCanvas/PhaseSidebar';
 import PlanningView from './PlaygroundCanvas/views/PlanningView';
 import LiteratureReviewView from './PlaygroundCanvas/views/LiteratureReviewView';
 import DataCohortView from './PlaygroundCanvas/views/DataCohortView';
+import SegmentationView from './PlaygroundCanvas/views/SegmentationView'
 import FeaturesView from './PlaygroundCanvas/views/FeaturesView';
 import ModelingView from './PlaygroundCanvas/views/ModelingView';
 import ReportingView from './PlaygroundCanvas/views/ReportingView';
@@ -36,6 +37,13 @@ export const RESEARCH_PHASES = [
         short_desc: 'Cohort Selection',
         icon: Database, 
         description: 'Inclusion Criteria, Cohort Selection & QA' 
+    },
+    {
+        id: 'segmentation',
+        label: 'Segmentation QC',
+        short_desc: 'Segmentation HITL',
+        icon: Scan,
+        description: 'Radiologists Approval of Segmentations'
     },
     { 
         id: 'features', 
@@ -68,7 +76,7 @@ export default function ResearchPlayground() {
     const location = useLocation();
     const navigate = useNavigate();
     const { phaseId } = useParams<{ phaseId?: string }>();
-    const [isChatOpen, setIsChatOpen] = useState(false);
+    const [isChatOpen, setIsChatOpen] = useState(true);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
     const [literatureOutput, setLiteratureOutput] = useState<any>(null);
@@ -79,6 +87,7 @@ export default function ResearchPlayground() {
     const [modelingData, setModelingData] = useState<any>(null);
     const [reportData, setReportData] = useState<any>(null);
     const [latexData, setLatexData] = useState<any>(null);
+    const [viewsReady, setViewsReady] = useState(false);
     const DEFAULT_PHASE = 'planning';
     const isValidPhase = RESEARCH_PHASES.some(phase => phase.id === phaseId);
     const activePhase = isValidPhase ? phaseId! : DEFAULT_PHASE;
@@ -91,8 +100,60 @@ export default function ResearchPlayground() {
     
     // Retrieve hypothesis from navigation state or default
     const hypothesis = location.state?.hypothesis || 'No active hypothesis defined.';
-    const sessionId = location.state?.sessionId || null;
+    const sessionId = location.state?.sessionId || location.state?.session_id || null;
     const sendInitialMessage = location.state?.sendInitialMessage || false;
+    const initialUserMessage = sendInitialMessage ? hypothesis : undefined;
+
+    // Load state from endpoints when session_id is provided
+    // Effect 1: non-replay session state (unchanged behavior, fires immediately)
+    useEffect(() => {
+        const loadSessionState = async () => {
+            if (!sessionId) return;
+            try {
+                const planRes = await fetch(`http://localhost:8150/session/${sessionId}/plan-state`);
+                if (planRes.ok) {
+                    const planData = await planRes.json();
+                    console.log('[ResearchPlayground] Loaded plan state:', planData);
+                }
+                const execRes = await fetch(`http://localhost:8150/session/${sessionId}/execution-state`);
+                if (execRes.ok) {
+                    const execData = await execRes.json();
+                    console.log('[ResearchPlayground] Loaded execution state:', execData);
+                }
+            } catch (err) {
+                console.error('[ResearchPlayground] Failed to load session state:', err);
+            }
+        };
+        loadSessionState();
+    }, [sessionId]);
+
+    // Effect 2: signal that all child views have mounted
+    useEffect(() => {
+        const raf = requestAnimationFrame(() => setViewsReady(true));
+        return () => cancelAnimationFrame(raf);
+    }, []);
+
+    // Effect 3: replay logs — only fires after views (and their WS subscriptions) are ready
+    useEffect(() => {
+        if (!sessionId || !viewsReady) return;
+
+        const triggerReplay = async () => {
+            websocketService.startReplayCapture();
+            try {
+                const replayRes = await fetch(`http://localhost:8150/session/${sessionId}/replay-logs`);
+                if (replayRes.ok) {
+                    console.log('[ResearchPlayground] ws logs replayed');
+                }
+            } catch (err) {
+                console.error('[ResearchPlayground] Failed to replay logs:', err);
+            } finally {
+                // Always clean up the buffer, even if the request failed
+                websocketService.stopReplayCapture();
+            }
+        };
+
+        triggerReplay();
+    }, [sessionId, viewsReady]);
 
     useEffect(() => {
         console.log('[HypothesisFlow][ResearchPlayground] Route/context', {
@@ -165,6 +226,9 @@ export default function ResearchPlayground() {
             </div>
             <div className={`absolute inset-0 ${activePhase === 'data' ? '' : 'pointer-events-none invisible'}`}>
                 <DataCohortView populationData={populationData} segmentationData={segmentationData} />
+            </div>
+            <div className={`absolute inset-0 ${activePhase === 'segmentation' ? '' : 'pointer-events-none invisible'}`}>
+                <SegmentationView segmentationData={segmentationData} />
             </div>
             <div className={`absolute inset-0 ${activePhase === 'features' ? '' : 'pointer-events-none invisible'}`}>
                 <FeaturesView featuresData={featuresData} importanceData={importanceData} />
@@ -255,7 +319,7 @@ export default function ResearchPlayground() {
                     <ChatSidebar 
                         isOpen={isChatOpen} 
                         onClose={() => setIsChatOpen(false)} 
-                        initialUserMessage={hypothesis} 
+                        initialUserMessage={initialUserMessage} 
                         externalSessionId={sessionId}
                         sendInitialMessage={sendInitialMessage}
                     />

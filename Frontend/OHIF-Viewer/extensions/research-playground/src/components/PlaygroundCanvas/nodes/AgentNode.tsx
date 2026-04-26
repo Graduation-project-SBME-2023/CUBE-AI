@@ -2,6 +2,7 @@ import React, { memo, useState, useRef } from 'react';
 import {
   Activity,
   CheckCircle2,
+  XCircle,
   Circle,
   Trash2,
   Edit3,
@@ -67,6 +68,17 @@ const AgentNode = memo((props: AgentNodeProps) => {
     statusLabel = 'Done';
     statusBg = 'bg-[#0d3320]';
     statusText = 'text-[#6fe5b8]';
+  } else if (status === 'failed') {
+    borderColor = 'border-[#7a2d2d]';
+    bgColor = 'bg-[#160a0a]';
+    textColor = 'text-[#f87171]';
+    Icon = XCircle;
+    iconColor = 'text-[#f87171]';
+    shadow = 'shadow-[0_0_20px_rgba(248,113,113,0.15)]';
+    statusLabel = 'Failed';
+    statusBg = 'bg-[#2d1010]';
+    statusText = 'text-[#f87171]';
+    accentBorder = 'ring-1 ring-[#f87171]/20';
   }
 
   const handleEditClick = (e: React.MouseEvent) => {
@@ -111,7 +123,7 @@ const AgentNode = memo((props: AgentNodeProps) => {
           relative flex w-[280px] flex-col overflow-hidden rounded-lg
           border transition-all duration-300
           ${borderColor} ${bgColor} ${shadow} ${accentBorder}
-          ${(status === 'active' || status === 'completed') ? 'cursor-pointer hover:brightness-110' : ''}
+          ${(status === 'active' || status === 'completed' || status === 'failed') ? 'cursor-pointer hover:brightness-110' : ''}
         `}
       >
         {/* Status badge bar */}
@@ -146,7 +158,7 @@ const AgentNode = memo((props: AgentNodeProps) => {
               </div>
             )}
             {/* Expand/Collapse Indicator */}
-            {(status === 'active' || status === 'completed') && (
+            {(status === 'active' || status === 'completed' || status === 'failed') && (
               <div className="text-[#566a84]">
                 {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
               </div>
@@ -171,7 +183,7 @@ const AgentNode = memo((props: AgentNodeProps) => {
         )}
 
         {/* Logs / Details Section — show whenever expanded and node is active/completed */}
-        {isExpanded && (status === 'active' || status === 'completed') && (
+        {isExpanded && (status === 'active' || status === 'completed' || status === 'failed') && (
           <div className="animate-in slide-in-from-top-2 space-y-1.5 border-t border-[#1f2d40] bg-[#080c10] p-3 font-mono text-xs duration-200">
             <div className="mb-2 flex items-center gap-2 text-[9px] font-bold uppercase tracking-widest text-[#5a8a9e]">
               <FileText size={10} /> System Trace
