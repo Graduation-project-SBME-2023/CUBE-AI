@@ -48,7 +48,7 @@ ENV QUICK_BUILD true
 RUN yarn run build
 
 # ADD . /usr/src/app/
-# RUN yarn install
+# RUN yarn install --network-timeout 600000
 # RUN yarn run build:web
 
 
