@@ -44,7 +44,7 @@ sys.modules["core"] = core_module
 # from Backend.monailabel.models.hypothesis import Hypothesis
 # from Backend.monailabel.models.plan import Plan
 # from Backend.monailabel.models.steps import PlanStep
-
+# from Backend.monailabel.models.Wslog import WSLog
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool

@@ -35,7 +35,7 @@ pip install git+https://github.com/AIM-Harvard/pyradiomics.git
 **3. Install pinned numeric libraries**
 
 ```bash
-pip install numpy==1.26.4 pandas==2.1.4
+pip install numpy==1.26.4 pandas==2.1.4 pycaret==3.3.2
 ```
 
 > These versions must be installed last to avoid being overwritten by other packages.

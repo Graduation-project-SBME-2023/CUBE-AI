@@ -6,6 +6,9 @@ class WebSocketService {
   reconnectInterval = 2000;
   private isConnecting = false;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+  private replayBuffer: any[] = [];
+  private isReplaying = false;
+  private replayBufferLimit = 500; // safety cap — avoid unbounded memory
 
   connect() {
     if (this.isConnecting || (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING))) {
@@ -21,6 +24,9 @@ class WebSocketService {
     this.socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (this.isReplaying && this.replayBuffer.length < this.replayBufferLimit) {
+          this.replayBuffer.push(data);
+        }
         this.listeners.forEach((cb) => cb(data));
       } catch (err) {
         // handle error
@@ -73,12 +79,19 @@ class WebSocketService {
    * Useful for cross-component communication (e.g., notification panel → chat sidebar).
    */
   dispatchLocal(data: any) {
+    if (this.isReplaying && this.replayBuffer.length < this.replayBufferLimit) {
+      this.replayBuffer.push(data);
+    }
     this.listeners.forEach((cb) => cb(data));
   }
 
   subscribe(callback: (data: any) => void) {
     this.listeners.add(callback);
-    return () => this.listeners.delete(callback);
+    // If a replay is in progress, flush buffered events to this late subscriber
+    if (this.replayBuffer.length > 0) {
+      this.replayBuffer.forEach((event) => callback(event));
+    }
+    return () => this.listeners.delete(callback)
   }
 
   onStatusChange(callback: (isConnected: boolean) => void) {
@@ -92,6 +105,16 @@ class WebSocketService {
 
   isConnected() {
     return this.socket?.readyState === WebSocket.OPEN;
+  }
+
+  startReplayCapture() {
+    this.isReplaying = true;
+    this.replayBuffer = [];
+  }
+
+  stopReplayCapture() {
+    this.isReplaying = false;
+    this.replayBuffer = [];
   }
 }
 

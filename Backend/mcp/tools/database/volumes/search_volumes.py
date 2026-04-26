@@ -5,6 +5,8 @@ import httpx
 import os
 
 base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+session_id = os.environ.get("SESSION_ID")
+
 import json
 from pathlib import Path
 import os
@@ -129,7 +131,8 @@ async def search_volumes_by_description(
                         "count": len(uids_list),
                         "uid_list": uids_list,
                         "saved_path": str(json_path) if file_saved else "N/A"
-                    }
+                    },
+                    "session_id": session_id
                 }
             )
 

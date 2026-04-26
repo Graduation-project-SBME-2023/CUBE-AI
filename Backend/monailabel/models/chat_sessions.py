@@ -1,7 +1,10 @@
 from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, text
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from core.database import Base  
+from core.database import Base 
+from .chat_messages import ChatMessage
+from .Wslog import WSLog 
+from .hypothesis import Hypothesis
 from .chat_link_study import chat_study_association
 from sqlalchemy.dialects.postgresql import UUID
 class ChatSession(Base):
@@ -27,3 +30,9 @@ class ChatSession(Base):
     messages = relationship("ChatMessage", back_populates="chat_session", lazy="selectin",cascade="all, delete-orphan")
 
     hypothesis = relationship("Hypothesis", back_populates="chat_session", uselist=False)
+    ws_logs = relationship(
+    "WSLog",
+    back_populates="chat_session",
+    cascade="all, delete-orphan",
+    lazy="selectin"
+)
