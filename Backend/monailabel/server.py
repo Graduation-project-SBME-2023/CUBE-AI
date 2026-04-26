@@ -24,7 +24,8 @@ from endpoints import (
     plan,   
     steps,
     Taskmessage,
-    contextaugmentation
+    contextaugmentation,
+        Wslog
 
     
     
@@ -51,6 +52,7 @@ monai_server_app.include_router(plan.router)
 monai_server_app.include_router(steps.router)
 monai_server_app.include_router(Taskmessage.router)
 monai_server_app.include_router(contextaugmentation.router)
+monai_server_app.include_router(Wslog.router)
 
 
 original_lifespan = monai_server_app.router.lifespan_context
