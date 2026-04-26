@@ -68,17 +68,15 @@ To run the application in production mode, you will need to set up the frontend 
 From the root, run the following command:
 
 ```bash
-docker compose -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml -f Backend/docker-compose.backend.cpu.yml up --build
+docker compose -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml -f Backend/docker-compose.backend.cpu.yml up
 ```
 This command will build and start the frontend and backend services in production mode.
 
 Or if GPU is available, you can run:
 
 ```bash
-docker compose -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml -f Backend/docker-compose.backend.gpu.yml up --build
+docker compose -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml -f Backend/docker-compose.backend.gpu.yml up
 ```
-
-**The `--build` flag is needed for the very first time the frontend compose file is ran, for further trials, if no changes occured to the frontend, you can omit the flag to reduce start up time.**
 
 ## Accessing the Application
 Once the services are up and running, you can access the application by navigating to `http://localhost`.
