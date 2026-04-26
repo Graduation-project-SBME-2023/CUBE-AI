@@ -34,6 +34,6 @@ jobs:
           push: true
           tags: |
             ${{ secrets.CUBE_AI_DOCKERHUB_USERNAME }}/agents-app:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/agents-app:${{ github.sha }}
+            ${{ secrets.CUBE_AI_DOCKERHUB_USERNAME }}/agents-app:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
