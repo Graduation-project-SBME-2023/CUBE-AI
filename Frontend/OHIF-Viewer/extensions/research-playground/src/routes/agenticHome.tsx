@@ -13,6 +13,13 @@ const ArrowRightIcon: any = ArrowRight;
 const ArrowLeftIcon: any = ArrowLeft;
 const SearchIcon: any = Search;
 
+const makeFallbackSessionId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
 // ==========================================
 // STYLE CONFIGURATION
 // ==========================================
@@ -81,8 +88,40 @@ const styles = {
 // ==========================================
 const AgenticHome = ({ onNavigate, onBack }) => {
   const [hypothesis, setHypothesis] = useState('');
+  const [history, setHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const textareaRef = useRef(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      setLoadingHistory(true);
+      try {
+        const response = await fetch('http://localhost:8000/hypotheses/?skip=0&limit=1000');
+        if (response.ok) {
+          const data = await response.json();
+          const sortedHistory = [...data].sort((a, b) => {
+            const aTime = new Date(a.date ?? a.updated_at ?? a.created_at ?? 0).getTime();
+            const bTime = new Date(b.date ?? b.updated_at ?? b.created_at ?? 0).getTime();
+            return bTime - aTime;
+          });
+          const displayedHistory = showAllHistory ? sortedHistory : sortedHistory.slice(0, 10);
+          setHistory(displayedHistory);
+          console.log('[HypothesisFlow][AgenticHome] Fetched history', {
+            count: sortedHistory.length,
+            sample: sortedHistory.slice(0, 3),
+            showAllHistory,
+          });
+        }
+      } catch (err) {
+        console.error('Failed to fetch history:', err);
+      } finally {
+        setLoadingHistory(false);
+      }
+    };
+    fetchHistory();
+  }, [showAllHistory]);
 
   // Auto-resize textarea as content grows
   useEffect(() => {
@@ -135,8 +174,8 @@ const AgenticHome = ({ onNavigate, onBack }) => {
       console.log('[HypothesisFlow][AgenticHome] Navigated to /playground with state payload');
     } catch (err) {
       console.error('Failed to create session:', err);
-      // Fallback: Navigate anyway with a timestamp-based ID if DB fails
-      const fallbackSessionId = String(Date.now());
+      // Fallback: use a UUID-shaped local ID to avoid UUID parsing errors downstream.
+      const fallbackSessionId = makeFallbackSessionId();
       console.warn('[HypothesisFlow][AgenticHome] Using fallback session', {
         fallbackSessionId,
       });
@@ -159,30 +198,35 @@ const AgenticHome = ({ onNavigate, onBack }) => {
   };
 
   const handleProjectClick = project => {
-    // Use the prop to navigate
+    // Restore an existing chat session and do not send a new initial message.
+    const restoredSessionId = project.chat_id || project.id || project.session_id;
+    const state = {
+      sessionId: restoredSessionId,
+      hypothesis: project.title || project.description || null,
+      sendInitialMessage: false,
+    };
+
     if (onNavigate) {
-      onNavigate('/cube-workflow', { state: { projectId: project.id } });
+      onNavigate('/playground', { state });
+    } else {
+      navigate('/playground', { state });
     }
   };
 
-  const MOCK_HISTORY = [
-    {
-      id: 1,
-      title: 'Liver Tumor Segmentation Analysis',
-      date: '2 hours ago',
-      status: 'In Progress',
-    },
-    { id: 2, title: 'Brain MRI Anomaly Detection v2', date: 'Yesterday', status: 'Completed' },
-    {
-      id: 3,
-      title: 'Chest X-Ray Pneumonia Classification',
-      date: '3 days ago',
-      status: 'Completed',
-    },
-    { id: 4, title: 'Cardiac MRI Flow Dynamics', date: 'Last week', status: 'Draft' },
-    { id: 5, title: 'Spine Fracture Localization', date: 'Last week', status: 'Completed' },
-    { id: 6, title: 'Retinal Scan Diabetic Retinopathy', date: '2 weeks ago', status: 'Draft' },
-  ];
+  // Helper to format date
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'Unknown';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffHours = diffMs / (1000 * 60 * 60);
+    if (diffHours < 1) return 'Just now';
+    if (diffHours < 24) return `${Math.floor(diffHours)} hours ago`;
+    const diffDays = diffHours / 24;
+    if (diffDays < 2) return 'Yesterday';
+    if (diffDays < 7) return `${Math.floor(diffDays)} days ago`;
+    return 'Last week';
+  };
 
   return (
     <div className={styles.container}>
@@ -275,35 +319,44 @@ const AgenticHome = ({ onNavigate, onBack }) => {
               size={20}
               className="text-[#5acce6]"
             />{' '}
-            Recent Hypotheses
+            {showAllHistory ? 'All Hypotheses' : 'Recent Hypotheses'}
           </h2>
-          <button className="flex items-center gap-1 text-xs text-[#566a84] transition-colors hover:text-[#5acce6]">
-            View All <ArrowRightIcon size={12} />
+          <button
+            onClick={() => setShowAllHistory(prev => !prev)}
+            className="flex items-center gap-1 text-xs text-[#566a84] transition-colors hover:text-[#5acce6]"
+          >
+            {showAllHistory ? 'Show Recent' : 'View All'} <ArrowRightIcon size={12} />
           </button>
         </div>
 
         <div className={styles.projectsGrid}>
-          {/* History Items */}
-          {MOCK_HISTORY.map(project => (
-            <div
-              key={project.id}
-              onClick={() => handleProjectClick(project)}
-            >
-              <Card
-                title={project.title}
-                description={`Edited ${project.date}`}
-                icon={
-                  <BotIcon
-                    size={24}
-                    className="text-[#5acce6] opacity-80"
-                  />
-                }
-                ctaText={project.status}
+          {loadingHistory ? (
+            <div className="text-[#566a84]">Loading...</div>
+          ) : history.length === 0 ? (
+            <div className="text-[#566a84]">No recent hypotheses</div>
+          ) : (
+            history.map(project => (
+              <div
+                key={project.id}
                 onClick={() => handleProjectClick(project)}
-                className="group"
-              />
-            </div>
-          ))}
+              >
+                <Card
+                  title={project.title}
+                  description={`Edited ${formatDate(project.date ?? project.updated_at ?? project.created_at)}`}
+
+                  icon={
+                    <BotIcon
+                      size={24}
+                      className="text-[#5acce6] opacity-80"
+                    />
+                  }
+                  ctaText={project.status}
+                  onClick={() => handleProjectClick(project)}
+                  className="group"
+                />
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

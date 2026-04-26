@@ -1,22 +1,22 @@
 name: CUBE.AI
 services:
-#  agents:
-#    image: cubeai1/agents-app:latest
-#    container_name: agents-backend
-#    ports:
-#      - '8150:8150'
-#    volumes:
-#      - ${COMPOSE_PROJECT_DIR}/Backend/agents_workspace:/app/agent_workspace
-#      - ${COMPOSE_PROJECT_DIR}/Backend/agent_system:/app/Backend/agent_system
-#      - ${COMPOSE_PROJECT_DIR}/Backend/mcp:/app/Backend/mcp
-#    environment:
-#      AGENTS_WORKSPACE_DIR: /app/agents_workspace
-#      OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
-#      MONAI_URL: http://monailabel:8000
-#    depends_on:
-#      - postgres
-#      - monailabel
-  #   restart: unless-stopped
+  agents:
+    image: cubeai1/agents-app:latest
+    container_name: agents-backend
+    ports:
+      - '8150:8150'
+    volumes:
+      - ${COMPOSE_PROJECT_DIR}/Backend/agents_workspace:/app/agent_workspace
+      - ${COMPOSE_PROJECT_DIR}/Backend/agent_system:/app/Backend/agent_system
+      - ${COMPOSE_PROJECT_DIR}/Backend/mcp:/app/Backend/mcp
+    environment:
+      AGENTS_WORKSPACE_DIR: /app/agents_workspace
+      OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
+      MONAI_URL: http://monailabel:8000
+    depends_on:
+      - postgres
+      - monailabel
+    restart: unless-stopped
 
   monailabel:
     # build:
@@ -71,6 +71,7 @@ services:
               capabilities: [gpu]
               # only for the workstation, gpu (rtx 3060) with specific id
               device_ids: ["0"]
+    restart: unless-stopped
 
   orthanc:
     image: jodogne/orthanc-plugins

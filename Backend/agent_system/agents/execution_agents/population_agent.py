@@ -20,6 +20,12 @@ import pandas as pd
 
 logger = logging.getLogger()
 
+TASK_CONTEXT_BOOTSTRAP = """=== TASK CONTEXT BOOTSTRAP (MANDATORY) ===
+Before doing anything else, call read_agent_task_context exactly once.
+Use the returned task_message.instructions and context_augmentation as the primary task specification.
+If the tool returns status other than 'ok', raise a scratchpad flag and stop.
+"""
+
 import os
 import json
 
@@ -110,10 +116,16 @@ class PopulationPlannerAgent(AssistantAgent):
         )
         if not os.path.exists(mcp_server_path):
             raise FileNotFoundError(f"MCP server not found at: {mcp_server_path}")
+        env = os.environ.copy()
+        env.update({
+            "WORKSPACE_DIR": workspace_folder,
+            "SESSION_ID": session_id,
+            "AGENT_ID": "study_population_planner_agent"
+        })
         mcp_server = StdioServerParams(
             command=sys.executable,
             args=[mcp_server_path],
-            env={"WORKSPACE_DIR": workspace_folder, "SESSION_ID": session_id, "AGENT_ID": "study_population_planner_agent"},
+            env=env,
             )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)
@@ -121,6 +133,7 @@ class PopulationPlannerAgent(AssistantAgent):
             logger.exception("Failed to initialize MCP tools from %s", mcp_server_path)
             raise RuntimeError(f"Failed to initialize MCP tools from {mcp_server_path}") from exc
         desired_tools = ['get_unique_series_descriptions', 'search_volumes_by_description', 'write_inclusion_criteria', 'generate_targets',
+                        'read_agent_task_context',
                         'scratchpad_register_agent', 'scratchpad_raise_flag',
                         'scratchpad_write_summary', 'scratchpad_set_status']
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
@@ -129,7 +142,7 @@ class PopulationPlannerAgent(AssistantAgent):
             logger.info(f"Tool selected: {tool.name}")
         name = "study_population_planner_agent"
         description = POPULATION_PLANNER_AGENT_DESCRIPTION
-        system_message = POPULATION_EXEC_SYSTEM_MESSAGE
+        system_message = f"{TASK_CONTEXT_BOOTSTRAP}\n\n{POPULATION_EXEC_SYSTEM_MESSAGE}"
         return cls(
             name = name,
             model_client = model_client,

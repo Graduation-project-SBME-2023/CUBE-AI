@@ -87,6 +87,22 @@ async def get_task_message_by_step(db: AsyncSession, agent_id: UUID) -> TaskMess
         return obj
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+async def get_task_message_by_task_id(db: AsyncSession, task_id: str) -> TaskMessage:
+    """Fetch a TaskMessage by its task_id field."""
+    try:
+        result = await db.execute(
+            select(TaskMessage)
+            .options(selectinload(TaskMessage.context_augmentation))
+            .where(TaskMessage.task_id == task_id)
+        )
+        obj = result.scalar_one_or_none()
+        if not obj:
+            raise HTTPException(status_code=404, detail="TaskMessage not found for this task_id")
+        return obj
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
  
  
 async def update_task_message_by_step(

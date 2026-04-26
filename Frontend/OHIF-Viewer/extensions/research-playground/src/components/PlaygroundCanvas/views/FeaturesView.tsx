@@ -9,14 +9,8 @@ import {
     ResponsiveContainer, Cell, LineChart, Line, ScatterChart,
     Scatter, ReferenceLine,
 } from 'recharts';
-import websocketService from '../../../utils/WebsocketService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-export interface VolumeGif {
-    seriesInstanceUid: string;
-    gifUrl: string;
-}
 
 export interface FeaturesData {
     status: string;
@@ -49,10 +43,6 @@ export interface FeatureImportanceData {
     method?: string;
     feature_count?: number;
     result_files?: Record<string, string>;
-    volumes?: VolumeGif[];
-    targetRoi?: string;
-    selectedModel?: string;
-    diceScore?: number | null;
     chart_data?: ChartData | null;
 }
 

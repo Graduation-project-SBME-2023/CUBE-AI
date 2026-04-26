@@ -1,11 +1,8 @@
-from socket_store import  send_ws_message
 from models.tool_logging import ToolEvent
 
 
 async def receive_tool_event(event: ToolEvent):
-    await send_ws_message(
-        msg_type="tool_update",
-        payload=event.model_dump(),
-        session_id=event.session_id,
-        # payload=event
-    )
+    # send instead via pipeline monitor???
+    from app import session_service
+    session = await session_service.async_require_session(event.session_id)
+    await session.execution_monitor.on_tool_event(event)

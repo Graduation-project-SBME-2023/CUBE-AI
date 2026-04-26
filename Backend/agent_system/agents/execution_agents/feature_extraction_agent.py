@@ -1,6 +1,7 @@
 import sys
 import os
 import logging
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "..", ".."))
 sys.path.append(root_dir)
@@ -15,17 +16,40 @@ from autogen_core.tools import FunctionTool
 
 logger = logging.getLogger(__name__)
 
+TASK_CONTEXT_BOOTSTRAP = """=== TASK CONTEXT BOOTSTRAP (MANDATORY) ===
+Before doing anything else, call read_agent_task_context exactly once.
+Use the returned task_message.instructions and context_augmentation as the primary task specification.
+If the tool returns status other than 'ok', raise a scratchpad flag and stop.
+"""
+
+
 class FeatureExtractionAgent(AssistantAgent):
-    def __init__(self, name, model_client, tools, description, system_message, max_tool_iterations):
-        super().__init__(name=name,
-                        model_client=model_client, 
-                        tools=tools, 
-                        description=description, 
-                        system_message=system_message,
-                        max_tool_iterations=max_tool_iterations)
-    
+    def __init__(
+        self,
+        name,
+        model_client,
+        tools,
+        description,
+        system_message,
+        max_tool_iterations,
+    ):
+        super().__init__(
+            name=name,
+            model_client=model_client,
+            tools=tools,
+            description=description,
+            system_message=system_message,
+            max_tool_iterations=max_tool_iterations,
+        )
+
     @classmethod
-    async def create(cls, model_client = None, workspace_folder = None, mcp_server_path=None, session_id = None):
+    async def create(
+        cls,
+        model_client=None,
+        workspace_folder=None,
+        mcp_server_path=None,
+        session_id=None,
+    ):
         model_client = OllamaClient() if not model_client else model_client
 
         if not mcp_server_path:
@@ -36,18 +60,37 @@ class FeatureExtractionAgent(AssistantAgent):
             mcp_server_path = os.path.abspath(mcp_server_path)
         if not os.path.exists(mcp_server_path):
             raise FileNotFoundError(f"MCP server not found at: {mcp_server_path}")
-
+        env = os.environ.copy()
+        env.update({
+            "WORKSPACE_DIR": workspace_folder,
+            "SESSION_ID": session_id,
+            "AGENT_ID": "feature_extraction_agent",
+        })
         mcp_server = StdioServerParams(
-            command=sys.executable, args=[mcp_server_path], env={"WORKSPACE_DIR": workspace_folder, "SESSION_ID": session_id, "AGENT_ID": 'feature_extraction_agent'}, read_timeout_seconds=300
+            command=sys.executable,
+            args=[mcp_server_path],
+            env=env,
+            read_timeout_seconds=300,
         )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)
         except Exception as exc:
             logger.exception("Failed to initialize MCP tools from %s", mcp_server_path)
-            raise RuntimeError(f"Failed to initialize MCP tools from {mcp_server_path}") from exc
-        desired_mcp_tools = ['radiomics_extract_features', 'radiomics_analyze_importance','scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',
-                             'scratchpad_write_summary', 'scratchpad_set_status', 'scratchpad_read_agent',
-                             'write_agent_output']
+            raise RuntimeError(
+                f"Failed to initialize MCP tools from {mcp_server_path}"
+            ) from exc
+        desired_mcp_tools = [
+            "read_agent_task_context",
+            "radiomics_extract_features",
+            "radiomics_analyze_importance",
+            "scratchpad_register_agent",
+            "scratchpad_write_note",
+            "scratchpad_raise_flag",
+            "scratchpad_write_summary",
+            "scratchpad_set_status",
+            "scratchpad_read_agent",
+            "write_agent_output",
+        ]
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
 
         # feature_extraction_tool_wrapper = FunctionTool(
@@ -104,14 +147,16 @@ class FeatureExtractionAgent(AssistantAgent):
         # tools = [feature_extraction_tool_wrapper, feature_importance_tool_wrapper, *final_mcp_tools]
         tools = final_mcp_tools
         description = FEATURE_EXTRACTION_AGENT_DESCRIPTION
-        system_message = FEATURE_EXTRACTION_AGENT_SYSTEM_PROMPT
+        system_message = (
+            f"{TASK_CONTEXT_BOOTSTRAP}\n\n{FEATURE_EXTRACTION_AGENT_SYSTEM_PROMPT}"
+        )
         return cls(
-            name = name,
-            model_client = model_client,
-            tools = tools,
-            description = description,
-            system_message = system_message,
-            max_tool_iterations = 20
+            name=name,
+            model_client=model_client,
+            tools=tools,
+            description=description,
+            system_message=system_message,
+            max_tool_iterations=20,
         )
 
     @staticmethod
@@ -122,24 +167,27 @@ class FeatureExtractionAgent(AssistantAgent):
 async def main():
     from autogen_agentchat.ui import Console
     from autogen_core import CancellationToken
-    
+
     # client = OllamaClient("qwen3-coder:480b-cloud")
 
     # Initialize the agent using the factory method
     # agent = await FeatureExtractionAgent.create(client)
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    SERVER_PATH = os.path.join(BASE_DIR, '..', '..', '..', 'mcp', 'server.py')
-    workspace_dir = os.path.join(BASE_DIR, '..', '..', "workspace")
+    SERVER_PATH = os.path.join(BASE_DIR, "..", "..", "..", "mcp", "server.py")
+    workspace_dir = os.path.join(BASE_DIR, "..", "..", "workspace")
 
-    agent = await FeatureExtractionAgent.create(workspace_folder=workspace_dir, mcp_server_path=SERVER_PATH)
-    
+    agent = await FeatureExtractionAgent.create(
+        workspace_folder=workspace_dir, mcp_server_path=SERVER_PATH
+    )
+
     # Now you can use the agent normally
     print(f"Agent initialized with {agent._tools} tools.")
     print(agent._max_tool_iterations)
     for tool in agent._tools:
         print(tool.name)
     await Console(
-        agent.run_stream(task="""Perform analysis, and find out the most important radiomics features for determining the health of the spleen. These are the inputs you'll need:
+        agent.run_stream(
+            task="""Perform analysis, and find out the most important radiomics features for determining the health of the spleen. These are the inputs you'll need:
             {
                 "hypothesis": "What are the most important features for determining the health of the spleen?",
                 "image_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/volumes",
@@ -148,9 +196,12 @@ async def main():
                 "subject_id_column": "id",
             }
         """,
-        cancellation_token=CancellationToken())
+            cancellation_token=CancellationToken(),
         )
+    )
+
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

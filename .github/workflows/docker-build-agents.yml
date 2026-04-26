@@ -1,4 +1,4 @@
-name: Build and Push Multi-Platform Docker Image
+name: Build and Push Multi-Platform Agents Docker Image
 
 on:
   push:
@@ -32,6 +32,8 @@ jobs:
           file: ./Backend/agent_system/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ secrets.CUBE_AI_DOCKERHUB_USERNAME }}/agents-app:latest
+          tags: |
+            ${{ secrets.CUBE_AI_DOCKERHUB_USERNAME }}/agents-app:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/agents-app:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

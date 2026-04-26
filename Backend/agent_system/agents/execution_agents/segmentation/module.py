@@ -20,6 +20,7 @@ from .services import SegmentationService
 from .utils import exclude_existing_masks, download_and_pair_volumes, generate_gif_overlays, cleanup_discarded, get_model_dice_score
 from .logging_config import setup_logging
 import logging
+from client_config import create_model_client_from_config
 # before integratinon make it to the default messages from the socket_store
 from .ws_client_sender import send_ws_message_remote, wait_for_user_message_remote
 from agent_system.models.tool_logging import ProgressPayload, TextPayload, ToolEvent
@@ -44,24 +45,26 @@ class SegmentationModule:
 
     async def initialize(self):
         # intialize model client
-        self.model_client = OllamaChatCompletionClient(
-        model=self.model_name,
-        model_info={
-            "vision": False,
-            "function_calling": True,
-            "json_output": True,
-            "structured_output": True,
-            "family": "unknown"
-        },
-        api_key=os.environ.get("APIKEY")
-     )
+        self.model_client = create_model_client_from_config()
+     #    self.model_client = OllamaChatCompletionClient(
+     #    model=self.model_name,
+     #    model_info={
+     #        "vision": False,
+     #        "function_calling": True,
+     #        "json_output": True,
+     #        "structured_output": True,
+     #        "family": "unknown"
+     #    },
+     #    api_key=os.environ.get("APIKEY"),
+     #
+     # )
         # MCP server connection
         current_file = Path(__file__).resolve()
         backend_dir = current_file.parent.parent.parent.parent.parent
         server_path = backend_dir / "mcp" / "server.py"   
-        logger.info(f"Starting MCP server at: {server_path}")     
+        logger.info(f"Starting MCP server at: {server_path}, with session id: {self.session_id}")
         math_server = StdioServerParams(
-            command="python", args=[str(server_path)], timeout=None
+            command="python", args=[str(server_path)], timeout=None, env={"SESSION_ID": self.session_id, "AGENT_ID": 'segmentation_agent'}
         )
         try:
             tools = await mcp_server_tools(math_server)
@@ -82,11 +85,15 @@ class SegmentationModule:
 
 
     async def run(self, input_data: Union[str, Dict[str, Any]], workspace_dir: str):
+        # input data is config_path
         if isinstance(input_data, str):
+            state_path = input_data.replace('config', 'state')
+            with open(state_path, 'r') as f:
+                state = json.load(f)
             with open(input_data, "r") as f:
                 input_data = json.load(f)
 
-        hypothesis: str = input_data["hypothesis"]
+        hypothesis: str = state["hypothesis"]["hypothesis"]
         datasetlist: List[str] = input_data["datasetlist"]
         #1. plan
         plan = await run_planner(self.PlannerAgent,hypothesis)
@@ -201,25 +208,30 @@ class SegmentationModule:
 
         # ==========sending data to fronted for review====================
         logger.info("Module sending data to frontend for review...")
-        await send_ws_message(
-            msg_type="features_output", 
-            payload=frontend_data, 
-            session_id= self.session_id
-        )
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                "http://localhost:8150/ws-broadcast",
+                json={
+                    "type": "segmentation_output",
+                    "payload": frontend_data,
+                    "session_id": self.session_id
+                }
+            )
         # wait untill fornt reply "save" to get the result
-        logger.info("Module paused: Waiting for human review...")
-        user_response_raw = await wait_for_user_message(
-            session_id= self.session_id
+        ## wait until fully checked wait for user message
+        # logger.info("Module paused: Waiting for human review...")
+        # user_response_raw = await wait_for_user_message(
+        #     session_id= self.session_id
             
-        )
+        # )
 
-        # The module wakes up! Here are the UIDs the user accepted:
-        user_results = json.loads(user_response_raw)
-        final_accepted_uids = user_results.get("accepted", [])
-        logger.info(f"Module resumed! User accepted: {final_accepted_uids}")
+        # # The module wakes up! Here are the UIDs the user accepted:
+        # user_results = json.loads(user_response_raw)
+        # final_accepted_uids = user_results.get("accepted", [])
+        # logger.info(f"Module resumed! User accepted: {final_accepted_uids}")
 
-        #============= accepted uid just kept only in the folder=================
-        cleanup_discarded(workspace_dir, final_accepted_uids)
+        # #============= accepted uid just kept only in the folder=================
+        # cleanup_discarded(workspace_dir, final_accepted_uids)
 
 
         return {"status": "finished"}
