@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir git+https://github.com/AIM-Harvard/pyradiomics.git
 
 # Step 3: Install pinned numeric libraries LAST (must not be overwritten)
-RUN pip install --no-cache-dir numpy==1.26.4 pandas==2.1.4
+RUN pip install --no-cache-dir numpy==1.26.4 pandas==2.1.4 pycaret==3.3.2
 
 # Copy application source
 COPY ./Backend/agent_system ./Backend/agent_system
