@@ -7,11 +7,7 @@ Read below for detailed instructions on each.
 
 ## Prerequisites
 - Ensure you have Docker and Docker Compose installed on your machine.
-- Ensure you have yarn install on your machine.
-  - On macOS, you can install it via Homebrew:
-```bash
-    brew install yarn
-```
+
 - **Download and install the Ollama client.**
   - Visit [https://ollama.com/download](https://ollama.com/download) and download the installer for your operating system (macOS, Windows, or Linux).
   - Follow the installation instructions for your platform:
