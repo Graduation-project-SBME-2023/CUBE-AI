@@ -208,25 +208,30 @@ class SegmentationModule:
 
         # ==========sending data to fronted for review====================
         logger.info("Module sending data to frontend for review...")
-        await send_ws_message(
-            msg_type="features_output", 
-            payload=frontend_data, 
-            session_id= self.session_id
-        )
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                "http://localhost:8150/ws-broadcast",
+                json={
+                    "type": "segmentation_output",
+                    "payload": frontend_data,
+                    "session_id": self.session_id
+                }
+            )
         # wait untill fornt reply "save" to get the result
-        logger.info("Module paused: Waiting for human review...")
-        user_response_raw = await wait_for_user_message(
-            session_id= self.session_id
+        ## wait until fully checked wait for user message
+        # logger.info("Module paused: Waiting for human review...")
+        # user_response_raw = await wait_for_user_message(
+        #     session_id= self.session_id
             
-        )
+        # )
 
-        # The module wakes up! Here are the UIDs the user accepted:
-        user_results = json.loads(user_response_raw)
-        final_accepted_uids = user_results.get("accepted", [])
-        logger.info(f"Module resumed! User accepted: {final_accepted_uids}")
+        # # The module wakes up! Here are the UIDs the user accepted:
+        # user_results = json.loads(user_response_raw)
+        # final_accepted_uids = user_results.get("accepted", [])
+        # logger.info(f"Module resumed! User accepted: {final_accepted_uids}")
 
-        #============= accepted uid just kept only in the folder=================
-        cleanup_discarded(workspace_dir, final_accepted_uids)
+        # #============= accepted uid just kept only in the folder=================
+        # cleanup_discarded(workspace_dir, final_accepted_uids)
 
 
         return {"status": "finished"}
