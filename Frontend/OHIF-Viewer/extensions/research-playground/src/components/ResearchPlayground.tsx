@@ -101,6 +101,7 @@ export default function ResearchPlayground() {
     const hypothesis = location.state?.hypothesis || 'No active hypothesis defined.';
     const sessionId = location.state?.sessionId || location.state?.session_id || null;
     const sendInitialMessage = location.state?.sendInitialMessage || false;
+    const initialUserMessage = sendInitialMessage ? hypothesis : undefined;
 
     // Load state from endpoints when session_id is provided
     useEffect(() => {
@@ -293,7 +294,7 @@ export default function ResearchPlayground() {
                     <ChatSidebar 
                         isOpen={isChatOpen} 
                         onClose={() => setIsChatOpen(false)} 
-                        initialUserMessage={hypothesis} 
+                        initialUserMessage={initialUserMessage} 
                         externalSessionId={sessionId}
                         sendInitialMessage={sendInitialMessage}
                     />

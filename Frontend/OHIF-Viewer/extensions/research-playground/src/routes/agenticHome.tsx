@@ -90,19 +90,28 @@ const AgenticHome = ({ onNavigate, onBack }) => {
   const [hypothesis, setHypothesis] = useState('');
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const textareaRef = useRef(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     const fetchHistory = async () => {
+      setLoadingHistory(true);
       try {
-        const response = await fetch('http://localhost:8150/hypothesis-history?limit=20');
+        const response = await fetch('http://localhost:8000/hypotheses/?skip=0&limit=1000');
         if (response.ok) {
           const data = await response.json();
-          setHistory(data);
+          const sortedHistory = [...data].sort((a, b) => {
+            const aTime = new Date(a.date ?? a.updated_at ?? a.created_at ?? 0).getTime();
+            const bTime = new Date(b.date ?? b.updated_at ?? b.created_at ?? 0).getTime();
+            return bTime - aTime;
+          });
+          const displayedHistory = showAllHistory ? sortedHistory : sortedHistory.slice(0, 10);
+          setHistory(displayedHistory);
           console.log('[HypothesisFlow][AgenticHome] Fetched history', {
-            count: data.length,
-            sample: data.slice(0, 3),
+            count: sortedHistory.length,
+            sample: sortedHistory.slice(0, 3),
+            showAllHistory,
           });
         }
       } catch (err) {
@@ -112,7 +121,7 @@ const AgenticHome = ({ onNavigate, onBack }) => {
       }
     };
     fetchHistory();
-  }, []);
+  }, [showAllHistory]);
 
   // Auto-resize textarea as content grows
   useEffect(() => {
@@ -189,9 +198,18 @@ const AgenticHome = ({ onNavigate, onBack }) => {
   };
 
   const handleProjectClick = project => {
-    // Navigate to the playground with the session_id
+    // Restore an existing chat session and do not send a new initial message.
+    const restoredSessionId = project.chat_id || project.id || project.session_id;
+    const state = {
+      sessionId: restoredSessionId,
+      hypothesis: project.title || project.description || null,
+      sendInitialMessage: false,
+    };
+
     if (onNavigate) {
-      onNavigate('/playground', { state: { session_id: project.id } });
+      onNavigate('/playground', { state });
+    } else {
+      navigate('/playground', { state });
     }
   };
 
@@ -202,6 +220,7 @@ const AgenticHome = ({ onNavigate, onBack }) => {
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffHours = diffMs / (1000 * 60 * 60);
+    if (diffHours < 1) return 'Just now';
     if (diffHours < 24) return `${Math.floor(diffHours)} hours ago`;
     const diffDays = diffHours / 24;
     if (diffDays < 2) return 'Yesterday';
@@ -300,10 +319,13 @@ const AgenticHome = ({ onNavigate, onBack }) => {
               size={20}
               className="text-[#5acce6]"
             />{' '}
-            Recent Hypotheses
+            {showAllHistory ? 'All Hypotheses' : 'Recent Hypotheses'}
           </h2>
-          <button className="flex items-center gap-1 text-xs text-[#566a84] transition-colors hover:text-[#5acce6]">
-            View All <ArrowRightIcon size={12} />
+          <button
+            onClick={() => setShowAllHistory(prev => !prev)}
+            className="flex items-center gap-1 text-xs text-[#566a84] transition-colors hover:text-[#5acce6]"
+          >
+            {showAllHistory ? 'Show Recent' : 'View All'} <ArrowRightIcon size={12} />
           </button>
         </div>
 
@@ -320,7 +342,8 @@ const AgenticHome = ({ onNavigate, onBack }) => {
               >
                 <Card
                   title={project.title}
-                  description={`Edited ${formatDate(project.date)}`}
+                  description={`Edited ${formatDate(project.date ?? project.updated_at ?? project.created_at)}`}
+
                   icon={
                     <BotIcon
                       size={24}

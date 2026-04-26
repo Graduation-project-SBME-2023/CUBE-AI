@@ -1,5 +1,6 @@
 import httpx
 import logging
+from datetime import datetime
 from models.plans import ClinicalHypothesis, StudyPlan, StudyStep
 import os
 import json
@@ -455,7 +456,22 @@ class BackendClient:
                 sessions = sessions_resp.json()
                 history = []
 
-                for session in sessions[:limit]:
+                def _parse_date(session_data):
+                    date_value = session_data.get("last_activity") or session_data.get("started_at")
+                    if not date_value:
+                        return 0
+                    try:
+                        return datetime.fromisoformat(date_value).timestamp()
+                    except Exception:
+                        return 0
+
+                sorted_sessions = sorted(
+                    sessions,
+                    key=_parse_date,
+                    reverse=True,
+                )
+
+                for session in sorted_sessions[:limit]:
                     chat_id = session.get("chat_id")
                     if not chat_id:
                         continue
@@ -482,7 +498,7 @@ class BackendClient:
                             else "Draft",
                         }
                     )
-                logger.info(f"Fetched hypothesis history: {len(history)} items")    
+                logger.info(f"Fetched hypothesis history: {len(history)} items")
                 return history
             except httpx.HTTPError as e:
                 logger.error(f"Failed to fetch hypothesis history: {e}")
