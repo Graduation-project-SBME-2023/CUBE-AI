@@ -3,6 +3,8 @@ import asyncio
 import logging
 from typing import List, Any, Dict
 from fastapi import WebSocket
+from clients.backend_client import BackendClient
+from models.logs import WS_Log
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +60,7 @@ class ConnectionManager:
         message = await queue.get()
         return message
 
-    async def send_ws_message(self, msg_type: str, payload: Any, session_id: str | None = None):
+    async def send_ws_message(self, msg_type: str, payload: Any, session_id: str = '', replaying: bool = False):
         """
         Called by the Planner/Agent to send updates to the UI.
         """
@@ -79,6 +81,11 @@ class ConnectionManager:
 
         # if self.solely_connected_socket:
         #     await self.solely_connected_socket.send_text(message_data)
+
+        # db persistence of logs
+        if not replaying:
+            log = WS_Log(msg_type=msg_type, payload=payload, session_id=session_id)
+            await BackendClient.save_log(log)
 
         # Cleanup broken connections
         for dead in dead_sockets:

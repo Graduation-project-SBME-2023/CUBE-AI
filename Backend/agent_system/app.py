@@ -32,10 +32,11 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, ".."))
 sys.path.append(root_dir)
 
-from socket_store import manager, send_ws_message
+from socket_store import manager as ws_manager, send_ws_message
 from agents.planning_agents.planner import ClinicalPlanner
 from models.session import Session
 from models.plans import PlannerState
+from models.logs import WS_Log
 from client_config import (
     ClientConfig,
     get_client_config,
@@ -48,6 +49,7 @@ from models.requests import PlanningRequest, SessionControlRequest
 from tool_logging import receive_tool_event
 from services.session_service import SessionService
 from services.pipeline_monitor import PipelineMonitor
+from clients.backend_client import BackendClient
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +105,7 @@ def serve_static_pdf(file_path: str):
 
 
 # Single shared service — the only stateful object routes need to know about
-session_service = SessionService(ws_manager=manager)
+session_service = SessionService(ws_manager=ws_manager)
 
 api_key = os.getenv("OLLAMA_API_KEY", "")
 
@@ -120,8 +122,8 @@ async def run_planner(session: Session, message: str) -> None:
     )
     os.makedirs(workspace_folder, exist_ok=True)
     planner = ClinicalPlanner(
-        input_provider=lambda: manager.wait_for_user_message(session.session_id),
-        output_callback=lambda t, d, s: manager.send_ws_message(t, d, s),
+        input_provider=lambda: ws_manager.wait_for_user_message(session.session_id),
+        output_callback=lambda t, d, s: ws_manager.send_ws_message(t, d, s),
         model_client=create_model_client_from_config(),
         workspace_dir=workspace_folder,
         session=session,
@@ -219,7 +221,7 @@ async def run_pipeline(session: Session) -> None:
                         pipeline_logger.info(f"  [{msg.source}] {msg.content}")
                     pipeline_logger.info("━" * 60)
                     await session.execution_monitor.on_pipeline_complete()
-                    await manager.send_ws_message(
+                    await ws_manager.send_ws_message(
                         "run_finished", "run_finished", session_id=session.session_id
                     )
 
@@ -431,6 +433,14 @@ async def list_providers():
 # State Recovery
 # ----------------------------------------------------------------------
 
+@app.get("/session/{session_id}/replay-logs")
+async def replay_logs(session_id: str):
+    logs: list[WS_Log] = await BackendClient.get_logs(session_id)
+    for log in logs:
+        if log.msg_type in ('msg'): continue
+        await ws_manager.send_ws_message(log.msg_type, log.payload, log.session_id, replaying=True)
+
+
 
 @app.get("/session/{session_id}/plan-state")
 async def get_plan_state(session_id: str):
@@ -526,13 +536,13 @@ async def get_hypothesis_history(limit: int = 20):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    await ws_manager.connect(websocket)
     logging.getLogger("HypothesisFlow").info("[HypothesisFlow][WS] Client connected")
 
     try:
         while True:
             data = await websocket.receive_text()
-            await manager.push_to_queue(data)
+            await ws_manager.push_to_queue(data)
             logging.getLogger("HypothesisFlow").info(
                 "[HypothesisFlow][WS] Message received raw | size=%s",
                 len(data or ""),
@@ -542,7 +552,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 message = json.loads(data)
             except json.JSONDecodeError:
                 # Backward compatibility: plain text is treated as user input.
-                await manager.push_to_queue(data)
+                await ws_manager.push_to_queue(data)
                 continue
 
             if not isinstance(message, dict):
@@ -569,18 +579,18 @@ async def websocket_endpoint(websocket: WebSocket):
                         len(text),
                         text[:120],
                     )
-                    await manager.push_to_queue(text, session_id=session_id)
+                    await ws_manager.push_to_queue(text, session_id=session_id)
 
     except WebSocketDisconnect:
         logging.getLogger("HypothesisFlow").info(
             "[HypothesisFlow][WS] Client disconnected"
         )
-        manager.disconnect(websocket)
+        ws_manager.disconnect(websocket)
 
 
 @app.post("/ws-broadcast")
 async def ws_broadcast(data: dict):
-    await manager.send_ws_message(
+    await ws_manager.send_ws_message(
         data["type"], data["payload"], session_id=data.get("session_id")
     )
     return {"status": "ok"}

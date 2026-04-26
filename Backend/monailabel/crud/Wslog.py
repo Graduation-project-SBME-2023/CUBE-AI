@@ -74,7 +74,7 @@ async def get_logs(
                     WSLogModel.payload.has_key(json_key)  # noqa
                 )
 
-        query = query.order_by(WSLogModel.created_at.desc())
+        query = query.order_by(WSLogModel.created_at.asc())
 
         result = await db.execute(query)
         return result.scalars().all()
