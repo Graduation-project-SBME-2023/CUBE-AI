@@ -9,9 +9,32 @@ Read below for detailed instructions on each.
 - Ensure you have Docker and Docker Compose installed on your machine.
 - Ensure you have yarn install on your machine.
   - On macOS, you can install it via Homebrew:
-    ```bash
+```bash
     brew install yarn
-    ```
+```
+- **Download and install the Ollama client.**
+  - Visit [https://ollama.com/download](https://ollama.com/download) and download the installer for your operating system (macOS, Windows, or Linux).
+  - Follow the installation instructions for your platform:
+    - **macOS/Windows**: Run the downloaded installer and follow the on-screen prompts.
+    - **Linux**:
+```bash
+      curl -fsSL https://ollama.com/install.sh | sh
+```
+  - Once installed, verify Ollama is running:
+```bash
+    ollama --version
+```
+  - **Sign in to Ollama** (required for cloud models):
+```bash
+    ollama login
+```
+    Enter your Ollama account credentials when prompted. If you don't have an account, register at [https://ollama.com](https://ollama.com).
+  - **Pull and run the `deepseek-v3.1:671b-cloud` model** to verify your setup and send your first message:
+```bash
+    ollama run deepseek-v3.1:671b-cloud
+```
+    This will download the model (first run only) and open an interactive chat session. Type a message and press **Enter** to confirm the model is working, then exit with `/bye` or `Ctrl+D`.
+
 - Clone the repository to your local machine.
 
 ```bash
@@ -68,15 +91,17 @@ To run the application in production mode, you will need to set up the frontend 
 From the root, run the following command:
 
 ```bash
-docker compose -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml -f Backend/docker-compose.backend.cpu.yml up
+docker compose -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml -f Backend/docker-compose.backend.cpu.yml up --build
 ```
 This command will build and start the frontend and backend services in production mode.
 
 Or if GPU is available, you can run:
 
 ```bash
-docker compose -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml -f Backend/docker-compose.backend.gpu.yml up
+docker compose -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml -f Backend/docker-compose.backend.gpu.yml up --build
 ```
+
+**The `--build` flag is needed for the very first time the frontend compose file is ran, for further trials, if no changes occured to the frontend, you can omit the flag to reduce start up time.**
 
 ## Accessing the Application
 Once the services are up and running, you can access the application by navigating to `http://localhost`.
