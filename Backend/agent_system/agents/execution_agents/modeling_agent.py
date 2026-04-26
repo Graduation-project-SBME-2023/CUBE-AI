@@ -43,7 +43,7 @@ class ModelingAgent(AssistantAgent):
         if not os.path.exists(mcp_server_path):
             raise FileNotFoundError(f"MCP server not found at: {mcp_server_path}")
         mcp_server = StdioServerParams(
-            command=sys.executable, args=[mcp_server_path], env={"WORKSPACE_DIR": workspace_folder, "SESSION_ID": session_id, "AGENT_ID": 'modeling_agent'}, read_timeout_seconds=300
+            command=sys.executable, args=[mcp_server_path], env=os.environ.copy().update({"WORKSPACE_DIR": workspace_folder, "SESSION_ID": session_id, "AGENT_ID": 'modeling_agent'}), read_timeout_seconds=300
         )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)
