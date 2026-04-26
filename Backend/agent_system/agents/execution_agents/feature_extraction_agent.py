@@ -64,11 +64,11 @@ class FeatureExtractionAgent(AssistantAgent):
         mcp_server = StdioServerParams(
             command=sys.executable,
             args=[mcp_server_path],
-            env={
+            env=os.environ.copy().update({
                 "WORKSPACE_DIR": workspace_folder,
                 "SESSION_ID": session_id,
                 "AGENT_ID": "feature_extraction_agent",
-            },
+            }),
             read_timeout_seconds=300,
         )
         try:

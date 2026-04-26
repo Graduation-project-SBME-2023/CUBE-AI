@@ -1,6 +1,9 @@
 import os
 import httpx
 from typing import Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 from . import mcp
 from tool_logging import ToolEvent, log_tool_state, TextPayload
@@ -11,6 +14,7 @@ AGENT_ID = os.environ.get("AGENT_ID", "")
 
 
 async def _get_json(client: httpx.AsyncClient, path: str) -> Any:
+    logger.info(f"GET {path}")
     response = await client.get(f"{BASE_URL}{path}")
     response.raise_for_status()
     return response.json()

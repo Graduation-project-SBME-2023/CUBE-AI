@@ -119,7 +119,7 @@ class PopulationPlannerAgent(AssistantAgent):
         mcp_server = StdioServerParams(
             command=sys.executable,
             args=[mcp_server_path],
-            env={"WORKSPACE_DIR": workspace_folder, "SESSION_ID": session_id, "AGENT_ID": "study_population_planner_agent"},
+            env=os.environ.copy().update({"WORKSPACE_DIR": workspace_folder, "SESSION_ID": session_id, "AGENT_ID": "study_population_planner_agent"}),
             )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)
