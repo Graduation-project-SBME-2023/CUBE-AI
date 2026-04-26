@@ -2,6 +2,7 @@ import httpx
 import logging
 from datetime import datetime
 from models.plans import ClinicalHypothesis, StudyPlan, StudyStep
+from models.logs import WS_Log
 import os
 import json
 from uuid import UUID
@@ -502,6 +503,39 @@ class BackendClient:
                 return history
             except httpx.HTTPError as e:
                 logger.error(f"Failed to fetch hypothesis history: {e}")
+                return []
+
+    # ------------------------------------------------------------------
+    # WS Stream Logs
+    # ------------------------------------------------------------------
+    @classmethod
+    async def save_log(cls, log: WS_Log) -> WS_Log:
+        """Save a ws log whenever the socket store sends any message."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    f"{BASE_URL}/ws_logs/",
+                    json=log.model_dump(),
+                )
+                response.raise_for_status()
+                return WS_Log(**response.json())
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to save ws log {log.msg_type}: {e}")
+                return log
+
+    @classmethod
+    async def get_logs(cls, session_id: str) -> list[WS_Log]:
+        """Get all logs sent in a session."""
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{BASE_URL}/ws_logs/session/{session_id}",
+                )
+                response.raise_for_status()
+                data = response.json()
+                return [WS_Log(**item) for item in data]
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to retrieve ws logs for session {session_id}: {e}")
                 return []
 
 

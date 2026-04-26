@@ -87,6 +87,7 @@ export default function ResearchPlayground() {
     const [modelingData, setModelingData] = useState<any>(null);
     const [reportData, setReportData] = useState<any>(null);
     const [latexData, setLatexData] = useState<any>(null);
+    const [viewsReady, setViewsReady] = useState(false);
     const DEFAULT_PHASE = 'planning';
     const isValidPhase = RESEARCH_PHASES.some(phase => phase.id === phaseId);
     const activePhase = isValidPhase ? phaseId! : DEFAULT_PHASE;
@@ -104,19 +105,16 @@ export default function ResearchPlayground() {
     const initialUserMessage = sendInitialMessage ? hypothesis : undefined;
 
     // Load state from endpoints when session_id is provided
+    // Effect 1: non-replay session state (unchanged behavior, fires immediately)
     useEffect(() => {
         const loadSessionState = async () => {
             if (!sessionId) return;
-            
             try {
-                // Load plan state
                 const planRes = await fetch(`http://localhost:8150/session/${sessionId}/plan-state`);
                 if (planRes.ok) {
                     const planData = await planRes.json();
                     console.log('[ResearchPlayground] Loaded plan state:', planData);
                 }
-                
-                // Load execution state
                 const execRes = await fetch(`http://localhost:8150/session/${sessionId}/execution-state`);
                 if (execRes.ok) {
                     const execData = await execRes.json();
@@ -126,9 +124,36 @@ export default function ResearchPlayground() {
                 console.error('[ResearchPlayground] Failed to load session state:', err);
             }
         };
-        
         loadSessionState();
     }, [sessionId]);
+
+    // Effect 2: signal that all child views have mounted
+    useEffect(() => {
+        const raf = requestAnimationFrame(() => setViewsReady(true));
+        return () => cancelAnimationFrame(raf);
+    }, []);
+
+    // Effect 3: replay logs — only fires after views (and their WS subscriptions) are ready
+    useEffect(() => {
+        if (!sessionId || !viewsReady) return;
+
+        const triggerReplay = async () => {
+            websocketService.startReplayCapture();
+            try {
+                const replayRes = await fetch(`http://localhost:8150/session/${sessionId}/replay-logs`);
+                if (replayRes.ok) {
+                    console.log('[ResearchPlayground] ws logs replayed');
+                }
+            } catch (err) {
+                console.error('[ResearchPlayground] Failed to replay logs:', err);
+            } finally {
+                // Always clean up the buffer, even if the request failed
+                websocketService.stopReplayCapture();
+            }
+        };
+
+        triggerReplay();
+    }, [sessionId, viewsReady]);
 
     useEffect(() => {
         console.log('[HypothesisFlow][ResearchPlayground] Route/context', {
