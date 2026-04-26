@@ -18,7 +18,7 @@ def seed_models():
     Base.metadata.create_all(bind=sync_engine)
     db = SessionLocal()
 
-    if db.query(model.Model).count() != 10:
+    if db.query(model.Model).count() != 0:
         print("Models already seeded. Skipping.")
         db.close()
         return
