@@ -36,7 +36,7 @@ Read below for detailed instructions on each.
 ```bash
 git clone https://github.com/Graduation-project-SBME-2023/OHIF-Standalone.git
 cd OHIF-Standalone
-git checkout demo
+git checkout demoV2.0
 ```
 
 - Set environment variable
