@@ -98,14 +98,16 @@ class SegmentationAgent(AssistantAgent):
         )
         if not os.path.exists(mcp_server_path):
             raise FileNotFoundError(f"MCP server not found at: {mcp_server_path}")
+        env = os.environ.copy()
+        env.update({
+            "WORKSPACE_DIR": workspace_folder,
+            "SESSION_ID": session_id,
+            "AGENT_ID": "segmentation_agent"
+        })
         mcp_server = StdioServerParams(
             command=sys.executable,
             args=[mcp_server_path],
-            env=os.environ.copy().update({
-                "WORKSPACE_DIR": workspace_folder,
-                "SESSION_ID": session_id,
-                "AGENT_ID": "segmentation_agent",
-            }),
+            env=env,
         )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)
