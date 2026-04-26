@@ -36,7 +36,7 @@ from tool_logging import log_tool_state, ToolEvent, TextPayload
 # ── Constants ──────────────────────────────────────────────────────────────────
 
 WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "../../agent_system/workspace")
-SCRATCHPAD_FILE = os.path.join(WORKSPACE_DIR, "scratchpad.json")
+SCRATCHPAD_FILE = os.path.join("Backend/agent_system", WORKSPACE_DIR, "scratchpad.json")# SCRATCHPAD_FILE = os.path.join(WORKSPACE_DIR, "scratchpad.json")
 AgentStatus = Literal["in_progress", "done", "blocked", "failed"]
 FlagLevel = Literal["info", "warning", "error", "critical"]
 
@@ -53,6 +53,9 @@ def _load() -> Dict[str, Any]:
 
 
 def _save(data: Dict[str, Any]) -> None:
+    # Ensure the parent directories exist before writing
+    os.makedirs(os.path.dirname(SCRATCHPAD_FILE), exist_ok=True)
+    
     with open(SCRATCHPAD_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -169,7 +172,6 @@ class ReadAgentInput(BaseModel):
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
-
 @mcp.tool(
     name="scratchpad_register_agent",
     annotations={
@@ -212,14 +214,26 @@ async def scratchpad_register_agent(params: RegisterAgentInput) -> str:
     _log_activity(data, current_agent_id, params.role, "registered", f"Role: {params.role}")
     _save(data)
 
-    payload = TextPayload(message=f'Registering agent {current_agent_id}.')
-    start_event = ToolEvent('tool_started', 'text', payload)
-    log_tool_state(start_event)
-    finished_event = ToolEvent('tool_finished', 'text', payload)
-    log_tool_state(finished_event)
+    # Calculate the absolute directory path
+    import os
+    save_directory = os.path.abspath(os.path.dirname(SCRATCHPAD_FILE))
 
-    return json.dumps({"status": "ok", "agent_id": current_agent_id, "role": params.role}, indent=2)
+    try:
+        payload = TextPayload(message=f'Registering agent {current_agent_id}.')
+        start_event = ToolEvent('tool_started', 'text', payload)
+        log_tool_state(start_event)
+        finished_event = ToolEvent('tool_finished', 'text', payload)
+        log_tool_state(finished_event)
+    except Exception as e:
+        print(f"Warning: Could not connect to logging server: {e}")
 
+    # Return the save_directory in the final JSON response
+    return json.dumps({
+        "status": "ok", 
+        "agent_id": current_agent_id, 
+        "role": params.role,
+        "save_path": save_directory
+    }, indent=2)
 
 @mcp.tool(
     name="scratchpad_write_note",
@@ -398,6 +412,16 @@ async def scratchpad_write_summary(params: WriteSummaryInput) -> str:
         "openWorldHint": False,
     },
 )
+@mcp.tool(
+    name="scratchpad_read_agent",
+    annotations={
+        "title": "Read a Single Agent's Scratchpad Section",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
 async def scratchpad_read_agent(params: ReadAgentInput) -> str:
     """Read the full scratchpad section for a specific agent.
 
@@ -406,27 +430,33 @@ async def scratchpad_read_agent(params: ReadAgentInput) -> str:
 
     Args:
         params (ReadAgentInput):
-            - agent_id (str): ID of the agent to read.
+            - target_agent_id (str): ID of the agent to read.
             - include_notes (bool): Include private working notes (default True).
 
     Returns:
         str: JSON of the agent's full section, with notes optionally omitted.
     """
     data = _load()
-    agent = _get_agent(data, params.agent_id)
+    # FIX 1: Change params.agent_id to params.target_agent_id
+    agent = _get_agent(data, params.target_agent_id)
     if agent is None:
         return json.dumps({
             "status": "error",
-            "message": f"Agent '{params.agent_id}' not found.",
+            # FIX 2: Change params.agent_id to params.target_agent_id
+            "message": f"Agent '{params.target_agent_id}' not found.",
         }, indent=2)
 
     result = {k: v for k, v in agent.items() if k != "notes" or params.include_notes}
 
-    payload = TextPayload(message=f'Reading {params.agent_id}\'s notes.')
-    start_event = ToolEvent('tool_started', 'text', payload)
-    log_tool_state(start_event)
-    finished_event = ToolEvent('tool_finished', 'text', payload)
-    log_tool_state(finished_event)
+    # FIX 3: Change params.agent_id to params.target_agent_id
+    try:
+        payload = TextPayload(message=f"Reading {params.target_agent_id}'s notes.")
+        start_event = ToolEvent('tool_started', 'text', payload)
+        log_tool_state(start_event)
+        finished_event = ToolEvent('tool_finished', 'text', payload)
+        log_tool_state(finished_event)
+    except Exception as e:
+        print(f"Warning: Could not connect to logging server: {e}")
 
     return json.dumps(result, indent=2)
 
