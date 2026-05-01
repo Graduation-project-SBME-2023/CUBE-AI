@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -U pip && \
-    pip install --no-cache-dir batchgenerators acvl-utils asyncpg nnunetv2 nnInteractive pydicom==2.4.4
+    pip install --no-cache-dir batchgenerators acvl-utils asyncpg nnunetv2 nnInteractive pydicom==2.4.4 
 
 COPY ./reader.py /usr/local/lib/python3.10/dist-packages/pydicom_seg/reader.py
 COPY ./segmentation_dataset.py /usr/local/lib/python3.10/dist-packages/pydicom_seg/segmentation_dataset.py

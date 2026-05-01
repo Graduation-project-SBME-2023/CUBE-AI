@@ -10,5 +10,5 @@ class Segmentation(Base):
     volume_series_instance_uid = Column(String, nullable=False)
     segmentation_type = Column(String, nullable=False)
     method = Column(String, nullable=True)
-    model_name = Column(String, ForeignKey('models.model_name'), nullable=True)
+    name = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=True)
