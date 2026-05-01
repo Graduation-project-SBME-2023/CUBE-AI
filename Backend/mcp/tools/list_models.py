@@ -40,4 +40,4 @@ async def list_models():
     payload = TextPayload(message=f"Fetched {len(formatted)} models")
     log_tool_state(ToolEvent("tool_finished", "text", payload))
 
-    return formatted
+    return json.dumps(formatted)
