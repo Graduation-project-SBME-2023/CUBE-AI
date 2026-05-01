@@ -30,6 +30,7 @@ def create_planner_agent(model_client, discovery_tools):
         - chosen_path: "automatic" if automatic models exist otherwise "interactive"
         - selected_models: List of selected models (automatic or interactive)
         - Output ONLY valid JSON, no explanations, no markdown
+        - You MUST NOT output raw tool results. You must transform them into the required schema
         """ ,     
         # reflect_on_tool_use=True,
         max_tool_iterations=2

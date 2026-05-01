@@ -42,7 +42,7 @@ async def exclude_existing_masks(volumes, labels):
         try:
             segmentations = await check_having_mask(volume_uid)
 
-            # Empty list → no mask
+            # empty list → no mask
             if not segmentations:
                 has_mask = False
             else:
@@ -132,32 +132,37 @@ def parse_multipart_response(headers, body):
     # Return in same order as original TS → data first, then centroids
     return nrrd_bytes, json_data.get('centroids', {})
 
+
+
+
 def split_multipart(buffer, boundary):
-    """ 
+    """
     Splits the buffer into parts using the boundary.
     Skips the boundary line itself and trailing \r\n.
     """
     parts = []
     start = 0
-
     while start < len(buffer):
         boundary_index = find_subarray(buffer, boundary, start)
         if boundary_index == -1:
             break
 
-        # Start of actual part content = after boundary + \r\n
+        # start of actual part content = after boundary + \r\n
         part_start = boundary_index + len(boundary) + 2
-        next_boundary = find_subarray(buffer, boundary, part_start)
 
+        # check for closing boundary (ends with --)
+        if buffer[part_start:part_start+2] == b'--':
+            break
+
+        next_boundary = find_subarray(buffer, boundary, part_start)
         part_end = next_boundary if next_boundary != -1 else len(buffer)
 
-        # Exclude trailing \r\n before next boundary or end
-        part = buffer[part_start : part_end - 2]
+        # exclude trailing \r\n before next boundary
+        part = buffer[part_start:part_end - 2]
         parts.append(part)
+        start = part_end  
 
-        start = part_end
-
-        return parts
+    return parts  
 
 def find_subarray(haystack, needle, start=0):
     """

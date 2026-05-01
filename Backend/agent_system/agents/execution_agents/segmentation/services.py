@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 
 from .utils import (
     parse_multipart_response,
-    parse_nrrd_data
+    parse_nrrd_data,
+    ensure_required_patient_tags
 )
 
 logger = logging.getLogger(__name__)
@@ -202,7 +203,7 @@ class SegmentationService:
 
 
         # ========== inject missing tags due to de-identification (if any) ============
-        self.ensure_required_patient_tags(dicom_datasets)
+        ensure_required_patient_tags(dicom_datasets)
         # ============== create Algorithm description=================
         algorithm_identification = hd.AlgorithmIdentificationSequence(
                 name=f'Automatic Segmentation',
