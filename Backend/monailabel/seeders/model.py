@@ -27,6 +27,7 @@ def seed_models():
         model.Model(
             name="deepedit",
             type="deepedit",
+            modality="CT",
             dimension=3,
             labels={
                 "background": 0, "spleen": 1, "right kidney": 2, "left kidney": 3,
@@ -39,6 +40,7 @@ def seed_models():
         model.Model(
             name="deepedit_seg",
             type="segmentation",
+            modality="CT",
             dimension=3,
             labels={
                 "background": 0, "spleen": 1, "right kidney": 2, "left kidney": 3,
@@ -51,6 +53,7 @@ def seed_models():
         model.Model(
             name="deepgrow_2d",
             type="deepgrow",
+            modality="CT",
             dimension=2,
             labels=["spleen", "right kidney", "left kidney", "liver", "stomach", "aorta", "inferior vena cava"],
             description="A pre-trained DeepGrow model based on UNET",
@@ -60,6 +63,7 @@ def seed_models():
         model.Model(
             name="deepgrow_3d",
             type="deepgrow",
+            modality="CT",
             dimension=3,
             labels=["spleen", "right kidney", "left kidney", "liver", "stomach", "aorta", "inferior vena cava"],
             description="A pre-trained DeepGrow model based on UNET",
@@ -69,6 +73,7 @@ def seed_models():
         model.Model(
             name="localization_vertebra",
             type="segmentation",
+            modality="CT",
             dimension=3,
             labels={
                 "C1": 1, "C2": 2, "C3": 3, "C4": 4, "C5": 5, "C6": 6, "C7": 7,
@@ -83,6 +88,7 @@ def seed_models():
         model.Model(
             name="nninteractive",
             type="segmentation",
+            modality="any",
             dimension=2,
             labels={"seg": 1},
             description="A pre-trained model for volumetric segmentation of the monai nnInteractive",
@@ -92,6 +98,7 @@ def seed_models():
         model.Model(
             name="sam",
             type="segmentation",
+            modality="any",
             dimension=3,
             labels={"Seg": 1},
             description="Pretrained SAM Model for video segmentation",
@@ -101,6 +108,7 @@ def seed_models():
         model.Model(
             name="segmentation_spleen",
             type="segmentation",
+            modality="CT",
             dimension=3,
             labels={"spleen": 1},
             description="A pre-trained model for volumetric (3D) segmentation of the spleen from CT image",
@@ -110,6 +118,7 @@ def seed_models():
         model.Model(
             name="vista",
             type="segmentation",
+            modality="CT",
             dimension=2,
             labels={
                 "spleen": 1, "kidney_right": 2, "kidney_left": 3, "gallbladder": 4,
@@ -157,6 +166,7 @@ def seed_models():
         model.Model(
             name="voxtell",
             type="segmentation",
+            modality="any",
             dimension=3,
             labels={"Seg": 1},
             description="Pretrained Voxtell Model for video segmentation",
