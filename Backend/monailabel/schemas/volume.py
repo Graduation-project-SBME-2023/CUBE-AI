@@ -8,6 +8,7 @@ class VolumeBase(BaseModel):
     series_description: Optional[str] = None
     modality: Optional[str] = None
     num_slices: Optional[int] = None
+    body_part_examined: Optional[str] = None
     created_at: Optional[date] = None  # ISO format date-time
     @validator("created_at", pre=True)
     def extract_date(cls, v):
