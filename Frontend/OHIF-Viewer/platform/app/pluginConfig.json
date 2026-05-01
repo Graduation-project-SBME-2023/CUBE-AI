@@ -57,7 +57,8 @@
       "version": "0.0.1"
     },
     {
-      "packageName": "@ohif/extension-research-playground" 
+      "packageName": "@ohif/extension-research-playground",
+      "default": true
     }
   ],
   "modes": [
@@ -85,11 +86,7 @@
     },
     {
       "packageName": "@ohif/mode-monai-label",
-      "version": "0.0.1"
-    }
-    ,
-    {
-      "packageName": "@ohif/extension-research-playground" 
+"version": "0.0.1"
     }
   ],
   "public": [

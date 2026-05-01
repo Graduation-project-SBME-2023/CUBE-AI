@@ -1,7 +1,7 @@
 from datetime import datetime
 from models import model
 from datetime import datetime
-from models import model
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from core.database import Base
