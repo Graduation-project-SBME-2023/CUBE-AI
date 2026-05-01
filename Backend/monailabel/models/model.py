@@ -30,5 +30,6 @@ class Model(Base):
     config = Column(JSON, nullable=True)
 
     dimension = Column(Integer, nullable=True)
+    
 
     created_at = Column(DateTime, nullable=True)

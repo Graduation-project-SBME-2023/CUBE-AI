@@ -22,7 +22,7 @@ from .logging_config import setup_logging
 import logging
 from client_config import create_model_client_from_config
 # before integratinon make it to the default messages from the socket_store
-from .ws_client_sender import send_ws_message_remote, wait_for_user_message_remote
+# from .ws_client_sender import send_ws_message_remote, wait_for_user_message_remote
 from agent_system.models.tool_logging import ProgressPayload, TextPayload, ToolEvent
 from agent_system.tool_logging import receive_tool_event
 setup_logging()
@@ -46,6 +46,7 @@ class SegmentationModule:
     async def initialize(self):
         # intialize model client
         self.model_client = create_model_client_from_config()
+        logger.info(f"Model client initialized with : {self.model_client}")
      #    self.model_client = OllamaChatCompletionClient(
      #    model=self.model_name,
      #    model_info={
@@ -79,6 +80,7 @@ class SegmentationModule:
         
         # intialize agents and services
         self.PlannerAgent = create_planner_agent(self.model_client, self.discovery_tools)
+        logger.info("PlannerAgent initialized.")
         self.UserFallbackAgent = create_interactive_agent(self.model_client, self.discovery_tools)
         self.UserProxyAgent = create_user_proxy_agent(self.model_client)
         self.segmentation_service = SegmentationService()
@@ -92,11 +94,22 @@ class SegmentationModule:
                 state = json.load(f)
             with open(input_data, "r") as f:
                 input_data = json.load(f)
+        steps = state.get("plan", {}).get("steps", [])
 
-        hypothesis: str = state["hypothesis"]["hypothesis"]
+        segmentation_step = next(
+            (s for s in steps if s.get("module") == "segmentation_agent"),
+            None
+        )
+
+        if not segmentation_step:
+            raise ValueError("Segmentation step not found")
+
+        instructions = segmentation_step["task_message"]["instructions"]
+        # hypothesis: str = state["hypothesis"]["hypothesis"]
+        logger.info(f"Received hypothesis: {instructions}")
         datasetlist: List[str] = input_data["datasetlist"]
         #1. plan
-        plan = await run_planner(self.PlannerAgent,hypothesis)
+        plan = await run_planner(self.PlannerAgent,instructions)
         logger.info(f"Planner plan: {plan}")
         target_labels = plan["target_labels"]
         chosen_path = plan["chosen_path"]
