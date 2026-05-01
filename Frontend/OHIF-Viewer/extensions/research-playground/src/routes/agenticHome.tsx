@@ -244,7 +244,7 @@ const AgenticHome = ({ onNavigate, onBack }) => {
       <div className={styles.navBar}>
         <div className={styles.navLogo}>
           <button
-            onClick={() => (onBack ? onBack() : navigate('/home'))}
+            onClick={() => (onBack ? onBack() : navigate('/'))}
             className="rounded-full p-2 text-[#566a84] transition-colors hover:bg-[#1f2d40] hover:text-white"
             title="Back to Startup"
             aria-label="Back to Startup"
@@ -382,7 +382,7 @@ export function PreviewAgenticHome() {
   return (
     <AgenticHome
       onNavigate={handleNavigation}
-      onBack={() => navigate('/home')}
+      onBack={() => navigate('/')}
     />
   );
 }
