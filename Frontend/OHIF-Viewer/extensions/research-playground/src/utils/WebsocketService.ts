@@ -15,10 +15,12 @@ class WebSocketService {
       return;
     }
     this.isConnecting = true;
+    console.log('[WebSocketService] Connecting to:', this.url);
     this.socket = new WebSocket(this.url);
     this.socket.onopen = () => {
       this.isConnecting = false;
       this.clearReconnect();
+      console.log('[WebSocketService] Connected!');
       this.notifyStatus(true);
     };
     this.socket.onmessage = (event) => {
@@ -29,15 +31,17 @@ class WebSocketService {
         }
         this.listeners.forEach((cb) => cb(data));
       } catch (err) {
-        // handle error
+        console.error('[WebSocketService] Parse error:', err);
       }
     };
     this.socket.onclose = () => {
+      console.log('[WebSocketService] Disconnected');
       this.isConnecting = false;
       this.notifyStatus(false);
       this.scheduleReconnect();
     };
-    this.socket.onerror = () => {
+    this.socket.onerror = (error) => {
+      console.error('[WebSocketService] Error:', error);
       this.isConnecting = false;
       this.notifyStatus(false);
       this.socket?.close();
