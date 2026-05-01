@@ -22,7 +22,7 @@ services:
 #    build:
 #      context: ${COMPOSE_PROJECT_DIR}/Backend/
 #      dockerfile: ${COMPOSE_PROJECT_DIR}/Backend/Dockerfile
-    image: cubeai1/custom-monailabel:0.2
+    image: cubeai1/custom-monailabel:0.2.1
     container_name: monailabel-backend
     shm_size: 8G # change if needed
     ports:
