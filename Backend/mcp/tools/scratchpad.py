@@ -412,16 +412,6 @@ async def scratchpad_write_summary(params: WriteSummaryInput) -> str:
         "openWorldHint": False,
     },
 )
-@mcp.tool(
-    name="scratchpad_read_agent",
-    annotations={
-        "title": "Read a Single Agent's Scratchpad Section",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
-)
 async def scratchpad_read_agent(params: ReadAgentInput) -> str:
     """Read the full scratchpad section for a specific agent.
 
