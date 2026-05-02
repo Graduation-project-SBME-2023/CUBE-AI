@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import httpx
 from pathlib import Path
 from typing import Dict, Any, Union, List
 from agent_system.socket_store import send_ws_message, wait_for_user_message
