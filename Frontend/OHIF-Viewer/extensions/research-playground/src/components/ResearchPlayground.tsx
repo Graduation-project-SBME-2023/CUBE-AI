@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { MessageSquare, FlaskConical, Layout, Database, Scan, BarChart3, FileText, BookOpenText, Settings } from 'lucide-react';
+import { MessageSquare, FlaskConical, Layout, Database, Scan, BarChart3, FileText, BookOpenText, Settings, ArrowLeft } from 'lucide-react';
 
 // Components
 import PhaseSidebar from './PlaygroundCanvas/PhaseSidebar';
@@ -71,6 +71,7 @@ export const RESEARCH_PHASES = [
 const MessageSquareIcon: any = MessageSquare;
 const FlaskConicalIcon: any = FlaskConical;
 const SettingsIcon: any = Settings;
+const ArrowLeftIcon: any = ArrowLeft;
 
 export default function ResearchPlayground() {
     const location = useLocation();
@@ -255,6 +256,15 @@ export default function ResearchPlayground() {
                 }}
             >
                 <div className="flex items-center">
+
+                    {/* Back Button */}
+                    <button
+                        onClick={() => navigate(-1)}
+                        className="mr-3 p-1.5 rounded-md transition-all hover:bg-[#0d1e2e] text-[#5a8aaa] hover:text-[#5acce6] border border-transparent hover:border-[#1e3248]"
+                        title="Go back to previous page"
+                    >
+                        <ArrowLeftIcon size={16} />
+                    </button>
 
                     {/* Brand */}
                     <div className="flex items-center gap-2 pr-4">
