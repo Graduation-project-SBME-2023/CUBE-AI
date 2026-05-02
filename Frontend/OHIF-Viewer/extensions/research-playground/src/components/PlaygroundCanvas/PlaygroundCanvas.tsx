@@ -559,14 +559,18 @@ export default function PlaygroundCanvas({
           nextX += AGENT_W + layout.gap;
         }
 
-        // Append new plan step nodes after anchors
+        // Append new plan step nodes after anchors (wavy/alternating pattern)
         planPayload.steps.forEach((step: any, index: number) => {
+          const wavyOffset = 70;
+          const y = index % 2 === 0 
+            ? layout.agentY - wavyOffset 
+            : layout.agentY + wavyOffset;
           keptNodes.push({
             id: step.id,
             type: 'agent',
             position: {
               x: nextX + index * (AGENT_W + layout.gap),
-              y: layout.agentY,
+              y,
             },
             data: {
               title: step.name || `Step ${index + 1}`,
