@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 // Assuming path to your existing component
 import PlaygroundCanvas from '../PlaygroundCanvas'; 
 import AgentRegistry from '../../../components/PlaygroundCanvas/AgentRegistry'; 
+import { getResearchNotificationService } from '../../../utils/ResearchNotificationService';
 
 interface PlanningViewProps {
     initialHypothesis: string;
@@ -11,6 +12,16 @@ interface PlanningViewProps {
 
 export default function PlanningView({ initialHypothesis, sessionId, onLiteratureOutput }: PlanningViewProps) {
     const [isRegistryOpen, setIsRegistryOpen] = useState(true);
+
+    useEffect(() => {
+        const service = getResearchNotificationService();
+        const wasEnabled = service.isEnabled();
+        service.setEnabled(false);
+
+        return () => {
+            service.setEnabled(wasEnabled);
+        };
+    }, []);
 
     console.log('[HypothesisFlow][PlanningView] Render', {
         hasHypothesis: Boolean(initialHypothesis),
