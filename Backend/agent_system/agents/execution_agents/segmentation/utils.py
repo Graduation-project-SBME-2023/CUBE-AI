@@ -503,7 +503,7 @@ def generate_gif_overlays(workspace_dir, uids):
     volumes_dir = os.path.join(workspace_dir, "volumes")
     masks_dir = os.path.join(workspace_dir, "masks")
     output_dir = os.path.join(workspace_dir, "overlays")
-
+    workspace_folder_name = os.path.basename(workspace_dir)
     os.makedirs(output_dir, exist_ok=True)
     generated_volumes = []
 
@@ -518,11 +518,10 @@ def generate_gif_overlays(workspace_dir, uids):
             continue
 
         try:
-            # Load NIfTI data
             vol_data = nib.load(vol_path).get_fdata()
             mask_data = nib.load(mask_path).get_fdata()
 
-            # Find slices where mask is present (assuming Z is the 3rd axis)
+            # find slices where mask is present
             z_indices = np.any(mask_data > 0, axis=(0, 1))
             active_slices = np.where(z_indices)[0]
 
@@ -530,7 +529,7 @@ def generate_gif_overlays(workspace_dir, uids):
                 logger.warning(f"Empty mask for {uid}.")
                 continue
             
-            # Add a padding of 2 slices before and after the mask
+            # add a padding of 2 slices before and after the mask
             start_z = max(0, active_slices[0] - 2)
             end_z = min(vol_data.shape[2], active_slices[-1] + 3)
 
@@ -539,26 +538,26 @@ def generate_gif_overlays(workspace_dir, uids):
                 v_slice = vol_data[:, :, z]
                 m_slice = mask_data[:, :, z]
 
-                # Normalize the medical image window to 0-255
+                # normalize the medical image window to 0-255
                 v_min, v_max = np.percentile(v_slice, (1, 99)) 
                 if v_max - v_min == 0:
                     v_norm = np.zeros_like(v_slice, dtype=np.uint8)
                 else:
                     v_norm = np.clip((v_slice - v_min) / (v_max - v_min) * 255, 0, 255).astype(np.uint8)
                 
-                # Convert grayscale to RGB
+                # convert grayscale to RGB
                 rgb_frame = np.stack([v_norm]*3, axis=-1)
 
-                # Overlay the mask with the React UI's cyan color (#5acce6 -> RGB: 90, 204, 230)
+                # overlay mask using cyian color where mask is present
                 mask_idx = m_slice > 0
                 rgb_frame[mask_idx] = [90, 204, 230]
 
-                # Rotate 90 degrees to make it upright (common for NIfTI axial views)
+                # totate 90 to fix the view
                 rgb_frame = np.rot90(rgb_frame)
 
                 frames.append(Image.fromarray(rgb_frame))
 
-            # Save as animated GIF (100ms per frame = 10 FPS)
+            # save gif
             if frames:
                 frames[0].save(
                     gif_path,
@@ -568,10 +567,10 @@ def generate_gif_overlays(workspace_dir, uids):
                     loop=0
                 )
                 
-                # Construct the object expected by the React frontend
+                # front payload
                 generated_volumes.append({
                     "seriesInstanceUid": uid,
-                    "gifUrl": f"http://localhost:8150/static/overlays/{gif_filename}" 
+                    "gifUrl": f"http://localhost:8150/files/{workspace_folder_name}/overlays/{gif_filename}" 
                 })
                 logger.info(f"Generated GIF for {uid}")
 
