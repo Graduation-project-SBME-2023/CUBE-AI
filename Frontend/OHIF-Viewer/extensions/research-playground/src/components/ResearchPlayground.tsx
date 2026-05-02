@@ -17,12 +17,12 @@ import websocketService from '../utils/WebsocketService';
 
 // Configuration of the 5 Research Modules
 export const RESEARCH_PHASES = [
-    { 
-        id: 'planning', 
-        label: 'Study Planning', 
+    {
+        id: 'planning',
+        label: 'Study Planning',
         short_desc: 'Design & Hypothesis',
-        icon: Layout, 
-        description: 'Define the research question, scope, and plan structure' 
+        icon: Layout,
+        description: 'Define the research question, scope, and plan structure'
     },
     {
         id: 'literature',
@@ -31,12 +31,12 @@ export const RESEARCH_PHASES = [
         icon: BookOpenText,
         description: 'Knowledge base, source map, and hypothesis context'
     },
-    { 
-        id: 'data', 
-        label: 'Data & Population', 
+    {
+        id: 'data',
+        label: 'Data & Population',
         short_desc: 'Cohort Selection',
-        icon: Database, 
-        description: 'Inclusion Criteria, Cohort Selection & QA' 
+        icon: Database,
+        description: 'Inclusion Criteria, Cohort Selection & QA'
     },
     {
         id: 'segmentation',
@@ -45,26 +45,26 @@ export const RESEARCH_PHASES = [
         icon: Scan,
         description: 'Radiologists Approval of Segmentations'
     },
-    { 
-        id: 'features', 
-        label: 'Feature Extraction', 
+    {
+        id: 'features',
+        label: 'Feature Extraction',
         short_desc: 'ROI & Radiomics',
-        icon: Scan, 
-        description: 'ROI Definition, Radiomics & Preprocessing' 
+        icon: Scan,
+        description: 'ROI Definition, Radiomics & Preprocessing'
     },
-    { 
-        id: 'modeling', 
-        label: 'Modeling & Stats', 
+    {
+        id: 'modeling',
+        label: 'Modeling & Stats',
         short_desc: 'Training & Testing',
-        icon: BarChart3, 
-        description: 'Model Training, Validation & Statistical Tests' 
+        icon: BarChart3,
+        description: 'Model Training, Validation & Statistical Tests'
     },
-    { 
-        id: 'reporting', 
-        label: 'Paper Writing', 
+    {
+        id: 'reporting',
+        label: 'Paper Writing',
         short_desc: 'Results & Export',
-        icon: FileText, 
-        description: 'Results Compilation & Literature Comparison' 
+        icon: FileText,
+        description: 'Results Compilation & Literature Comparison'
     },
 ];
 
@@ -97,7 +97,7 @@ export default function ResearchPlayground() {
             navigate('/playground/planning', { replace: true, state: location.state });
         }
     }, [phaseId, isValidPhase, navigate, location.state]);
-    
+
     // Retrieve hypothesis from navigation state or default
     const hypothesis = location.state?.hypothesis || 'No active hypothesis defined.';
     const sessionId = location.state?.sessionId || location.state?.session_id || null;
@@ -244,69 +244,109 @@ export default function ResearchPlayground() {
 
     return (
         <div className="w-full h-screen font-sans flex flex-col bg-[#000000] text-white overflow-hidden">
-            
+
             {/* 1. TOP HEADER */}
-            <div className="h-14 bg-[#0b1015] border-b border-[#1f2d40] flex items-center justify-between px-4 z-20 shrink-0 shadow-sm">
-                <div className="flex items-center gap-6">
-                    <div className="flex items-center gap-3">
-                        <span className="font-bold text-[#5acce6] text-xs tracking-widest">CUBE</span>
-                        <span className="text-gray-500 text-xs">/</span>
-                        <span className="text-gray-300 text-xs font-medium">Intelligent Medical Viewer</span>
+            <div
+                className="h-14 flex items-center justify-between px-4 z-20 shrink-0"
+                style={{
+                    background: '#0a1520',
+                    borderBottom: '1px solid #1a2a3a',
+                    boxShadow: '0 1px 0 #0d1e2e, 0 4px 24px rgba(0,0,0,0.4)',
+                }}
+            >
+                <div className="flex items-center">
+
+                    {/* Brand */}
+                    <div className="flex items-center gap-2 pr-4">
+                        <div
+                            className="w-6 h-6 rounded flex items-center justify-center flex-shrink-0"
+                            style={{
+                                background: 'linear-gradient(135deg, #0d2035 0%, #1a3a54 100%)',
+                                border: '1px solid #2a5a8a',
+                                boxShadow: '0 0 8px rgba(90,204,230,0.15)',
+                            }}
+                        >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                                <path
+                                    d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+                                    stroke="#5acce6" strokeWidth="2"
+                                    strokeLinecap="round" strokeLinejoin="round"
+                                />
+                            </svg>
+                        </div>
+                        <span className="font-bold text-[11px] tracking-[0.18em] uppercase" style={{ color: '#5acce6' }}>
+                            CUBE
+                        </span>
                     </div>
-                    {/* Hypothesis Context */}
-                    <div className="h-6 w-px bg-[#1f2d40]" />
-                    <div className="flex items-center gap-3 text-xs">
-                        <span className="text-[#5acce6] uppercase tracking-wider font-bold flex items-center gap-2">
-                            <FlaskConicalIcon size={14} /> Scope:
+
+                    {/* Divider */}
+                    <div className="w-px self-stretch mx-1" style={{ background: '#1a2a3a' }} />
+
+                    {/* App name */}
+                    <div className="px-4">
+                        <span className="text-[11px] font-medium tracking-wide" style={{ color: '#7aa8c4' }}>
+                            Intelligent Medical Viewer
                         </span>
-                        <span className="text-gray-300 font-mono max-w-xl truncate opacity-90" title={hypothesis}>
-                            {hypothesis}
+                    </div>
+
+                    {/* Divider */}
+                    <div className="w-px self-stretch mx-1" style={{ background: '#1a2a3a' }} />
+
+                    {/* Scope */}
+                    <div className="flex items-center gap-2 px-4">
+                        <FlaskConicalIcon size={12} style={{ color: '#5acce6', flexShrink: 0 }} />
+                        <span className="text-[9px] font-bold uppercase tracking-[0.14em]" style={{ color: '#4a6580' }}>
+                            Scope:
                         </span>
+                        <div
+                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md"
+                            style={{ background: '#0d1e2e', border: '1px solid #1e3a54' }}
+                        >
+                            <span className="relative flex h-1.5 w-1.5 flex-shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ background: '#2eca8e' }} />
+                                <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ background: '#2eca8e' }} />
+                            </span>
+                            <span className="text-[11px] font-mono max-w-xl truncate" style={{ color: '#b0d4ea' }} title={hypothesis}>
+                                {hypothesis}
+                            </span>
+                        </div>
                     </div>
                 </div>
-                
+
+                {/* Right buttons */}
                 <div className="flex items-center gap-2">
-                    <button 
+                    <button
                         onClick={() => setIsSettingsOpen(true)}
-                        className="p-2 rounded border transition-colors flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider bg-[#151a1f] text-[#566a84] border-[#3c5d80] hover:text-white"
+                        className="flex items-center gap-2 px-3 h-8 rounded-md text-[10px] font-semibold uppercase tracking-wider transition-all border border-[#1e3248] text-[#5a8aaa] bg-[#0d1e2e] hover:border-[#5acce6] hover:text-[#e0f0ff] hover:bg-[#111d29]"
                     >
-                        <SettingsIcon size={14} /> Model
+                        <SettingsIcon size={13} /> Model
                     </button>
-                    <button 
+                    <button
                         onClick={() => setIsChatOpen(!isChatOpen)}
-                        className={`p-2 rounded border transition-colors flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider
-                        ${isChatOpen ? 'bg-[#3c5d80] text-white border-[#5acce6]' : 'bg-[#151a1f] text-[#566a84] border-[#3c5d80] hover:text-white'}`}
+                        className={`flex items-center gap-2 px-3 h-8 rounded-md text-[10px] font-semibold uppercase tracking-wider transition-all border ${isChatOpen
+                                ? 'border-[#5acce6] text-[#5acce6] bg-[#0d2540] shadow-[0_0_12px_rgba(90,204,230,0.2)]'
+                                : 'border-[#1e3248] text-[#5a8aaa] bg-[#0d1e2e] hover:border-[#5acce6] hover:text-[#e0f0ff] hover:bg-[#111d29]'
+                            }`}
                     >
-                        <MessageSquareIcon size={14} /> AI Assistant
+                        <MessageSquareIcon size={13} /> AI Assistant
                     </button>
                 </div>
             </div>
 
             {/* 2. MAIN WORKSPACE LAYOUT */}
             <div className="flex-1 flex overflow-hidden relative">
-                
+
                 {/* A. LEFT SIDEBAR (Phase Navigation) */}
-                <PhaseSidebar 
-                    phases={RESEARCH_PHASES} 
-                    activePhase={activePhase} 
-                    onSelectPhase={handleSelectPhase} 
+                <PhaseSidebar
+                    phases={RESEARCH_PHASES}
+                    activePhase={activePhase}
+                    onSelectPhase={handleSelectPhase}
                     isCollapsed={isPhaseSidebarCollapsed}
                     onToggleCollapse={() => setIsPhaseSidebarCollapsed(prev => !prev)}
                 />
 
                 {/* B. CENTER STAGE (Polymorphic View) */}
                 <div className="flex-1 min-w-0 relative flex flex-col bg-[#000000]">
-                    {/* Context Header for the active module */}
-                    <div className="h-10 border-b border-[#1f2d40] bg-[#0b1015]/50 backdrop-blur flex items-center px-6 text-xs text-[#91b9cd]">
-                        <span className="opacity-50 mr-2">Current Module:</span>
-                        <span className="font-bold text-white uppercase tracking-wider">
-                            {RESEARCH_PHASES.find(p => p.id === activePhase)?.label}
-                        </span>
-                        <span className="mx-3 opacity-30 text-[#3c5d80]">|</span>
-                        <span className="italic opacity-70 truncate">
-                            {RESEARCH_PHASES.find(p => p.id === activePhase)?.description}
-                        </span>
-                    </div>
 
                     {/* The Dynamic Content — all views stay mounted, only active is visible */}
                     <div className="flex-1 relative overflow-hidden">
@@ -316,10 +356,10 @@ export default function ResearchPlayground() {
 
                 {/* C. RIGHT SIDEBAR (Chat) — always mounted to preserve WS state */}
                 <div className={`shrink-0 z-30 relative ${isChatOpen ? 'animate-in slide-in-from-right duration-300' : 'hidden'}`}>
-                    <ChatSidebar 
-                        isOpen={isChatOpen} 
-                        onClose={() => setIsChatOpen(false)} 
-                        initialUserMessage={initialUserMessage} 
+                    <ChatSidebar
+                        isOpen={isChatOpen}
+                        onClose={() => setIsChatOpen(false)}
+                        initialUserMessage={initialUserMessage}
                         externalSessionId={sessionId}
                         sendInitialMessage={sendInitialMessage}
                     />
