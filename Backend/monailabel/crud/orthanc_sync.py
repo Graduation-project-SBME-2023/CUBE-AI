@@ -235,7 +235,7 @@ async def _get_or_create_segmentation(db: AsyncSession, label_uid: str, orthanc_
         volume_series_instance_uid=volume_uid,
         segmentation_type=segmentation_type,
         method=method,
-        model_name=None,
+        name=None,
         created_at=created_at,
     )
     db.add(seg)

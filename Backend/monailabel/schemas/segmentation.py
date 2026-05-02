@@ -6,7 +6,7 @@ class SegmentationBase(BaseModel):
     volume_series_instance_uid: str
     segmentation_type: Optional[str] = None
     method: Optional[str] = None
-    model_name:  Optional[str] = None
+    name:  Optional[str] = None
     created_at: Optional[datetime] = None  # ISO format date-time
 
 class SegmentationCreate(SegmentationBase):
@@ -15,7 +15,7 @@ class SegmentationCreate(SegmentationBase):
 class SegmentationUpdate(BaseModel):
     segmentation_type: Optional[str] = None
     method: Optional[str] = None
-    model_name:  Optional[str] = None
+    name:  Optional[str] = None
     created_at: Optional[datetime] = None # ISO format date-time
 
 class Segmentation(SegmentationBase):
