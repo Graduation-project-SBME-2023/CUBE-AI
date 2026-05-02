@@ -46,7 +46,7 @@ function ViewerHeader({ hotkeysManager, extensionManager, servicesManager }) {
     }
 
     navigate({
-      pathname: '/',
+      pathname: '/worklist',
       search: decodeURIComponent(searchQuery.toString()),
     });
   };
