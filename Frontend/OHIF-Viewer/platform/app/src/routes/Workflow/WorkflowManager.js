@@ -94,6 +94,13 @@ class WorkflowManager {
     const workflowNames = this.workflows.map(workflow => workflow.workflowName);
     return workflowNames;
   }
+
+  deleteStudyFromWorkflow(workflowName, studyInstanceUid) {
+    const workflow = this.workflows.find(wf => wf.workflowName === workflowName);
+    if (workflow) {
+      workflow.Studies = workflow.Studies.filter(uid => uid !== studyInstanceUid);
+    }
+  }
 }
 
 let g_workflowManagerInstance = null;

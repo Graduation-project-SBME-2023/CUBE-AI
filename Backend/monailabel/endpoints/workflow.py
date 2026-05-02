@@ -159,7 +159,7 @@ async def delete_multiple_workflows(
 ):
     # Build the query to delete multiple records
     query = """
-    DELETE FROM workflow
+    DELETE FROM workflow_details
     WHERE (study_uid, task_name) IN (
         SELECT * FROM UNNEST($1::text[], $2::text[])
     )
@@ -171,11 +171,12 @@ async def delete_multiple_workflows(
 
         # Execute the query
         result = await conn.execute(query, study_uids, task_names)
-        if result == "DELETE 0":
-            raise HTTPException(
-                status_code=404, detail="No matching workflow records found"
-            )
-        return {"message": f"{result.split()[1]} workflow records deleted successfully"}
+        deleted_count = result.split()[1] if result else "0"
+        if deleted_count == "0":
+            return {"message": "No matching workflow records found", "deleted": 0}
+        return {"message": f"{deleted_count} workflow records deleted successfully", "deleted": int(deleted_count)}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting workflow records: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete workflow records")
