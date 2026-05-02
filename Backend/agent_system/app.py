@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from groq import BaseModel
-
+import os
 from teams.execution_team import BasicPipelineBuilder
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import FileResponse, Response
@@ -80,28 +80,40 @@ class CoopCoepMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(CoopCoepMiddleware)
-# todo: make it after the planner set the session id and create the workspace associated with the session id
-# workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "workspace"))
 
+agent_system_dir = os.path.dirname(os.path.abspath(__file__)) 
+app.mount(
+    "/files",
+    StaticFiles(directory=agent_system_dir),
+    name="files"
+)
 
 @app.get("/static/{file_path:path}")
 def serve_static_pdf(file_path: str):
-    # full_path = os.path.join(workspace_dir, file_path)
+    # file_path may be an absolute path passed through the URL
+    full_path = os.path.normpath(file_path)
+    if not os.path.isabs(full_path):
+        # fallback: try relative to CWD
+        full_path = os.path.abspath(full_path)
 
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail=f"File not found: {full_path}")
 
-    # PDFs → inline to allow view in browser
-    if file_path.endswith(".pdf"):
+    if full_path.endswith(".pdf"):
         return FileResponse(
-            path=file_path,
+            path=full_path,
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f"inline; filename={os.path.basename(file_path)}"
+                "Content-Disposition": f"inline; filename={os.path.basename(full_path)}"
             },
             content_disposition_type="inline",
         )
-    return FileResponse(path=file_path)
+    
+    # detect GIF explicitly
+    if full_path.endswith(".gif"):
+        return FileResponse(path=full_path, media_type="image/gif")
+
+    return FileResponse(path=full_path)
 
 
 # Single shared service — the only stateful object routes need to know about
