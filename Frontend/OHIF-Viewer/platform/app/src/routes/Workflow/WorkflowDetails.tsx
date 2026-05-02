@@ -753,7 +753,7 @@ function WorkflowDetailPage({
     }
 
     navigate({
-      pathname: '/',
+      pathname: '/worklist',
       search: decodeURIComponent(searchQuery.toString()),
     });
   };
