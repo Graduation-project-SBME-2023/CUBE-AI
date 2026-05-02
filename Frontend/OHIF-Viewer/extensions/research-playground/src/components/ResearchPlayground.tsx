@@ -376,6 +376,45 @@ export default function ResearchPlayground() {
                 </div>
             </div>
 
+            {/* 3. FOOTER */}
+            <div 
+                className="h-8 flex items-center px-4 z-20 shrink-0"
+                style={{
+                    background: '#0a1520',
+                    borderTop: '1px solid #1a2a3a',
+                }}
+            >
+                <div className="flex items-center gap-6">
+                    {/* Active Phase Indicator */}
+                    <div className="flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: '#2eca8e' }}></span>
+                        <span className="text-[11px] font-medium" style={{ color: '#5a8aaa' }}>
+                            {RESEARCH_PHASES.find(p => p.id === activePhase)?.label || 'Playground'}
+                        </span>
+                    </div>
+
+                    {/* Shortcuts */}
+                    <div className="flex items-center gap-4 text-[10px]" style={{ color: '#4a6580' }}>
+                        <div className="flex items-center gap-1.5">
+                            <span className="rounded px-1.5 py-0.5" style={{ background: '#0d1e2e', border: '1px solid #1e3248', color: '#5a8aaa' }}>Drag</span>
+                            <span>Move</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                            <span className="rounded px-1.5 py-0.5" style={{ background: '#0d1e2e', border: '1px solid #1e3248', color: '#5a8aaa' }}>Right-click</span>
+                            <span>Menu</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                            <span className="rounded px-1.5 py-0.5" style={{ background: '#0d1e2e', border: '1px solid #1e3248', color: '#5a8aaa' }}>Ctrl+Scroll</span>
+                            <span>Zoom</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                            <span className="rounded px-1.5 py-0.5" style={{ background: '#0d1e2e', border: '1px solid #1e3248', color: '#5a8aaa' }}>Space</span>
+                            <span>Pan</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             {/* Model Settings Modal */}
             <ClientSettingsPanel isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
         </div>
