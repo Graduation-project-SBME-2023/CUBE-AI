@@ -19,7 +19,7 @@ export default function PlanningView({ initialHypothesis, sessionId, onLiteratur
     });
 
     return (
-        <div className="w-full h-full relative bg-slate-950 rounded-2xl overflow-hidden border border-slate-800">
+        <div className="w-full h-full relative bg-slate-950 overflow-hidden border border-slate-800">
             <div className="absolute top-0 left-0 right-0 z-10 pointer-events-none bg-gradient-to-b from-slate-900/90 to-transparent px-4 py-2">
                 <p className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">Planning Canvas</p>
             </div>
