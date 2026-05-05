@@ -390,7 +390,7 @@ class ClinicalPlanner:
     # MAIN RUN — THREE-PHASE PIPELINE
     # ══════════════════════════════════════════════════════════════════════════
 
-    async def run(self, start_query: str = "Start"):
+    async def run(self, start_query: str = "Start", do_lit_review: bool = True):
         await self._load_state()
         print(f"Planner {start_query} state before run:", self.state)
         self._pipeline_instructions = {}
@@ -428,29 +428,6 @@ class ClinicalPlanner:
             print(f"response from hypothesis_architect: {response.chat_message.content}")
             await self._process_hypothesis_response(response.chat_message.content)
 
-            # Hypothesis refinement loop — ask client via WebSocket to approve
-            while True:
-                await self._send("hypothesis_approval", {
-                    "message": "Review the structured PICO hypothesis. Approve or request changes."
-                })
-                user_feedback = await self.input_provider()
-
-                if "APPROVE" in user_feedback.upper(): #We keep it in the front as boxes
-                    break
-
-                refinement_prompt = (
-                    f"User Feedback: {user_feedback}\n\n"
-                    "Update the hypothesis based on their feedback. "
-                    "Return JSON with updated 'hypothesis' and 'message'. "
-                    "Only change the fields the user mentions."
-                )
-
-                response = await hypothesis_architect.on_messages(
-                    [TextMessage(content=refinement_prompt, source="user")],
-                    cancellation_token=None
-                )
-                await self._process_hypothesis_response(response.chat_message.content)
-
             # Mark hypothesis confirmed
             self.state.hypothesis.state = "confirmed"
             await self.session_service.confirm_hypothesis(self.session)
@@ -460,12 +437,6 @@ class ClinicalPlanner:
             # ─────────────────────────────────────────────────────────────
             # PHASE 2: LITERATURE REVIEW & KNOWLEDGE BUILDING (user choice)
             # ─────────────────────────────────────────────────────────────
-            await self._send("lit_review_choice", {
-                "message": "Would you like to build a domain knowledge base?"
-            })
-            lit_review_answer = await self.input_provider()
-            do_lit_review = "YES" in lit_review_answer.upper()
-
             knowledge_base = ""
             sources_guide = ""
             knowledge_sections = {}

@@ -88,6 +88,7 @@ const styles = {
 // ==========================================
 const AgenticHome = ({ onNavigate, onBack }) => {
   const [hypothesis, setHypothesis] = useState('');
+  const [includeLitReview, setIncludeLitReview] = useState(true);
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [showAllHistory, setShowAllHistory] = useState(false);
@@ -169,6 +170,7 @@ const AgenticHome = ({ onNavigate, onBack }) => {
           hypothesis,
           sessionId: newSessionId,
           sendInitialMessage: true,
+          includeLitReview,
         },
       });
       console.log('[HypothesisFlow][AgenticHome] Navigated to /playground with state payload');
@@ -183,6 +185,8 @@ const AgenticHome = ({ onNavigate, onBack }) => {
         state: {
           hypothesis,
           sessionId: fallbackSessionId,
+          sendInitialMessage: true,
+          includeLitReview,
         },
       });
       console.log('[HypothesisFlow][AgenticHome] Navigated to /playground with fallback state payload');
@@ -293,6 +297,19 @@ const AgenticHome = ({ onNavigate, onBack }) => {
                 onKeyDown={handleKeyDown}
                 rows={1}
               />
+            </div>
+            
+            <div className="flex items-center gap-2 px-2 text-[#91b9cd]">
+              <input
+                type="checkbox"
+                id="litReviewToggle"
+                checked={includeLitReview}
+                onChange={(e) => setIncludeLitReview(e.target.checked)}
+                className="w-4 h-4 rounded border-[#3c5d80] bg-[#151a1f] text-[#5acce6] focus:ring-[#5acce6]"
+              />
+              <label htmlFor="litReviewToggle" className="text-sm font-medium cursor-pointer">
+                Include Literature Review
+              </label>
             </div>
 
             {/* Button on separate line */}

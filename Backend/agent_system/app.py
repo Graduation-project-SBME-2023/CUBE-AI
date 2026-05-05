@@ -127,7 +127,7 @@ api_key = os.getenv("OLLAMA_API_KEY", "")
 # ----------------------------------------------------------------------
 
 
-async def run_planner(session: Session, message: str) -> None:
+async def run_planner(session: Session, message: str, do_lit_review: bool = True) -> None:
     base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
     workspace_folder = os.path.join(
         base_agents_workspace, f"workspace_{session.session_id}"
@@ -142,7 +142,7 @@ async def run_planner(session: Session, message: str) -> None:
         session_service=session_service,
         api_key=api_key,
     )
-    await planner.run(start_query=message)
+    await planner.run(start_query=message, do_lit_review=do_lit_review)
     logging.getLogger("HypothesisFlow").info(
         "[HypothesisFlow][Planner] Planner finished | session_id=%s",
         session.session_id,
@@ -297,7 +297,9 @@ async def run_pipeline(session: Session) -> None:
 
 @app.post("/plan")
 async def start_planning(request: PlanningRequest):
-    session_service.start_planning(request.session_id, request.message, run_planner)
+    from functools import partial
+    bound_planner = partial(run_planner, do_lit_review=request.do_lit_review)
+    session_service.start_planning(request.session_id, request.message, bound_planner)
     return {"session_id": request.session_id, "status": "planning_started"}
 
 
