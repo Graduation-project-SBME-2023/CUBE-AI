@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { MessageSquare, FlaskConical, Layout, Database, Scan, BarChart3, FileText, BookOpenText, Settings, ArrowLeft } from 'lucide-react';
+import { MessageSquare, FlaskConical, Layout, Database, Scan, BarChart3, FileText, BookOpenText, Settings, ArrowLeft, Users } from 'lucide-react';
 
 // Components
 import PhaseSidebar from './PlaygroundCanvas/PhaseSidebar';
 import PlanningView from './PlaygroundCanvas/views/PlanningView';
+import ExecutionView from './PlaygroundCanvas/views/ExecutionView';
 import LiteratureReviewView from './PlaygroundCanvas/views/LiteratureReviewView';
 import DataCohortView from './PlaygroundCanvas/views/DataCohortView';
 import SegmentationView from './PlaygroundCanvas/views/SegmentationView'
@@ -23,6 +24,13 @@ export const RESEARCH_PHASES = [
         short_desc: 'Design & Hypothesis',
         icon: Layout,
         description: 'Define the research question, scope, and plan structure'
+    },
+    {
+        id: 'execution',
+        label: 'Agent Execution',
+        short_desc: 'Live Agent Chat',
+        icon: Users,
+        description: 'Real-time agent group chat'
     },
     {
         id: 'literature',
@@ -102,6 +110,7 @@ export default function ResearchPlayground() {
     // Retrieve hypothesis from navigation state or default
     const hypothesis = location.state?.hypothesis || 'No active hypothesis defined.';
     const sessionId = location.state?.sessionId || location.state?.session_id || null;
+    const includeLitReview = location.state?.includeLitReview ?? true;
     const sendInitialMessage = location.state?.sendInitialMessage || false;
     const initialUserMessage = sendInitialMessage ? hypothesis : undefined;
 
@@ -220,7 +229,10 @@ export default function ResearchPlayground() {
     const renderAllViews = () => (
         <>
             <div className={`absolute inset-0 ${activePhase === 'planning' ? '' : 'pointer-events-none invisible'}`}>
-                <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} onLiteratureOutput={handleLiteratureOutput} />
+                <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} includeLitReview={includeLitReview} onLiteratureOutput={handleLiteratureOutput} />
+            </div>
+            <div className={`absolute inset-0 ${activePhase === 'execution' ? '' : 'pointer-events-none invisible'}`}>
+                <ExecutionView sessionId={sessionId} />
             </div>
             <div className={`absolute inset-0 ${activePhase === 'literature' ? '' : 'pointer-events-none invisible'}`}>
                 <LiteratureReviewView literatureOutput={literatureOutput || location.state?.literatureReviewOutput || location.state?.literatureContext} />
