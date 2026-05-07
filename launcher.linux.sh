@@ -17,9 +17,9 @@ if [[ "$(uname)" == "Darwin" ]] && [[ "$TERM_PROGRAM" == "" ]]; then
 fi
 
 echo
-echo "  OHIF-Standalone  ·  Production launcher"
+echo "  OHIF-Standalone Interactive launcher"
 echo "  ─────────────────────────────────────────"
-echo
+echo -e "${NC}"
 
 # ── 1. Docker ────────────────────────────────
 if ! command -v docker &>/dev/null; then
@@ -52,16 +52,90 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export COMPOSE_PROJECT_DIR="$SCRIPT_DIR"
 info "COMPOSE_PROJECT_DIR set to: $COMPOSE_PROJECT_DIR"
 
-# ── 4. Launch ─────────────────────────────────
+# ── 4. Backend Selection ─────────────────────
+echo "Select backend mode:"
+echo "  1) GPU"
+echo "  2) CPU"
 echo
-warn "Starting containers (GPU · production mode)…"
-warn "First run will download images — this may take several minutes."
+while true; do
+  read -rp "Choice [1-2]: " BACKEND_CHOICE
+  case "$BACKEND_CHOICE" in
+    1)
+      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/Backend/docker-compose.backend.gpu.yml"
+      BACKEND_MODE="GPU"
+      break
+      ;;
+    2)
+      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/Backend/docker-compose.backend.cpu.yml"
+      BACKEND_MODE="CPU"
+      break
+      ;;
+    *)
+      warn "Invalid selection."
+      ;;
+  esac
+done
+
+# ── 5. Frontend Selection ────────────────────
+echo "Select frontend mode:"
+echo "  1) Docker (production)"
+echo "  2) Yarn (development)"
+echo
+while true; do
+  read -rp "Choice [1-2]: " FRONTEND_CHOICE
+  case "$FRONTEND_CHOICE" in
+    1)
+      FRONTEND_MODE="Docker"
+      FRONTEND_COMPOSE="$COMPOSE_PROJECT_DIR/Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml"
+      break
+      ;;
+    2)
+      FRONTEND_MODE="Yarn"
+      break
+      ;;
+    *)
+      warn "Invalid selection."
+      ;;
+  esac
+done
+echo
+info "Selected backend: $BACKEND_MODE"
+info "Selected frontend: $FRONTEND_MODE"
 echo
 
-docker compose \
-  -f "$COMPOSE_PROJECT_DIR/Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml" \
-  -f "$COMPOSE_PROJECT_DIR/Backend/docker-compose.backend.gpu.yml" \
-  up
-
+# ── 6. Launch ────────────────────────────────
+if [[ "$FRONTEND_MODE" == "Docker" ]]; then
+  warn "Starting Docker containers..."
+  warn "First run may take several minutes."
+  echo
+  docker compose \
+    -f "$FRONTEND_COMPOSE" \
+    -f "$BACKEND_COMPOSE" \
+    up
+else
+  # ── Yarn checks ───────────────────────────
+  if ! command -v yarn &>/dev/null; then
+    abort "Yarn is not installed.
+Install it with:
+npm install -g yarn"
+  fi
+  FRONTEND_DIR="$COMPOSE_PROJECT_DIR/Frontend/OHIF-Viewer"
+  if [[ ! -d "$FRONTEND_DIR" ]]; then
+    abort "Frontend directory not found:
+$FRONTEND_DIR"
+  fi
+  warn "Starting backend containers..."
+  docker compose -f "$BACKEND_COMPOSE" up -d
+  echo
+  warn "Starting OHIF frontend with Yarn..."
+  echo
+  cd "$FRONTEND_DIR"
+  yarn run dev
+fi
 echo
-info "Application is available at http://localhost"
+info "Application available at:"
+if [[ "$FRONTEND_MODE" == "Docker" ]]; then
+  info "  Frontend: http://localhost"
+else
+  info "  Frontend: http://localhost:3000"
+fi
