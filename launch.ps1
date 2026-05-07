@@ -95,20 +95,20 @@ Write-Host "  1) GPU"
 Write-Host "  2) CPU"
 Write-Host ""
 
-while ($true) {
+:backendLoop while ($true) {
     $BackendChoice = Read-Host "Choice [1-2]"
 
     switch ($BackendChoice) {
         "1" {
             $BackendCompose = Join-Path $ScriptDir "Backend\docker-compose.backend.gpu.yml"
             $BackendMode = "GPU"
-            break
+            break backendLoop
         }
 
         "2" {
             $BackendCompose = Join-Path $ScriptDir "Backend\docker-compose.backend.cpu.yml"
             $BackendMode = "CPU"
-            break
+            break backendLoop
         }
 
         default {
@@ -124,19 +124,19 @@ Write-Host "  1) Docker (production)"
 Write-Host "  2) Yarn (development)"
 Write-Host ""
 
-while ($true) {
+:frontendLoop while ($true) {
     $FrontendChoice = Read-Host "Choice [1-2]"
 
     switch ($FrontendChoice) {
         "1" {
             $FrontendMode = "Docker"
             $FrontendCompose = Join-Path $ScriptDir "Frontend\OHIF-Viewer\docker-compose.frontend.prod.yml"
-            break
+            break frontendLoop
         }
 
         "2" {
             $FrontendMode = "Yarn"
-            break
+            break frontendLoop
         }
 
         default {
