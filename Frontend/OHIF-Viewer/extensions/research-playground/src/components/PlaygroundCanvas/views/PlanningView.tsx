@@ -1,16 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 // Assuming path to your existing component
 import PlaygroundCanvas from '../PlaygroundCanvas'; 
 import AgentRegistry from '../../../components/PlaygroundCanvas/AgentRegistry'; 
+import { getResearchNotificationService } from '../../../utils/ResearchNotificationService';
 
 interface PlanningViewProps {
     initialHypothesis: string;
     sessionId?: string | number | null;
+    includeLitReview?: boolean;
     onLiteratureOutput?: (data: any) => void;
 }
 
-export default function PlanningView({ initialHypothesis, sessionId, onLiteratureOutput }: PlanningViewProps) {
+export default function PlanningView({ initialHypothesis, sessionId, includeLitReview = true, onLiteratureOutput }: PlanningViewProps) {
     const [isRegistryOpen, setIsRegistryOpen] = useState(true);
+
+    useEffect(() => {
+        const service = getResearchNotificationService();
+        const wasEnabled = service.isEnabled();
+        service.setEnabled(false);
+
+        return () => {
+            service.setEnabled(wasEnabled);
+        };
+    }, []);
 
     console.log('[HypothesisFlow][PlanningView] Render', {
         hasHypothesis: Boolean(initialHypothesis),
@@ -24,7 +36,7 @@ export default function PlanningView({ initialHypothesis, sessionId, onLiteratur
                 <p className="text-[11px] uppercase tracking-widest text-[#5a8aaa] font-semibold">Planning Canvas</p>
             </div>
             {/* Reuse your existing Graph Engine */}
-            <PlaygroundCanvas initialHypothesis={initialHypothesis} session_id={sessionId as any} onLiteratureOutput={onLiteratureOutput} />
+            <PlaygroundCanvas initialHypothesis={initialHypothesis} session_id={sessionId as any} includeLitReview={includeLitReview} onLiteratureOutput={onLiteratureOutput} />
             
             {/* Reuse your existing Registry
             <AgentRegistry 
