@@ -95,6 +95,7 @@ const edgeTypes = { custom: CustomEdge };
 interface PlaygroundCanvasProps {
   initialHypothesis?: string;
   session_id?: string;
+  includeLitReview?: boolean;
   onNodeSelect?: (node: FlowNode | null) => void;
   onLiteratureOutput?: (data: any) => void;
 }
@@ -102,6 +103,7 @@ interface PlaygroundCanvasProps {
 export default function PlaygroundCanvas({
   initialHypothesis,
   session_id,
+  includeLitReview = true,
   onNodeSelect,
   onLiteratureOutput,
 }: PlaygroundCanvasProps) {
@@ -127,6 +129,7 @@ export default function PlaygroundCanvas({
 
   const isPausedRef = useRef(isPaused);
   const modeRef = useRef(mode);
+  const miniFlowRef = useRef<any>(null);
   useEffect(() => {
     isPausedRef.current = isPaused;
   }, [isPaused]);
@@ -482,7 +485,11 @@ export default function PlaygroundCanvas({
           const response = await fetch('http://localhost:8150/plan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: initialHypothesis, session_id: String(session_id) }),
+            body: JSON.stringify({ 
+              message: initialHypothesis, 
+              session_id: String(session_id),
+              do_lit_review: includeLitReview
+            }),
           });
           console.log('[HypothesisFlow][PlaygroundCanvas] /plan response', {
             ok: response.ok,
@@ -516,10 +523,15 @@ export default function PlaygroundCanvas({
       if (planPayload.mode) {
         setMode(planPayload.mode);
       }
+      setTimeout(() => {
+        miniFlowRef.current?.fitView();
+      }, 100);
       return;
     }
 
     if (planPayload.steps) {
+      let newNodes: FlowNode[] = [];
+      
       setNodes(prev => {
         // Preserve existing start and literature review nodes
         const existingStart = prev.find(n => n.type === 'start');
@@ -559,14 +571,18 @@ export default function PlaygroundCanvas({
           nextX += AGENT_W + layout.gap;
         }
 
-        // Append new plan step nodes after anchors
+        // Append new plan step nodes after anchors (wavy/alternating pattern)
         planPayload.steps.forEach((step: any, index: number) => {
+          const wavyOffset = 70;
+          const y = index % 2 === 0 
+            ? layout.agentY - wavyOffset 
+            : layout.agentY + wavyOffset;
           keptNodes.push({
             id: step.id,
             type: 'agent',
             position: {
               x: nextX + index * (AGENT_W + layout.gap),
-              y: layout.agentY,
+              y,
             },
             data: {
               title: step.name || `Step ${index + 1}`,
@@ -579,23 +595,28 @@ export default function PlaygroundCanvas({
           });
         });
 
+        newNodes = keptNodes;
         return keptNodes;
       });
 
-      // Rebuild edges as a chain through all nodes
-      setNodes(currentNodes => {
+      // Update edges in a separate timeout or useEffect? 
+      // Actually we can do it directly: we need to delay to ensure newNodes is captured.
+      setTimeout(() => {
         const newEdges: FlowEdge[] = [];
-        for (let i = 0; i < currentNodes.length - 1; i++) {
+        for (let i = 0; i < newNodes.length - 1; i++) {
           newEdges.push({
-            id: `e${currentNodes[i].id}-${currentNodes[i + 1].id}`,
-            source: currentNodes[i].id,
-            target: currentNodes[i + 1].id,
+            id: `e${newNodes[i].id}-${newNodes[i + 1].id}`,
+            source: newNodes[i].id,
+            target: newNodes[i + 1].id,
             type: 'custom',
           });
         }
         setEdges(newEdges);
-        return currentNodes; // no mutation, just reading
-      });
+        
+        setTimeout(() => {
+          miniFlowRef.current?.fitView();
+        }, 150);
+      }, 0);
     }
   };
 
@@ -953,6 +974,7 @@ export default function PlaygroundCanvas({
         onDragOver={handleDragOver}
       >
         <MiniFlow
+          ref={miniFlowRef}
           nodes={nodesWithHandlers}
           edges={edges}
           onNodesChange={handleNodesChange}

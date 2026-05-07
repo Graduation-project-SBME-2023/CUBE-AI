@@ -28,7 +28,7 @@ class ClientConfig(BaseModel):
     """User-configurable LLM client settings."""
 
     provider: Literal["openai", "azure_openai", "ollama"] = "ollama"
-    model: str = "deepseek-v3.1:671b-cloud"
+    model: str = "gpt-oss:120b-cloud"
     api_key: Optional[str] = None
     base_url: Optional[str] = None
 

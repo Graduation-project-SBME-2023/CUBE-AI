@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { MessageSquare, History, Plus, ChevronRight, Trash2, Send } from 'lucide-react';
+import { MessageSquare, History, Plus, ChevronRight, Trash2, Send, Activity as ActivityIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import websocketService from '../../utils/WebsocketService';
@@ -565,7 +565,12 @@ const ChatSidebar = ({
             </span>
           </div>
         ))}
-        {isTyping && <div className="w-chat-typing">CUBE is thinking...</div>}
+        {isTyping && (
+          <div className="w-chat-message w-chat-cube" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', fontSize: '13px' }}>
+            <ActivityIcon size={14} className="animate-spin text-[#5acce6]" />
+            <span className="italic">CUBE is thinking...</span>
+          </div>
+        )}
         <div ref={messagesEndRef} />
       </div>
       <div className="w-chat-input-area">
