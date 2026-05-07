@@ -91,7 +91,7 @@ async def latex_to_pdf(
 
         # ================  report view ================
         frontend_data = {
-        "latex_pdf": f"http://localhost:8150/files/{workspace_folder_name}/{output_filename}"
+            "latex_pdf": f"http://localhost:8150/files/{workspace_folder_name}/{output_filename if output_filename.endswith('.pdf') else output_filename + '.pdf'}"
         }
         async with httpx.AsyncClient() as client:
             await client.post(
