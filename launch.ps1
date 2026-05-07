@@ -1,7 +1,7 @@
-# ─────────────────────────────────────────────
+#  ====================================
 #  OHIF-Standalone Interactive launcher
 #  Double-click this file to launch
-# ─────────────────────────────────────────────
+#  ====================================
 
 # Keep the window open if something goes wrong
 $ErrorActionPreference = "Stop"
@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 
 function Write-OK {
     param($m)
-    Write-Host "[✔] $m" -ForegroundColor Green
+    Write-Host "[OK] $m" -ForegroundColor Green
 }
 
 function Write-Warn {
@@ -19,15 +19,16 @@ function Write-Warn {
 
 function Stop-Launch {
     param($m)
-    Write-Host "[✘] $m" -ForegroundColor Red
+    Write-Host "[ERROR] $m" -ForegroundColor Red
     Write-Host ""
     Read-Host "Press Enter to close"
     exit 1
 }
 
 Write-Host ""
+Write-Host "  ===================================="
 Write-Host "  OHIF-Standalone Interactive launcher"
-Write-Host "  -----------------------------------------"
+Write-Host "  ===================================="
 Write-Host ""
 
 # ── 1. Docker ────────────────────────────────
@@ -45,7 +46,7 @@ catch {
 
 Write-OK "Docker is running."
 
-# ── 2. Ollama ────────────────────────────────
+#  = 2. Ollama ==================================
 if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
     Stop-Launch "Ollama is not installed. Download it from https://ollama.com/download then re-run this script."
 }
@@ -81,13 +82,13 @@ if (-not $ollamaOk) {
 
 Write-OK "Ollama is running."
 
-# ── 3. Environment variable ───────────────────
+#  === 3. Environment Variable ================================
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $env:COMPOSE_PROJECT_DIR = $ScriptDir
 
 Write-OK "COMPOSE_PROJECT_DIR set to: $ScriptDir"
 
-# ── 4. Backend Selection ─────────────────────
+#  === 4. Backend Selection =================================
 Write-Host ""
 Write-Host "Select backend mode:"
 Write-Host "  1) GPU"
@@ -116,7 +117,7 @@ while ($true) {
     }
 }
 
-# ── 5. Frontend Selection ────────────────────
+#  === 5. Frontend Selection =================================
 Write-Host ""
 Write-Host "Select frontend mode:"
 Write-Host "  1) Docker (production)"
@@ -149,7 +150,7 @@ Write-OK "Selected backend: $BackendMode"
 Write-OK "Selected frontend: $FrontendMode"
 Write-Host ""
 
-# ── 6. Launch ────────────────────────────────
+#  === 6. Launch =================================
 
 if ($FrontendMode -eq "Docker") {
 
@@ -168,7 +169,7 @@ if ($FrontendMode -eq "Docker") {
 }
 else {
 
-    # ── Yarn checks ───────────────────────────
+    #  === Yarn checks =================================
     if (-not (Get-Command yarn -ErrorAction SilentlyContinue)) {
         Stop-Launch "Yarn is not installed.`nInstall it with:`nnpm install -g yarn"
     }
@@ -202,7 +203,7 @@ else {
     }
 }
 
-# ── 7. Final Message ─────────────────────────
+#  === 7. Final Message =================================
 Write-Host ""
 
 if ($FrontendMode -eq "Docker") {
