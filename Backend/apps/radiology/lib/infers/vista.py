@@ -147,7 +147,7 @@ class VISTAPOINT3D(BasicInferTask):
         points = None
         point_labels = None
 
-        if data["Mode"] == "interactive" and "Points" in data:
+        if data.get("Mode") == "interactive" and "Points" in data:
             self.adjust_points(data)  # Adjust points before inference
             points = data["Points"]['points']
             # Use point_labels if available
@@ -161,7 +161,7 @@ class VISTAPOINT3D(BasicInferTask):
         self.run_monai_inference(
             config_path=config_path,
             image_path=data[self.input_key],
-            mode=data["Mode"],
+            mode=data.get("Mode"),
             label_index=data["Class"],
             point=points,
             point_labels=point_labels

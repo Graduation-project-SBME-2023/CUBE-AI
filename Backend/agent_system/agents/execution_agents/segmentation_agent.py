@@ -182,7 +182,9 @@ After completing segmentation, you MUST call write_agent_output with:
 
 async def main():
     # Initialize the agent using the factory method
-    agent = await SegmentationAgent.create()
+    current_file = Path(__file__)
+    workspace_folder = os.path.join(current_file.parent.parent.parent,"workspace_68dac4a1-ecdb-4145-9f23-874a85d1d6bb")
+    agent = await SegmentationAgent.create(workspace_folder=workspace_folder, session_id="68dac4a1-ecdb-4145-9f23-874a85d1d6bb")
 
     # # Now you can use the agent normally
     # print(f"Agent initialized with {agent._tools} tools.")

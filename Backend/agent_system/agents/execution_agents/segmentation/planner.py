@@ -12,7 +12,7 @@ def create_planner_agent(model_client, discovery_tools):
         system_message = """
         You are PlannerAgent.
         Your responsibilities:
-        1. Infer target anatomical label(s) from the hypothesis.
+        1. Infer target anatomical label(s) from the instruction.
         2. Use the tool to discover available segmentation models.
         3. Analyze the returned models and their metrics (e.g., Dice scores).
         4. Decide whether segmentation should be automatic or interactive based on available models .
@@ -26,7 +26,7 @@ def create_planner_agent(model_client, discovery_tools):
         }
 
         Rules:
-        - target_labels: Extract anatomical structures from the hypothesis (e.g., "spleen", "liver")
+        - target_labels: Extract anatomical structures from the instruction (e.g., "spleen", "liver")
         - chosen_path: "automatic" if automatic models exist otherwise "interactive"
         - selected_models: List of selected models (automatic or interactive)
         - Output ONLY valid JSON, no explanations, no markdown
@@ -39,15 +39,15 @@ def create_planner_agent(model_client, discovery_tools):
     return planner
 
 
-async def run_planner(agent, hypothesis):
+async def run_planner(agent, instruction):
     task = f"""
-        Analyze this hypothesis:
+        Analyze this instruction:
 
-        {hypothesis}
+        {instruction}
 
         Steps:
         1. Discover available segmentation models using the tool.
-        2. Identify target anatomical label(s) from the hypothesis.
+        2. Identify target anatomical label(s) from the instruction.
         3. Categorize discovered models as automatic or interactive.
         4. Determine if automatic models exist for the target labels.
         5. If automatic models exist, select it as 'selected_models'.
