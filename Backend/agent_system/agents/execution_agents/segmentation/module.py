@@ -108,7 +108,8 @@ class SegmentationModule:
         instructions = segmentation_step["task_message"]["instructions"]
         # hypothesis: str = state["hypothesis"]["hypothesis"]
         logger.info(f"Received hypothesis: {instructions}")
-        datasetlist: List[str] = input_data["datasetlist"]
+        datasetlist: List[str] = input_data.get("datasetlist", [])
+        logger.info(f"Will prepare segmentations for {len(datasetlist)} volumes.")
         #1. plan
         plan = await run_planner(self.PlannerAgent,instructions)
         logger.info(f"Planner plan: {plan}")
