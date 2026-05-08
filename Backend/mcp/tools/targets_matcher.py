@@ -1,14 +1,20 @@
 import os
 import csv
 import numpy as np
-import json
+from typing import List
+from pathlib import Path
 from . import mcp
 from tool_logging import ToolEvent, log_tool_state, TextPayload
 
 @mcp.tool()
-async def generate_targets() -> str:
+async def generate_targets(
+    datasetlist: List[str],
+) -> str:
     """
-    Generates the necessary targets.csv file for the matching subjects found in the datasetlist inside the config file to targets
+    Generates the necessary targets.csv file for the matching subjects to targets
+
+    Args:
+        datasetlist: The complete list of the volume_instance_uid's included in the population.
 
     Returns:
         The path of the generated csv file.
@@ -27,13 +33,7 @@ async def generate_targets() -> str:
 
     workspace_dir = os.environ.get("WORKSPACE_DIR")
 
-    config_json_path = os.path.join(workspace_dir, "config.json")
-    datasetlist = []
-    with open(config_json_path, mode="r", encoding="utf-8") as f:
-        config = json.load(f)
-        datasetlist = config.get("datasetlist", [])
-
-    output_dir = os.path.join(workspace_dir, 'populations', 'targets')
+    output_dir = os.path.join(workspace_dir, 'populations', 'targets', 'targets.csv')
     
     os.makedirs(output_dir, exist_ok=True)
 
