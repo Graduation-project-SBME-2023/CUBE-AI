@@ -298,9 +298,13 @@ def ensure_required_patient_tags(datasets):
 #  ================================
 #  Download Data
 #  ================================
-
-async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, selected_auto_model_for_volume):
-
+async def download_and_pair_volumes(
+    workspace_dir, 
+    datasetlist, 
+    chosen_path, 
+    selected_auto_model_for_volume, 
+    download_volumes=True  
+):
     VOLUMES = datasetlist
     LABELS_BY_VOLUME_URL = "http://localhost:8000/segmentations/by-volume/"
     DOWNLOAD_IMAGES_URL  = "http://localhost:8000/datastore/images"
@@ -318,6 +322,8 @@ async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, sel
     for d in [FINAL_DIR_IMG, FINAL_DIR_LABEL]:
         os.makedirs(d, exist_ok=True)
 
+    # ------------------------------------------------------------------ #
+    # Helper functions remain exactly the same
     # ------------------------------------------------------------------ #
     def fetch_labels_for_volume(volume_uid):
         url = LABELS_BY_VOLUME_URL + volume_uid
@@ -343,7 +349,6 @@ async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, sel
         return max(labels, key=lambda x: x.get("created_at", ""))
 
     def trigger_download(url, task_name, uids_list):
-        """POST to trigger MONAI to download files into its local dirs."""
         if not uids_list:
             return False
         logger.info(f"POST {url} | task={task_name} | uids={uids_list}")
@@ -359,10 +364,6 @@ async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, sel
             return False
 
     async def wait_and_find(search_dir, uids, timeout_s=120, poll_interval=3.0):
-        """
-        Poll search_dir (recursively) until a file containing each UID appears.
-        Returns dict: {uid: full_path}
-        """
         deadline  = time.time() + timeout_s
         found     = {}
         remaining_uids = set(uids)
@@ -420,7 +421,7 @@ async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, sel
             return None
 
     # ------------------------------------------------------------------ #
-    #  1. pair volumes ↔ labels                                           #
+    #  1. pair volumes ↔ labels                                          #
     # ------------------------------------------------------------------ #
     volumes_to_process = []
     labels_to_process  = []
@@ -451,33 +452,40 @@ async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, sel
     logger.info(f"Pairs ready: {len(volumes_to_process)}")
 
     # ------------------------------------------------------------------ #
-    #  2. trigger downloads (POST → MONAI saves to its local dirs)        #
+    #  2. trigger downloads (POST → MONAI saves to its local dirs)       #
     # ------------------------------------------------------------------ #
-    trigger_download(DOWNLOAD_IMAGES_URL, TASK_NAME, volumes_to_process)
+    if download_volumes:
+        trigger_download(DOWNLOAD_IMAGES_URL, TASK_NAME, volumes_to_process)
+    
     trigger_download(DOWNLOAD_LABELS_URL, TASK_NAME, labels_to_process)
 
     # ------------------------------------------------------------------ #
-    #  3. wait for files to appear in MONAI's local dirs                  #
+    #  3. wait for files to appear in MONAI's local dirs                 #
     # ------------------------------------------------------------------ #
-    found_volumes = await wait_and_find(MONAI_IMG_DIR,   volumes_to_process, timeout_s=120)
-    found_labels  = await wait_and_find(MONAI_LABEL_DIR, labels_to_process,  timeout_s=120)
+    found_volumes = {}
+    if download_volumes:
+        found_volumes = await wait_and_find(MONAI_IMG_DIR, volumes_to_process, timeout_s=120)
+        
+    found_labels = await wait_and_find(MONAI_LABEL_DIR, labels_to_process, timeout_s=120)
 
     # ------------------------------------------------------------------ #
-    #  4. copy to workspace                                                #
+    #  4. copy to workspace                                              #
     # ------------------------------------------------------------------ #
     successful = []
     for vol_uid, label_uid in zip(volumes_to_process, labels_to_process):
-        vol_src   = found_volumes.get(vol_uid)
         label_src = found_labels.get(label_uid)
-
-        if not vol_src:
-            logger.error(f"Volume file never appeared for {vol_uid} — skipping pair")
-            continue
         if not label_src:
             logger.error(f"Label file never appeared for {label_uid} — skipping pair")
             continue
 
-        vol_result   = copy_volume(vol_src, vol_uid, FINAL_DIR_IMG)
+        vol_result = True # Default to True if we aren't downloading volumes
+        if download_volumes:
+            vol_src = found_volumes.get(vol_uid)
+            if not vol_src:
+                logger.error(f"Volume file never appeared for {vol_uid} — skipping pair")
+                continue
+            vol_result = copy_volume(vol_src, vol_uid, FINAL_DIR_IMG)
+
         label_result = copy_and_normalize_label(label_src, vol_uid, FINAL_DIR_LABEL)
 
         if vol_result and label_result:
@@ -489,7 +497,6 @@ async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, sel
     logger.info(f"DONE: {len(successful)}/{len(volumes_to_process)} pairs ready in workspace")
     logger.info("=" * 60)
     return successful
-
 #  ================================
 #  Generate GIF Overlays for front view
 #  ================================
@@ -629,23 +636,32 @@ def get_model_dice_score(model_name, target_label):
 # =================================
 #  remove volumes and labels from working space that was discarded by user
 # =================================
-
-def cleanup_discarded(workspace_dir, uids_to_keep):
+def cleanup_discarded(workspace_dir, accepted_uids, modified_uids):
     """
-    Removes volume and label files from the working directories if their UIDs are not in the keep list.
+    Removes discarded volumes and masks.
+    - Keeps volumes for BOTH accepted and modified UIDs.
+    - Keeps masks ONLY for accepted UIDs (modified masks are removed to be re-downloaded).
     """
     volumes_dir = os.path.join(workspace_dir, "volumes")
     masks_dir = os.path.join(workspace_dir, "masks")
-    for fname in os.listdir(volumes_dir):
-        if fname.lower().endswith(".nii.gz"):
-            uid = fname.replace(".nii.gz", "")
-            if uid not in uids_to_keep:
-                os.remove(os.path.join(volumes_dir, fname))
-                logger.info(f"Removed discarded volume: {fname}")
+    
+    # we want to keep the NIfTI volume files for both accepted and modified
+    uids_to_keep_volumes = set(accepted_uids) | set(modified_uids)
+    
+    # cleanup volumes
+    if os.path.exists(volumes_dir):
+        for fname in os.listdir(volumes_dir):
+            if fname.lower().endswith(".nii.gz"):
+                uid = fname.replace(".nii.gz", "")
+                if uid not in uids_to_keep_volumes:
+                    os.remove(os.path.join(volumes_dir, fname))
+                    logger.info(f"Removed discarded volume: {fname}")
 
-    for fname in os.listdir(masks_dir):
-        if fname.lower().endswith(".nii.gz"):
-            uid = fname.replace(".nii.gz", "")
-            if uid not in uids_to_keep:
-                os.remove(os.path.join(masks_dir, fname))
-                logger.info(f"Removed discarded mask: {fname}")
+    # cleanup masks (labels)
+    if os.path.exists(masks_dir):
+        for fname in os.listdir(masks_dir):
+            if fname.lower().endswith(".nii.gz"):
+                uid = fname.replace(".nii.gz", "")
+                if uid not in accepted_uids:
+                    os.remove(os.path.join(masks_dir, fname))
+                    logger.info(f"Removed mask (discarded or pending modification): {fname}")
