@@ -22,6 +22,7 @@ from .utils import exclude_existing_masks, download_and_pair_volumes, generate_g
 from .logging_config import setup_logging
 import logging
 from client_config import create_model_client_from_config
+import httpx
 # before integratinon make it to the default messages from the socket_store
 # from .ws_client_sender import send_ws_message_remote, wait_for_user_message_remote
 from agent_system.models.tool_logging import ProgressPayload, TextPayload, ToolEvent
@@ -107,7 +108,7 @@ class SegmentationModule:
 
         instructions = segmentation_step["task_message"]["instructions"]
         # hypothesis: str = state["hypothesis"]["hypothesis"]
-        logger.info(f"Received hypothesis: {instructions}")
+        logger.info(f"Received instructions: {instructions}")
         datasetlist: List[str] = input_data["datasetlist"]
         #1. plan
         plan = await run_planner(self.PlannerAgent,instructions)
@@ -118,25 +119,25 @@ class SegmentationModule:
             datasetlist, target_labels
         )
         # ====== Logging before Segmentation =================
-        payload = TextPayload(
-            message=f'Found existing masks for {len(datasetlist) - len(eligible_volumes)} volumes'
-        )
-        plan_log_event = ToolEvent(
-            event_type='tool_started',
-            source='segmentation_agent',
-            content_type='text',
-            content=payload,
-            session_id=self.session_id,
-        )
-        await receive_tool_event(plan_log_event)
-        plan_log_event = ToolEvent(
-            event_type='tool_finished',
-            source='segmentation_agent',
-            content_type='text',
-            content=payload,
-            session_id=self.session_id,
-        )
-        await receive_tool_event(plan_log_event)
+        # payload = TextPayload(
+        #     message=f'Found existing masks for {len(datasetlist) - len(eligible_volumes)} volumes'
+        # )
+        # plan_log_event = ToolEvent(
+        #     event_type='tool_started',
+        #     source='segmentation_agent',
+        #     content_type='text',
+        #     content=payload,
+        #     session_id=self.session_id,
+        # )
+        # await receive_tool_event(plan_log_event)
+        # plan_log_event = ToolEvent(
+        #     event_type='tool_finished',
+        #     source='segmentation_agent',
+        #     content_type='text',
+        #     content=payload,
+        #     session_id=self.session_id,
+        # )
+        # await receive_tool_event(plan_log_event)
         
         # =========== test ===============
 
@@ -154,34 +155,34 @@ class SegmentationModule:
         elif eligible_volumes:
             selected_interactive_model = await run_interactive_pipeline(self.UserFallbackAgent, self.UserProxyAgent, eligible_volumes, target_labels, self.segmentation_service, self.session_id)
         # ========= logging after Segmentation ================
-        payload = TextPayload(message=f'Segmentation...Done')
-        segmentation_tool_event = ToolEvent(
-            event_type='tool_finished',
-            source='segmentation_agent',
-            content_type='text',
-            content=payload,
-            session_id=self.session_id,
-        )
-        await receive_tool_event(segmentation_tool_event)  
+        # payload = TextPayload(message=f'Segmentation...Done')
+        # segmentation_tool_event = ToolEvent(
+        #     event_type='tool_finished',
+        #     source='segmentation_agent',
+        #     content_type='text',
+        #     content=payload,
+        #     session_id=self.session_id,
+        # )
+        # await receive_tool_event(segmentation_tool_event)  
         
-        # ===========  loggin before download ====================  
-        payload = TextPayload(message='Creating dataset...')
-        environment_setup_event = ToolEvent(
-            event_type='tool_started',
-            source='segmentation_agent',
-            content_type='text',
-            content=payload,
-            session_id=self.session_id,
-        )
-        await receive_tool_event(environment_setup_event)
-        environment_setup_event = ToolEvent(
-            event_type='tool_progress',
-            source='segmentation_agent',
-            content_type='text',
-            content=payload,
-            session_id=self.session_id,
-        )
-        await receive_tool_event(environment_setup_event)
+        # # ===========  loggin before download ====================  
+        # payload = TextPayload(message='Creating dataset...')
+        # environment_setup_event = ToolEvent(
+        #     event_type='tool_started',
+        #     source='segmentation_agent',
+        #     content_type='text',
+        #     content=payload,
+        #     session_id=self.session_id,
+        # )
+        # await receive_tool_event(environment_setup_event)
+        # environment_setup_event = ToolEvent(
+        #     event_type='tool_progress',
+        #     source='segmentation_agent',
+        #     content_type='text',
+        #     content=payload,
+        #     session_id=self.session_id,
+        # )
+        # await receive_tool_event(environment_setup_event)
         # =========== download ========================    
         #finally download the volumes with its label masks 
         await asyncio.sleep(120)  
@@ -189,7 +190,7 @@ class SegmentationModule:
                     workspace_dir,
                     datasetlist, 
                     chosen_path=chosen_path, 
-                    selected_auto_model_for_volume = plan["selected_models"] if plan["selected_models"] else None
+                    selected_auto_model_for_volume = plan["selected_models"][0] if plan["selected_models"] else None
         )
         
         #============================ test segmentation view ===================================
@@ -231,21 +232,21 @@ class SegmentationModule:
                     "session_id": self.session_id
                 }
             )
-        # wait untill fornt reply "save" to get the result
-        ## wait until fully checked wait for user message
-        # logger.info("Module paused: Waiting for human review...")
-        # user_response_raw = await wait_for_user_message(
-        #     session_id= self.session_id
+  
+        # wait until fully checked wait for user message
+        logger.info("Module paused: Waiting for human review...")
+        user_response_raw = await wait_for_user_message(
+            session_id= self.session_id
             
         # )
 
-        # # The module wakes up! Here are the UIDs the user accepted:
-        # user_results = json.loads(user_response_raw)
-        # final_accepted_uids = user_results.get("accepted", [])
-        # logger.info(f"Module resumed! User accepted: {final_accepted_uids}")
+        # The module wakes up! Here are the UIDs the user accepted:
+        user_results = json.loads(user_response_raw)
+        final_accepted_uids = user_results.get("accepted", [])
+        logger.info(f"Module resumed! User accepted: {final_accepted_uids}")
 
-        # #============= accepted uid just kept only in the folder=================
-        # cleanup_discarded(workspace_dir, final_accepted_uids)
+        #============= accepted uid just kept only in the folder=================
+        cleanup_discarded(workspace_dir, final_accepted_uids)
 
 
         return {"status": "finished"}

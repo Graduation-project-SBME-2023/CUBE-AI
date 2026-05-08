@@ -3,7 +3,7 @@ import tempfile
 import sys
 import os
 import asyncio
-
+import httpx
 from Backend.agent_system.socket_store import send_ws_message
 from .. import mcp
 from pydantic import Field
@@ -70,8 +70,10 @@ async def latex_to_pdf(
                 pdf_bytes = f.read()
 
         workspace_folder = os.environ.get("WORKSPACE_DIR")
+        workspace_folder_name = os.path.basename(workspace_folder)
         if not workspace_folder:
             current_dir = os.getcwd()
+            workspace_folder_name = os.path.basename(target_dir)
             target_dir = os.path.abspath(os.path.join(current_dir, "Backend", "agent_system/workspace"))
             final_folder = os.path.join(target_dir, "reports")
         else:
@@ -89,23 +91,22 @@ async def latex_to_pdf(
 
         # ================  report view ================
         frontend_data = {
-        "latex_pdf": f"http://localhost:8150/static/overlays/{final_path}"
+            "latex_pdf": f"http://localhost:8150/files/{workspace_folder_name}/{output_filename if output_filename.endswith('.pdf') else output_filename + '.pdf'}"
         }
-        await send_ws_message(
-        msg_type="latex_output",
-        payload=frontend_data,
-        # session_id=session_id
-    )
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                "http://localhost:8150/ws-broadcast",
+                json={
+                    "type": "latex_output",
+                    "payload": frontend_data,
+                    "session_id": workspace_folder_name[len("workspace_"):] if workspace_folder_name.startswith("workspace_") else None
+                }
+            )        
         # =============================================
         return f"PDF generated successfully and saved as: {final_path}"
 
     except Exception as e:
         return f"Error: {str(e)}"
-
-
-
-
-
 
 if __name__ == "__main__":
     # 1. Simple LaTeX content for testing

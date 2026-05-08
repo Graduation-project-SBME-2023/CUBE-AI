@@ -11,42 +11,42 @@ async def run_automatic_pipeline(
     session_id
 ):
         # ================ logging ======================
-        payload = TextPayload(message=f'Starting Automatic Segmentation on {len(volumes)}...')
-        tool_started = ToolEvent(
-            event_type='tool_started',
-            source='segmentation_agent',
-            content_type='text',
-            content=payload,
-            session_id=session_id,
-        )
-        await receive_tool_event(tool_started)
-        tool_progress = ToolEvent(
-            event_type='tool_progress',
-            source='segmentation_agent',
-            content_type='progress',
-            content=payload,
-            session_id=session_id,
-        )
-        await receive_tool_event(tool_progress)
+        # payload = TextPayload(message=f'Starting Automatic Segmentation on {len(volumes)}...')
+        # tool_started = ToolEvent(
+        #     event_type='tool_started',
+        #     source='segmentation_agent',
+        #     content_type='text',
+        #     content=payload,
+        #     session_id=session_id,
+        # )
+        # await receive_tool_event(tool_started)
+        # tool_progress = ToolEvent(
+        #     event_type='tool_progress',
+        #     source='segmentation_agent',
+        #     content_type='progress',
+        #     content=payload,
+        #     session_id=session_id,
+        # )
+        # await receive_tool_event(tool_progress)
         #===============================================
         logger.info(f"Starting automatic segmentation on {len(volumes)} volumes")
 
         for idx, volume_uid in enumerate(volumes, start=1):
             logger.info(f"[{idx}/{len(volumes)}] Running segmentation for volume: {volume_uid}")
             # ============ logging =================
-            payload = ProgressPayload(
-                current=idx,
-                total=len(volumes),
-                label='Segmenting Volumes'
-            )
-            tool_progress = ToolEvent(
-                event_type='tool_progress',
-                source='segmentation_agent',
-                content_type='progress',
-                content=payload,
-                session_id=session_id,
-            )
-            await receive_tool_event(tool_progress)
+            # payload = ProgressPayload(
+            #     current=idx,
+            #     total=len(volumes),
+            #     label='Segmenting Volumes'
+            # )
+            # tool_progress = ToolEvent(
+            #     event_type='tool_progress',
+            #     source='segmentation_agent',
+            #     content_type='progress',
+            #     content=payload,
+            #     session_id=session_id,
+            # )
+            # await receive_tool_event(tool_progress)
             # =======================================
             try:
                 for i, label in enumerate(labels):     

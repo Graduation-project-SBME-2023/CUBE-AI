@@ -199,7 +199,7 @@ export default function ResearchPlayground() {
                     setPopulationData(payload);
                     break;
                 case 'segmentation_output':
-                    setSegmentationData(payload);
+                    setSegmentationData({ ...payload, sessionId: data.session_id });
                     break;
                 case 'features_output':
                     // Backend sends tool="radiomic_extraction" or tool="feature_importance"
