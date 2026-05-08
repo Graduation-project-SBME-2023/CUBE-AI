@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
     Target, Cpu, Percent, Check, X, CheckSquare, XSquare, Save, Loader2,
-    ChevronDown, ChevronUp,
+    ChevronDown, ChevronUp, Edit
 } from 'lucide-react';
 import websocketService from '../../../utils/WebsocketService';
 
@@ -17,6 +17,7 @@ export interface SegmentationData {
     targetRoi?: string;
     selectedModel?: string;
     diceScore?: number | null;
+    sessionId?: string;
 }
 
 interface ReviewContainerProps {
@@ -115,40 +116,67 @@ function ReviewView({
     selectedModel: string;
     diceScore: number | null;
     volumes: VolumeGif[];
-    onSave: (results: { accepted: string[]; rejected: string[] }) => void;
+    onSave: (results: { accepted: string[]; rejected: string[]; modified: string[] }) => void;
     isLoading: boolean;
 }) {
-    const [reviewStatus, setReviewStatus] = useState<Record<string, 'accepted' | 'rejected' | 'pending'>>({});
+    const [reviewStatus, setReviewStatus] = useState<Record<string, 'accepted' | 'rejected' | 'pending' | 'modified'>>({});
 
     useEffect(() => {
-        const initial: Record<string, 'accepted' | 'rejected' | 'pending'> = {};
+        const initial: Record<string, 'accepted' | 'rejected' | 'pending' | 'modified'> = {};
         volumes.forEach(v => { initial[v.seriesInstanceUid] = 'pending'; });
         setReviewStatus(initial);
     }, [volumes]);
 
-    const handleToggle = useCallback((uid: string, status: 'accepted' | 'rejected') =>
+    const handleToggle = useCallback((uid: string, status: 'accepted' | 'rejected' | 'modified') =>
         setReviewStatus(prev => ({ ...prev, [uid]: status })), []);
 
     const handleAcceptAll = useCallback(() => {
-        const s: Record<string, 'accepted' | 'rejected' | 'pending'> = {};
+        const s: Record<string, 'accepted' | 'rejected' | 'pending' | 'modified'> = {};
         volumes.forEach(v => { s[v.seriesInstanceUid] = 'accepted'; });
         setReviewStatus(s);
     }, [volumes]);
 
     const handleRejectAll = useCallback(() => {
-        const s: Record<string, 'accepted' | 'rejected' | 'pending'> = {};
+        const s: Record<string, 'accepted' | 'rejected' | 'pending' | 'modified'> = {};
         volumes.forEach(v => { s[v.seriesInstanceUid] = 'rejected'; });
         setReviewStatus(s);
     }, [volumes]);
 
+    const handleModify = async (uid: string) => {
+        try {
+            // Optimistically set status to modified (Yellow) so it's ready when the user returns
+            handleToggle(uid, 'modified');
+
+            const response = await fetch(`http://localhost:8000/volumes/${uid}/study`);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch study UID. Status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.study_uid) {
+                // Open Monai Label in a new tab to preserve the current React state
+                window.open(`http://localhost:3000/monai-label?StudyInstanceUIDs=${data.study_uid}`, '_blank');
+            } else {
+                console.error("study_uid not found in the response body", data);
+                alert("Study UID missing from the server response.");
+            }
+        } catch (error) {
+            console.error("Error retrieving study uid:", error);
+            alert("Failed to connect to the backend to retrieve the Study UID.");
+        }
+    };
+
     const handleSave = () => {
         const accepted = Object.keys(reviewStatus).filter(uid => reviewStatus[uid] === 'accepted');
         const rejected = Object.keys(reviewStatus).filter(uid => reviewStatus[uid] === 'rejected');
-        onSave({ accepted, rejected });
+        const modified = Object.keys(reviewStatus).filter(uid => reviewStatus[uid] === 'modified');
+        onSave({ accepted, rejected, modified });
     };
 
     const acceptedCount = Object.values(reviewStatus).filter(s => s === 'accepted').length;
     const rejectedCount = Object.values(reviewStatus).filter(s => s === 'rejected').length;
+    const modifiedCount = Object.values(reviewStatus).filter(s => s === 'modified').length;
     const pendingCount  = Object.values(reviewStatus).filter(s => s === 'pending').length;
 
     return (
@@ -183,6 +211,9 @@ function ReviewView({
                                 <span className="flex items-center gap-1 text-red-400">
                                     <XSquare size={11} /> {rejectedCount} rejected
                                 </span>
+                                <span className="flex items-center gap-1 text-[#eab308]">
+                                    <Edit size={11} /> {modifiedCount} modified
+                                </span>
                                 <span className="text-[#566a84]">{pendingCount} pending</span>
                             </div>
                         )}
@@ -210,6 +241,7 @@ function ReviewView({
                                 const status     = reviewStatus[volume.seriesInstanceUid];
                                 const isAccepted = status === 'accepted';
                                 const isRejected = status === 'rejected';
+                                const isModified = status === 'modified';
 
                                 return (
                                     <div
@@ -220,7 +252,7 @@ function ReviewView({
                                             flexDirection: 'column',
                                             borderRadius: '12px',
                                             overflow: 'hidden',
-                                            border: `2px solid ${isAccepted ? '#6fe5b8' : isRejected ? '#ef4444' : 'rgba(31,45,64,0.8)'}`,
+                                            border: `2px solid ${isAccepted ? '#6fe5b8' : isRejected ? '#ef4444' : isModified ? '#eab308' : 'rgba(31,45,64,0.8)'}`,
                                             background: '#0b1015',
                                             transition: 'border-color 0.2s',
                                         }}
@@ -237,6 +269,11 @@ function ReviewView({
                                                 {volume.seriesInstanceUid.slice(-8)}
                                             </span>
                                             <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                                                <button
+                                                    onClick={() => handleModify(volume.seriesInstanceUid)}
+                                                    style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: isModified ? '#eab308' : 'transparent', color: isModified ? '#000' : '#9ca3af' }}
+                                                    title="Modify Interactively"
+                                                ><Edit size={14} /></button>
                                                 <button
                                                     onClick={() => handleToggle(volume.seriesInstanceUid, 'rejected')}
                                                     style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: isRejected ? '#ef4444' : 'transparent', color: isRejected ? '#fff' : '#9ca3af' }}
@@ -293,7 +330,8 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
         selectedModel: string;
         diceScore: number | null;
         volumes: VolumeGif[];
-    }>({ targetRoi: '-', selectedModel: '-', diceScore: null, volumes: [] });
+        sessionId?: string;
+    }>({ targetRoi: '-', selectedModel: '-', diceScore: null, volumes: [], sessionId: undefined });
 
     const [isLoading, setIsLoading] = useState(true);
 
@@ -304,6 +342,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
                 selectedModel: segmentationData.selectedModel || '-',
                 diceScore:     segmentationData.diceScore     ?? null,
                 volumes:       segmentationData.volumes,
+                sessionId:     segmentationData.sessionId,
             });
             setIsLoading(false);
         } else {
@@ -311,13 +350,36 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
         }
     }, [segmentationData]);
 
-    const handleSave = (results: { accepted: string[]; rejected: string[] }) => {
+    const handleSave = async (results: { accepted: string[]; rejected: string[]; modified: string[] }) => {
+        if (!data.sessionId) {
+            alert('Session ID is missing. Unable to send review results.');
+            return;
+        }
+        console.log('the session id in front is', data.sessionId);
+
         try {
-            websocketService.send(JSON.stringify({ accepted: results.accepted, rejected: results.rejected }));
+            const response = await fetch('http://localhost:8150/segmentation-review', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    accepted: results.accepted,
+                    rejected: results.rejected,
+                    modified: results.modified,
+                    session_id: data.sessionId,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server responded with status ${response.status}`);
+            }
+
             alert('Review saved! The AI module will now resume.');
+            console.log('Review results sent successfully:', results);
         } catch (error) {
             console.error('Failed to send review results:', error);
-            alert('Failed to connect to the AI agent. Please try again.');
+            alert('Failed to send review results to the backend. Please try again.');
         }
     };
 

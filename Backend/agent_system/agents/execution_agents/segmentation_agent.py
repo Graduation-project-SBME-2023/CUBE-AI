@@ -21,11 +21,10 @@ from autogen_core.models import SystemMessage
 from autogen_agentchat.ui import Console
 from autogen_core import CancellationToken
 
-# from agent_system.descriptions.models_descriptions import RESULT_AGENT_DESCRIPTION
-# from agent_system.system_prompts.system_messages import RESULT_AGENT_SYSTEM_PROMPT
+from agent_system.descriptions.models_descriptions import RESULT_AGENT_DESCRIPTION
+from agent_system.system_prompts.system_messages import RESULT_AGENT_SYSTEM_PROMPT
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
 
-# from .segmentation_module import SegmentationModule
 from autogen_core.tools import FunctionTool
 
 from .segmentation.module import SegmentationModule
@@ -183,7 +182,9 @@ to start the task of the segmentation, all you need to do just run the tool you 
 
 async def main():
     # Initialize the agent using the factory method
-    agent = await SegmentationAgent.create()
+    current_file = Path(__file__)
+    workspace_folder = os.path.join(current_file.parent.parent.parent,"workspace_68dac4a1-ecdb-4145-9f23-874a85d1d6bb")
+    agent = await SegmentationAgent.create(workspace_folder=workspace_folder, session_id="68dac4a1-ecdb-4145-9f23-874a85d1d6bb")
 
     # # Now you can use the agent normally
     # print(f"Agent initialized with {agent._tools} tools.")

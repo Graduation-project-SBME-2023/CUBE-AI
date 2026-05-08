@@ -72,8 +72,8 @@ async def latex_to_pdf(
         workspace_folder_name = os.path.basename(workspace_folder)
         if not workspace_folder:
             current_dir = os.getcwd()
-            target_dir = os.path.abspath(os.path.join(current_dir, "Backend", "agent_system/workspace"))
             workspace_folder_name = os.path.basename(target_dir)
+            target_dir = os.path.abspath(os.path.join(current_dir, "Backend", "agent_system/workspace"))
             final_folder = os.path.join(target_dir, "reports")
         else:
             final_folder = os.path.join(workspace_folder, "reports")
