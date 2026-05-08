@@ -608,7 +608,48 @@ async def ws_broadcast(data: dict):
         data["type"], data["payload"], session_id=data.get("session_id")
     )
     return {"status": "ok"}
+    
+_review_futures: Dict[str, asyncio.Future] = {}
 
+@app.post("/segmentation-review")
+async def segmentation_review(data: dict):
+    session_id = data.get("session_id", "default")
+    review_payload = {
+        "accepted": data.get("accepted", []),
+        "rejected": data.get("rejected", []),
+        "modified": data.get("modified", []),
+    }
+    # resolve the waiting module if it's already polling
+    future = _review_futures.pop(session_id, None)
+    if future and not future.done():
+        future.set_result(review_payload)
+    else:
+        # store it in case the module polls later
+        _review_futures[f"ready:{session_id}"] = review_payload  # plain dict, not future
+    
+    return {"status": "ok"}
+
+
+@app.get("/segmentation-review/wait/{session_id}")
+async def wait_for_review(session_id: str, timeout: int = 300):
+    """Long-poll endpoint: blocks until the frontend submits a review."""
+    # check if result already arrived
+    ready_key = f"ready:{session_id}"
+    if ready_key in _review_futures:
+        result = _review_futures.pop(ready_key)
+        return result
+
+    # otherwise register a future and wait
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    _review_futures[session_id] = future
+
+    try:
+        result = await asyncio.wait_for(future, timeout=timeout)
+        return result
+    except asyncio.TimeoutError:
+        _review_futures.pop(session_id, None)
+        raise HTTPException(status_code=408, detail="Review timeout")
 
 # ----------------------------------------------------------------------
 # Entry point
