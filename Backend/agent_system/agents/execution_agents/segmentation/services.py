@@ -1,4 +1,5 @@
 import httpx
+import os
 import logging
 import json
 from datetime import datetime
@@ -30,8 +31,8 @@ class SegmentationService:
 
     def __init__(self):
 
-        self.monai_url = "http://localhost:8000"
-        self.orthanc_url = "http://localhost:8043"
+        self.monai_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+        self.orthanc_url = os.environ.get("ORTHANC_URL", "http://localhost:8043")
 
 
     async def run_segmentation(

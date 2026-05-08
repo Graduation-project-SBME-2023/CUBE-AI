@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 TASK_CONTEXT_BOOTSTRAP = """=== TASK CONTEXT BOOTSTRAP (MANDATORY) ===
 Before doing anything else, call read_agent_task_context exactly once.
 Use the returned task_message.instructions and context_augmentation as the primary task specification.
-If the tool returns status other than 'ok', raise a scratchpad flag and stop.
 """
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -32,8 +31,8 @@ from autogen_core.tools import FunctionTool
 from .segmentation.module import SegmentationModule
 
 
-async def test_module(workspace_folder: str | None = None):
-    """Test function for the SegmentationModule with return value
+async def segmentation_tool(workspace_folder: str | None = None):
+    """The main segmentation tool, containing all the needed logic
     :arg workspace_folder: The workspace folder to save outputs to.
     """
     try:
@@ -118,18 +117,18 @@ class SegmentationAgent(AssistantAgent):
             ) from exc
         desired_mcp_tools = [
             "read_agent_task_context",
-            "scratchpad_register_agent",
-            "scratchpad_write_summary",
-            "scratchpad_set_status",
-            "scratchpad_raise_flag",
-            "write_agent_output",
+            # "scratchpad_register_agent",
+            # "scratchpad_write_summary",
+            # "scratchpad_set_status",
+            # "scratchpad_raise_flag",
+            # "write_agent_output",
         ]
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
         logger.info(f"Creating segmentation agent")
         function_tools = [
             FunctionTool(
-                test_module,
-                description="the tool that starts the segmentation, it has the capability to know what to segment and install by itself",
+                segmentation_tool,
+                description="The main segmentation tool",
             )
         ]
         tools = [*function_tools, *final_mcp_tools]
@@ -140,32 +139,34 @@ class SegmentationAgent(AssistantAgent):
 
 to start the task of the segmentation, all you need to do just run the tool you have, do not ask any questions, the workspace folder is {workspace_folder}
 
-=== SCRATCHPAD INSTRUCTIONS ===
-At the very start of your task, register yourself:
-  - scratchpad_register_agent(agent_id="segmentation_agent", role="roi_segmentation")
-
-When segmentation is complete:
-1. Call scratchpad_write_summary with:
-   - Segmentation method used
-   - Number of volumes segmented
-   - Any quality issues encountered
-2. Call scratchpad_set_status(agent_id="segmentation_agent", status="done")
-
-=== STRUCTURED OUTPUT INSTRUCTIONS ===
-After completing segmentation, you MUST call write_agent_output with:
-  - agent_id: "segmentation_agent"
-  - agent_role: "roi_segmentation"
-  - status: "completed" (or "failed"/"partial")
-  - inputs: {{"workspace_folder": "{workspace_folder}"}}
-  - output_files: {{"labels_dir": "labels_data/"}}
-  - output_metrics: {{
-      "segmentation_method": "<method used, e.g. MONAI Label VISTA3D>",
-      "volumes_segmented": <number>,
-      "roi_description": "<what was segmented>"
-    }}
-  - output_summary: "<concise summary of segmentation results>"
-  - warnings: [<any quality warnings>]
 """
+
+# === SCRATCHPAD INSTRUCTIONS ===
+# At the very start of your task, register yourself:
+#   - scratchpad_register_agent(agent_id="segmentation_agent", role="roi_segmentation")
+#
+# When segmentation is complete:
+# 1. Call scratchpad_write_summary with:
+#    - Segmentation method used
+#    - Number of volumes segmented
+#    - Any quality issues encountered
+# 2. Call scratchpad_set_status(agent_id="segmentation_agent", status="done")
+#
+# === STRUCTURED OUTPUT INSTRUCTIONS ===
+# After completing segmentation, you MUST call write_agent_output with:
+#   - agent_id: "segmentation_agent"
+#   - agent_role: "roi_segmentation"
+#   - status: "completed" (or "failed"/"partial")
+#   - inputs: {{"workspace_folder": "{workspace_folder}"}}
+#   - output_files: {{"labels_dir": "labels_data/"}}
+#   - output_metrics: {{
+#       "segmentation_method": "<method used, e.g. MONAI Label VISTA3D>",
+#       "volumes_segmented": <number>,
+#       "roi_description": "<what was segmented>"
+#     }}
+#   - output_summary: "<concise summary of segmentation results>"
+#   - warnings: [<any quality warnings>]
+# """
         return cls(
             name=name,
             model_client=model_client,
