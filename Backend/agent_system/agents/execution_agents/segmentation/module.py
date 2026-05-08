@@ -11,7 +11,6 @@ import os
 import httpx
 from pathlib import Path
 from typing import Dict, Any, Union, List
-from agent_system.socket_store import send_ws_message, wait_for_user_message
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 from .planner import create_planner_agent, run_planner
 from .pipelines.automatic import run_automatic_pipeline
@@ -23,8 +22,6 @@ from .logging_config import setup_logging
 import logging
 from client_config import create_model_client_from_config
 import httpx
-# before integratinon make it to the default messages from the socket_store
-# from .ws_client_sender import send_ws_message_remote, wait_for_user_message_remote
 from agent_system.models.tool_logging import ProgressPayload, TextPayload, ToolEvent
 from agent_system.tool_logging import receive_tool_event
 setup_logging()
@@ -49,18 +46,7 @@ class SegmentationModule:
         # intialize model client
         self.model_client = create_model_client_from_config()
         logger.info(f"Model client initialized with : {self.model_client}")
-     #    self.model_client = OllamaChatCompletionClient(
-     #    model=self.model_name,
-     #    model_info={
-     #        "vision": False,
-     #        "function_calling": True,
-     #        "json_output": True,
-     #        "structured_output": True,
-     #        "family": "unknown"
-     #    },
-     #    api_key=os.environ.get("APIKEY"),
-     #
-     # )
+
         # MCP server connection
         current_file = Path(__file__).resolve()
         backend_dir = current_file.parent.parent.parent.parent.parent
@@ -107,7 +93,6 @@ class SegmentationModule:
             raise ValueError("Segmentation step not found")
 
         instructions = segmentation_step["task_message"]["instructions"]
-        # hypothesis: str = state["hypothesis"]["hypothesis"]
         logger.info(f"Received instructions: {instructions}")
         datasetlist: List[str] = input_data["datasetlist"]
         #1. plan
@@ -119,29 +104,29 @@ class SegmentationModule:
             datasetlist, target_labels
         )
         # ====== Logging before Segmentation =================
-        # payload = TextPayload(
-        #     message=f'Found existing masks for {len(datasetlist) - len(eligible_volumes)} volumes'
-        # )
-        # plan_log_event = ToolEvent(
-        #     event_type='tool_started',
-        #     source='segmentation_agent',
-        #     content_type='text',
-        #     content=payload,
-        #     session_id=self.session_id,
-        # )
-        # await receive_tool_event(plan_log_event)
-        # plan_log_event = ToolEvent(
-        #     event_type='tool_finished',
-        #     source='segmentation_agent',
-        #     content_type='text',
-        #     content=payload,
-        #     session_id=self.session_id,
-        # )
-        # await receive_tool_event(plan_log_event)
+        payload = TextPayload(
+            message=f'Found existing masks for {len(datasetlist) - len(eligible_volumes)} volumes'
+        )
+        plan_log_event = ToolEvent(
+            event_type='tool_started',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload,
+            session_id=self.session_id,
+        )
+        await receive_tool_event(plan_log_event)
+        plan_log_event = ToolEvent(
+            event_type='tool_finished',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload,
+            session_id=self.session_id,
+        )
+        await receive_tool_event(plan_log_event)
         
         # =========== test ===============
 
-        # plan={'target_labels': ['Spleen'], 'chosen_path': 'interactive','selected_model': ['Spleen_Automatic_model']}
+        # plan ={'target_labels': ['Spleen'], 'chosen_path': 'automatic','selected_models': ['segmentation_spleen']}
         # =================================
         
         logger.info(
@@ -155,34 +140,34 @@ class SegmentationModule:
         elif eligible_volumes:
             selected_interactive_model = await run_interactive_pipeline(self.UserFallbackAgent, self.UserProxyAgent, eligible_volumes, target_labels, self.segmentation_service, self.session_id)
         # ========= logging after Segmentation ================
-        # payload = TextPayload(message=f'Segmentation...Done')
-        # segmentation_tool_event = ToolEvent(
-        #     event_type='tool_finished',
-        #     source='segmentation_agent',
-        #     content_type='text',
-        #     content=payload,
-        #     session_id=self.session_id,
-        # )
-        # await receive_tool_event(segmentation_tool_event)  
+        payload = TextPayload(message=f'Segmentation...Done')
+        segmentation_tool_event = ToolEvent(
+            event_type='tool_finished',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload,
+            session_id=self.session_id,
+        )
+        await receive_tool_event(segmentation_tool_event)  
         
-        # # ===========  loggin before download ====================  
-        # payload = TextPayload(message='Creating dataset...')
-        # environment_setup_event = ToolEvent(
-        #     event_type='tool_started',
-        #     source='segmentation_agent',
-        #     content_type='text',
-        #     content=payload,
-        #     session_id=self.session_id,
-        # )
-        # await receive_tool_event(environment_setup_event)
-        # environment_setup_event = ToolEvent(
-        #     event_type='tool_progress',
-        #     source='segmentation_agent',
-        #     content_type='text',
-        #     content=payload,
-        #     session_id=self.session_id,
-        # )
-        # await receive_tool_event(environment_setup_event)
+        # ===========  loggin before download ====================  
+        payload = TextPayload(message='Creating dataset...')
+        environment_setup_event = ToolEvent(
+            event_type='tool_started',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload,
+            session_id=self.session_id,
+        )
+        await receive_tool_event(environment_setup_event)
+        environment_setup_event = ToolEvent(
+            event_type='tool_progress',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload,
+            session_id=self.session_id,
+        )
+        await receive_tool_event(environment_setup_event)
         # =========== download ========================    
         #finally download the volumes with its label masks 
         await asyncio.sleep(120)  
@@ -194,12 +179,7 @@ class SegmentationModule:
         )
         
         #============================ test segmentation view ===================================
-        # downloaded_uids = ["1.2.826.0.1.3680043.8.498.12073285427930663774611907954116957406",
-        #                  "1.2.826.0.1.3680043.8.498.15136386566608168882487015520907740870",
-        #                  "1.2.826.0.1.3680043.8.498.39690361926593906696712695770248244325",
-        #                  "1.2.826.0.1.3680043.8.498.66527749693564068057441707562288227105",
-        #                  "1.2.826.0.1.3680043.8.498.90966193394235914543895670294526949480"
-        #                  ] 
+        # downloaded_uids = ["1.2.826.0.1.3680043.8.498.15136386566608168882487015520907740870"] 
         # ======================================================================================
         
         # ================== Generate Overlays ===========================================
@@ -223,7 +203,7 @@ class SegmentationModule:
 
         # ==========sending data to fronted for review====================
         logger.info("Module sending data to frontend for review...")
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             await client.post(
                 "http://localhost:8150/ws-broadcast",
                 json={
@@ -233,20 +213,44 @@ class SegmentationModule:
                 }
             )
   
-        # wait until fully checked wait for user message
-        logger.info("Module paused: Waiting for human review...")
-        user_response_raw = await wait_for_user_message(
-            session_id= self.session_id
-            
-        # )
+        # Wait for user review message
+        logger.info("Module paused: Waiting for human review via HTTP long-poll...")
+        async with httpx.AsyncClient(timeout=330.0) as client:
+                    while True:
+                        try:
+                            response = await client.get(
+                                f"http://localhost:8150/segmentation-review/wait/{self.session_id}"
+                            )
+                            
+                            # if time out reconnect
+                            if response.status_code == 408:
+                                logger.info("Server ended the long-poll (408 Timeout). Reconnecting...")
+                                continue  
+                            # for other errors, log and raise
+                            response.raise_for_status()
+                            # successful response, break the loop and process results
+                            user_results = response.json()
+                            break 
+                        except httpx.ReadTimeout:
+                            logger.info("Client read timeout reached. Reconnecting...")
+                            continue
 
-        # The module wakes up! Here are the UIDs the user accepted:
-        user_results = json.loads(user_response_raw)
         final_accepted_uids = user_results.get("accepted", [])
-        logger.info(f"Module resumed! User accepted: {final_accepted_uids}")
-
-        #============= accepted uid just kept only in the folder=================
-        cleanup_discarded(workspace_dir, final_accepted_uids)
+        final_rejected_uids = user_results.get("rejected", [])
+        final_modified_uids = user_results.get("modified", [])
+        logger.info(f"Module resumed! Accepted: {final_accepted_uids}, Rejected: {final_rejected_uids}, Modified: {final_modified_uids}")
+        
+        # #============= accepted and modified uids just kept only in the folder=================
+        cleanup_discarded(workspace_dir, final_accepted_uids, final_modified_uids)
+        if final_modified_uids:
+            logger.info("Fetching updated labels for modified UIDs...")
+            await download_and_pair_volumes(
+                workspace_dir, 
+                datasetlist=final_modified_uids, 
+                chosen_path="interactive", 
+                selected_auto_model_for_volume=None, 
+                download_volumes=False 
+            )
 
 
         return {"status": "finished"}
@@ -257,13 +261,12 @@ async def test_module():
     try:
         logger.info("Starting SegmentationModule test...")
         
-        agent = SegmentationModule()
+        agent = SegmentationModule(session_id="68dac4a1-ecdb-4145-9f23-874a85d1d6bb")
         await agent.initialize()
         
         current_file = Path(__file__)
-        config_path =os.path.join(current_file.parent.parent.parent.parent.parent,"mas","memory", "workspace", "configurations.json")
-        logger.info(f"Running with config: {config_path}")
-        workspace_folder = os.path.join(current_file.parent.parent.parent.parent,"workspace")
+        workspace_folder = os.path.join(current_file.parent.parent.parent.parent,"workspace_68dac4a1-ecdb-4145-9f23-874a85d1d6bb")
+        config_path = os.path.join(workspace_folder, "config.json")
         result = await agent.run(config_path, workspace_folder)
         
         logger.info("Test completed successfully!")
