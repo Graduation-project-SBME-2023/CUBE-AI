@@ -22,11 +22,10 @@ from autogen_core.models import SystemMessage
 from autogen_agentchat.ui import Console
 from autogen_core import CancellationToken
 
-# from agent_system.descriptions.models_descriptions import RESULT_AGENT_DESCRIPTION
-# from agent_system.system_prompts.system_messages import RESULT_AGENT_SYSTEM_PROMPT
+from agent_system.descriptions.models_descriptions import RESULT_AGENT_DESCRIPTION
+from agent_system.system_prompts.system_messages import RESULT_AGENT_SYSTEM_PROMPT
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
 
-# from .segmentation_module import SegmentationModule
 from autogen_core.tools import FunctionTool
 
 from .segmentation.module import SegmentationModule
@@ -117,7 +116,7 @@ class SegmentationAgent(AssistantAgent):
                 f"Failed to initialize MCP tools from {mcp_server_path}"
             ) from exc
         desired_mcp_tools = [
-            # "read_agent_task_context",
+            "read_agent_task_context",
             "scratchpad_register_agent",
             "scratchpad_write_summary",
             "scratchpad_set_status",
