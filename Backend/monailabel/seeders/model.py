@@ -1,5 +1,6 @@
 from datetime import datetime
 import os
+import uuid
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -38,7 +39,7 @@ def seed_models():
                 "spleen": 0.96
             },
             params_schema=None,
-            model_id="segmentation-spleen-model-id",
+            model_id=str(uuid.uuid4()),
             created_at=datetime.now(),
         ),
 
@@ -61,7 +62,7 @@ def seed_models():
                     ]
                 }
             },
-            model_id="voxtell-model-id",
+            model_id=str(uuid.uuid4()),
             created_at=datetime.now(),
         ),
         
@@ -427,7 +428,7 @@ def seed_models():
                     ]
                 }
             },
-            model_id="vista-model-id",
+            model_id=str(uuid.uuid4()),
             created_at=datetime.now(),
         ),
     ]

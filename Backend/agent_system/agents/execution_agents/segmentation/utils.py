@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 from PIL import Image
 import csv
 import pandas as pd
+
+MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
 # ===============================
 # MASK HELPERS
 # ===============================
@@ -77,7 +79,7 @@ async def check_having_mask(volume_uid):
     Checks if a segmentation mask exists for the given volume SeriesInstanceUID (volume_uid).
     Calls the endpoint /segmentations/by-volume/{volume_uid} and returns the list of segmentations.
     """
-    url = f"http://localhost:8000/segmentations/by-volume/{volume_uid}"
+    url = f"{MONAI_URL}/segmentations/by-volume/{volume_uid}"
     response = requests.get(url)
     if response.status_code == 200:
         return response.json()
@@ -306,9 +308,9 @@ async def download_and_pair_volumes(
     download_volumes=True  
 ):
     VOLUMES = datasetlist
-    LABELS_BY_VOLUME_URL = "http://localhost:8000/segmentations/by-volume/"
-    DOWNLOAD_IMAGES_URL  = "http://localhost:8000/datastore/images"
-    DOWNLOAD_LABELS_URL  = "http://localhost:8000/datastore/labels"
+    LABELS_BY_VOLUME_URL = f"{MONAI_URL}/segmentations/by-volume/"
+    DOWNLOAD_IMAGES_URL  = f"{MONAI_URL}/datastore/images"
+    DOWNLOAD_LABELS_URL  = f"{MONAI_URL}/datastore/labels"
     TASK_NAME  = f"{selected_auto_model_for_volume}_segmentation_task" if selected_auto_model_for_volume else "segmentation_task"
 
     # where MONAI actually saves files after the POST trigger
