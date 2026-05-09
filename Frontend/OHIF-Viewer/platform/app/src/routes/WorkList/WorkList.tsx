@@ -670,7 +670,8 @@ function WorkList({
       <Header
         isSticky
         menuOptions={menuOptions}
-        isReturnEnabled={false}
+        isReturnEnabled={true}
+        onClickReturnButton={() => navigate('/')}
         WhiteLabeling={appConfig.whiteLabeling}
       >
         <button
