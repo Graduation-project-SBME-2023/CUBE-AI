@@ -9,9 +9,10 @@ interface PlanningViewProps {
     sessionId?: string | number | null;
     includeLitReview?: boolean;
     onLiteratureOutput?: (data: any) => void;
+    initialMode?: 'planning' | 'executing' | 'results';
 }
 
-export default function PlanningView({ initialHypothesis, sessionId, includeLitReview = true, onLiteratureOutput }: PlanningViewProps) {
+export default function PlanningView({ initialHypothesis, sessionId, includeLitReview = true, onLiteratureOutput, initialMode }: PlanningViewProps) {
     const [isRegistryOpen, setIsRegistryOpen] = useState(true);
 
     useEffect(() => {
@@ -30,7 +31,7 @@ export default function PlanningView({ initialHypothesis, sessionId, includeLitR
                 <p className="text-[11px] uppercase tracking-widest text-[#5a8aaa] font-semibold">Planning Canvas</p>
             </div>
             {/* Reuse your existing Graph Engine */}
-            <PlaygroundCanvas initialHypothesis={initialHypothesis} session_id={sessionId as any} includeLitReview={includeLitReview} onLiteratureOutput={onLiteratureOutput} />
+            <PlaygroundCanvas initialHypothesis={initialHypothesis} session_id={sessionId as any} includeLitReview={includeLitReview} onLiteratureOutput={onLiteratureOutput} initialMode={initialMode} />
             
             {/* Reuse your existing Registry
             <AgentRegistry 

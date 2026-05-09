@@ -42,12 +42,18 @@ function ResearchPlaygroundInner() {
   const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
   const [updatedPhaseIds, setUpdatedPhaseIds] = useState<string[]>([]);
   const [viewsReady, setViewsReady] = useState(false);
-  const { data, setLiteratureOutput, setPopulationData, setSegmentationData, setFeaturesData, setImportanceData, setModelingData, setReportData, setLatexData } = useResearchData();
+  const [restoredMode, setRestoredMode] = useState<'planning' | 'executing' | 'results'>('planning');
 
+  // Derive sessionId first so it can be used in useState initialisers below
   const hypothesis = routeState.hypothesis || 'No active hypothesis defined.';
   const sessionId = routeState.sessionId || routeState.session_id || null;
   const sendInitialMessage = routeState.sendInitialMessage || false;
   const initialUserMessage = sendInitialMessage ? hypothesis : undefined;
+
+  // True once we know the restored mode — gates both canvas mount and log replay
+  // so PlaygroundCanvas always receives the correct initialMode on first render.
+  const [restoredModeReady, setRestoredModeReady] = useState(!sessionId);
+  const { data, setLiteratureOutput, setPopulationData, setSegmentationData, setFeaturesData, setImportanceData, setModelingData, setReportData, setLatexData } = useResearchData();
   const sidebarPhases = useMemo(
     () => phases.filter(phase => phase.id !== 'planning' && phase.id !== 'execution'),
     [phases]
@@ -62,23 +68,36 @@ function ResearchPlaygroundInner() {
     }, [phaseId, isValidPhase, navigate, location.state]);
 
     // Load state from endpoints when session_id is provided
-    // Effect 1: non-replay session state (unchanged behavior, fires immediately)
+    // Effect 1: non-replay session state — also derives the initial canvas mode
     useEffect(() => {
         const loadSessionState = async () => {
             if (!sessionId) return;
             try {
-                const planRes = await fetch(`http://localhost:8150/session/${sessionId}/plan-state`);
-                if (planRes.ok) {
-                    const planData = await planRes.json();
-                    console.log('[ResearchPlayground] Loaded plan state:', planData);
-                }
-                const execRes = await fetch(`http://localhost:8150/session/${sessionId}/execution-state`);
-                if (execRes.ok) {
-                    const execData = await execRes.json();
-                    console.log('[ResearchPlayground] Loaded execution state:', execData);
+                // Check the live session status to determine initial canvas mode
+                const statusRes = await fetch(`http://localhost:8150/status/${sessionId}`);
+                if (statusRes.ok) {
+                    const { state } = await statusRes.json();
+                    if (state === 'COMPLETED') {
+                        setRestoredMode('results');
+                    } else if (state === 'RUNNING' || state === 'PAUSED') {
+                        setRestoredMode('executing');
+                    }
+                } else {
+                    // Backend has no in-memory session (e.g. restarted) — check execution-state
+                    const execRes = await fetch(`http://localhost:8150/session/${sessionId}/execution-state`);
+                    if (execRes.ok) {
+                        const execData = await execRes.json();
+                        if (Array.isArray(execData?.agents) && execData.agents.length > 0) {
+                            const allDone = execData.agents.every((a: any) => a.status === 'COMPLETED');
+                            setRestoredMode(allDone ? 'results' : 'executing');
+                        }
+                    }
                 }
             } catch (err) {
                 console.error('[ResearchPlayground] Failed to load session state:', err);
+            } finally {
+                // Always mark ready — even on error we fall back to 'planning'
+                setRestoredModeReady(true);
             }
         };
         loadSessionState();
@@ -90,7 +109,8 @@ function ResearchPlaygroundInner() {
   }, []);
 
   useEffect(() => {
-    if (!sessionId || !viewsReady) return;
+    // Wait for both: views mounted AND mode resolved before replaying
+    if (!sessionId || !viewsReady || !restoredModeReady) return;
     const replay = async () => {
       websocketService.startReplayCapture();
       try {
@@ -102,7 +122,7 @@ function ResearchPlaygroundInner() {
       }
     };
     replay();
-  }, [sessionId, viewsReady]);
+  }, [sessionId, viewsReady, restoredModeReady]);
 
   useEffect(() => {
     const eventToPhaseMap: Record<string, string> = {
@@ -172,7 +192,11 @@ function ResearchPlaygroundInner() {
     () => [
       {
         id: 'planning',
-        node: <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} includeLitReview={includeLitReview} onLiteratureOutput={setLiteratureOutput} />,
+        // Only render once the restored mode is known — prevents PlaygroundCanvas
+        // from mounting with mode='planning' then receiving plan_approval during replay.
+        node: restoredModeReady
+          ? <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} includeLitReview={includeLitReview} onLiteratureOutput={setLiteratureOutput} initialMode={restoredMode} />
+          : null,
       },
       { id: 'execution', node: <ExecutionView sessionId={sessionId} /> },
       ...(includeLitReview
@@ -201,7 +225,7 @@ function ResearchPlaygroundInner() {
       { id: 'modeling', node: <ModelingView modelingData={data.modelingData as any} /> },
       { id: 'reporting', node: <ReportingView reportData={data.reportData} latexData={data.latexData} sessionId={sessionId || undefined} /> },
     ],
-    [data, hypothesis, includeLitReview, routeState.literatureContext, routeState.literatureReviewOutput, sessionId, setLiteratureOutput]
+    [data, hypothesis, includeLitReview, restoredMode, restoredModeReady, routeState.literatureContext, routeState.literatureReviewOutput, sessionId, setLiteratureOutput]
   );
 
   return (

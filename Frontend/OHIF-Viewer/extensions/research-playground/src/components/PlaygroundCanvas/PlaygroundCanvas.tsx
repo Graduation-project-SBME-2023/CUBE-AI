@@ -13,6 +13,8 @@ interface PlaygroundCanvasProps {
   session_id?: string;
   includeLitReview?: boolean;
   onLiteratureOutput?: (data: any) => void;
+  /** Pre-resolved mode (e.g. 'executing') from session restore — avoids timing race with WS replay */
+  initialMode?: 'planning' | 'executing' | 'results';
 }
 
 export default function PlaygroundCanvas({
@@ -20,6 +22,7 @@ export default function PlaygroundCanvas({
   session_id,
   includeLitReview = true,
   onLiteratureOutput,
+  initialMode = 'planning',
 }: PlaygroundCanvasProps) {
   const normalizeKey = useCallback(
     (value?: string | null) =>
@@ -29,18 +32,20 @@ export default function PlaygroundCanvas({
     []
   );
 
-  const [mode, setMode] = useState<'planning' | 'executing' | 'results'>('planning');
+  // initialMode is resolved BEFORE render (passed from ResearchPlayground after checking
+  // execution-state), so both the state and ref start correct — no race with WS replay.
+  const [mode, setMode] = useState<'planning' | 'executing' | 'results'>(initialMode);
   const [nodes, setNodes] = useState<FlowNode[]>(() => createInitialNodes(initialHypothesis));
   const [edges, setEdges] = useState<FlowEdge[]>(INITIAL_EDGES);
   const [isPaused, setIsPaused] = useState(false);
   const [isConnected, setIsConnected] = useState(websocketService.isConnected());
   const [pendingPrompt, setPendingPrompt] = useState<{ type: string; message: string } | null>(null);
-  const [canExecute, setCanExecute] = useState(false);
+  const [canExecute, setCanExecute] = useState(initialMode !== 'planning');
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
   const [labellingMode, setLabellingMode] = useState<'manual' | 'automatic'>('manual');
-  const [labellingModeLocked, setLabellingModeLocked] = useState(false);
+  const [labellingModeLocked, setLabellingModeLocked] = useState(initialMode !== 'planning');
   const hasInitiatedPlan = useRef(false);
-  const modeRef = useRef<'planning' | 'executing' | 'results'>('planning');
+  const modeRef = useRef<'planning' | 'executing' | 'results'>(initialMode);
   const nodesRef = useRef<FlowNode[]>([]);
   const sessionIdRef = useRef<string | undefined>(session_id);
   const literatureOutputRef = useRef<typeof onLiteratureOutput>(onLiteratureOutput);
@@ -62,6 +67,9 @@ export default function PlaygroundCanvas({
       console.log('[PlaygroundCanvas] Saved session ID to storage:', session_id);
     }
   }, [session_id]);
+
+
+
 
   useEffect(() => {
     literatureOutputRef.current = onLiteratureOutput;
@@ -385,6 +393,10 @@ export default function PlaygroundCanvas({
       }
 
       if (type === 'hypothesis_approval' || type === 'lit_review_choice' || type === 'plan_approval') {
+        // Suppress approval prompts when we are already past the planning stage
+        if (type === 'plan_approval' && modeRef.current !== 'planning') {
+          return;
+        }
         setPendingPrompt({ type, message: payload?.message || payload?.text || '' });
         return;
       }
@@ -448,15 +460,28 @@ export default function PlaygroundCanvas({
       }
 
       if (type === 'pipeline_agent_status' || type === 'Pipeline_agent_status') {
+        // Seeing pipeline agent statuses means execution has started — restore mode
+        if (modeRef.current === 'planning') {
+          setMode('executing');
+          setLabellingModeLocked(true);
+          setCanExecute(true);
+        }
         updatePipelineAgentStatuses(payload?.agents || []);
         return;
       }
 
       if (type === 'run_status') {
+        // run_status also implies we are executing
+        if (modeRef.current === 'planning') {
+          setMode('executing');
+          setLabellingModeLocked(true);
+          setCanExecute(true);
+        }
         updateCurrentAgent(payload.current_agent);
       }
 
       if (type === 'run_finished') {
+        setMode('results');
         updateCurrentAgent('run_finished');
       }
     });
