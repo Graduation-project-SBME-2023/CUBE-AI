@@ -1,0 +1,83 @@
+# ============================================================
+# CUBE.AI — custom-monailabel  (GPU / CUDA variant)
+# Base: projectmonai/monailabel ships with PyTorch + CUDA libs.
+# We layer CUDA toolkit (nvcc) on top, then bake every runtime
+# pip dependency straight into the image so container startup
+# requires no pip install at all.
+# ============================================================
+FROM projectmonai/monailabel:0.8.5
+
+# ------------------------------------------------------------
+# 1. System packages  (git, build tools, CUDA toolkit for nvcc)
+# ------------------------------------------------------------
+# monailabel base is Ubuntu 20.04 / 22.04; the CUDA toolkit
+# package that provides nvcc is  cuda-toolkit-<major>-<minor>.
+# The base image already has CUDA runtime libs; we just add the
+# compiler/toolkit package from the same repo that is already
+# configured by nvidia/cuda base images.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        build-essential \
+        # nvcc lives in cuda-toolkit — pick the version that
+        # matches the CUDA runtime already in the base image.
+        # Adjust the version tag if the base ever upgrades CUDA.
+        cuda-toolkit-11-8 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Make sure nvcc is on PATH
+ENV PATH="/usr/local/cuda/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+
+# ------------------------------------------------------------
+# 2. Python — upgrade pip, install ALL runtime dependencies
+#    (everything that was previously installed at container
+#    start-time via docker-compose command is now here)
+# ------------------------------------------------------------
+RUN pip install --no-cache-dir -U pip && \
+    pip install --no-cache-dir \
+        # original Dockerfile deps
+        batchgenerators \
+        acvl-utils \
+        asyncpg \
+        nnunetv2 \
+        nnInteractive \
+        "pydicom==2.4.4" \
+        # previously installed via compose command at startup
+        psycopg2-binary \
+        aiohttp \
+        alembic
+
+# voxtell_requirements.txt is copied into the image so we never
+# need to bind-mount it just to install deps.
+COPY ./voxtell_requirements.txt /voxtell_requirements.txt
+RUN pip install --no-cache-dir -r /voxtell_requirements.txt
+
+# ------------------------------------------------------------
+# 3. Patched pydicom-seg sources
+# ------------------------------------------------------------
+COPY ./reader.py \
+     /usr/local/lib/python3.10/dist-packages/pydicom_seg/reader.py
+COPY ./segmentation_dataset.py \
+     /usr/local/lib/python3.10/dist-packages/pydicom_seg/segmentation_dataset.py
+
+# ------------------------------------------------------------
+# 4. Environment variables
+# ------------------------------------------------------------
+ENV nnUNet_preprocessed=/NN_Unet/nnUNet_preprocessed \
+    nnUNet_results=/NN_Unet/nnUNet_results \
+    nnUNet_raw=/NN_Unet/nnUNet_raw \
+    DATABASE_URL=postgresql://workflow_user:password@postgres:5432/workflow_db \
+    PYTHONPATH=/apps/radiology \
+    # NVIDIA runtime hints (can also be set in compose)
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# ------------------------------------------------------------
+# 5. Expose & default command
+# ------------------------------------------------------------
+EXPOSE 8000
+
+# Default entrypoint: run DB migrations then start the server.
+# The compose file can still override this if needed.
+CMD ["sh", "-c", "alembic -c /alembic/alembic.ini upgrade head && python /monailabel/server_start.py"]

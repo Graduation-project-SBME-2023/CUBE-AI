@@ -22,23 +22,13 @@ services:
     restart: unless-stopped
 
   monailabel:
-    # build:
-    #  context: ${COMPOSE_PROJECT_DIR}/Backend/
-    #  dockerfile: ${COMPOSE_PROJECT_DIR}/Backend/Dockerfile
-    image: cubeai1/custom-monailabel:0.2.1
+    # GPU image — amd64 only, CUDA toolkit included
+    image: cubeai1/custom-monailabel:latest-gpu
     container_name: monailabel-backend
     runtime: nvidia
-    shm_size: 8G # change if needed
+    shm_size: 8G
     ports:
       - '8000:8000'
-    command: >
-        sh -c "
-        pip install psycopg2-binary &&
-        pip install -r /voxtell_requirements.txt &&
-        pip install aiohttp &&
-        alembic -c /alembic/alembic.ini upgrade head &&
-        python /monailabel/server_start.py
-        "
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
@@ -61,7 +51,7 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/CustomNnUnetTrainer.py:/usr/local/lib/python3.10/dist-packages/nnunetv2/training/nnUNetTrainer/CustomNnUnetTrainer.py
       - ${COMPOSE_PROJECT_DIR}/Backend/alembic.ini:/alembic/alembic.ini
       - ${COMPOSE_PROJECT_DIR}/Backend/migrations:/alembic/migrations
-      - ${COMPOSE_PROJECT_DIR}/Backend/voxtell_requirements.txt:/voxtell_requirements.txt
+    # CMD in the Dockerfile.gpu already runs migrations + server.
     depends_on:
       - postgres
       - orthanc
@@ -70,10 +60,8 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              # count: all
               capabilities: [gpu]
-              # only for the workstation, gpu (rtx 3060) with specific id
-              device_ids: ["0"]
+              device_ids: ["0"]   # RTX 3060 — adjust as needed
     restart: unless-stopped
 
   orthanc:
@@ -84,7 +72,7 @@ services:
       - 8043:8042
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/config/orthanc.json:/etc/orthanc/orthanc.json:ro
-      - ${COMPOSE_PROJECT_DIR}/Backend/orthanc/lua:/etc/orthanc/lua:ro 
+      - ${COMPOSE_PROJECT_DIR}/Backend/orthanc/lua:/etc/orthanc/lua:ro
       - orthanc-db:/var/lib/orthanc/db/
     restart: unless-stopped
 
@@ -94,7 +82,6 @@ services:
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/backup.sql:/docker-entrypoint-initdb.d/backup.sql
       - postgres-db:/var/lib/postgresql/data
-     
     ports:
       - '5433:5432'
     environment:

@@ -28,7 +28,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./Backend
-          file: ./Backend/Dockerfile
+          file: ./Backend/Dockerfile.gpu
           tags:  ${{ secrets.DOCKER_USERNAME }}/monailabel-custom:latest  # Fixed tag format
           push: true  # Changed to push to registry
 
@@ -77,7 +77,7 @@ jobs:
 #         uses: docker/build-push-action@v5
 #         with:
 #           context: ./Backend
-#           file: ./Backend/Dockerfile
+#           file: ./Backend/Dockerfile.gpu
 #           tags: ${{ secrets.DOCKER_USERNAME }}/monailabel-custom:latest
 #           push: true
 
@@ -87,7 +87,7 @@ jobs:
 #           docker compose up
 #           sleep 10  # wait for services to be ready
 
-#       - name: Check Images in Dockerfile
+#       - name: Check Images in Dockerfile.gpu
 #         working-directory: ./Backend
 #         run: docker ps
 
