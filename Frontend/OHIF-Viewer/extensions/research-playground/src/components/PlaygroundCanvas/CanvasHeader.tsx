@@ -30,19 +30,23 @@ export default function CanvasHeader({
   onReset,
   onToggleLabellingMode,
 }: CanvasHeaderProps) {
+  // Single morphing badge label
+  const badgeLabel = mode === 'planning' ? 'Planning' : mode === 'executing' ? 'Executing' : 'Results';
+
   return (
     <div className="absolute left-1/2 top-6 z-40 flex -translate-x-1/2 items-center gap-4 rounded-lg border border-[#3c5d80] bg-[#151a1f]/90 p-2 shadow-2xl backdrop-blur-md">
+      {/* ── Stage badge (morphs with mode) ── */}
       <div className="flex items-center gap-3 border-r border-[#3c5d80] pl-2 pr-4">
         <div
-          className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+          className={`rounded border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-all ${
             mode === 'planning'
               ? 'border-[#3c5d80] bg-[#1f2d40] text-[#91b9cd]'
               : mode === 'executing'
-                ? 'border-[#005f7d] bg-[#003f5c] text-[#5acce6]'
-                : 'border-[#085a3c] bg-[#06422d] text-[#6fe5b8]'
+                ? 'border-[#005f7d] bg-[#003f5c] text-[#5acce6] shadow-[0_0_10px_rgba(90,204,230,0.2)]'
+                : 'border-[#085a3c] bg-[#06422d] text-[#6fe5b8] shadow-[0_0_10px_rgba(111,229,184,0.2)]'
           }`}
         >
-          {mode}
+          {badgeLabel}
         </div>
       </div>
 

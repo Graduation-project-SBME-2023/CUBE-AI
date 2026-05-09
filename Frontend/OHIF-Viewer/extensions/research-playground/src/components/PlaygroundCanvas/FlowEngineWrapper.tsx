@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, Edit3, MousePointer2, ZoomIn } from 'lucide-react';
+import { AlertCircle, Edit3, MousePointer2, ZoomIn } from 'lucide-react';
 import MiniFlow from './miniflow';
 import StartNode from './nodes/StartNode';
 import AgentNode from './nodes/AgentNode';
@@ -139,22 +139,7 @@ export default function FlowEngineWrapper({
           </div>
         )}
 
-        {mode === 'results' && (
-          <div className="animate-in fade-in absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-[2px] duration-500">
-            <div className="max-w-md space-y-4 rounded border border-[#3c5d80] bg-[#151a1f] p-8 text-center shadow-2xl">
-              <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full border border-[#6fe5b8] bg-[#06422d]">
-                <CheckCircle2 size={24} className="text-[#6fe5b8]" />
-              </div>
-              <h2 className="text-xl font-bold text-white">Workflow Complete</h2>
-              <button
-                onClick={onReset}
-                className="w-full rounded bg-[#348cfd] py-2 text-sm font-medium text-white transition-colors hover:bg-[#599fff]"
-              >
-                Return to Worklist
-              </button>
-            </div>
-          </div>
-        )}
+
       </MiniFlow>
     </div>
   );
