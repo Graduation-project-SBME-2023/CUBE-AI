@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { User, AlertTriangle, FileText, Activity, AlertCircle, Info, CheckCircle2, Loader2 } from 'lucide-react';
-import websocketService from '../../../utils/WebsocketService';
+import websocketService from '../../../services/websocket';
 
 interface ScratchpadMessage {
   type: string;
