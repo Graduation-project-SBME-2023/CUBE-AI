@@ -74,6 +74,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       # QEMU lets the amd64 runner emulate arm64
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -101,8 +112,8 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.meta.outputs.tag }}-cpu
             ${{ env.IMAGE_NAME }}:latest-cpu
-          cache-from: type=gha,scope=cpu
-          cache-to:   type=gha,scope=cpu,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-gpu
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-gpu,mode=max
 
   # ----------------------------------------------------------
   # GPU image — amd64 only (CUDA toolkit is x86_64)
@@ -115,6 +126,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -135,5 +157,5 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.meta.outputs.tag }}-gpu
             ${{ env.IMAGE_NAME }}:latest-gpu
-          cache-from: type=gha,scope=gpu
-          cache-to:   type=gha,scope=gpu,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-gpu
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-gpu,mode=max
