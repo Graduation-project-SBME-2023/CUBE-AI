@@ -141,13 +141,13 @@ function ResearchPlaygroundInner() {
     <div className="flex h-screen w-full flex-col overflow-hidden bg-black font-sans text-white">
       <div className="z-20 flex h-14 shrink-0 items-center justify-between bg-[#0a1520] px-4 shadow-[0_1px_0_#0d1e2e,0_4px_24px_rgba(0,0,0,0.4)] border-b border-[#1a2a3a]">
         <div className="flex items-center">
-          <button
-            onClick={() => navigate(-1)}
-            className="mr-3 rounded-md border border-transparent p-1.5 text-[#5a8aaa] transition-all hover:border-[#1e3248] hover:bg-[#0d1e2e] hover:text-[#5acce6]"
-            title="Go back to previous page"
-          >
-            <ArrowLeft size={16} />
-          </button>
+            <button
+                onClick={() => navigate('/agentic-home')}
+                className="mr-3 p-1.5 rounded-md transition-all hover:bg-[#0d1e2e] text-[#5a8aaa] hover:text-[#5acce6] border border-transparent hover:border-[#1e3248]"
+                title="Back to Home"
+            >
+                <ArrowLeftIcon size={16} />
+            </button>
 
           <div className="flex items-center gap-2 pr-4">
             <div className="flex h-6 w-6 items-center justify-center rounded border border-[#2a5a8a] bg-[linear-gradient(135deg,#0d2035_0%,#1a3a54_100%)]">
