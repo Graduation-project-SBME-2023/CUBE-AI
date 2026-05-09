@@ -275,9 +275,9 @@ class SessionService:
                 f"[{session.session_id}] confirm_hypothesis called with no hypothesis on session"
             )
 
-        await self._ws_send(
-            "msg", "Hypothesis Confirmed.", session_id=session.session_id
-        )
+        # await self._ws_send(
+        #     "msg", "Hypothesis Confirmed.", session_id=session.session_id
+        # )
 
     async def confirm_plan(self, session: Session) -> None:
         """
@@ -304,9 +304,9 @@ class SessionService:
             )
 
         await self.update_state(session, SessionState.READY)
-        await self._ws_send(
-            "msg", "Study Plan Confirmed.", session_id=session.session_id
-        )
+        # await self._ws_send(
+        #     "msg", "Study Plan Confirmed.", session_id=session.session_id
+        # )
 
     # ------------------------------------------------------------------
     # Queries — routes call these

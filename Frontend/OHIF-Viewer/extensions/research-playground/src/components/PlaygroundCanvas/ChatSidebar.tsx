@@ -38,6 +38,13 @@ const ChatSidebar = ({
   const resizeStateRef = useRef({ startX: 0, startWidth: 420 });
   const messagesEndRef = useRef(null);
   const activeSessionIdRef = useRef(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const MIN_WIDTH = 340;
   const MAX_WIDTH = maxSidebarWidth;
@@ -47,6 +54,8 @@ const ChatSidebar = ({
   if (messages.length === 0 && initialUserMessage) {
     messages = [{ id: makeId('init'), role: 'user', text: initialUserMessage, ts: Date.now() }];
   }
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+  const showThinking = isTyping || lastMessage?.role === 'user';
 
   useEffect(() => {
     console.log('[HypothesisFlow][ChatSidebar] Session binding effect', {
@@ -181,6 +190,7 @@ const ChatSidebar = ({
         last_activity: s.last_activity ? new Date(s.last_activity).getTime() : 0,
       }));
       // Merge DB sessions with existing local sessions to preserve WS-delivered messages
+      if (!isMountedRef.current) return;
       setSessions(prev => {
         const merged = [...prev];
         for (const dbSession of mapped) {
@@ -215,6 +225,7 @@ const ChatSidebar = ({
         text: m.text,
         ts: new Date(m.timestamp).getTime(),
       }));
+      if (!isMountedRef.current) return;
       setSessions(prev =>
         prev.map(s => {
           if (String(s.chat_id) !== String(chat_id)) return s;
@@ -252,6 +263,7 @@ const ChatSidebar = ({
         summary: data.summary,
         last_activity: Date.now(),
       };
+      if (!isMountedRef.current) return;
       setSessions(s => [newSession, ...s]);
       setActiveSessionId(newSession.chat_id);
       setDrawerOpen(false);
@@ -272,6 +284,7 @@ const ChatSidebar = ({
         summary: '',
         last_activity: Date.now(),
       };
+      if (!isMountedRef.current) return;
       setSessions(s => [newSession, ...s]);
       setActiveSessionId(newSession.chat_id);
       setDrawerOpen(false);
@@ -566,7 +579,7 @@ const ChatSidebar = ({
             </span>
           </div>
         ))}
-        {isTyping && (
+        {showThinking && (
           <div className="flex items-center gap-2 p-2 text-[13px] text-[#3d5a72]">
             <ActivityIcon size={14} className="animate-spin text-[#5acce6]" />
             <span className="italic">CUBE is thinking...</span>

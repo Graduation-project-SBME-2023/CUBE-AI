@@ -19,6 +19,14 @@ export default function PlaygroundCanvas({
   includeLitReview = true,
   onLiteratureOutput,
 }: PlaygroundCanvasProps) {
+  const normalizeKey = useCallback(
+    (value?: string | null) =>
+      String(value || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, ''),
+    []
+  );
+
   const [mode, setMode] = useState<'planning' | 'executing' | 'results'>('planning');
   const [nodes, setNodes] = useState<FlowNode[]>(() => createInitialNodes(initialHypothesis));
   const [edges, setEdges] = useState<FlowEdge[]>(INITIAL_EDGES);
@@ -26,27 +34,195 @@ export default function PlaygroundCanvas({
   const [isConnected, setIsConnected] = useState(websocketService.isConnected());
   const [pendingPrompt, setPendingPrompt] = useState<{ type: string; message: string } | null>(null);
   const [canExecute, setCanExecute] = useState(false);
+  const [fitViewTrigger, setFitViewTrigger] = useState(0);
   const hasInitiatedPlan = useRef(false);
+  const nodesRef = useRef<FlowNode[]>([]);
+  const sessionIdRef = useRef<string | undefined>(session_id);
+  const literatureOutputRef = useRef<typeof onLiteratureOutput>(onLiteratureOutput);
+
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  useEffect(() => {
+    sessionIdRef.current = session_id;
+  }, [session_id]);
+
+  useEffect(() => {
+    literatureOutputRef.current = onLiteratureOutput;
+  }, [onLiteratureOutput]);
 
   const updateNodeData = useCallback((id: string, patch: any) => {
     setNodes(prev => prev.map(n => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
   }, []);
 
+  const resolveAgentNodeId = useCallback(
+    (source: string) => {
+      const sourceKey = normalizeKey(source);
+      if (!sourceKey) return null;
+
+      const matched = nodesRef.current.find(node => {
+        if (node.type !== 'agent') return false;
+        const data = node.data as AgentNodeData;
+        const candidates = [
+          node.id,
+          data.matched_module,
+          data.title,
+          data.name,
+        ]
+          .filter(Boolean)
+          .map(v => normalizeKey(String(v)));
+        return candidates.includes(sourceKey);
+      });
+
+      return matched?.id || null;
+    },
+    [normalizeKey]
+  );
+
   const updateCurrentAgent = useCallback((current_agent: string) => {
-    setNodes(prev =>
-      prev.map(node => {
+    const resolvedCurrentId = resolveAgentNodeId(current_agent) || current_agent;
+
+    setNodes(prev => {
+      let changed = false;
+      const next = prev.map(node => {
         if (node.type !== 'agent') return node;
         const agentData = node.data as AgentNodeData;
-        if (node.id === current_agent) {
+        if (node.id === resolvedCurrentId) {
+          if (agentData.status === 'active' && agentData.isExpanded) {
+            return node;
+          }
+          changed = true;
           return { ...node, data: { ...agentData, status: 'active', isExpanded: true } };
         }
         if (agentData.status === 'active') {
+          changed = true;
           return { ...node, data: { ...agentData, status: 'completed', isExpanded: false } };
         }
         return node;
-      })
-    );
-  }, []);
+      });
+      return changed ? next : prev;
+    });
+  }, [resolveAgentNodeId]);
+
+  const updatePipelineAgentStatuses = useCallback(
+    (agents: Array<{ name?: string; status?: string }>) => {
+      if (!Array.isArray(agents) || agents.length === 0) return;
+
+      const statusByNodeId = new Map<string, 'pending' | 'active' | 'completed' | 'failed'>();
+
+      for (const agent of agents) {
+        const resolvedNodeId = resolveAgentNodeId(agent?.name || '');
+        if (!resolvedNodeId) continue;
+
+        const backendStatus = String(agent?.status || '').toUpperCase();
+        const status =
+          backendStatus === 'RUNNING'
+            ? 'active'
+            : backendStatus === 'COMPLETED'
+              ? 'completed'
+              : backendStatus === 'FAILED'
+                ? 'failed'
+                : 'pending';
+
+        statusByNodeId.set(resolvedNodeId, status);
+      }
+
+      if (statusByNodeId.size === 0) return;
+
+      setNodes(prev => {
+        let changed = false;
+        const next = prev.map(node => {
+          if (node.type !== 'agent') return node;
+          const nextStatus = statusByNodeId.get(node.id);
+          if (!nextStatus) return node;
+          const agentData = node.data as AgentNodeData;
+          const shouldExpand = nextStatus === 'active' ? true : agentData.isExpanded;
+          if (agentData.status === nextStatus && agentData.isExpanded === shouldExpand) {
+            return node;
+          }
+          changed = true;
+          return {
+            ...node,
+            data: {
+              ...agentData,
+              status: nextStatus,
+              isExpanded: shouldExpand,
+            },
+          };
+        });
+        return changed ? next : prev;
+      });
+    },
+    [resolveAgentNodeId]
+  );
+
+  const appendToolEventToNode = useCallback(
+    (toolEvent: ToolEvent) => {
+      if (!toolEvent?.source) return;
+
+      const targetNodeId = resolveAgentNodeId(toolEvent.source) || toolEvent.source;
+
+      setNodes(prev => {
+        let changed = false;
+        const next = prev.map(node => {
+          if (node.type !== 'agent' || node.id !== targetNodeId) return node;
+          changed = true;
+          const agentData = node.data as AgentNodeData;
+          const existingLogs: ToolLog[] = agentData.logs ?? [];
+          let updatedLogs: ToolLog[];
+
+          if (toolEvent.event_type === 'tool_started') {
+            updatedLogs = [
+              ...existingLogs,
+              {
+                source: toolEvent.source,
+                started_at: toolEvent.timestamp,
+                last_updated_at: toolEvent.timestamp,
+                events: [toolEvent],
+                status: 'active',
+              },
+            ];
+          } else if (existingLogs.length === 0) {
+            updatedLogs = [
+              {
+                source: toolEvent.source,
+                started_at: toolEvent.timestamp,
+                last_updated_at: toolEvent.timestamp,
+                events: [toolEvent],
+                status:
+                  toolEvent.event_type === 'tool_finished'
+                    ? 'completed'
+                    : toolEvent.event_type === 'error'
+                      ? 'error'
+                      : 'active',
+              },
+            ];
+          } else {
+            const last = existingLogs[existingLogs.length - 1];
+            updatedLogs = [
+              ...existingLogs.slice(0, -1),
+              {
+                ...last,
+                last_updated_at: toolEvent.timestamp,
+                events: [...last.events, toolEvent],
+                status:
+                  toolEvent.event_type === 'tool_finished'
+                    ? 'completed'
+                    : toolEvent.event_type === 'error'
+                      ? 'error'
+                      : 'active',
+              },
+            ];
+          }
+
+          return { ...node, data: { ...node.data, logs: updatedLogs, isExpanded: true } };
+        });
+        return changed ? next : prev;
+      });
+    },
+    [resolveAgentNodeId]
+  );
 
   const resetNodeLogs = useCallback(
     (prev: FlowNode[]) =>
@@ -64,6 +240,7 @@ export default function PlaygroundCanvas({
         setNodes(planPayload.nodes);
         if (planPayload.edges) setEdges(planPayload.edges);
         if (planPayload.mode) setMode(planPayload.mode);
+        setFitViewTrigger(prev => prev + 1);
         return;
       }
 
@@ -129,6 +306,7 @@ export default function PlaygroundCanvas({
           });
         }
         setEdges(newEdges);
+        setFitViewTrigger(prev => prev + 1);
       }, 0);
     },
     [initialHypothesis]
@@ -141,7 +319,8 @@ export default function PlaygroundCanvas({
     const unsubscribeMsg = websocketService.subscribe((data: any) => {
       const { type, payload } = data;
       const incomingSessionId = String(data?.session_id);
-      if (incomingSessionId && session_id && incomingSessionId !== String(session_id)) {
+      const currentSessionId = sessionIdRef.current;
+      if (incomingSessionId && currentSessionId && incomingSessionId !== String(currentSessionId)) {
         return;
       }
 
@@ -177,7 +356,7 @@ export default function PlaygroundCanvas({
       }
 
       if (type === 'lit_review_output') {
-        onLiteratureOutput?.(payload);
+        literatureOutputRef.current?.(payload);
         return;
       }
 
@@ -222,63 +401,20 @@ export default function PlaygroundCanvas({
       }
 
       if (type === 'tool_update') {
-        const toolEvent = payload as ToolEvent;
-        if (!toolEvent?.source) return;
+        appendToolEventToNode(payload as ToolEvent);
+        return;
+      }
 
-        setNodes(prev =>
-          prev.map(node => {
-            if (node.type !== 'agent' || node.id !== toolEvent.source) return node;
-            const agentData = node.data as AgentNodeData;
-            const existingLogs: ToolLog[] = agentData.logs ?? [];
-            let updatedLogs: ToolLog[];
+      if (['tool_started', 'tool_progress', 'tool_log', 'tool_finished', 'error'].includes(type)) {
+        const directToolEvent = payload?.event_type
+          ? (payload as ToolEvent)
+          : ({ ...(payload || {}), event_type: type } as ToolEvent);
+        appendToolEventToNode(directToolEvent);
+        return;
+      }
 
-            if (toolEvent.event_type === 'tool_started') {
-              updatedLogs = [
-                ...existingLogs,
-                {
-                  source: toolEvent.source,
-                  started_at: toolEvent.timestamp,
-                  last_updated_at: toolEvent.timestamp,
-                  events: [toolEvent],
-                  status: 'active',
-                },
-              ];
-            } else if (existingLogs.length === 0) {
-              updatedLogs = [
-                {
-                  source: toolEvent.source,
-                  started_at: toolEvent.timestamp,
-                  last_updated_at: toolEvent.timestamp,
-                  events: [toolEvent],
-                  status:
-                    toolEvent.event_type === 'tool_finished'
-                      ? 'completed'
-                      : toolEvent.event_type === 'error'
-                        ? 'error'
-                        : 'active',
-                },
-              ];
-            } else {
-              const last = existingLogs[existingLogs.length - 1];
-              updatedLogs = [
-                ...existingLogs.slice(0, -1),
-                {
-                  ...last,
-                  last_updated_at: toolEvent.timestamp,
-                  events: [...last.events, toolEvent],
-                  status:
-                    toolEvent.event_type === 'tool_finished'
-                      ? 'completed'
-                      : toolEvent.event_type === 'error'
-                        ? 'error'
-                        : 'active',
-                },
-              ];
-            }
-
-            return { ...node, data: { ...node.data, logs: updatedLogs } };
-          })
-        );
+      if (type === 'pipeline_agent_status' || type === 'Pipeline_agent_status') {
+        updatePipelineAgentStatuses(payload?.agents || []);
         return;
       }
 
@@ -293,6 +429,13 @@ export default function PlaygroundCanvas({
 
     const unsubscribeStatus = websocketService.onStatusChange(status => setIsConnected(status));
 
+    return () => {
+      unsubscribeMsg();
+      unsubscribeStatus();
+    };
+  }, [appendToolEventToNode, applyBackendPlan, updateCurrentAgent, updateNodeData, updatePipelineAgentStatuses]);
+
+  useEffect(() => {
     if (initialHypothesis && !hasInitiatedPlan.current) {
       hasInitiatedPlan.current = true;
       const startPlanning = async () => {
@@ -317,12 +460,7 @@ export default function PlaygroundCanvas({
       };
       startPlanning();
     }
-
-    return () => {
-      unsubscribeMsg();
-      unsubscribeStatus();
-    };
-  }, [applyBackendPlan, includeLitReview, initialHypothesis, onLiteratureOutput, session_id, updateCurrentAgent, updateNodeData]);
+  }, [includeLitReview, initialHypothesis, session_id]);
 
   const sendPlanToBackend = useCallback(
     (nodesData: FlowNode[], edgesData: FlowEdge[]) => {
@@ -445,6 +583,7 @@ export default function PlaygroundCanvas({
     <div className="relative flex h-full w-full flex-col bg-[#000000]">
       <CanvasHeader
         mode={mode}
+        literatureEnabled = {!!nodes.find(n => n.id === 'literature_review')}
         canExecute={canExecute}
         isPaused={isPaused}
         isConnected={isConnected}
@@ -458,6 +597,7 @@ export default function PlaygroundCanvas({
         mode={mode}
         nodes={nodes}
         edges={edges}
+        fitViewTrigger={fitViewTrigger}
         pendingPrompt={pendingPrompt}
         onNodesChange={handleNodesChange}
         onDrop={handleDrop}

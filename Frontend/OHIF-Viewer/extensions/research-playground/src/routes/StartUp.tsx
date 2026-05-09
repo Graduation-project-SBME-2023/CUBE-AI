@@ -113,13 +113,7 @@ const CubeStartUp = () => {
 
     return (
         <div className={styles.wrapper(hovered)}>
-             <button
-               className="absolute right-6 top-6 z-20 rounded-md border border-[#2b4f66] bg-[#0f1f2e] px-3 py-1 text-sm font-semibold text-[#5acce6] transition-colors hover:border-[#5acce6] hover:bg-[#123149]"
-               onClick={() => navigate('/agentic-home')}
-               title="Open Research Playground"
-             >
-               Research Playground
-             </button>
+
              {/* Dynamic Background Gradient */}
              <div 
                 className="absolute inset-0 pointer-events-none transition-all duration-1000 ease-in-out opacity-60"

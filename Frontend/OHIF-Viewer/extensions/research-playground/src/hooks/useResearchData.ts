@@ -1,26 +1,85 @@
+import { useCallback, useMemo } from 'react';
 import { useResearchContext } from '../context/ResearchContext';
 
 export function useResearchData() {
   const { data, setData } = useResearchContext();
 
-  const setLiteratureOutput = (payload: any) => setData(prev => ({ ...prev, literatureOutput: payload }));
-  const setPopulationData = (payload: any) => setData(prev => ({ ...prev, populationData: payload }));
-  const setSegmentationData = (payload: any) => setData(prev => ({ ...prev, segmentationData: payload }));
-  const setFeaturesData = (payload: any) => setData(prev => ({ ...prev, featuresData: payload }));
-  const setImportanceData = (payload: any) => setData(prev => ({ ...prev, importanceData: payload }));
-  const setModelingData = (payload: any) => setData(prev => ({ ...prev, modelingData: payload }));
-  const setReportData = (payload: any) => setData(prev => ({ ...prev, reportData: payload }));
-  const setLatexData = (payload: any) => setData(prev => ({ ...prev, latexData: payload }));
+  const setLiteratureOutput = useCallback(
+    (payload: any) =>
+      setData(prev =>
+        prev.literatureOutput === payload ? prev : { ...prev, literatureOutput: payload }
+      ),
+    [setData]
+  );
 
-  return {
-    data,
-    setLiteratureOutput,
-    setPopulationData,
-    setSegmentationData,
-    setFeaturesData,
-    setImportanceData,
-    setModelingData,
-    setReportData,
-    setLatexData,
-  };
+  const setPopulationData = useCallback(
+    (payload: any) =>
+      setData(prev => (prev.populationData === payload ? prev : { ...prev, populationData: payload })),
+    [setData]
+  );
+
+  const setSegmentationData = useCallback(
+    (payload: any) =>
+      setData(prev =>
+        prev.segmentationData === payload ? prev : { ...prev, segmentationData: payload }
+      ),
+    [setData]
+  );
+
+  const setFeaturesData = useCallback(
+    (payload: any) =>
+      setData(prev => (prev.featuresData === payload ? prev : { ...prev, featuresData: payload })),
+    [setData]
+  );
+
+  const setImportanceData = useCallback(
+    (payload: any) =>
+      setData(prev =>
+        prev.importanceData === payload ? prev : { ...prev, importanceData: payload }
+      ),
+    [setData]
+  );
+
+  const setModelingData = useCallback(
+    (payload: any) =>
+      setData(prev => (prev.modelingData === payload ? prev : { ...prev, modelingData: payload })),
+    [setData]
+  );
+
+  const setReportData = useCallback(
+    (payload: any) =>
+      setData(prev => (prev.reportData === payload ? prev : { ...prev, reportData: payload })),
+    [setData]
+  );
+
+  const setLatexData = useCallback(
+    (payload: any) =>
+      setData(prev => (prev.latexData === payload ? prev : { ...prev, latexData: payload })),
+    [setData]
+  );
+
+  return useMemo(
+    () => ({
+      data,
+      setLiteratureOutput,
+      setPopulationData,
+      setSegmentationData,
+      setFeaturesData,
+      setImportanceData,
+      setModelingData,
+      setReportData,
+      setLatexData,
+    }),
+    [
+      data,
+      setFeaturesData,
+      setImportanceData,
+      setLatexData,
+      setLiteratureOutput,
+      setModelingData,
+      setPopulationData,
+      setReportData,
+      setSegmentationData,
+    ]
+  );
 }

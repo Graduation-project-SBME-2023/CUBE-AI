@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Bot, Box, Clock, Search } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bot, Box, Clock, List, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../ui/Card';
 
@@ -143,26 +143,36 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
             aria-label="Back to Startup"
           >
             <ArrowLeft size={20} />
+          
           </button>
-          <Box size={20} className="text-[#5acce6]" />
-          <span>
-            CUBE <span className="font-normal opacity-50">| Agentic Mode</span>
-          </span>
+
+            <button
+                onClick={() => navigate('/worklist')}
+                className="mr-2 p-2 rounded-md transition-all hover:bg-[#0d1e2e] text-[#5a8aaa] hover:text-[#5acce6] border border-transparent hover:border-[#1e3248]"
+                title="Go to Worklist"
+                aria-label="Go to Worklist"
+            >
+              <List size={16} />
+            </button>
+
         </div>
-        <div className="flex h-8 w-8 items-center justify-center rounded-full border border-[#023a7d] bg-[#151a1f] text-xs font-bold text-[#5acce6] shadow-inner">
-          AI
-        </div>
+
       </div>
 
       <div className="z-10 mx-auto w-full max-w-5xl space-y-8 px-6 pb-12 pt-24 text-center">
         <p className="mx-auto max-w-4xl bg-gradient-to-r from-white to-[#91b9cd] bg-clip-text text-2xl font-medium leading-relaxed text-transparent md:text-3xl">
           Describe your research question or hypothesis, and CUBE will construct the workflow.
         </p>
-
+        <div className="rounded-3xl border border-[#2e445c] bg-[#10151a] p-3 shadow-2xl">
         <div className="relative mx-auto w-full max-w-3xl pt-4">
-          <div className="group flex flex-col gap-3">
-            <div className="relative w-full">
-              <Search className="absolute left-5 top-4 text-[#566a84] transition-colors group-focus-within:text-[#5acce6]" size={24} />
+          <div className="group flex items-start gap-3">
+            {/* Search Area */}
+            <div className="relative flex-1">
+              <Search
+                className="absolute left-5 top-4 text-[#566a84] transition-colors group-focus-within:text-[#5acce6]"
+                size={24}
+              />
+
               <textarea
                 ref={textareaRef}
                 className="min-h-[56px] max-h-[140px] w-full resize-none overflow-y-auto rounded-2xl border border-[#3c5d80] bg-[#151a1f] py-4 pl-14 pr-4 text-lg text-white placeholder-[#566a84] shadow-2xl transition-all focus:border-[#5acce6] focus:outline-none focus:ring-1 focus:ring-[#5acce6]"
@@ -179,27 +189,52 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
               />
             </div>
 
-            <div className="flex items-center gap-2 px-2 text-[#91b9cd]">
-              <input
-                type="checkbox"
-                id="litReviewToggle"
-                checked={includeLitReview}
-                onChange={e => setIncludeLitReview(e.target.checked)}
-                className="h-4 w-4 rounded border-[#3c5d80] bg-[#151a1f] text-[#5acce6] focus:ring-[#5acce6]"
-              />
-              <label htmlFor="litReviewToggle" className="cursor-pointer text-sm font-medium">
-                Include Literature Review
-              </label>
-            </div>
+            {/* Toggle */}
+            <button
+              type="button"
+              onClick={() => setIncludeLitReview(!includeLitReview)}
+              className={`group relative flex h-[56px] shrink-0 items-center rounded-2xl border px-4 transition-all duration-200 ${
+                includeLitReview
+                  ? 'border-[#5acce6] bg-[#1d2a33] shadow-[0_0_20px_rgba(90,204,230,0.15)]'
+                  : 'border-[#3c5d80] bg-[#151a1f]'
+              }`}
+            >
+              {/* Toggle Circle */}
+              <div
+                className={`relative h-6 w-11 rounded-full transition-colors duration-200 ${
+                  includeLitReview ? 'bg-[#5acce6]' : 'bg-[#2a3b4d]'
+                }`}
+              >
+                <div
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-md transition-transform duration-200 ${
+                    includeLitReview ? 'translate-x-5' : 'translate-x-0.5'
+                  }`}
+                />
+              </div>
 
+              {/* Label */}
+              <span
+                className={`ml-3 whitespace-nowrap text-sm font-medium transition-colors ${
+                  includeLitReview ? 'text-white' : 'text-[#91b9cd]'
+                }`}
+              >
+                Literature Review
+              </span>
+            </button>
+          </div>
+          <div className="relative flex-1 mt-4">
             <button
               onClick={handleSearch}
               className="self-end rounded-xl bg-[#5acce6] px-6 py-3 font-bold text-black shadow-lg transition-colors hover:bg-[#4ab8d4]"
               disabled={!hypothesis.trim()}
-              style={{ opacity: hypothesis.trim() ? 1 : 0.5, cursor: hypothesis.trim() ? 'pointer' : 'not-allowed' }}
+              style={{
+                opacity: hypothesis.trim() ? 1 : 0.5,
+                cursor: hypothesis.trim() ? 'pointer' : 'not-allowed'
+              }}
             >
               Start Research <ArrowRight size={16} className="inline" />
             </button>
+          </div>
           </div>
         </div>
       </div>

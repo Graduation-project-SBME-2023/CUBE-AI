@@ -1,8 +1,8 @@
 import React from 'react';
-import { Pause, Play, RotateCcw, Wifi, WifiOff } from 'lucide-react';
-
+import { Pause, Play, RotateCcw, Wifi, WifiOff, BookOpen } from 'lucide-react';
 interface CanvasHeaderProps {
   mode: 'planning' | 'executing' | 'results';
+  literatureEnabled: boolean;
   canExecute: boolean;
   isPaused: boolean;
   isConnected: boolean;
@@ -10,10 +10,12 @@ interface CanvasHeaderProps {
   onTogglePause: () => void;
   onRestart: () => void;
   onReset: () => void;
+
 }
 
 export default function CanvasHeader({
   mode,
+  literatureEnabled,
   canExecute,
   isPaused,
   isConnected,
@@ -25,7 +27,6 @@ export default function CanvasHeader({
   return (
     <div className="absolute left-1/2 top-6 z-40 flex -translate-x-1/2 items-center gap-4 rounded-lg border border-[#3c5d80] bg-[#151a1f]/90 p-2 shadow-2xl backdrop-blur-md">
       <div className="flex items-center gap-3 border-r border-[#3c5d80] pl-2 pr-4">
-        <h1 className="hidden text-[10px] font-bold uppercase tracking-wide text-[#91b9cd] xl:block">Workflow Engine</h1>
         <div
           className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
             mode === 'planning'
@@ -44,11 +45,14 @@ export default function CanvasHeader({
           <button
             onClick={onStart}
             disabled={!canExecute}
-            className={`flex items-center gap-2 rounded px-4 py-1.5 text-xs font-medium text-white shadow-lg transition-colors ${
-              canExecute ? 'cursor-pointer bg-[#348cfd] hover:bg-[#599fff]' : 'cursor-not-allowed bg-[#348cfd] opacity-50'
+            className={`flex items-center gap-2 rounded px-6 py-1.5 text-[15px] font-bold text-black shadow-lg transition-colors ${
+              canExecute
+                ? 'cursor-pointer bg-[#5acce6] hover:bg-[#4ab8d4]'
+                : 'cursor-not-allowed bg-[#5acce6] opacity-50'
             }`}
           >
-            <Play size={14} fill="currentColor" /> Execute
+            <Play size={16} fill="currentColor" />
+            Execute
           </button>
         )}
 
@@ -83,10 +87,16 @@ export default function CanvasHeader({
           </button>
         )}
       </div>
+      {literatureEnabled && (
+        <div
+          className="flex items-center gap-1 rounded border border-[#5acce6] bg-[#1d2a33] px-2 py-1 text-[10px] font-medium text-[#5acce6]"
+          title="Literature Review Enabled"
+        >
+          <BookOpen size={15} />
+          <span className="hidden sm:inline">Literature</span>
+        </div>
+      )}
 
-      <div className="flex items-center border-l border-[#3c5d80] pl-2 text-[10px] text-[#566a84]" title={isConnected ? 'WebSocket Connected' : 'Using Mock Data'}>
-        {isConnected ? <Wifi size={14} className="text-[#6fe5b8]" /> : <WifiOff size={14} />}
-      </div>
     </div>
   );
 }
