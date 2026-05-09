@@ -6,7 +6,7 @@ import json
 import shutil
 import time
 import asyncio
-from anyio import Path
+from pathlib import Path
 import nrrd
 import numpy as np
 import tempfile
@@ -314,9 +314,9 @@ async def download_and_pair_volumes(
     TASK_NAME  = f"{selected_auto_model_for_volume}_segmentation_task" if selected_auto_model_for_volume else "segmentation_task"
 
     # where MONAI actually saves files after the POST trigger
-    current_file = Path(__file__)
-    MONAI_IMG_DIR   = os.path.join(current_file.parent.parent.parent.parent.parent,"apps\\radiology\\General_Data")
-    MONAI_LABEL_DIR = os.path.join(current_file.parent.parent.parent.parent.parent,"apps\\radiology\\labels")
+    MONAI_BASE_DIR = Path("/app/Backend/apps")
+    MONAI_IMG_DIR   = MONAI_BASE_DIR / "radiology" / "General_Data"
+    MONAI_LABEL_DIR = MONAI_BASE_DIR / "radiology" / "labels"
 
     FINAL_DIR_IMG   = os.path.join(workspace_dir, "volumes")
     FINAL_DIR_LABEL = os.path.join(workspace_dir, "masks")
