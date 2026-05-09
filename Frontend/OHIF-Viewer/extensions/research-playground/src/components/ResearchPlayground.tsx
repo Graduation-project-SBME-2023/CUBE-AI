@@ -271,7 +271,7 @@ export default function ResearchPlayground() {
 
                     {/* Back Button */}
                     <button
-                        onClick={() => navigate('/')}
+                        onClick={() => navigate('/agentic-home')}
                         className="mr-3 p-1.5 rounded-md transition-all hover:bg-[#0d1e2e] text-[#5a8aaa] hover:text-[#5acce6] border border-transparent hover:border-[#1e3248]"
                         title="Back to Home"
                     >
