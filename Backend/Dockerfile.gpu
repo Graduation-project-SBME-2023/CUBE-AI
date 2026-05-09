@@ -10,24 +10,33 @@ FROM projectmonai/monailabel:0.8.5
 # ------------------------------------------------------------
 # 1. System packages  (git, build tools, CUDA toolkit for nvcc)
 # ------------------------------------------------------------
-# monailabel base is Ubuntu 20.04 / 22.04; the CUDA toolkit
-# package that provides nvcc is  cuda-toolkit-<major>-<minor>.
-# The base image already has CUDA runtime libs; we just add the
-# compiler/toolkit package from the same repo that is already
-# configured by nvidia/cuda base images.
+# The monailabel base image has CUDA runtime libs installed via
+# pip/conda but does NOT have the NVIDIA apt repo configured,
+# so cuda-toolkit-XX-X isn't directly available.
+# We add the NVIDIA keyring + repo for Ubuntu 22.04 (jammy),
+# then install cuda-toolkit which pulls nvcc + headers.
+# The toolkit version (12-x) should match the CUDA runtime
+# that PyTorch was compiled against inside the base image.
+# To verify: docker run projectmonai/monailabel:0.8.5 \
+#              python -c "import torch; print(torch.version.cuda)"
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git \
         build-essential \
-        # nvcc lives in cuda-toolkit — pick the version that
-        # matches the CUDA runtime already in the base image.
-        # Adjust the version tag if the base ever upgrades CUDA.
-        cuda-toolkit-11-8 \
+        wget \
+        ca-certificates \
+    && wget -qO /tmp/cuda-keyring.deb \
+        https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb \
+    && dpkg -i /tmp/cuda-keyring.deb \
+    && rm /tmp/cuda-keyring.deb \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        cuda-nvcc-12-6 \
+        cuda-cudart-dev-12-6 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Make sure nvcc is on PATH
 ENV PATH="/usr/local/cuda/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 # ------------------------------------------------------------
 # 2. Python — upgrade pip, install ALL runtime dependencies
