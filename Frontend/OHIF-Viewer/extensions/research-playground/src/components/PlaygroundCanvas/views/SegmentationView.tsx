@@ -3,7 +3,7 @@ import {
     Target, Cpu, Percent, Check, X, CheckSquare, XSquare, Save, Loader2,
     ChevronDown, ChevronUp, Edit
 } from 'lucide-react';
-import websocketService from '../../../utils/WebsocketService';
+import websocketService from '../../../services/websocket';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
