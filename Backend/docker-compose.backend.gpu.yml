@@ -9,6 +9,8 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/agents_workspace:/app/agents_workspace
       - ${COMPOSE_PROJECT_DIR}/Backend/agent_system:/app/Backend/agent_system
       - ${COMPOSE_PROJECT_DIR}/Backend/mcp:/app/Backend/mcp
+      - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/General_Data:/app/Backend/apps/radiology/General_Data
+      - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/labels:/app/Backend/apps/radiology/labels
     environment:
       AGENTS_WORKSPACE_DIR: /app/agents_workspace
       OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
