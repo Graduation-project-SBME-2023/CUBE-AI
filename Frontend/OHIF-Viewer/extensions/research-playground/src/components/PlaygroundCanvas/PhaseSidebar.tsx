@@ -1,15 +1,16 @@
 import React from 'react';
-import { CheckCircle2, Home, PanelLeftClose, PanelLeftOpen, Plus } from 'lucide-react';
+import { Home, PanelLeftClose, PanelLeftOpen, Plus, Rocket } from 'lucide-react';
 
-const CheckCircle2Icon: any = CheckCircle2;
 const HomeIcon: any = Home;
 const PanelLeftCloseIcon: any = PanelLeftClose;
 const PanelLeftOpenIcon: any = PanelLeftOpen;
 const PlusIcon: any = Plus;
+const RocketIcon: any = Rocket;
 
 interface PhaseSidebarProps {
     phases: any[];
     activePhase: string;
+    updatedPhaseIds?: string[];
     onSelectPhase: (id: string) => void;
     isCollapsed: boolean;
     onToggleCollapse: () => void;
@@ -18,12 +19,14 @@ interface PhaseSidebarProps {
 export default function PhaseSidebar({
     phases,
     activePhase,
+    updatedPhaseIds = [],
     onSelectPhase,
     isCollapsed,
     onToggleCollapse,
 }: PhaseSidebarProps) {
     const activeIndex = phases.findIndex(p => p.id === activePhase);
-    const progressPct = Math.round(((activeIndex + 1) / phases.length) * 100);
+    const activeStep = activeIndex >= 0 ? activeIndex + 1 : 0;
+    const progressPct = phases.length ? Math.round((activeStep / phases.length) * 100) : 0;
     const activePhaseObj = phases.find(p => p.id === activePhase);
 
     return (
@@ -90,7 +93,9 @@ export default function PhaseSidebar({
             <div className="flex-1 overflow-y-auto px-2 py-2.5 flex flex-col gap-1">
                 {phases.map((phase, index) => {
                     const isActive = activePhase === phase.id;
-                    const isPast = phases.findIndex(p => p.id === activePhase) > index;
+                    const isCoreView = phase.id === 'planning' || phase.id === 'execution';
+                    const PhaseIcon = (phase.icon as any) || PlusIcon;
+                    const hasUpdate = !isActive && updatedPhaseIds.includes(phase.id);
 
                     return (
                         <div key={phase.id} className="relative flex flex-col">
@@ -100,26 +105,33 @@ export default function PhaseSidebar({
                                 className={`w-full flex items-center transition-all rounded-xl text-left ${
                                     isCollapsed ? 'justify-center px-1 py-3' : 'gap-2.5 px-2.5 py-2.5'
                                 } ${
-                                    isActive
-                                        ? 'bg-[#0d2540] border border-[#2a5a8a]'
+                                    hasUpdate
+                                        ? 'border border-[#e3a230] bg-[#2a1d07] shadow-[0_0_0_1px_rgba(227,162,48,0.45),0_0_14px_rgba(227,162,48,0.22)]'
+                                        : isActive
+                                        ? isCoreView
+                                            ? 'bg-[linear-gradient(135deg,#23142f_0%,#3a1f4d_100%)] border border-[#8f53bf]'
+                                            : 'bg-[#0d2540] border border-[#2a5a8a]'
+                                        : isCoreView
+                                        ? 'border border-transparent hover:bg-[#1a1224] hover:border-[#5c3a78]'
                                         : 'border border-transparent hover:bg-[#111d29] hover:border-[#1e3248]'
                                 }`}
                             >
-                                {/* Status Dot */}
+                                {/* Phase Icon */}
                                 <div
                                     className={`relative flex items-center justify-center w-7 h-7 rounded-full flex-shrink-0 z-10 transition-all
                                         ${isActive
-                                            ? 'border-[#5acce6] bg-[#0d2035] text-[#5acce6] shadow-[0_0_12px_rgba(90,204,230,0.25),inset_0_0_8px_rgba(90,204,230,0.08)]'
-                                            : isPast
-                                            ? 'border-[#2eca8e] bg-[#0d2420] text-[#2eca8e]'
+                                            ? isCoreView
+                                                ? 'border-[#c98cff] bg-[#2d1b3a] text-[#d8adff] shadow-[0_0_12px_rgba(216,173,255,0.25),inset_0_0_8px_rgba(216,173,255,0.08)]'
+                                            : 'border-[#5acce6] bg-[#0d2035] text-[#5acce6] shadow-[0_0_12px_rgba(90,204,230,0.25),inset_0_0_8px_rgba(90,204,230,0.08)]'
+                                            : hasUpdate
+                                            ? 'border-[#e3a230] bg-[#3a260b] text-[#ffd487] shadow-[0_0_12px_rgba(227,162,48,0.22)]'
+                                            : isCoreView
+                                            ? 'border-[#5c3a78] bg-[#160f1d] text-[#8f6cab]'
                                             : 'border-[#1e3a54] bg-[#0b1015] text-[#3c5d80]'
                                         }`}
                                     style={{ border: '1.5px solid' }}
                                 >
-                                    {isPast
-                                        ? <CheckCircle2Icon size={13} />
-                                        : <span className="text-[10px] font-bold">{index + 1}</span>
-                                    }
+                                    {phase.id === 'execution' ? <RocketIcon size={13} /> : <PhaseIcon size={13} />}
                                 </div>
 
                                 {/* Text Content */}
@@ -127,18 +139,39 @@ export default function PhaseSidebar({
                                     <div className="flex flex-col overflow-hidden">
                                         <span
                                             className={`text-[12px] font-semibold truncate leading-snug ${
-                                                isActive ? 'text-[#e0f0ff]' : 'text-[#7aa8c4] group-hover:text-[#b0d4ea]'
+                                                hasUpdate
+                                                    ? 'text-[#ffd487]'
+                                                    : isActive
+                                                    ? isCoreView
+                                                        ? 'text-[#f0ddff]'
+                                                        : 'text-[#e0f0ff]'
+                                                    : isCoreView
+                                                    ? 'text-[#b28dd0]'
+                                                    : 'text-[#7aa8c4]'
                                             }`}
                                         >
                                             {phase.label}
                                         </span>
                                         <span
                                             className={`text-[10px] truncate mt-0.5 leading-snug ${
-                                                isActive ? 'text-[#4d7a9a]' : 'text-[#3d5a72]'
+                                                hasUpdate
+                                                    ? 'text-[#dfaf59]'
+                                                    : isActive
+                                                    ? isCoreView
+                                                        ? 'text-[#b791d6]'
+                                                        : 'text-[#4d7a9a]'
+                                                    : isCoreView
+                                                    ? 'text-[#8765a4]'
+                                                    : 'text-[#3d5a72]'
                                             }`}
                                         >
                                             {phase.short_desc}
                                         </span>
+                                        {hasUpdate && (
+                                            <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#ffd487]">
+                                                New update received
+                                            </span>
+                                        )}
                                     </div>
                                 )}
                             </button>
@@ -189,7 +222,7 @@ export default function PhaseSidebar({
                             Progress
                         </span>
                         <span className="text-[9px] font-bold" style={{ color: '#5a8aaa' }}>
-                            {activeIndex + 1}/{phases.length} steps
+                            {activeStep}/{phases.length} steps
                         </span>
                     </div>
                 )}

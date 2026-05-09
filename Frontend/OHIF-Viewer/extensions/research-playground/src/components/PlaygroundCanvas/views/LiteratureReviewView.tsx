@@ -575,17 +575,17 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
           </div>
         )}
 
-        {/* ── Knowledge Base Sections ────────────────────────────────── */}
+        {/* ── Knowledge Base Sections ──────────────────────────────────
         {kbSections.length > 0 && (
           <div className="space-y-4">
             {kbSections.map((section, i) => (
               <SectionCard key={i} section={section} />
             ))}
           </div>
-        )}
+        )} */}
 
         {/* ── Sources Guide ────────────────────────────────────────── */}
-        {sourcesMarkdown && (
+        {/* {sourcesMarkdown && (
           <div className="rounded-xl border border-[#1f2d40] bg-[#0b1015] overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-[#1f2d40]/50 bg-gradient-to-r from-[#f59e4208] to-transparent">
               <GlobeIcon size={14} className="text-[#f59e42]" />
@@ -597,7 +597,7 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
               </ReactMarkdown>
             </div>
           </div>
-        )}
+        )} */}
       </div>
     </div>
   );

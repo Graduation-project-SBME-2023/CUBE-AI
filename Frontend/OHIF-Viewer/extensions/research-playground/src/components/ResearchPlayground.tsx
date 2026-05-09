@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, FlaskConical, MessageSquare, Settings } from 'lucide-react';
+import { ArrowLeft, FlaskConical, List, MessageSquare, PlayCircle, Rocket, Settings } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import PhaseSidebar from './PlaygroundCanvas/PhaseSidebar';
 import PlanningView from './PlaygroundCanvas/views/PlanningView';
@@ -13,36 +13,51 @@ import ReportingView from './PlaygroundCanvas/views/ReportingView';
 import ChatSidebar from './PlaygroundCanvas/ChatSidebar';
 import ClientSettingsPanel from './PlaygroundCanvas/ClientSettingsPanel';
 import { RESEARCH_PHASES } from '../constants/researchPhases';
-import { useResearchPhase } from '../hooks/useResearchPhase';
 import { ResearchProvider } from '../context/ResearchContext';
 import { useResearchData } from '../hooks/useResearchData';
 import websocketService from '../services/websocket';
 import { fetchSessionExecutionState, fetchSessionPlanState, replaySessionLogs } from '../services/api';
 import { ResearchRouteState } from '../types';
 
+const DEFAULT_PHASE = 'planning';
+
 function ResearchPlaygroundInner() {
   const location = useLocation();
   const navigate = useNavigate();
   const { phaseId } = useParams<{ phaseId?: string }>();
-  const { isValidPhase, activePhase, defaultPhase, phases } = useResearchPhase(phaseId);
+  const routeState = (location.state || {}) as ResearchRouteState;
+  const includeLitReview = routeState.includeLitReview ?? true;
+  const phases = useMemo(
+    () => RESEARCH_PHASES.filter(phase => includeLitReview || phase.id !== 'literature'),
+    [includeLitReview]
+  );
+  const [activePhase, setActivePhase] = useState<string>(() => {
+    if (phaseId && phases.some(phase => phase.id === phaseId)) {
+      return phaseId;
+    }
+    return DEFAULT_PHASE;
+  });
   const [isChatOpen, setIsChatOpen] = useState(true);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
+  const [updatedPhaseIds, setUpdatedPhaseIds] = useState<string[]>([]);
   const [viewsReady, setViewsReady] = useState(false);
   const { data, setLiteratureOutput, setPopulationData, setSegmentationData, setFeaturesData, setImportanceData, setModelingData, setReportData, setLatexData } = useResearchData();
 
-  const routeState = (location.state || {}) as ResearchRouteState;
   const hypothesis = routeState.hypothesis || 'No active hypothesis defined.';
   const sessionId = routeState.sessionId || routeState.session_id || null;
-  const includeLitReview = routeState.includeLitReview ?? true;
   const sendInitialMessage = routeState.sendInitialMessage || false;
   const initialUserMessage = sendInitialMessage ? hypothesis : undefined;
+  const sidebarPhases = useMemo(
+    () => phases.filter(phase => phase.id !== 'planning' && phase.id !== 'execution'),
+    [phases]
+  );
 
   useEffect(() => {
-    if (phaseId && !isValidPhase) {
-      navigate(`/playground/${defaultPhase}`, { replace: true, state: location.state });
+    if (!phases.some(phase => phase.id === activePhase)) {
+      setActivePhase(DEFAULT_PHASE);
     }
-  }, [phaseId, isValidPhase, defaultPhase, navigate, location.state]);
+  }, [activePhase, phases]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -78,6 +93,16 @@ function ResearchPlaygroundInner() {
   }, [sessionId, viewsReady]);
 
   useEffect(() => {
+    const eventToPhaseMap: Record<string, string> = {
+      literature_output: 'literature',
+      population_output: 'data',
+      segmentation_output: 'segmentation',
+      features_output: 'features',
+      modeling_output: 'modeling',
+      report_output: 'reporting',
+      latex_output: 'reporting',
+    };
+
     const unsubscribe = websocketService.subscribe((event: any) => {
       const { type, payload } = event;
       switch (type) {
@@ -101,9 +126,33 @@ function ResearchPlaygroundInner() {
           setLatexData(payload);
           break;
       }
+
+      const phaseId = eventToPhaseMap[type];
+      if (phaseId && phases.some(phase => phase.id === phaseId) && phaseId !== activePhase) {
+        setUpdatedPhaseIds(prev => (prev.includes(phaseId) ? prev : [...prev, phaseId]));
+      }
     });
     return () => unsubscribe();
-  }, [setFeaturesData, setImportanceData, setLatexData, setModelingData, setPopulationData, setReportData, setSegmentationData]);
+  }, [
+    activePhase,
+    phases,
+    setFeaturesData,
+    setImportanceData,
+    setLatexData,
+    setModelingData,
+    setPopulationData,
+    setReportData,
+    setSegmentationData,
+  ]);
+
+  useEffect(() => {
+    setUpdatedPhaseIds(prev => prev.filter(id => id !== activePhase));
+  }, [activePhase]);
+
+  const selectPhase = (id: string) => {
+    setUpdatedPhaseIds(prev => prev.filter(phaseId => phaseId !== id));
+    setActivePhase(id);
+  };
 
   const viewNodes = useMemo(
     () => [
@@ -112,16 +161,20 @@ function ResearchPlaygroundInner() {
         node: <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} includeLitReview={includeLitReview} onLiteratureOutput={setLiteratureOutput} />,
       },
       { id: 'execution', node: <ExecutionView sessionId={sessionId} /> },
-      {
-        id: 'literature',
-        node: (
-          <LiteratureReviewView
-            literatureOutput={
-              data.literatureOutput || routeState.literatureReviewOutput || routeState.literatureContext
-            }
-          />
-        ),
-      },
+      ...(includeLitReview
+        ? [
+            {
+              id: 'literature',
+              node: (
+                <LiteratureReviewView
+                  literatureOutput={
+                    data.literatureOutput || routeState.literatureReviewOutput || routeState.literatureContext
+                  }
+                />
+              ),
+            },
+          ]
+        : []),
       {
         id: 'data',
         node: <DataCohortView populationData={data.populationData} segmentationData={data.segmentationData} />,
@@ -146,46 +199,50 @@ function ResearchPlaygroundInner() {
                 className="mr-3 p-1.5 rounded-md transition-all hover:bg-[#0d1e2e] text-[#5a8aaa] hover:text-[#5acce6] border border-transparent hover:border-[#1e3248]"
                 title="Back to Home"
             >
-                <ArrowLeftIcon size={16} />
+              <ArrowLeft size={16} />
             </button>
 
-          <div className="flex items-center gap-2 pr-4">
-            <div className="flex h-6 w-6 items-center justify-center rounded border border-[#2a5a8a] bg-[linear-gradient(135deg,#0d2035_0%,#1a3a54_100%)]">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                <path
-                  d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-                  stroke="#5acce6"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </div>
-            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5acce6]">CUBE</span>
-          </div>
+          
 
-          <div className="mx-1 w-px self-stretch bg-[#1a2a3a]" />
-          <div className="px-4">
-            <span className="text-[11px] font-medium tracking-wide text-[#7aa8c4]">Intelligent Medical Viewer</span>
-          </div>
-          <div className="mx-1 w-px self-stretch bg-[#1a2a3a]" />
 
           <div className="flex items-center gap-2 px-4">
-            <FlaskConical size={12} className="text-[#5acce6]" />
-            <span className="text-[9px] font-bold uppercase tracking-[0.14em] text-[#4a6580]">Scope:</span>
-            <div className="flex items-center gap-1.5 rounded-md border border-[#1e3a54] bg-[#0d1e2e] px-2.5 py-1">
-              <span className="relative flex h-1.5 w-1.5 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#2eca8e] opacity-60" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[#2eca8e]" />
-              </span>
-              <span className="max-w-xl truncate font-mono text-[11px] text-[#b0d4ea]" title={hypothesis}>
-                {hypothesis}
-              </span>
+            <div className="flex items-center rounded-md border border-[#2a3a4c] bg-[#0d1b2a] p-0.5">
+              <button
+                onClick={() => selectPhase('planning')}
+                className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                  activePhase === 'planning'
+                    ? 'border border-[#6f8db3] bg-[#1d3249] text-[#d1e7ff]'
+                    : 'border border-transparent text-[#7fa2c4] hover:bg-[#152537] hover:text-[#c7def6]'
+                }`}
+              >
+                <PlayCircle size={12} /> Study Planning
+              </button>
+              <button
+                onClick={() => selectPhase('execution')}
+                className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                  activePhase === 'execution'
+                    ? 'border border-[#a06fd4] bg-[#2b1b38] text-[#f0ddff]'
+                    : 'border border-transparent text-[#a987c4] hover:bg-[#20152b] hover:text-[#dfc6f2]'
+                }`}
+              >
+                <Rocket size={12} /> Agent Execution
+              </button>
             </div>
+
           </div>
         </div>
+        
+        
 
         <div className="flex items-center gap-2">
+           <button
+                onClick={() => navigate('/worklist')}
+                className="mr-2 p-1.5 rounded-md transition-all hover:bg-[#0d1e2e] text-[#5a8aaa] hover:text-[#5acce6] border border-transparent hover:border-[#1e3248]"
+                title="Go to Worklist"
+                aria-label="Go to Worklist"
+            >
+              <List size={16} />
+            </button>
           <button
             onClick={() => setIsSettingsOpen(true)}
             className="flex h-8 items-center gap-2 rounded-md border border-[#1e3248] bg-[#0d1e2e] px-3 text-[10px] font-semibold uppercase tracking-wider text-[#5a8aaa] transition-all hover:border-[#5acce6] hover:bg-[#111d29] hover:text-[#e0f0ff]"
@@ -207,9 +264,10 @@ function ResearchPlaygroundInner() {
 
       <div className="relative flex flex-1 overflow-hidden">
         <PhaseSidebar
-          phases={phases}
+          phases={sidebarPhases}
           activePhase={activePhase}
-          onSelectPhase={id => navigate(`/playground/${id}`, { state: location.state })}
+          updatedPhaseIds={updatedPhaseIds}
+          onSelectPhase={selectPhase}
           isCollapsed={isPhaseSidebarCollapsed}
           onToggleCollapse={() => setIsPhaseSidebarCollapsed(prev => !prev)}
         />

@@ -674,13 +674,29 @@ function WorkList({
         onClickReturnButton={() => navigate('/')}
         WhiteLabeling={appConfig.whiteLabeling}
       >
-        <button
-          className="rounded-md border border-[#2b4f66] bg-[#0f1f2e] px-3 py-1 text-sm font-semibold text-[#5acce6] transition-colors hover:border-[#5acce6] hover:bg-[#123149]"
-          onClick={() => navigate('/agentic-home')}
-          title="Open Research Playground"
-        >
-          Research Playground
-        </button>
+        <div className="relative flex items-center justify-center gap-3">
+          <button
+            type="button"
+            data-cy="header-worklist-icon"
+            className="inline-flex items-center justify-center p-2 text-[#5acce6] transition duration-300 ease-in-out hover:bg-primary-light hover:text-black"
+            onClick={() => navigate('/worklist')}
+            title="Go to Worklist"
+            aria-label="Go to Worklist"
+          >
+            <Icon name="list-bullets" className="h-5 w-5" />
+          </button>
+
+          <button
+            type="button"
+            data-cy="header-agentic-home-icon"
+            className="inline-flex items-center justify-center p-2 text-[#5acce6] transition duration-300 ease-in-out hover:bg-primary-light hover:text-black"
+            onClick={() => navigate('/agentic-home')}
+            title="Go to Agentic Home"
+            aria-label="Go to Agentic Home"
+          >
+            <Icon name="profile" className="h-5 w-5" />
+          </button>
+        </div>
       </Header>
       <div className="flex flex-row justify-center gap-4 ">
         <div className="ohif-scrollbar flex max-w-[75%] grow flex-col overflow-y-auto pl-4">

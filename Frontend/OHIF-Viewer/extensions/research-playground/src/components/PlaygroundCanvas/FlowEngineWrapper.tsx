@@ -18,6 +18,7 @@ interface FlowEngineWrapperProps {
   mode: 'planning' | 'executing' | 'results';
   nodes: FlowNode[];
   edges: FlowEdge[];
+  fitViewTrigger?: number;
   pendingPrompt: PromptState | null;
   onNodesChange: (nodes: FlowNode[]) => void;
   onDrop: (event: React.DragEvent) => void;
@@ -31,6 +32,7 @@ export default function FlowEngineWrapper({
   mode,
   nodes,
   edges,
+  fitViewTrigger,
   pendingPrompt,
   onNodesChange,
   onDrop,
@@ -55,28 +57,13 @@ export default function FlowEngineWrapper({
       <MiniFlow
         nodes={nodesWithHandlers}
         edges={edges}
+        fitViewTrigger={fitViewTrigger}
         onNodesChange={onNodesChange}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         readOnly={mode !== 'planning'}
       >
-        <div className="pointer-events-none absolute bottom-24 left-6">
-          <div className="space-y-2 rounded border border-[#3c5d80] bg-[#151a1f]/90 p-3 text-[10px] backdrop-blur">
-            <div className="mb-1 font-bold uppercase text-[#91b9cd]">{mode === 'planning' ? 'Planning Tools' : 'Monitor Status'}</div>
-            {mode === 'planning' ? (
-              <>
-                <div className="flex items-center gap-2 text-[#dadada]"><MousePointer2 size={10} /> Drag nodes & canvas</div>
-                <div className="flex items-center gap-2 text-[#dadada]"><Edit3 size={10} /> Edit / Delete</div>
-                <div className="flex items-center gap-2 text-[#dadada]"><ZoomIn size={10} /> Ctrl+Scroll to zoom</div>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center gap-2 text-[#dadada]"><AlertCircle size={10} className="text-[#5acce6]" /> Active</div>
-                <div className="flex items-center gap-2 text-[#dadada]"><CheckCircle2 size={10} className="text-[#6fe5b8]" /> Complete</div>
-              </>
-            )}
-          </div>
-        </div>
+
 
         {pendingPrompt && (
           <div className="animate-in slide-in-from-bottom-2 pointer-events-auto absolute bottom-6 right-6 z-50 duration-200">
