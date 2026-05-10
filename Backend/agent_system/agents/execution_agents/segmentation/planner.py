@@ -58,12 +58,14 @@ async def run_planner(agent, instruction):
             "target_labels": ["label1", "label2"],
             "chosen_path": "automatic",
             "selected_models": ["model1", "model2"],
+            "reason": "why you chose each model, as text"
         }}
         or 
         {{
             "target_labels": ["label1", "label2"],
             "chosen_path": "interactive",
             "selected_models": ["voxtell"],
+            "reason": "why you didn't choose any of the automatic options"
         }}
 
         Rules:
@@ -73,6 +75,10 @@ async def run_planner(agent, instruction):
         """
 
     result = await agent.run(task=task)
+    for i, msg in enumerate(result.messages):
+        print("\n" + "=" * 80)
+        print(f"[{i}] TYPE: {type(msg).__name__}")
+        print(msg)
     content = result.messages[-1].content
 
     try:

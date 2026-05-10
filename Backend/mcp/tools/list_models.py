@@ -25,6 +25,9 @@ async def list_models():
 
     formatted = []
 
+    payload = TextPayload(message="Formating models")
+    log_tool_state(ToolEvent("tool_progress", "text", payload))
+
     for m in models:
 
         formatted.append({

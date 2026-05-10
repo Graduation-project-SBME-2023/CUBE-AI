@@ -81,10 +81,10 @@ class CoopCoepMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(CoopCoepMiddleware)
 
-agent_system_dir = os.path.dirname(os.path.abspath(__file__)) 
+agents_workspace_dir = os.environ.get("AGENTS_WORKSPACE_DIR", "/app/agents_workspace")
 app.mount(
     "/files",
-    StaticFiles(directory=agent_system_dir),
+    StaticFiles(directory=agents_workspace_dir),
     name="files"
 )
 
@@ -514,9 +514,10 @@ async def get_session_chat_messages(session_id: str):
     Used when recovering a session from hypothesis history.
     """
     async with httpx.AsyncClient() as client:
+        monai_url = os.environ.get("MONAI_URL", "http://localhost:8000")
         try:
             response = await client.get(
-                f"http://localhost:8000/chat_messages/{session_id}", timeout=10.0
+                f"{monai_url}/chat_messages/{session_id}", timeout=10.0
             )
             if response.status_code == 200:
                 return response.json()
