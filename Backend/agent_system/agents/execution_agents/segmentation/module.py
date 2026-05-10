@@ -52,8 +52,12 @@ class SegmentationModule:
         backend_dir = current_file.parent.parent.parent.parent.parent
         server_path = backend_dir / "mcp" / "server.py"   
         logger.info(f"Starting MCP server at: {server_path}, with session id: {self.session_id}")
+        env = os.environ.copy()
+        env.update({
+            "SESSION_ID": self.session_id, "AGENT_ID": 'segmentation_agent'
+        })
         math_server = StdioServerParams(
-            command="python", args=[str(server_path)], timeout=None, env={"SESSION_ID": self.session_id, "AGENT_ID": 'segmentation_agent'}
+            command="python", args=[str(server_path)], timeout=None, env=env
         )
         try:
             tools = await mcp_server_tools(math_server)

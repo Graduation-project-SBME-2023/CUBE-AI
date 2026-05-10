@@ -97,7 +97,7 @@ class SegmentationService:
         inference_params["result_extension"]=".nrrd"
         inference_params["result_dtype"] = "uint16"
         inference_params["result_compress"]= False
-        inference_params["restore_label_idxs"] = False
+        inference_params["restore_label_idxs"] = True
 
         files = {"params": (None, json.dumps(inference_params), "application/json")}      
         async with httpx.AsyncClient(timeout=timeout_config) as client:  
