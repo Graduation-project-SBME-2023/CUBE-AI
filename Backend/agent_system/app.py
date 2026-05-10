@@ -81,10 +81,10 @@ class CoopCoepMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(CoopCoepMiddleware)
 
-agent_system_dir = os.path.dirname(os.path.abspath(__file__)) 
+agents_workspace_dir = os.environ.get("AGENTS_WORKSPACE_DIR", "/app/agents_workspace")
 app.mount(
     "/files",
-    StaticFiles(directory=agent_system_dir),
+    StaticFiles(directory=agents_workspace_dir),
     name="files"
 )
 

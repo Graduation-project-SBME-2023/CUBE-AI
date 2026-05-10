@@ -134,9 +134,6 @@ def parse_multipart_response(headers, body):
     # Return in same order as original TS → data first, then centroids
     return nrrd_bytes, json_data.get('centroids', {})
 
-
-
-
 def split_multipart(buffer, boundary):
     """
     Splits the buffer into parts using the boundary.
@@ -502,9 +499,7 @@ async def download_and_pair_volumes(
 #  ================================
 #  Generate GIF Overlays for front view
 #  ================================
-
 def generate_gif_overlays(workspace_dir, uids):
-    
     """
     Generates animated GIF overlays slicing through the Z-axis where the mask is present.
     Returns a list of dictionaries formatted for the React frontend.
@@ -530,56 +525,64 @@ def generate_gif_overlays(workspace_dir, uids):
             vol_data = nib.load(vol_path).get_fdata()
             mask_data = nib.load(mask_path).get_fdata()
 
-            # find slices where mask is present
-            z_indices = np.any(mask_data > 0, axis=(0, 1))
+            # warn and cap against shape mismatch in Z >> problem happens with subset of vol !
+            # todo: check why seg returns sometimes the mask not over all sliceson subset only 
+            if vol_data.shape != mask_data.shape:
+                logger.warning(
+                    f"Shape mismatch for {uid}: vol={vol_data.shape}, mask={mask_data.shape}. "
+                    f"Capping Z to min of both."
+                )
+            max_z = min(vol_data.shape[2], mask_data.shape[2])
+
+            # safe zone
+            z_indices = np.any(mask_data[:, :, :max_z] > 0, axis=(0, 1))
             active_slices = np.where(z_indices)[0]
 
             if len(active_slices) == 0:
                 logger.warning(f"Empty mask for {uid}.")
                 continue
-            
-            # add a padding of 2 slices before and after the mask
+
+            # padding
             start_z = max(0, active_slices[0] - 2)
-            end_z = min(vol_data.shape[2], active_slices[-1] + 3)
+            end_z = min(max_z - 1, active_slices[-1] + 2)
 
             frames = []
-            for z in range(start_z, end_z):
+            for z in range(start_z, end_z + 1):
                 v_slice = vol_data[:, :, z]
                 m_slice = mask_data[:, :, z]
 
-                # normalize the medical image window to 0-255
-                v_min, v_max = np.percentile(v_slice, (1, 99)) 
+                # normalize
+                v_min, v_max = np.percentile(v_slice, (1, 99))
                 if v_max - v_min == 0:
                     v_norm = np.zeros_like(v_slice, dtype=np.uint8)
                 else:
                     v_norm = np.clip((v_slice - v_min) / (v_max - v_min) * 255, 0, 255).astype(np.uint8)
-                
-                # convert grayscale to RGB
-                rgb_frame = np.stack([v_norm]*3, axis=-1)
 
-                # overlay mask using cyian color where mask is present
+                # convert to rgb "cyan"
+                rgb_frame = np.stack([v_norm] * 3, axis=-1)
+
+                # overlay
                 mask_idx = m_slice > 0
                 rgb_frame[mask_idx] = [90, 204, 230]
 
-                # totate 90 to fix the view
+                # rotate 90
                 rgb_frame = np.rot90(rgb_frame)
 
                 frames.append(Image.fromarray(rgb_frame))
 
-            # save gif
+            # save GIF
             if frames:
                 frames[0].save(
                     gif_path,
                     save_all=True,
                     append_images=frames[1:],
-                    duration=100, 
+                    duration=100,
                     loop=0
                 )
-                
-                # front payload
+
                 generated_volumes.append({
                     "seriesInstanceUid": uid,
-                    "gifUrl": f"http://localhost:8150/files/{workspace_folder_name}/overlays/{gif_filename}" 
+                    "gifUrl": f"http://localhost:8150/files/{workspace_folder_name}/overlays/{gif_filename}"
                 })
                 logger.info(f"Generated GIF for {uid}")
 
