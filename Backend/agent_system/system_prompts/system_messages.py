@@ -115,7 +115,7 @@ throughout your work to log anything or take notes.
 
 === SCRATCHPAD INSTRUCTIONS ===
 At the very start of your task, register yourself:
-  - scratchpad_register_agent(agent_id="feature_extractor", role="feature_extraction")
+  - scratchpad_register_agent(agent_id="feature_extraction_agent", role="feature_extraction")
 
 Then call scratchpad_read_agent(agent_id="study_population_planner_agent") to read the population 
 planner's summary and retrieve the dataset and targets.csv path before starting work.
@@ -134,7 +134,7 @@ When ALL pipeline steps are complete and configuration.json is updated:
    - Number of samples and features in the output
    - Paths to radiomics_features CSV and top_10_features CSV
    - Any warnings about feature quality or failed extractions
-2. Call scratchpad_set_status(agent_id="feature_extractor", status="done")
+2. Call scratchpad_set_status(agent_id="feature_extraction_agent", status="done")
 
 \n CRITICAL EXECUTION GUIDELINES 
 You are responsible for executing a complete multi-step radiomics pipeline. 
@@ -157,7 +157,7 @@ Step 1: Decide which radiomic feature classes are required (e.g., shape, firstor
         and pass them as an array.
 Step 2: Call extract_radiomic_features with correct parameters.
         Write the extracted features CSV path to configuration.json under key 'radiomics_features'.
-Step 3: Call analyze_feature_importance using the features file from Step 2.
+Step 3: Call analyze_feature_importance using each features file from Step 2.
         Save the top features CSV path in the JSON under key 'top_10_features'.
 Step 4: After completing all steps, provide a concise summary confirming successful 
         execution and all updated JSON entries.
@@ -213,7 +213,7 @@ Step 0: Register & Load Inputs
 - Call:
     scratchpad_register_agent(agent_id="modeling_agent", role="ml_modeling")
 - Then:
-    scratchpad_read_agent(agent_id="feature_extractor")
+    scratchpad_read_agent(agent_id="feature_extraction_agent")
 - Extract:
     - Path to radiomics_features CSV
     - Target column (radiomic_features_label)
@@ -322,7 +322,7 @@ After completing ALL steps, you MUST call write_agent_output with:
 - status: "completed" (or "failed"/"partial")
 
 - inputs:
-    {"upstream_agent": "feature_extractor", "features_path": "<path>"}
+    {"upstream_agent": "feature_extraction_agent", "features_path": "<path>"}
 
 - output_files:
     {
@@ -368,7 +368,7 @@ At the very start of your task, register yourself:
 
 Then call scratchpad_read_agent for each upstream agent to gather their outputs:
   - scratchpad_read_agent(agent_id="population_planner")
-  - scratchpad_read_agent(agent_id="feature_extractor")
+  - scratchpad_read_agent(agent_id="feature_extraction_agent")
   - scratchpad_read_agent(agent_id="modeling_agent")
 
 Use the summaries from those agents as your primary inputs for the report.
@@ -389,7 +389,7 @@ After completing your analysis, you MUST call write_agent_output with:
   - agent_id: "result_agent"
   - agent_role: "result_analysis"
   - status: "completed"
-  - inputs: {"upstream_agents": ["population_planner", "feature_extractor", "modeling_agent"]}
+  - inputs: {"upstream_agents": ["population_planner", "feature_extraction_agent", "modeling_agent"]}
   - output_files: {}
   - output_metrics: {
       "decision": "accepted" or "rejected",
@@ -428,7 +428,7 @@ Follow these steps in order:
 === STEP 1: GATHER ALL DATA ===
 Call these tools to collect everything you need:
   1. read_all_agent_outputs — structured JSON from every pipeline agent
-     (population_planner, segmentation_agent, feature_extractor, modeling_agent, result_agent)
+     (population_planner, segmentation_agent, feature_extraction_agent, modeling_agent, result_agent)
   2. read_literature_context — the literature review knowledge base, sources guide,
      and hypothesis produced during the planning phase
   3. scratchpad_read_report — the cross-agent activity log
