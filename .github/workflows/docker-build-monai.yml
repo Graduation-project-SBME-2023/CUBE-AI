@@ -112,8 +112,8 @@ jobs:
           tags: |
             ${{ env.IMAGE_NAME }}:${{ needs.meta.outputs.tag }}-cpu
             ${{ env.IMAGE_NAME }}:latest-cpu
-          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-gpu
-          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-gpu,mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-cpu
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-cpu,mode=max
 
   # ----------------------------------------------------------
   # GPU image — amd64 only (CUDA toolkit is x86_64)
