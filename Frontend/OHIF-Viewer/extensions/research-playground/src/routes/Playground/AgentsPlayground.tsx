@@ -97,6 +97,7 @@ export default function AgentsPlayground() {
           <PlaygroundCanvas
             initialHypothesis={hypothesis}
             session_id={sessionId}
+            includeLitReview={location.state?.includeLitReview ?? true}
           />
 
           {/* B. Agent Registry (Floating Deck) */}

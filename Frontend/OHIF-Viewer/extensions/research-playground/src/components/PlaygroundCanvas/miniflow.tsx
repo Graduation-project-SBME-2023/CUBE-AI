@@ -171,13 +171,22 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
         if (e.touches.length > 1) e.preventDefault();
       }}
     >
-      {/* Grid background */}
+      {/* Grid background — dot matrix */}
       <div
-        className="pointer-events-none absolute inset-0 opacity-25"
+        className="pointer-events-none absolute inset-0"
         style={{
-          backgroundImage: 'radial-gradient(#44626f 1px, transparent 1px)',
-          backgroundSize: `${20 * scale}px ${20 * scale}px`,
-          backgroundPosition: `${offset.x}px ${offset.y}px`,
+          backgroundImage: 'radial-gradient(circle, rgba(68,98,111,0.55) 1px, transparent 1px)',
+          backgroundSize: `${24 * scale}px ${24 * scale}px`,
+          backgroundPosition: `${offset.x % (24 * scale)}px ${offset.y % (24 * scale)}px`,
+        }}
+      />
+
+      {/* Radial vignette glow from center */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(ellipse 70% 55% at 50% 50%, rgba(15,40,70,0.45) 0%, transparent 75%)',
         }}
       />
 

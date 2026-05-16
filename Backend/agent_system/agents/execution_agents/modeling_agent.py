@@ -49,7 +49,7 @@ class ModelingAgent(AssistantAgent):
             "AGENT_ID": "modeling_agent"
         })
         mcp_server = StdioServerParams(
-            command=sys.executable, args=[mcp_server_path], env=env, read_timeout_seconds=300
+            command=sys.executable, args=[mcp_server_path], env=env, read_timeout_seconds=3600
         )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)

@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from groq import BaseModel
-
+import os
 from teams.execution_team import BasicPipelineBuilder
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.responses import FileResponse, Response
@@ -54,6 +54,7 @@ from clients.backend_client import BackendClient
 logger = logging.getLogger(__name__)
 
 logging.getLogger("watchfiles").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 # ----------------------------------------------------------------------
 # App setup
 # ----------------------------------------------------------------------
@@ -80,28 +81,40 @@ class CoopCoepMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(CoopCoepMiddleware)
-# todo: make it after the planner set the session id and create the workspace associated with the session id
-# workspace_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "workspace"))
 
+agents_workspace_dir = os.environ.get("AGENTS_WORKSPACE_DIR", "/app/agents_workspace")
+app.mount(
+    "/files",
+    StaticFiles(directory=agents_workspace_dir),
+    name="files"
+)
 
 @app.get("/static/{file_path:path}")
 def serve_static_pdf(file_path: str):
-    # full_path = os.path.join(workspace_dir, file_path)
+    # file_path may be an absolute path passed through the URL
+    full_path = os.path.normpath(file_path)
+    if not os.path.isabs(full_path):
+        # fallback: try relative to CWD
+        full_path = os.path.abspath(full_path)
 
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
+    if not os.path.exists(full_path):
+        raise HTTPException(status_code=404, detail=f"File not found: {full_path}")
 
-    # PDFs → inline to allow view in browser
-    if file_path.endswith(".pdf"):
+    if full_path.endswith(".pdf"):
         return FileResponse(
-            path=file_path,
+            path=full_path,
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f"inline; filename={os.path.basename(file_path)}"
+                "Content-Disposition": f"inline; filename={os.path.basename(full_path)}"
             },
             content_disposition_type="inline",
         )
-    return FileResponse(path=file_path)
+    
+    # detect GIF explicitly
+    if full_path.endswith(".gif"):
+        return FileResponse(path=full_path, media_type="image/gif")
+
+    return FileResponse(path=full_path)
 
 
 # Single shared service — the only stateful object routes need to know about
@@ -115,7 +128,7 @@ api_key = os.getenv("OLLAMA_API_KEY", "")
 # ----------------------------------------------------------------------
 
 
-async def run_planner(session: Session, message: str) -> None:
+async def run_planner(session: Session, message: str, do_lit_review: bool = True) -> None:
     base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
     workspace_folder = os.path.join(
         base_agents_workspace, f"workspace_{session.session_id}"
@@ -130,7 +143,7 @@ async def run_planner(session: Session, message: str) -> None:
         session_service=session_service,
         api_key=api_key,
     )
-    await planner.run(start_query=message)
+    await planner.run(start_query=message, do_lit_review=do_lit_review)
     logging.getLogger("HypothesisFlow").info(
         "[HypothesisFlow][Planner] Planner finished | session_id=%s",
         session.session_id,
@@ -285,7 +298,9 @@ async def run_pipeline(session: Session) -> None:
 
 @app.post("/plan")
 async def start_planning(request: PlanningRequest):
-    session_service.start_planning(request.session_id, request.message, run_planner)
+    from functools import partial
+    bound_planner = partial(run_planner, do_lit_review=request.do_lit_review)
+    session_service.start_planning(request.session_id, request.message, bound_planner)
     return {"session_id": request.session_id, "status": "planning_started"}
 
 
@@ -500,9 +515,10 @@ async def get_session_chat_messages(session_id: str):
     Used when recovering a session from hypothesis history.
     """
     async with httpx.AsyncClient() as client:
+        monai_url = os.environ.get("MONAI_URL", "http://localhost:8000")
         try:
             response = await client.get(
-                f"http://localhost:8000/chat_messages/{session_id}", timeout=10.0
+                f"{monai_url}/chat_messages/{session_id}", timeout=10.0
             )
             if response.status_code == 200:
                 return response.json()
@@ -594,7 +610,48 @@ async def ws_broadcast(data: dict):
         data["type"], data["payload"], session_id=data.get("session_id")
     )
     return {"status": "ok"}
+    
+_review_futures: Dict[str, asyncio.Future] = {}
 
+@app.post("/segmentation-review")
+async def segmentation_review(data: dict):
+    session_id = data.get("session_id", "default")
+    review_payload = {
+        "accepted": data.get("accepted", []),
+        "rejected": data.get("rejected", []),
+        "modified": data.get("modified", []),
+    }
+    # resolve the waiting module if it's already polling
+    future = _review_futures.pop(session_id, None)
+    if future and not future.done():
+        future.set_result(review_payload)
+    else:
+        # store it in case the module polls later
+        _review_futures[f"ready:{session_id}"] = review_payload  # plain dict, not future
+    
+    return {"status": "ok"}
+
+
+@app.get("/segmentation-review/wait/{session_id}")
+async def wait_for_review(session_id: str, timeout: int = 300):
+    """Long-poll endpoint: blocks until the frontend submits a review."""
+    # check if result already arrived
+    ready_key = f"ready:{session_id}"
+    if ready_key in _review_futures:
+        result = _review_futures.pop(ready_key)
+        return result
+
+    # otherwise register a future and wait
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    _review_futures[session_id] = future
+
+    try:
+        result = await asyncio.wait_for(future, timeout=timeout)
+        return result
+    except asyncio.TimeoutError:
+        _review_futures.pop(session_id, None)
+        raise HTTPException(status_code=408, detail="Review timeout")
 
 # ----------------------------------------------------------------------
 # Entry point

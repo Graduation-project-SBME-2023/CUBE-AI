@@ -26,6 +26,7 @@ scratchpad.json structure:
 
 import json
 import os
+import asyncio
 from datetime import datetime, timezone
 from typing import Any, Dict, Literal, Optional
 
@@ -33,15 +34,33 @@ from . import mcp
 from pydantic import BaseModel, ConfigDict, Field
 from tool_logging import log_tool_state, ToolEvent, TextPayload
 
+# ── Dynamic imports logic
+import sys
+import httpx
+
+
 # ── Constants ──────────────────────────────────────────────────────────────────
 
 WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "../../agent_system/workspace")
-SCRATCHPAD_FILE = os.path.join(WORKSPACE_DIR, "scratchpad.json")
+SCRATCHPAD_FILE = os.path.join("Backend/agent_system", WORKSPACE_DIR, "scratchpad.json")# SCRATCHPAD_FILE = os.path.join(WORKSPACE_DIR, "scratchpad.json")
 AgentStatus = Literal["in_progress", "done", "blocked", "failed"]
 FlagLevel = Literal["info", "warning", "error", "critical"]
 
 current_agent_id = os.environ.get("AGENT_ID")
 
+async def _emit_ws_message(msg_type: str, payload_ws: dict, session_id: str):
+    """Sends an HTTP POST to app.py to broadcast a WebSocket message."""
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                "http://localhost:8150/ws-broadcast",
+                json={"type": msg_type, "payload": payload_ws, "session_id": session_id},
+                timeout=2.0
+            )
+            # Log the broadcast attempt internally (prints to mcp server stdout, which usually gets captured by Autogen logger)
+            print(f"[Scratchpad WebSockets] Successfully emitted {msg_type} for agent {payload_ws.get('agent_id')}")
+    except Exception as e:
+        print(f"[Scratchpad WebSockets] Error emitting ws message: {e}")
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -53,6 +72,9 @@ def _load() -> Dict[str, Any]:
 
 
 def _save(data: Dict[str, Any]) -> None:
+    # Ensure the parent directories exist before writing
+    os.makedirs(os.path.dirname(SCRATCHPAD_FILE), exist_ok=True)
+    
     with open(SCRATCHPAD_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
@@ -169,7 +191,6 @@ class ReadAgentInput(BaseModel):
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
-
 @mcp.tool(
     name="scratchpad_register_agent",
     annotations={
@@ -212,14 +233,41 @@ async def scratchpad_register_agent(params: RegisterAgentInput) -> str:
     _log_activity(data, current_agent_id, params.role, "registered", f"Role: {params.role}")
     _save(data)
 
-    payload = TextPayload(message=f'Registering agent {current_agent_id}.')
-    start_event = ToolEvent('tool_started', 'text', payload)
-    log_tool_state(start_event)
-    finished_event = ToolEvent('tool_finished', 'text', payload)
-    log_tool_state(finished_event)
+    # Calculate the absolute directory path
+    import os
+    save_directory = os.path.abspath(os.path.dirname(SCRATCHPAD_FILE))
 
-    return json.dumps({"status": "ok", "agent_id": current_agent_id, "role": params.role}, indent=2)
+    try:
+        payload = TextPayload(message=f'Registering agent {current_agent_id}.')
+        start_event = ToolEvent('tool_started', 'text', payload)
+        log_tool_state(start_event)
+        finished_event = ToolEvent('tool_finished', 'text', payload)
+        log_tool_state(finished_event)
+    except Exception as e:
+        print(f"Warning: Could not connect to logging server: {e}")
 
+    try:
+        session_id = os.environ.get("SESSION_ID", "")
+        payload_ws = {
+            "type": "agent_registered",
+            "agent_id": current_agent_id,
+            "role": params.role,
+            "status": "in_progress",
+            "timestamp": _now(),
+            "content": f"Agent {current_agent_id} registered as {params.role}"
+        }
+        if session_id:
+            asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
+    except Exception as e:
+        print(f"Warning: Could not broadcast agent registration: {e}")
+
+    # Return the save_directory in the final JSON response
+    return json.dumps({
+        "status": "ok", 
+        "agent_id": current_agent_id, 
+        "role": params.role,
+        "save_path": save_directory
+    }, indent=2)
 
 @mcp.tool(
     name="scratchpad_write_note",
@@ -256,6 +304,22 @@ async def scratchpad_write_note(params: WriteNoteInput) -> str:
     _log_activity(data, current_agent_id, agent["role"], "wrote_note",
                   f"Note #{len(agent['notes']) - 1}")
     _save(data)
+
+    try:
+        session_id = os.environ.get("SESSION_ID", "")
+        payload_ws = {
+            "type": "agent_note",
+            "agent_id": current_agent_id,
+            "role": agent["role"],
+            "content": params.content,
+            "timestamp": _now(),
+            "note_index": len(agent["notes"]) - 1
+        }
+        if session_id:
+            asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
+    except Exception as e:
+        print(f"Warning: Could not broadcast agent note: {e}")
+
     return json.dumps({"status": "ok", "note_index": len(agent["notes"]) - 1}, indent=2)
 
 
@@ -295,6 +359,23 @@ async def scratchpad_raise_flag(params: RaiseFlagInput) -> str:
     _log_activity(data, current_agent_id, agent["role"], "raised_flag",
                   f"[{params.level.upper()}] {params.message[:120]}")
     _save(data)
+
+    try:
+        session_id = os.environ.get("SESSION_ID", "")
+        payload_ws = {
+            "type": "agent_flag",
+            "agent_id": current_agent_id,
+            "role": agent["role"],
+            "level": params.level,
+            "content": params.message,
+            "timestamp": _now(),
+            "flag_index": len(agent["flags"]) - 1
+        }
+        if session_id:
+            asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
+    except Exception as e:
+        print(f"Warning: Could not broadcast agent flag: {e}")
+
     return json.dumps({"status": "ok", "flag_index": len(agent["flags"]) - 1}, indent=2)
 
 
@@ -333,6 +414,23 @@ async def scratchpad_set_status(params: SetStatusInput) -> str:
     _log_activity(data, current_agent_id, agent["role"], "status_change",
                   f"{previous} → {params.status}")
     _save(data)
+
+    try:
+        session_id = os.environ.get("SESSION_ID", "")
+        payload_ws = {
+            "type": "agent_status",
+            "agent_id": current_agent_id,
+            "role": agent["role"],
+            "status": params.status,
+            "previous_status": previous,
+            "timestamp": _now(),
+            "content": f"Status changed: {previous} → {params.status}"
+        }
+        if session_id:
+            asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
+    except Exception as e:
+        print(f"Warning: Could not broadcast agent status: {e}")
+
     return json.dumps({"status": "ok", "previous_status": previous, "new_status": params.status}, indent=2)
 
 
@@ -379,6 +477,21 @@ async def scratchpad_write_summary(params: WriteSummaryInput) -> str:
                   f"{len(params.summary)} chars")
     _save(data)
 
+    try:
+        session_id = os.environ.get("SESSION_ID", "")
+        payload_ws = {
+            "type": "agent_summary",
+            "agent_id": current_agent_id,
+            "role": agent["role"],
+            "content": params.summary,
+            "timestamp": _now(),
+            "summary_length": len(params.summary)
+        }
+        if session_id:
+            asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
+    except Exception as e:
+        print(f"Warning: Could not broadcast agent summary: {e}")
+
     payload = TextPayload(message=f'Writing a Summary.')
     start_event = ToolEvent('tool_started', 'text', payload)
     log_tool_state(start_event)
@@ -406,27 +519,33 @@ async def scratchpad_read_agent(params: ReadAgentInput) -> str:
 
     Args:
         params (ReadAgentInput):
-            - agent_id (str): ID of the agent to read.
+            - target_agent_id (str): ID of the agent to read.
             - include_notes (bool): Include private working notes (default True).
 
     Returns:
         str: JSON of the agent's full section, with notes optionally omitted.
     """
     data = _load()
-    agent = _get_agent(data, params.agent_id)
+    # FIX 1: Change params.agent_id to params.target_agent_id
+    agent = _get_agent(data, params.target_agent_id)
     if agent is None:
         return json.dumps({
             "status": "error",
-            "message": f"Agent '{params.agent_id}' not found.",
+            # FIX 2: Change params.agent_id to params.target_agent_id
+            "message": f"Agent '{params.target_agent_id}' not found.",
         }, indent=2)
 
     result = {k: v for k, v in agent.items() if k != "notes" or params.include_notes}
 
-    payload = TextPayload(message=f'Reading {params.agent_id}\'s notes.')
-    start_event = ToolEvent('tool_started', 'text', payload)
-    log_tool_state(start_event)
-    finished_event = ToolEvent('tool_finished', 'text', payload)
-    log_tool_state(finished_event)
+    # FIX 3: Change params.agent_id to params.target_agent_id
+    try:
+        payload = TextPayload(message=f"Reading {params.target_agent_id}'s notes.")
+        start_event = ToolEvent('tool_started', 'text', payload)
+        log_tool_state(start_event)
+        finished_event = ToolEvent('tool_finished', 'text', payload)
+        log_tool_state(finished_event)
+    except Exception as e:
+        print(f"Warning: Could not connect to logging server: {e}")
 
     return json.dumps(result, indent=2)
 

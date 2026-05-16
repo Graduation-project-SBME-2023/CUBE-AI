@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, JSON, text,UUID
+from sqlalchemy import Column, Integer, String, DateTime, JSON, text, UUID
 from core.database import Base
 
 class Model(Base):
@@ -11,9 +11,25 @@ class Model(Base):
     )
 
     name = Column(String, nullable=False)
+
+    # automatic / interactive
     type = Column(String, nullable=False)
-    dimension = Column(Integer, nullable=True)
+
+    modality = Column(String, nullable=False)  # "CT", "MRI", "any"
+
+    anatomy = Column(JSON, nullable=True)  # ["spleen", "liver"]
+
+    # performance per label (Dice, etc.)
     labels = Column(JSON, nullable=True)
+
+    # so it contain any parameters needed for the model execution
+    params_schema = Column(JSON, nullable=True)
+
     description = Column(String, nullable=True)
+
     config = Column(JSON, nullable=True)
+
+    dimension = Column(Integer, nullable=True)
+    
+
     created_at = Column(DateTime, nullable=True)

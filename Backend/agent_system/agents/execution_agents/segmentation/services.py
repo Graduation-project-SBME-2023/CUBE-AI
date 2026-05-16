@@ -1,4 +1,5 @@
 import httpx
+import os
 import logging
 import json
 from datetime import datetime
@@ -19,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 from .utils import (
     parse_multipart_response,
-    parse_nrrd_data
+    parse_nrrd_data,
+    ensure_required_patient_tags
 )
 
 logger = logging.getLogger(__name__)
@@ -29,8 +31,8 @@ class SegmentationService:
 
     def __init__(self):
 
-        self.monai_url = "http://localhost:8000"
-        self.orthanc_url = "http://localhost:8043"
+        self.monai_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+        self.orthanc_url = os.environ.get("ORTHANC_URL", "http://localhost:8043")
 
 
     async def run_segmentation(
@@ -95,7 +97,7 @@ class SegmentationService:
         inference_params["result_extension"]=".nrrd"
         inference_params["result_dtype"] = "uint16"
         inference_params["result_compress"]= False
-        inference_params["restore_label_idxs"] = False
+        inference_params["restore_label_idxs"] = True
 
         files = {"params": (None, json.dumps(inference_params), "application/json")}      
         async with httpx.AsyncClient(timeout=timeout_config) as client:  
@@ -202,7 +204,7 @@ class SegmentationService:
 
 
         # ========== inject missing tags due to de-identification (if any) ============
-        self.ensure_required_patient_tags(dicom_datasets)
+        ensure_required_patient_tags(dicom_datasets)
         # ============== create Algorithm description=================
         algorithm_identification = hd.AlgorithmIdentificationSequence(
                 name=f'Automatic Segmentation',

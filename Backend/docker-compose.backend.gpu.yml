@@ -6,13 +6,16 @@ services:
     ports:
       - '8150:8150'
     volumes:
-      - ${COMPOSE_PROJECT_DIR}/Backend/agents_workspace:/app/agent_workspace
+      - ${COMPOSE_PROJECT_DIR}/Backend/agents_workspace:/app/agents_workspace
       - ${COMPOSE_PROJECT_DIR}/Backend/agent_system:/app/Backend/agent_system
       - ${COMPOSE_PROJECT_DIR}/Backend/mcp:/app/Backend/mcp
+      - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/General_Data:/app/Backend/apps/radiology/General_Data
+      - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/labels:/app/Backend/apps/radiology/labels
     environment:
       AGENTS_WORKSPACE_DIR: /app/agents_workspace
       OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
       MONAI_URL: http://monailabel:8000
+      ORTHANC_URL: http://orthanc:8042
     depends_on:
       - postgres
       - monailabel
