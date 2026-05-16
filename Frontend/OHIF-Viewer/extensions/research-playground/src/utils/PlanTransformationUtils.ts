@@ -37,7 +37,7 @@ export const transformPlanToFlow = (planData: any): GraphTransformResult => {
     {
       id: 'start',
       type: 'start',
-      position: { x: 50, y: 50 },
+      position: { x: 50, y: 30 },
       data: {
         title: 'Start',
         description: planData.study_goal || 'Study workflow'
@@ -45,13 +45,13 @@ export const transformPlanToFlow = (planData: any): GraphTransformResult => {
     }
   ];
 
-  // Create step nodes with alternating vertical positions
+  // Create step nodes with wavy alternating vertical positions
   planData.steps.forEach((step: any, index: number) => {
     const baseX = 50;
     const spacingX = 100;
-    const baseY = 180;
-    const offsetY = 40;
-    const y = baseY + (index % 2 === 0 ? -offsetY : offsetY);
+    const baseY = 200;
+    const wavyOffset = index % 2 === 0 ? 90 : -110;
+    const y = baseY + wavyOffset;
 
     nodes.push({
       id: String(index + 1),

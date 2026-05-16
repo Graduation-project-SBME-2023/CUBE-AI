@@ -29,6 +29,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from .. import mcp
 from ..helpers.workspace import WorkspacePath, base_on_workspace_dir
 
+from tool_logging import ToolEvent, log_tool_state, TextPayload, ProgressPayload
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -37,13 +39,15 @@ def _setup_logging(log_file: str, verbose: bool = True) -> None:
     logger.setLevel(logging.INFO if verbose else logging.WARNING)
     for h in logger.handlers[:]:
         logger.removeHandler(h)
-    fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    fmt = logging.Formatter("%(asctime)s - %(levelname)-8s - %(name)s - %(message)s")
     fh = logging.FileHandler(log_file)
     fh.setFormatter(fmt)
     ch = logging.StreamHandler()
     ch.setFormatter(fmt)
     logger.addHandler(fh)
     logger.addHandler(ch)
+
+    logging.getLogger('radiomics').setLevel(logging.ERROR)
 
 
 def _csv_str(value: Optional[str]) -> Optional[list]:
@@ -214,11 +218,12 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         extractor = featureextractor.RadiomicsFeatureExtractor(params_file)
 
         target_dict: dict = {}
-        if params.targets_csv and os.path.exists(params.targets_csv):
-            tdf = pd.read_csv(params.targets_csv)
-            id_col = params.id_column or tdf.columns[0]
-            tgt_col = target_column or tdf.columns[1]
-            target_dict = {str(row[id_col]): row[tgt_col] for _, row in tdf.iterrows()}
+        if not (params.targets_csv and os.path.exists(params.targets_csv)):
+            params.target_csv = base_on_workspace_dir('/populations/targets/targets.csv')
+        tdf = pd.read_csv(params.targets_csv)
+        id_col = params.id_column or tdf.columns[0]
+        tgt_col = target_column or tdf.columns[1]
+        target_dict = {str(row[id_col]): row[tgt_col] for _, row in tdf.iterrows()}
 
         image_files = sorted(_glob.glob(os.path.join(image_dir, params.image_pattern)))
         mask_files  = sorted(_glob.glob(os.path.join(mask_dir,  params.mask_pattern)))
@@ -268,8 +273,19 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         temp_dir = tempfile.mkdtemp(dir=output_dir)
         start = time.time()
 
+        payload = TextPayload(message=f"Extracting features for {len(pairs)} masks...")
+        log_tool_state(ToolEvent("tool_started", "text", payload))
+        log_tool_state(ToolEvent("tool_started", "text", payload))
+
+
         for idx, (subject_id, files) in enumerate(pairs.items(), 1):
             logger.info(f"Processing {subject_id} ({idx}/{len(pairs)})")
+            payload = ProgressPayload(
+                current=idx,
+                total=len(pairs),
+                label='Processing Volumes'
+            )
+            log_tool_state(ToolEvent("tool_progress", "progress", payload))
             try:
                 orig_image = sitk.ReadImage(files["image"])
                 orig_mask  = sitk.ReadImage(files["mask"])
@@ -299,6 +315,8 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 logger.error(f"Error processing {subject_id}: {exc}")
 
         processing_time = time.time() - start
+        payload = TextPayload(message='Feature Extraction...Done')
+        log_tool_state(ToolEvent('tool_finished', 'text', payload))
 
         csv_paths: dict = {}
         num_features: dict = {}

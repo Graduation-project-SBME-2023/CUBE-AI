@@ -1,13 +1,68 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, forwardRef, useImperativeHandle } from 'react';
 import './MiniFlow.css';
 
-const MiniFlow = ({ nodes, edges, onNodesChange, nodeTypes, edgeTypes, children, readOnly }) => {
+const MiniFlow = forwardRef(({ nodes, edges, onNodesChange, nodeTypes, edgeTypes, children, readOnly }, ref) => {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
   const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 });
   const [draggingNodeId, setDraggingNodeId] = useState(null);
   const containerRef = useRef(null);
+  
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+
+  const fitViewInternal = () => {
+    const currentNodes = nodesRef.current;
+    if (!currentNodes || currentNodes.length === 0 || !containerRef.current) return;
+    const setDimensions = () => {
+      const PADDING = 100;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      
+      currentNodes.forEach(node => {
+        minX = Math.min(minX, node.position.x);
+        minY = Math.min(minY, node.position.y);
+        maxX = Math.max(maxX, node.position.x + 350); // width approx
+        maxY = Math.max(maxY, node.position.y + 200); // height approx
+      });
+
+      const { offsetWidth, offsetHeight } = containerRef.current;
+      if (offsetWidth === 0 || offsetHeight === 0) {
+        requestAnimationFrame(setDimensions);
+        return;
+      }
+
+      const contentWidth = maxX - minX + PADDING * 2;
+      const contentHeight = maxY - minY + PADDING * 2;
+
+      const scaleX = offsetWidth / contentWidth;
+      const scaleY = offsetHeight / contentHeight;
+      const newScale = Math.max(0.1, Math.min(scaleX, scaleY, 0.85)); // Max 85% scale to allow default zoom out a bit 
+
+      const scaledContentWidth = contentWidth * newScale;
+      const scaledContentHeight = contentHeight * newScale;
+
+      const newOffsetX = (offsetWidth - scaledContentWidth) / 2 - (minX * newScale) + (PADDING * newScale);
+      const newOffsetY = (offsetHeight - scaledContentHeight) / 2 - (minY * newScale) + (PADDING * newScale);
+
+      setScale(newScale);
+      setOffset({ x: newOffsetX, y: newOffsetY });
+    };
+    
+    // Defer once to ensure DOM rendering is done
+    requestAnimationFrame(() => {
+      requestAnimationFrame(setDimensions);
+    });
+  };
+
+  useImperativeHandle(ref, () => ({
+    fitView: fitViewInternal
+  }));
+
+  // Optional: Auto zoom on nodes change or first load
+  // useEffect(() => {
+  //   fitViewInternal();
+  // }, [nodes]);
 
   const handleCanvasMouseDown = (e) => {
     if (e.button === 0 && !e.target.closest('.flow-node')) {
@@ -101,5 +156,5 @@ const MiniFlow = ({ nodes, edges, onNodesChange, nodeTypes, edgeTypes, children,
       </div>
     </div>
   );
-};
+});
 export default MiniFlow;

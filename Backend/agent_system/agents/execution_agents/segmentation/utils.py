@@ -6,7 +6,7 @@ import json
 import shutil
 import time
 import asyncio
-from anyio import Path
+from pathlib import Path
 import nrrd
 import numpy as np
 import tempfile
@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 from PIL import Image
 import csv
 import pandas as pd
+
+MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
 # ===============================
 # MASK HELPERS
 # ===============================
@@ -42,7 +44,7 @@ async def exclude_existing_masks(volumes, labels):
         try:
             segmentations = await check_having_mask(volume_uid)
 
-            # Empty list → no mask
+            # empty list → no mask
             if not segmentations:
                 has_mask = False
             else:
@@ -77,7 +79,7 @@ async def check_having_mask(volume_uid):
     Checks if a segmentation mask exists for the given volume SeriesInstanceUID (volume_uid).
     Calls the endpoint /segmentations/by-volume/{volume_uid} and returns the list of segmentations.
     """
-    url = f"http://localhost:8000/segmentations/by-volume/{volume_uid}"
+    url = f"{MONAI_URL}/segmentations/by-volume/{volume_uid}"
     response = requests.get(url)
     if response.status_code == 200:
         return response.json()
@@ -133,31 +135,33 @@ def parse_multipart_response(headers, body):
     return nrrd_bytes, json_data.get('centroids', {})
 
 def split_multipart(buffer, boundary):
-    """ 
+    """
     Splits the buffer into parts using the boundary.
     Skips the boundary line itself and trailing \r\n.
     """
     parts = []
     start = 0
-
     while start < len(buffer):
         boundary_index = find_subarray(buffer, boundary, start)
         if boundary_index == -1:
             break
 
-        # Start of actual part content = after boundary + \r\n
+        # start of actual part content = after boundary + \r\n
         part_start = boundary_index + len(boundary) + 2
-        next_boundary = find_subarray(buffer, boundary, part_start)
 
+        # check for closing boundary (ends with --)
+        if buffer[part_start:part_start+2] == b'--':
+            break
+
+        next_boundary = find_subarray(buffer, boundary, part_start)
         part_end = next_boundary if next_boundary != -1 else len(buffer)
 
-        # Exclude trailing \r\n before next boundary or end
-        part = buffer[part_start : part_end - 2]
+        # exclude trailing \r\n before next boundary
+        part = buffer[part_start:part_end - 2]
         parts.append(part)
+        start = part_end  
 
-        start = part_end
-
-        return parts
+    return parts  
 
 def find_subarray(haystack, needle, start=0):
     """
@@ -293,265 +297,209 @@ def ensure_required_patient_tags(datasets):
 #  ================================
 #  Download Data
 #  ================================
-
-async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, selected_auto_model_for_volume):
-    """
-    Downloads volumes and their associated labels.
-    """
+async def download_and_pair_volumes(
+    workspace_dir, 
+    datasetlist, 
+    chosen_path, 
+    selected_auto_model_for_volume, 
+    download_volumes=True  
+):
     VOLUMES = datasetlist
-    LABELS_BY_VOLUME_URL = "http://localhost:8000/segmentations/by-volume/"
-    DOWNLOAD_IMAGES_URL = "http://localhost:8000/datastore/images"
-    DOWNLOAD_LABELS_URL = "http://localhost:8000/datastore/labels"
-    TASK_NAME = "final"
+    LABELS_BY_VOLUME_URL = f"{MONAI_URL}/segmentations/by-volume/"
+    DOWNLOAD_IMAGES_URL  = f"{MONAI_URL}/datastore/images"
+    DOWNLOAD_LABELS_URL  = f"{MONAI_URL}/datastore/labels"
+    TASK_NAME  = f"{selected_auto_model_for_volume}_segmentation_task" if selected_auto_model_for_volume else "segmentation_task"
 
+    # where MONAI actually saves files after the POST trigger
+    MONAI_BASE_DIR = Path("/app/Backend/apps")
+    MONAI_IMG_DIR   = MONAI_BASE_DIR / "radiology" / "General_Data"
+    MONAI_LABEL_DIR = MONAI_BASE_DIR / "radiology" / "labels"
 
-    DOWNLOAD_DIR_IMG = os.path.join(workspace_dir, "General_Data")
-    DOWNLOAD_DIR_LABEL = os.path.join(workspace_dir, "Labels")
-    FINAL_DIR_IMG = os.path.join(workspace_dir, "volumes")
+    FINAL_DIR_IMG   = os.path.join(workspace_dir, "volumes")
     FINAL_DIR_LABEL = os.path.join(workspace_dir, "masks")
 
-    os.makedirs(DOWNLOAD_DIR_IMG, exist_ok=True)
-    os.makedirs(DOWNLOAD_DIR_LABEL, exist_ok=True)
-    os.makedirs(FINAL_DIR_IMG, exist_ok=True)
-    os.makedirs(FINAL_DIR_LABEL, exist_ok=True)
+    for d in [FINAL_DIR_IMG, FINAL_DIR_LABEL]:
+        os.makedirs(d, exist_ok=True)
 
+    # ------------------------------------------------------------------ #
+    # Helper functions remain exactly the same
+    # ------------------------------------------------------------------ #
     def fetch_labels_for_volume(volume_uid):
-        """Fetch all labels associated with a volume from the API"""
         url = LABELS_BY_VOLUME_URL + volume_uid
-        logger.info(f"Fetching labels from: {url}")
         try:
             r = requests.get(url, timeout=10)
             if r.status_code != 200:
-                logger.warning(f"GET {url} returned {r.status_code}: {r.text}")
+                logger.warning(f"GET {url} returned {r.status_code}")
                 return []
-            labels = r.json()
-            logger.info(f"Received {len(labels)} labels for volume {volume_uid}")
-            if labels:
-                logger.debug(f"Labels data: {json.dumps(labels, indent=2)}")
-            return labels
+            return r.json()
         except Exception as e:
             logger.error(f"Error fetching labels for {volume_uid}: {e}")
             return []
 
     def pick_latest_or_auto(labels, chosen_path="interactive", selected_auto_model=None):
-        """
-        Select the appropriate label based on the path:
-        - automatic: Match segmentation_type with selected_auto_model
-        - interactive: Pick the latest by created_at
-        """
         if not labels:
-            logger.warning("No labels provided to pick_latest_or_auto")
             return None
-        
-        logger.info(f"Picking label from {len(labels)} options (path={chosen_path}, model={selected_auto_model})")
-        
-        # match model for automatic path
         if chosen_path == "automatic" and selected_auto_model:
-            logger.info(f"Searching for label with segmentation_type='{selected_auto_model}'")
             for label in labels:
-                seg_type = label.get("segmentation_type")
-                logger.debug(f"Checking label: segmentation_type='{seg_type}', created_at='{label.get('created_at')}'")
-                if seg_type == selected_auto_model:
-                    logger.info(f" Found matching automatic label: {label.get('label_series_instance_uid')}")
+                if label.get("segmentation_type") == selected_auto_model:
+                    logger.info(f"Found matching label: {label.get('label_series_instance_uid')}")
                     return label
-            logger.warning(f"No label found with segmentation_type='{selected_auto_model}', falling back to latest")
-        
-        # the latest created mask
-        latest = max(labels, key=lambda x: x.get("created_at", ""))
-        logger.info(f"Selected latest label: {latest.get('label_series_instance_uid')} (created_at={latest.get('created_at')})")
-        return latest
+            logger.warning(f"No label matched '{selected_auto_model}', falling back to latest")
+        return max(labels, key=lambda x: x.get("created_at", ""))
 
-    def post_trigger_download(url, task_name, uids_list):
-        """Trigger download API endpoint"""
+    def trigger_download(url, task_name, uids_list):
         if not uids_list:
-            logger.warning(f"Empty UID list for {url}, skipping")
-            return None
-        
-        logger.info(f"POST to {url} with {len(uids_list)} UIDs: {uids_list}")
+            return False
+        logger.info(f"POST {url} | task={task_name} | uids={uids_list}")
         try:
-            response = requests.post(url, params={"task_name": task_name}, json=uids_list, timeout=60)
-            logger.info(f"Download trigger response: {response.status_code}")
-            if response.status_code != 200:
-                logger.error(f"Download failed: {response.text}")
-            return response
+            r = requests.post(url, params={"task_name": task_name}, json=uids_list, timeout=60)
+            logger.info(f"Trigger response: {r.status_code}")
+            if r.status_code != 200:
+                logger.error(f"Trigger failed: {r.text[:300]}")
+                return False
+            return True
         except Exception as e:
-            logger.error(f"ERROR posting to {url}: {e}")
-            return None
+            logger.error(f"Trigger exception: {e}")
+            return False
 
-    async def wait_for_files_appear(target_dir, expected_uids, timeout_s=60, poll_interval=2.0):
-        """Wait for files to appear in the download directory"""
-        if not expected_uids:
-            logger.info("No UIDs to wait for")
-            return set()
-        
-        deadline = time.time() + timeout_s
-        found = set()
-        logger.info(f"Waiting for {len(expected_uids)} files in {target_dir}")
-        logger.info(f"Expected UIDs: {expected_uids}")
-        
-        while time.time() < deadline:
-            current_files = os.listdir(target_dir)
-            for name in current_files:
-                if not name.lower().endswith(".nii.gz"):
-                    continue
-                for uid in expected_uids:
-                    if uid in name and name not in found:
-                        found.add(name)
-                        logger.info(f"Found file: {name}")
-            
-            if len(found) >= len(expected_uids):
-                logger.info(f"All {len(expected_uids)} files found!")
-                return found
-            
-            remaining = time.time() - deadline
-            logger.debug(f"Found {len(found)}/{len(expected_uids)} files, waiting... ({remaining:.1f}s remaining)")
-            await asyncio.sleep(poll_interval)
-        
-        logger.warning(f"Timeout Only found {len(found)}/{len(expected_uids)} files: {found}")
+    async def wait_and_find(search_dir, uids, timeout_s=120, poll_interval=3.0):
+        deadline  = time.time() + timeout_s
+        found     = {}
+        remaining_uids = set(uids)
+
+        logger.info(f"Waiting for {len(uids)} file(s) in {search_dir} (timeout={timeout_s}s)")
+
+        while time.time() < deadline and remaining_uids:
+            if not os.path.isdir(search_dir):
+                logger.warning(f"Directory does not exist yet: {search_dir}")
+                await asyncio.sleep(poll_interval)
+                continue
+
+            for root, _, files in os.walk(search_dir):
+                for fname in files:
+                    if not fname.lower().endswith(".nii.gz"):
+                        continue
+                    for uid in list(remaining_uids):
+                        if uid in fname:
+                            full_path = os.path.join(root, fname)
+                            found[uid] = full_path
+                            remaining_uids.discard(uid)
+                            logger.info(f"Found: {full_path}")
+
+            if remaining_uids:
+                elapsed = timeout_s - (deadline - time.time())
+                logger.debug(f"Found {len(found)}/{len(uids)} — waiting... ({elapsed:.0f}s elapsed)")
+                await asyncio.sleep(poll_interval)
+
+        if remaining_uids:
+            logger.warning(f"Timeout — missing UIDs: {remaining_uids}")
         return found
 
-    def move_matching_niigz(src_dir, dst_dir, matching_uids=None):
-        """Move volume files from source to destination"""
-        moved = []
-        for fname in os.listdir(src_dir):
-            if not fname.lower().endswith(".nii.gz"):
-                continue
-            if matching_uids and not any(uid in fname for uid in matching_uids):
-                continue
-            src_path = os.path.join(src_dir, fname)
-            dst_path = os.path.join(dst_dir, fname)
-            shutil.move(src_path, dst_path)
-            moved.append(fname)
-            logger.info(f"Moved volume: {fname}")
-        logger.info(f"Total volumes moved: {len(moved)}")
-        return moved
-    def move_and_rename_labels(src_dir, dst_dir, label_uids, volume_uids):
-        """
-        Move label files, convert {0,255} -> {0,1}, and rename them
-        to match their corresponding volume UIDs.
-        """
-        if not label_uids or not volume_uids:
-            logger.warning("Empty label or volume UID lists")
-            return
+    def copy_volume(src_path, volume_uid, dest_dir):
+        dst = os.path.join(dest_dir, f"{volume_uid}.nii.gz")
+        shutil.copy2(src_path, dst)
+        size_mb = os.path.getsize(dst) / 1_048_576
+        logger.info(f"Copied volume → {dst} ({size_mb:.2f} MB)")
+        return dst
 
-        logger.info(f"Moving, renaming, and normalizing {len(label_uids)} labels")
-        moved_count = 0
+    def copy_and_normalize_label(src_path, volume_uid, dest_dir):
+        dst = os.path.join(dest_dir, f"{volume_uid}.nii.gz")
+        try:
+            nii  = nib.load(src_path)
+            data = nii.get_fdata()
+            logger.info(f"Label unique values before normalize: {np.unique(data)}")
+            if np.max(data) == 255:
+                data = (data > 0).astype(np.uint8)
+                logger.info("Converted {0,255} → {0,1}")
+            nib.save(nib.Nifti1Image(data, nii.affine, nii.header), dst)
+            size_mb = os.path.getsize(dst) / 1_048_576
+            logger.info(f"Saved normalized label → {dst} ({size_mb:.2f} MB)")
+            return dst
+        except Exception as e:
+            logger.error(f"Error normalizing label {src_path}: {e}")
+            return None
 
-        for label_uid, volume_uid in zip(label_uids, volume_uids):
-            label_file = None
-            for fname in os.listdir(src_dir):
-                if label_uid in fname and fname.lower().endswith(".nii.gz"):
-                    label_file = fname
-                    break
+    # ------------------------------------------------------------------ #
+    #  1. pair volumes ↔ labels                                          #
+    # ------------------------------------------------------------------ #
+    volumes_to_process = []
+    labels_to_process  = []
 
-            if not label_file:
-                logger.warning(f"Label file not found for UID: {label_uid}")
-                continue
-
-            src_path = os.path.join(src_dir, label_file)
-            dst_path = os.path.join(dst_dir, f"{volume_uid}.nii.gz")
-
-            try:
-                nii = nib.load(src_path)
-                data = nii.get_fdata()
-
-                unique_vals = np.unique(data)
-                logger.info(f"Label {label_file} unique values before: {unique_vals}")
-
-                # convert {0,255} → {0,1}
-                if np.max(data) == 255:
-                    data = (data > 0).astype(np.uint8)
-                    logger.info(f"Converted label {label_file} from {{0,255}} to {{0,1}}")
-                # the new updated one    
-                new_nii = nib.Nifti1Image(data, affine=nii.affine, header=nii.header)
-                nib.save(new_nii, dst_path)
-
-                os.remove(src_path)
-
-                moved_count += 1
-                logger.info(f" Renamed + normalized label → {volume_uid}.nii.gz")
-
-            except Exception as e:
-                logger.error(f"Error processing label {label_file}: {e}")
-
-        logger.info(f"Total labels moved and normalized: {moved_count}/{len(label_uids)}")
-
-    # Main pairing logic
-    volumes_to_download = []
-    labels_to_download = []
-
-    logger.info(f"Processing {len(VOLUMES)} volumes for label pairing...")
-    
+    logger.info(f"Processing {len(VOLUMES)} volumes...")
     for idx, vol_uid in enumerate(VOLUMES, 1):
-        logger.info(f"[{idx}/{len(VOLUMES)}] Processing volume: {vol_uid}")
-        
-        # Fetch all labels for this volume
+        logger.info(f"[{idx}/{len(VOLUMES)}] Volume: {vol_uid}")
         labels = fetch_labels_for_volume(vol_uid)
-        
         if not labels:
-            logger.warning(f"No labels found for volume {vol_uid}, skipping")
+            logger.warning(f"No labels for {vol_uid}, skipping")
             continue
-        
-        # Select the appropriate label based on path
         selected_model = selected_auto_model_for_volume if chosen_path == "automatic" else None
         latest = pick_latest_or_auto(labels, chosen_path=chosen_path, selected_auto_model=selected_model)
-        
-        if latest is None:
-            logger.warning(f"No suitable label selected for volume {vol_uid}, skipping")
+        if not latest:
             continue
-        
-        # Extract UIDs from the selected label
         label_uid = latest.get("label_series_instance_uid")
-        vol_uid_from_label = latest.get("volume_series_instance_uid") or vol_uid
-        
         if not label_uid:
-            logger.warning(f"Label UID is empty for volume {vol_uid}, skipping")
             continue
+        vol_uid_confirmed = latest.get("volume_series_instance_uid") or vol_uid
+        logger.info(f"Paired: volume={vol_uid_confirmed}  label={label_uid}")
+        volumes_to_process.append(vol_uid_confirmed)
+        labels_to_process.append(label_uid)
+
+    if not volumes_to_process:
+        logger.error("Nothing to process — aborting.")
+        return []
+
+    logger.info(f"Pairs ready: {len(volumes_to_process)}")
+
+    # ------------------------------------------------------------------ #
+    #  2. trigger downloads (POST → MONAI saves to its local dirs)       #
+    # ------------------------------------------------------------------ #
+    if download_volumes:
+        trigger_download(DOWNLOAD_IMAGES_URL, TASK_NAME, volumes_to_process)
+    
+    trigger_download(DOWNLOAD_LABELS_URL, TASK_NAME, labels_to_process)
+
+    # ------------------------------------------------------------------ #
+    #  3. wait for files to appear in MONAI's local dirs                 #
+    # ------------------------------------------------------------------ #
+    found_volumes = {}
+    if download_volumes:
+        found_volumes = await wait_and_find(MONAI_IMG_DIR, volumes_to_process, timeout_s=120)
         
-        logger.info(f"Paired: volume={vol_uid_from_label} label={label_uid}")
-        volumes_to_download.append(vol_uid_from_label)
-        labels_to_download.append(label_uid)
+    found_labels = await wait_and_find(MONAI_LABEL_DIR, labels_to_process, timeout_s=120)
 
-    logger.info("="*60)
-    logger.info(f"PAIRING COMPLETE:")
-    logger.info(f"Volumes to download: {len(volumes_to_download)}")
-    logger.info(f"Labels to download: {len(labels_to_download)}")
-    logger.info("="*60)
+    # ------------------------------------------------------------------ #
+    #  4. copy to workspace                                              #
+    # ------------------------------------------------------------------ #
+    successful = []
+    for vol_uid, label_uid in zip(volumes_to_process, labels_to_process):
+        label_src = found_labels.get(label_uid)
+        if not label_src:
+            logger.error(f"Label file never appeared for {label_uid} — skipping pair")
+            continue
 
-    if not volumes_to_download or not labels_to_download:
-        logger.error(" No volumes or labels to download! Exiting.")
-        return
+        vol_result = True # Default to True if we aren't downloading volumes
+        if download_volumes:
+            vol_src = found_volumes.get(vol_uid)
+            if not vol_src:
+                logger.error(f"Volume file never appeared for {vol_uid} — skipping pair")
+                continue
+            vol_result = copy_volume(vol_src, vol_uid, FINAL_DIR_IMG)
 
-    # Trigger downloads
-    logger.info("Triggering volume download...")
-    vol_response = post_trigger_download(DOWNLOAD_IMAGES_URL, TASK_NAME, volumes_to_download)
-    
-    logger.info("Triggering label download...")
-    label_response = post_trigger_download(DOWNLOAD_LABELS_URL, TASK_NAME, labels_to_download)
+        label_result = copy_and_normalize_label(label_src, vol_uid, FINAL_DIR_LABEL)
 
-    # Wait for files to appear in download directories
-    logger.info("Waiting for volume files to appear...")
-    found_volume_files = await wait_for_files_appear(DOWNLOAD_DIR_IMG, volumes_to_download, timeout_s=90)
-    
-    logger.info("Waiting for label files to appear...")
-    found_label_files = await wait_for_files_appear(DOWNLOAD_DIR_LABEL, labels_to_download, timeout_s=90)
+        if vol_result and label_result:
+            successful.append(vol_uid)
+        else:
+            logger.warning(f"Failed to copy pair for {vol_uid}")
 
-    logger.info("Moving volume files to final directory...")
-    move_matching_niigz(DOWNLOAD_DIR_IMG, FINAL_DIR_IMG, volumes_to_download)
-    
-    logger.info("Moving and renaming label files...")
-    move_and_rename_labels(DOWNLOAD_DIR_LABEL, FINAL_DIR_LABEL, labels_to_download, volumes_to_download)
-    
-    logger.info("="*60)
-    logger.info("DOWNLOAD AND PAIRING COMPLETED SUCCESSFULLY!")
-    return volumes_to_download
-
+    logger.info("=" * 60)
+    logger.info(f"DONE: {len(successful)}/{len(volumes_to_process)} pairs ready in workspace")
+    logger.info("=" * 60)
+    return successful
 #  ================================
 #  Generate GIF Overlays for front view
 #  ================================
-
 def generate_gif_overlays(workspace_dir, uids):
-    
     """
     Generates animated GIF overlays slicing through the Z-axis where the mask is present.
     Returns a list of dictionaries formatted for the React frontend.
@@ -559,7 +507,7 @@ def generate_gif_overlays(workspace_dir, uids):
     volumes_dir = os.path.join(workspace_dir, "volumes")
     masks_dir = os.path.join(workspace_dir, "masks")
     output_dir = os.path.join(workspace_dir, "overlays")
-
+    workspace_folder_name = os.path.basename(workspace_dir)
     os.makedirs(output_dir, exist_ok=True)
     generated_volumes = []
 
@@ -574,60 +522,67 @@ def generate_gif_overlays(workspace_dir, uids):
             continue
 
         try:
-            # Load NIfTI data
             vol_data = nib.load(vol_path).get_fdata()
             mask_data = nib.load(mask_path).get_fdata()
 
-            # Find slices where mask is present (assuming Z is the 3rd axis)
-            z_indices = np.any(mask_data > 0, axis=(0, 1))
+            # warn and cap against shape mismatch in Z >> problem happens with subset of vol !
+            # todo: check why seg returns sometimes the mask not over all sliceson subset only 
+            if vol_data.shape != mask_data.shape:
+                logger.warning(
+                    f"Shape mismatch for {uid}: vol={vol_data.shape}, mask={mask_data.shape}. "
+                    f"Capping Z to min of both."
+                )
+            max_z = min(vol_data.shape[2], mask_data.shape[2])
+
+            # safe zone
+            z_indices = np.any(mask_data[:, :, :max_z] > 0, axis=(0, 1))
             active_slices = np.where(z_indices)[0]
 
             if len(active_slices) == 0:
                 logger.warning(f"Empty mask for {uid}.")
                 continue
-            
-            # Add a padding of 2 slices before and after the mask
+
+            # padding
             start_z = max(0, active_slices[0] - 2)
-            end_z = min(vol_data.shape[2], active_slices[-1] + 3)
+            end_z = min(max_z - 1, active_slices[-1] + 2)
 
             frames = []
-            for z in range(start_z, end_z):
+            for z in range(start_z, end_z + 1):
                 v_slice = vol_data[:, :, z]
                 m_slice = mask_data[:, :, z]
 
-                # Normalize the medical image window to 0-255
-                v_min, v_max = np.percentile(v_slice, (1, 99)) 
+                # normalize
+                v_min, v_max = np.percentile(v_slice, (1, 99))
                 if v_max - v_min == 0:
                     v_norm = np.zeros_like(v_slice, dtype=np.uint8)
                 else:
                     v_norm = np.clip((v_slice - v_min) / (v_max - v_min) * 255, 0, 255).astype(np.uint8)
-                
-                # Convert grayscale to RGB
-                rgb_frame = np.stack([v_norm]*3, axis=-1)
 
-                # Overlay the mask with the React UI's cyan color (#5acce6 -> RGB: 90, 204, 230)
+                # convert to rgb "cyan"
+                rgb_frame = np.stack([v_norm] * 3, axis=-1)
+
+                # overlay
                 mask_idx = m_slice > 0
                 rgb_frame[mask_idx] = [90, 204, 230]
 
-                # Rotate 90 degrees to make it upright (common for NIfTI axial views)
+                # rotate 90
                 rgb_frame = np.rot90(rgb_frame)
 
                 frames.append(Image.fromarray(rgb_frame))
 
-            # Save as animated GIF (100ms per frame = 10 FPS)
+            # save GIF
             if frames:
                 frames[0].save(
                     gif_path,
                     save_all=True,
                     append_images=frames[1:],
-                    duration=100, 
+                    duration=100,
                     loop=0
                 )
-                
-                # Construct the object expected by the React frontend
+
                 generated_volumes.append({
                     "seriesInstanceUid": uid,
-                    "gifUrl": f"http://localhost:8150/static/overlays/{gif_filename}" 
+                    "gifUrl": f"http://localhost:8150/files/{workspace_folder_name}/overlays/{gif_filename}"
                 })
                 logger.info(f"Generated GIF for {uid}")
 
@@ -686,23 +641,32 @@ def get_model_dice_score(model_name, target_label):
 # =================================
 #  remove volumes and labels from working space that was discarded by user
 # =================================
-
-def cleanup_discarded(workspace_dir, uids_to_keep):
+def cleanup_discarded(workspace_dir, accepted_uids, modified_uids):
     """
-    Removes volume and label files from the working directories if their UIDs are not in the keep list.
+    Removes discarded volumes and masks.
+    - Keeps volumes for BOTH accepted and modified UIDs.
+    - Keeps masks ONLY for accepted UIDs (modified masks are removed to be re-downloaded).
     """
     volumes_dir = os.path.join(workspace_dir, "volumes")
     masks_dir = os.path.join(workspace_dir, "masks")
-    for fname in os.listdir(volumes_dir):
-        if fname.lower().endswith(".nii.gz"):
-            uid = fname.replace(".nii.gz", "")
-            if uid not in uids_to_keep:
-                os.remove(os.path.join(volumes_dir, fname))
-                logger.info(f"Removed discarded volume: {fname}")
+    
+    # we want to keep the NIfTI volume files for both accepted and modified
+    uids_to_keep_volumes = set(accepted_uids) | set(modified_uids)
+    
+    # cleanup volumes
+    if os.path.exists(volumes_dir):
+        for fname in os.listdir(volumes_dir):
+            if fname.lower().endswith(".nii.gz"):
+                uid = fname.replace(".nii.gz", "")
+                if uid not in uids_to_keep_volumes:
+                    os.remove(os.path.join(volumes_dir, fname))
+                    logger.info(f"Removed discarded volume: {fname}")
 
-    for fname in os.listdir(masks_dir):
-        if fname.lower().endswith(".nii.gz"):
-            uid = fname.replace(".nii.gz", "")
-            if uid not in uids_to_keep:
-                os.remove(os.path.join(masks_dir, fname))
-                logger.info(f"Removed discarded mask: {fname}")
+    # cleanup masks (labels)
+    if os.path.exists(masks_dir):
+        for fname in os.listdir(masks_dir):
+            if fname.lower().endswith(".nii.gz"):
+                uid = fname.replace(".nii.gz", "")
+                if uid not in accepted_uids:
+                    os.remove(os.path.join(masks_dir, fname))
+                    logger.info(f"Removed mask (discarded or pending modification): {fname}")

@@ -483,9 +483,21 @@ function WorkflowDetailPage({
   };
 
   const handleDeletion = async () => {
+    let notification = new UINotificationService();
+
+    if (selectedStudies.length === 0) {
+      notification.show({
+        title: 'Delete Failed',
+        message: 'Please select at least one study to delete.',
+        type: 'warning',
+        duration: 3000,
+      });
+      return;
+    }
+
     // Prepare the records to be deleted
     const recordsToDelete = selectedStudies.map(studyInstanceUid => ({
-      case_id: studyInstanceUid,
+      study_uid: studyInstanceUid,
       task_name: workflowName,
     }));
 
@@ -515,9 +527,9 @@ function WorkflowDetailPage({
       setWorkflowStudies(
         studies.filter(study => workflowDetails.Studies.includes(study.studyInstanceUid))
       );
-      // selectedStudies.forEach(studyInstanceUid => {
-      //   g_workflowManagerInstance.deleteStudyFromWorkflow(workflowName, studyInstanceUid);
-      // });
+      selectedStudies.forEach(studyInstanceUid => {
+        g_workflowManagerInstance.deleteStudyFromWorkflow(workflowName, studyInstanceUid);
+      });
       // Clear the selection
       setSelectedStudies([]);
     } catch (error) {
@@ -753,7 +765,7 @@ function WorkflowDetailPage({
     }
 
     navigate({
-      pathname: '/',
+      pathname: '/worklist',
       search: decodeURIComponent(searchQuery.toString()),
     });
   };

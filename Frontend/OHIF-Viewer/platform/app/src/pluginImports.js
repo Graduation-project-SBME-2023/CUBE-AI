@@ -17,7 +17,6 @@ modes.push("@ohif/mode-segmentation");
 modes.push("@ohif/mode-tmtv");
 modes.push("@ohif/mode-microscopy");
 modes.push("@ohif/mode-monai-label");
-modes.push("@ohif/extension-research-playground");
 
 
 // Add a dynamic runtime loader
@@ -101,10 +100,6 @@ async function loadModule(module) {
   }
   if( module==="@ohif/mode-monai-label") {
     const imported = await import("@ohif/mode-monai-label");
-    return imported.default;
-  }
-  if( module==="@ohif/extension-research-playground") {
-    const imported = await import("@ohif/extension-research-playground");
     return imported.default;
   }
   return (await import(/* webpackIgnore: true */ module)).default;

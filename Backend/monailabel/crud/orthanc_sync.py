@@ -145,7 +145,7 @@ async def _get_or_create_study(db: AsyncSession, study_uid: str, orthanc_study_i
 
 
 async def _get_or_create_volume(db: AsyncSession, volume_uid: str, orthanc_series_id: str, study_uid: str, desc: str,
-                                modality: str, num_slices: int, created_at: datetime):
+                                modality: str, num_slices: int, created_at: datetime,body_part_examined: str = None):
     result = await db.execute(select(Volume).where(Volume.volume_series_instance_uid == volume_uid))
     volume = result.scalar_one_or_none()
     if volume:
@@ -159,6 +159,9 @@ async def _get_or_create_volume(db: AsyncSession, volume_uid: str, orthanc_serie
             updated = True
         if modality and not volume.modality:
             volume.modality = modality
+            updated = True
+        if body_part_examined and not volume.body_part_examined:  # ← add this
+            volume.body_part_examined = body_part_examined
             updated = True
         if num_slices and not volume.num_slices:
             volume.num_slices = num_slices
@@ -176,6 +179,7 @@ async def _get_or_create_volume(db: AsyncSession, volume_uid: str, orthanc_serie
         modality=modality or "UNK",
         num_slices=max(1, num_slices),
         created_at=created_at,
+        body_part_examined=body_part_examined,
     )
     db.add(volume)
     try:
@@ -231,7 +235,7 @@ async def _get_or_create_segmentation(db: AsyncSession, label_uid: str, orthanc_
         volume_series_instance_uid=volume_uid,
         segmentation_type=segmentation_type,
         method=method,
-        model_name=None,
+        name=None,
         created_at=created_at,
     )
     db.add(seg)
@@ -382,6 +386,7 @@ async def sync_series_to_db(db: AsyncSession, orthanc_series_id: str, series_id:
         modality = (s_tags.get("Modality") or "").upper()
         desc = s_tags.get("SeriesDescription")
         num_instances = len(series_info.get("Instances", []))
+        body_part_examined = s_tags.get("BodyPartExamined")
         series_datetime = _parse_dicom_datetime(s_tags.get("SeriesDate"), s_tags.get("SeriesTime"))
 
         parent_study_id = series_info.get("ParentStudy")
@@ -420,7 +425,8 @@ async def sync_series_to_db(db: AsyncSession, orthanc_series_id: str, series_id:
                 desc=desc,
                 modality=modality,
                 num_slices=num_instances,
-                created_at=series_datetime
+                created_at=series_datetime,
+                body_part_examined=body_part_examined,
             )
     finally:
         if own_session:
