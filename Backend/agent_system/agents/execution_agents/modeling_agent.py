@@ -58,7 +58,7 @@ class ModelingAgent(AssistantAgent):
             raise RuntimeError(f"Failed to initialize MCP tools from {mcp_server_path}") from exc
         desired_mcp_tools = ['pycaret_train_classifier', 'pycaret_run_inference', 'scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',
                              'scratchpad_write_summary', 'scratchpad_set_status', 'scratchpad_read_agent',
-                             'write_agent_output']
+                             'write_agent_output', 'browse_workspace']
         
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
         # modelling_classification_tool_wrapper = FunctionTool(
@@ -93,21 +93,25 @@ class ModelingAgent(AssistantAgent):
     def get_desired_tools(mcp_tools, desired_tools):
         return [tool for tool in mcp_tools if tool.name in desired_tools]
 
-async def main():
+async def main(client=None):
+    from pathlib import Path
     # Initialize the agent using the factory method
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     SERVER_PATH = os.path.join(BASE_DIR, '..', '..', '..', 'mcp', 'server.py')
-    workspace_dir = os.path.join(BASE_DIR, '..', '..', "workspace")
+    agents_base_ws_dir = Path(os.environ.get("AGENTS_WORKSPACE_DIR"))
+    workspace_dir = str(agents_base_ws_dir / "workspace_4a4b06a4-5487-4512-932a-20cbdf28ff49")
 
-    agent = await ModelingAgent.create(workspace_folder=workspace_dir, mcp_server_path=SERVER_PATH)
+    session_id = "4a4b06a4-5487-4512-932a-20cbdf28ff49"
+
+    agent = await ModelingAgent.create(workspace_folder=workspace_dir, mcp_server_path=SERVER_PATH, session_id=session_id, model_client=client)
 
     # Now you can use the agent normally
-    print(f"Agent initialized with {agent._tools} tools.")
-    print(agent._max_tool_iterations)
-    for tool in agent._tools:
-        print(tool.name)
+    # print(f"Agent initialized with {agent._tools} tools.")
+    # print(agent._max_tool_iterations)
+    # for tool in agent._tools:
+    #     print(tool.name)
     await Console(
-        agent.run_stream(task="run the classification modeling, provide as argument to the tool just experiment name, make the name experiment1",
+        agent.run_stream(task="run the classification modeling",
                          cancellation_token=CancellationToken())
         )
 
