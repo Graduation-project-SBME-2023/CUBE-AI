@@ -93,7 +93,7 @@ export default function ResearchPlayground() {
     const [segmentationData, setSegmentationData] = useState<any>(null);
     const [featuresData, setFeaturesData] = useState<any>(null);
     const [importanceData, setImportanceData] = useState<any>(null);
-    const [modelingData, setModelingData] = useState<any>(null);
+    const [modelingData, setModelingData] = useState<Record<string, any>>({});
     const [reportData, setReportData] = useState<any>(null);
     const [latexData, setLatexData] = useState<any>(null);
     const [viewsReady, setViewsReady] = useState(false);
@@ -209,9 +209,21 @@ export default function ResearchPlayground() {
                         setFeaturesData(payload);
                     }
                     break;
-                case 'modeling_output':
-                    setModelingData(payload);
+                case 'modeling_output': {
+                    // Use experiment_name as the key; fall back to a counter based on current size.
+                    const key: string =
+                        payload?.experiment_name ||
+                        `Experiment ${Object.keys(modelingData).length + 1}`;
+                
+                    setModelingData(prev => ({
+                        ...prev,
+                        // Merge rather than replace — if the same experiment name arrives again
+                        // (e.g. a partial update from the backend), its entry is overwritten while
+                        // all other experiments are preserved.
+                        [key]: payload,
+                    }));
                     break;
+                }
                 case 'report_output':
                     setReportData(payload);
                     break;
