@@ -70,7 +70,7 @@ class FeatureExtractionAgent(AssistantAgent):
             command=sys.executable,
             args=[mcp_server_path],
             env=env,
-            read_timeout_seconds=300,
+            read_timeout_seconds=3600,
         )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)
