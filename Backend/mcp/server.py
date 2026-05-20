@@ -43,6 +43,8 @@ from tools.modeling.regression import pycaret_train_regressor, pycaret_run_regre
 
 from tools.feature_extraction.features import radiomics_extract_features, radiomics_analyze_importance
 
+import tools.browse_workspace
+
 
 if __name__ == "__main__":
     try:
