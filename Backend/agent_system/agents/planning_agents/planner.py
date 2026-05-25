@@ -606,30 +606,8 @@ class ClinicalPlanner:
             await self._load_state()
             await self._send("msg", "Research plan confirmed. You can excute the agents now...")
 
-            # Generate initial LaTeX (Introduction + Literature Review) and compile it.
-            try:
-                import importlib.util
-                tool_path = os.path.abspath(os.path.join(Path(__file__).parent.parent.parent, "mcp", "tools", "planning", "generate_initial_latex.py"))
-                spec = importlib.util.spec_from_file_location("generate_initial_latex_tool", tool_path)
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                generate_initial = getattr(module, "generate_initial_latex")
-
-                gen_result_str = await generate_initial()
-                try:
-                    gen_result = json.loads(gen_result_str)
-                except Exception:
-                    gen_result = {"status": "error", "message": "Failed to parse generate_initial_latex output"}
-
-                # Emit to frontend so ReportingView can display latex + compiled PDF
-                emit_payload = {
-                    "latex_text": gen_result.get("latex_text"),
-                    "pdf_url": gen_result.get("latex_pdf"),
-                    "status": gen_result.get("status"),
-                }
-                await self._send("latex_output", emit_payload)
-            except Exception as e:
-                logger.exception(f"Failed to generate or emit initial LaTeX: {e}")
+            # Initial LaTeX generation/emission and persistence removed.
+            # The frontend or reporter agent should request or generate reports on demand.
 
             try:
                 # Compile structured task messages with pre-structured knowledge sections
