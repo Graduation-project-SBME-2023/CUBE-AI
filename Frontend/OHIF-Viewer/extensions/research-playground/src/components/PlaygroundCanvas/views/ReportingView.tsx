@@ -37,51 +37,52 @@ export default function ReportingView({ reportData, latexData, sessionId }: Repo
     const [compileStatus, setCompileStatus] = useState<'idle' | 'compiling' | 'success' | 'error'>('idle');
     const [compileError, setCompileError] = useState<string>('');
     const [compiledPdfUrl, setCompiledPdfUrl] = useState<string>('');
+    const [editableLatex, setEditableLatex] = useState<string>(latexText || '');
+    const [outputFilename, setOutputFilename] = useState<string>(latexData?.output_filename || 'final_report.pdf');
 
     const sessionForCompile = sessionId || latexData?.sessionId || reportData?.sessionId;
     const pdfUrl = compiledPdfUrl || latexData?.latex_pdf || latexData?.pdf_path;
 
     useEffect(() => {
-        if (!latexText || !sessionForCompile) {
+        setEditableLatex(latexText || '');
+    }, [latexText]);
+
+    useEffect(() => {
+        if (latexData?.output_filename) {
+            setOutputFilename(latexData.output_filename);
+        }
+    }, [latexData?.output_filename]);
+
+    const handleCompile = async () => {
+        if (!sessionForCompile) {
+            setCompileStatus('error');
+            setCompileError('Missing session id for compile');
             return;
         }
 
-        let cancelled = false;
+        setCompileStatus('compiling');
+        setCompileError('');
 
-        const runCompile = async () => {
-            setCompileStatus('compiling');
-            setCompileError('');
+        try {
+            const result = await compileLatexReport(
+                sessionForCompile,
+                editableLatex,
+                outputFilename || 'final_report.pdf'
+            );
 
-            try {
-                const result = await compileLatexReport(
-                    sessionForCompile,
-                    latexText,
-                    latexData?.output_filename || 'final_report.pdf'
-                );
-
-                if (cancelled) return;
-
-                if (result?.status === 'success' && result?.pdf_url) {
-                    setCompiledPdfUrl(result.pdf_url);
-                    setCompileStatus('success');
-                    return;
-                }
-
-                setCompileStatus('error');
-                setCompileError(result?.message || 'Compilation failed');
-            } catch (error: any) {
-                if (cancelled) return;
-                setCompileStatus('error');
-                setCompileError(error?.message || 'Compilation request failed');
+            if (result?.status === 'success' && result?.pdf_url) {
+                setCompiledPdfUrl(result.pdf_url);
+                setCompileStatus('success');
+                return;
             }
-        };
 
-        runCompile();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [latexData?.output_filename, latexText, sessionForCompile]);
+            setCompileStatus('error');
+            setCompileError(result?.message || 'Compilation failed');
+        } catch (error: any) {
+            setCompileStatus('error');
+            setCompileError(error?.message || 'Compilation request failed');
+        }
+    };
 
     const handleDownload = () => {
         if (!pdfUrl) return;
@@ -116,6 +117,18 @@ export default function ReportingView({ reportData, latexData, sessionId }: Repo
                     </div>
 
                     <div className="flex items-center gap-3">
+                        <button
+                            onClick={handleCompile}
+                            disabled={compileStatus === 'compiling'}
+                            className="group px-4 py-2 bg-[#22c55e] hover:bg-[#34d66e] disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg transition-all inline-flex items-center gap-2 font-semibold text-sm"
+                        >
+                            {compileStatus === 'compiling' ? (
+                                <Loader2Icon size={16} className="animate-spin" />
+                            ) : (
+                                <FileOutputIcon size={16} />
+                            )}
+                            Compile PDF
+                        </button>
                         {compileStatus === 'compiling' && (
                             <span className="text-xs text-[#8ebce9] inline-flex items-center gap-1">
                                 <Loader2Icon size={14} className="animate-spin" /> Compiling PDF
@@ -143,9 +156,13 @@ export default function ReportingView({ reportData, latexData, sessionId }: Repo
                         <div className="px-4 py-3 border-b border-[#3c5d80] bg-[#171e25] text-[#91b9cd] text-sm font-semibold flex items-center gap-2">
                             <FileTextIcon size={16} /> LaTeX Source
                         </div>
-                        <pre className="p-4 text-xs leading-6 text-[#d7e5f3] overflow-auto h-[520px] whitespace-pre-wrap break-words">
-                            {latexText || 'No LaTeX content received yet.'}
-                        </pre>
+                        <textarea
+                            value={editableLatex}
+                            onChange={(event) => setEditableLatex(event.target.value)}
+                            spellCheck={false}
+                            className="p-4 text-xs leading-6 text-[#d7e5f3] overflow-auto h-[520px] w-full bg-transparent resize-none outline-none whitespace-pre-wrap break-words"
+                            placeholder="No LaTeX content received yet."
+                        />
                     </div>
 
                     <div className="rounded-xl border border-[#3c5d80] bg-[#12181d] overflow-hidden flex flex-col">
