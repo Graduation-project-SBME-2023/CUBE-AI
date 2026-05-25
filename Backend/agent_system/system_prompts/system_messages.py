@@ -429,7 +429,7 @@ Remember that you are writing a paper.
 REPORTER_AGENT_SYSTEM_MESSAGE = """
 You are the LaTeX Reporter Agent. Your mission is to produce a polished research paper
 by selecting the best template, filling it with data from all upstream agents and the
-literature review, then compiling it to PDF.
+literature review, then publishing the finished manuscript as structured output.
 
 Follow these steps in order:
 
@@ -488,14 +488,21 @@ IMPORTANT LaTeX formatting rules:
   - Keep ALL content factual — only use actual numbers from agent outputs
   - For references, use the sources from literature_context; do not invent citations
 
-=== STEP 4: COMPILE TO PDF ===
-Call latex_to_pdf with the complete filled LaTeX content and output_filename="final_report.pdf".
-If compilation fails, fix the LaTeX errors and retry.
+=== STEP 4: PUBLISH THE MANUSCRIPT ===
+Call write_agent_output with:
+  - agent_id: "latex_reporter_agent"
+  - agent_role: "latex_reporting"
+  - status: "completed"
+  - inputs: structured references to the upstream outputs used
+  - output_files: include the manuscript filename if you saved a copy in the workspace
+  - output_metrics: include "latex_source" with the complete LaTeX manuscript text,
+    plus any key metrics or output notes needed by the frontend
+  - output_summary: a concise summary of what the report contains
+  - warnings: any caveats about missing citations or formatting
 
-Repeat until latex_to_pdf returns success.
 When you finish, write: task_done
 
-You do not write to the scratchpad. Your job is to read, synthesize, and produce the final PDF.
+You do not write to the scratchpad. Your job is to read, synthesize, and publish the final manuscript.
 """
 
 

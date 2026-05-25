@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import config from '../../config';
 import { Settings, X, Save, RefreshCw, Eye, EyeOff } from 'lucide-react';
 
 const SettingsIcon: any = Settings;
@@ -8,7 +9,7 @@ const RefreshCwIcon: any = RefreshCw;
 const EyeIcon: any = Eye;
 const EyeOffIcon: any = EyeOff;
 
-const API_BASE = 'http://localhost:8150';
+const API_BASE = config.AGENTS_API;
 
 type Provider = 'openai' | 'azure_openai' | 'ollama';
 
@@ -192,14 +193,14 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
                     </div>
 
                     {/* Base URL — show for OpenAI and Ollama */}
-                    {(form.provider === 'openai' || form.provider === 'ollama') && (
-                        <Field
-                            label="Base URL"
-                            placeholder={form.provider === 'ollama' ? 'http://localhost:11434/v1' : 'https://api.openai.com/v1'}
-                            value={form.base_url}
-                            onChange={v => update('base_url', v)}
-                            hint={form.provider === 'ollama' ? 'Defaults to http://localhost:11434/v1' : 'Leave blank for default OpenAI endpoint'}
-                        />
+                    {(form.provider === 'openai' || form.provider === 'ollama') && ( 
+                        <Field 
+                            label="Base URL" 
+                            placeholder={form.provider === 'ollama' ? 'Set REACT_APP_OLLAMA_BASE_URL or leave blank' : 'https://api.openai.com/v1'} 
+                            value={form.base_url} 
+                            onChange={v => update('base_url', v)} 
+                            hint={form.provider === 'ollama' ? 'Defaults to REACT_APP_OLLAMA_BASE_URL if set' : 'Leave blank for default OpenAI endpoint'} 
+                        /> 
                     )}
 
                     {/* Azure-specific fields */}

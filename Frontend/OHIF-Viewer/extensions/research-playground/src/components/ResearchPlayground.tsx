@@ -120,10 +120,12 @@ function ResearchPlaygroundInner() {
           setModelingData(payload);
           break;
         case 'report_output':
-          setReportData(payload);
+          setReportData({ ...payload, sessionId: event.session_id || sessionId });
+          setActivePhase('reporting');
           break;
         case 'latex_output':
-          setLatexData(payload);
+          setLatexData({ ...payload, sessionId: event.session_id || sessionId });
+          setActivePhase('reporting');
           break;
       }
 
@@ -132,7 +134,7 @@ function ResearchPlaygroundInner() {
         setUpdatedPhaseIds(prev => (prev.includes(phaseId) ? prev : [...prev, phaseId]));
       }
     });
-    return () => unsubscribe();
+    return unsubscribe;
   }, [
     activePhase,
     phases,
@@ -185,7 +187,7 @@ function ResearchPlaygroundInner() {
         node: <FeaturesView featuresData={data.featuresData} importanceData={data.importanceData} />,
       },
       { id: 'modeling', node: <ModelingView modelingData={data.modelingData as any} /> },
-      { id: 'reporting', node: <ReportingView reportData={data.reportData} latexData={data.latexData} /> },
+      { id: 'reporting', node: <ReportingView reportData={data.reportData} latexData={data.latexData} sessionId={sessionId || undefined} /> },
     ],
     [data, hypothesis, includeLitReview, routeState.literatureContext, routeState.literatureReviewOutput, sessionId, setLiteratureOutput]
   );
@@ -292,6 +294,7 @@ function ResearchPlaygroundInner() {
             initialUserMessage={initialUserMessage}
             externalSessionId={sessionId}
             sendInitialMessage={sendInitialMessage}
+            onPlanApprovalNeeded={() => setActivePhase('planning')}
           />
         </div>
       </div>
