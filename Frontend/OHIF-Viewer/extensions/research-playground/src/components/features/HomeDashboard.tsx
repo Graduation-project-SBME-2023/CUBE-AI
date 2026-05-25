@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Bot, Box, Clock, List, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../ui/Card';
+import { getBackendApiBaseUrl } from '../../utils/apiBase';
 
 const makeFallbackSessionId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -28,7 +29,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
     const fetchHistory = async () => {
       setLoadingHistory(true);
       try {
-        const response = await fetch('http://localhost:8000/hypotheses/?skip=0&limit=1000');
+        const response = await fetch(`${getBackendApiBaseUrl()}/hypotheses/?skip=0&limit=1000`);
         if (response.ok) {
           const data = await response.json();
           const sorted = [...data].sort((a, b) => {
@@ -62,7 +63,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
 
     try {
       const payload = { title: `${hypothesis.substring(0, 30)}...` };
-      const response = await fetch('http://localhost:8000/chat_sessions/', {
+      const response = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),

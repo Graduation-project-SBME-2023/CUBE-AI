@@ -1,5 +1,8 @@
 import asyncio
 from typing import Dict
+import subprocess
+import tempfile
+import re
 
 import httpx
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -543,6 +546,88 @@ async def get_hypothesis_history(limit: int = 20):
     history = await session_service.get_hypothesis_history(limit)
 
     return history
+
+
+@app.post("/reports/compile")
+async def compile_report(data: dict, request: Request):
+    """
+    Compile LaTeX text into a PDF inside the session workspace and return a public URL.
+
+    Expected body:
+      - session_id (str)
+      - latex_text (str)
+      - output_filename (str, optional)
+    """
+    session_id = str(data.get("session_id") or "").strip()
+    latex_text = data.get("latex_text")
+    output_filename = str(data.get("output_filename") or "final_report.pdf").strip()
+
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    if not isinstance(latex_text, str) or not latex_text.strip():
+        raise HTTPException(status_code=400, detail="latex_text is required")
+
+    # Ensure filename cannot traverse directories and always ends in .pdf
+    safe_name = os.path.basename(output_filename)
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", safe_name)
+    if not safe_name.lower().endswith(".pdf"):
+        safe_name = f"{safe_name}.pdf"
+
+    workspace_name = f"workspace_{session_id}"
+    workspace_folder = os.path.join(agents_workspace_dir, workspace_name)
+    reports_folder = os.path.join(workspace_folder, "reports")
+    os.makedirs(reports_folder, exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        tex_path = os.path.join(temp_dir, "document.tex")
+        pdf_temp_path = os.path.join(temp_dir, "document.pdf")
+
+        with open(tex_path, "w", encoding="utf-8") as file_obj:
+            file_obj.write(latex_text)
+
+        compile_logs = []
+        for _ in range(2):
+            result = subprocess.run(
+                ["pdflatex", "-interaction=nonstopmode", "document.tex"],
+                cwd=temp_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=30.0,
+            )
+            stdout = result.stdout.decode("utf-8", errors="ignore")
+            stderr = result.stderr.decode("utf-8", errors="ignore")
+            compile_logs.append(stdout)
+            if stderr:
+                compile_logs.append(stderr)
+            if result.returncode != 0:
+                break
+
+        if result.returncode != 0 or not os.path.exists(pdf_temp_path):
+            merged_log = "\n".join(compile_logs)[-8000:]
+            return {
+                "status": "error",
+                "message": "LaTeX compilation failed",
+                "compile_log": merged_log,
+            }
+
+        final_path = os.path.join(reports_folder, safe_name)
+        with open(pdf_temp_path, "rb") as src, open(final_path, "wb") as dst:
+            dst.write(src.read())
+
+    # Prefer explicit AGENTS_BASE_URL env var when provided (no hardcoded hosts)
+    agents_base = os.environ.get("AGENTS_BASE_URL")
+    if agents_base:
+        pdf_url = agents_base.rstrip("/") + f"/files/{workspace_name}/reports/{safe_name}"
+    else:
+        base_url = str(request.base_url).rstrip("/")
+        pdf_url = f"{base_url}/files/{workspace_name}/reports/{safe_name}"
+
+    return {
+        "status": "success",
+        "output_filename": safe_name,
+        "pdf_url": pdf_url,
+        "pdf_path": final_path,
+    }
 
 
 # ----------------------------------------------------------------------

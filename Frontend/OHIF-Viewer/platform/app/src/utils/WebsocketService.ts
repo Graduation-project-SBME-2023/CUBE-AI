@@ -1,8 +1,10 @@
+import { getAgentsWsUrl } from './runtimeUrls';
+
 class WebSocketService {
   socket: WebSocket | null = null;
   listeners: Set<(data: any) => void> = new Set();
   statusListeners: Set<(isConnected: boolean) => void> = new Set();
-  url = "ws://localhost:8150/ws";
+  url = getAgentsWsUrl();
   reconnectInterval = 2000;
   private isConnecting = false;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
