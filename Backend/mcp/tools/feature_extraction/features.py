@@ -29,21 +29,27 @@ from pydantic import BaseModel, ConfigDict, Field
 from .. import mcp
 from ..helpers.workspace import WorkspacePath, base_on_workspace_dir
 
+from tool_logging import ToolEvent, log_tool_state, TextPayload, ProgressPayload
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _setup_logging(log_file: str, verbose: bool = True) -> None:
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO if verbose else logging.WARNING)
     for h in logger.handlers[:]:
         logger.removeHandler(h)
-    fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    fmt = logging.Formatter("%(asctime)s - %(levelname)-8s - %(name)s - %(message)s")
     fh = logging.FileHandler(log_file)
+    fh.setLevel(logging.INFO)
     fh.setFormatter(fmt)
     ch = logging.StreamHandler()
+    ch.setLevel(logging.WARNING)
     ch.setFormatter(fmt)
     logger.addHandler(fh)
     logger.addHandler(ch)
+
+    logging.getLogger('radiomics').setLevel(logging.ERROR)
 
 
 def _csv_str(value: Optional[str]) -> Optional[list]:
@@ -214,11 +220,12 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         extractor = featureextractor.RadiomicsFeatureExtractor(params_file)
 
         target_dict: dict = {}
-        if params.targets_csv and os.path.exists(params.targets_csv):
-            tdf = pd.read_csv(params.targets_csv)
-            id_col = params.id_column or tdf.columns[0]
-            tgt_col = target_column or tdf.columns[1]
-            target_dict = {str(row[id_col]): row[tgt_col] for _, row in tdf.iterrows()}
+        if not (params.targets_csv and os.path.exists(params.targets_csv)):
+            params.target_csv = base_on_workspace_dir('/populations/targets/targets.csv')
+        tdf = pd.read_csv(params.targets_csv)
+        id_col = params.id_column or tdf.columns[0]
+        tgt_col = target_column or tdf.columns[1]
+        target_dict = {str(row[id_col]): row[tgt_col] for _, row in tdf.iterrows()}
 
         image_files = sorted(_glob.glob(os.path.join(image_dir, params.image_pattern)))
         mask_files  = sorted(_glob.glob(os.path.join(mask_dir,  params.mask_pattern)))
@@ -268,8 +275,19 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         temp_dir = tempfile.mkdtemp(dir=output_dir)
         start = time.time()
 
+        payload = TextPayload(message=f"Extracting features for {len(pairs)} masks...")
+        log_tool_state(ToolEvent("tool_started", "text", payload))
+        log_tool_state(ToolEvent("tool_started", "text", payload))
+
+
         for idx, (subject_id, files) in enumerate(pairs.items(), 1):
             logger.info(f"Processing {subject_id} ({idx}/{len(pairs)})")
+            payload = ProgressPayload(
+                current=idx,
+                total=len(pairs),
+                label='Processing Volumes'
+            )
+            log_tool_state(ToolEvent("tool_progress", "progress", payload))
             try:
                 orig_image = sitk.ReadImage(files["image"])
                 orig_mask  = sitk.ReadImage(files["mask"])
@@ -299,6 +317,8 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 logger.error(f"Error processing {subject_id}: {exc}")
 
         processing_time = time.time() - start
+        payload = TextPayload(message='Feature Extraction...Done')
+        log_tool_state(ToolEvent('tool_finished', 'text', payload))
 
         csv_paths: dict = {}
         num_features: dict = {}
@@ -385,6 +405,17 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
 
     target_column = 'target'
 
+    # Count the main pipeline stages for progress reporting:
+    #   1. Data loading & preprocessing
+    #   2. Importance computation
+    #   3. Importance bars + cumulative chart data
+    #   4. Correlation chart data
+    #   5. PCA chart data
+    #   6. t-SNE chart data
+    #   7. Archival plots
+    #   8. Top-N CSV export
+    TOTAL_STAGES = 8
+
     try:
         if not os.path.exists(params.input_path):
             raise ValueError(f"Input file not found: {params.input_path}")
@@ -396,6 +427,10 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             raise ValueError(f"encode_categorical must be one of {valid_enc}")
 
         top_features_list = sorted(set(_csv_int(params.top_features) or [10]))
+
+        # ── Stage 1: Data loading & preprocessing ──────────────────────────
+        payload = TextPayload(message=f"Analysing feature importance for {os.path.basename(params.input_path)}...")
+        log_tool_state(ToolEvent("tool_started", "text", payload))
 
         df = pd.read_csv(params.input_path)
         if target_column not in df.columns:
@@ -455,7 +490,10 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
 
         logger.info(f"Feature matrix: {X.shape[0]} rows × {X.shape[1]} features")
 
-        # ── Importance computation ──────────────────────────────────────────
+        payload = ProgressPayload(current=1, total=TOTAL_STAGES, label="Loading & preprocessing data")
+        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+
+        # ── Stage 2: Importance computation ────────────────────────────────
         def _rf_importance(n):
             clf = (RandomForestClassifier if task_type == "classification"
                    else RandomForestRegressor)(n_estimators=100, random_state=42)
@@ -490,17 +528,19 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         importance_path = os.path.join(output_dir, "feature_importance.csv")
         importance_df.to_csv(importance_path, index=False)
 
+        payload = ProgressPayload(current=2, total=TOTAL_STAGES, label=f"Computing importance ({params.method}, {task_type})")
+        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+
         # ── Build chart_data ────────────────────────────────────────────────
         chart_data: dict = {"task_type": task_type, "method": params.method}
 
-        # 1. Importance bars (top top_n_plot)
+        # ── Stage 3: Importance bars + cumulative curve ─────────────────────
         top_plot = importance_df.head(min(params.top_n_plot, len(importance_df)))
         chart_data["importance_bars"] = [
             {"feature": str(row["feature"]), "importance": _safe(row["importance"])}
             for _, row in top_plot.iterrows()
         ]
 
-        # 2. Cumulative importance curve (full, down-sampled to ≤300 pts)
         total_imp = importance_df["importance"].sum()
         cum = importance_df["importance"].cumsum()
         cum_pct = (cum / total_imp * 100) if total_imp > 0 else cum * 0
@@ -511,7 +551,10 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             if i % step == 0 or i == len(cum_pct) - 1
         ]
 
-        # 3. Correlation matrix (top 20 features)
+        payload = ProgressPayload(current=3, total=TOTAL_STAGES, label="Building importance & cumulative chart data")
+        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+
+        # ── Stage 4: Correlation matrix (top 20) ───────────────────────────
         top20_feats = importance_df["feature"].iloc[:20].tolist()
         top20_feats = [f for f in top20_feats if f in X.columns]
         if len(top20_feats) >= 2:
@@ -526,7 +569,10 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         else:
             chart_data["correlation"] = None
 
-        # 4 & 5. PCA + t-SNE — use top-N subset (first value in top_features_list)
+        payload = ProgressPayload(current=4, total=TOTAL_STAGES, label="Computing correlation matrix (top 20 features)")
+        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+
+        # ── Stage 5: PCA ───────────────────────────────────────────────────
         top_n_scatter = min(top_features_list[-1], X.shape[1])
         scatter_feats = [f for f in importance_df["feature"].iloc[:top_n_scatter].tolist() if f in X.columns]
         chart_data["pca"] = None
@@ -535,7 +581,6 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         if len(scatter_feats) >= 2:
             X_sub = X[scatter_feats]
 
-            # PCA
             try:
                 pca = PCA(n_components=2, random_state=42)
                 Xp = pca.fit_transform(X_sub)
@@ -552,25 +597,32 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             except Exception as exc:
                 logger.warning(f"PCA failed: {exc}")
 
-            # t-SNE (only for ≤5000 samples to keep time reasonable)
-            if len(X_sub) <= 5000:
-                try:
-                    perp = min(30, len(X_sub) - 1)
-                    tsne = TSNE(n_components=2, perplexity=perp, random_state=42, n_jobs=-1)
-                    Xt = tsne.fit_transform(X_sub)
-                    tsne_df = pd.DataFrame({"x": Xt[:, 0], "y": Xt[:, 1], "target": y.values})
-                    chart_data["tsne"] = {
-                        "points": [
-                            {"x": round(float(r["x"]), 4), "y": round(float(r["y"]), 4),
-                             "target": str(r["target"])}
-                            for _, r in tsne_df.iterrows()
-                        ],
-                        "n_features": len(scatter_feats),
-                    }
-                except Exception as exc:
-                    logger.warning(f"t-SNE failed: {exc}")
+        payload = ProgressPayload(current=5, total=TOTAL_STAGES, label="Running PCA")
+        log_tool_state(ToolEvent("tool_progress", "progress", payload))
 
-        # ── Also still save plots for archival purposes ─────────────────────
+        # ── Stage 6: t-SNE ─────────────────────────────────────────────────
+        if len(scatter_feats) >= 2 and len(X_sub) <= 5000:
+            try:
+                perp = min(30, len(X_sub) - 1)
+                tsne = TSNE(n_components=2, perplexity=perp, random_state=42, n_jobs=-1)
+                Xt = tsne.fit_transform(X_sub)
+                tsne_df = pd.DataFrame({"x": Xt[:, 0], "y": Xt[:, 1], "target": y.values})
+                chart_data["tsne"] = {
+                    "points": [
+                        {"x": round(float(r["x"]), 4), "y": round(float(r["y"]), 4),
+                         "target": str(r["target"])}
+                        for _, r in tsne_df.iterrows()
+                    ],
+                    "n_features": len(scatter_feats),
+                }
+            except Exception as exc:
+                logger.warning(f"t-SNE failed: {exc}")
+
+        tsne_label = "Running t-SNE" if (len(scatter_feats) >= 2 and len(X_sub) <= 5000) else "Skipping t-SNE (dataset > 5 000 samples)"
+        payload = ProgressPayload(current=6, total=TOTAL_STAGES, label=tsne_label)
+        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+
+        # ── Stage 7: Archival plots ─────────────────────────────────────────
         plots_dir = os.path.join(output_dir, "plots")
         os.makedirs(plots_dir, exist_ok=True)
 
@@ -615,7 +667,10 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
                 except Exception as exc:
                     logger.warning(f"Correlation heatmap failed: {exc}"); plt.close()
 
-        # ── Export top-N feature CSVs ───────────────────────────────────────
+        payload = ProgressPayload(current=7, total=TOTAL_STAGES, label="Saving archival plot images")
+        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+
+        # ── Stage 8: Export top-N feature CSVs ─────────────────────────────
         selected_files: dict = {}
         for n in top_features_list:
             n = min(n, X.shape[1])
@@ -635,7 +690,13 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             out_df.to_csv(out_path, index=False)
             selected_files[str(n)] = out_path
 
+        payload = ProgressPayload(current=8, total=TOTAL_STAGES, label="Exporting top-N feature CSVs")
+        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+
         logger.info("Feature importance analysis complete.")
+        payload = TextPayload(message="Feature Importance Analysis...Done")
+        log_tool_state(ToolEvent("tool_finished", "text", payload))
+
         return json.dumps({
             "status": "success",
             "output_dir": output_dir,

@@ -58,11 +58,14 @@ class ToolEvent:
 def log_tool_state(event: ToolEvent):
     session_id = os.environ.get("SESSION_ID")
     event.session_id = session_id
-    requests.post(
-        "http://localhost:8150/events",
-        json=asdict(event),
-        timeout=1,
-    )
+    try:
+        requests.post(
+            "http://localhost:8150/events",
+            json=asdict(event),
+            timeout=1,
+        )
+    except Exception as e:
+        pass
 
 def log_pdf_tool_view(event: Dict):
     session_id = os.environ.get("SESSION_ID")
@@ -71,8 +74,11 @@ def log_pdf_tool_view(event: Dict):
         "content": event,
         "session_id": session_id,
     }
-    requests.post(
-        "http://localhost:8150/events",
-        json=payload,
-        timeout=1,
-    )
+    try:
+        requests.post(
+            "http://localhost:8150/events",
+            json=payload,
+            timeout=1,
+        )
+    except Exception as e:
+        pass
