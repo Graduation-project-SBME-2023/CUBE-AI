@@ -3,11 +3,11 @@ import tempfile
 import sys
 import os
 import asyncio
-import httpx
+import json
 from .. import mcp
 from pydantic import Field
 from typing import Annotated
-from tool_logging import ToolEvent, log_tool_state, TextPayload, log_pdf_tool_view
+from tool_logging import ToolEvent, log_tool_state, TextPayload
 
 @mcp.tool()
 async def latex_to_pdf(
@@ -54,7 +54,14 @@ async def latex_to_pdf(
 
                 stdout = result.stdout.decode("utf-8", errors="ignore")
                 stderr = result.stderr.decode("utf-8", errors="ignore")
-                return f"LaTeX compilation failed. Check your LaTeX syntax. {stdout}. {stderr}"
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": "LaTeX compilation failed",
+                        "stdout": stdout[-4000:],
+                        "stderr": stderr[-2000:],
+                    }
+                )
 
             # Read compiled PDF bytes
             pdf_path = os.path.join(temp, "document.pdf")
@@ -63,20 +70,25 @@ async def latex_to_pdf(
                 payload = TextPayload(message='Possible LaTeX error.')
                 error_compilation_event = ToolEvent('error', 'text', payload)
                 log_tool_state(error_compilation_event)
-                return "PDF was not generated. Possible LaTeX error."
+                return json.dumps(
+                    {
+                        "status": "error",
+                        "message": "PDF was not generated. Possible LaTeX error.",
+                    }
+                )
 
             with open(pdf_path, "rb") as f:
                 pdf_bytes = f.read()
 
         workspace_folder = os.environ.get("WORKSPACE_DIR")
-        workspace_folder_name = os.path.basename(workspace_folder)
         if not workspace_folder:
             current_dir = os.getcwd()
-            workspace_folder_name = os.path.basename(target_dir)
             target_dir = os.path.abspath(os.path.join(current_dir, "Backend", "agent_system/workspace"))
             final_folder = os.path.join(target_dir, "reports")
+            workspace_folder_name = os.path.basename(target_dir)
         else:
             final_folder = os.path.join(workspace_folder, "reports")
+            workspace_folder_name = os.path.basename(workspace_folder)
 
         os.makedirs(final_folder, exist_ok=True)
         final_path = os.path.join(final_folder, output_filename)
@@ -88,24 +100,27 @@ async def latex_to_pdf(
         error_compilation_event = ToolEvent('tool_finished', 'text', payload)
         log_tool_state(error_compilation_event)
 
-        # ================  report view ================
-        frontend_data = {
-            "latex_pdf": f"http://localhost:8150/files/{workspace_folder_name}/reports/{output_filename if output_filename.endswith('.pdf') else output_filename + '.pdf'}"
-        }
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                "http://localhost:8150/ws-broadcast",
-                json={
-                    "type": "latex_output",
-                    "payload": frontend_data,
-                    "session_id": workspace_folder_name[len("workspace_"):] if workspace_folder_name.startswith("workspace_") else None
-                }
-            )        
-        # =============================================
-        return f"PDF generated successfully and saved as: {final_path}"
+        public_name = output_filename if output_filename.endswith('.pdf') else f"{output_filename}.pdf"
+        # Build a public URL using env var AGENTS_BASE_URL when available.
+        agents_base = os.environ.get('AGENTS_BASE_URL')
+        if agents_base:
+            latex_pdf = agents_base.rstrip('/') + f"/files/{workspace_folder_name}/reports/{public_name}"
+        else:
+            # Fallback to a relative path that can be resolved by the orchestrator when serving files
+            latex_pdf = f"/files/{workspace_folder_name}/reports/{public_name}"
+
+        return json.dumps(
+            {
+                "status": "success",
+                "message": "PDF generated successfully",
+                "latex_text": latex_text,
+                "pdf_path": final_path,
+                "latex_pdf": latex_pdf,
+            }
+        )
 
     except Exception as e:
-        return f"Error: {str(e)}"
+        return json.dumps({"status": "error", "message": str(e)})
 
 if __name__ == "__main__":
     # 1. Simple LaTeX content for testing

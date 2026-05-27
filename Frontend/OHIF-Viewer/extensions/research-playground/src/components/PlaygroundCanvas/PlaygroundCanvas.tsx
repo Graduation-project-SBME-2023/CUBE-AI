@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import websocketService from '../../services/websocket';
+import config from '../../config';
 import { FlowEdge, FlowNode, ToolEvent, ToolLog, AgentNodeData } from './types';
 import { createInitialNodes, getDynamicLayout, INITIAL_EDGES, START_W, AGENT_W } from './CanvasLayoutManager';
 import CanvasHeader from './CanvasHeader';
 import FlowEngineWrapper from './FlowEngineWrapper';
 import { registerAllLogRenderers } from './logs/registerRenderers';
+import { getAgentsApiBaseUrl } from '../../utils/apiBase';
 
 interface PlaygroundCanvasProps {
   initialHypothesis?: string;
@@ -441,7 +443,7 @@ export default function PlaygroundCanvas({
       const startPlanning = async () => {
         try {
           await new Promise(r => setTimeout(r, 500));
-          const response = await fetch('http://localhost:8150/plan', {
+          const response = await fetch(`${getAgentsApiBaseUrl()}/plan`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -491,7 +493,7 @@ export default function PlaygroundCanvas({
     setIsPaused(false);
     setNodes(resetNodeLogs);
     setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
-    await fetch('http://localhost:8150/run/', {
+    await fetch(`${getAgentsApiBaseUrl()}/run/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: String(session_id) }),
@@ -501,7 +503,7 @@ export default function PlaygroundCanvas({
   const togglePause = async () => {
     const next = !isPaused;
     setIsPaused(next);
-    await fetch(`http://localhost:8150/${next ? 'pause' : 'resume'}`, {
+    await fetch(`${getAgentsApiBaseUrl()}/${next ? 'pause' : 'resume'}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: String(session_id) }),
@@ -509,7 +511,7 @@ export default function PlaygroundCanvas({
   };
 
   const restartExecution = async () => {
-    await fetch('http://localhost:8150/restart', {
+    await fetch(`${getAgentsApiBaseUrl()}/restart`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: String(session_id) }),

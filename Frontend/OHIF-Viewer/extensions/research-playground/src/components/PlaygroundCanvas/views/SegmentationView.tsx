@@ -4,6 +4,7 @@ import {
     ChevronDown, ChevronUp, Edit
 } from 'lucide-react';
 import websocketService from '../../../services/websocket';
+import { getBackendApiBaseUrl, getAgentsApiBaseUrl } from '../../../utils/apiBase';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -147,7 +148,7 @@ function ReviewView({
             // Optimistically set status to modified (Yellow) so it's ready when the user returns
             handleToggle(uid, 'modified');
 
-            const response = await fetch(`http://localhost:8000/volumes/${uid}/study`);
+            const response = await fetch(`${getBackendApiBaseUrl()}/volumes/${uid}/study`);
             if (!response.ok) {
                 throw new Error(`Failed to fetch study UID. Status: ${response.status}`);
             }
@@ -156,7 +157,7 @@ function ReviewView({
             
             if (data.study_uid) {
                 // Open Monai Label in a new tab to preserve the current React state
-                window.open(`http://localhost:3000/monai-label?StudyInstanceUIDs=${data.study_uid}`, '_blank');
+                window.open(`${getBackendApiBaseUrl()}/monai-label?StudyInstanceUIDs=${data.study_uid}`, '_blank');
             } else {
                 console.error("study_uid not found in the response body", data);
                 alert("Study UID missing from the server response.");
@@ -358,7 +359,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
         console.log('the session id in front is', data.sessionId);
 
         try {
-            const response = await fetch('http://localhost:8150/segmentation-review', {
+            const response = await fetch(`${getAgentsApiBaseUrl()}/segmentation-review`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

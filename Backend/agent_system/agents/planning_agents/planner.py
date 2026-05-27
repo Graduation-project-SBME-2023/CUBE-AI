@@ -606,6 +606,9 @@ class ClinicalPlanner:
             await self._load_state()
             await self._send("msg", "Research plan confirmed. You can excute the agents now...")
 
+            # Initial LaTeX generation/emission and persistence removed.
+            # The frontend or reporter agent should request or generate reports on demand.
+
             try:
                 # Compile structured task messages with pre-structured knowledge sections
                 task_messages = compile_task_messages(

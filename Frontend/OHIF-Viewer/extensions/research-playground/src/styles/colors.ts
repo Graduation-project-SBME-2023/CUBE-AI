@@ -10,7 +10,7 @@ export const colors = {
   accent: '#5acce6',
   accentStrong: '#348cfd',
   success: '#6fe5b8',
-  warning: '#f8ce46',
+  warning: '#46f8ef',
   danger: '#ff6b6b',
 } as const;
 

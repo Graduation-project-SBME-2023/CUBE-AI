@@ -200,11 +200,22 @@ class SegmentationModule:
 
         #=========== Prepare data for the frontend(payload)==============================
         #todo: handle list of labels and models in front view and in function
+        # Attempt to include planner-generated initial LaTeX if available
+        latex_content = None
+        try:
+            from pathlib import Path
+            tex_path = Path(workspace_dir) / "initial_report.tex"
+            if tex_path.exists():
+                latex_content = tex_path.read_text(encoding="utf-8")
+        except Exception:
+            latex_content = None
+
         frontend_data = {
-            "targetRoi": plan['target_labels'][0], 
-            "selectedModel": plan["selected_models"][0] if plan["selected_models"] else None, 
-            "diceScore": get_model_dice_score(plan["selected_models"][0],plan["target_labels"][0]) if plan["selected_models"] else None, 
-            "volumes": gif_volumes
+            "targetRoi": plan['target_labels'][0],
+            "selectedModel": plan["selected_models"][0] if plan["selected_models"] else None,
+            "diceScore": get_model_dice_score(plan["selected_models"][0],plan["target_labels"][0]) if plan["selected_models"] else None,
+            "volumes": gif_volumes,
+            "latex": latex_content,
         }
 
         # ==========sending data to fronted for review====================

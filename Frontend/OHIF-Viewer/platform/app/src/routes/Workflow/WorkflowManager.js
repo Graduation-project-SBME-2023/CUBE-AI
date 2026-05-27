@@ -1,4 +1,5 @@
 import Workflow from './Workflow';
+import { getMonaiBaseUrl } from '../../utils/runtimeUrls';
 
 class WorkflowManager {
   constructor() {
@@ -8,7 +9,7 @@ class WorkflowManager {
   async refreshDatabase() {
     try {
       // Fetch all task names from the list_workflow API
-      const response = await fetch('http://localhost:8000/workflow/');
+      const response = await fetch(`${getMonaiBaseUrl()}/workflow/`);
 
       if (!response.ok) {
         throw new Error(`Error: ${response.status}`);
@@ -20,7 +21,7 @@ class WorkflowManager {
       // Fetch study_uids for each task_name
       const workflows = await Promise.all(
         taskRecords.map(async record => {
-          const url = `http://localhost:8000/workflow/${encodeURIComponent(
+          const url = `${getMonaiBaseUrl()}/workflow/${encodeURIComponent(
             record.task_name
           )}/filter-uid`;
           const filterResponse = await fetch(url, {
@@ -48,7 +49,7 @@ class WorkflowManager {
   }
 
   async createWorkflow(workflowName, workflowStudies = [], workflowTrainFlag = false) {
-    const apiUrl = 'http://localhost:8000/workflow/add';
+    const apiUrl = `${getMonaiBaseUrl()}/workflow/add`;
 
     try {
       const response = await fetch(apiUrl, {

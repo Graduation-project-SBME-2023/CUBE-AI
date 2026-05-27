@@ -1,22 +1,88 @@
-import React from 'react';
-import { FileText, Download, CheckCircle, FileOutput } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { FileText, Download, CheckCircle, FileOutput, AlertCircle, Loader2 } from 'lucide-react';
+import { compileLatexReport } from '../../../services/api';
 
 const FileTextIcon: any = FileText;
 const DownloadIcon: any = Download;
 const CheckCircleIcon: any = CheckCircle;
 const FileOutputIcon: any = FileOutput;
+const AlertCircleIcon: any = AlertCircle;
+const Loader2Icon: any = Loader2;
 
 export interface ReportingViewProps {
     reportData?: any;
     latexData?: any;
+    sessionId?: string;
 }
 
-export default function ReportingView({ reportData, latexData }: ReportingViewProps) {
+function extractLatexText(latexData?: any) {
+    if (!latexData) return '';
+    return (
+        latexData?.latex_text ||
+        latexData?.latex ||
+        latexData?.outputs?.metrics?.latex_source ||
+        latexData?.outputs?.metrics?.latex ||
+        latexData?.outputs?.summary ||
+        latexData?.data?.latex_text ||
+        latexData?.data?.latex ||
+        latexData?.outputs?.latex_text ||
+        ''
+    );
+}
+
+export default function ReportingView({ reportData, latexData, sessionId }: ReportingViewProps) {
     const hasReport = reportData && reportData.status === 'success';
-    const hasLatex = latexData && (latexData.status === 'success' || latexData.latex_pdf);
-    
-    // The raw URL for downloading
-    const pdfUrl = latexData?.latex_pdf || latexData?.pdf_path;
+    const latexText = useMemo(() => extractLatexText(latexData), [latexData]);
+    const hasLatex = !!latexText || !!latexData?.latex_pdf || !!latexData?.pdf_path;
+    const [compileStatus, setCompileStatus] = useState<'idle' | 'compiling' | 'success' | 'error'>('idle');
+    const [compileError, setCompileError] = useState<string>('');
+    const [compiledPdfUrl, setCompiledPdfUrl] = useState<string>('');
+    const [editableLatex, setEditableLatex] = useState<string>(latexText || '');
+    const [outputFilename, setOutputFilename] = useState<string>(latexData?.output_filename || 'final_report.pdf');
+
+    const sessionForCompile = sessionId || latexData?.sessionId || reportData?.sessionId;
+    const pdfUrl = compiledPdfUrl || latexData?.latex_pdf || latexData?.pdf_path;
+
+    useEffect(() => {
+        setEditableLatex(latexText || '');
+    }, [latexText]);
+
+    useEffect(() => {
+        if (latexData?.output_filename) {
+            setOutputFilename(latexData.output_filename);
+        }
+    }, [latexData?.output_filename]);
+
+    const handleCompile = async () => {
+        if (!sessionForCompile) {
+            setCompileStatus('error');
+            setCompileError('Missing session id for compile');
+            return;
+        }
+
+        setCompileStatus('compiling');
+        setCompileError('');
+
+        try {
+            const result = await compileLatexReport(
+                sessionForCompile,
+                editableLatex,
+                outputFilename || 'final_report.pdf'
+            );
+
+            if (result?.status === 'success' && result?.pdf_url) {
+                setCompiledPdfUrl(result.pdf_url);
+                setCompileStatus('success');
+                return;
+            }
+
+            setCompileStatus('error');
+            setCompileError(result?.message || 'Compilation failed');
+        } catch (error: any) {
+            setCompileStatus('error');
+            setCompileError(error?.message || 'Compilation request failed');
+        }
+    };
 
     const handleDownload = () => {
         if (!pdfUrl) return;
@@ -39,53 +105,91 @@ export default function ReportingView({ reportData, latexData }: ReportingViewPr
         );
     }
 
-    // SUCCESS STATE
     return (
-        <div className="w-full h-full bg-[#000000] p-6 flex flex-col items-center justify-center overflow-y-auto">
-            
-            {/* Main Card */}
-            <div className="w-full max-w-xl bg-[#151a1f] rounded-2xl border border-[#3c5d80] overflow-hidden flex flex-col shadow-2xl">
-                
-                {/* Header */}
-                <div className="flex items-center gap-3 px-6 py-4 border-b border-[#3c5d80] bg-[#1a2128]">
+        <div className="w-full h-full bg-[#000000] p-6 flex flex-col gap-4 overflow-y-auto">
+            <div className="w-full bg-[#151a1f] rounded-2xl border border-[#3c5d80] overflow-hidden flex flex-col shadow-2xl">
+                <div className="flex items-center justify-between gap-3 px-6 py-4 border-b border-[#3c5d80] bg-[#1a2128]">
+                    <div className="flex items-center gap-3">
                     <CheckCircleIcon size={24} className="text-[#6fe5b8]" />
                     <h2 className="text-lg font-bold text-white tracking-wide">
-                        Report Ready for Download
+                            Reporting Output
                     </h2>
-                </div>
-
-                {/* Body Area */}
-                <div className="p-10 flex flex-col items-center text-center space-y-6 bg-[#1e252b]">
-                    
-                    {/* Big Icon */}
-                    <div className="p-6 bg-[#151a1f] rounded-full border border-[#3c5d80] shadow-inner relative">
-                        <FileOutputIcon size={56} className="text-[#348cfd]" />
-                        {/* Decorative ping effect behind the icon */}
-                        <div className="absolute inset-0 rounded-full border border-[#348cfd] animate-ping opacity-20"></div>
-                    </div>
-                    
-                    {/* Text Content */}
-                    <div className="space-y-2">
-                        <h3 className="text-2xl font-semibold text-gray-100">
-                            Clinical Hypothesis Document
-                        </h3>
-                        <p className="text-gray-400 max-w-sm mx-auto leading-relaxed text-sm">
-                            {reportData?.summary || "Your data has been successfully compiled into a finalized PDF report. Click below to save it to your device."}
-                        </p>
                     </div>
 
-                    {/* Action Button */}
-                    {pdfUrl && (
-                        <div className="pt-6 w-full flex justify-center">
+                    <div className="flex items-center gap-3">
+                        <button
+                            onClick={handleCompile}
+                            disabled={compileStatus === 'compiling'}
+                            className="group px-4 py-2 bg-[#22c55e] hover:bg-[#34d66e] disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg transition-all inline-flex items-center gap-2 font-semibold text-sm"
+                        >
+                            {compileStatus === 'compiling' ? (
+                                <Loader2Icon size={16} className="animate-spin" />
+                            ) : (
+                                <FileOutputIcon size={16} />
+                            )}
+                            Compile PDF
+                        </button>
+                        {compileStatus === 'compiling' && (
+                            <span className="text-xs text-[#8ebce9] inline-flex items-center gap-1">
+                                <Loader2Icon size={14} className="animate-spin" /> Compiling PDF
+                            </span>
+                        )}
+                        {compileStatus === 'error' && (
+                            <span className="text-xs text-[#f5a2a2] inline-flex items-center gap-1">
+                                <AlertCircleIcon size={14} /> Compile failed
+                            </span>
+                        )}
+                        {pdfUrl && (
                             <button
                                 onClick={handleDownload}
-                                className="group relative px-8 py-4 w-full sm:w-3/4 bg-[#348cfd] hover:bg-[#599fff] text-white rounded-xl transition-all flex items-center justify-center gap-3 font-bold text-lg shadow-[0_0_20px_rgba(52,140,253,0.3)] hover:shadow-[0_0_30px_rgba(52,140,253,0.5)] transform hover:-translate-y-1"
+                                className="group px-4 py-2 bg-[#348cfd] hover:bg-[#599fff] text-white rounded-lg transition-all inline-flex items-center gap-2 font-semibold text-sm"
                             >
-                                <DownloadIcon size={24} className="group-hover:animate-bounce" />
-                                <span>Download PDF</span>
+                                <DownloadIcon size={16} className="group-hover:animate-bounce" />
+                                Download PDF
                             </button>
+                        )}
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 p-4 bg-[#1e252b]">
+                    <div className="rounded-xl border border-[#3c5d80] bg-[#12181d] overflow-hidden">
+                        <div className="px-4 py-3 border-b border-[#3c5d80] bg-[#171e25] text-[#91b9cd] text-sm font-semibold flex items-center gap-2">
+                            <FileTextIcon size={16} /> LaTeX Source
                         </div>
-                    )}
+                        <textarea
+                            value={editableLatex}
+                            onChange={(event) => setEditableLatex(event.target.value)}
+                            spellCheck={false}
+                            className="p-4 text-xs leading-6 text-[#d7e5f3] overflow-auto h-[520px] w-full bg-transparent resize-none outline-none whitespace-pre-wrap break-words"
+                            placeholder="No LaTeX content received yet."
+                        />
+                    </div>
+
+                    <div className="rounded-xl border border-[#3c5d80] bg-[#12181d] overflow-hidden flex flex-col">
+                        <div className="px-4 py-3 border-b border-[#3c5d80] bg-[#171e25] text-[#91b9cd] text-sm font-semibold flex items-center gap-2">
+                            <FileOutputIcon size={16} /> Compiled PDF Preview
+                        </div>
+
+                        {pdfUrl ? (
+                            <object data={pdfUrl} type="application/pdf" className="w-full h-[520px] bg-[#0f1419]">
+                                <div className="p-4 text-sm text-gray-300">
+                                    Embedded preview is unavailable in this browser. Use Download PDF.
+                                </div>
+                            </object>
+                        ) : (
+                            <div className="h-[520px] flex items-center justify-center text-sm text-gray-400 p-4 text-center">
+                                {compileStatus === 'compiling'
+                                    ? 'Compiling LaTeX into PDF...'
+                                    : compileStatus === 'error'
+                                        ? `Compilation failed. ${compileError}`
+                                        : 'PDF is not available yet.'}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="px-6 py-4 border-t border-[#3c5d80] bg-[#1a2128] text-gray-300 text-sm">
+                    {reportData?.summary || 'The generated LaTeX is displayed on the left. The backend compiler output is shown as PDF on the right.'}
                 </div>
             </div>
         </div>

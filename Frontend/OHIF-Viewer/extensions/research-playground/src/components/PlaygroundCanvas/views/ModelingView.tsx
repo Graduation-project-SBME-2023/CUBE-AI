@@ -461,7 +461,6 @@ function EmptyState() {
 }
 
 // ── Best metric badge (used in accordion header) ───────────────────────────────
-// ── Best metric badge (used in accordion header) ───────────────────────────────
 
 function BestMetricBadge({ chartData }: { chartData: ChartData }) {
     // Find the best holdout accuracy across all models in this experiment
@@ -494,6 +493,16 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
     const [selectedModel, setSelectedModel] = useState<string | null>(null);
     const [activeMetric, setActiveMetric] = useState('Accuracy');
     const [hidden, setHidden] = useState<Record<string, Set<string>>>({});
+
+    const toggle = useCallback((chartId: string, key: string) => {
+        setHidden(prev => {
+            const cur = new Set(prev[chartId] ?? []);
+            cur.has(key) ? cur.delete(key) : cur.add(key);
+            return { ...prev, [chartId]: cur };
+        });
+    }, []);
+
+    const h = (id: string): Set<string> => hidden[id] ?? new Set();
     const chartData = data.chart_data;
     const hasCharts = !!(chartData && Object.keys(chartData.per_model ?? {}).length);
     const modelKeys = hasCharts ? Object.keys(chartData!.per_model) : [];
