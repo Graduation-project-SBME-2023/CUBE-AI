@@ -1,107 +1,9 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import {
-    Target, Cpu, Percent, Check, X, CheckSquare, XSquare, Save, Loader2,
-    ChevronDown, ChevronUp, Edit
-} from 'lucide-react';
-import websocketService from '../../../services/websocket';
-import { getBackendApiBaseUrl, getAgentsApiBaseUrl } from '../../../utils/apiBase';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-export interface VolumeGif {
-    seriesInstanceUid: string;
-    gifUrl: string;
-}
-
-export interface SegmentationData {
-    volumes?: VolumeGif[];
-    targetRoi?: string;
-    selectedModel?: string;
-    diceScore?: number | null;
-    sessionId?: string;
-}
-
-interface ReviewContainerProps {
-    segmentationData?: SegmentationData | null;
-}
-
-// ─── Collapsible Section ──────────────────────────────────────────────────────
-
-function CollapsibleSection({
-    title,
-    icon,
-    defaultOpen = true,
-    children,
-    accent = '#5acce6',
-}: {
-    title: string;
-    icon: React.ReactNode;
-    defaultOpen?: boolean;
-    children: React.ReactNode;
-    accent?: string;
-}) {
-    const [open, setOpen] = useState(defaultOpen);
-    return (
-        <div className="bg-[#151a1f] rounded-xl border border-[#1f2d40] overflow-hidden">
-            <button
-                onClick={() => setOpen(o => !o)}
-                className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/[0.025] transition-colors"
-            >
-                <span
-                    className="flex items-center gap-2 text-[10px] uppercase font-semibold tracking-wider"
-                    style={{ color: accent }}
-                >
-                    {icon} {title}
-                </span>
-                {open
-                    ? <ChevronUp size={13} className="text-[#566a84]" />
-                    : <ChevronDown size={13} className="text-[#566a84]" />}
-            </button>
-            {open && <div className="px-4 pb-4">{children}</div>}
-        </div>
-    );
-}
-
-// ─── Right Panel ──────────────────────────────────────────────────────────────
-
-function RightPanel({
-    targetRoi,
-    selectedModel,
-    diceScore,
-}: {
-    targetRoi: string;
-    selectedModel: string;
-    diceScore: number | null;
-}) {
-    return (
-        <div className="w-64 flex flex-col gap-3 shrink-0 overflow-y-auto pr-0.5">
-            <CollapsibleSection title="Segmentation Info" icon={<Target size={11} />} accent="#5acce6">
-                <div className="flex flex-col gap-4 pt-1">
-                    <div>
-                        <p className="text-[#566a84] text-[10px] uppercase flex items-center gap-1 mb-0.5">
-                            <Target size={11} /> Target ROI
-                        </p>
-                        <div className="text-base font-bold text-[#5acce6]">{targetRoi}</div>
-                    </div>
-                    <div>
-                        <p className="text-[#566a84] text-[10px] uppercase flex items-center gap-1 mb-0.5">
-                            <Cpu size={11} /> Selected Model
-                        </p>
-                        <div className="text-sm font-bold text-white">{selectedModel}</div>
-                    </div>
-                    <div>
-                        <p className="text-[#566a84] text-[10px] uppercase flex items-center gap-1 mb-0.5">
-                            <Percent size={11} /> Benchmarking Dice Score
-                        </p>
-                        <div className="text-xl font-mono font-bold text-[#6fe5b8]">
-                            {diceScore !== null ? diceScore.toFixed(3) : '—'}
-                        </div>
-                    </div>
-                </div>
-            </CollapsibleSection>
-        </div>
-    );
-}
+import { Check, X, CheckSquare, XSquare, Save, Loader2, Edit } from 'lucide-react';
+import { VolumeGif, ReviewContainerProps, ReviewStatus } from './segmentation/types';
+import { RightPanel } from './segmentation/Shared';
+import { handleModifyAction, saveSegmentationReview } from './segmentation/utils';
+import { getBackendApiBaseUrl } from '../../../utils/apiBase';
 
 // ─── Review View ──────────────────────────────────────────────────────────────
 
@@ -120,10 +22,10 @@ function ReviewView({
     onSave: (results: { accepted: string[]; rejected: string[]; modified: string[] }) => void;
     isLoading: boolean;
 }) {
-    const [reviewStatus, setReviewStatus] = useState<Record<string, 'accepted' | 'rejected' | 'pending' | 'modified'>>({});
+    const [reviewStatus, setReviewStatus] = useState<Record<string, ReviewStatus>>({});
 
     useEffect(() => {
-        const initial: Record<string, 'accepted' | 'rejected' | 'pending' | 'modified'> = {};
+        const initial: Record<string, ReviewStatus> = {};
         volumes.forEach(v => { initial[v.seriesInstanceUid] = 'pending'; });
         setReviewStatus(initial);
     }, [volumes]);
@@ -132,13 +34,13 @@ function ReviewView({
         setReviewStatus(prev => ({ ...prev, [uid]: status })), []);
 
     const handleAcceptAll = useCallback(() => {
-        const s: Record<string, 'accepted' | 'rejected' | 'pending' | 'modified'> = {};
+        const s: Record<string, ReviewStatus> = {};
         volumes.forEach(v => { s[v.seriesInstanceUid] = 'accepted'; });
         setReviewStatus(s);
     }, [volumes]);
 
     const handleRejectAll = useCallback(() => {
-        const s: Record<string, 'accepted' | 'rejected' | 'pending' | 'modified'> = {};
+        const s: Record<string, ReviewStatus> = {};
         volumes.forEach(v => { s[v.seriesInstanceUid] = 'rejected'; });
         setReviewStatus(s);
     }, [volumes]);
@@ -148,12 +50,7 @@ function ReviewView({
             // Optimistically set status to modified (Yellow) so it's ready when the user returns
             handleToggle(uid, 'modified');
 
-            const response = await fetch(`${getBackendApiBaseUrl()}/volumes/${uid}/study`);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch study UID. Status: ${response.status}`);
-            }
-            
-            const data = await response.json();
+            const data = await handleModifyAction(uid);
             
             if (data.study_uid) {
                 // Open Monai Label in a new tab to preserve the current React state
@@ -359,23 +256,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
         console.log('the session id in front is', data.sessionId);
 
         try {
-            const response = await fetch(`${getAgentsApiBaseUrl()}/segmentation-review`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    accepted: results.accepted,
-                    rejected: results.rejected,
-                    modified: results.modified,
-                    session_id: data.sessionId,
-                }),
-            });
-
-            if (!response.ok) {
-                throw new Error(`Server responded with status ${response.status}`);
-            }
-
+            await saveSegmentationReview(data.sessionId, results);
             alert('Review saved! The AI module will now resume.');
             console.log('Review results sent successfully:', results);
         } catch (error) {

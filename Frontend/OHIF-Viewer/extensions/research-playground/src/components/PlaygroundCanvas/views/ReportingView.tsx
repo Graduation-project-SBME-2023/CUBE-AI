@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { FileText, Download, CheckCircle, FileOutput, AlertCircle, Loader2 } from 'lucide-react';
 import { compileLatexReport } from '../../../services/api';
+import { ReportingViewProps, CompileStatus } from './reporting/types';
+import { extractLatexText, handlePdfDownload } from './reporting/utils';
+import { EmptyReportingState } from './reporting/Shared';
 
 const FileTextIcon: any = FileText;
 const DownloadIcon: any = Download;
@@ -9,32 +12,11 @@ const FileOutputIcon: any = FileOutput;
 const AlertCircleIcon: any = AlertCircle;
 const Loader2Icon: any = Loader2;
 
-export interface ReportingViewProps {
-    reportData?: any;
-    latexData?: any;
-    sessionId?: string;
-}
-
-function extractLatexText(latexData?: any) {
-    if (!latexData) return '';
-    return (
-        latexData?.latex_text ||
-        latexData?.latex ||
-        latexData?.outputs?.metrics?.latex_source ||
-        latexData?.outputs?.metrics?.latex ||
-        latexData?.outputs?.summary ||
-        latexData?.data?.latex_text ||
-        latexData?.data?.latex ||
-        latexData?.outputs?.latex_text ||
-        ''
-    );
-}
-
 export default function ReportingView({ reportData, latexData, sessionId }: ReportingViewProps) {
     const hasReport = reportData && reportData.status === 'success';
     const latexText = useMemo(() => extractLatexText(latexData), [latexData]);
     const hasLatex = !!latexText || !!latexData?.latex_pdf || !!latexData?.pdf_path;
-    const [compileStatus, setCompileStatus] = useState<'idle' | 'compiling' | 'success' | 'error'>('idle');
+    const [compileStatus, setCompileStatus] = useState<CompileStatus>('idle');
     const [compileError, setCompileError] = useState<string>('');
     const [compiledPdfUrl, setCompiledPdfUrl] = useState<string>('');
     const [editableLatex, setEditableLatex] = useState<string>(latexText || '');
@@ -84,25 +66,9 @@ export default function ReportingView({ reportData, latexData, sessionId }: Repo
         }
     };
 
-    const handleDownload = () => {
-        if (!pdfUrl) return;
-        const link = document.createElement('a');
-        link.href = pdfUrl;
-        link.download = 'Clinical_Hypothesis_Report.pdf';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-    };
-
     // NO REPORT YET STATE
     if (!hasReport && !hasLatex) {
-        return (
-            <div className="w-full h-full flex flex-col items-center justify-center text-gray-600 space-y-4 bg-[#000000]">
-                <FileTextIcon size={64} className="text-[#3c5d80]" />
-                <h3 className="text-xl font-bold text-[#91b9cd]">Paper & Reporting</h3>
-                <p className="text-sm">Run the orchestrator to generate a document.</p>
-            </div>
-        );
+        return <EmptyReportingState />;
     }
 
     return (
@@ -141,7 +107,7 @@ export default function ReportingView({ reportData, latexData, sessionId }: Repo
                         )}
                         {pdfUrl && (
                             <button
-                                onClick={handleDownload}
+                                onClick={() => handlePdfDownload(pdfUrl)}
                                 className="group px-4 py-2 bg-[#348cfd] hover:bg-[#599fff] text-white rounded-lg transition-all inline-flex items-center gap-2 font-semibold text-sm"
                             >
                                 <DownloadIcon size={16} className="group-hover:animate-bounce" />
