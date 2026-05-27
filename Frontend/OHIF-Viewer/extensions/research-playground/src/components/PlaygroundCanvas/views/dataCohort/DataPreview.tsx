@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Database } from 'lucide-react';
+import { getBackendApiBaseUrl } from '../../../../utils/apiBase';
 
 const PausableGif = ({ uid, isHovered }: { uid: string; isHovered: boolean }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -36,7 +37,7 @@ const PausableGif = ({ uid, isHovered }: { uid: string; isHovered: boolean }) =>
       />
       <img
         ref={imgRef}
-        src={`http://localhost:8000/volumes/${uid}/preview.gif`}
+        src={`${getBackendApiBaseUrl()}/volumes/${uid}/preview.gif`}
         alt={`Volume ${uid}`}
         className="absolute inset-0 z-20 h-full w-full object-cover"
         style={{ opacity: isHovered ? 0.9 : 0, transition: 'opacity 0.3s ease-in-out' }}

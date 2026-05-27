@@ -1,8 +1,10 @@
+import { AGENTS_WS } from '../config';
+
 class WebSocketService {
   socket: WebSocket | null = null;
   listeners: Set<(data: any) => void> = new Set();
   statusListeners: Set<(isConnected: boolean) => void> = new Set();
-  url = "ws://localhost:8150/ws";
+  url = AGENTS_WS;
   reconnectInterval = 2000;
   private isConnecting = false;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -95,7 +97,9 @@ class WebSocketService {
     if (this.replayBuffer.length > 0) {
       this.replayBuffer.forEach((event) => callback(event));
     }
-    return () => this.listeners.delete(callback)
+    return () => {
+      this.listeners.delete(callback);
+    }
   }
 
   onStatusChange(callback: (isConnected: boolean) => void) {

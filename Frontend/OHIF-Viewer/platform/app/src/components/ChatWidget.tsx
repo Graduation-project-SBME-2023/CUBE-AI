@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import websocketService from "../utils/WebsocketService";
+import { getAgentsBaseUrl, getMonaiBaseUrl } from "../utils/runtimeUrls";
 type Message = {
   id: string;
   role: "user" | "assistant" | "system";
@@ -46,7 +47,7 @@ const CustomChatWidget: React.FC = () => {
   // --- Backend calls ---
   const fetchChatSessions = async () => {
     try {
-      const r = await fetch("http://localhost:8000/chat_sessions/");
+      const r = await fetch(`${getMonaiBaseUrl()}/chat_sessions/`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       const mapped: ChatSession[] = (data || []).map((s: any) => ({
@@ -65,7 +66,7 @@ const CustomChatWidget: React.FC = () => {
 
   const fetchMessagesForSession = async (chat_id: string) => {
     try {
-      const res = await fetch(`http://localhost:8000/chat_messages/${chat_id}`);
+      const res = await fetch(`${getMonaiBaseUrl()}/chat_messages/${chat_id}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const msgs: any[] = await res.json();
       setSessions((prev) =>
@@ -91,7 +92,7 @@ const CustomChatWidget: React.FC = () => {
   const createNewSession = async (title?: string) => {
     try {
       const payload = { title: title || `chat ${sessions.length + 1}` };
-      const r = await fetch("http://localhost:8000/chat_sessions/", {
+      const r = await fetch(`${getMonaiBaseUrl()}/chat_sessions/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -111,7 +112,7 @@ const CustomChatWidget: React.FC = () => {
       };
 
       // Save initial system message to backend
-      await fetch(`http://localhost:8000/chat_messages/${newSession.chat_id}`, {
+      await fetch(`${getMonaiBaseUrl()}/chat_messages/${newSession.chat_id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: "system", text: newSession.messages[0].text }),
@@ -128,7 +129,7 @@ const CustomChatWidget: React.FC = () => {
 
   const updateSessionLastActivity = async (chat_id: string) => {
     try {
-      await fetch(`http://localhost:8000/chat_sessions/${chat_id}`, {
+      await fetch(`${getMonaiBaseUrl()}/chat_sessions/${chat_id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ last_activity: new Date().toISOString() }),
@@ -143,7 +144,7 @@ const CustomChatWidget: React.FC = () => {
 
   const deleteSession = async (chat_id: string) => {
     try {
-      await fetch(`http://localhost:8000/chat_sessions/${chat_id}`, { method: "DELETE" });
+      await fetch(`${getMonaiBaseUrl()}/chat_sessions/${chat_id}`, { method: "DELETE" });
     } catch (err) {
       console.warn("Failed to delete session", err);
     }
@@ -156,7 +157,7 @@ const CustomChatWidget: React.FC = () => {
 
   const mockAgentResponse = async (text: string) => {
     try {
-      const res = await fetch("http://localhost:8150/chat", {
+      const res = await fetch(`${getAgentsBaseUrl()}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ task: text }),
@@ -188,7 +189,7 @@ const CustomChatWidget: React.FC = () => {
     );
 
   // Save to backend
-    await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
+    await fetch(`${getMonaiBaseUrl()}/chat_messages/${sessionId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role: "user", text }),
@@ -262,7 +263,7 @@ const CustomChatWidget: React.FC = () => {
 
       // 4. Save in backend
       try {
-        await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
+        await fetch(`${getMonaiBaseUrl()}/chat_messages/${currentSessionId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ role: "assistant", text: assistantMsg.text }),

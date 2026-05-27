@@ -3,6 +3,7 @@ import { MessageSquare, History, Plus, ChevronRight, Trash2, Send, Activity as A
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import websocketService from '../../services/websocket';
+import { getBackendApiBaseUrl } from '../../utils/apiBase';
 
 const makeId = (prefix = 'id') => `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 const renderIcon = (Icon, size) => React.createElement(Icon, { size, 'aria-hidden': true });
@@ -102,7 +103,7 @@ const ChatSidebar = ({
       if (!isUuid(String(externalSessionId))) {
         return;
       }
-      fetch(`http://localhost:8000/chat_messages/${externalSessionId}`, {
+      fetch(`${getBackendApiBaseUrl()}/chat_messages/${externalSessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: 'user', text: initialUserMessage }),
@@ -177,7 +178,7 @@ const ChatSidebar = ({
 
   const fetchChatSessions = async () => {
     try {
-      const r = await fetch('http://localhost:8000/chat_sessions/');
+      const r = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/`);
       if (!r.ok) {
         throw new Error(`HTTP ${r.status}`);
       }
@@ -214,7 +215,7 @@ const ChatSidebar = ({
       return;
     }
     try {
-      const res = await fetch(`http://localhost:8000/chat_messages/${chat_id}`);
+      const res = await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chat_id}`);
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -240,7 +241,7 @@ const ChatSidebar = ({
   const createNewSession = async () => {
     try {
       const payload = { title: `Chat ${sessions.length + 1}` };
-      const r = await fetch('http://localhost:8000/chat_sessions/', {
+      const r = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -297,7 +298,7 @@ const ChatSidebar = ({
   const deleteSession = async chat_id => {
     if (isUuid(String(chat_id))) {
       try {
-        await fetch(`http://localhost:8000/chat_sessions/${chat_id}`, { method: 'DELETE' });
+        await fetch(`${getBackendApiBaseUrl()}/chat_sessions/${chat_id}`, { method: 'DELETE' });
       } catch (err) {}
     }
     setSessions(s => s.filter(x => x.chat_id !== chat_id));
@@ -333,7 +334,7 @@ const ChatSidebar = ({
     setIsTyping(true);
     try {
       if (isUuid(String(sessionId))) {
-        await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
+        await fetch(`${getBackendApiBaseUrl()}/chat_messages/${sessionId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ role: 'user', text: userMsg.text }),
@@ -386,7 +387,7 @@ const ChatSidebar = ({
         setIsTyping(true);
         try {
           if (isUuid(String(currentSessionId))) {
-            await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
+            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ role: 'user', text: userMsg.text }),
@@ -455,7 +456,7 @@ const ChatSidebar = ({
       setIsTyping(false);
       try {
         if (isUuid(String(currentSessionId))) {
-          await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
+            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ role: 'assistant', text: assistantMsg.text }),
