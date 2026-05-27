@@ -16,7 +16,7 @@ export interface ResearchViewState {
 export interface ResearchRouteState {
   hypothesis?: string;
   sessionId?: string;
-  session_id?: string;
+  session_id?: string; //why??
   includeLitReview?: boolean;
   sendInitialMessage?: boolean;
   literatureReviewOutput?: any;
