@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Optional, TYPE_CHECKING, Dict, Any
 import aiofiles
 import json
+import logging
 
 from models.execution import AgentState, AgentStatus
 from models.tool_logging import ToolEvent
@@ -20,6 +21,8 @@ if TYPE_CHECKING:
     from models.session import Session
     from services.session_service import SessionService
 
+logger = logging.getLogger(__name__)
+
 # ── Agent-to-view mapping for tool result emission ────────────────────────────
 
 def _parse_tool_content(content: str) -> Dict[str, Any]:
@@ -30,11 +33,32 @@ def _parse_tool_content(content: str) -> Dict[str, Any]:
     try:
         parsed = json.loads(content)
 
-        # Enforce dict output
+        # Case 1: already a dict
         if isinstance(parsed, dict):
             return parsed
-        else:
-            return {"data": parsed}
+
+        # Case 2: MCP-style content blocks
+        if (
+            isinstance(parsed, list)
+            and len(parsed) > 0
+            and isinstance(parsed[0], dict)
+            and "text" in parsed[0]
+        ):
+            text_content = parsed[0]["text"]
+
+            try:
+                nested = json.loads(text_content)
+
+                if isinstance(nested, dict):
+                    return nested
+
+                return {"data": nested}
+
+            except json.JSONDecodeError:
+                return {"raw": text_content[:2000]}
+
+        # Fallback for lists or other structures
+        return {"data": parsed}
 
     except (json.JSONDecodeError, TypeError):
         return {"raw": str(content)[:2000]}
@@ -103,9 +127,10 @@ async def _emit_tool_result_to_view(
 
         elif tool_name == "radiomics_extract_features":
             # No chart_data from extraction — just counts and paths
+            logger.info(f"Content: {content}, parsed: {parsed}")
             data = {
-                "tool": "radiomic_extractions",
-                "status": parsed.get("status", "completed"),
+                "tool": "radiomic_extraction",
+                "status": parsed.get("status", "success"),
                 "csv_paths": parsed.get("csv_paths", {}),
                 "num_subjects": parsed.get("num_subjects"),
                 "num_features": parsed.get("num_features", {}),
@@ -116,9 +141,10 @@ async def _emit_tool_result_to_view(
 
         elif tool_name == "radiomics_analyze_importance":
             # Forward chart_data directly — this is what drives the frontend charts
+            logger.info(f"Content: {content}, parsed: {parsed}")
             data = {
                 "tool": "feature_importance",
-                "status": parsed.get("status", "completed"),
+                "status": parsed.get("status", "success"),
                 "method": parsed.get("method"),
                 "feature_count": parsed.get("feature_count"),
                 "result_files": parsed.get("result_files", {}),

@@ -54,6 +54,7 @@ from clients.backend_client import BackendClient
 logger = logging.getLogger(__name__)
 
 logging.getLogger("watchfiles").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
 # ----------------------------------------------------------------------
 # App setup
 # ----------------------------------------------------------------------
