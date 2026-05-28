@@ -47,8 +47,8 @@ ENV nnUNet_preprocessed=/NN_Unet/nnUNet_preprocessed \
     nnUNet_results=/NN_Unet/nnUNet_results \
     nnUNet_raw=/NN_Unet/nnUNet_raw \
     DATABASE_URL=postgresql://workflow_user:password@postgres:5432/workflow_db \
-    PYTHONPATH=/apps/radiology
-
+    PYTHONPATH=/apps/radiology \
+    PATH=/apps/radiology/bin:${PATH}
 # ------------------------------------------------------------
 # 5. Expose & default command
 # ------------------------------------------------------------
