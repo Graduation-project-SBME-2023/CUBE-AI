@@ -42,6 +42,7 @@ services:
       NNUNET_DIR: /NN_Unet
       GENERAL_DATA_DIR: /General_Data
       PATH: "/apps/radiology/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+      TORCH_CUDA_ARCH_LIST: "8.0;8.6;8.9;9.0;12.0"
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/apps:/apps
       - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/monailabel
