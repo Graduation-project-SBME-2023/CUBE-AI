@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Make sure nvcc is on PATH
 ENV CUDA_HOME=/usr/local/cuda-12.8
-ENV PATH=/usr/local/cuda-12.8/bin:${PATH}
+ENV PATH=/apps/radiology/bin:/usr/local/cuda-12.8/bin:${PATH}
 ENV LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64${LD_LIBRARY_PATH}
 
 # ------------------------------------------------------------
