@@ -30,8 +30,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm /tmp/cuda-keyring.deb \
     && apt-get update && apt-get install -y --no-install-recommends \
         cuda-toolkit-12-8 \
-        cuda-nvcc-12-6 \
-        cuda-cudart-dev-12-6 \
+        cuda-nvcc-12-8 \
+        cuda-cudart-dev-12-8 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
