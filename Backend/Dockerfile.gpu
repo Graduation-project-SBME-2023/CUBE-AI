@@ -39,7 +39,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV CUDA_HOME=/usr/local/cuda-12.8
 ENV PATH=/apps/radiology/bin:/usr/local/cuda-12.8/bin:${PATH}
 ENV LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64${LD_LIBRARY_PATH}
-
+# to fix the error of qunato not support sm 120
+ENV TORCH_CUDA_ARCH_LIST="12.0"
 # ------------------------------------------------------------
 # 2. Python — upgrade pip, install ALL runtime dependencies
 #    (everything that was previously installed at container
@@ -62,7 +63,14 @@ RUN pip install --no-cache-dir -U pip && \
 # voxtell_requirements.txt is copied into the image so we never
 # need to bind-mount it just to install deps.
 COPY ./voxtell_requirements.txt /voxtell_requirements.txt
+# so the ofrcing of kernals related to sm120
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel ninja
+
+RUN sed -i '/optimum-quanto/d' /voxtell_requirements.txt
+
 RUN pip install --no-cache-dir -r /voxtell_requirements.txt
+
+RUN pip install git+https://github.com/huggingface/optimum-quanto.git
 
 # ------------------------------------------------------------
 # 3. Patched pydicom-seg sources

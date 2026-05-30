@@ -8,9 +8,11 @@
 # # # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # # # See the License for the specific language governing permissions and
 # # # limitations under the License.
-
-import torch
 import os
+os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0;8.6;8.9;9.0"
+os.environ["QUANTO_DISABLE_CUDA"] = "1"
+os.environ["CUDA_HOME"] = "/usr/local/cuda"
+import torch
 import nibabel as nib
 import numpy as np
 from enum import Enum
@@ -24,6 +26,7 @@ import pickle
 import ctypes
 from transformers import AutoModel, AutoTokenizer
 from optimum.quanto import quantize, freeze, qint4
+from transformers import BitsAndBytesConfig
 from transformers import QuantoConfig
 from unittest.mock import patch, MagicMock
 from voxtell.inference.predictor import VoxTellPredictor
@@ -99,15 +102,13 @@ class MyVoxTellPredictor(VoxTellPredictor):
         self,
         model_dir: str,
         device: torch.device = torch.device("cuda"),
-        text_encoding_model: str = "./models/qwen3-4b-embedding"  # local path after snapshot_download
+        text_encoding_model: str = "./models/qwen3-4b-embedding"
     ):
-        # mock the parent model loading
         with patch('transformers.AutoModel.from_pretrained') as mock_automodel:
-            # The parent calls .eval() on the result, so our mock needs to support that
             mock_automodel.return_value = MagicMock()
         super().__init__(
             model_dir=model_dir,
-            device=device,
+            device=torch.device("cpu"),
             text_encoding_model="Qwen/Qwen3-Embedding-0.6B"
         )
         self.perform_everything_on_device = False
@@ -123,72 +124,74 @@ class MyVoxTellPredictor(VoxTellPredictor):
             text_encoding_model,
             padding_side='left'
         )
-        
-        check_memory("Before Loading",torch.device("cuda"))
-        
-        logger.info("Loading Qwen3-4B directly in 4-bit on CPU to bypass RAM spikes....")
 
-        # define the qunato configuration for 4-bit :
+        check_memory("Before Loading", torch.device("cuda"))
+        logger.info("Loading Qwen3-4B directly in gpu...")
+
         q_config = QuantoConfig(weights="int4")
-        
-        # self.text_backbone = AutoModel.from_pretrained(
-        #     text_encoding_model,
-        #     device_map="cpu",
-        #     low_cpu_mem_usage=True,
-        #     dtype=torch.float16,  # fp16 = ~4GB peak RAM instead of ~16GB
-        # )
+
         self.text_backbone = AutoModel.from_pretrained(
-                text_encoding_model,
-                device_map="cpu",           # Keep it safely on System RAM
-                low_cpu_mem_usage=True,     # Tells HuggingFace to be careful with RAM
-                quantization_config=q_config # Applies Quanto shard-by-shard during load!
-            )
-        check_memory("loaded quantized",torch.device("cuda"))
-        
-        # logger.info("Quant
+            text_encoding_model,
+            device_map="cuda",
+            low_cpu_mem_usage=True,
+            quantization_config=q_config
+        )
+        check_memory("loaded quantized", torch.device("cuda"))
 
         self.text_backbone.eval()
         logger.info("Qwen3-4B loaded in 4-bit")
-        check_memory("after  direct 4-bit load",torch.device("cuda"))
-        # moving the voxtell to device :
-        self.network = self.network.to(self.device)
-        check_memory("after moving the voxtell network to vram",torch.device("cuda"))
+        check_memory("after direct 4-bit load", torch.device("cuda"))
+
+        # Network stays on CPU; GPU is reserved for text backbone during embedding
+        self.network = self.network.to(torch.device("cpu"))
+        check_memory("after moving the voxtell network to ram", torch.device("cuda"))
+
+        # Store the target device for inference
+        self.inference_device = device
+
     def predict_single_image(
         self,
         data: np.ndarray,
         text_prompts: Union[str, List[str]]
     ) -> np.ndarray:
-        """
-        Predict segmentation masks for a single image with text prompts.
-
-        Args:
-            data: Image data in RAS orientation (3D or 4D with channel dimension).
-            text_prompts: Single text prompt or list of text prompts describing
-                anatomical structures to segment.
-
-        Returns:
-            Segmentation masks as numpy array of shape (num_prompts, X, Y, Z)
-            with binary values (0 or 1) indicating the segmented regions.
-        """
         # Preprocess image
         data, bbox, orig_shape = self.preprocess(data)
         logger.info(f"Preprocessed shape: {data.shape}")
-        check_memory(" after preprocessing the data",torch.device("cuda"))
+        check_memory("after preprocessing the data", torch.device("cuda"))
 
-        # Embed text prompts on CPU → returns tensor on GPU
+        # Step 1: get embeddings — text backbone on GPU, embeddings returned on CPU
         embeddings = self.embed_text_prompts(text_prompts)
-        check_memory("after getting the embedding",torch.device("cuda"))
+        check_memory("after getting the embedding", torch.device("cuda"))
         logger.info(f"Embeddings shape: {embeddings.shape}")
-        # after getting the embedding free uo some space taken by text backbone
+
+        # Step 2: free text backbone from GPU so network can use it
         del self.text_backbone
         gc.collect()
-        check_memory("after del the backbone",torch.device("cuda"))
-        # Sliding window inference on GPU
+        torch.cuda.empty_cache()
+        if hasattr(ctypes.cdll, 'LoadLibrary'):
+            import platform
+            if platform.system() == "Linux":
+                ctypes.cdll.LoadLibrary("libc.so.6").malloc_trim(0)
+        check_memory("after del the backbone", torch.device("cuda"))
+
+        # Step 3: move network and embeddings to GPU together for inference
+        logger.info("Moving network and embeddings to GPU for sliding window inference...")
+        self.network = self.network.to(self.inference_device)
+        embeddings = embeddings.to(self.inference_device)
+        check_memory("after moving network+embeddings to GPU", torch.device("cuda"))
+
+        # Step 4: sliding window inference
         prediction = self.predict_sliding_window_return_logits(
             data, embeddings
         ).to("cpu")
-        
-        check_memory("after the sliding window",torch.device("cuda"))
+        check_memory("after the sliding window", torch.device("cuda"))
+
+        # Step 5: move network back to CPU to keep GPU free between calls
+        self.network = self.network.to(torch.device("cpu"))
+        gc.collect()
+        torch.cuda.empty_cache()
+        check_memory("after moving network back to cpu", torch.device("cuda"))
+
         # Postprocess logits → binary masks
         with torch.no_grad():
             prediction = torch.sigmoid(prediction.float()) > 0.5
@@ -200,9 +203,9 @@ class MyVoxTellPredictor(VoxTellPredictor):
         segmentation_reverted_cropping = insert_crop_into_image(
             segmentation_reverted_cropping, prediction, bbox
         )
-        check_memory("after postprocessing",torch.device("cuda"))
+        check_memory("after postprocessing", torch.device("cuda"))
         return segmentation_reverted_cropping
-    
+
     def embed_text_prompts(
         self,
         text_prompts: Union[List[str], str]
@@ -210,9 +213,9 @@ class MyVoxTellPredictor(VoxTellPredictor):
         if isinstance(text_prompts, str):
             text_prompts = [text_prompts]
         n_prompts = len(text_prompts)
-    
+
         text_prompts_wrapped = wrap_with_instruction(text_prompts)
-    
+
         text_tokens = self.tokenizer(
             text_prompts_wrapped,
             padding=True,
@@ -220,21 +223,23 @@ class MyVoxTellPredictor(VoxTellPredictor):
             max_length=self.max_text_length,
             return_tensors="pt",
         )
-    
+
         with torch.no_grad():
+            text_tokens = {k: v.to("cuda") for k, v in text_tokens.items()}
             text_embed = self.text_backbone(**text_tokens)
             embeddings = last_token_pool(
                 text_embed.last_hidden_state,
                 text_tokens["attention_mask"]
             )
-    
-        # Cast to fp32 to match VoxTell's project_text_embed layer 
+
+        # Cast to fp32 to match VoxTell's project_text_embed layer
         embeddings = embeddings.float()
-        embeddings = embeddings.to(self.device)
+
+        embeddings = embeddings.to("cpu")
         embeddings = embeddings.view(1, n_prompts, -1)
-    
-        empty_cache(self.device)
-        return embeddings    
+
+        empty_cache(self.inference_device)
+        return embeddings
 
 class voxtell(BasicInferTask):
     """Implements Voxtell-based segmentation with improved structure."""
@@ -261,7 +266,7 @@ class voxtell(BasicInferTask):
                 load_strict=True,
                 **kwargs,
             )
-            self.annotated_image = None # may help in session handling keep the segmentation 
+            self.annotated_image = None 
             self.image_path = None
             self.voxtell_predictor = None
             self.model_path = path
@@ -269,11 +274,12 @@ class voxtell(BasicInferTask):
 
 
 
-    def initialize_predictor(self, device=torch.device("cpu")):
+    def initialize_predictor(self, device=torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")):
         if self.voxtell_predictor is None:
+            logger.info(f"Initializing VoxTell predictor with device: {device}")
             self.voxtell_predictor = MyVoxTellPredictor(model_dir=self.model_path, device=device, text_encoding_model=self.text_encoding_model_path)
 
-    def run_inferer(self, data, device="cuda"):
+    def run_inferer(self, data, device):
         """
         Run Inferer over pre-processed Data.
         """
