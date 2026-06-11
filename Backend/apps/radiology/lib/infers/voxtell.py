@@ -269,7 +269,7 @@ class voxtell(BasicInferTask):
 
 
 
-    def initialize_predictor(self, device=torch.device("cpu")):
+    def initialize_predictor(self, device=torch.device("cuda")):
         if self.voxtell_predictor is None:
             self.voxtell_predictor = MyVoxTellPredictor(model_dir=self.model_path, device=device, text_encoding_model=self.text_encoding_model_path)
 
@@ -282,7 +282,7 @@ class voxtell(BasicInferTask):
         # Load the 3D image in RAS orientation
         image_array, image_ras, orig_orient = ImageProcessor.load_image_in_ras(data["image"])
         # Initialize the predictor for new task
-        self.initialize_predictor()
+        self.initialize_predictor(device=torch.device(device))
         # Get text prompts from data
         text_prompts = data.get("text_prompts", "spleen") 
         # Predict segmentation masks
@@ -300,7 +300,7 @@ class voxtell(BasicInferTask):
 
 
     def inferer(self, data=None) -> SlidingWindowInferer:
-        return SlidingWindowInferer(roi_size=[128, 128, 32], sw_batch_size=6, overlap=0.1)
+        return SlidingWindowInferer(roi_size=[128, 128, 32], sw_batch_size=1, overlap=0.1)
 
     def pre_transforms(self, data=None) -> Sequence[Callable]:
         return []
