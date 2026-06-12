@@ -153,55 +153,57 @@ class MyVoxTellPredictor(VoxTellPredictor):
         # moving the voxtell to device :
         self.network = self.network.to(self.device)
         check_memory("after moving the voxtell network to vram",torch.device("cuda"))
-    def predict_single_image(
-        self,
-        data: np.ndarray,
-        text_prompts: Union[str, List[str]]
-    ) -> np.ndarray:
-        """
-        Predict segmentation masks for a single image with text prompts.
-
-        Args:
-            data: Image data in RAS orientation (3D or 4D with channel dimension).
-            text_prompts: Single text prompt or list of text prompts describing
-                anatomical structures to segment.
-
-        Returns:
-            Segmentation masks as numpy array of shape (num_prompts, X, Y, Z)
-            with binary values (0 or 1) indicating the segmented regions.
-        """
-        # Preprocess image
-        data, bbox, orig_shape = self.preprocess(data)
-        logger.info(f"Preprocessed shape: {data.shape}")
-        check_memory(" after preprocessing the data",torch.device("cuda"))
-
-        # Embed text prompts on CPU → returns tensor on GPU
-        embeddings = self.embed_text_prompts(text_prompts)
-        check_memory("after getting the embedding",torch.device("cuda"))
-        logger.info(f"Embeddings shape: {embeddings.shape}")
-        # after getting the embedding free uo some space taken by text backbone
-        del self.text_backbone
-        gc.collect()
-        check_memory("after del the backbone",torch.device("cuda"))
-        # Sliding window inference on GPU
-        prediction = self.predict_sliding_window_return_logits(
-            data, embeddings
-        ).to("cpu")
         
-        check_memory("after the sliding window",torch.device("cuda"))
-        # Postprocess logits → binary masks
-        with torch.no_grad():
-            prediction = torch.sigmoid(prediction.float()) > 0.5
+    def predict_single_image(
+            self,
+            data: np.ndarray,
+            text_prompts: Union[str, List[str]]
+        ) -> np.ndarray:
+            # Preprocess image
+            data, bbox, orig_shape = self.preprocess(data)
+            logger.info(f"Preprocessed shape: {data.shape}")
 
-        segmentation_reverted_cropping = np.zeros(
-            [prediction.shape[0], *orig_shape],
-            dtype=np.uint8
-        )
-        segmentation_reverted_cropping = insert_crop_into_image(
-            segmentation_reverted_cropping, prediction, bbox
-        )
-        check_memory("after postprocessing",torch.device("cuda"))
-        return segmentation_reverted_cropping
+            # Embed text prompts on CPU
+            embeddings = self.embed_text_prompts(text_prompts)
+            
+            # ==========================================================
+            # CRITICAL RAM RELEASE: FORCE LINUX TO RECLAIM MEMORY NOW
+            # ==========================================================
+            del self.text_backbone
+            gc.collect()
+            
+            # Python gc.collect() frees memory to Python, 
+            # but malloc_trim(0) forces Linux to give it back to the OS!
+            import platform
+            if platform.system() == "Linux":
+                import ctypes
+                try:
+                    ctypes.cdll.LoadLibrary("libc.so.6").malloc_trim(0)
+                    logger.info("!!! Hard memory trim successful !!!")
+                except Exception as e:
+                    logger.warning(f"Failed to trim memory: {e}")
+                    
+            # Check if RAM dropped from 94% down to ~50%
+            check_memory("AFTER CRITICAL TRIM", torch.device("cuda"))
+            # ==========================================================
+
+            # Sliding window inference on GPU (Now it won't swap to disk!)
+            prediction = self.predict_sliding_window_return_logits(
+                data, embeddings
+            ).to("cpu")
+            
+            # Postprocess logits → binary masks
+            with torch.no_grad():
+                prediction = torch.sigmoid(prediction.float()) > 0.5
+
+            segmentation_reverted_cropping = np.zeros(
+                [prediction.shape[0], *orig_shape],
+                dtype=np.uint8
+            )
+            segmentation_reverted_cropping = insert_crop_into_image(
+                segmentation_reverted_cropping, prediction, bbox
+            )
+            return segmentation_reverted_cropping
     
     def embed_text_prompts(
         self,
@@ -273,34 +275,61 @@ class voxtell(BasicInferTask):
         if self.voxtell_predictor is None:
             self.voxtell_predictor = MyVoxTellPredictor(model_dir=self.model_path, device=device, text_encoding_model=self.text_encoding_model_path)
 
+
+
+    def initialize_predictor(self, device=torch.device("cuda")):
+        if self.voxtell_predictor is None:
+            self.voxtell_predictor = MyVoxTellPredictor(model_dir=self.model_path, device=device, text_encoding_model=self.text_encoding_model_path)
+
     def run_inferer(self, data, device="cuda"):
-        """
-        Run Inferer over pre-processed Data.
-        """
-        start_time = time.time()
-       
-        # Load the 3D image in RAS orientation
-        image_array, image_ras, orig_orient = ImageProcessor.load_image_in_ras(data["image"])
-        # Initialize the predictor for new task
-        self.initialize_predictor(device=torch.device(device))
-        # Get text prompts from data
-        text_prompts = data.get("text_prompts", "spleen") 
-        # Predict segmentation masks
-        voxtell_seg_np_ras = self.voxtell_predictor.predict_single_image(image_array, text_prompts)
-        # Convert segmentation back to original orientation
-        seg_final = ImageProcessor.convert_seg_to_orginal_orientation(voxtell_seg_np_ras, image_ras, orig_orient)
+            """
+            Run Inferer over pre-processed Data.
+            """
+            start_time = time.time()
         
-        seg_np = sitk.GetArrayFromImage(seg_final)         
-        seg_np = seg_np[None].astype(np.uint8)              
+            # 1. Load the 3D image
+            image_array, image_ras, orig_orient = ImageProcessor.load_image_in_ras(data["image"])
+            
+            # 2. Initialize the predictor (Loads Text Backbone to RAM, VoxTell to VRAM)
+            self.initialize_predictor(device=torch.device(device))
+            
+            # 3. Predict segmentation masks (Deletes text backbone internally after use)
+            text_prompts = data.get("text_prompts", "spleen") 
+            voxtell_seg_np_ras = self.voxtell_predictor.predict_single_image(image_array, text_prompts)
+            
+            # 4. Convert orientation back
+            seg_final = ImageProcessor.convert_seg_to_orginal_orientation(voxtell_seg_np_ras, image_ras, orig_orient)
+            seg_np = sitk.GetArrayFromImage(seg_final)         
+            seg_np = seg_np[None].astype(np.uint8)              
+            data["pred"] = torch.from_numpy(seg_np) 
 
-        # save results
-        data["pred"] = torch.from_numpy(seg_np) 
-        logger.info(f"Execution time: {time.time() - start_time:.2f} seconds")
-        return data
+            # =====================================================================
+            # SERVER CLEANUP: WIPE EVERYTHING TO RESET RAM FOR THE NEXT REQUEST
+            # =====================================================================
+            logger.info("Performing end-of-inference server RAM/VRAM wipe...")
+            
+            # Completely destroy the predictor object
+            self.voxtell_predictor = None 
+            
+            # Clear Python garbage collection and PyTorch VRAM cache
+            gc.collect()
+            torch.cuda.empty_cache()
+            
+            # Force Linux to reclaim all freed system RAM immediately
+            import platform
+            if platform.system() == "Linux":
+                import ctypes
+                try:
+                    ctypes.cdll.LoadLibrary("libc.so.6").malloc_trim(0)
+                    logger.info("Server RAM completely cleared back to baseline.")
+                except Exception as e:
+                    logger.warning(f"Failed to trim server memory: {e}")
+            # =====================================================================
 
-
+            logger.info(f"Execution time: {time.time() - start_time:.2f} seconds")
+            return data
     def inferer(self, data=None) -> SlidingWindowInferer:
-        return SlidingWindowInferer(roi_size=[128, 128, 32], sw_batch_size=1, overlap=0.1)
+        return SlidingWindowInferer(roi_size=[128, 128, 32], sw_batch_size=6, overlap=0.1)
 
     def pre_transforms(self, data=None) -> Sequence[Callable]:
         return []
