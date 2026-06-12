@@ -96,74 +96,57 @@ class MyVoxTellPredictor(VoxTellPredictor):
             self,
             model_dir: str,
             device: torch.device = torch.device("cuda"),
-            text_encoding_model: str = "./models/qwen3-4b-embedding"
+            text_encoding_model: str = None 
         ):
-            with patch('transformers.AutoModel.from_pretrained') as mock_automodel:
-                mock_automodel.return_value = MagicMock()
+            # Bypass parent's HuggingFace loading
+            with patch('transformers.AutoModel.from_pretrained') as mock_automodel, \
+                            patch('transformers.AutoTokenizer.from_pretrained') as mock_tokenizer:
+                            
+                            mock_automodel.return_value = MagicMock()
+                            mock_tokenizer.return_value = MagicMock()
                 
             super().__init__(
                 model_dir=model_dir,
                 device=device,
-                text_encoding_model="Qwen/Qwen3-Embedding-0.6B"
+                text_encoding_model="Qwen/Qwen3-Embedding-0.6B" # Ignored due to mock
             )
             self.perform_everything_on_device = False
-            check_memory("direct after super init", torch.device("cuda"))
-            # CRITICAL: Force VoxTell to CPU so the GPU is 100% empty!
-            self.network = self.network.to("cpu")
-            torch.cuda.empty_cache()
-            check_memory("After moving the network to cpu", torch.device("cuda"))
-            logger.info("Phase 1: Loading Tokenizer and Text Model directly to GPU VRAM...")
             
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                text_encoding_model, 
-                padding_side='left',
-                local_files_only=True
-            )
-            check_memory("AFTER loading the tokenizer", torch.device("cuda"))
-            q_config = QuantoConfig(weights="int4")
-            self.text_backbone = AutoModel.from_pretrained(
-                text_encoding_model,
-                device_map="cuda", # Streams directly to GPU
-                low_cpu_mem_usage=True,
-                quantization_config=q_config,
-                local_files_only=True
-            )
-            self.text_backbone.eval()
-            check_memory("AFTER loading the backbone", torch.device("cuda"))
+            # 1. LOAD THE CACHED VECTORS INSTEAD OF THE TEXT MODEL
+            cache_path = os.path.join(model_dir, "text_embeddings_cache.pkl")
+            if os.path.exists(cache_path):
+                with open(cache_path, "rb") as f:
+                    self.embeddings_cache = pickle.load(f)
+                logger.info(f"Loaded cached embeddings for: {list(self.embeddings_cache.keys())}")
+            else:
+                logger.error(f"Cache file NOT FOUND at {cache_path}! Run generate_cache.py first.")
+                self.embeddings_cache = {}
+
+            # 2. MOVE VOXTELL DIRECTLY TO GPU
+            # Since there is no text model, the GPU is empty and ready for VoxTell!
+            self.network = self.network.to(self.device)
+            torch.cuda.empty_cache()
+            check_memory("After INIT (VoxTell loaded, NO text model in RAM)", torch.device("cuda"))
+
     def embed_text_prompts(
         self,
         text_prompts: Union[List[str], str]
     ) -> torch.Tensor:
+        """Instantly retrieves the pre-calculated mathematical vectors."""
         if isinstance(text_prompts, str):
             text_prompts = [text_prompts]
-        n_prompts = len(text_prompts)
-    
-        text_prompts_wrapped = wrap_with_instruction(text_prompts)
-    
-        text_tokens = self.tokenizer(
-            text_prompts_wrapped,
-            padding=True,
-            truncation=True,
-            max_length=self.max_text_length,
-            return_tensors="pt",
-        )
         
-        # CRITICAL: Move tokens to GPU so they can interact with the GPU text model
-        text_tokens = {k: v.to(self.device) for k, v in text_tokens.items()}
-    
-        with torch.no_grad():
-            text_embed = self.text_backbone(**text_tokens)
-            embeddings = last_token_pool(
-                text_embed.last_hidden_state,
-                text_tokens["attention_mask"]
-            )
-    
-        # Cast to fp32 to match VoxTell's precision
-        embeddings = embeddings.float()
-        embeddings = embeddings.view(1, n_prompts, -1)
-        
-        # Vector is already on self.device (cuda), ready to be returned
-        return embeddings    
+        embeddings_list = []
+        for prompt in text_prompts:
+            key = prompt.lower().strip()
+            if key in self.embeddings_cache:
+                embeddings_list.append(self.embeddings_cache[key])
+            else:
+                raise ValueError(f"Prompt '{key}' was not found in the cache! Add it to generate_cache.py")
+
+        # Combine into a single tensor and push to GPU
+        embeddings = torch.cat(embeddings_list, dim=1) 
+        return embeddings.to(self.device)    
 
 
     def predict_single_image(
@@ -172,61 +155,32 @@ class MyVoxTellPredictor(VoxTellPredictor):
         text_prompts: Union[str, List[str]]
     ) -> np.ndarray:
         """
-        Optimized execution order to prevent 8GB System RAM bottleneck.
+        Hyper-Optimized Offline-Embedding Pipeline
         """
         # ==========================================================
-        # PHASE 1: TEXT EMBEDDING (Uses Text model currently on GPU)
+        # PHASE 1: INSTANT TEXT EMBEDDING 
         # ==========================================================
-        logger.info("Phase 1: Embedding text prompts...")
+        logger.info(f"Phase 1: Retrieving cached text embeddings for {text_prompts}...")
         embeddings = self.embed_text_prompts(text_prompts)
-        logger.info(f"Embeddings successfully created. Shape: {embeddings.shape}")
         check_memory("AFTER extracting the embedding", torch.device("cuda"))
-        # ==========================================================
-        # PHASE 2: TOTAL TEXT PURGE (Free the GPU for VoxTell)
-        # ==========================================================
-        logger.info("Phase 2: Purging Text Encoder from VRAM and System RAM...")
-        del self.text_backbone
-        del self.tokenizer
-        gc.collect()
-        
-        # CRITICAL: You MUST empty cache so the GPU actually drops the 2.5GB 
-        torch.cuda.empty_cache()
-        
-        import platform
-        if platform.system() == "Linux":
-            import ctypes
-            try:
-                ctypes.cdll.LoadLibrary("libc.so.6").malloc_trim(0)
-            except Exception as e:
-                pass
-                
-        # VRAM should now drop down to ~0.00 GB
-        check_memory("AFTER TEXT PURGE", torch.device("cuda"))
 
         # ==========================================================
-        # PHASE 3: LOAD VOXTELL NETWORK TO GPU
+        # PHASE 2: IMAGE PREPROCESSING 
         # ==========================================================
-        logger.info("Phase 3: Moving VoxTell neural network to GPU VRAM...")
-        self.network = self.network.to(self.device)
-        
-        # VRAM will show ~1.65 GB, System RAM will remain safe
-        check_memory("AFTER LOADING VOXTELL", torch.device("cuda"))
-
-        # ==========================================================
-        # PHASE 4: IMAGE PREPROCESSING 
-        # ==========================================================
-        logger.info("Phase 4: Preprocessing 3D Medical Image...")
+        logger.info("Phase 2: Preprocessing 3D Medical Image...")
         data, bbox, orig_shape = self.preprocess(data)
         logger.info(f"Preprocessed shape: {data.shape}")
         check_memory("AFTER preporcessing the data", torch.device("cuda"))
+        
         # ==========================================================
-        # PHASE 5: SLIDING WINDOW INFERENCE
+        # PHASE 3: SLIDING WINDOW INFERENCE
         # ==========================================================
-        logger.info("Phase 5: Running sliding window inference...")
+        logger.info("Phase 3: Running sliding window inference...")
         prediction = self.predict_sliding_window_return_logits(
             data, embeddings
         ).to("cpu")
         check_memory("AFTER SLIDING WINDOW INFERENCE", torch.device("cuda"))
+        
         # Postprocess logits → binary masks
         with torch.no_grad():
             prediction = torch.sigmoid(prediction.float()) > 0.5
@@ -239,20 +193,20 @@ class MyVoxTellPredictor(VoxTellPredictor):
             segmentation_reverted_cropping, prediction, bbox
         )
         check_memory("AFTER POSTPROCESSING", torch.device("cuda"))
-        return segmentation_reverted_cropping
+        return segmentation_reverted_cropping  
     
 class voxtell(BasicInferTask):
-    """Implements Voxtell-based segmentation with improved structure."""
+    """Implements Voxtell-based segmentation inside MONAILabel server."""
 
     def __init__(
             self,
             path,
-            text_encoding_model_path,
+            text_encoding_model_path=None,
             network=None,
             type=InferType.SEGMENTATION,
             labels=None,
             dimension=3,
-            description=" Pretrained Voxtell Model for video segmentation ",
+            description="Pretrained Voxtell Model for medical image segmentation",
             preload=False,
             **kwargs,
         ):
@@ -266,23 +220,23 @@ class voxtell(BasicInferTask):
                 load_strict=True,
                 **kwargs,
             )
-            self.annotated_image = None # may help in session handling keep the segmentation 
+            self.annotated_image = None 
             self.image_path = None
             self.voxtell_predictor = None
             self.model_path = path
             self.text_encoding_model_path = text_encoding_model_path
 
-
-
     def initialize_predictor(self, device=torch.device("cuda")):
+        """Initializes the predictor strictly ONCE to keep VRAM consumption stable across requests."""
         if self.voxtell_predictor is None:
-            self.voxtell_predictor = MyVoxTellPredictor(model_dir=self.model_path, device=device, text_encoding_model=self.text_encoding_model_path)
-
-
-
-    def initialize_predictor(self, device=torch.device("cuda")):
-        if self.voxtell_predictor is None:
-            self.voxtell_predictor = MyVoxTellPredictor(model_dir=self.model_path, device=device, text_encoding_model=self.text_encoding_model_path)
+            logger.info("Initializing MyVoxTellPredictor for the first time...")
+            self.voxtell_predictor = MyVoxTellPredictor(
+                model_dir=self.model_path, 
+                device=device, 
+                text_encoding_model=self.text_encoding_model_path
+            )
+        else:
+            logger.info("Predictor already cached in memory. Skipping initialization.")
 
     def run_inferer(self, data, device="cuda"):
             """
@@ -293,44 +247,46 @@ class voxtell(BasicInferTask):
             # 1. Load the 3D image
             image_array, image_ras, orig_orient = ImageProcessor.load_image_in_ras(data["image"])
             
-            # 2. Initialize the predictor (Loads Text Backbone to RAM, VoxTell to VRAM)
+            # 2. Initialize the predictor (Only hits disk on the very first API request)
             self.initialize_predictor(device=torch.device(device))
             
-            # 3. Predict segmentation masks (Deletes text backbone internally after use)
-            text_prompts = data.get("text_prompts", "spleen") 
+            # 3. Retrieve target prompt from MONAILabel client parameters or fallback
+            # Safe parsing: looks for 'params -> label' (standard MONAILabel UI parameter) or text_prompts
+            params = data.get("params", {})
+            text_prompts = params.get("label", data.get("text_prompts", "spleen"))
+            
+            # 4. Run inference
             voxtell_seg_np_ras = self.voxtell_predictor.predict_single_image(image_array, text_prompts)
             
-            # 4. Convert orientation back
+            # 5. Convert orientation back to original DICOM space
             seg_final = ImageProcessor.convert_seg_to_orginal_orientation(voxtell_seg_np_ras, image_ras, orig_orient)
-            seg_np = sitk.GetArrayFromImage(seg_final)         
+            seg_np = sitk.GetArrayFromImage(seg_final)  
+            seg_np = seg_np.transpose(2, 1, 0)       
             seg_np = seg_np[None].astype(np.uint8)              
             data["pred"] = torch.from_numpy(seg_np) 
 
             # =====================================================================
-            # SERVER CLEANUP: WIPE EVERYTHING TO RESET RAM FOR THE NEXT REQUEST
+            # POST-REQUEST CLEANUP (Cleans activations, keeps the model loaded)
             # =====================================================================
-            logger.info("Performing end-of-inference server RAM/VRAM wipe...")
+            logger.info("Performing post-inference memory optimization...")
             
-            # Completely destroy the predictor object
-            self.voxtell_predictor = None 
+            # NOTICE: We DO NOT set self.voxtell_predictor = None anymore!
+            # The model stays warm inside the GPU memory ready for the next request.
             
-            # Clear Python garbage collection and PyTorch VRAM cache
             gc.collect()
             torch.cuda.empty_cache()
             
-            # Force Linux to reclaim all freed system RAM immediately
             import platform
             if platform.system() == "Linux":
-                import ctypes
                 try:
                     ctypes.cdll.LoadLibrary("libc.so.6").malloc_trim(0)
-                    logger.info("Server RAM completely cleared back to baseline.")
                 except Exception as e:
                     logger.warning(f"Failed to trim server memory: {e}")
             # =====================================================================
 
-            logger.info(f"Execution time: {time.time() - start_time:.2f} seconds")
+            logger.info(f"Total inference execution time: {time.time() - start_time:.2f} seconds")
             return data
+
     def inferer(self, data=None) -> SlidingWindowInferer:
         return SlidingWindowInferer(roi_size=[128, 128, 32], sw_batch_size=6, overlap=0.1)
 
