@@ -151,43 +151,63 @@ class MyVoxTellPredictor(VoxTellPredictor):
         logger.info("Qwen3-4B loaded in 4-bit")
         check_memory("after  direct 4-bit load",torch.device("cuda"))
         # moving the voxtell to device :
-        self.network = self.network.to(self.device)
-        check_memory("after moving the voxtell network to vram",torch.device("cuda"))
+        # self.network = self.network.to(self.device)
+        # check_memory("after moving the voxtell network to vram",torch.device("cuda"))
         
     def predict_single_image(
             self,
             data: np.ndarray,
             text_prompts: Union[str, List[str]]
         ) -> np.ndarray:
-            # Preprocess image
-            data, bbox, orig_shape = self.preprocess(data)
-            logger.info(f"Preprocessed shape: {data.shape}")
-
-            # Embed text prompts on CPU
+            """
+            Optimized execution order to prevent 8GB System RAM bottleneck.
+            """
+            # ==========================================================
+            # PHASE 1: TEXT EMBEDDING (VoxTell network is still idle)
+            # ==========================================================
+            logger.info("Phase 1: Embedding text prompts...")
             embeddings = self.embed_text_prompts(text_prompts)
+            logger.info(f"Embeddings successfully created. Shape: {embeddings.shape}")
             
             # ==========================================================
-            # CRITICAL RAM RELEASE: FORCE LINUX TO RECLAIM MEMORY NOW
+            # PHASE 2: TOTAL TEXT PURGE (Drop RAM usage back to baseline)
             # ==========================================================
+            logger.info("Phase 2: Purging Text Encoder from System RAM...")
             del self.text_backbone
             gc.collect()
             
-            # Python gc.collect() frees memory to Python, 
-            # but malloc_trim(0) forces Linux to give it back to the OS!
             import platform
             if platform.system() == "Linux":
                 import ctypes
                 try:
                     ctypes.cdll.LoadLibrary("libc.so.6").malloc_trim(0)
-                    logger.info("!!! Hard memory trim successful !!!")
+                    logger.info("!!! System RAM successfully reclaimed by Linux !!!")
                 except Exception as e:
                     logger.warning(f"Failed to trim memory: {e}")
                     
-            # Check if RAM dropped from 94% down to ~50%
-            check_memory("AFTER CRITICAL TRIM", torch.device("cuda"))
-            # ==========================================================
+            # RAM should now drop back down to ~4GB (50% usage)
+            check_memory("AFTER TEXT PURGE", torch.device("cuda"))
 
-            # Sliding window inference on GPU (Now it won't swap to disk!)
+            # ==========================================================
+            # PHASE 3: LOAD VOXTELL NETWORK TO GPU
+            # ==========================================================
+            logger.info("Phase 3: Moving VoxTell neural network to GPU VRAM...")
+            self.network = self.network.to(self.device)
+            
+            # VRAM will show ~1.65 GB, System RAM will remain safe
+            check_memory("AFTER LOADING VOXTELL", torch.device("cuda"))
+
+            # ==========================================================
+            # PHASE 4: IMAGE PREPROCESSING (Uses the newly freed RAM space)
+            # ==========================================================
+            logger.info("Phase 4: Preprocessing 3D Medical Image...")
+            data, bbox, orig_shape = self.preprocess(data)
+            logger.info(f"Preprocessed shape: {data.shape}")
+            
+            # ==========================================================
+            # PHASE 5: SLIDING WINDOW INFERENCE
+            # ==========================================================
+            logger.info("Phase 5: Running sliding window inference...")
             prediction = self.predict_sliding_window_return_logits(
                 data, embeddings
             ).to("cpu")
@@ -204,7 +224,7 @@ class MyVoxTellPredictor(VoxTellPredictor):
                 segmentation_reverted_cropping, prediction, bbox
             )
             return segmentation_reverted_cropping
-    
+        
     def embed_text_prompts(
         self,
         text_prompts: Union[List[str], str]
