@@ -138,6 +138,12 @@ export default function PlaygroundCanvas({
   }, [mode]);
 
   const hasInitiatedPlan = useRef(false);
+  useEffect(() => {
+    if (session_id) {
+      sessionStorage.setItem('active_cube_session', String(session_id));
+      console.log('[PlaygroundCanvas] Saved session ID to storage:', session_id);
+    }
+  }, [session_id]);
 
   useEffect(() => {
     websocketService.connect();

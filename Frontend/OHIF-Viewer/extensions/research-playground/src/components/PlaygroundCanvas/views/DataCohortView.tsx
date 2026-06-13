@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, Filter, Database, AlertTriangle, Check, Activity, Layers } from 'lucide-react';
-
+import { Users, Filter, Database, AlertTriangle, Check, Activity, Layers, Download, Upload } from 'lucide-react';
 // --- FIXED HELPER COMPONENT ---
 const PausableGif = ({ uid, isHovered }: { uid: string; isHovered: boolean }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -106,9 +105,10 @@ interface SegmentationData {
 interface DataCohortViewProps {
     populationData?: PopulationData | null;
     segmentationData?: SegmentationData | null;
+    sessionId?: string | null;
 }
 
-export default function DataCohortView({ populationData, segmentationData }: DataCohortViewProps) {
+export default function DataCohortView({ populationData, segmentationData, sessionId }: DataCohortViewProps) {
 
     const [accumulatedPop, setAccumulatedPop] = useState({
         count: null as number | null,
@@ -158,6 +158,66 @@ export default function DataCohortView({ populationData, segmentationData }: Dat
     const roiDesc = segMetrics?.roi_description ?? null;
     const hasPopData = populationData && populationData.status !== undefined;
     const hasSegData = segmentationData && segmentationData.status !== undefined;
+
+    // --- NEW: File upload refs and state ---
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [isUploading, setIsUploading] = useState(false);
+
+    // --- NEW: DOWNLOAD TEMPLATE LOGIC ---
+    const handleDownloadCSV = () => {
+        if (accumulatedPop.uids.length === 0) return;
+        
+        const header = "id,target\n";
+        const rows = accumulatedPop.uids.map(uid => `${uid},`).join('\n');
+        const csvContent = "data:text/csv;charset=utf-8," + header + rows;
+        
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "cohort_labels_template.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+// --- UPLOAD FILLED CSV LOGIC ---
+    const handleUploadCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        // 1. Grab the session ID that PlaygroundCanvas saved
+        const activeSessionId = sessionStorage.getItem('active_cube_session');
+        
+        if (!activeSessionId) {
+            alert('Error: No active session found. Please start planning first.');
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            return;
+        }
+
+        setIsUploading(true);
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            // 2. Attach it to the URL query parameter
+            const response = await fetch(`http://localhost:8150/populations/upload-targets?session_id=${activeSessionId}`, {
+                method: 'POST',
+                body: formData,
+            });
+            
+            if (response.ok) {
+                alert('Labels uploaded successfully! The agent will now continue.');
+            } else {
+                alert('Failed to upload labels.');
+            }
+        } catch (error) {
+            console.error("Error uploading file", error);
+            alert("Upload failed.");
+        } finally {
+            setIsUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
 
     return (
         <div className="p-6 w-full h-full flex gap-6 bg-[#000000] overflow-hidden">
@@ -289,10 +349,42 @@ export default function DataCohortView({ populationData, segmentationData }: Dat
                                 : 'Waiting for Population Agent to initiate DB search...'}
                         </p>
                     </div>
-                    <div className="flex gap-2 text-xs font-mono">
+                    <div className="flex gap-2 items-center text-xs font-mono">
+                        {/* --- NEW: Download & Upload Buttons --- */}
+                        {accumulatedPop.uids.length > 0 && (
+                            <div className="flex gap-2 mr-4">
+                                <button 
+                                    onClick={handleDownloadCSV}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1f2d40] hover:bg-[#3c5d80] text-[#91b9cd] hover:text-white border border-[#3c5d80] rounded transition-colors"
+                                >
+                                    <Download size={14} /> Template
+                                </button>
+                                
+                                <input 
+                                    type="file" 
+                                    accept=".csv" 
+                                    ref={fileInputRef} 
+                                    className="hidden" 
+                                    onChange={handleUploadCSV}
+                                />
+                                
+                                <button 
+                                    onClick={() => fileInputRef.current?.click()}
+                                    disabled={isUploading}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 border rounded transition-colors shadow-[0_0_10px_rgba(92,230,176,0.2)] ${
+                                        isUploading 
+                                        ? 'bg-[#152e2e] text-gray-400 border-gray-600 cursor-not-allowed' 
+                                        : 'bg-[#152e2e] hover:bg-[#1f4242] text-[#5ce6b0] border-[#234d4d]'
+                                    }`}
+                                >
+                                    <Upload size={14} /> {isUploading ? 'Uploading...' : 'Upload Labels'}
+                                </button>
+                            </div>
+                        )}
+
                         {accumulatedPop.uids.length > 0 && (
                             <span className="px-3 py-1.5 bg-[#152e2e] text-[#5ce6b0] border border-[#234d4d] rounded flex items-center gap-2 shadow-[0_0_10px_rgba(92,230,176,0.2)]">
-                                <ActivityIcon size={12} className="animate-pulse" /> Cohort Secured & Loading Previews
+                                <ActivityIcon size={12} className="animate-pulse" /> Cohort Secured
                             </span>
                         )}
                     </div>
