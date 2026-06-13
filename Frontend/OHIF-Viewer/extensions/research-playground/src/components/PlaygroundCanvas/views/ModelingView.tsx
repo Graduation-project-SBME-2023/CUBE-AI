@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
     BarChart3, TrendingUp, GitBranch, CheckCircle,
-    Database, Activity, Target, Layers, X, Maximize2
+    Database, Activity, Target, Layers, X, Maximize2,
+    ChevronDown, ChevronRight, FlaskConical,
 } from 'lucide-react';
 import {
     LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -43,7 +44,8 @@ export interface ModelingData {
 }
 
 interface ModelingViewProps {
-    modelingData?: ModelingData | null;
+    /** Keyed by experiment_name (or a fallback key). Never overwritten — new experiments are added. */
+    modelingData?: Record<string, ModelingData> | null;
 }
 
 // ── Palette ────────────────────────────────────────────────────────────────────
@@ -314,19 +316,14 @@ function PrChart({ data, hidden, onToggle, height = 220 }: {
 function ConfusionMatrix({ matrix, labels }: { matrix: number[][]; labels: string[] }) {
     const max = Math.max(...matrix.flat());
 
-    // Returns bg + text colour with guaranteed contrast in both bright and dim states.
     const cellTheme = (val: number, ri: number, ci: number) => {
         const intensity = max > 0 ? val / max : 0;
         const isCorrect = ri === ci;
         if (isCorrect) {
-            // Correct prediction: green fill.
-            // Bright green (intensity > 0.35) → very dark text so numbers are readable.
-            // Dim green (intensity ≤ 0.35) → muted green text against near-black fill.
             const bg = `rgba(111,229,184,${0.12 + intensity * 0.82})`;
             const color = intensity > 0.35 ? '#051a0f' : '#6fe5b8';
             return { bg, color };
         } else {
-            // Off-diagonal: red fill.
             const bg = `rgba(239,68,68,${0.05 + intensity * 0.65})`;
             const color = intensity > 0.5 ? '#fca5a5' : '#566a84';
             return { bg, color };
@@ -468,11 +465,38 @@ function EmptyState() {
     );
 }
 
-// ── Main ───────────────────────────────────────────────────────────────────────
+// ── Best metric badge (used in accordion header) ───────────────────────────────
 
-export default function ModelingView({ modelingData }: ModelingViewProps) {
+function BestMetricBadge({ chartData }: { chartData: ChartData }) {
+    // Find the best holdout accuracy across all models in this experiment
+    const best = useMemo(() => {
+        let bestVal: number | null = null;
+        let bestModel = '';
+        Object.entries(chartData.per_model).forEach(([, m]) => {
+            const acc = m.holdout_metrics?.Accuracy ?? m.holdout_metrics?.accuracy ?? null;
+            if (acc != null && (bestVal == null || acc > bestVal)) {
+                bestVal = acc;
+                bestModel = m.label;
+            }
+        });
+        return { val: bestVal, model: bestModel };
+    }, [chartData]);
+
+    if (best.val == null) return null;
+
+    return (
+        <span className="flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded border border-[#6fe5b8]/30 bg-[#6fe5b8]/8 text-[#6fe5b8]">
+            <CheckCircle size={9} />
+            Best: {pct(best.val)} ({best.model})
+        </span>
+    );
+}
+
+// ── Per-experiment content panel ───────────────────────────────────────────────
+
+function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData }) {
     const [selectedModel, setSelectedModel] = useState<string | null>(null);
-    const [activeMetric, setActiveMetric]   = useState('Accuracy');
+    const [activeMetric, setActiveMetric] = useState('Accuracy');
     const [hidden, setHidden] = useState<Record<string, Set<string>>>({});
 
     const toggle = useCallback((chartId: string, key: string) => {
@@ -485,16 +509,12 @@ export default function ModelingView({ modelingData }: ModelingViewProps) {
 
     const h = (id: string): Set<string> => hidden[id] ?? new Set();
 
-    const hasData    = modelingData?.status === 'success';
-    const chartData  = modelingData?.chart_data;
-    const hasCharts  = !!(chartData && Object.keys(chartData.per_model ?? {}).length);
-    const modelKeys  = hasCharts ? Object.keys(chartData!.per_model) : [];
-    const activeKey  = selectedModel ?? modelKeys[0] ?? null;
+    const chartData = data.chart_data;
+    const hasCharts = !!(chartData && Object.keys(chartData.per_model ?? {}).length);
+    const modelKeys = hasCharts ? Object.keys(chartData!.per_model) : [];
+    const activeKey = selectedModel ?? modelKeys[0] ?? null;
     const activeModel = activeKey && hasCharts ? chartData!.per_model[activeKey] : null;
 
-    if (!hasData && !hasCharts) return <EmptyState />;
-
-    // Shared metric selector bar
     const MetricBar = () => (
         <div className="flex gap-2 flex-wrap">
             {METRIC_KEYS.map(m => (
@@ -510,157 +530,254 @@ export default function ModelingView({ modelingData }: ModelingViewProps) {
         </div>
     );
 
-    return (
-        <div className="w-full h-full overflow-y-auto bg-[#000000] p-5 space-y-4">
+    if (!hasCharts) {
+        return (
+            <div className="px-4 pb-4 pt-2 text-[#3c5d80] text-xs italic">
+                No chart data available for this experiment yet.
+            </div>
+        );
+    }
 
-            {/* Info bar */}
-            {hasData && (
-                <div className="flex items-center gap-3 flex-wrap">
-                    <div className="flex items-center gap-2 bg-[#0b1015] border border-[#1f2d40] rounded-lg px-3 py-2">
-                        <CheckCircle size={13} className="text-[#6fe5b8]" />
-                        <span className="text-[11px] text-[#91b9cd]">{modelingData.experiment_name || 'Experiment'}</span>
-                    </div>
-                    <div className="flex items-center gap-2 bg-[#0b1015] border border-[#1f2d40] rounded-lg px-3 py-2">
-                        <Layers size={13} className="text-[#5acce6]" />
-                        <span className="text-[11px] text-[#91b9cd]">{modelKeys.length} model{modelKeys.length !== 1 ? 's' : ''} trained</span>
-                    </div>
-                    {chartData?.fold && (
-                        <div className="flex items-center gap-2 bg-[#0b1015] border border-[#1f2d40] rounded-lg px-3 py-2">
-                            <Database size={13} className="text-[#a78bfa]" />
-                            <span className="text-[11px] text-[#91b9cd]">{chartData.fold}-fold CV</span>
-                        </div>
-                    )}
-                    <span className="text-[10px] text-[#3c5d80] ml-auto">Double-click any chart to expand · click legend pills to toggle series</span>
+    return (
+        <div className="px-4 pb-5 pt-3 space-y-4">
+            {/* Meta info badges */}
+            <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-2 bg-[#0b1015] border border-[#1f2d40] rounded-lg px-3 py-1.5">
+                    <Layers size={11} className="text-[#5acce6]" />
+                    <span className="text-[10px] text-[#91b9cd]">{modelKeys.length} model{modelKeys.length !== 1 ? 's' : ''}</span>
                 </div>
+                {chartData?.fold && (
+                    <div className="flex items-center gap-2 bg-[#0b1015] border border-[#1f2d40] rounded-lg px-3 py-1.5">
+                        <Database size={11} className="text-[#a78bfa]" />
+                        <span className="text-[10px] text-[#91b9cd]">{chartData.fold}-fold CV</span>
+                    </div>
+                )}
+                <span className="text-[10px] text-[#3c5d80] ml-auto">Double-click any chart to expand · click pills to toggle series</span>
+            </div>
+
+            {/* Comparison table */}
+            {chartData.comparison_table?.length > 0 && (
+                <Section title="Model Comparison (Cross-Validation)" icon={<BarChart3 size={13} />}
+                    expandContent={<ComparisonTable table={chartData.comparison_table} />}>
+                    <ComparisonTable table={chartData.comparison_table} />
+                </Section>
             )}
 
-            {hasCharts && chartData && (
-                <>
-                    {/* Comparison table */}
-                    {chartData.comparison_table?.length > 0 && (
-                        <Section title="Model Comparison (Cross-Validation)" icon={<BarChart3 size={13} />}
-                            expandContent={<ComparisonTable table={chartData.comparison_table} />}>
-                            <ComparisonTable table={chartData.comparison_table} />
-                        </Section>
-                    )}
-
-                    {/* Metric bars + Radar */}
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                        <Section title="Metric Comparison" icon={<Activity size={13} />}
-                            expandContent={
-                                <div className="space-y-4">
-                                    <MetricBar />
-                                    <ModelComparisonBars data={chartData} metric={activeMetric}
-                                        hidden={h('bars')} onToggle={k => toggle('bars', k)} />
-                                </div>
-                            }>
-                            <div className="space-y-3">
-                                <MetricBar />
-                                <ModelComparisonBars data={chartData} metric={activeMetric}
-                                    hidden={h('bars')} onToggle={k => toggle('bars', k)} />
-                            </div>
-                        </Section>
-
-                        <Section title="CV Metric Radar" icon={<Target size={13} />}
-                            expandContent={
-                                <MetricRadar data={chartData} hidden={h('radar')}
-                                    onToggle={k => toggle('radar', k)} height={380} />
-                            }>
-                            <MetricRadar data={chartData} hidden={h('radar')}
-                                onToggle={k => toggle('radar', k)} />
-                        </Section>
+            {/* Metric bars + Radar */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <Section title="Metric Comparison" icon={<Activity size={13} />}
+                    expandContent={
+                        <div className="space-y-4">
+                            <MetricBar />
+                            <ModelComparisonBars data={chartData} metric={activeMetric}
+                                hidden={h('bars')} onToggle={k => toggle('bars', k)} />
+                        </div>
+                    }>
+                    <div className="space-y-3">
+                        <MetricBar />
+                        <ModelComparisonBars data={chartData} metric={activeMetric}
+                            hidden={h('bars')} onToggle={k => toggle('bars', k)} />
                     </div>
+                </Section>
 
-                    {/* ROC + PR */}
-                    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                        <Section title="ROC Curves (Holdout)" icon={<TrendingUp size={13} />}
-                            expandContent={
-                                <RocChart data={chartData} hidden={h('roc')}
-                                    onToggle={k => toggle('roc', k)} height={420} />
-                            }>
-                            <RocChart data={chartData} hidden={h('roc')}
-                                onToggle={k => toggle('roc', k)} />
-                        </Section>
+                <Section title="CV Metric Radar" icon={<Target size={13} />}
+                    expandContent={
+                        <MetricRadar data={chartData} hidden={h('radar')}
+                            onToggle={k => toggle('radar', k)} height={380} />
+                    }>
+                    <MetricRadar data={chartData} hidden={h('radar')}
+                        onToggle={k => toggle('radar', k)} />
+                </Section>
+            </div>
 
-                        <Section title="Precision-Recall Curves (Holdout)" icon={<Activity size={13} />}
-                            expandContent={
-                                <PrChart data={chartData} hidden={h('pr')}
-                                    onToggle={k => toggle('pr', k)} height={420} />
-                            }>
-                            <PrChart data={chartData} hidden={h('pr')}
-                                onToggle={k => toggle('pr', k)} />
-                        </Section>
-                    </div>
+            {/* ROC + PR */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <Section title="ROC Curves (Holdout)" icon={<TrendingUp size={13} />}
+                    expandContent={
+                        <RocChart data={chartData} hidden={h('roc')}
+                            onToggle={k => toggle('roc', k)} height={420} />
+                    }>
+                    <RocChart data={chartData} hidden={h('roc')}
+                        onToggle={k => toggle('roc', k)} />
+                </Section>
 
-                    {/* Confusion matrices */}
-                    {modelKeys.length > 0 && (
-                        <Section title="Confusion Matrices" icon={<Target size={13} />}
-                            expandContent={activeModel?.confusion_matrix && (
-                                <div className="flex flex-col lg:flex-row gap-8 items-start">
-                                    <ConfusionMatrix
-                                        matrix={activeModel.confusion_matrix}
-                                        labels={activeModel.confusion_matrix_labels ?? activeModel.confusion_matrix.map((_, i) => String(i))}
-                                    />
-                                    {activeModel.holdout_metrics && (
-                                        <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                            {Object.entries(activeModel.holdout_metrics)
-                                                .filter(([k]) => !['confusion_matrix', 'confusion_matrix_labels'].includes(k))
-                                                .map(([k, v]) => (
-                                                    <div key={k} className="bg-[#151a1f] rounded-lg border border-[#1f2d40] p-3">
-                                                        <div className="text-[9px] text-[#566a84] uppercase tracking-wider mb-1">{k}</div>
-                                                        <div className="text-lg font-mono font-semibold text-[#5acce6]">
-                                                            {typeof v === 'number' ? (v <= 1 && v >= 0 ? pct(v) : v.toFixed(3)) : '—'}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}>
-                            <div className="flex gap-2 mb-4 flex-wrap">
-                                {modelKeys.map((key, i) => (
-                                    <button key={key} onClick={() => setSelectedModel(key)}
-                                        className={`px-3 py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center gap-1.5 ${
-                                            activeKey === key
-                                                ? 'border-[#5acce6]/60 text-[#5acce6] bg-[#5acce6]/10'
-                                                : 'border-[#1f2d40] text-[#566a84] hover:text-[#91b9cd]'
-                                        }`}>
-                                        <span className="w-2 h-2 rounded-full"
-                                            style={{ background: MODEL_COLORS[i % MODEL_COLORS.length] }} />
-                                        {chartData.per_model[key].label || key}
-                                    </button>
-                                ))}
-                            </div>
-                            {activeModel?.confusion_matrix ? (
-                                <div className="flex flex-col lg:flex-row gap-6 items-start">
-                                    <ConfusionMatrix
-                                        matrix={activeModel.confusion_matrix}
-                                        labels={activeModel.confusion_matrix_labels ?? activeModel.confusion_matrix.map((_, i) => String(i))}
-                                    />
-                                    {activeModel.holdout_metrics && Object.keys(activeModel.holdout_metrics).length > 0 && (
-                                        <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                            {Object.entries(activeModel.holdout_metrics)
-                                                .filter(([k]) => !['confusion_matrix', 'confusion_matrix_labels'].includes(k))
-                                                .map(([k, v]) => (
-                                                    <div key={k} className="bg-[#151a1f] rounded-lg border border-[#1f2d40] p-3">
-                                                        <div className="text-[9px] text-[#566a84] uppercase tracking-wider mb-1">{k}</div>
-                                                        <div className="text-lg font-mono font-semibold text-[#5acce6]">
-                                                            {typeof v === 'number' ? (v <= 1 && v >= 0 ? pct(v) : v.toFixed(3)) : '—'}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                        </div>
-                                    )}
-                                </div>
-                            ) : (
-                                <div className="text-[#3c5d80] text-xs text-center py-6">
-                                    Confusion matrix available after holdout evaluation
+                <Section title="Precision-Recall Curves (Holdout)" icon={<Activity size={13} />}
+                    expandContent={
+                        <PrChart data={chartData} hidden={h('pr')}
+                            onToggle={k => toggle('pr', k)} height={420} />
+                    }>
+                    <PrChart data={chartData} hidden={h('pr')}
+                        onToggle={k => toggle('pr', k)} />
+                </Section>
+            </div>
+
+            {/* Confusion matrices */}
+            {modelKeys.length > 0 && (
+                <Section title="Confusion Matrices" icon={<Target size={13} />}
+                    expandContent={activeModel?.confusion_matrix && (
+                        <div className="flex flex-col lg:flex-row gap-8 items-start">
+                            <ConfusionMatrix
+                                matrix={activeModel.confusion_matrix}
+                                labels={activeModel.confusion_matrix_labels ?? activeModel.confusion_matrix.map((_, i) => String(i))}
+                            />
+                            {activeModel.holdout_metrics && (
+                                <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                    {Object.entries(activeModel.holdout_metrics)
+                                        .filter(([k]) => !['confusion_matrix', 'confusion_matrix_labels'].includes(k))
+                                        .map(([k, v]) => (
+                                            <div key={k} className="bg-[#151a1f] rounded-lg border border-[#1f2d40] p-3">
+                                                <div className="text-[9px] text-[#566a84] uppercase tracking-wider mb-1">{k}</div>
+                                                <div className="text-lg font-mono font-semibold text-[#5acce6]">
+                                                    {typeof v === 'number' ? (v <= 1 && v >= 0 ? pct(v) : v.toFixed(3)) : '—'}
+                                                </div>
+                                            </div>
+                                        ))}
                                 </div>
                             )}
-                        </Section>
+                        </div>
+                    )}>
+                    <div className="flex gap-2 mb-4 flex-wrap">
+                        {modelKeys.map((key, i) => (
+                            <button key={key} onClick={() => setSelectedModel(key)}
+                                className={`px-3 py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center gap-1.5 ${
+                                    activeKey === key
+                                        ? 'border-[#5acce6]/60 text-[#5acce6] bg-[#5acce6]/10'
+                                        : 'border-[#1f2d40] text-[#566a84] hover:text-[#91b9cd]'
+                                }`}>
+                                <span className="w-2 h-2 rounded-full"
+                                    style={{ background: MODEL_COLORS[i % MODEL_COLORS.length] }} />
+                                {chartData.per_model[key].label || key}
+                            </button>
+                        ))}
+                    </div>
+                    {activeModel?.confusion_matrix ? (
+                        <div className="flex flex-col lg:flex-row gap-6 items-start">
+                            <ConfusionMatrix
+                                matrix={activeModel.confusion_matrix}
+                                labels={activeModel.confusion_matrix_labels ?? activeModel.confusion_matrix.map((_, i) => String(i))}
+                            />
+                            {activeModel.holdout_metrics && Object.keys(activeModel.holdout_metrics).length > 0 && (
+                                <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                    {Object.entries(activeModel.holdout_metrics)
+                                        .filter(([k]) => !['confusion_matrix', 'confusion_matrix_labels'].includes(k))
+                                        .map(([k, v]) => (
+                                            <div key={k} className="bg-[#151a1f] rounded-lg border border-[#1f2d40] p-3">
+                                                <div className="text-[9px] text-[#566a84] uppercase tracking-wider mb-1">{k}</div>
+                                                <div className="text-lg font-mono font-semibold text-[#5acce6]">
+                                                    {typeof v === 'number' ? (v <= 1 && v >= 0 ? pct(v) : v.toFixed(3)) : '—'}
+                                                </div>
+                                            </div>
+                                        ))}
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <div className="text-[#3c5d80] text-xs text-center py-6">
+                            Confusion matrix available after holdout evaluation
+                        </div>
                     )}
-                </>
+                </Section>
             )}
+        </div>
+    );
+}
+
+// ── Accordion row for a single experiment ──────────────────────────────────────
+
+function ExperimentAccordion({
+    expKey, data, index, defaultOpen,
+}: {
+    expKey: string; data: ModelingData; index: number; defaultOpen: boolean;
+}) {
+    const [open, setOpen] = useState(defaultOpen);
+    const chartData = data.chart_data;
+    const modelCount = chartData ? Object.keys(chartData.per_model ?? {}).length : 0;
+    const accentColor = MODEL_COLORS[index % MODEL_COLORS.length];
+
+    return (
+        <div className="rounded-xl border border-[#1f2d40] overflow-hidden bg-[#0b1015]">
+            {/* Header / toggle button */}
+            <button
+                onClick={() => setOpen(v => !v)}
+                className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
+            >
+                {/* Colored left accent */}
+                <span className="w-1 h-6 rounded-full flex-shrink-0" style={{ background: accentColor }} />
+
+                {/* Expand indicator */}
+                <span className="text-[#3c5d80] flex-shrink-0">
+                    {open
+                        ? <ChevronDown size={13} />
+                        : <ChevronRight size={13} />
+                    }
+                </span>
+
+                {/* Icon */}
+                <FlaskConical size={13} style={{ color: accentColor, flexShrink: 0 }} />
+
+                {/* Name */}
+                <span className="font-mono text-[12px] font-semibold text-[#91b9cd] flex-1 truncate">
+                    {expKey}
+                </span>
+
+                {/* Right-side badges */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                    {modelCount > 0 && (
+                        <span className="text-[10px] px-2 py-0.5 rounded border border-[#1f2d40] text-[#566a84] font-mono">
+                            {modelCount} model{modelCount !== 1 ? 's' : ''}
+                        </span>
+                    )}
+                    {chartData && <BestMetricBadge chartData={chartData} />}
+                    {data.status === 'success' && (
+                        <CheckCircle size={12} className="text-[#6fe5b8]" />
+                    )}
+                </div>
+            </button>
+
+            {/* Collapsible content */}
+            {open && (
+                <div className="border-t border-[#1f2d40]">
+                    <ExperimentPanel expKey={expKey} data={data} />
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ── Main ───────────────────────────────────────────────────────────────────────
+
+export default function ModelingView({ modelingData }: ModelingViewProps) {
+    const experiments = modelingData ?? {};
+    const expEntries = Object.entries(experiments);
+
+    if (expEntries.length === 0) return <EmptyState />;
+
+    return (
+        <div className="w-full h-full overflow-y-auto bg-[#000000] p-5 space-y-3">
+            {/* Header */}
+            <div className="flex items-center gap-3 flex-wrap mb-1">
+                <div className="flex items-center gap-2 bg-[#0b1015] border border-[#1f2d40] rounded-lg px-3 py-2">
+                    <FlaskConical size={13} className="text-[#5acce6]" />
+                    <span className="text-[11px] text-[#91b9cd]">
+                        {expEntries.length} experiment{expEntries.length !== 1 ? 's' : ''}
+                    </span>
+                </div>
+                <span className="text-[10px] text-[#3c5d80] ml-auto">
+                    Each experiment is collapsible · newest runs appear at the bottom
+                </span>
+            </div>
+
+            {/* One accordion per experiment */}
+            {expEntries.map(([key, data], i) => (
+                <ExperimentAccordion
+                    key={key}
+                    expKey={key}
+                    data={data}
+                    index={i}
+                    // Auto-open the most recent (last) experiment
+                    defaultOpen={i === expEntries.length - 1}
+                />
+            ))}
         </div>
     );
 }

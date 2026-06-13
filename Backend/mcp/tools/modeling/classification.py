@@ -27,22 +27,37 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 from .. import mcp
 from ..helpers.workspace import WorkspacePath, base_on_workspace_dir
+from tool_logging import ToolEvent, log_tool_state, TextPayload, ProgressPayload
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _setup_logging(log_file: str, verbose: bool = True) -> None:
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO if verbose else logging.WARNING)
-    for h in logger.handlers[:]:
-        logger.removeHandler(h)
     fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    fh = logging.FileHandler(log_file)
+
+    fh = logging.FileHandler(log_file, mode="a")
     fh.setFormatter(fmt)
+    fh.setLevel(logging.DEBUG)
     ch = logging.StreamHandler()
     ch.setFormatter(fmt)
+    ch.setLevel(logging.WARNING)
+
+    # Configure only the module logger — root is never touched
+    for h in logger.handlers[:]:
+        logger.removeHandler(h)
     logger.addHandler(fh)
     logger.addHandler(ch)
+
+    # PyCaret loggers sit in a different hierarchy so propagation won't
+    # reach our module logger — attach the same file handler directly
+    for name in ("pycaret", "pycaret.classification", "pycaret.internal"):
+        pl = logging.getLogger(name)
+        pl.setLevel(logging.DEBUG)
+        pl.propagate = False  # don't leak into root either
+        for h in pl.handlers[:]:
+            pl.removeHandler(h)
+        pl.addHandler(fh)     # same file handler instance
 
 
 def _csv_list(value: Optional[str]) -> Optional[list]:
@@ -251,11 +266,13 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
 
         log_file = os.path.join(output_dir, "pycaret_classification.log")
         _setup_logging(log_file)
+        logger = logging.getLogger(__name__)
+        os.environ["TQDM_DISABLE"] = "1"
 
         experiment_name = params.experiment_name or f"classification_exp_{time.strftime('%Y%m%d_%H%M%S')}"
         session_id = params.session_id if params.session_id is not None else random.randint(1, 10_000)
 
-        logging.info(f"Experiment: {experiment_name} | input: {params.input_path} | target: {target_column}")
+        logger.info(f"Experiment: {experiment_name} | input: {params.input_path} | target: {target_column}")
 
         try:
             from pycaret.classification import (
@@ -263,14 +280,56 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                 plot_model, predict_model, pull, save_model, setup, tune_model,
             )
             import pycaret
-            logging.info(f"PyCaret {getattr(pycaret, '__version__', 'unknown')} imported")
+            logger.info(f"PyCaret {getattr(pycaret, '__version__', 'unknown')} imported")
         except ImportError as exc:
             raise ImportError("PyCaret is required. Install with: pip install pycaret") from exc
 
+        # ── Stages: setup, compare, N×(tune+eval+plots), blend, finalise ──
+        # Total = 3 fixed stages + 1 per model + 1 if blending
+        n_models = params.n_select
+        TOTAL_STAGES = 3 + n_models + 1  # setup | compare | tune×N | blend+finalise
+
+        payload = TextPayload(message=f"Starting classification experiment '{experiment_name}'...")
+        log_tool_state(ToolEvent("tool_started", "text", payload))
+
+        # ── Stage 1: Load data & PyCaret setup ─────────────────────────────
+        payload = ProgressPayload(current=1, total=TOTAL_STAGES, label="Loading data & configuring PyCaret")
+        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+
         data = pd.read_csv(params.input_path)
-        logging.info(f"Data loaded: {data.shape[0]} rows × {data.shape[1]} cols")
+        logger.info(f"Data loaded: {data.shape[0]} rows × {data.shape[1]} cols")
+
+        MIN_ROWS = 10  # conservative minimum for any meaningful CV
+        if data.shape[0] < MIN_ROWS:
+            return json.dumps({
+                "status": "error",
+                "error_message": (
+                    f"Dataset has only {data.shape[0]} rows which is too few for reliable "
+                    f"cross-validation training. A minimum of {MIN_ROWS} rows is recommended. "
+                    f"Consider collecting more data or merging with other datasets."
+                ),
+                "input_path": params.input_path,
+                "rows": data.shape[0],
+                "cols": data.shape[1],
+            }, indent=2)
+
         if target_column not in data.columns:
             raise ValueError(f"Target column '{target_column}' not found in data.")
+
+        class_counts = data[target_column].value_counts()
+        min_class_count = class_counts.min()
+        if min_class_count < params.fold:
+            return json.dumps({
+                "status": "error",
+                "error_message": (
+                    f"The rarest class has only {min_class_count} sample(s), which is fewer "
+                    f"than fold={params.fold}. Stratified CV requires at least fold samples "
+                    f"per class. Either reduce fold or collect more data."
+                ),
+                "input_path": params.input_path,
+                "class_distribution": class_counts.to_dict(),
+                "fold": params.fold,
+            }, indent=2)
 
         # Store ground truth for holdout evaluation
         y_holdout = None  # will be set after setup splits data
@@ -281,7 +340,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                 import cuml  # noqa: F401
             except ImportError:
                 if params.ignore_gpu_errors:
-                    logging.warning("cuml not installed – falling back to CPU.")
+                    logger.warning("cuml not installed – falling back to CPU.")
                     use_gpu = False
                 else:
                     raise ImportError("GPU requested but cuml is not installed.")
@@ -319,17 +378,17 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                 bad = str(exc)
                 if "unexpected keyword argument" in bad:
                     param = bad.split("'")[1]
-                    logging.warning(f"Removing unsupported setup param '{param}' and retrying.")
+                    logger.warning(f"Removing unsupported setup param '{param}' and retrying.")
                     kwargs.pop(param, None)
                     return setup(**kwargs)
                 raise
             except Exception:
                 minimal = {"data": data, "target": target_column, "session_id": session_id}
-                logging.warning("Setup failed – retrying with minimal params.")
+                logger.warning("Setup failed – retrying with minimal params.")
                 return setup(**minimal)
 
         _try_setup(setup_kwargs)
-        logging.info("PyCaret setup complete.")
+        logger.info("PyCaret setup complete.")
 
         # Extract holdout (test) set ground truth from PyCaret's internal split
         try:
@@ -338,6 +397,10 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             y_holdout = get_config("y_test")
         except Exception:
             pass
+
+        # ── Stage 2: Compare models ─────────────────────────────────────────
+        payload = ProgressPayload(current=2, total=TOTAL_STAGES, label="Comparing models")
+        log_tool_state(ToolEvent("tool_progress", "progress", payload))
 
         compare_kwargs: dict = {"n_select": params.n_select}
         if params.include_models:
@@ -348,12 +411,21 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         try:
             best = compare_models(**compare_kwargs)
         except Exception:
-            logging.warning("compare_models failed with custom kwargs – retrying with defaults.")
+            logger.warning("compare_models failed with custom kwargs – retrying with defaults.")
             best = compare_models()
 
         if not isinstance(best, list):
             best = [best]
-        logging.info(f"{len(best)} model(s) selected.")
+        logger.info(f"{len(best)} model(s) selected.")
+
+        compare_df = pull()
+        logger.debug(f"compare_models result table shape: {compare_df.shape}")
+        logger.debug(f"compare_models result table:\n{compare_df.to_string()}")
+
+        if not best:
+            logger.error(f"best is empty. n_select={params.n_select}, "
+                        f"models in results: {len(compare_df)}")
+            raise Exception("No models trained successfully, dataset size is likely too small.")
 
         created_files: list = []
 
@@ -388,7 +460,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                         if os.path.exists(fp):
                             results.append((f"Plot: {pt}", fp))
                     except Exception as exc:
-                        logging.warning(f"Plot '{pt}' skipped: {exc}")
+                        logger.warning(f"Plot '{pt}' skipped: {exc}")
             finally:
                 os.chdir(original_dir)
             return results
@@ -408,7 +480,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                         if os.path.exists(fp):
                             results.append((f"Interpretation: {plot_type}", fp))
                     except Exception as exc:
-                        logging.warning(f"Interpretation '{plot_type}' skipped: {exc}")
+                        logger.warning(f"Interpretation '{plot_type}' skipped: {exc}")
             finally:
                 os.chdir(original_dir)
             return results
@@ -418,7 +490,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             try:
                 preds = predict_model(model)
                 preds.to_csv(output_path, index=False)
-                logging.info(f"Holdout predictions for '{name}' → {output_path}")
+                logger.info(f"Holdout predictions for '{name}' → {output_path}")
 
                 chart_info = None
                 if y_holdout is not None:
@@ -426,7 +498,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
 
                 return output_path, chart_info
             except Exception as exc:
-                logging.error(f"Holdout eval failed for '{name}': {exc}")
+                logger.error(f"Holdout eval failed for '{name}': {exc}")
                 return None, None
 
         models_dir = os.path.join(output_dir, "models")
@@ -436,11 +508,20 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         # chart_data accumulator
         per_model_chart: dict = {}
 
+        # ── Stages 3…(2+N): Tune, evaluate & plot each model ───────────────
         for i, model in enumerate(best):
             name = f"tuned_model_{i + 1}"
+            label = _get_model_label(model)
             model_dir = os.path.join(models_dir, name)
             os.makedirs(model_dir, exist_ok=True)
-            logging.info(f"Tuning {name} ({i + 1}/{len(best)})")
+            logger.info(f"Tuning {name} ({i + 1}/{len(best)})")
+
+            payload = ProgressPayload(
+                current=3 + i,
+                total=TOTAL_STAGES,
+                label=f"Tuning & evaluating {label} ({i + 1}/{len(best)})",
+            )
+            log_tool_state(ToolEvent("tool_progress", "progress", payload))
 
             try:
                 tuned = tune_model(model)
@@ -466,7 +547,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                     individual_model_paths[name] = model_pkl
                     created_files.append((f"{name} Saved Model", model_pkl))
                 except Exception as exc:
-                    logging.error(f"Could not save {name}: {exc}")
+                    logger.error(f"Could not save {name}: {exc}")
 
                 plots_dir_path = os.path.join(model_dir, "plots")
                 os.makedirs(plots_dir_path, exist_ok=True)
@@ -480,19 +561,26 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                     model_test_predictions[name] = result_path
                     created_files.append((f"{name} Holdout Predictions", result_path))
 
-                label = _get_model_label(tuned)
                 per_model_chart[name] = {
                     "label": label,
                     "cv_metrics": cv_metrics,
-                    "holdout_metrics": chart_info["metrics"]  if chart_info else {},
-                    "confusion_matrix": chart_info["confusion_matrix"] if chart_info else None,
+                    "holdout_metrics": chart_info.get("metrics", {})           if chart_info else {},
+                    "confusion_matrix": chart_info.get("confusion_matrix")     if chart_info else None,
                     "confusion_matrix_labels": chart_info.get("confusion_matrix_labels") if chart_info else None,
-                    "roc_curve": chart_info["roc_curve"] if chart_info else None,
-                    "pr_curve":  chart_info["pr_curve"]  if chart_info else None,
+                    "roc_curve": chart_info.get("roc_curve")                   if chart_info else None,
+                    "pr_curve":  chart_info.get("pr_curve")                    if chart_info else None,
                 }
 
             except Exception as exc:
-                logging.error(f"Failed to process {name}: {exc}")
+                logger.error(f"Failed to process {name}: {exc}")
+
+        # ── Final stage: Blend (if applicable) + save final model ──────────
+        payload = ProgressPayload(
+            current=TOTAL_STAGES,
+            total=TOTAL_STAGES,
+            label="Blending models & saving final model" if len(tuned_models) > 1 else "Saving final model",
+        )
+        log_tool_state(ToolEvent("tool_progress", "progress", payload))
 
         blended_model = None
         if len(tuned_models) > 1:
@@ -515,7 +603,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                     individual_model_paths["blended_model"] = blend_pkl
                     created_files.append(("Blended Model Saved Model", blend_pkl))
                 except Exception as exc:
-                    logging.error(f"Could not save blended model: {exc}")
+                    logger.error(f"Could not save blended model: {exc}")
 
                 blend_plots_dir = os.path.join(blend_dir, "plots")
                 os.makedirs(blend_plots_dir, exist_ok=True)
@@ -529,17 +617,17 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                     created_files.append(("Blended Model Holdout Predictions", result_path))
 
                 per_model_chart["blended_model"] = {
-                    "label": "Blended Ensemble",
+                    "label": "Blended",
                     "cv_metrics": blend_cv_metrics,
-                    "holdout_metrics": chart_info["metrics"]  if chart_info else {},
-                    "confusion_matrix": chart_info["confusion_matrix"] if chart_info else None,
+                    "holdout_metrics": chart_info.get("metrics", {})           if chart_info else {},
+                    "confusion_matrix": chart_info.get("confusion_matrix")     if chart_info else None,
                     "confusion_matrix_labels": chart_info.get("confusion_matrix_labels") if chart_info else None,
-                    "roc_curve": chart_info["roc_curve"] if chart_info else None,
-                    "pr_curve":  chart_info["pr_curve"]  if chart_info else None,
+                    "roc_curve": chart_info.get("roc_curve")                   if chart_info else None,
+                    "pr_curve":  chart_info.get("pr_curve")                    if chart_info else None,
                 }
 
             except Exception as exc:
-                logging.error(f"Blending failed: {exc}")
+                logger.error(f"Blending failed: {exc}")
 
         final_model = blended_model or (tuned_models[0] if tuned_models else best[0])
 
@@ -548,7 +636,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             save_model(final_model, final_model_path)
             created_files.append(("Final Model", final_model_path))
         except Exception as exc:
-            logging.error(f"Could not save final model: {exc}")
+            logger.error(f"Could not save final model: {exc}")
             final_model_path = None
 
         summary_path = os.path.join(output_dir, "model_summary.csv")
@@ -565,7 +653,11 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         pd.DataFrame(rows).to_csv(summary_path, index=False)
         created_files.append(("Model Summary", summary_path))
 
-        logging.info("Classification experiment complete.")
+        logger.info("Classification experiment complete.")
+
+        payload = TextPayload(message="Classification Experiment...Done")
+        log_tool_state(ToolEvent("tool_finished", "text", payload))
+
         return json.dumps({
             "status": "success",
             "experiment_name": experiment_name,
@@ -585,7 +677,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         }, indent=2)
 
     except Exception as exc:
-        logging.error(f"Unhandled error in pycaret_train_classifier: {exc}", exc_info=True)
+        logger.error(f"Unhandled error in pycaret_train_classifier: {exc}", exc_info=True)
         return json.dumps({
             "status": "error",
             "error_message": str(exc),
@@ -620,8 +712,9 @@ async def pycaret_run_inference(params: RunInferenceInput) -> str:
         os.makedirs(output_dir, exist_ok=True)
         log_file = os.path.join(output_dir, "pycaret_inference.log")
         _setup_logging(log_file, verbose=params.verbose)
+        logger = logging.getLogger(__name__)
 
-        logging.info(f"Inference | model: {params.model_path} | input: {params.input_path}")
+        logger.info(f"Inference | model: {params.model_path} | input: {params.input_path}")
 
         try:
             from pycaret.classification import load_model, predict_model
@@ -629,7 +722,7 @@ async def pycaret_run_inference(params: RunInferenceInput) -> str:
             raise ImportError("PyCaret is required. Install with: pip install pycaret") from exc
 
         data = pd.read_csv(params.input_path)
-        logging.info(f"Data loaded: {data.shape}")
+        logger.info(f"Data loaded: {data.shape}")
 
         has_ground_truth = (
             params.ground_truth_column is not None
@@ -637,7 +730,7 @@ async def pycaret_run_inference(params: RunInferenceInput) -> str:
         )
         original_labels = data[params.ground_truth_column].copy() if has_ground_truth else None
         if params.ground_truth_column and not has_ground_truth:
-            logging.warning(f"Column '{params.ground_truth_column}' not found – metrics skipped.")
+            logger.warning(f"Column '{params.ground_truth_column}' not found – metrics skipped.")
 
         model_path = params.model_path.removesuffix(".pkl")
         model_dir = os.path.dirname(model_path)
@@ -738,7 +831,7 @@ async def pycaret_run_inference(params: RunInferenceInput) -> str:
         }, indent=2)
 
     except Exception as exc:
-        logging.error(f"Unhandled error in pycaret_run_inference: {exc}", exc_info=True)
+        logger.error(f"Unhandled error in pycaret_run_inference: {exc}", exc_info=True)
         return json.dumps({
             "status": "error",
             "error_message": str(exc),

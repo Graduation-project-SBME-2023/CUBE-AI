@@ -93,7 +93,7 @@ export default function ResearchPlayground() {
     const [segmentationData, setSegmentationData] = useState<any>(null);
     const [featuresData, setFeaturesData] = useState<any>(null);
     const [importanceData, setImportanceData] = useState<any>(null);
-    const [modelingData, setModelingData] = useState<any>(null);
+    const [modelingData, setModelingData] = useState<Record<string, any>>({});
     const [reportData, setReportData] = useState<any>(null);
     const [latexData, setLatexData] = useState<any>(null);
     const [viewsReady, setViewsReady] = useState(false);
@@ -212,7 +212,7 @@ export default function ResearchPlayground() {
                     setPopulationData(payload);
                     break;
                 case 'segmentation_output':
-                    setSegmentationData(payload);
+                    setSegmentationData({ ...payload, sessionId: data.session_id });
                     break;
                 case 'features_output':
                     // Backend sends tool="radiomic_extraction" or tool="feature_importance"
@@ -222,9 +222,21 @@ export default function ResearchPlayground() {
                         setFeaturesData(payload);
                     }
                     break;
-                case 'modeling_output':
-                    setModelingData(payload);
+                case 'modeling_output': {
+                    // Use experiment_name as the key; fall back to a counter based on current size.
+                    const key: string =
+                        payload?.experiment_name ||
+                        `Experiment ${Object.keys(modelingData).length + 1}`;
+                
+                    setModelingData(prev => ({
+                        ...prev,
+                        // Merge rather than replace — if the same experiment name arrives again
+                        // (e.g. a partial update from the backend), its entry is overwritten while
+                        // all other experiments are preserved.
+                        [key]: payload,
+                    }));
                     break;
+                }
                 case 'report_output':
                     setReportData(payload);
                     break;
@@ -284,9 +296,9 @@ export default function ResearchPlayground() {
 
                     {/* Back Button */}
                     <button
-                        onClick={() => navigate(-1)}
+                        onClick={() => navigate('/agentic-home')}
                         className="mr-3 p-1.5 rounded-md transition-all hover:bg-[#0d1e2e] text-[#5a8aaa] hover:text-[#5acce6] border border-transparent hover:border-[#1e3248]"
-                        title="Go back to previous page"
+                        title="Back to Home"
                     >
                         <ArrowLeftIcon size={16} />
                     </button>

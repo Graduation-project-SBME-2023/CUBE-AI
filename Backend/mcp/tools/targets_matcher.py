@@ -60,6 +60,7 @@ import asyncio
 # Create a global flag to track the waiting state
 IS_WAITING_FOR_LABELS = False
 
+
 @mcp.tool()
 async def generate_targets() -> str:
     """
@@ -79,10 +80,6 @@ async def generate_targets() -> str:
             content_type='text',
             content=payload
         )
-        log_tool_state(start_event)
-        IS_WAITING_FOR_LABELS = True # Prevent future logs while waiting
-    
-    
     csv_path = os.path.join(output_dir, "targets.csv")
 
     # Wait up to 45 seconds to keep the LLM connection alive
