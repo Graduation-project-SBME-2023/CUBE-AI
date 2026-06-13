@@ -605,51 +605,51 @@ export default class InteractiveSegmentation extends BaseTab {
 
     // =============== need to test why those probes are undefined =========
 
-    const positive_points = {};
-    const negative_points = {};
-    const boxes = {};
-    const object_ids = [];
-    const framOfReferenceUID = Object.keys(clickPoints[currentObject])[0];
-    for (const object_id in clickPoints) {
-      const negative_annotations =
-        clickPoints[object_id][framOfReferenceUID]['ProbeMONAILabelNeg'];
-      const positive_annotations =
-        clickPoints[object_id][framOfReferenceUID]['ProbeMONAILabelPos'];
-      const box_annotations =
-        clickPoints[object_id][framOfReferenceUID]['RecROIToolMONAILabel'];
-      negative_points[object_id] = [];
-      for (const neg_annotation in negative_annotations) {
-        console.log(neg_annotation);
-        const pt = negative_annotations[neg_annotation].data.handles.points[0];
-        negative_points[object_id].push(this.correct_xy_format(worldToIndex(pt)));
-        // negative_points[object_id].push(this.correct_xy_format(worldToIndex(pt).map(Math.round)));
-      }
+    // const positive_points = {};
+    // const negative_points = {};
+    // const boxes = {};
+    // const object_ids = [];
+    // const framOfReferenceUID = Object.keys(clickPoints[currentObject])[0]; 
+    // for (const object_id in clickPoints) {
+    //   const negative_annotations =
+    //     clickPoints[object_id][framOfReferenceUID]['ProbeMONAILabelNeg'];
+    //   const positive_annotations =
+    //     clickPoints[object_id][framOfReferenceUID]['ProbeMONAILabelPos'];
+    //   const box_annotations =
+    //     clickPoints[object_id][framOfReferenceUID]['RecROIToolMONAILabel'];
+    //   negative_points[object_id] = [];
+    //   for (const neg_annotation in negative_annotations) {
+    //     console.log(neg_annotation);
+    //     const pt = negative_annotations[neg_annotation].data.handles.points[0];
+    //     negative_points[object_id].push(this.correct_xy_format(worldToIndex(pt)));
+    //     // negative_points[object_id].push(this.correct_xy_format(worldToIndex(pt).map(Math.round)));
+    //   }
 
-      positive_points[object_id] = [];
-      for (const pos_annotation in positive_annotations) {
-        const pt = positive_annotations[pos_annotation].data.handles.points[0];
-          positive_points[object_id].push(this.correct_xy_format(worldToIndex(pt)));
-        // positive_points[object_id].push(this.correct_xy_format(worldToIndex(pt).map(Math.round)));
-      }
+    //   positive_points[object_id] = [];
+    //   for (const pos_annotation in positive_annotations) {
+    //     const pt = positive_annotations[pos_annotation].data.handles.points[0];
+    //       positive_points[object_id].push(this.correct_xy_format(worldToIndex(pt)));
+    //     // positive_points[object_id].push(this.correct_xy_format(worldToIndex(pt).map(Math.round)));
+    //   }
 
-      boxes[object_id] = [];
-      for (const box_annotation in box_annotations) {
-        const pt1 = box_annotations[box_annotation].data.handles.points[0];
-        const pt2 = box_annotations[box_annotation].data.handles.points[3];
-        boxes[object_id].push([
-          this.correct_xy_format(worldToIndex(pt1).map(Math.round)),
-          this.correct_xy_format(worldToIndex(pt2).map(Math.round)),
-        ]);
-      }
-      object_ids.push(object_id);
-    }
-    // debuging
-    console.log('positive points: ', positive_points);
-    const points = positive_points[1];
-    const lastPoint = points?.[points.length - 1];  // safe access
-    console.log("Last point for object", 0, "is", lastPoint);
-    console.log('negative points: ', negative_points);
-    console.log('boxes: ', boxes);
+    //   boxes[object_id] = [];
+    //   for (const box_annotation in box_annotations) {
+    //     const pt1 = box_annotations[box_annotation].data.handles.points[0];
+    //     const pt2 = box_annotations[box_annotation].data.handles.points[3];
+    //     boxes[object_id].push([
+    //       this.correct_xy_format(worldToIndex(pt1).map(Math.round)),
+    //       this.correct_xy_format(worldToIndex(pt2).map(Math.round)),
+    //     ]);
+    //   }
+    //   object_ids.push(object_id);
+    // }
+    // // debuging 
+    // console.log('positive points: ', positive_points);
+    // const points = positive_points[1];
+    // const lastPoint = points?.[points.length - 1];  // safe access
+    // console.log("Last point for object", 0, "is", lastPoint);
+    // console.log('negative points: ', negative_points);
+    // console.log('boxes: ', boxes);
     
     // =====================================================================
     const config = this.props.onOptionsConfig();

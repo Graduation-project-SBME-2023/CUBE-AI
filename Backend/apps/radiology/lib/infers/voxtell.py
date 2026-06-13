@@ -10,12 +10,11 @@
 # # # limitations under the License.
 
 import torch
-import logging
 import os
 import nibabel as nib
 import numpy as np
 from enum import Enum
-from typing import Callable, Sequence
+from typing import Callable, Sequence, List, Union
 from PIL import Image
 import shutil
 import gc
@@ -23,15 +22,22 @@ import time
 import tempfile
 import pickle
 import ctypes
-from typing import List, Union
 from transformers import AutoModel, AutoTokenizer
 from optimum.quanto import quantize, freeze, qint4
-
+from transformers import QuantoConfig
+from unittest.mock import patch, MagicMock
 from voxtell.inference.predictor import VoxTellPredictor
 from voxtell.utils.text_embedding import last_token_pool, wrap_with_instruction
 from acvl_utils.cropping_and_padding.bounding_boxes import insert_crop_into_image
 from nnunetv2.utilities.helpers import empty_cache
 import SimpleITK as sitk
+import psutil
+import logging
+import sys
+from voxtell.inference.predictor import VoxTellPredictor
+from voxtell.utils.text_embedding import last_token_pool, wrap_with_instruction
+from acvl_utils.cropping_and_padding.bounding_boxes import insert_crop_into_image
+from nnunetv2.utilities.helpers import empty_cache
 from monai.inferers import Inferer, SlidingWindowInferer, SliceInferer
 from monailabel.interfaces.tasks.infer_v2 import InferType
 from monailabel.tasks.infer.basic_infer import BasicInferTask
@@ -39,6 +45,21 @@ from monailabel.tasks.infer.basic_infer import BasicInferTask
 
 logger = logging.getLogger(__name__)
 
+def check_memory(step_name: str, device: torch.device):
+    """Helper function to print current System RAM and GPU VRAM usage."""
+    ram = psutil.virtual_memory()
+    ram_used_gb = ram.used / (1024 ** 3)
+    ram_total_gb = ram.total / (1024 ** 3)
+    
+    log_message = f"[{step_name}] RAM Used: {ram_used_gb:.2f} GB / {ram_total_gb:.2f} GB ({ram.percent}%)"
+
+    if device.type == 'cuda':
+        vram_allocated = torch.cuda.memory_allocated(device) / (1024 ** 3)
+        vram_reserved = torch.cuda.memory_reserved(device) / (1024 ** 3)
+        
+        log_message += f" || VRAM Allocated: {vram_allocated:.2f} GB (Reserved: {vram_reserved:.2f} GB)"
+        
+    logger.info(log_message)
 
 class CallBackTypes(str, Enum):
     PRE_TRANSFORMS = "PRE_TRANSFORMS"
@@ -70,6 +91,8 @@ class ImageProcessor:
         seg_final = sitk.DICOMOrient(seg_sitk, orig_orient)
         return seg_final
 
+    
+
 class MyVoxTellPredictor(VoxTellPredictor):
 
     def __init__(
@@ -78,15 +101,16 @@ class MyVoxTellPredictor(VoxTellPredictor):
         device: torch.device = torch.device("cuda"),
         text_encoding_model: str = "./models/qwen3-4b-embedding"  # local path after snapshot_download
     ):
-        # Parent loads 0.6B (small, safe) to initialize seg model
+        # mock the parent model loading
+        with patch('transformers.AutoModel.from_pretrained') as mock_automodel:
+            # The parent calls .eval() on the result, so our mock needs to support that
+            mock_automodel.return_value = MagicMock()
         super().__init__(
             model_dir=model_dir,
             device=device,
             text_encoding_model="Qwen/Qwen3-Embedding-0.6B"
         )
         self.perform_everything_on_device = False
-
-        # Free 0.6B loaded by parent immediately
         del self.text_backbone
         gc.collect()
         torch.cuda.empty_cache()
@@ -99,21 +123,36 @@ class MyVoxTellPredictor(VoxTellPredictor):
             text_encoding_model,
             padding_side='left'
         )
+        
+        check_memory("Before Loading",torch.device("cuda"))
+        
+        logger.info("Loading Qwen3-4B directly in 4-bit on CPU to bypass RAM spikes....")
 
-        logger.info("Loading Qwen3-4B in fp16 on CPU...")
+        # define the qunato configuration for 4-bit :
+        q_config = QuantoConfig(weights="int4")
+        
+        # self.text_backbone = AutoModel.from_pretrained(
+        #     text_encoding_model,
+        #     device_map="cpu",
+        #     low_cpu_mem_usage=True,
+        #     dtype=torch.float16,  # fp16 = ~4GB peak RAM instead of ~16GB
+        # )
         self.text_backbone = AutoModel.from_pretrained(
-            text_encoding_model,
-            device_map="cpu",
-            low_cpu_mem_usage=True,
-            dtype=torch.float16,  # fp16 = ~4GB peak RAM instead of ~16GB
-        )
+                text_encoding_model,
+                device_map="cpu",           # Keep it safely on System RAM
+                low_cpu_mem_usage=True,     # Tells HuggingFace to be careful with RAM
+                quantization_config=q_config # Applies Quanto shard-by-shard during load!
+            )
+        check_memory("loaded quantized",torch.device("cuda"))
+        
+        # logger.info("Quant
 
-        logger.info("Quantizing to 4-bit...")
-        quantize(self.text_backbone, weights=qint4)
-        freeze(self.text_backbone)
         self.text_backbone.eval()
-        logger.info("Qwen3-4B loaded in 4-bit on CPU ")
-
+        logger.info("Qwen3-4B loaded in 4-bit")
+        check_memory("after  direct 4-bit load",torch.device("cuda"))
+        # moving the voxtell to device :
+        self.network = self.network.to(self.device)
+        check_memory("after moving the voxtell network to vram",torch.device("cuda"))
     def predict_single_image(
         self,
         data: np.ndarray,
@@ -134,15 +173,22 @@ class MyVoxTellPredictor(VoxTellPredictor):
         # Preprocess image
         data, bbox, orig_shape = self.preprocess(data)
         logger.info(f"Preprocessed shape: {data.shape}")
+        check_memory(" after preprocessing the data",torch.device("cuda"))
 
         # Embed text prompts on CPU → returns tensor on GPU
         embeddings = self.embed_text_prompts(text_prompts)
+        check_memory("after getting the embedding",torch.device("cuda"))
         logger.info(f"Embeddings shape: {embeddings.shape}")
+        # after getting the embedding free uo some space taken by text backbone
+        del self.text_backbone
+        gc.collect()
+        check_memory("after del the backbone",torch.device("cuda"))
         # Sliding window inference on GPU
         prediction = self.predict_sliding_window_return_logits(
             data, embeddings
         ).to("cpu")
-
+        
+        check_memory("after the sliding window",torch.device("cuda"))
         # Postprocess logits → binary masks
         with torch.no_grad():
             prediction = torch.sigmoid(prediction.float()) > 0.5
@@ -154,54 +200,9 @@ class MyVoxTellPredictor(VoxTellPredictor):
         segmentation_reverted_cropping = insert_crop_into_image(
             segmentation_reverted_cropping, prediction, bbox
         )
+        check_memory("after postprocessing",torch.device("cuda"))
         return segmentation_reverted_cropping
-    # def predict_single_image(
-    #     self,
-    #     data: np.ndarray,
-    #     text_prompts: Union[str, List[str]]
-    # ) -> np.ndarray:
-    #     """
-    #     Dummy predictor that returns a small cube of 1s inside a zero volume.
-    #     Useful for testing pipeline without running VoxTell inference.
-    #     """
-
-    #     # Ensure prompts are list
-    #     if isinstance(text_prompts, str):
-    #         text_prompts = [text_prompts]
-
-    #     n_prompts = len(text_prompts)
-
-    #     # Preprocess to get original shape + bbox
-    #     data, bbox, orig_shape = self.preprocess(data)
-    #     logger.info(f"Preprocessed shape: {data.shape}")
-    #     logger.info(f"Original shape: {orig_shape}")
-
-    #     # Create empty segmentation volume
-    #     segmentation = np.zeros(
-    #         (n_prompts, *orig_shape),
-    #         dtype=np.uint8
-    #     )
-
-    #     # Define a small cube region in the center
-    #     cx, cy, cz = (
-    #         orig_shape[0] // 2,
-    #         orig_shape[1] // 2,
-    #         orig_shape[2] // 2
-    #     )
-
-    #     cube_size = 5  # adjust size if needed
-
-    #     segmentation[
-    #         :,
-    #         cx-cube_size:cx+cube_size,
-    #         cy-cube_size:cy+cube_size,
-    #         cz-cube_size:cz+cube_size
-    #     ] = 1
-
-    #     logger.info("Dummy segmentation generated")
-
-    #     return segmentation    
-
+    
     def embed_text_prompts(
         self,
         text_prompts: Union[List[str], str]
@@ -233,8 +234,7 @@ class MyVoxTellPredictor(VoxTellPredictor):
         embeddings = embeddings.view(1, n_prompts, -1)
     
         empty_cache(self.device)
-        return embeddings
-  
+        return embeddings    
 
 class voxtell(BasicInferTask):
     """Implements Voxtell-based segmentation with improved structure."""

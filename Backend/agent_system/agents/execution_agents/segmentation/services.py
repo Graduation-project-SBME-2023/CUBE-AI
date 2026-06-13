@@ -1,4 +1,5 @@
 import httpx
+import os
 import logging
 import json
 from datetime import datetime
@@ -30,8 +31,8 @@ class SegmentationService:
 
     def __init__(self):
 
-        self.monai_url = "http://localhost:8000"
-        self.orthanc_url = "http://localhost:8043"
+        self.monai_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+        self.orthanc_url = os.environ.get("ORTHANC_URL", "http://localhost:8043")
 
 
     async def run_segmentation(
@@ -96,7 +97,7 @@ class SegmentationService:
         inference_params["result_extension"]=".nrrd"
         inference_params["result_dtype"] = "uint16"
         inference_params["result_compress"]= False
-        inference_params["restore_label_idxs"] = False
+        inference_params["restore_label_idxs"] = True
 
         files = {"params": (None, json.dumps(inference_params), "application/json")}      
         async with httpx.AsyncClient(timeout=timeout_config) as client:  

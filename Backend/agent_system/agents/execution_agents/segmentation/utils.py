@@ -6,7 +6,7 @@ import json
 import shutil
 import time
 import asyncio
-from anyio import Path
+from pathlib import Path
 import nrrd
 import numpy as np
 import tempfile
@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 from PIL import Image
 import csv
 import pandas as pd
+
+MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
 # ===============================
 # MASK HELPERS
 # ===============================
@@ -77,7 +79,7 @@ async def check_having_mask(volume_uid):
     Checks if a segmentation mask exists for the given volume SeriesInstanceUID (volume_uid).
     Calls the endpoint /segmentations/by-volume/{volume_uid} and returns the list of segmentations.
     """
-    url = f"http://localhost:8000/segmentations/by-volume/{volume_uid}"
+    url = f"{MONAI_URL}/segmentations/by-volume/{volume_uid}"
     response = requests.get(url)
     if response.status_code == 200:
         return response.json()
@@ -131,9 +133,6 @@ def parse_multipart_response(headers, body):
 
     # Return in same order as original TS → data first, then centroids
     return nrrd_bytes, json_data.get('centroids', {})
-
-
-
 
 def split_multipart(buffer, boundary):
     """
@@ -298,19 +297,23 @@ def ensure_required_patient_tags(datasets):
 #  ================================
 #  Download Data
 #  ================================
-
-async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, selected_auto_model_for_volume):
-
+async def download_and_pair_volumes(
+    workspace_dir, 
+    datasetlist, 
+    chosen_path, 
+    selected_auto_model_for_volume, 
+    download_volumes=True  
+):
     VOLUMES = datasetlist
-    LABELS_BY_VOLUME_URL = "http://localhost:8000/segmentations/by-volume/"
-    DOWNLOAD_IMAGES_URL  = "http://localhost:8000/datastore/images"
-    DOWNLOAD_LABELS_URL  = "http://localhost:8000/datastore/labels"
+    LABELS_BY_VOLUME_URL = f"{MONAI_URL}/segmentations/by-volume/"
+    DOWNLOAD_IMAGES_URL  = f"{MONAI_URL}/datastore/images"
+    DOWNLOAD_LABELS_URL  = f"{MONAI_URL}/datastore/labels"
     TASK_NAME  = f"{selected_auto_model_for_volume}_segmentation_task" if selected_auto_model_for_volume else "segmentation_task"
 
     # where MONAI actually saves files after the POST trigger
-    current_file = Path(__file__)
-    MONAI_IMG_DIR   = os.path.join(current_file.parent.parent.parent.parent.parent,"apps\\radiology\\General_Data")
-    MONAI_LABEL_DIR = os.path.join(current_file.parent.parent.parent.parent.parent,"apps\\radiology\\labels")
+    MONAI_BASE_DIR = Path("/app/Backend/apps")
+    MONAI_IMG_DIR   = MONAI_BASE_DIR / "radiology" / "General_Data"
+    MONAI_LABEL_DIR = MONAI_BASE_DIR / "radiology" / "labels"
 
     FINAL_DIR_IMG   = os.path.join(workspace_dir, "volumes")
     FINAL_DIR_LABEL = os.path.join(workspace_dir, "masks")
@@ -318,6 +321,8 @@ async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, sel
     for d in [FINAL_DIR_IMG, FINAL_DIR_LABEL]:
         os.makedirs(d, exist_ok=True)
 
+    # ------------------------------------------------------------------ #
+    # Helper functions remain exactly the same
     # ------------------------------------------------------------------ #
     def fetch_labels_for_volume(volume_uid):
         url = LABELS_BY_VOLUME_URL + volume_uid
@@ -343,7 +348,6 @@ async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, sel
         return max(labels, key=lambda x: x.get("created_at", ""))
 
     def trigger_download(url, task_name, uids_list):
-        """POST to trigger MONAI to download files into its local dirs."""
         if not uids_list:
             return False
         logger.info(f"POST {url} | task={task_name} | uids={uids_list}")
@@ -359,10 +363,6 @@ async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, sel
             return False
 
     async def wait_and_find(search_dir, uids, timeout_s=120, poll_interval=3.0):
-        """
-        Poll search_dir (recursively) until a file containing each UID appears.
-        Returns dict: {uid: full_path}
-        """
         deadline  = time.time() + timeout_s
         found     = {}
         remaining_uids = set(uids)
@@ -420,7 +420,7 @@ async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, sel
             return None
 
     # ------------------------------------------------------------------ #
-    #  1. pair volumes ↔ labels                                           #
+    #  1. pair volumes ↔ labels                                          #
     # ------------------------------------------------------------------ #
     volumes_to_process = []
     labels_to_process  = []
@@ -451,33 +451,40 @@ async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, sel
     logger.info(f"Pairs ready: {len(volumes_to_process)}")
 
     # ------------------------------------------------------------------ #
-    #  2. trigger downloads (POST → MONAI saves to its local dirs)        #
+    #  2. trigger downloads (POST → MONAI saves to its local dirs)       #
     # ------------------------------------------------------------------ #
-    trigger_download(DOWNLOAD_IMAGES_URL, TASK_NAME, volumes_to_process)
+    if download_volumes:
+        trigger_download(DOWNLOAD_IMAGES_URL, TASK_NAME, volumes_to_process)
+    
     trigger_download(DOWNLOAD_LABELS_URL, TASK_NAME, labels_to_process)
 
     # ------------------------------------------------------------------ #
-    #  3. wait for files to appear in MONAI's local dirs                  #
+    #  3. wait for files to appear in MONAI's local dirs                 #
     # ------------------------------------------------------------------ #
-    found_volumes = await wait_and_find(MONAI_IMG_DIR,   volumes_to_process, timeout_s=120)
-    found_labels  = await wait_and_find(MONAI_LABEL_DIR, labels_to_process,  timeout_s=120)
+    found_volumes = {}
+    if download_volumes:
+        found_volumes = await wait_and_find(MONAI_IMG_DIR, volumes_to_process, timeout_s=120)
+        
+    found_labels = await wait_and_find(MONAI_LABEL_DIR, labels_to_process, timeout_s=120)
 
     # ------------------------------------------------------------------ #
-    #  4. copy to workspace                                                #
+    #  4. copy to workspace                                              #
     # ------------------------------------------------------------------ #
     successful = []
     for vol_uid, label_uid in zip(volumes_to_process, labels_to_process):
-        vol_src   = found_volumes.get(vol_uid)
         label_src = found_labels.get(label_uid)
-
-        if not vol_src:
-            logger.error(f"Volume file never appeared for {vol_uid} — skipping pair")
-            continue
         if not label_src:
             logger.error(f"Label file never appeared for {label_uid} — skipping pair")
             continue
 
-        vol_result   = copy_volume(vol_src, vol_uid, FINAL_DIR_IMG)
+        vol_result = True # Default to True if we aren't downloading volumes
+        if download_volumes:
+            vol_src = found_volumes.get(vol_uid)
+            if not vol_src:
+                logger.error(f"Volume file never appeared for {vol_uid} — skipping pair")
+                continue
+            vol_result = copy_volume(vol_src, vol_uid, FINAL_DIR_IMG)
+
         label_result = copy_and_normalize_label(label_src, vol_uid, FINAL_DIR_LABEL)
 
         if vol_result and label_result:
@@ -489,13 +496,10 @@ async def download_and_pair_volumes(workspace_dir, datasetlist, chosen_path, sel
     logger.info(f"DONE: {len(successful)}/{len(volumes_to_process)} pairs ready in workspace")
     logger.info("=" * 60)
     return successful
-
 #  ================================
 #  Generate GIF Overlays for front view
 #  ================================
-
 def generate_gif_overlays(workspace_dir, uids):
-    
     """
     Generates animated GIF overlays slicing through the Z-axis where the mask is present.
     Returns a list of dictionaries formatted for the React frontend.
@@ -521,56 +525,64 @@ def generate_gif_overlays(workspace_dir, uids):
             vol_data = nib.load(vol_path).get_fdata()
             mask_data = nib.load(mask_path).get_fdata()
 
-            # find slices where mask is present
-            z_indices = np.any(mask_data > 0, axis=(0, 1))
+            # warn and cap against shape mismatch in Z >> problem happens with subset of vol !
+            # todo: check why seg returns sometimes the mask not over all sliceson subset only 
+            if vol_data.shape != mask_data.shape:
+                logger.warning(
+                    f"Shape mismatch for {uid}: vol={vol_data.shape}, mask={mask_data.shape}. "
+                    f"Capping Z to min of both."
+                )
+            max_z = min(vol_data.shape[2], mask_data.shape[2])
+
+            # safe zone
+            z_indices = np.any(mask_data[:, :, :max_z] > 0, axis=(0, 1))
             active_slices = np.where(z_indices)[0]
 
             if len(active_slices) == 0:
                 logger.warning(f"Empty mask for {uid}.")
                 continue
-            
-            # add a padding of 2 slices before and after the mask
+
+            # padding
             start_z = max(0, active_slices[0] - 2)
-            end_z = min(vol_data.shape[2], active_slices[-1] + 3)
+            end_z = min(max_z - 1, active_slices[-1] + 2)
 
             frames = []
-            for z in range(start_z, end_z):
+            for z in range(start_z, end_z + 1):
                 v_slice = vol_data[:, :, z]
                 m_slice = mask_data[:, :, z]
 
-                # normalize the medical image window to 0-255
-                v_min, v_max = np.percentile(v_slice, (1, 99)) 
+                # normalize
+                v_min, v_max = np.percentile(v_slice, (1, 99))
                 if v_max - v_min == 0:
                     v_norm = np.zeros_like(v_slice, dtype=np.uint8)
                 else:
                     v_norm = np.clip((v_slice - v_min) / (v_max - v_min) * 255, 0, 255).astype(np.uint8)
-                
-                # convert grayscale to RGB
-                rgb_frame = np.stack([v_norm]*3, axis=-1)
 
-                # overlay mask using cyian color where mask is present
+                # convert to rgb "cyan"
+                rgb_frame = np.stack([v_norm] * 3, axis=-1)
+
+                # overlay
                 mask_idx = m_slice > 0
                 rgb_frame[mask_idx] = [90, 204, 230]
 
-                # totate 90 to fix the view
+                # rotate 90
                 rgb_frame = np.rot90(rgb_frame)
 
                 frames.append(Image.fromarray(rgb_frame))
 
-            # save gif
+            # save GIF
             if frames:
                 frames[0].save(
                     gif_path,
                     save_all=True,
                     append_images=frames[1:],
-                    duration=100, 
+                    duration=100,
                     loop=0
                 )
-                
-                # front payload
+
                 generated_volumes.append({
                     "seriesInstanceUid": uid,
-                    "gifUrl": f"http://localhost:8150/files/{workspace_folder_name}/overlays/{gif_filename}" 
+                    "gifUrl": f"http://localhost:8150/files/{workspace_folder_name}/overlays/{gif_filename}"
                 })
                 logger.info(f"Generated GIF for {uid}")
 
@@ -629,23 +641,32 @@ def get_model_dice_score(model_name, target_label):
 # =================================
 #  remove volumes and labels from working space that was discarded by user
 # =================================
-
-def cleanup_discarded(workspace_dir, uids_to_keep):
+def cleanup_discarded(workspace_dir, accepted_uids, modified_uids):
     """
-    Removes volume and label files from the working directories if their UIDs are not in the keep list.
+    Removes discarded volumes and masks.
+    - Keeps volumes for BOTH accepted and modified UIDs.
+    - Keeps masks ONLY for accepted UIDs (modified masks are removed to be re-downloaded).
     """
     volumes_dir = os.path.join(workspace_dir, "volumes")
     masks_dir = os.path.join(workspace_dir, "masks")
-    for fname in os.listdir(volumes_dir):
-        if fname.lower().endswith(".nii.gz"):
-            uid = fname.replace(".nii.gz", "")
-            if uid not in uids_to_keep:
-                os.remove(os.path.join(volumes_dir, fname))
-                logger.info(f"Removed discarded volume: {fname}")
+    
+    # we want to keep the NIfTI volume files for both accepted and modified
+    uids_to_keep_volumes = set(accepted_uids) | set(modified_uids)
+    
+    # cleanup volumes
+    if os.path.exists(volumes_dir):
+        for fname in os.listdir(volumes_dir):
+            if fname.lower().endswith(".nii.gz"):
+                uid = fname.replace(".nii.gz", "")
+                if uid not in uids_to_keep_volumes:
+                    os.remove(os.path.join(volumes_dir, fname))
+                    logger.info(f"Removed discarded volume: {fname}")
 
-    for fname in os.listdir(masks_dir):
-        if fname.lower().endswith(".nii.gz"):
-            uid = fname.replace(".nii.gz", "")
-            if uid not in uids_to_keep:
-                os.remove(os.path.join(masks_dir, fname))
-                logger.info(f"Removed discarded mask: {fname}")
+    # cleanup masks (labels)
+    if os.path.exists(masks_dir):
+        for fname in os.listdir(masks_dir):
+            if fname.lower().endswith(".nii.gz"):
+                uid = fname.replace(".nii.gz", "")
+                if uid not in accepted_uids:
+                    os.remove(os.path.join(masks_dir, fname))
+                    logger.info(f"Removed mask (discarded or pending modification): {fname}")

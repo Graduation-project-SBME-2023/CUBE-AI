@@ -11,7 +11,6 @@ import os
 import httpx
 from pathlib import Path
 from typing import Dict, Any, Union, List
-from agent_system.socket_store import send_ws_message, wait_for_user_message
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 from .planner import create_planner_agent, run_planner
 from .pipelines.automatic import run_automatic_pipeline
@@ -22,8 +21,7 @@ from .utils import exclude_existing_masks, download_and_pair_volumes, generate_g
 from .logging_config import setup_logging
 import logging
 from client_config import create_model_client_from_config
-# before integratinon make it to the default messages from the socket_store
-# from .ws_client_sender import send_ws_message_remote, wait_for_user_message_remote
+import httpx
 from agent_system.models.tool_logging import ProgressPayload, TextPayload, ToolEvent
 from agent_system.tool_logging import receive_tool_event
 setup_logging()
@@ -48,25 +46,18 @@ class SegmentationModule:
         # intialize model client
         self.model_client = create_model_client_from_config()
         logger.info(f"Model client initialized with : {self.model_client}")
-     #    self.model_client = OllamaChatCompletionClient(
-     #    model=self.model_name,
-     #    model_info={
-     #        "vision": False,
-     #        "function_calling": True,
-     #        "json_output": True,
-     #        "structured_output": True,
-     #        "family": "unknown"
-     #    },
-     #    api_key=os.environ.get("APIKEY"),
-     #
-     # )
+
         # MCP server connection
         current_file = Path(__file__).resolve()
         backend_dir = current_file.parent.parent.parent.parent.parent
         server_path = backend_dir / "mcp" / "server.py"   
         logger.info(f"Starting MCP server at: {server_path}, with session id: {self.session_id}")
+        env = os.environ.copy()
+        env.update({
+            "SESSION_ID": self.session_id, "AGENT_ID": 'segmentation_agent'
+        })
         math_server = StdioServerParams(
-            command="python", args=[str(server_path)], timeout=None, env={"SESSION_ID": self.session_id, "AGENT_ID": 'segmentation_agent'}
+            command="python", args=[str(server_path)], timeout=None, env=env
         )
         try:
             tools = await mcp_server_tools(math_server)
@@ -107,8 +98,9 @@ class SegmentationModule:
 
         instructions = segmentation_step["task_message"]["instructions"]
         # hypothesis: str = state["hypothesis"]["hypothesis"]
-        logger.info(f"Received hypothesis: {instructions}")
-        datasetlist: List[str] = input_data["datasetlist"]
+        logger.info(f"Received instructions: {instructions}")
+        datasetlist: List[str] = input_data.get("datasetlist", [])
+        logger.info(f"Will prepare segmentations for {len(datasetlist)} volumes.")
         #1. plan
         plan = await run_planner(self.PlannerAgent,instructions)
         logger.info(f"Planner plan: {plan}")
@@ -140,7 +132,7 @@ class SegmentationModule:
         
         # =========== test ===============
 
-        # plan={'target_labels': ['Spleen'], 'chosen_path': 'interactive','selected_model': ['Spleen_Automatic_model']}
+        # plan ={'target_labels': ['Spleen'], 'chosen_path': 'automatic','selected_models': ['segmentation_spleen']}
         # =================================
         
         logger.info(
@@ -189,16 +181,11 @@ class SegmentationModule:
                     workspace_dir,
                     datasetlist, 
                     chosen_path=chosen_path, 
-                    selected_auto_model_for_volume = plan["selected_models"] if plan["selected_models"] else None
+                    selected_auto_model_for_volume = plan["selected_models"][0] if plan["selected_models"] else None
         )
         
         #============================ test segmentation view ===================================
-        # downloaded_uids = ["1.2.826.0.1.3680043.8.498.12073285427930663774611907954116957406",
-        #                  "1.2.826.0.1.3680043.8.498.15136386566608168882487015520907740870",
-        #                  "1.2.826.0.1.3680043.8.498.39690361926593906696712695770248244325",
-        #                  "1.2.826.0.1.3680043.8.498.66527749693564068057441707562288227105",
-        #                  "1.2.826.0.1.3680043.8.498.90966193394235914543895670294526949480"
-        #                  ] 
+        # downloaded_uids = ["1.2.826.0.1.3680043.8.498.15136386566608168882487015520907740870"]
         # ======================================================================================
         
         # ================== Generate Overlays ===========================================
@@ -222,7 +209,7 @@ class SegmentationModule:
 
         # ==========sending data to fronted for review====================
         logger.info("Module sending data to frontend for review...")
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             await client.post(
                 "http://localhost:8150/ws-broadcast",
                 json={
@@ -231,21 +218,45 @@ class SegmentationModule:
                     "session_id": self.session_id
                 }
             )
-        # wait untill fornt reply "save" to get the result
-        ## wait until fully checked wait for user message
-        # logger.info("Module paused: Waiting for human review...")
-        # user_response_raw = await wait_for_user_message(
-        #     session_id= self.session_id
-            
-        # )
 
-        # # The module wakes up! Here are the UIDs the user accepted:
-        # user_results = json.loads(user_response_raw)
-        # final_accepted_uids = user_results.get("accepted", [])
-        # logger.info(f"Module resumed! User accepted: {final_accepted_uids}")
+        # Wait for user review message
+        logger.info("Module paused: Waiting for human review via HTTP long-poll...")
+        async with httpx.AsyncClient(timeout=330.0) as client:
+                    while True:
+                        try:
+                            response = await client.get(
+                                f"http://localhost:8150/segmentation-review/wait/{self.session_id}"
+                            )
 
-        # #============= accepted uid just kept only in the folder=================
-        # cleanup_discarded(workspace_dir, final_accepted_uids)
+                            # if time out reconnect
+                            if response.status_code == 408:
+                                logger.info("Server ended the long-poll (408 Timeout). Reconnecting...")
+                                continue
+                            # for other errors, log and raise
+                            response.raise_for_status()
+                            # successful response, break the loop and process results
+                            user_results = response.json()
+                            break
+                        except httpx.ReadTimeout:
+                            logger.info("Client read timeout reached. Reconnecting...")
+                            continue
+
+        final_accepted_uids = user_results.get("accepted", [])
+        final_rejected_uids = user_results.get("rejected", [])
+        final_modified_uids = user_results.get("modified", [])
+        logger.info(f"Module resumed! Accepted: {final_accepted_uids}, Rejected: {final_rejected_uids}, Modified: {final_modified_uids}")
+
+        # #============= accepted and modified uids just kept only in the folder=================
+        cleanup_discarded(workspace_dir, final_accepted_uids, final_modified_uids)
+        if final_modified_uids:
+            logger.info("Fetching updated labels for modified UIDs...")
+            await download_and_pair_volumes(
+                workspace_dir,
+                datasetlist=final_modified_uids,
+                chosen_path="interactive",
+                selected_auto_model_for_volume=None,
+                download_volumes=False
+            )
 
 
         return {"status": "finished"}
@@ -256,13 +267,12 @@ async def test_module():
     try:
         logger.info("Starting SegmentationModule test...")
         
-        agent = SegmentationModule()
+        agent = SegmentationModule(session_id="68dac4a1-ecdb-4145-9f23-874a85d1d6bb")
         await agent.initialize()
         
         current_file = Path(__file__)
-        config_path =os.path.join(current_file.parent.parent.parent.parent.parent,"mas","memory", "workspace", "configurations.json")
-        logger.info(f"Running with config: {config_path}")
-        workspace_folder = os.path.join(current_file.parent.parent.parent.parent,"workspace")
+        workspace_folder = os.path.join(current_file.parent.parent.parent.parent,"workspace_68dac4a1-ecdb-4145-9f23-874a85d1d6bb")
+        config_path = os.path.join(workspace_folder, "config.json")
         result = await agent.run(config_path, workspace_folder)
         
         logger.info("Test completed successfully!")
