@@ -107,12 +107,25 @@ export default function ResearchPlayground() {
         }
     }, [phaseId, isValidPhase, navigate, location.state]);
 
-    // Retrieve hypothesis from navigation state or default
+// Retrieve hypothesis from navigation state or default
     const hypothesis = location.state?.hypothesis || 'No active hypothesis defined.';
-    const sessionId = location.state?.sessionId || location.state?.session_id || null;
+    
+    // Look in browser memory in case the page was refreshed
+    const savedSessionId = sessionStorage.getItem('current_cube_session');
+    
+    // Fallback chain (Router State -> Browser Memory -> null)
+    const sessionId = location.state?.sessionId || location.state?.session_id || savedSessionId;
+    
     const includeLitReview = location.state?.includeLitReview ?? true;
     const sendInitialMessage = location.state?.sendInitialMessage || false;
     const initialUserMessage = sendInitialMessage ? hypothesis : undefined;
+
+    // Whenever we detect a valid session ID, lock it into browser memory
+    useEffect(() => {
+        if (sessionId) {
+            sessionStorage.setItem('current_cube_session', sessionId);
+        }
+    }, [sessionId]);
 
     // Load state from endpoints when session_id is provided
     // Effect 1: non-replay session state (unchanged behavior, fires immediately)

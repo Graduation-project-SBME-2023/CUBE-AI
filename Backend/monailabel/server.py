@@ -7,6 +7,7 @@ import asyncio
 from endpoints import (
     hello_world,
     create_model,
+    populations,
     workflow,
     norm_align,
     new_handle,
@@ -53,6 +54,7 @@ monai_server_app.include_router(steps.router)
 monai_server_app.include_router(Taskmessage.router)
 monai_server_app.include_router(contextaugmentation.router)
 monai_server_app.include_router(Wslog.router)
+monai_server_app.include_router(populations.router)
 
 
 original_lifespan = monai_server_app.router.lifespan_context

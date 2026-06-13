@@ -80,3 +80,5 @@ Backend/agent_system/tools/pycaret_classification_tool.py
 Backend/agent_system/benchmarking/validation/population/data_generation
 Backend/agent_system/benchmarking/validation/population/inclusion_bench
 Backend/agent_system/benchmarking/validation/population/papers
+Backend/agent_system/benchmarking/validation
+eval_workspace

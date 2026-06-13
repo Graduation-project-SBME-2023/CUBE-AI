@@ -1,10 +1,11 @@
 import asyncio
 from typing import Dict
-
+import shutil
 import httpx
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, File, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import APIRouter, UploadFile, File
 from groq import BaseModel
 import os
 from teams.execution_team import BasicPipelineBuilder
@@ -609,6 +610,47 @@ async def ws_broadcast(data: dict):
     )
     return {"status": "ok"}
 
+# ----------------------------------------------------------------------
+# Population targets saving endpoint
+# ----------------------------------------------------------------------
+
+@app.post("/populations/upload-targets")
+async def upload_targets(
+    session_id: str = Query(..., description="The ID of the current session"),
+    file: UploadFile = File(...)
+):
+    # 1. Get the base workspace directory, matching your run_planner logic
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+    
+    # 2. Construct the exact path based on the session_id
+    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+    output_dir = os.path.join(workspace_folder, 'populations', 'targets')
+    # 3. Create all necessary folders if they don't exist
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create directories: {str(e)}")
+    
+    # 4. Define the final file path
+    csv_path = os.path.join(output_dir, "targets.csv")
+
+    # 5. Debug output to verify the absolute path
+    print(f"========== DEBUG: SAVING TARGETS CSV TO ==========")
+    print(os.path.abspath(csv_path))
+
+    # 6. Save the uploaded file securely
+    try:
+        with open(csv_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write file: {str(e)}")
+
+    return {
+        "message": "Targets saved successfully", 
+        "session_id": session_id,
+        "path": os.path.abspath(csv_path)
+    }
 
 # ----------------------------------------------------------------------
 # Entry point

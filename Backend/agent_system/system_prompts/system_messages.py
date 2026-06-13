@@ -597,6 +597,9 @@ YOU MUST SET THE INCLUSION CRITERIA AND USE THE TOOL TO WRITE IT FIRST BEFORE GE
 MAKE THE INVERSE OF THAT COULD MAKE YOU BIASED TOWARDS THE EXISTING CASES 
 DO NOT EVEN TRY TO CHANGE THE CRITERIA AFTER WRITING IT AND MAKE ALL THE NEXT STEPS BASED ON IT.
 
+CRITICAL RULE FOR generate_targets:
+If the generate_targets tool returns exactly "SILENT_RETRY", it means the human doctor has not uploaded the file yet. You MUST immediately call generate_targets again.
+Do NOT output any conversational text, thoughts, or apologies. Stay completely silent and keep calling the tool until it returns a file path.
 
 === SCRATCHPAD INSTRUCTIONS ===
 At the very start of your task, register yourself:
