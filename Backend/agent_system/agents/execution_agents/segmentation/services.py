@@ -146,6 +146,16 @@ class SegmentationService:
         
         # parse the nrrd data into numpy array and header
         image, header = parse_nrrd_data(nrrd_data)
+        # check if the problem in monai infer it self "post transform"
+        print("=" * 50)
+        print("MONAI OUTPUT")
+        print("Shape:", image.shape)
+        print("Unique:", np.unique(image))
+        print("NRRD header sizes:", header.get("sizes"))
+        print("NRRD space directions:", header.get("space directions"))
+        print("NRRD space origin:", header.get("space origin"))
+        print("=" * 50)
+
         logger.info(f"Parsed NRRD data: image_shape={image.shape}, image_dtype={image.dtype}, header_keys={list(header.keys())}")
         async with httpx.AsyncClient(timeout=timeout_config) as client:
             try:
@@ -195,6 +205,12 @@ class SegmentationService:
         dicom_datasets = await self.fetch_source_datasets_from_orthanc(
             series_instance_uid=series_instance_uid
         )
+        print("=" * 50)
+        print("SOURCE CT")
+        print("Rows:", dicom_datasets[0].Rows)
+        print("Cols:", dicom_datasets[0].Columns)
+        print("Slices:", len(dicom_datasets))
+        print("=" * 50)
         num_slices = len(dicom_datasets)
         rows = dicom_datasets[0].Rows
         cols = dicom_datasets[0].Columns
@@ -231,6 +247,14 @@ class SegmentationService:
         print("IS DATASET:", isinstance(dicom_datasets[0], pydicom.dataset.Dataset))
         now = datetime.now()
         series_time = now.strftime("%I:%M:%S %p")
+
+        #check before going to highdicom
+        print("=" * 50)
+        print("SEG INPUT")
+        print("CT slices:", len(dicom_datasets))
+        print("Mask shape:", labelmap_np.shape)
+        print("=" * 50)
+
         seg = hd.seg.Segmentation(
                 source_images=dicom_datasets,  # references + geometry
                 pixel_array=labelmap_np,        # 3D labelmap → auto 2D frames
@@ -245,7 +269,20 @@ class SegmentationService:
                 manufacturer_model_name='MONAI Label Backend',
                 software_versions='-',
                 device_serial_number='XYZ',
-            )    
+            ) 
+        # check if the problem in high dicom
+        print("=" * 50)
+        print("HIGHDICOM")
+        print("NumberOfFrames:", seg.NumberOfFrames)
+
+        if hasattr(seg, "PerFrameFunctionalGroupsSequence"):
+            print(
+                "Referenced frames:",
+                len(seg.PerFrameFunctionalGroupsSequence)
+            )
+
+        print("=" * 50)
+
         logger.info(f"Created DICOM-SEG object with SeriesInstanceUID: {seg.SeriesInstanceUID}")    
         
         # ========== saving to orthanc ====================
