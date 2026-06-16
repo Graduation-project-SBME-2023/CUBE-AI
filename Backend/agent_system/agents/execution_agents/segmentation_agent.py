@@ -183,8 +183,8 @@ to start the task of the segmentation, all you need to do just run the tool you 
 async def main():
     # Initialize the agent using the factory method
     current_file = Path(__file__)
-    workspace_folder = os.path.join(current_file.parent.parent.parent,"workspace_68dac4a1-ecdb-4145-9f23-874a85d1d6bb")
-    agent = await SegmentationAgent.create(workspace_folder=workspace_folder, session_id="68dac4a1-ecdb-4145-9f23-874a85d1d6bb")
+    workspace_folder = os.path.join(current_file.parent.parent.parent.parent,"agents_workspace","workspace_testing_validation_segmentation_123")
+    agent = await SegmentationAgent.create(workspace_folder=workspace_folder, session_id="testing_validation_segmentation_123")
 
     # # Now you can use the agent normally
     # print(f"Agent initialized with {agent._tools} tools.")

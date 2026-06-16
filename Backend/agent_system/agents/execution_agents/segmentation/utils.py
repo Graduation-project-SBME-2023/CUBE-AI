@@ -600,7 +600,7 @@ def check_voxtell_label_availability(target_label):
     target_label = target_label.lower().strip()
     
     current_file = Path(__file__)
-    csv_filepath =os.path.join(current_file.parent.parent.parent.parent,"workspace", "supported.csv") 
+    csv_filepath =os.path.join(current_file.parent.parent.parent.parent, "supported.csv") 
     try:
         with open(csv_filepath, mode='r', encoding='utf-8') as file:
             reader = csv.DictReader(file)
