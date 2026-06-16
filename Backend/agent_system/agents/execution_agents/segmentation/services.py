@@ -239,7 +239,7 @@ class SegmentationService:
                 series_instance_uid=hd.UID(),
                 series_number=1001,
                 sop_instance_uid=hd.UID(),
-                series_description=f"{clean_model}-{series_time}-g",
+                series_description=f"{clean_model}-{series_time}-{organ_list[0] if organ_list else 'Segment'}-g",
                 instance_number=1,
                 manufacturer='Manufacturer Name',
                 manufacturer_model_name='MONAI Label Backend',
