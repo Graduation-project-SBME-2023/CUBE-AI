@@ -269,6 +269,7 @@ class SegmentationService:
                 manufacturer_model_name='MONAI Label Backend',
                 software_versions='-',
                 device_serial_number='XYZ',
+                omit_empty_frames=False,
             ) 
         # check if the problem in high dicom
         print("=" * 50)
