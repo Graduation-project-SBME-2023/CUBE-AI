@@ -1,0 +1,57 @@
+# ============================================================
+# CUBE.AI — custom-monailabel  (CPU / ARM64 variant)
+# No CUDA toolkit — safe to build natively on arm64 (Apple
+# Silicon) and amd64 without GPU drivers.
+# ============================================================
+FROM projectmonai/monailabel:0.8.5
+
+# ------------------------------------------------------------
+# 1. System packages
+# ------------------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        build-essential \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# ------------------------------------------------------------
+# 2. Python dependencies (all baked in, nothing at runtime)
+# ------------------------------------------------------------
+RUN pip install --no-cache-dir -U pip && \
+    pip install --no-cache-dir \
+        batchgenerators \
+        acvl-utils \
+        asyncpg \
+        nnunetv2 \
+        nnInteractive \
+        "pydicom==2.4.4" \
+        psycopg2-binary \
+        aiohttp \
+        alembic
+
+COPY ./voxtell_requirements.txt /voxtell_requirements.txt
+RUN pip install --no-cache-dir -r /voxtell_requirements.txt
+
+# ------------------------------------------------------------
+# 3. Patched pydicom-seg sources
+# ------------------------------------------------------------
+COPY ./reader.py \
+     /usr/local/lib/python3.10/dist-packages/pydicom_seg/reader.py
+COPY ./segmentation_dataset.py \
+     /usr/local/lib/python3.10/dist-packages/pydicom_seg/segmentation_dataset.py
+
+# ------------------------------------------------------------
+# 4. Environment variables
+# ------------------------------------------------------------
+ENV nnUNet_preprocessed=/NN_Unet/nnUNet_preprocessed \
+    nnUNet_results=/NN_Unet/nnUNet_results \
+    nnUNet_raw=/NN_Unet/nnUNet_raw \
+    DATABASE_URL=postgresql://workflow_user:password@postgres:5432/workflow_db \
+    PYTHONPATH=/apps/radiology \
+    PATH=/apps/radiology/bin:${PATH}
+# ------------------------------------------------------------
+# 5. Expose & default command
+# ------------------------------------------------------------
+EXPOSE 8000
+
+CMD ["sh", "-c", "alembic -c /alembic/alembic.ini upgrade head && python /monailabel/server_start.py"]
