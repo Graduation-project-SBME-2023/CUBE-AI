@@ -73,7 +73,7 @@ services:
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/config/orthanc.json:/etc/orthanc/orthanc.json:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/orthanc/lua:/etc/orthanc/lua:ro
-      - orthanc-db:/var/lib/orthanc/db/
+      - orthanc-db2:/var/lib/orthanc/db/
     restart: unless-stopped
 
   postgres:
@@ -81,7 +81,7 @@ services:
     container_name: postgres-backend
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/backup.sql:/docker-entrypoint-initdb.d/backup.sql
-      - postgres-db:/var/lib/postgresql/data
+      - postgres-db2:/var/lib/postgresql/data
     ports:
       - '5433:5432'
     environment:

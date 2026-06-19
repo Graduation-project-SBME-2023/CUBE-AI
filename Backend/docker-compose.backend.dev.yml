@@ -12,3 +12,7 @@ services:
       MODELS_DIR: /models
       NNUNET_DIR: /NN_Unet
       GENERAL_DATA_DIR: /General_Data
+    command: >-
+      sh -c "pip install --no-cache-dir -U torchvision --no-deps &&
+      alembic -c /alembic/alembic.ini upgrade head &&
+      python /monailabel/server_start.py"
