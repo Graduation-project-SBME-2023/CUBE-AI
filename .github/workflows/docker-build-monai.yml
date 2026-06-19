@@ -1,0 +1,161 @@
+# ============================================================
+# .github/workflows/docker-build-monai.yml
+#
+# Builds & pushes two Docker images to Docker Hub:
+#
+#   cubeai1/custom-monailabel:<tag>-cpu   (arm64 + amd64)
+#   cubeai1/custom-monailabel:<tag>-gpu   (amd64 only — CUDA
+#                                          images don't support
+#                                          arm64 natively)
+#
+# Triggers
+# --------
+#   • Push to main / master
+#   • Version tags  v*.*.*
+#   • Manual trigger (workflow_dispatch) with optional custom tag
+#
+# Required secrets (Settings → Secrets → Actions)
+# ------------------------------------------------
+#   DOCKERHUB_USERNAME   your Docker Hub username
+#   DOCKERHUB_TOKEN      Docker Hub access token (not password)
+# ============================================================
+
+name: Build & Push MONAI Docker Images
+
+on:
+  push:
+    branches:
+      - monai-deployment
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Custom image tag (default: manual)"
+        required: false
+        default: "manual"
+
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: cubeai1/custom-monailabel
+
+jobs:
+  # ----------------------------------------------------------
+  # Determine the image tag once and share it across jobs
+  # ----------------------------------------------------------
+  meta:
+    name: Resolve image tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Resolve tag
+        id: resolve
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"          # e.g. v1.2.3
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="latest"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: ${TAG}"
+
+  # ----------------------------------------------------------
+  # CPU image — arm64 + amd64 multi-arch
+  # ----------------------------------------------------------
+  build-cpu:
+    name: Build CPU image (arm64 + amd64)
+    needs: meta
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      # QEMU lets the amd64 runner emulate arm64
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+
+      # Buildx is required for multi-platform builds
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.CUBE_AI_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.CUBE_AI_DOCKERHUB_TOKEN }}
+
+      - name: Build & push CPU image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./Backend          # adjust if your Dockerfile
+          file: ./Backend/Dockerfile.cpu   # lives elsewhere
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # Two tags: versioned + "latest-cpu"
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.meta.outputs.tag }}-cpu
+            ${{ env.IMAGE_NAME }}:latest-cpu
+#          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-cpu
+#          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-cpu,mode=max
+
+  # ----------------------------------------------------------
+  # GPU image — amd64 only (CUDA toolkit is x86_64)
+  # ----------------------------------------------------------
+  build-gpu:
+    name: Build GPU image (amd64)
+    needs: meta
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.CUBE_AI_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.CUBE_AI_DOCKERHUB_TOKEN }}
+
+      - name: Build & push GPU image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./Backend
+          file: ./Backend/Dockerfile.gpu
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.meta.outputs.tag }}-gpu
+            ${{ env.IMAGE_NAME }}:latest-gpu
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-gpu
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-gpu,mode=max
