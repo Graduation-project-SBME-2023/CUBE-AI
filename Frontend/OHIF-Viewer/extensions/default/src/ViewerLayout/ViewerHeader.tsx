@@ -3,7 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useLocation } from 'react-router';
 
-import { ErrorBoundary, UserPreferences, AboutModal, Header, useModal } from '@ohif/ui';
+import {
+  ErrorBoundary,
+  UserPreferences,
+  AboutModal,
+  Header,
+  Icon,
+  useModal,
+} from '@ohif/ui';
 import i18n from '@ohif/i18n';
 import { hotkeys } from '@ohif/core';
 import { useAppConfig } from '@state';
@@ -48,6 +55,27 @@ function ViewerHeader({ hotkeysManager, extensionManager, servicesManager }) {
     navigate({
       pathname: '/worklist',
       search: decodeURIComponent(searchQuery.toString()),
+    });
+  };
+
+  const getConfigUrlSearch = () => {
+    const query = new URLSearchParams(window.location.search);
+    const configUrl = query.get('configUrl');
+
+    return configUrl ? `?configUrl=${encodeURIComponent(configUrl)}` : '';
+  };
+
+  const onClickWorklistButton = () => {
+    navigate({
+      pathname: '/worklist',
+      search: getConfigUrlSearch(),
+    });
+  };
+
+  const onClickAgenticHomeButton = () => {
+    navigate({
+      pathname: '/agentic-home',
+      search: getConfigUrlSearch(),
     });
   };
 
@@ -120,12 +148,23 @@ function ViewerHeader({ hotkeysManager, extensionManager, servicesManager }) {
       <ErrorBoundary context="Primary Toolbar">
         <div className="relative flex items-center justify-center gap-3">
           <button
-            className="rounded-md border border-[#2b4f66] bg-[#0f1f2e] px-3 py-1 text-sm font-semibold text-[#5acce6] transition-colors hover:border-[#5acce6] hover:bg-[#123149]"
-            onClick={() => navigate('/agentic-home')}
-            title="Open Research Playground"
+            type="button"
+            data-cy="header-worklist-icon"
+            className="inline-flex items-center justify-center p-2 text-[#5acce6] transition duration-300 ease-in-out hover:bg-primary-light hover:text-black"
+            onClick={onClickWorklistButton}
           >
-            Research Playground
+            <Icon name="list-bullets" className="h-5 w-5" />
           </button>
+
+          <button
+            type="button"
+            data-cy="header-agentic-home-icon"
+            className="inline-flex items-center justify-center p-2 text-[#5acce6] transition duration-300 ease-in-out hover:bg-primary-light hover:text-black"
+            onClick={onClickAgenticHomeButton}
+          >
+            <Icon name="profile" className="h-5 w-5" />
+          </button>
+
           <Toolbar servicesManager={servicesManager} />
         </div>
       </ErrorBoundary>

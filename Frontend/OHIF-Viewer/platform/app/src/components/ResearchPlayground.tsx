@@ -183,23 +183,7 @@ export default function ResearchPlayground() {
             
             {/* 1. TOP HEADER */}
             <div className="h-14 bg-[#0b1015] border-b border-[#1f2d40] flex items-center justify-between px-4 z-20 shrink-0 shadow-sm">
-                <div className="flex items-center gap-6">
-                    <div className="flex items-center gap-3">
-                        <span className="font-bold text-[#5acce6] text-xs tracking-widest">CUBE</span>
-                        <span className="text-gray-500 text-xs">/</span>
-                        <span className="text-gray-300 text-xs font-medium">Intelligent Medical Viewer</span>
-                    </div>
-                    {/* Hypothesis Context */}
-                    <div className="h-6 w-px bg-[#1f2d40]" />
-                    <div className="flex items-center gap-3 text-xs">
-                        <span className="text-[#5acce6] uppercase tracking-wider font-bold flex items-center gap-2">
-                            <FlaskConicalIcon size={14} /> Scope:
-                        </span>
-                        <span className="text-gray-300 font-mono max-w-xl truncate opacity-90" title={hypothesis}>
-                            {hypothesis}
-                        </span>
-                    </div>
-                </div>
+
                 
                 <div className="flex items-center gap-2">
                     <button 

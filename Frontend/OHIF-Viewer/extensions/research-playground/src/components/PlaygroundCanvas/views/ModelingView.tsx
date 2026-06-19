@@ -442,27 +442,22 @@ function ComparisonTable({ table }: { table: Array<Record<string, any>> }) {
     );
 }
 
-// ── Empty state ────────────────────────────────────────────────────────────────
-
+// ── Empty state ───────────────────────────────────────────────────────────────
 function EmptyState() {
-    return (
-        <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 space-y-5 p-6">
-            <div className="flex gap-4 opacity-40">
-                <BarChart3 size={48} className="text-[#5acce6]" />
-                <TrendingUp size={48} className="text-[#6fe5b8]" />
-            </div>
-            <div className="text-center max-w-md space-y-2">
-                <h3 className="text-xl font-semibold tracking-tight text-slate-100">Modeling & Statistics</h3>
-                <p className="text-sm leading-relaxed text-[#566a84] mt-2">
-                    ROC curves, PR curves, confusion matrices, and per-model metric comparisons
-                    will appear here once training completes.
-                </p>
-            </div>
-            <div className="flex items-center gap-2 text-[10px] text-[#3c5d80] border border-[#1f2d40] rounded-full px-4 py-2">
-                <GitBranch size={12} /> Waiting for classification agent…
-            </div>
-        </div>
-    );
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center space-y-4 p-6 text-center">
+      <div className="flex gap-4 opacity-40">
+        <BarChart3 size={48} className="text-[#5acce6]" />
+        <TrendingUp size={48} className="text-[#6fe5b8]" />
+      </div>
+      <div>
+        <h3 className="text-xl font-semibold text-slate-100">Modeling & Statistics</h3>
+        <p className="mt-2 max-w-md text-sm text-[#566a84]">
+          ROC curves, PR curves, confusion matrices, and per-model metric comparisons will appear here once training completes.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 // ── Best metric badge (used in accordion header) ───────────────────────────────
@@ -508,7 +503,6 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
     }, []);
 
     const h = (id: string): Set<string> => hidden[id] ?? new Set();
-
     const chartData = data.chart_data;
     const hasCharts = !!(chartData && Object.keys(chartData.per_model ?? {}).length);
     const modelKeys = hasCharts ? Object.keys(chartData!.per_model) : [];

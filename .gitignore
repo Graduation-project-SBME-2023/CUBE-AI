@@ -32,7 +32,7 @@ Backend/agent_system/agents/literature_review_agent/literature_review_output
 
 # Saved Data - will change this after fixing the env variables for all data directories
 *.nii.gz
-
+**/workspace_*/
 # Logs
 **/*.log
 Backend/apps/radiology/logs/app.log

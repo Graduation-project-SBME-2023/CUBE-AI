@@ -68,6 +68,7 @@ export interface MiniFlowProps {
   edgeTypes: Record<string, React.ComponentType<any>>;
   children?: React.ReactNode;
   readOnly?: boolean;
+  fitViewTrigger?: number;
 }
 
 export type EventType =
