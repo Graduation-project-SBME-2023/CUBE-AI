@@ -14,7 +14,7 @@ class Study(Base):
     created_at = Column(DateTime, nullable=True)
 
     chat_sessions = relationship(
-        "ChatSession",  # ← string reference
+        "ChatSession",
         secondary=chat_study_association,
         back_populates="studies",
     )

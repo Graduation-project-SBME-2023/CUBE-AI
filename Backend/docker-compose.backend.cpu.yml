@@ -34,10 +34,14 @@ services:
         {"models": "all"}
       MONAI_SERVER_PORT: 8000
       MONAI_LABEL_STUDIES: http://orthanc:8042/dicom-web
-      DATABASE_URL: postgresql+asyncpg://workflow_user:password@postgres:5432/workflow_db
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ORTHANC_URL: http://orthanc:8042
       MODELS_DIR: /models
       NNUNET_DIR: /NN_Unet
       GENERAL_DATA_DIR: /General_Data
+      PATH: "/apps/radiology/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    env_file:
+      - .env
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/apps:/apps
       - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/monailabel
@@ -74,9 +78,11 @@ services:
     ports:
       - '5433:5432'
     environment:
-      POSTGRES_DB: workflow_db
-      POSTGRES_USER: workflow_user
-      POSTGRES_PASSWORD: password
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    env_file:
+      - .env
     restart: unless-stopped
 
 volumes:

@@ -1,18 +1,18 @@
+import logging
+from datetime import date, datetime
+from typing import Optional, Union
+from uuid import UUID
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
 from models.patient import Patient
 from schemas.patient import PatientCreate, PatientUpdate
-import schemas
-from typing import Optional
-from datetime import datetime, date
-from typing import Optional, Union
-from uuid import UUID
-from datetime import datetime
-from typing import Optional
-from datetime import date
-import aiohttp  
-from crud.orthanc_sync import ORTHANC_URL, AUTH
+from services.orthanc_client import delete_orthanc_resource
+
+logger = logging.getLogger(__name__)
+
+
 def normalize_gender(gender: Optional[str]) -> Optional[str]:
     if not gender:
         return None
@@ -57,12 +57,12 @@ async def create_patient(db: AsyncSession, patient: PatientCreate):
     db_patient = Patient(**patient_data)
     db.add(db_patient)
     try:
-            await db.commit()
-            await db.refresh(db_patient)
-            return db_patient
+        await db.commit()
+        await db.refresh(db_patient)
+        return db_patient
     except SQLAlchemyError as e:
-            await db.rollback()
-            raise e
+        await db.rollback()
+        raise e
 
 async def update_patient(db: AsyncSession, patient_id: UUID, data: PatientUpdate):
     result = await db.execute(select(Patient).where(Patient.patient_id == patient_id))
@@ -98,36 +98,22 @@ async def delete_patient(db: AsyncSession, patient_id: UUID):
         return False, "Patient not found"
     
     orthanc_patient_id = patient.orthanc_patient_id
-    patient_name = patient.name
-    
-    # Delete from Orthanc first
-    if orthanc_patient_id:
-        async with aiohttp.ClientSession(auth=AUTH) as session:
-            try:
-                async with session.delete(f"{ORTHANC_URL}/patients/{orthanc_patient_id}") as resp:
-                    if resp.status == 404:
-                        print(f"[WARN] Patient {orthanc_patient_id} not found in Orthanc (already deleted)")
-                    elif resp.status not in [200, 204]:
-                        error_msg = f"Failed to delete from Orthanc: HTTP {resp.status}"
-                        print(f"[ERROR] {error_msg}")
-                        return False, error_msg
-                    else:
-                        print(f"[INFO] 🗑 Deleted patient {patient_name} from Orthanc")
-            except aiohttp.ClientError as e:
-                error_msg = f"Orthanc connection error: {str(e)}"
-                print(f"[ERROR] {error_msg}")
-                return False, error_msg
+    deleted_from_orthanc, error_msg = await delete_orthanc_resource(
+        "patients",
+        orthanc_patient_id,
+    )
+    if not deleted_from_orthanc:
+        return False, error_msg
     
     # Delete from database
     try:
         await db.delete(patient)
         await db.commit()
-        print(f"[INFO] 🗑 Deleted patient {patient_name} from database")
         return True, None
     except SQLAlchemyError as e:
         await db.rollback()
         error_msg = f"Database error: {str(e)}"
-        print(f"[ERROR] {error_msg}")
+        logger.error(error_msg)
         return False, error_msg
 
 # ---------------------------

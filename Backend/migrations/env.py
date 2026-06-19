@@ -3,48 +3,43 @@ from logging.config import fileConfig
 
 import sys
 import os
-# Calculate paths
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
-monailabel_dir = os.path.join(project_root, 'monailabel')
+backend_root = os.path.abspath(os.path.join(current_dir, ".."))
+repo_root = os.path.abspath(os.path.join(backend_root, ".."))
+local_monailabel_dir = os.path.join(backend_root, "monailabel")
+container_monailabel_dir = "/monailabel"
 
-# Add project root
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
 
-# Import monailabel.core and alias it as 'core'
+def add_sys_path(path: str) -> None:
+    if path and path not in sys.path and os.path.exists(path):
+        sys.path.insert(0, path)
+
+
+for path in (backend_root, repo_root, local_monailabel_dir, container_monailabel_dir):
+    add_sys_path(path)
+
 core_module = importlib.import_module("monailabel.core")
 sys.modules["core"] = core_module
-# # 1. Calculate paths
-# current_dir = os.path.dirname(os.path.abspath(__file__))
-# project_root = os.path.abspath(os.path.join(current_dir, '..', '..'))
-# monailabel_dir = os.path.join(project_root, 'monailabel')
-
-# # 2. Add Project Root (Allows 'import monailabel')
-# if project_root not in sys.path:
-#     sys.path.insert(0, project_root)
-
-# # 3. Add Monailabel Directory (Allows 'import core')
-# # This fixes the "No module named 'core'" error
-# if monailabel_dir not in sys.path:
-#     sys.path.insert(0, monailabel_dir)
 
 
-# from monailabel.core.database import Base
-# from Backend.monailabel.models.model import Model
-# from Backend.monailabel.models.volume import Volume
-# from Backend.monailabel.models.segmentation import Segmentation
-# from Backend.monailabel.models.study import Study
-# from Backend.monailabel.models.patient import Patient
-# from Backend.monailabel.models.radiomics import Radiomics
-# from Backend.monailabel.models.chat_messages import ChatMessage
-# from Backend.monailabel.models.chat_sessions import ChatSession
-# from Backend.monailabel.models.workflow import Workflow
-# from Backend.monailabel.models.workflow_details import WorkflowDetail
-# from Backend.monailabel.models.hypothesis import Hypothesis
-# from Backend.monailabel.models.plan import Plan
-# from Backend.monailabel.models.steps import PlanStep
-# from Backend.monailabel.models.Wslog import WSLog
+from core.database import Base
+from models.model import Model
+from models.volume import Volume
+from models.segmentation import Segmentation
+from models.study import Study
+from models.patient import Patient
+from models.radiomics import Radiomics
+from models.chat_messages import ChatMessage
+from models.chat_sessions import ChatSession
+from models.workflow import Workflow
+from models.workflow_details import WorkflowDetail
+from models.hypothesis import Hypothesis
+from models.plan import Plan
+from models.steps import PlanStep
+from models.Wslog import WSLog
+from models.contextaugmentation import ContextAugmentation
+from models.Taskmessage import TaskMessage
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
@@ -53,12 +48,6 @@ from alembic import context
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
-config = context.config
-
-import os
-from sqlalchemy import engine_from_config, pool
-from alembic import context
-
 config = context.config
 
 #  Override Alembic URL from environment variable if present
@@ -76,9 +65,7 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 # from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
-# target_metadata = Base.metadata
-target_metadata=None  # Replace with actual MetaData object
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

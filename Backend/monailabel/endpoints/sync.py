@@ -1,9 +1,10 @@
+import logging
+
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, BackgroundTasks
 from core.database import get_db, AsyncSessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-import aiohttp
 
 from crud.orthanc_sync import (
     sync_study_to_db,
@@ -13,15 +14,15 @@ from crud.orthanc_sync import (
     delete_series_from_db,
     delete_patient_from_db,
     delete_segmentation_from_db,
-    AUTH,
-    ORTHANC_URL
 )
+from services.orthanc_client import ORTHANC_URL, create_orthanc_session
 from models.patient import Patient
 from models.study import Study
 from models.volume import Volume
 from models.segmentation import Segmentation
 
 router = APIRouter(prefix="/sync", tags=["orthanc"])
+logger = logging.getLogger(__name__)
 
 
 # ----------------- Pydantic Payload -----------------
@@ -43,11 +44,10 @@ async def manual_full_sync(background_tasks: BackgroundTasks):
     Manually trigger a full sync of all Orthanc data.
     Runs in the background and returns immediately.
     """
-    print("[INFO] Manual full sync requested")
     background_tasks.add_task(run_full_sync_background)
     return {
         "status": "accepted",
-        "message": "Full sync started in background. Check logs for progress."
+        "message": "Full sync started in background."
     }
 
 
@@ -66,7 +66,7 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
         segs_count = (await db.execute(select(func.count()).select_from(Segmentation))).scalar()
 
         # Get counts from Orthanc
-        async with aiohttp.ClientSession(auth=AUTH) as session:
+        async with create_orthanc_session() as session:
             async with session.get(f"{ORTHANC_URL}/statistics") as resp:
                 orthanc_stats = await resp.json() if resp.status == 200 else {}
 
@@ -95,26 +95,22 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
 # ----------------- BACKGROUND TASKS -----------------
 
 async def run_full_sync_background():
-    """Background task for full sync"""
+    """Background task for full sync."""
     async with AsyncSessionLocal() as db:
         await sync_all_from_orthanc(db)
 
 
 async def process_webhook_background(change_type: str, resource_id: str, level: str):
-    """Process webhook changes in background"""
-    print(f"[INFO] Background processing started for {change_type}: {resource_id}")
-
+    """Process webhook changes in background."""
     async with AsyncSessionLocal() as db:
         try:
             if change_type == "stable_study":
                 await sync_study_to_db(db, orthanc_study_id=resource_id)
                 await db.commit()
-                print(f"[INFO] ✅ Background sync completed for study {resource_id}")
 
             elif change_type == "stable_series":
                 await sync_series_to_db(db, orthanc_series_id=resource_id)
                 await db.commit()
-                print(f"[INFO] ✅ Background sync completed for series {resource_id}")
 
             # ---------- DELETE EVENTS ----------
             elif change_type == "deleted":
@@ -126,10 +122,8 @@ async def process_webhook_background(change_type: str, resource_id: str, level: 
                 if level_lower == "patient":
                     # For patient, we use orthanc_patient_id directly
                     deleted = await delete_patient_from_db(db, resource_id)
-                    if deleted:
-                        print(f"[INFO] 🗑 Successfully deleted patient {resource_id}")
-                    else:
-                        print(f"[WARN] Patient {resource_id} not found in database")
+                    if not deleted:
+                        logger.warning("Patient %s not found in database", resource_id)
 
                 elif level_lower == "study":
                     # Find study by orthanc_study_id and delete
@@ -140,9 +134,8 @@ async def process_webhook_background(change_type: str, resource_id: str, level: 
                     if study:
                         study_uid = study.study_uid
                         await delete_study_from_db(db, study_uid)
-                        print(f"[INFO] 🗑 Successfully deleted study {study_uid}")
                     else:
-                        print(f"[WARN] Study with Orthanc ID {resource_id} not found in database")
+                        logger.warning("Study with Orthanc ID %s not found in database", resource_id)
 
                 elif level_lower == "series":
                     # Try to find as volume first
@@ -154,7 +147,6 @@ async def process_webhook_background(change_type: str, resource_id: str, level: 
                     if volume:
                         series_uid = volume.volume_series_instance_uid
                         await delete_series_from_db(db, series_uid)
-                        print(f"[INFO] 🗑 Successfully deleted volume series {series_uid}")
                     else:
                         # Try as segmentation
                         result = await db.execute(
@@ -164,27 +156,30 @@ async def process_webhook_background(change_type: str, resource_id: str, level: 
                         if seg:
                             seg_uid = seg.label_series_instance_uid
                             await delete_segmentation_from_db(db, seg_uid)
-                            print(f"[INFO] 🗑 Successfully deleted segmentation series {seg_uid}")
                         else:
-                            print(f"[WARN] Series with Orthanc ID {resource_id} not found in database")
+                            logger.warning("Series with Orthanc ID %s not found in database", resource_id)
 
                 elif level_lower == "instance":
                     # Instance deletion: only delete if it's the last instance in a series
-                    # For now, we'll just log it - typically you don't delete series on single instance deletion
-                    print(f"[INFO] Instance {resource_id} deleted - no database action needed")
+                    # Typically we do not delete a series on single-instance deletion.
+                    pass
 
                 else:
-                    print(f"[WARN] Unknown delete level: {level_lower}")
+                    logger.warning("Unknown delete level: %s", level_lower)
 
                 await db.commit()
 
             else:
-                print(f"[INFO] Ignored change_type={change_type}")
+                return
 
         except Exception as e:
-            print(f"[ERROR] ❌ Background sync failed for {change_type} {resource_id}: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(
+                "Background sync failed for %s %s: %s",
+                change_type,
+                resource_id,
+                e,
+                exc_info=True,
+            )
             await db.rollback()
 
 
@@ -196,13 +191,7 @@ async def orthanc_webhook(payload: OrthancWebhookPayload, background_tasks: Back
     Webhook endpoint that responds immediately and processes in background.
     Supports sync + deletion.
     """
-    print(f"[INFO] Received webhook: {payload.change_type} for resource {payload.resource_id}")
-
-    supported_events = {
-    "stable_study",
-    "stable_series",
-    "deleted",
-}
+    supported_events = {"stable_study", "stable_series", "deleted"}
 
     if payload.change_type in supported_events:
         background_tasks.add_task(
