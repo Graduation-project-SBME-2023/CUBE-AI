@@ -38,6 +38,7 @@ export default function PlaygroundCanvas({
   const [canExecute, setCanExecute] = useState(false);
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
   const hasInitiatedPlan = useRef(false);
+  const modeRef = useRef<'planning' | 'executing' | 'results'>('planning');
   const nodesRef = useRef<FlowNode[]>([]);
   const sessionIdRef = useRef<string | undefined>(session_id);
   const literatureOutputRef = useRef<typeof onLiteratureOutput>(onLiteratureOutput);
@@ -49,8 +50,6 @@ export default function PlaygroundCanvas({
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
-
-  const hasInitiatedPlan = useRef(false);
   useEffect(() => {
     if (session_id) {
       sessionStorage.setItem('active_cube_session', String(session_id));

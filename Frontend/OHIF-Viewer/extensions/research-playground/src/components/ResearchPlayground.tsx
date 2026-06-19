@@ -53,18 +53,13 @@ function ResearchPlaygroundInner() {
     [phases]
   );
 
+  const isValidPhase = !phaseId || phases.some(phase => phase.id === phaseId);
+
     useEffect(() => {
         if (phaseId && !isValidPhase) {
             navigate('/playground/planning', { replace: true, state: location.state });
         }
     }, [phaseId, isValidPhase, navigate, location.state]);
-
-    // Retrieve hypothesis from navigation state or default
-    const hypothesis = location.state?.hypothesis || 'No active hypothesis defined.';
-    const sessionId = location.state?.sessionId || location.state?.session_id || null;
-    const includeLitReview = location.state?.includeLitReview ?? true;
-    const sendInitialMessage = location.state?.sendInitialMessage || false;
-    const initialUserMessage = sendInitialMessage ? hypothesis : undefined;
 
     // Load state from endpoints when session_id is provided
     // Effect 1: non-replay session state (unchanged behavior, fires immediately)
