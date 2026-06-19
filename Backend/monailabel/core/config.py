@@ -1,11 +1,18 @@
-from pydantic_settings import BaseSettings
-from os import getenv
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = getenv("DATABASE_URL", "postgresql+asyncpg://workflow_user:password@postgres:5432/workflow_db")
+    DATABASE_URL: str
+    SQL_ECHO: bool = False
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    ORTHANC_URL: str
+    ORTHANC_USER: str
+    ORTHANC_PASSWORD: str
+    ORTHANC_REQUEST_TIMEOUT: float = 30.0
+
+    model_config = SettingsConfigDict(
+        env_file=(".env", "Backend/.env"),
+        env_file_encoding="utf-8",
+    )
+
 
 settings = Settings()

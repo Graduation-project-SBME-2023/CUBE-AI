@@ -1,12 +1,8 @@
-from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, text,ForeignKey
-from sqlalchemy.dialects.postgresql import JSONB
-from unittest.mock import Base
-
-
+from sqlalchemy import Column, Text, DateTime, text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from core.database import Base  
-from sqlalchemy.dialects.postgresql import UUID
+from core.database import Base
 
 class ContextAugmentation(Base):
     """

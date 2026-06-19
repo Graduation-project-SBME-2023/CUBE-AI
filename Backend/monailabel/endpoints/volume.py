@@ -1,22 +1,37 @@
+import asyncio
+import logging
+from io import BytesIO
+
 import httpx
 import imageio.v2 as imageio # Using v2 to avoid deprecation warnings
-from io import BytesIO
-from fastapi.responses import StreamingResponse
-import asyncio
-from schemas.study import StudyRead
 from fastapi import APIRouter, Depends, HTTPException, Query
+from schemas.study import StudyRead
 from sqlalchemy.orm import Session
 from schemas.volume import Volume, VolumeCreate, VolumeUpdate
-from crud.volume import count_volumes_by_study, delete_volume, get_volume, get_volumes, create_volume, get_volumes_by_study, search_volumes, search_volumes, update_volume, get_study_by_volume, search_volumes_by_description, get_unique_series_descriptions
+from crud.volume import (
+    count_volumes_by_study,
+    create_volume,
+    delete_volume,
+    get_study_by_volume,
+    get_unique_series_descriptions,
+    get_volume,
+    get_volumes,
+    get_volumes_by_study,
+    search_volumes,
+    search_volumes_by_description,
+    update_volume,
+)
+from core.config import settings
 from core.database import get_db
+from fastapi.responses import StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
 router = APIRouter(prefix="/volumes", tags=["volumes"])
+logger = logging.getLogger(__name__)
 
-# Define your Orthanc URL and credentials here
-ORTHANC_URL = "http://orthanc:8042"
-ORTHANC_AUTH = ("orthanc", "orthanc")
-
+ORTHANC_URL = settings.ORTHANC_URL.rstrip("/")
+ORTHANC_AUTH = (settings.ORTHANC_USER, settings.ORTHANC_PASSWORD)
+ORTHANC_PREVIEW_TIMEOUT = 60.0
 
 MAX_CONCURRENT_GIFS = asyncio.Semaphore(5)
 
@@ -35,14 +50,13 @@ def create_gif_in_thread(responses):
         gif_io.seek(0)
         return gif_io
     except Exception as e:
-        print(f"GIF Encoding Error: {e}")
+        logger.error("GIF encoding error: %s", e, exc_info=True)
         return None
 
 @router.get("/{volume_series_instance_uid}/preview.gif")
 async def get_volume_preview_gif(volume_series_instance_uid: str):
     async with MAX_CONCURRENT_GIFS:
-        # Increased timeout to 60s for heavy DICOM rendering
-        async with httpx.AsyncClient(auth=ORTHANC_AUTH, timeout=60.0) as client:
+        async with httpx.AsyncClient(auth=ORTHANC_AUTH, timeout=ORTHANC_PREVIEW_TIMEOUT) as client:
             try:
                 # 1. TRANSLATE UID TO ORTHANC ID
                 # We post the UID to lookup to get the internal Orthanc UUID
