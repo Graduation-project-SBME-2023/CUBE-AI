@@ -70,6 +70,10 @@ RUN sed -i '/optimum-quanto/d' /voxtell_requirements.txt
 
 RUN pip install --no-cache-dir -r /voxtell_requirements.txt
 
+# Fix torchvision circular import: upgrade only the torchvision wheel,
+# not its dependencies (avoids re-downloading the full ~500MB torch package).
+RUN pip install --no-cache-dir -U torchvision --no-deps
+
 RUN pip install git+https://github.com/huggingface/optimum-quanto.git
 
 # ------------------------------------------------------------

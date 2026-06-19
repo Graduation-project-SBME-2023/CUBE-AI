@@ -218,6 +218,7 @@ CONSTRAINTS
 • Comparison must include a gold standard or conventional alternative.
 • Outcome must include quantitative metrics.
 • Do NOT include pipeline steps in this phase — only the hypothesis.
+• CRITICAL JSON FORMATTING: If you include any LaTeX commands or paths in your instructions, you MUST double-escape all backslashes (e.g., use \\includegraphics instead of \includegraphics) so the JSON remains perfectly valid. Do not use unescaped backslashes
 """,
         ),
 
