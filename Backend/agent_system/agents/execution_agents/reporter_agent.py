@@ -63,6 +63,7 @@ class ReporterAgent(AssistantAgent):
             command=sys.executable,
             args=[mcp_server_path],
             env=env,
+            read_timeout_seconds=2000,
         )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)

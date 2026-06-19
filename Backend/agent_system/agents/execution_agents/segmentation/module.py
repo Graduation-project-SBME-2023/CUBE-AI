@@ -57,7 +57,7 @@ class SegmentationModule:
             "SESSION_ID": self.session_id, "AGENT_ID": 'segmentation_agent'
         })
         math_server = StdioServerParams(
-            command="python", args=[str(server_path)], timeout=None, env=env
+            command="python", args=[str(server_path)], read_timeout_seconds=2000, env=env
         )
         try:
             tools = await mcp_server_tools(math_server)
