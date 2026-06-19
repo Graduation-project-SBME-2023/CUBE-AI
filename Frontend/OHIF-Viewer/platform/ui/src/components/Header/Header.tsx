@@ -51,9 +51,7 @@ function Header({
                 className="text-[#5acce6] w-8"
               />
             )}
-            <div className="ml-4">
-              {WhiteLabeling?.createLogoComponentFn?.(React, props) || <Svg name="logo-cube" />}
-            </div>
+
           </div>
         </div>
         <div className="flex items-center">{children}</div>

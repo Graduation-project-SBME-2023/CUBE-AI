@@ -24,12 +24,6 @@ export default function PlanningView({ initialHypothesis, sessionId, includeLitR
         };
     }, []);
 
-    console.log('[HypothesisFlow][PlanningView] Render', {
-        hasHypothesis: Boolean(initialHypothesis),
-        hypothesisLength: initialHypothesis?.length || 0,
-        sessionId,
-    });
-
     return (
         <div className="w-full h-full relative overflow-hidden bg-[#0a1520]">
             <div className="absolute top-0 left-0 right-0 z-10 pointer-events-none bg-gradient-to-b from-[#0a1520]/90 to-transparent px-4 py-2">

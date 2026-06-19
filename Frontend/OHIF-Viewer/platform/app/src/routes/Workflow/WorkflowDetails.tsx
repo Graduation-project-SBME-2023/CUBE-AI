@@ -10,6 +10,7 @@ import { utils } from '@ohif/core';
 import filtersMeta from '../WorkList/filtersMeta';
 import { useNavigate } from 'react-router-dom';
 import { useLocation } from 'react-router';
+import { getMonaiBaseUrl } from '../../utils/runtimeUrls';
 
 import {
   Icon,
@@ -134,7 +135,7 @@ function WorkflowDetailPage({
         ? ServerSettings.current.state
         : null;
 
-    return new MonaiLabelClient(settings ? settings.url : 'http://127.0.0.1:8000');
+    return new MonaiLabelClient(settings ? settings.url : getMonaiBaseUrl());
   };
 
   const onInfo = async () => {
@@ -217,7 +218,7 @@ function WorkflowDetailPage({
   useEffect(() => {
     const fetchAnnotationStatus = async () => {
       try {
-        const url = `http://localhost:8000/workflow/${encodeURIComponent(
+        const url = `${getMonaiBaseUrl()}/workflow/${encodeURIComponent(
           workflowName
         )}/filter-annotated`;
         const response = await fetch(url, {
@@ -377,7 +378,7 @@ function WorkflowDetailPage({
 
   const fetchTrainFlag = async (taskName, caseId) => {
     try {
-      const url = `http://localhost:8000/workflow/${encodeURIComponent(taskName)}/get-train?study_uid=${encodeURIComponent(caseId)}`;
+      const url = `${getMonaiBaseUrl()}/workflow/${encodeURIComponent(taskName)}/get-train?study_uid=${encodeURIComponent(caseId)}`;
       const response = await fetch(
         url
       );
@@ -429,7 +430,7 @@ function WorkflowDetailPage({
         study_uid: studyInstanceUid,
         train: trainFlag,
       }).toString();
-      const url = `http://localhost:8000/workflow/${encodeURIComponent(workflowDetails.workflowName)}/update-train?${queryParams}`;
+      const url = `${getMonaiBaseUrl()}/workflow/${encodeURIComponent(workflowDetails.workflowName)}/update-train?${queryParams}`;
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -502,7 +503,7 @@ function WorkflowDetailPage({
     }));
 
     try {
-      const response = await fetch('http://localhost:8000/workflow/delete-multiple', {
+      const response = await fetch(`${getMonaiBaseUrl()}/workflow/delete-multiple`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -620,7 +621,7 @@ function WorkflowDetailPage({
     setIsTraining(true);
 
     try {
-      const url = `http://localhost:8000/workflow/${encodeURIComponent(workflowName)}/train`;
+      const url = `${getMonaiBaseUrl()}/workflow/${encodeURIComponent(workflowName)}/train`;
       const fetchedWorkflowDataResponse = await fetch(
         url,
         {
@@ -680,7 +681,7 @@ function WorkflowDetailPage({
       try {
         // Construct query string
 
-        const response = await fetch(`http://localhost:8000/create-model?${queryParams}`, {
+        const response = await fetch(`${getMonaiBaseUrl()}/create-model?${queryParams}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -704,7 +705,7 @@ function WorkflowDetailPage({
           const queryParams = new URLSearchParams({
             model_name: workflowDetails.workflowName,
           }).toString();
-          const response = await fetch(`http://localhost:8000/train/${workflowName}`, {
+          const response = await fetch(`${getMonaiBaseUrl()}/train/${workflowName}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

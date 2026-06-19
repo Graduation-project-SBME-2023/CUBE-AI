@@ -1,93 +1,41 @@
 import React, { useState } from 'react';
-import { Activity, Bot, Layout, ArrowRight, Box, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { Bot, Layout, Box } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import Card from '../components/ui/Card';
+import Card, { SystemVariant } from '../components/ui/Card';
+import Badge from '../components/shared/Badge';
+import theme from '../components/ui/theme';
 
 // Icon aliases for lucide-react to satisfy JSX typing in this project
 const BoxIcon: any = Box;
 const LayoutIcon: any = Layout;
 const BotIcon: any = Bot;
 
-// ==========================================
-// STYLE CONFIGURATION (Centralized Theme)
-// ==========================================
-const styles = {
-  // Layout & Backgrounds
-  wrapper: (hovered) => `w-full h-screen flex items-center justify-center p-6 text-white font-sans relative overflow-hidden transition-colors duration-700 ease-in-out ${
-    hovered === 'standard' ? 'bg-[#020410]' : hovered === 'agentic' ? 'bg-[#010a05]' : 'bg-[#000000]'
-  }`,
-  
-  gradients: {
-    standard: 'radial-gradient(circle at 30% 50%, rgba(52, 140, 253, 0.15), transparent 60%)',
-    // Agentic gradient switched to OHIF cyan (unified)
-    agentic: 'radial-gradient(circle at 70% 50%, rgba(90, 204, 230, 0.15), transparent 60%)',
-    default: 'radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.03), transparent 70%)'
-  },
-  
-  gridTexture: {
-    backgroundImage: 'radial-gradient(#44626f 1px, transparent 1px)',
-    backgroundSize: '30px 30px'
-  },
+const DEFAULT_GRADIENT = 'radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.03), transparent 70%)';
+const GRID_TEXTURE = {
+  backgroundImage: 'radial-gradient(#44626f 1px, transparent 1px)',
+  backgroundSize: '30px 30px',
+};
 
-  // Header Elements
-  header: {
-    container: "max-w-4xl w-full z-10 flex flex-col items-center animate-in fade-in zoom-in-95 duration-500",
-    content: "mb-12 text-center space-y-4",
-    badge: "inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#5acce6] border border-[#023a7d] text-[#000000] text-xs font-bold uppercase tracking-widest shadow-lg",
-    titleWrapper: "flex items-center justify-center gap-4",
-    logoBox: "p-2 bg-[#151a1f] border border-[#023a7d] rounded-xl shadow-lg shadow-[#5acce6]/20",
-    mainTitle: "text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-white to-[#91b9cd]",
-    subTitle: "text-[#91b9cd] text-xl font-medium tracking-wide",
-    description: "text-[#566a84] text-sm max-w-xl mx-auto pt-2"
-  },
+const getBackgroundGradient = (hovered: SystemVariant | null) => {
+  if (hovered === 'standard') return theme.gradients.standard;
+  if (hovered === 'agentic') return theme.gradients.agentic;
+  return DEFAULT_GRADIENT;
+};
 
-  // Selection Cards
-  cards: {
-    grid: "grid grid-cols-1 md:grid-cols-2 gap-8 w-full",
-    
-    // Standard Card Styles
-    standardContainer: (hovered) => `group relative p-8 rounded-2xl border transition-all duration-500 text-left flex flex-col gap-4 shadow-xl cursor-pointer ${
-      hovered === 'standard' 
-        ? 'bg-[#151a1f] border-[#348cfd] shadow-[#348cfd]/20 scale-105 z-10' 
-        : hovered === 'agentic' 
-        ? 'bg-[#151a1f]/50 border-[#3c5d80] opacity-50 scale-95 blur-[1px]'
-        : 'bg-[#151a1f] border-[#3c5d80] hover:border-[#348cfd]'
-    }`,
-    standardIconBox: (hovered) => `w-14 h-14 rounded-xl border flex items-center justify-center transition-colors duration-300 ${
-        hovered === 'standard' ? 'bg-[#348cfd] border-transparent' : 'bg-[#003f5c] border-[#005f7d]'
-    }`,
-    standardTitle: (hovered) => `text-xl font-bold mb-2 transition-colors ${
-        hovered === 'standard' ? 'text-[#348cfd]' : 'text-white'
-    }`,
-    standardFooter: (hovered) => `mt-auto pt-4 flex items-center text-xs font-bold uppercase tracking-wider transition-colors ${
-        hovered === 'standard' ? 'text-white' : 'text-[#566a84]'
-    }`,
-
-    // Agentic Card Styles
-    agenticContainer: (hovered) => `group relative p-8 rounded-2xl border transition-all duration-500 text-left flex flex-col gap-4 shadow-xl cursor-pointer ${
-      hovered === 'agentic' 
-        ? 'bg-[#151a1f] border-[#348cfd] shadow-[#348cfd]/12 scale-105 z-10' 
-        : hovered === 'standard' 
-        ? 'bg-[#151a1f]/50 border-[#3c5d80] opacity-50 scale-95 blur-[1px]'
-        : 'bg-[#151a1f] border-[#3c5d80] hover:border-[#348cfd]'
-    }`,
-    agenticIconBox: (hovered) => `w-14 h-14 rounded-xl border flex items-center justify-center transition-colors duration-300 ${
-        hovered === 'agentic' ? 'bg-[#5acce6] border-transparent' : 'bg-[#023a7d] border-[#0f3354]'
-    }`,
-    agenticTitle: (hovered) => `text-xl font-bold mb-2 transition-colors ${
-        hovered === 'agentic' ? 'text-[#5acce6]' : 'text-white'
-    }`,
-    agenticFooter: (hovered) => `mt-auto pt-4 flex items-center text-xs font-bold uppercase tracking-wider transition-colors ${
-        hovered === 'agentic' ? 'text-white' : 'text-[#566a84]'
-    }`,
-
-    description: "text-[#91b9cd] text-sm leading-relaxed",
-    
-    // Animation elements
-    pingWrapper: "absolute top-0 right-0 p-3",
-    pingDot: (hovered) => `animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${hovered === 'agentic' ? 'bg-[#5acce6]' : 'bg-[#3c5d80]'}`,
-    staticDot: (hovered) => `relative inline-flex rounded-full h-3 w-3 ${hovered === 'agentic' ? 'bg-[#5acce6]' : 'bg-[#566a84]'}`,
+const getCardClassName = (hovered: SystemVariant | null, mode: SystemVariant) => {
+  if (hovered && hovered !== mode) {
+    return 'bg-[#151a1f]/50 border-[#3c5d80] opacity-50 scale-95 blur-[1px]';
   }
+
+  if (mode === 'standard') {
+    return hovered === mode
+      ? 'bg-[#151a1f] border-[#348cfd] shadow-[#348cfd]/20 scale-105 z-10'
+      : 'bg-[#151a1f] border-[#3c5d80] hover:border-[#348cfd]';
+  }
+
+  return hovered === mode
+    ? 'bg-[#151a1f] border-[#5acce6] shadow-[#5acce6]/12 scale-105 z-10'
+    : 'bg-[#151a1f] border-[#3c5d80] hover:border-[#5acce6]';
 };
 
 // ==========================================
@@ -95,10 +43,10 @@ const styles = {
 // ==========================================
 const CubeStartUp = () => {
     const navigate = useNavigate();
-    const [hovered, setHovered] = useState(null);
+  const [hovered, setHovered] = useState<SystemVariant | null>(null);
 
     // Handle mode selection and navigation
-    const handleModeSelection = (mode) => {
+    const handleModeSelection = (mode: SystemVariant) => {
         console.log(`[CUBE] Mode selected: ${mode}`);
         
         if (mode === 'standard') {
@@ -112,76 +60,56 @@ const CubeStartUp = () => {
     };
 
     return (
-        <div className={styles.wrapper(hovered)}>
-             <button
-               className="absolute right-6 top-6 z-20 rounded-md border border-[#2b4f66] bg-[#0f1f2e] px-3 py-1 text-sm font-semibold text-[#5acce6] transition-colors hover:border-[#5acce6] hover:bg-[#123149]"
-               onClick={() => navigate('/agentic-home')}
-               title="Open Research Playground"
-             >
-               Research Playground
-             </button>
-             {/* Dynamic Background Gradient */}
-             <div 
-                className="absolute inset-0 pointer-events-none transition-all duration-1000 ease-in-out opacity-60"
-                style={{
-                    background: hovered === 'standard' 
-                        ? styles.gradients.standard
-                        : hovered === 'agentic'
-                        ? styles.gradients.agentic
-                        : styles.gradients.default
-                }}
+        <div className="relative flex h-screen w-full items-center justify-center overflow-hidden bg-black font-sans text-white">
+             <div className="pointer-events-none absolute inset-0 opacity-20" style={GRID_TEXTURE} />
+             <div
+                className="pointer-events-none absolute inset-0 transition-all duration-700 ease-in-out opacity-60"
+                style={{ background: getBackgroundGradient(hovered) }}
              />
-             
-             {/* Grid Texture */}
-             <div className="absolute inset-0 opacity-20" style={styles.gridTexture} />
 
-             <div className={styles.header.container}>
-                {/* Header Section */}
-                <div className={styles.header.content}>
-                    <div className={styles.header.badge}>
+             <div className="z-10 w-full max-w-4xl px-6">
+                <div className="mb-12 text-center space-y-4">
+                    <Badge tone="info">
+                      <span className="flex items-center gap-2">
                         <BoxIcon size={12} /> CUBE Research Platform
-                    </div>
-                    <div className={styles.header.titleWrapper}>
-                        <div className={styles.header.logoBox}>
+                      </span>
+                    </Badge>
+                    <div className="flex items-center justify-center gap-4">
+                        <div className="rounded-xl border border-[#023a7d] bg-[#151a1f] p-2 shadow-lg shadow-[#5acce6]/20">
                             <BoxIcon size={42} className="text-[#5acce6]" strokeWidth={1.5} />
                         </div>
-                        <h1 className={styles.header.mainTitle}>
+                        <h1 className="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-white to-[#91b9cd]">
                             CUBE
                         </h1>
                     </div>
-                    <p className={styles.header.subTitle}>
-                        Your AI Research Assistant
-                    </p>
-                    <p className={styles.header.description}>
+                    <p className="text-[#91b9cd] text-xl font-medium tracking-wide">Your AI Research Assistant</p>
+                    <p className="text-[#566a84] text-sm max-w-xl mx-auto pt-2">
                         Select an operation mode to begin your research session.
                     </p>
                 </div>
 
-                {/* Mode Selection Cards (refactored to use shared Card) */}
-                <div className={styles.cards.grid}>
-                    {/* Standard Pipeline → Worklist */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div onMouseEnter={() => setHovered('standard')} onMouseLeave={() => setHovered(null)}>
                       <Card
                         title="Standard Pipeline"
                         description="View and manage your medical imaging cases, extract regions of interest, build your datasets faster through interactive AI assisted segmentation, and build your custom AI models with ease."
-                        icon={<LayoutIcon size={28} className={`${hovered === 'standard' ? 'text-white' : 'text-[#5acce6]'}`} />}
+                        icon={<LayoutIcon size={28} className={hovered === 'standard' ? 'text-white' : 'text-[#5acce6]'} />}
                         ctaText="Enter Worklist"
                         onClick={() => handleModeSelection('standard')}
                         variant="standard"
-                        className={`${hovered === 'standard' ? 'scale-105 z-10 border-[#348cfd]' : hovered === 'agentic' ? 'bg-[#151a1f]/50 border-[#3c5d80] opacity-50 scale-95 blur-[1px]' : 'border-[#3c5d80] hover:border-[#348cfd]'}`}
+                        className={getCardClassName(hovered, 'standard')}
                       />
                     </div>
 
-                    {/* Agentic Researcher → Playground */}
-                    <div onMouseEnter={() => setHovered('agentic')} onMouseLeave={() => setHovered(null)} style={hovered === 'agentic' ? { boxShadow: '0 20px 40px rgba(90,204,230,0.12)' } : undefined}>
+                    <div onMouseEnter={() => setHovered('agentic')} onMouseLeave={() => setHovered(null)}>
                       <Card
                         title="Agentic Researcher"
                         description="Perform end-to-end research tasks through natural language instructions, leveraging the full capabilities of CUBE's AI agents to assist you in data analysis, hypothesis testing, and iterative experimentation."
-                        icon={<BotIcon size={28} className={`${hovered === 'agentic' ? 'text-[#023a7d]' : 'text-[#5acce6]'}`} />}
+                        icon={<BotIcon size={28} className={hovered === 'agentic' ? 'text-[#023a7d]' : 'text-[#5acce6]'} />}
                         ctaText="Launch Playground"
                         onClick={() => handleModeSelection('agentic')}
                         variant="agentic"
-                        className={`${hovered === 'agentic' ? 'scale-100 z-10 border-[#5acce6] shadow-[#5acce6]/12' : hovered === 'standard' ? 'bg-[#151a1f]/50 border-[#3c5d80] opacity-50 scale-95 blur-[1px]' : 'border-[#3c5d80] hover:border-[#5acce6]'}`}
+                        className={getCardClassName(hovered, 'agentic')}
                       />
                     </div>
                 </div>

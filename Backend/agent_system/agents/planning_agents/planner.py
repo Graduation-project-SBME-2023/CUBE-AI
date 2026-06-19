@@ -403,7 +403,7 @@ class ClinicalPlanner:
             # ─────────────────────────────────────────────────────────────
             # PHASE 1: HYPOTHESIS STRUCTURING
             # ─────────────────────────────────────────────────────────────
-            await self._send("msg", "**Phase 1: Hypothesis Structuring**")
+            # await self._send("msg", "**Phase 1: Hypothesis Structuring**")
 
             hypothesis_architect = self.agents["hypothesis_architect"]
 
@@ -542,7 +542,7 @@ class ClinicalPlanner:
             # ─────────────────────────────────────────────────────────────
             # PHASE 3: DYNAMIC PIPELINE PLANNING
             # ─────────────────────────────────────────────────────────────
-            await self._send("msg", "**Phase 3: Pipeline Planning**")
+            # await self._send("msg", "**Phase 3: Pipeline Planning**")
 
             pipeline_architect = self.agents["pipeline_architect"]
 
@@ -604,7 +604,10 @@ class ClinicalPlanner:
             await self._save_state()
             await self.session_service.confirm_plan(self.session)
             await self._load_state()
-            await self._send("msg", "Pipeline confirmed. Compiling context-enriched task messages for each agent...")
+            await self._send("msg", "Research plan confirmed. You can excute the agents now...")
+
+            # Initial LaTeX generation/emission and persistence removed.
+            # The frontend or reporter agent should request or generate reports on demand.
 
             try:
                 # Compile structured task messages with pre-structured knowledge sections
@@ -618,16 +621,16 @@ class ClinicalPlanner:
                 await self._save_state()
                 await self.session_service.confirm_plan(self.session)
 
-                await self._send("msg", f"Generated {len(task_messages)} context-enriched task messages.")
+                # await self._send("msg", f"Generated {len(task_messages)} context-enriched task messages.")
 
                 persisted_messages = await self.session_service.save_task_messages_for_plan(
                     self.session,
                     task_messages,
                 )
-                await self._send(
-                    "msg",
-                    f"Persisted {len(persisted_messages)}/{len(task_messages)} task messages with context augmentation to DB.",
-                )
+                # await self._send(
+                #     "msg",
+                #     f"Persisted {len(persisted_messages)}/{len(task_messages)} task messages with context augmentation to DB.",
+                # )
 
                 # Send task message summaries to UI
                 task_summaries = [

@@ -2,8 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { MessageSquare, History, Plus, ChevronRight, Trash2, Send, Activity as ActivityIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import websocketService from '../../utils/WebsocketService';
-import './ChatSidebar.css';
+import websocketService from '../../services/websocket';
+import { getBackendApiBaseUrl } from '../../utils/apiBase';
 
 const makeId = (prefix = 'id') => `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 const renderIcon = (Icon, size) => React.createElement(Icon, { size, 'aria-hidden': true });
@@ -39,6 +39,13 @@ const ChatSidebar = ({
   const resizeStateRef = useRef({ startX: 0, startWidth: 420 });
   const messagesEndRef = useRef(null);
   const activeSessionIdRef = useRef(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const MIN_WIDTH = 340;
   const MAX_WIDTH = maxSidebarWidth;
@@ -48,6 +55,8 @@ const ChatSidebar = ({
   if (messages.length === 0 && initialUserMessage) {
     messages = [{ id: makeId('init'), role: 'user', text: initialUserMessage, ts: Date.now() }];
   }
+  const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null;
+  const showThinking = isTyping || lastMessage?.role === 'user';
 
   useEffect(() => {
     console.log('[HypothesisFlow][ChatSidebar] Session binding effect', {
@@ -94,7 +103,7 @@ const ChatSidebar = ({
       if (!isUuid(String(externalSessionId))) {
         return;
       }
-      fetch(`http://localhost:8000/chat_messages/${externalSessionId}`, {
+      fetch(`${getBackendApiBaseUrl()}/chat_messages/${externalSessionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ role: 'user', text: initialUserMessage }),
@@ -169,7 +178,7 @@ const ChatSidebar = ({
 
   const fetchChatSessions = async () => {
     try {
-      const r = await fetch('http://localhost:8000/chat_sessions/');
+      const r = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/`);
       if (!r.ok) {
         throw new Error(`HTTP ${r.status}`);
       }
@@ -182,6 +191,7 @@ const ChatSidebar = ({
         last_activity: s.last_activity ? new Date(s.last_activity).getTime() : 0,
       }));
       // Merge DB sessions with existing local sessions to preserve WS-delivered messages
+      if (!isMountedRef.current) return;
       setSessions(prev => {
         const merged = [...prev];
         for (const dbSession of mapped) {
@@ -205,7 +215,7 @@ const ChatSidebar = ({
       return;
     }
     try {
-      const res = await fetch(`http://localhost:8000/chat_messages/${chat_id}`);
+      const res = await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chat_id}`);
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`);
       }
@@ -216,6 +226,7 @@ const ChatSidebar = ({
         text: m.text,
         ts: new Date(m.timestamp).getTime(),
       }));
+      if (!isMountedRef.current) return;
       setSessions(prev =>
         prev.map(s => {
           if (String(s.chat_id) !== String(chat_id)) return s;
@@ -230,7 +241,7 @@ const ChatSidebar = ({
   const createNewSession = async () => {
     try {
       const payload = { title: `Chat ${sessions.length + 1}` };
-      const r = await fetch('http://localhost:8000/chat_sessions/', {
+      const r = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -253,6 +264,7 @@ const ChatSidebar = ({
         summary: data.summary,
         last_activity: Date.now(),
       };
+      if (!isMountedRef.current) return;
       setSessions(s => [newSession, ...s]);
       setActiveSessionId(newSession.chat_id);
       setDrawerOpen(false);
@@ -273,6 +285,7 @@ const ChatSidebar = ({
         summary: '',
         last_activity: Date.now(),
       };
+      if (!isMountedRef.current) return;
       setSessions(s => [newSession, ...s]);
       setActiveSessionId(newSession.chat_id);
       setDrawerOpen(false);
@@ -285,7 +298,7 @@ const ChatSidebar = ({
   const deleteSession = async chat_id => {
     if (isUuid(String(chat_id))) {
       try {
-        await fetch(`http://localhost:8000/chat_sessions/${chat_id}`, { method: 'DELETE' });
+        await fetch(`${getBackendApiBaseUrl()}/chat_sessions/${chat_id}`, { method: 'DELETE' });
       } catch (err) {}
     }
     setSessions(s => s.filter(x => x.chat_id !== chat_id));
@@ -321,7 +334,7 @@ const ChatSidebar = ({
     setIsTyping(true);
     try {
       if (isUuid(String(sessionId))) {
-        await fetch(`http://localhost:8000/chat_messages/${sessionId}`, {
+        await fetch(`${getBackendApiBaseUrl()}/chat_messages/${sessionId}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ role: 'user', text: userMsg.text }),
@@ -374,7 +387,7 @@ const ChatSidebar = ({
         setIsTyping(true);
         try {
           if (isUuid(String(currentSessionId))) {
-            await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
+            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ role: 'user', text: userMsg.text }),
@@ -443,7 +456,7 @@ const ChatSidebar = ({
       setIsTyping(false);
       try {
         if (isUuid(String(currentSessionId))) {
-          await fetch(`http://localhost:8000/chat_messages/${currentSessionId}`, {
+            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ role: 'assistant', text: assistantMsg.text }),
@@ -484,44 +497,46 @@ const ChatSidebar = ({
   }
   return (
     <div
-      className={`w-chat-sidebar${isResizing ? ' is-resizing' : ''}`}
+      className={`relative flex h-full min-w-[340px] max-w-[min(90vw,760px)] flex-col border-l border-[#1a2a3a] bg-[#0f1923] shadow-[-10px_0_25px_-5px_rgba(0,0,0,0.4)] ${isResizing ? 'select-none' : ''}`}
       style={{ width: `${sidebarWidth}px` }}
     >
       <button
         type="button"
-        className="w-chat-resize-handle"
+        className="absolute left-[-4px] top-0 z-50 h-full w-2 cursor-col-resize border-0 bg-transparent"
         aria-label="Resize chat sidebar"
         onMouseDown={handleResizeStart}
       />
-      <div className="w-chat-header">
-        <div className="w-chat-header-title">
+      <div className="flex h-14 items-center justify-between border-b border-[#1a2a3a] bg-[#0a1520] px-5">
+        <div className="flex items-center gap-2.5 text-[15px] font-semibold text-[#e0f0ff]">
           {renderIcon(MessageSquare, 16)} Assistant
         </div>
-        <div className="w-chat-header-actions">
+        <div className="flex items-center gap-1.5">
           <button
             onClick={() => setDrawerOpen(!drawerOpen)}
             title="History"
+            className="inline-flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-transparent text-[#b0d4ea] transition-all hover:border-[#1e3248] hover:bg-[#0d1e2e] hover:text-[#e0f0ff]"
           >
             {renderIcon(History, 16)}
           </button>
           <button
             onClick={() => createNewSession()}
             title="New Chat"
+            className="inline-flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-transparent text-[#b0d4ea] transition-all hover:border-[#1e3248] hover:bg-[#0d1e2e] hover:text-[#e0f0ff]"
           >
             {renderIcon(Plus, 16)}
           </button>
           <button
             onClick={onClose}
-            style={{ marginLeft: 8 }}
+            className="ml-2 inline-flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-transparent text-[#b0d4ea] transition-all hover:border-[#1e3248] hover:bg-[#0d1e2e] hover:text-[#e0f0ff]"
           >
             {renderIcon(ChevronRight, 18)}
           </button>
         </div>
       </div>
       {drawerOpen && (
-        <div className="w-chat-history-drawer">
-          <div className="w-chat-history-list">
-            <div className="w-chat-history-title">Chat History</div>
+        <div className="absolute inset-0 top-14 z-20 overflow-y-auto border-l border-[#1a2a3a] bg-[#0a1520]/95 backdrop-blur">
+          <div className="p-4">
+            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[#3d5a72]">Chat History</div>
             {sessions.map(s => (
               <div
                 key={s.chat_id}
@@ -529,7 +544,7 @@ const ChatSidebar = ({
                   setActiveSessionId(s.chat_id);
                   setDrawerOpen(false);
                 }}
-                className={`w-chat-history-item${s.chat_id === activeSessionId ? ' active' : ''}`}
+                className={`group mb-1.5 flex cursor-pointer items-center justify-between rounded-[10px] border p-2.5 transition-all ${s.chat_id === activeSessionId ? 'border-[#2a5a8a] bg-[rgba(26,74,122,0.2)]' : 'border-transparent hover:border-[#1e3248] hover:bg-[#0d1e2e]'}`}
               >
                 <span className="truncate text-sm text-[#dadada]">{s.title}</span>
                 <button
@@ -537,7 +552,7 @@ const ChatSidebar = ({
                     e.stopPropagation();
                     deleteSession(s.chat_id);
                   }}
-                  className="w-chat-history-delete"
+                  className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-md text-[#ef4444] opacity-0 transition-all group-hover:opacity-100"
                 >
                   {renderIcon(Trash2, 12)}
                 </button>
@@ -546,38 +561,38 @@ const ChatSidebar = ({
           </div>
         </div>
       )}
-      <div className="w-chat-messages">
+      <div className="flex flex-1 flex-col gap-5 overflow-y-auto bg-[#0f1923] p-6">
         {messages.length === 0 && (
-          <div className="w-chat-message-empty">Start a new conversation...</div>
+          <div className="mt-10 text-center text-[13px] text-[#3d5a72]">Start a new conversation...</div>
         )}
         {messages.map(msg => (
           <div
             key={msg.id}
-            className={`w-chat-message ${msg.role}`}
+            className={`flex max-w-full flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
           >
-            <div className={`w-chat-bubble ${msg.role}`}>
-              <div className="w-chat-markdown">
+            <div className={`max-w-[88%] rounded-[18px] border p-3 text-[14.5px] leading-6 shadow ${msg.role === 'user' ? 'border-[#2a5a8a] bg-[linear-gradient(135deg,#1a4a7a_0%,#0d3560_100%)] text-[#e0f0ff]' : msg.role === 'assistant' ? 'border-[#1e3248] bg-[#111d29] text-[#8ab8cc]' : 'border-[#1a2a3a] bg-[#0d1e2e] text-[#b0d4ea]'}`}>
+              <div>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text || ''}</ReactMarkdown>
               </div>
             </div>
-            <span className="w-chat-timestamp">
+            <span className="mx-1 text-[11px] text-[#2d4a5e]">
               {new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
         ))}
-        {isTyping && (
-          <div className="w-chat-message w-chat-cube" style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', fontSize: '13px' }}>
+        {showThinking && (
+          <div className="flex items-center gap-2 p-2 text-[13px] text-[#3d5a72]">
             <ActivityIcon size={14} className="animate-spin text-[#5acce6]" />
             <span className="italic">CUBE is thinking...</span>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
-      <div className="w-chat-input-area">
-        <div className="w-chat-input-wrapper">
+      <div className="border-t border-[#1a2a3a] bg-[#0a1520] px-5 py-4">
+        <div className="flex items-end rounded-xl border border-[#1e3248] bg-[#0d1e2e] px-3 py-2">
           <input
             type="text"
-            className="w-chat-input"
+            className="flex-1 bg-transparent py-1 text-[14.5px] text-[#e0f0ff] outline-none placeholder:text-[#3d5a72]"
             placeholder="Type a message..."
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -585,7 +600,7 @@ const ChatSidebar = ({
           />
           <button
             onClick={sendMessage}
-            className="w-chat-send-btn"
+            className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-[10px] border border-[#2a5a8a] bg-[linear-gradient(135deg,#1a4a7a_0%,#0d3560_100%)] text-[#5acce6] transition-all hover:border-[#5acce6] hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
             disabled={!input.trim() || isTyping}
           >
             {renderIcon(Send, 16)}

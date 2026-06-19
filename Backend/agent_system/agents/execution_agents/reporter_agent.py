@@ -73,12 +73,12 @@ class ReporterAgent(AssistantAgent):
             ) from exc
         desired_tools = [
             "read_agent_task_context",
-            "latex_to_pdf",
             "scratchpad_read_report",
             "read_all_agent_outputs",
             "list_latex_templates",
             "get_latex_template",
             "read_literature_context",
+            "write_agent_output",
         ]
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         # final_tools = mcp_tools

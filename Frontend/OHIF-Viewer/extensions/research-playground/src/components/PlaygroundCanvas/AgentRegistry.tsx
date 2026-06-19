@@ -1,78 +1,15 @@
 import React from 'react';
-import { 
-    Database, Bot, Activity, FileText, Shield, User, 
-    ChevronDown, ChevronUp 
-} from 'lucide-react';
+import { Activity, Bot, ChevronDown, ChevronUp, Database, FileText, Shield, User } from 'lucide-react';
+import { AGENTS_REGISTRY } from '../../constants/agents';
 
-// --- RICH CONTENT CONFIGURATION ---
-const AGENTS_REGISTRY = [
-    { 
-        id: 'a1', 
-        title: 'DICOM Fetcher', 
-        role: 'IO / Network', 
-        icon: <Database size={16} className="text-[#5acce6]" />,
-        capabilities: [
-            "Query/Retrieve (C-FIND, C-MOVE)",
-            "Parse DICOM Tags",
-            "Anonymize on fly"
-        ]
-    },
-    { 
-        id: 'a2', 
-        title: 'Liver Segmentation', 
-        role: 'ML Model', 
-        icon: <Bot size={16} className="text-[#6fe5b8]" />,
-        capabilities: [
-            "Organ Volumetry",
-            "Couinaud Segments",
-            "Lesion Detection"
-        ]
-    },
-    { 
-        id: 'a3', 
-        title: 'Lung Nodule Det', 
-        role: 'ML Model', 
-        icon: <Activity size={16} className="text-[#f8ce46]" />,
-        capabilities: [
-            "Nodule Classification",
-            "Diameter Measurement",
-            "Growth Tracking"
-        ]
-    },
-    { 
-        id: 'a4', 
-        title: 'Report Generator', 
-        role: 'LLM / NLP', 
-        icon: <FileText size={16} className="text-[#91b9cd]" />,
-        capabilities: [
-            "Summarize Findings",
-            "Format Structured Report",
-            "ICD-10 Coding"
-        ]
-    },
-    { 
-        id: 'a5', 
-        title: 'De-identifier', 
-        role: 'Utility', 
-        icon: <Shield size={16} className="text-[#ff6b6b]" />,
-        capabilities: [
-            "Remove PHI",
-            "Shift Dates",
-            "Mask Pixel Data"
-        ]
-    },
-    { 
-        id: 'a6', 
-        title: 'Radiologist Review', 
-        role: 'Human In Loop', 
-        icon: <User size={16} className="text-white" />,
-        capabilities: [
-            "Manual Verification",
-            "Add Annotations",
-            "Sign Off"
-        ]
-    },
-];
+const iconByType = {
+    database: <Database size={16} className="text-[#5acce6]" />,
+    bot: <Bot size={16} className="text-[#6fe5b8]" />,
+    activity: <Activity size={16} className="text-[#f8ce46]" />,
+    fileText: <FileText size={16} className="text-[#91b9cd]" />,
+    shield: <Shield size={16} className="text-[#ff6b6b]" />,
+    user: <User size={16} className="text-white" />,
+};
 
 const AgentRegistry = ({ isOpen, onToggle }) => {
     return (
@@ -101,13 +38,13 @@ const AgentRegistry = ({ isOpen, onToggle }) => {
                             title="Drag to canvas"
                             draggable
                             onDragStart={(e) => {
-                                e.dataTransfer.setData('application/reactflow', agent.type || 'agent');
+                                e.dataTransfer.setData('application/reactflow', 'agent');
                                 e.dataTransfer.setData('application/agentData', JSON.stringify(agent));
                             }}
                         >
                             <div className="flex items-center gap-3 mb-2 border-b border-[#3c5d80]/30 pb-2">
                                 <div className="p-2 bg-[#151a1f] rounded border border-[#3c5d80]/50 group-hover:border-[#348cfd]/50 transition-colors">
-                                    {agent.icon}
+                                     {iconByType[agent.icon]}
                                 </div>
                                 <div>
                                     <h3 className="text-sm font-bold text-white leading-tight">{agent.title}</h3>

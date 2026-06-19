@@ -16,6 +16,7 @@ from descriptions.models_descriptions import POPULATION_PLANNER_AGENT_DESCRIPTIO
 from system_prompts.system_messages import POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE
 import asyncio
 import logging
+import json
 
 logger = logging.getLogger('Population Planner')
 
@@ -56,7 +57,7 @@ class PopulationPlannerAgent(AssistantAgent):
         desired_tools = ['generate_targets', 'get_patient', 'get_volume', 'save_final_output',
                          'scratchpad_register_agent', 'scratchpad_raise_flag',
                          'scratchpad_write_summary', 'scratchpad_set_status',
-                         'write_agent_output']
+                 'write_agent_output', 'generate_initial_latex']
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         logger.info(f"Started population selection with available tools: {len(final_tools)}")
         for tool in final_tools:
@@ -64,7 +65,7 @@ class PopulationPlannerAgent(AssistantAgent):
         name = "study_population_planner_agent"
         description = POPULATION_PLANNER_AGENT_DESCRIPTION
         system_message = POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE
-        return cls(
+        instance = cls(
             name = name,
             model_client = model_client,
             tools = final_tools,
@@ -72,6 +73,33 @@ class PopulationPlannerAgent(AssistantAgent):
             system_message = system_message,
             max_tool_iterations = 20
         )
+        # expose workspace and session for helper methods
+        instance._workspace_folder = workspace_folder
+        instance._session_id = session_id
+        return instance
+
+    async def generate_initial_report(self, sections: str = "introduction,literature_review") -> str:
+        """Generate and compile the initial LaTeX document using the planning MCP tool.
+
+        This helper calls the internal MCP tool implementation directly so the
+        planner can generate the initial report at confirmation time.
+        Returns the tool JSON string result.
+        """
+        try:
+            # Dynamically load the MCP tool module from the mcp tools folder to
+            # avoid import path issues in different runtimes.
+            import importlib.util
+            tool_path = os.path.abspath(os.path.join(current_dir, "..", "..", "..", "mcp", "tools", "planning", "generate_initial_latex.py"))
+            spec = importlib.util.spec_from_file_location("generate_initial_latex_tool", tool_path)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            generate_initial = getattr(module, "generate_initial_latex")
+
+            result = await generate_initial(sections)
+            return result
+        except Exception as e:
+            logger.exception("Failed to generate initial report: %s", e)
+            return json.dumps({"status": "error", "message": str(e)})
     
     @staticmethod
     def get_desired_tools(mcp_tools, desired_tools):

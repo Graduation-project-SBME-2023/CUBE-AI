@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react';
 import { MiniFlowProps } from './types';
 
 const MiniFlow: React.FC<MiniFlowProps> = ({
@@ -9,6 +9,7 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
   edgeTypes,
   children,
   readOnly,
+  fitViewTrigger,
 }) => {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [scale, setScale] = useState(1);
@@ -22,24 +23,75 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Measure node dimensions after every render
-  useEffect(() => {
+  const fitNodesToViewport = useCallback(() => {
+    const container = containerRef.current;
+    if (!container || nodes.length === 0) return;
+
+    const dims = nodes.map(node => {
+      const dim = nodeDims[node.id];
+      const isStart = node.type === 'start';
+      return {
+        x: node.position.x,
+        y: node.position.y,
+        w: dim?.w ?? (isStart ? 340 : 280),
+        h: dim?.h ?? (isStart ? 100 : 120),
+      };
+    });
+
+    const minX = Math.min(...dims.map(d => d.x));
+    const minY = Math.min(...dims.map(d => d.y));
+    const maxX = Math.max(...dims.map(d => d.x + d.w));
+    const maxY = Math.max(...dims.map(d => d.y + d.h));
+
+    const contentW = Math.max(1, maxX - minX);
+    const contentH = Math.max(1, maxY - minY);
+
+    const rect = container.getBoundingClientRect();
+    const padding = 64;
+    const viewportW = Math.max(1, rect.width - padding * 2);
+    const viewportH = Math.max(1, rect.height - padding * 2);
+
+    const fitScale = Math.min(viewportW / contentW, viewportH / contentH, 1);
+    const clampedScale = Math.max(0.1, Math.min(3, fitScale));
+
+    const centerX = minX + contentW / 2;
+    const centerY = minY + contentH / 2;
+
+    setScale(clampedScale);
+    setOffset({
+      x: rect.width / 2 - centerX * clampedScale,
+      y: rect.height / 2 - centerY * clampedScale,
+    });
+  }, [nodeDims, nodes]);
+
+  // Measure node dimensions when node structure changes.
+  useLayoutEffect(() => {
     const measured: Record<string, { w: number; h: number }> = {};
-    let changed = false;
 
     for (const [id, el] of Object.entries(nodeRefs.current)) {
       if (!el) continue;
-      const { offsetWidth: w, offsetHeight: h } = el;
-      if (nodeDims[id]?.w !== w || nodeDims[id]?.h !== h) {
-        changed = true;
-      }
-      measured[id] = { w, h };
+      measured[id] = { w: el.offsetWidth, h: el.offsetHeight };
     }
 
-    if (changed) {
-      setNodeDims(measured);
-    }
-  });
+    setNodeDims(prev => {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(measured);
+
+      if (prevKeys.length !== nextKeys.length) {
+        return measured;
+      }
+
+      for (const key of nextKeys) {
+        const prevDim = prev[key];
+        const nextDim = measured[key];
+        if (!prevDim || prevDim.w !== nextDim.w || prevDim.h !== nextDim.h) {
+          return measured;
+        }
+      }
+
+      return prev;
+    });
+  }, [nodes]);
 
   // Prevent default touch/wheel behaviors
   useEffect(() => {
@@ -63,6 +115,16 @@ const MiniFlow: React.FC<MiniFlowProps> = ({
       container.removeEventListener('wheel', preventDefaultWheel);
     };
   }, []);
+
+  useEffect(() => {
+    if (fitViewTrigger == null) return;
+
+    const raf = requestAnimationFrame(() => {
+      fitNodesToViewport();
+    });
+
+    return () => cancelAnimationFrame(raf);
+  }, [fitNodesToViewport, fitViewTrigger]);
 
   // Returns the canvas-space XY where an edge should attach to a node side.
   // Agent nodes use a fixed vertical offset (status badge row) so edges stay
