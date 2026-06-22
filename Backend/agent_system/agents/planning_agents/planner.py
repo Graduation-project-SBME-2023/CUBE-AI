@@ -6,6 +6,7 @@ from datetime import datetime
 import re
 import asyncio
 import aiofiles
+import yaml
 from pathlib import Path
 from typing import Callable, Awaitable, Any
 
@@ -158,7 +159,7 @@ class ClinicalPlanner:
     # RESPONSE PROCESSORS
     # ══════════════════════════════════════════════════════════════════════════
 
-    async def _parse_llm_json(self, response_content: str) -> dict | None:
+    async def _parse_llm_json(self, response_content: str, log_prefix="[Planner]") -> dict | None:
         clean_content = self._clean_json(response_content)
 
         for attempt, content in enumerate(
@@ -168,18 +169,31 @@ class ClinicalPlanner:
                 return json.loads(content)
             except json.JSONDecodeError as e:
                 if attempt == 0:
-                    logger.warning(f"[Planner]: JSON attempt 1 failed ({e}), retrying with escape fix...")
+                    logger.warning(f"{log_prefix}: JSON attempt 1 failed ({e}), retrying with escape fix...")
+                    continue
                 else:
-                    logger.error(f"[Planner]: JSON parse error after escape fix: {e}")
-                    logger.error(f"[Planner]: Clean content (first 300 chars): {clean_content[:300]}")
+                    logger.error(f"{log_prefix}: JSON parse error after escape fix: {e}")
+                    
+                    # FALLBACK: Try yaml parsing
+                    try:
+                        logger.warning(f"{log_prefix}: Attempting yaml.safe_load as fallback...")
+                        data = yaml.safe_load(content)
+                        if data and isinstance(data, dict):
+                            logger.info(f"{log_prefix}: Successfully parsed using yaml fallback")
+                            return data
+                    except Exception as yaml_e:
+                        logger.error(f"{log_prefix}: YAML fallback also failed: {yaml_e}")
+                        
+                    preview = clean_content[:300].encode("ascii", errors="replace").decode("ascii")
+                    logger.error(f"{log_prefix}: Clean content preview: {preview}")
 
-            return None
+        return None
 
     async def _process_hypothesis_response(self, response_content: str):
         """Parse hypothesis JSON from the HypothesisArchitect and update state/UI."""
         logger.info(f"[HypothesisArchitect]: {response_content[:100]}...")
         
-        data = await self._parse_llm_json(response_content)
+        data = await self._parse_llm_json(response_content, log_prefix="[HypothesisArchitect]")
 
         match data:
             case None:
@@ -210,26 +224,7 @@ class ClinicalPlanner:
         """Parse pipeline plan JSON from the PipelineArchitect and update state/UI."""
         logger.info(f"[PipelineArchitect]: {response_content[:100]}...")
 
-        clean_content = self._clean_json(response_content)
-
-        # Try parsing — if invalid escapes (LaTeX, paths), fix and retry
-        data = None
-        for attempt, content in enumerate(
-            [clean_content, self._fix_invalid_json_escapes(clean_content)]
-        ):
-            try:
-                data = json.loads(content)
-                break
-            except json.JSONDecodeError as e:
-                if attempt == 0:
-                    logger.warning(f"Pipeline JSON attempt 1 failed ({e}), retrying with escape fix...")
-                    continue
-                logger.error(f"Pipeline JSON parse error after escape fix: {e}")
-                # Avoid Windows cp1252 console encoding crashes on non-ASCII chars.
-                preview = clean_content[:300].encode("ascii", errors="replace").decode("ascii")
-                logger.error(f"Clean content (first 300 chars): {preview}")
-                print(f"[DEBUG] Pipeline JSON parse error: {e}")
-                print(f"[DEBUG] Clean content preview: {clean_content[:200]}...")
+        data = await self._parse_llm_json(response_content, log_prefix="[PipelineArchitect]")
 
         if data is None:
             display_text = response_content.replace("APPROVE", "").strip()

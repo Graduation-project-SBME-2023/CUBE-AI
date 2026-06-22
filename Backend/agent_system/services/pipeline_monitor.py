@@ -255,8 +255,23 @@ class PipelineMonitor:
         if source not in self.agents:
             return
 
-        lowered = content.lower()
-        is_error = any(kw in lowered for kw in ["error", "exception", "failed", "traceback"])
+        # Only flag as error if the JSON status field is actually "error" or "failed",
+        # not just because those words appear anywhere in the (potentially large) content.
+        is_error = False
+        try:
+            parsed_check = json.loads(content) if content else {}
+            if isinstance(parsed_check, list) and parsed_check:
+                # MCP-style list of content blocks — check the text inside
+                inner = parsed_check[0].get("text", "")
+                try:
+                    parsed_check = json.loads(inner)
+                except Exception:
+                    pass
+            if isinstance(parsed_check, dict):
+                status_val = str(parsed_check.get("status", "")).lower()
+                is_error = status_val in ("error", "failed")
+        except Exception:
+            pass
 
         if is_error:
             agent = self.agents[source]
@@ -272,7 +287,9 @@ class PipelineMonitor:
         )
 
         await self.on_agent_active(source)
-        await self.session_service.update_tool_views(self.session, source, msg_type, data)
+        # Only persist/broadcast to frontend when there is meaningful data to emit
+        if msg_type is not None and data is not None:
+            await self.session_service.update_tool_views(self.session, source, msg_type, data)
 
     async def on_pipeline_complete(self):
         """Mark the last running agent and pipeline as done."""
