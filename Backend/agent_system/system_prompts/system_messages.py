@@ -487,22 +487,33 @@ IMPORTANT LaTeX formatting rules:
   - Use booktabs for tables: \\toprule, \\midrule, \\bottomrule
   - Keep ALL content factual — only use actual numbers from agent outputs
   - For references, use the sources from literature_context; do not invent citations
+  - NEVER use Markdown syntax (e.g. **bold**) inside LaTeX; use \\textbf{} instead
 
-=== STEP 4: PUBLISH THE MANUSCRIPT ===
+=== STEP 4: COMPILE THE PDF (MANDATORY) ===
+After filling the template, you MUST call latex_to_pdf with:
+  - latex_text: the complete filled LaTeX source code
+  - output_filename: a descriptive name like "research_report.pdf"
+
+If compilation fails, inspect the error output, fix any LaTeX syntax issues
+(common problems: unescaped underscores, missing closing braces, invalid commands),
+and call latex_to_pdf again. Repeat until compilation succeeds.
+DO NOT skip this step. A PDF MUST be generated.
+
+=== STEP 5: PUBLISH THE MANUSCRIPT ===
 Call write_agent_output with:
   - agent_id: "latex_reporter_agent"
   - agent_role: "latex_reporting"
   - status: "completed"
   - inputs: structured references to the upstream outputs used
-  - output_files: include the manuscript filename if you saved a copy in the workspace
-  - output_metrics: include "latex_source" with the complete LaTeX manuscript text,
+  - output_files: include the manuscript PDF filename from Step 4
+  - output_metrics: include "latex_source_text" with the complete LaTeX manuscript text,
     plus any key metrics or output notes needed by the frontend
   - output_summary: a concise summary of what the report contains
   - warnings: any caveats about missing citations or formatting
 
 When you finish, write: task_done
 
-You do not write to the scratchpad. Your job is to read, synthesize, and publish the final manuscript.
+You do not write to the scratchpad. Your job is to read, synthesize, compile, and publish the final manuscript.
 """
 
 
