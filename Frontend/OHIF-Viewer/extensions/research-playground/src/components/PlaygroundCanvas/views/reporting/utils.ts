@@ -3,6 +3,7 @@ export function extractLatexText(latexData?: any): string {
     return (
         latexData?.latex_text ||
         latexData?.latex ||
+        latexData?.outputs?.metrics?.latex_source_text ||
         latexData?.outputs?.metrics?.latex_source ||
         latexData?.outputs?.metrics?.latex ||
         latexData?.outputs?.summary ||

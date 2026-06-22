@@ -4,6 +4,7 @@ import { compileLatexReport } from '../../../services/api';
 import { ReportingViewProps, CompileStatus } from './reporting/types';
 import { extractLatexText, handlePdfDownload } from './reporting/utils';
 import { EmptyReportingState } from './reporting/Shared';
+import { AGENTS_API } from '../../../config';
 
 const FileTextIcon: any = FileText;
 const DownloadIcon: any = Download;
@@ -23,7 +24,15 @@ export default function ReportingView({ reportData, latexData, sessionId }: Repo
     const [outputFilename, setOutputFilename] = useState<string>(latexData?.output_filename || 'final_report.pdf');
 
     const sessionForCompile = sessionId || latexData?.sessionId || reportData?.sessionId;
-    const pdfUrl = compiledPdfUrl || latexData?.latex_pdf || latexData?.pdf_path;
+    
+    let pdfUrl = compiledPdfUrl || latexData?.latex_pdf || latexData?.pdf_path;
+    const backendPdfPath = latexData?.outputs?.files?.manuscript_pdf;
+    if (!pdfUrl && backendPdfPath && sessionForCompile) {
+        const filename = backendPdfPath.split('/').pop() || 'research_abstract.pdf';
+        pdfUrl = `${AGENTS_API}/files/workspace_${sessionForCompile}/reports/${filename}`;
+    }
+
+    const [pdfBlobUrl, setPdfBlobUrl] = useState<string>('');
 
     useEffect(() => {
         setEditableLatex(latexText || '');
@@ -34,6 +43,34 @@ export default function ReportingView({ reportData, latexData, sessionId }: Repo
             setOutputFilename(latexData.output_filename);
         }
     }, [latexData?.output_filename]);
+
+    useEffect(() => {
+        if (!pdfUrl) {
+            setPdfBlobUrl('');
+            return;
+        }
+        
+        let isMounted = true;
+        fetch(pdfUrl)
+            .then(res => {
+                if (!res.ok) throw new Error('Network response was not ok');
+                return res.blob();
+            })
+            .then(blob => {
+                if (isMounted) {
+                    const url = URL.createObjectURL(blob);
+                    setPdfBlobUrl(url);
+                }
+            })
+            .catch(err => {
+                console.error("Failed to fetch PDF for inline preview", err);
+                if (isMounted) setPdfBlobUrl(pdfUrl);
+            });
+            
+        return () => {
+            isMounted = false;
+        };
+    }, [pdfUrl]);
 
     const handleCompile = async () => {
         if (!sessionForCompile) {
@@ -136,12 +173,12 @@ export default function ReportingView({ reportData, latexData, sessionId }: Repo
                             <FileOutputIcon size={16} /> Compiled PDF Preview
                         </div>
 
-                        {pdfUrl ? (
-                            <object data={pdfUrl} type="application/pdf" className="w-full h-[520px] bg-[#0f1419]">
+                        {pdfBlobUrl ? (
+                            <iframe src={pdfBlobUrl} className="w-full h-[520px] bg-[#0f1419]" title="PDF Preview">
                                 <div className="p-4 text-sm text-gray-300">
                                     Embedded preview is unavailable in this browser. Use Download PDF.
                                 </div>
-                            </object>
+                            </iframe>
                         ) : (
                             <div className="h-[520px] flex items-center justify-center text-sm text-gray-400 p-4 text-center">
                                 {compileStatus === 'compiling'

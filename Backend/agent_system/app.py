@@ -208,12 +208,11 @@ async def run_pipeline(session: Session) -> None:
         session_id=session.session_id,
     )
 
-    print(graph_builder.get_participants())
-
     graph_flow = GraphFlow(
         participants=graph_builder.get_participants(),
         graph=graph_builder.build(),
     )
+
 
     # Build the pipeline prompt: use structured task messages if available,
     # otherwise fall back to the raw hypothesis string
@@ -606,7 +605,7 @@ async def compile_report(data: dict, request: Request):
             if result.returncode != 0:
                 break
 
-        if result.returncode != 0 or not os.path.exists(pdf_temp_path):
+        if not os.path.exists(pdf_temp_path):
             merged_log = "\n".join(compile_logs)[-8000:]
             return {
                 "status": "error",
