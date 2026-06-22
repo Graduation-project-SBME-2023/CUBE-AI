@@ -220,9 +220,10 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         extractor = featureextractor.RadiomicsFeatureExtractor(params_file)
 
         target_dict: dict = {}
-        if not (params.targets_csv and os.path.exists(params.targets_csv)):
-            params.target_csv = base_on_workspace_dir('/populations/targets/targets.csv')
-        tdf = pd.read_csv(params.targets_csv)
+        targets_csv_path = params.targets_csv
+        if not (targets_csv_path and os.path.exists(targets_csv_path)):
+            targets_csv_path = base_on_workspace_dir('populations/targets/targets.csv')
+        tdf = pd.read_csv(targets_csv_path)
         id_col = params.id_column or tdf.columns[0]
         tgt_col = target_column or tdf.columns[1]
         target_dict = {str(row[id_col]): row[tgt_col] for _, row in tdf.iterrows()}
@@ -276,7 +277,6 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         start = time.time()
 
         payload = TextPayload(message=f"Extracting features for {len(pairs)} masks...")
-        log_tool_state(ToolEvent("tool_started", "text", payload))
         log_tool_state(ToolEvent("tool_started", "text", payload))
 
 
@@ -421,10 +421,12 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             raise ValueError(f"Input file not found: {params.input_path}")
         valid_methods = ("rf", "f_test", "mutual_info", "rfe")
         if params.method not in valid_methods:
-            raise ValueError(f"method must be one of {valid_methods}")
+            logger.warning(f"Unsupported method '{params.method}'. Falling back to 'rf'.")
+            params.method = "rf"
         valid_enc = ("auto", "onehot", "label", "target", "none")
         if params.encode_categorical not in valid_enc:
-            raise ValueError(f"encode_categorical must be one of {valid_enc}")
+            logger.warning(f"Unsupported encode_categorical '{params.encode_categorical}'. Falling back to 'auto'.")
+            params.encode_categorical = "auto"
 
         top_features_list = sorted(set(_csv_int(params.top_features) or [10]))
 

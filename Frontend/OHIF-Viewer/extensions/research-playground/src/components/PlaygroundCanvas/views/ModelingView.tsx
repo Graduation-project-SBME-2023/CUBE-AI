@@ -550,7 +550,7 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
             </div>
 
             {/* Comparison table */}
-            {chartData.comparison_table?.length > 0 && (
+            {chartData?.comparison_table?.length > 0 && (
                 <Section title="Model Comparison (Cross-Validation)" icon={<BarChart3 size={13} />}
                     expandContent={<ComparisonTable table={chartData.comparison_table} />}>
                     <ComparisonTable table={chartData.comparison_table} />
@@ -684,6 +684,7 @@ function ExperimentAccordion({
     expKey: string; data: ModelingData; index: number; defaultOpen: boolean;
 }) {
     const [open, setOpen] = useState(defaultOpen);
+    if (!data) return null;
     const chartData = data.chart_data;
     const modelCount = chartData ? Object.keys(chartData.per_model ?? {}).length : 0;
     const accentColor = MODEL_COLORS[index % MODEL_COLORS.length];
@@ -742,7 +743,7 @@ function ExperimentAccordion({
 
 export default function ModelingView({ modelingData }: ModelingViewProps) {
     const experiments = modelingData ?? {};
-    const expEntries = Object.entries(experiments);
+    const expEntries = Object.entries(experiments).filter(([, data]) => data != null);
 
     if (expEntries.length === 0) return <EmptyState />;
 
