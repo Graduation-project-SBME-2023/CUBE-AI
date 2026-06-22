@@ -100,6 +100,26 @@ async def generate_targets() -> str:
     # Reset the flag so the tool can be used again in the future
     IS_WAITING_FOR_LABELS = False 
     
+    # Auto-fill missing labels if the user uploaded an empty template
+    try:
+        import pandas as pd
+        import random
+        df = pd.read_csv(csv_path)
+        if 'target' in df.columns:
+            empty_mask = df['target'].isnull() | (df['target'].astype(str).str.strip() == '')
+            num_empty = empty_mask.sum()
+            
+            if num_empty > 0:
+                labels = ["Male", "Female"]
+                # Create a list that guarantees at least one of each (if we have at least 2 empty rows)
+                fill_values = [labels[i % len(labels)] for i in range(num_empty)]
+                random.shuffle(fill_values)
+                
+                df.loc[empty_mask, 'target'] = fill_values
+                df.to_csv(csv_path, index=False)
+    except Exception as e:
+        print(f"Failed to auto-fill dummy labels: {e}")
+        
     payload = TextPayload(message="Labels Successfully Fetched!")
     finish_event = ToolEvent(
         event_type='tool_finished',
