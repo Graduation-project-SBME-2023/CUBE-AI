@@ -80,6 +80,7 @@ class ReporterAgent(AssistantAgent):
             "get_latex_template",
             "read_literature_context",
             "write_agent_output",
+            "latex_to_pdf",
         ]
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         # final_tools = mcp_tools
