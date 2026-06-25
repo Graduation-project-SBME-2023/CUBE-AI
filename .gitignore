@@ -10,7 +10,7 @@ __pycache__/
 # venvs and envs
 **/*venv
 
-.env
+# .env  #TEMPORARY COMMENTED OUT FOR TESTING PURPOSES
 
 
 # models checkpoints
