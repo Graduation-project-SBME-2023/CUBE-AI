@@ -62,6 +62,28 @@ async def segmentation_tool(workspace_folder: str | None = None):
         # print("Test completed successfully!")
         # print(f"Result: {result}")
 
+        # Write output file
+        outputs_dir = os.path.join(workspace_folder, "outputs")
+        os.makedirs(outputs_dir, exist_ok=True)
+        import json
+        from datetime import datetime, timezone
+        output_data = {
+            "agent_id": "segmentation_agent",
+            "agent_role": "roi_segmentation",
+            "status": "completed",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "inputs": {"workspace_folder": workspace_folder},
+            "outputs": {
+                "files": {},
+                "metrics": {},
+                "summary": "Segmentation completed."
+            },
+            "errors": [],
+            "warnings": []
+        }
+        with open(os.path.join(outputs_dir, "segmentation_agent_output.json"), "w") as f:
+            json.dump(output_data, f, indent=2)
+
         return result
 
     except Exception as e:
@@ -117,11 +139,11 @@ class SegmentationAgent(AssistantAgent):
             ) from exc
         desired_mcp_tools = [
             "read_agent_task_context",
-            # "scratchpad_register_agent",
-            # "scratchpad_write_summary",
-            # "scratchpad_set_status",
-            # "scratchpad_raise_flag",
-            # "write_agent_output",
+            "scratchpad_register_agent",
+            "scratchpad_write_summary",
+            "scratchpad_set_status",
+            "scratchpad_raise_flag",
+            "write_agent_output"
         ]
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
         logger.info(f"Creating segmentation agent")
@@ -137,43 +159,53 @@ class SegmentationAgent(AssistantAgent):
         description = "agent to run the segmentation task, has the capability to know which volumes to segment by itself"
         system_message = f"""{TASK_CONTEXT_BOOTSTRAP}
 
-to start the task of the segmentation, all you need to do just run the tool you have, do not ask any questions, the workspace folder is {workspace_folder}
+You are the segmentation agent. The workspace folder is: {workspace_folder}
 
+Follow these steps in order:
+1. Call read_agent_task_context to get your instructions.
+2. Call scratchpad_register_agent(agent_id="segmentation_agent", role="roi_segmentation") to announce yourself.
+3. Run the segmentation_tool with workspace_folder="{workspace_folder}".
+4. After the tool completes, call scratchpad_write_summary to describe:
+   - Segmentation method used
+   - Number of volumes segmented
+   - Any quality issues encountered
+5. Call scratchpad_set_status(agent_id="segmentation_agent", status="done").
+
+Do NOT ask questions. Run the tool and report results.
+
+=== SCRATCHPAD INSTRUCTIONS ===
+At the very start of your task, register yourself:
+  - scratchpad_register_agent(agent_id="segmentation_agent", role="roi_segmentation")
+
+When segmentation is complete:
+1. Call scratchpad_write_summary with:
+   - Segmentation method used
+   - Number of volumes segmented
+   - Any quality issues encountered
+2. Call scratchpad_set_status(agent_id="segmentation_agent", status="done")
+
+=== STRUCTURED OUTPUT INSTRUCTIONS ===
+After completing segmentation, you MUST call write_agent_output with:
+  - agent_id: "segmentation_agent"
+  - agent_role: "roi_segmentation"
+  - status: "completed" (or "failed"/"partial")
+  - inputs: {{"workspace_folder": "{workspace_folder}"}}
+  - output_files: {{"labels_dir": "labels_data/"}}
+  - output_metrics: {{
+      "segmentation_method": "<method used, e.g. MONAI Label VISTA3D>",
+      "volumes_segmented": <number>,
+      "roi_description": "<what was segmented>"
+    }}
+  - output_summary: "<concise summary of segmentation results>"
+  - warnings: [<any quality warnings>]
 """
-
-# === SCRATCHPAD INSTRUCTIONS ===
-# At the very start of your task, register yourself:
-#   - scratchpad_register_agent(agent_id="segmentation_agent", role="roi_segmentation")
-#
-# When segmentation is complete:
-# 1. Call scratchpad_write_summary with:
-#    - Segmentation method used
-#    - Number of volumes segmented
-#    - Any quality issues encountered
-# 2. Call scratchpad_set_status(agent_id="segmentation_agent", status="done")
-#
-# === STRUCTURED OUTPUT INSTRUCTIONS ===
-# After completing segmentation, you MUST call write_agent_output with:
-#   - agent_id: "segmentation_agent"
-#   - agent_role: "roi_segmentation"
-#   - status: "completed" (or "failed"/"partial")
-#   - inputs: {{"workspace_folder": "{workspace_folder}"}}
-#   - output_files: {{"labels_dir": "labels_data/"}}
-#   - output_metrics: {{
-#       "segmentation_method": "<method used, e.g. MONAI Label VISTA3D>",
-#       "volumes_segmented": <number>,
-#       "roi_description": "<what was segmented>"
-#     }}
-#   - output_summary: "<concise summary of segmentation results>"
-#   - warnings: [<any quality warnings>]
-# """
         return cls(
             name=name,
             model_client=model_client,
             tools=tools,
             description=description,
             system_message=system_message,
-            max_tool_iterations=2,
+            max_tool_iterations=8,  # 6 steps required + buffer
         )
 
     @staticmethod

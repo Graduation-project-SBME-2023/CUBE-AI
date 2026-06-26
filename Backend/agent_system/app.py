@@ -16,7 +16,7 @@ from groq import BaseModel
 import os
 from teams.execution_team import BasicPipelineBuilder
 from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.requests import Request
 from autogen_agentchat.teams import GraphFlow
 from autogen_agentchat.messages import (
@@ -466,7 +466,8 @@ async def replay_logs(session_id: str):
 @app.get("/session/{session_id}/config")
 async def get_session_config(session_id: str):
     """Get the current configuration for a given session."""
-    workspace_folder = os.path.join(AGENT_WORKSPACE_DIR, f"workspace_{session_id}")
+    workspace_root = os.path.abspath(os.path.join(current_dir, "..", "agents_workspace"))
+    workspace_folder = os.path.join(workspace_root, f"workspace_{session_id}")
     config_path = os.path.join(workspace_folder, "config.json")
     
     if not os.path.exists(config_path):

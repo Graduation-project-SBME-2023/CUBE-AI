@@ -77,9 +77,10 @@ function ResearchPlaygroundInner() {
                 const statusRes = await fetch(`http://localhost:8150/status/${sessionId}`);
                 if (statusRes.ok) {
                     const { state } = await statusRes.json();
-                    if (state === 'COMPLETED') {
+                    const upperState = state?.toUpperCase();
+                    if (upperState === 'COMPLETED') {
                         setRestoredMode('results');
-                    } else if (state === 'RUNNING' || state === 'PAUSED') {
+                    } else if (['RUNNING', 'PAUSED', 'FAILED'].includes(upperState)) {
                         setRestoredMode('executing');
                     }
                 } else {

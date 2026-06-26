@@ -56,6 +56,12 @@ export default function PlaygroundCanvas({
 
   useEffect(() => {
     modeRef.current = mode;
+    
+    // Clear any lingering prompts when no longer in planning mode
+    if (mode !== 'planning') {
+      setPendingPrompt(null);
+    }
+    
     // Lock labelling mode once execution begins so the agent sees a stable config
     if (mode === 'executing') {
       setLabellingModeLocked(true);
@@ -395,7 +401,7 @@ export default function PlaygroundCanvas({
 
       if (type === 'hypothesis_approval' || type === 'lit_review_choice' || type === 'plan_approval') {
         // Suppress approval prompts when we are already past the planning stage
-        if (type === 'plan_approval' && modeRef.current !== 'planning') {
+        if (modeRef.current !== 'planning') {
           return;
         }
         setPendingPrompt({ type, message: payload?.message || payload?.text || '' });
@@ -464,6 +470,8 @@ export default function PlaygroundCanvas({
         // Seeing pipeline agent statuses means execution has started — restore mode
         if (modeRef.current === 'planning') {
           setMode('executing');
+          modeRef.current = 'executing'; // Update immediately to prevent race conditions
+          setPendingPrompt(null);        // Clear any approval prompts
           setLabellingModeLocked(true);
           setCanExecute(true);
         }
@@ -475,6 +483,8 @@ export default function PlaygroundCanvas({
         // run_status also implies we are executing
         if (modeRef.current === 'planning') {
           setMode('executing');
+          modeRef.current = 'executing'; // Update immediately
+          setPendingPrompt(null);        // Clear any approval prompts
           setLabellingModeLocked(true);
           setCanExecute(true);
         }
@@ -483,6 +493,8 @@ export default function PlaygroundCanvas({
 
       if (type === 'run_finished') {
         setMode('results');
+        modeRef.current = 'results';
+        setPendingPrompt(null);
         updateCurrentAgent('run_finished');
       }
     });
