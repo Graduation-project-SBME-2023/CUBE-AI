@@ -463,6 +463,23 @@ async def replay_logs(session_id: str):
 
 
 
+@app.get("/session/{session_id}/config")
+async def get_session_config(session_id: str):
+    """Get the current configuration for a given session."""
+    workspace_folder = os.path.join(AGENT_WORKSPACE_DIR, f"workspace_{session_id}")
+    config_path = os.path.join(workspace_folder, "config.json")
+    
+    if not os.path.exists(config_path):
+        return JSONResponse(content={"labelling_mode": "manual"}, status_code=200)
+        
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config_data = json.load(f)
+        return JSONResponse(content=config_data, status_code=200)
+    except Exception as e:
+        logger.error(f"Error reading config: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
 @app.get("/session/{session_id}/plan-state")
 async def get_plan_state(session_id: str):
     """
@@ -702,8 +719,38 @@ async def ws_broadcast(data: dict):
 _review_futures: Dict[str, asyncio.Future] = {}
 
 # ----------------------------------------------------------------------
-# Population targets saving endpoint
+# Population targets saving & mode endpoint
 # ----------------------------------------------------------------------
+
+@app.post("/populations/set-labelling-mode")
+async def set_labelling_mode(
+    session_id: str = Query(..., description="The ID of the current session"),
+    mode: str = Query(..., description="Labelling mode: 'manual' or 'automatic'")
+):
+    if mode not in ["manual", "automatic"]:
+        raise HTTPException(status_code=400, detail="mode must be 'manual' or 'automatic'")
+
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+    config_path = os.path.join(workspace_folder, "config.json")
+    
+    config_data = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+        except Exception:
+            pass
+
+    config_data["labelling_mode"] = mode
+
+    os.makedirs(workspace_folder, exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=4)
+        
+    return {"status": "success", "mode": mode}
+
 
 @app.post("/populations/upload-targets")
 async def upload_targets(

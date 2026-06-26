@@ -219,6 +219,7 @@ CONSTRAINTS
 • Outcome must include quantitative metrics.
 • Do NOT include pipeline steps in this phase — only the hypothesis.
 • CRITICAL JSON FORMATTING: If you include any LaTeX commands or paths in your instructions, you MUST double-escape all backslashes (e.g., use \\includegraphics instead of \includegraphics) so the JSON remains perfectly valid. Do not use unescaped backslashes
+• STRICT JSON ONLY: You must output ONLY valid JSON format without any markdown wrappers, fences (e.g. no ```json), or conversational text before or after the JSON.
 """,
         ),
 
@@ -314,6 +315,8 @@ CONSTRAINTS
 • Instructions must be actionable and specific — not generic templates.
 • Reference domain knowledge when justifying method choices.
 • Include at minimum 3 steps and at maximum all {len(AVAILABLE_AGENTS)} agents.
+• CRITICAL JSON FORMATTING: If you include any LaTeX commands or paths in your instructions, you MUST double-escape all backslashes.
+• STRICT JSON ONLY: You must output ONLY valid JSON format without any markdown wrappers, fences (e.g. no ```json), or conversational text before or after the JSON.
 """,
         ),
     }

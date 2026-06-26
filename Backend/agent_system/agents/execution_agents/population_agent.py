@@ -117,11 +117,31 @@ class PopulationPlannerAgent(AssistantAgent):
         if not os.path.exists(mcp_server_path):
             raise FileNotFoundError(f"MCP server not found at: {mcp_server_path}")
         env = os.environ.copy()
-        env.update({
-            "WORKSPACE_DIR": workspace_folder,
-            "SESSION_ID": session_id,
-            "AGENT_ID": "study_population_planner_agent"
-        })
+        try:
+            from client_config import get_client_config
+            cfg = get_client_config()
+            base_url = cfg.base_url or os.environ.get("OLLAMA_BASE_URL")
+            if not base_url:
+                raise RuntimeError("Model base_url is not configured. Cannot initialize LLM tools.")
+            env.update({
+                "WORKSPACE_DIR": workspace_folder,
+                "SESSION_ID": session_id,
+                "AGENT_ID": "study_population_planner_agent",
+                "MODEL_BASE_URL": base_url,
+                "MODEL_NAME": cfg.model,
+                "MODEL_API_KEY": cfg.api_key or "ollama",
+                "LLM_CONCURRENCY_LIMIT": os.environ.get("LLM_CONCURRENCY_LIMIT", "5")
+            })
+        except (ImportError, RuntimeError):
+            env.update({
+                "WORKSPACE_DIR": workspace_folder,
+                "SESSION_ID": session_id,
+                "AGENT_ID": "study_population_planner_agent",
+                "MODEL_BASE_URL": os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+                "MODEL_NAME": os.environ.get("MODEL_NAME", "llama3.1"),
+                "MODEL_API_KEY": os.environ.get("MODEL_API_KEY", "ollama"),
+                "LLM_CONCURRENCY_LIMIT": os.environ.get("LLM_CONCURRENCY_LIMIT", "5")
+            })
         mcp_server = StdioServerParams(
             command=sys.executable,
             args=[mcp_server_path],
@@ -133,10 +153,30 @@ class PopulationPlannerAgent(AssistantAgent):
         except Exception as exc:
             logger.exception("Failed to initialize MCP tools from %s", mcp_server_path)
             raise RuntimeError(f"Failed to initialize MCP tools from {mcp_server_path}") from exc
-        desired_tools = ['get_unique_series_descriptions', 'search_volumes_by_description', 'write_inclusion_criteria', 'generate_targets',
-                        'read_agent_task_context',
-                        'scratchpad_register_agent', 'scratchpad_raise_flag',
-                        'scratchpad_write_summary', 'scratchpad_set_status']
+        desired_tools = [
+            'get_unique_series_descriptions',
+            'search_volumes_by_description',
+            'write_inclusion_criteria',
+            'generate_targets',
+            'read_agent_task_context',
+            'scratchpad_register_agent',
+            'scratchpad_raise_flag',
+            'scratchpad_write_summary',
+            'scratchpad_set_status'
+        ]
+        
+        # Only add extract_cohort_labels if mode is automatic
+        config_path = os.path.join(workspace_folder, "config.json")
+        try:
+            import json
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config_data = json.load(f)
+                    if config_data.get("labelling_mode") == "automatic":
+                        desired_tools.insert(3, 'extract_cohort_labels')
+        except Exception as e:
+            logger.error(f"Failed to read labelling_mode from config: {e}")
+
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         logger.info(f"Started population selection with available tools: {len(final_tools)}")
         for tool in final_tools:

@@ -232,7 +232,8 @@ const ChatSidebar = ({
           if (String(s.chat_id) !== String(chat_id)) return s;
           // Merge: use DB messages as base, append any local-only messages not in DB
           const dbIds = new Set(dbMessages.map(m => m.id));
-          const localOnly = s.messages.filter(m => !dbIds.has(m.id) && !m.id.startsWith('db_'));
+          const dbTexts = new Set(dbMessages.map(m => m.text.trim()));
+          const localOnly = s.messages.filter(m => !dbIds.has(m.id) && !m.id.startsWith('db_') && !dbTexts.has(m.text.trim()));
           return { ...s, messages: [...dbMessages, ...localOnly] };
         })
       );
@@ -599,7 +600,7 @@ const ChatSidebar = ({
             onKeyDown={e => e.key === 'Enter' && sendMessage()}
           />
           <button
-            onClick={sendMessage}
+            onClick={() => sendMessage()}
             className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-[10px] border border-[#2a5a8a] bg-[linear-gradient(135deg,#1a4a7a_0%,#0d3560_100%)] text-[#5acce6] transition-all hover:border-[#5acce6] hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
             disabled={!input.trim() || isTyping}
           >
