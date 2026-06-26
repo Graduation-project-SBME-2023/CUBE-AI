@@ -503,9 +503,16 @@ class SessionService:
         """
         session = await self.store.get_async(session_id)
         if session is None or session.plan is None:
-            return None
+            hypothesis = await BackendClient.get_hypothesis_by_chat(session_id)
+            if not hypothesis:
+                return None
+            plan = await BackendClient.get_plan_by_hypothesis(hypothesis.id)
+            if not plan:
+                return None
+            steps = await BackendClient.get_plan_steps(str(plan.id))
+        else:
+            steps = await BackendClient.get_plan_steps(str(session.plan.id))
 
-        steps = await BackendClient.get_plan_steps(str(session.plan.id))
         if not steps:
             return None
 

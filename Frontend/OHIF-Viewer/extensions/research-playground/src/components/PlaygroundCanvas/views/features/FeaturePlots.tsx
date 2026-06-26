@@ -13,7 +13,95 @@ import {
 } from 'recharts';
 import { ChartData } from './types';
 
+// ─── Correlation heatmap utilities ────────────────────────────────────────────
+
+function corrBg(v: number | null): string {
+  if (v == null) return '#0b1015';
+  const abs = Math.abs(v);
+  return v > 0
+    ? `rgba(90,204,230,${0.08 + abs * 0.85})`
+    : `rgba(239,68,68,${0.08 + abs * 0.85})`;
+}
+
+function corrText(v: number | null): string {
+  if (v == null) return '#3c5d80';
+  return Math.abs(v) > 0.5 ? '#fff' : '#91b9cd';
+}
+
+function CorrelationHeatmap({ data }: { data: NonNullable<ChartData['correlation']> }) {
+  const { labels, matrix } = data;
+  const cellSize = Math.max(28, Math.min(48, Math.floor(480 / labels.length)));
+
+  return (
+    <div className="overflow-auto">
+      <div style={{ display: 'inline-block' }}>
+        <div style={{ display: 'flex', marginLeft: cellSize + 4 }}>
+          {labels.map((l, i) => (
+            <div
+              key={i}
+              style={{ width: cellSize, flexShrink: 0 }}
+              className="text-center font-mono text-[8px] text-[#566a84] overflow-hidden"
+              title={l}
+            >
+              {l.length > 6 ? l.slice(-5) : l}
+            </div>
+          ))}
+        </div>
+        {matrix.map((row, ri) => (
+          <div key={ri} style={{ display: 'flex', alignItems: 'center', marginBottom: 2 }}>
+            <div
+              style={{ width: cellSize, flexShrink: 0, marginRight: 4 }}
+              className="pr-1 text-right font-mono text-[8px] text-[#566a84] overflow-hidden"
+              title={labels[ri]}
+            >
+              {labels[ri].length > 8 ? `...${labels[ri].slice(-7)}` : labels[ri]}
+            </div>
+            {row.map((val, ci) => (
+              <div
+                key={ci}
+                style={{
+                  width: cellSize,
+                  height: cellSize,
+                  flexShrink: 0,
+                  background: corrBg(val),
+                  color: corrText(val),
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 8,
+                  fontFamily: 'monospace',
+                  borderRadius: 2,
+                  marginRight: 2,
+                  cursor: 'default',
+                }}
+                title={val != null ? `${labels[ri]} × ${labels[ci]}: ${val.toFixed(3)}` : '—'}
+              >
+                {val != null && cellSize >= 36 ? val.toFixed(2) : ''}
+              </div>
+            ))}
+          </div>
+        ))}
+        <div className="mt-3 flex items-center gap-2 px-1">
+          <span className="text-[9px] text-[#ef4444]">−1</span>
+          <div
+            style={{
+              flex: 1,
+              height: 6,
+              borderRadius: 3,
+              background: 'linear-gradient(to right, rgba(239,68,68,0.9), #1f2d40, rgba(90,204,230,0.9))',
+            }}
+          />
+          <span className="text-[9px] text-[#5acce6]">+1</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type TabId = 'importance' | 'cumulative' | 'correlation' | 'pca' | 'tsne';
+
 interface FeaturePlotsProps {
+  activeTab: TabId;
   chartData: ChartData;
   hiddenThresholds: Set<number>;
   toggleThreshold: (value: number) => void;
@@ -31,7 +119,6 @@ const THRESHOLDS = [
 ];
 
 const TARGET_PALETTE = ['#5acce6', '#6fe5b8', '#a78bfa', '#f59e0b', '#f472b6', '#34d399', '#fb923c', '#60a5fa'];
-
 const targetColor = (target: string, all: string[]) => TARGET_PALETTE[all.indexOf(target) % TARGET_PALETTE.length] ?? TARGET_PALETTE[0];
 
 function TogglePill({ label, color, active, onClick }: { label: string; color: string; active: boolean; onClick: () => void }) {
@@ -112,6 +199,7 @@ function ScatterByClass({
 }
 
 export default function FeaturePlots({
+  activeTab,
   chartData,
   hiddenThresholds,
   toggleThreshold,
@@ -120,7 +208,9 @@ export default function FeaturePlots({
   hiddenTsneClasses,
   toggleTsneClass,
 }: FeaturePlotsProps) {
-  if (chartData.cumulative?.length) {
+  // ── Switch strictly on the active tab — never fall through ────────────────
+  if (activeTab === 'cumulative') {
+    if (!chartData.cumulative?.length) return <p className="text-xs text-[#3c5d80]">No cumulative data available.</p>;
     return (
       <div>
         <div className="mb-3 flex flex-wrap gap-1.5">
@@ -160,7 +250,13 @@ export default function FeaturePlots({
     );
   }
 
-  if (chartData.pca) {
+  if (activeTab === 'correlation') {
+    if (!chartData.correlation) return <p className="text-xs text-[#3c5d80]">No correlation data available.</p>;
+    return <CorrelationHeatmap data={chartData.correlation} />;
+  }
+
+  if (activeTab === 'pca') {
+    if (!chartData.pca) return <p className="text-xs text-[#3c5d80]">No PCA data available.</p>;
     return (
       <ScatterByClass
         points={chartData.pca.points}
@@ -172,7 +268,8 @@ export default function FeaturePlots({
     );
   }
 
-  if (chartData.tsne) {
+  if (activeTab === 'tsne') {
+    if (!chartData.tsne) return <p className="text-xs text-[#3c5d80]">No t-SNE data available.</p>;
     return (
       <ScatterByClass
         points={chartData.tsne.points}

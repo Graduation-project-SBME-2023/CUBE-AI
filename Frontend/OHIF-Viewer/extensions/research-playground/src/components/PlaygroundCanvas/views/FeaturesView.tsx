@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Activity, BarChart3, GitMerge, Layers, Scan, TrendingUp } from 'lucide-react';
+import { Activity, BarChart3, BrainCircuit, GitMerge, Layers, Scan, TrendingUp } from 'lucide-react';
 import Tabs from '../../shared/Tabs';
 import ChartCard from '../../shared/Charts/ChartCard';
 import ImportanceChart from './features/ImportanceChart';
@@ -27,7 +27,7 @@ function EmptyCharts() {
     <div className="flex flex-1 flex-col items-center justify-center gap-4 p-8 text-center">
       <div className="relative">
         <Scan size={48} className="text-[#1f2d40]" />
-        <BarChart3 size={22} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse text-[#5acce6]" />
+        <BrainCircuit size={22} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse text-[#5acce6]" />
       </div>
       <div>
         <p className="text-sm font-medium text-[#566a84]">Feature analysis not yet complete</p>
@@ -114,6 +114,7 @@ export default function FeaturesView({ featuresData, importanceData }: FeaturesV
                   <ImportanceChart bars={chartData.importance_bars} hiddenFeatures={hiddenFeatures} onToggle={toggleFeature} />
                 ) : (
                   <FeaturePlots
+                    activeTab={displayTab}
                     chartData={chartData}
                     hiddenThresholds={hiddenThresholds}
                     toggleThreshold={toggleThreshold}
