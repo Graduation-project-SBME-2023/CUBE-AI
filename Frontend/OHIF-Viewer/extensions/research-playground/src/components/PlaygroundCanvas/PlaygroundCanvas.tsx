@@ -268,11 +268,12 @@ export default function PlaygroundCanvas({
 
   const resetNodeLogs = useCallback(
     (prev: FlowNode[]) =>
-      prev.map(n =>
-        n.type === 'agent'
-          ? { ...n, data: { ...n.data, status: 'pending', logs: [], isExpanded: false } }
-          : n
-      ),
+      prev.map(n => {
+        if (n.type !== 'agent') return n;
+        // Literature review completes during planning — preserve its done state on execution start
+        if (n.id === 'literature_review') return n;
+        return { ...n, data: { ...n.data, status: 'pending', logs: [], isExpanded: false } };
+      }),
     []
   );
 
