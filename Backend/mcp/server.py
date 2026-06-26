@@ -33,6 +33,7 @@ from tools.list_models import list_models
 # from tools.database.models.create_model import create_model
 import tools.population.inclusion_criteria
 import tools.population.unique_descriptions
+import tools.population.cohort_labels
 
 import tools.scratchpad
 import tools.agent_output

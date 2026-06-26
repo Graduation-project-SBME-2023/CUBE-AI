@@ -37,6 +37,8 @@ export default function PlaygroundCanvas({
   const [pendingPrompt, setPendingPrompt] = useState<{ type: string; message: string } | null>(null);
   const [canExecute, setCanExecute] = useState(false);
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
+  const [labellingMode, setLabellingMode] = useState<'manual' | 'automatic'>('manual');
+  const [labellingModeLocked, setLabellingModeLocked] = useState(false);
   const hasInitiatedPlan = useRef(false);
   const modeRef = useRef<'planning' | 'executing' | 'results'>('planning');
   const nodesRef = useRef<FlowNode[]>([]);
@@ -49,6 +51,10 @@ export default function PlaygroundCanvas({
 
   useEffect(() => {
     modeRef.current = mode;
+    // Lock labelling mode once execution begins so the agent sees a stable config
+    if (mode === 'executing') {
+      setLabellingModeLocked(true);
+    }
   }, [mode]);
   useEffect(() => {
     if (session_id) {
@@ -64,6 +70,25 @@ export default function PlaygroundCanvas({
   const updateNodeData = useCallback((id: string, patch: any) => {
     setNodes(prev => prev.map(n => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
   }, []);
+
+  // ── Labelling Mode ───────────────────────────────────────────────────────────
+  const toggleLabellingMode = useCallback(async () => {
+    if (labellingModeLocked) return;
+    const newMode = labellingMode === 'manual' ? 'automatic' : 'manual';
+    setLabellingMode(newMode);
+    window.dispatchEvent(new CustomEvent('labellingModeChanged', { detail: newMode }));
+    const sid = sessionIdRef.current || sessionStorage.getItem('active_cube_session');
+    if (sid) {
+      try {
+        await fetch(
+          `${getAgentsApiBaseUrl()}/populations/set-labelling-mode?session_id=${sid}&mode=${newMode}`,
+          { method: 'POST' }
+        );
+      } catch (e) {
+        console.warn('[CanvasHeader] Failed to set labelling mode on server:', e);
+      }
+    }
+  }, [labellingMode, labellingModeLocked]);
 
   const resolveAgentNodeId = useCallback(
     (source: string) => {
@@ -592,14 +617,17 @@ export default function PlaygroundCanvas({
     <div className="relative flex h-full w-full flex-col bg-[#000000]">
       <CanvasHeader
         mode={mode}
-        literatureEnabled = {!!nodes.find(n => n.id === 'literature_review')}
+        literatureEnabled={!!nodes.find(n => n.id === 'literature_review')}
         canExecute={canExecute}
         isPaused={isPaused}
         isConnected={isConnected}
+        labellingMode={labellingMode}
+        labellingModeLocked={labellingModeLocked}
         onStart={startExecution}
         onTogglePause={togglePause}
         onRestart={restartExecution}
         onReset={resetWorkflow}
+        onToggleLabellingMode={toggleLabellingMode}
       />
 
       <FlowEngineWrapper

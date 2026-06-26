@@ -197,9 +197,9 @@ class ClinicalPlanner:
 
         match data:
             case None:
-                if display_text := response_content.replace("APPROVE", "").strip():
-                    await self._send("msg", display_text) ##Here we send the message with the agent
-                    return
+                logger.error("Failed to parse HypothesisArchitect response as JSON. Sending error message to chat.")
+                await self._send("msg", "The agent generated an improperly formatted hypothesis. Please ask it to regenerate or revise your request.")
+                return
             case {"hypothesis": dict() as hypothesis, **rest}:
                 persisted_hypothesis = await self.session_service.handle_hypothesis_update(
                     self.session, hypothesis
@@ -227,9 +227,8 @@ class ClinicalPlanner:
         data = await self._parse_llm_json(response_content, log_prefix="[PipelineArchitect]")
 
         if data is None:
-            display_text = response_content.replace("APPROVE", "").strip()
-            if display_text:
-                await self._send("msg", display_text)
+            logger.error("Failed to parse PipelineArchitect response as JSON. Sending error message to chat.")
+            await self._send("msg", "The agent generated an improperly formatted plan. Please ask it to regenerate or revise your request.")
             return
 
         if "steps" in data and isinstance(data["steps"], list):

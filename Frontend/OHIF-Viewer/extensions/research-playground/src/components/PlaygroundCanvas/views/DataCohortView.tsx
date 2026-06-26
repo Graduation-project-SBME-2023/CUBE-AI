@@ -159,6 +159,28 @@ export default function DataCohortView({ populationData, segmentationData, sessi
     const hasPopData = populationData && populationData.status !== undefined;
     const hasSegData = segmentationData && segmentationData.status !== undefined;
 
+    const [labellingMode, setLabellingMode] = useState<string>('manual');
+
+    useEffect(() => {
+        const activeSessionId = sessionStorage.getItem('active_cube_session');
+        if (activeSessionId) {
+            fetch(`http://localhost:8150/session/${activeSessionId}/config`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.labelling_mode) {
+                        setLabellingMode(data.labelling_mode);
+                    }
+                })
+                .catch(console.error);
+        }
+
+        const handleModeChange = (e: any) => {
+            setLabellingMode(e.detail);
+        };
+        window.addEventListener('labellingModeChanged', handleModeChange);
+        return () => window.removeEventListener('labellingModeChanged', handleModeChange);
+    }, [populationData]);
+
     // --- NEW: File upload refs and state ---
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isUploading, setIsUploading] = useState(false);
@@ -351,7 +373,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                     </div>
                     <div className="flex gap-2 items-center text-xs font-mono">
                         {/* --- NEW: Download & Upload Buttons --- */}
-                        {accumulatedPop.uids.length > 0 && (
+                        {accumulatedPop.uids.length > 0 && labellingMode !== 'automatic' && (
                             <div className="flex gap-2 mr-4">
                                 <button 
                                     onClick={handleDownloadCSV}

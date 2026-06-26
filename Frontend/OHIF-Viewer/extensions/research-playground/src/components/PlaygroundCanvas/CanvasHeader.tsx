@@ -1,16 +1,19 @@
 import React from 'react';
-import { Pause, Play, RotateCcw, Wifi, WifiOff, BookOpen } from 'lucide-react';
+import { Pause, Play, RotateCcw, BookOpen, Bot, Upload } from 'lucide-react';
+
 interface CanvasHeaderProps {
   mode: 'planning' | 'executing' | 'results';
   literatureEnabled: boolean;
   canExecute: boolean;
   isPaused: boolean;
   isConnected: boolean;
+  labellingMode: 'manual' | 'automatic';
+  labellingModeLocked: boolean;
   onStart: () => void;
   onTogglePause: () => void;
   onRestart: () => void;
   onReset: () => void;
-
+  onToggleLabellingMode: () => void;
 }
 
 export default function CanvasHeader({
@@ -19,10 +22,13 @@ export default function CanvasHeader({
   canExecute,
   isPaused,
   isConnected,
+  labellingMode,
+  labellingModeLocked,
   onStart,
   onTogglePause,
   onRestart,
   onReset,
+  onToggleLabellingMode,
 }: CanvasHeaderProps) {
   return (
     <div className="absolute left-1/2 top-6 z-40 flex -translate-x-1/2 items-center gap-4 rounded-lg border border-[#3c5d80] bg-[#151a1f]/90 p-2 shadow-2xl backdrop-blur-md">
@@ -87,6 +93,7 @@ export default function CanvasHeader({
           </button>
         )}
       </div>
+      {/* ── Literature Review badge ── */}
       {literatureEnabled && (
         <div
           className="flex items-center gap-1 rounded border border-[#5acce6] bg-[#1d2a33] px-2 py-1 text-[10px] font-medium text-[#5acce6]"
@@ -96,6 +103,41 @@ export default function CanvasHeader({
           <span className="hidden sm:inline">Literature</span>
         </div>
       )}
+
+      {/* ── Labelling Mode Toggle ── */}
+      <button
+        onClick={onToggleLabellingMode}
+        disabled={labellingModeLocked}
+        title={labellingModeLocked ? 'Labelling mode locked once agent starts' : 'Toggle cohort labelling method'}
+        className={`flex items-center gap-0 rounded border text-[10px] font-bold uppercase tracking-wider overflow-hidden transition-all ${
+          labellingModeLocked
+            ? 'cursor-not-allowed opacity-50 border-[#3c5d80]'
+            : 'cursor-pointer border-[#3c5d80] hover:border-[#5acce6]'
+        }`}
+      >
+        {/* Manual side */}
+        <span
+          className={`flex items-center gap-1 px-2 py-1 transition-colors ${
+            labellingMode === 'manual'
+              ? 'bg-[#3c5d80] text-white'
+              : 'bg-[#0b1015] text-[#3c5d80]'
+          }`}
+        >
+          <Upload size={11} />
+          Manual
+        </span>
+        {/* Auto side */}
+        <span
+          className={`flex items-center gap-1 px-2 py-1 transition-colors ${
+            labellingMode === 'automatic'
+              ? 'bg-[#005f7d] text-[#5acce6]'
+              : 'bg-[#0b1015] text-[#3c5d80]'
+          }`}
+        >
+          <Bot size={11} />
+          Auto
+        </span>
+      </button>
 
     </div>
   );
