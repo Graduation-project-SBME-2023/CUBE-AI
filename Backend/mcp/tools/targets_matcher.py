@@ -48,13 +48,25 @@ async def _wait_for_manual_upload(csv_path: str, timeout_seconds: int = 300) -> 
 async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, config: dict, csv_path: str) -> str:
     """
     Reads cohort_labels.csv and resolves patient IDs via Orthanc to produce targets.csv.
+    If cohort_labels.csv is missing in automatic mode, runs extract_cohort_labels first.
     Returns the csv_path on success, or a JSON error string.
     """
+    from .population.cohort_labels import extract_cohort_labels
+
     cohort_labels_path = os.path.join(workspace_dir, "populations", "cohort_labels.csv")
     if not os.path.exists(cohort_labels_path):
-        err_msg = "cohort_labels.csv not found. Did you run extract_cohort_labels first?"
-        await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
-        return json.dumps({"status": "error", "message": err_msg})
+        print("[generate_targets] cohort_labels.csv not found — running extract_cohort_labels automatically...")
+        extraction_result = await extract_cohort_labels()
+        # If extraction itself failed, surface the error clearly
+        if isinstance(extraction_result, dict) and extraction_result.get("status") == "error":
+            err_msg = f"extract_cohort_labels failed: {extraction_result.get('message', 'unknown error')}"
+            await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
+            return json.dumps({"status": "error", "message": err_msg})
+        # Re-check after extraction
+        if not os.path.exists(cohort_labels_path):
+            err_msg = "cohort_labels.csv still missing after extract_cohort_labels ran."
+            await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
+            return json.dumps({"status": "error", "message": err_msg})
 
     # Load labels into dict: patient_id -> row
     labels_dict: dict = {}
