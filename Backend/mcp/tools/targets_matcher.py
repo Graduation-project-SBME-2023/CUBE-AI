@@ -45,78 +45,16 @@ async def _wait_for_manual_upload(csv_path: str, timeout_seconds: int = 300) -> 
 # Shared: join cohort_labels.csv + datasetlist → targets.csv
 # ---------------------------------------------------------------------------
 
-async def _build_targets_from_dicom_metadata(
-    workspace_dir: str, datasetlist: list, config: dict, csv_path: str
-) -> str:
-    """
-    Fallback: build targets.csv directly from DICOM patient metadata (gender).
-    Used when cohort_labels.csv is unavailable (e.g. no clinical reports).
-    """
-    valid_targets: list[tuple] = []
-    dropped: list[str] = []
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        for uid in datasetlist:
-            try:
-                study_res = await client.get(f"{base_url}/volumes/{uid}/study")
-                study_res.raise_for_status()
-                patient_uuid = study_res.json().get("patient_id")
-
-                patient_res = await client.get(f"{base_url}/patients/{patient_uuid}")
-                patient_res.raise_for_status()
-                patient_data = patient_res.json()
-
-                gender = patient_data.get("gender")
-                name = patient_data.get("name", "") or patient_data.get("orthanc_patient_id", uid)
-
-                if not gender:
-                    # Fallback to mock gender for demo purposes if DICOM is missing it
-                    is_male = int(patient_uuid.split('-')[0], 16) % 2 == 0
-                    gender = "M" if is_male else "F"
-
-                valid_targets.append((uid, name, gender))
-            except Exception as e:
-                dropped.append(f"{uid} (API error: {e})")
-
-    if not valid_targets:
-        err_msg = "No gender metadata found for any volume in the dataset."
-        await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
-        return json.dumps({"status": "error", "message": err_msg})
-
-    if dropped:
-        msg = (
-            f"Dropped {len(dropped)} volumes (missing gender). "
-            f"Continuing with {len(valid_targets)} valid patients."
-        )
-        await scratchpad_raise_flag(RaiseFlagInput(level="warning", message=msg))
-
-    # Update config to only keep valid UIDs
-    config_json_path = os.path.join(workspace_dir, "config.json")
-    config["datasetlist"] = [uid for uid, _, _ in valid_targets]
-    with open(config_json_path, mode="w", encoding="utf-8") as f:
-        json.dump(config, f, indent=4)
-
-    with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["id", "name", "target"])
-        for uid, name, gender in valid_targets:
-            writer.writerow([uid, name, gender])
-
-    return csv_path
-
-
 async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, config: dict, csv_path: str) -> str:
     """
     Reads cohort_labels.csv and resolves patient IDs via Orthanc to produce targets.csv.
-    Falls back to DICOM patient metadata (gender) when cohort_labels.csv is unavailable.
     Returns the csv_path on success, or a JSON error string.
     """
     cohort_labels_path = os.path.join(workspace_dir, "populations", "cohort_labels.csv")
     if not os.path.exists(cohort_labels_path):
-        print("[generate_targets] cohort_labels.csv not found — falling back to DICOM metadata (gender).")
-        return await _build_targets_from_dicom_metadata(
-            workspace_dir, datasetlist, config, csv_path
-        )
+        err_msg = "cohort_labels.csv not found. Did you run extract_cohort_labels first?"
+        await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
+        return json.dumps({"status": "error", "message": err_msg})
 
     # Load labels into dict: patient_id -> row
     labels_dict: dict = {}
