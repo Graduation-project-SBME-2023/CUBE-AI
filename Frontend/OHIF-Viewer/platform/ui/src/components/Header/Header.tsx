@@ -20,8 +20,6 @@ function Header({
 }): ReactNode {
   const { t } = useTranslation('Header');
 
-  // TODO: this should be passed in as a prop instead and the react-router-dom
-  // dependency should be dropped
   const onClickReturn = () => {
     if (isReturnEnabled && onClickReturnButton) {
       onClickReturnButton();
