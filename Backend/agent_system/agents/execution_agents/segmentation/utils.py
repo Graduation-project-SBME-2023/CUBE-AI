@@ -406,6 +406,20 @@ async def download_and_pair_volumes(
         dst = os.path.join(dest_dir, f"{volume_uid}.nii.gz")
         try:
             nii  = nib.load(src_path)
+            
+            # --- MEMORY SAFETY CHECK ---
+            # Calculate total voxels from the shape (width * height * depth)
+            total_voxels = np.prod(nii.shape)
+            # get_fdata() casts to float64, which is 8 bytes per voxel
+            estimated_ram_bytes = total_voxels * 8
+            estimated_ram_gb = estimated_ram_bytes / (1024**3)
+            
+            # If the uncompressed array will take more than 16 GB of RAM, skip it to prevent crash
+            if estimated_ram_gb > 16.0:
+                logger.error(f"Skipping label {volume_uid}: requires {estimated_ram_gb:.2f} GB of RAM, exceeding the 16 GB safety limit.")
+                return "SKIPPED_OOM"
+            # ---------------------------
+
             data = nii.get_fdata()
             logger.info(f"Label unique values before normalize: {np.unique(data)}")
             if np.max(data) == 255:
@@ -471,6 +485,7 @@ async def download_and_pair_volumes(
     #  4. copy to workspace                                              #
     # ------------------------------------------------------------------ #
     successful = []
+    skipped_oom = []
     for vol_uid, label_uid in zip(volumes_to_process, labels_to_process):
         label_src = found_labels.get(label_uid)
         if not label_src:
@@ -487,22 +502,33 @@ async def download_and_pair_volumes(
 
         label_result = copy_and_normalize_label(label_src, vol_uid, FINAL_DIR_LABEL)
 
+        if label_result == "SKIPPED_OOM":
+            skipped_oom.append(vol_uid)
+            continue
+
         if vol_result and label_result:
             successful.append(vol_uid)
         else:
-            logger.warning(f"Failed to copy pair for {vol_uid}")
+            logger.error(f"Failed to copy vol/label for {vol_uid}")
 
     logger.info("=" * 60)
     logger.info(f"DONE: {len(successful)}/{len(volumes_to_process)} pairs ready in workspace")
     logger.info("=" * 60)
-    return successful
+    return successful, skipped_oom
 #  ================================
 #  Generate GIF Overlays for front view
 #  ================================
-def generate_gif_overlays(workspace_dir, uids):
+def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
     """
     Generates animated GIF overlays slicing through the Z-axis where the mask is present.
     Returns a list of dictionaries formatted for the React frontend.
+
+    Args:
+        workspace_dir: path to the session workspace.
+        uids: list of SeriesInstanceUIDs to process.
+        on_gif_ready: optional sync callable(volume_entry: dict) called immediately
+                      after each GIF is saved, so callers can stream results
+                      to the frontend one-by-one instead of waiting for the full batch.
     """
     volumes_dir = os.path.join(workspace_dir, "volumes")
     masks_dir = os.path.join(workspace_dir, "masks")
@@ -580,11 +606,19 @@ def generate_gif_overlays(workspace_dir, uids):
                     loop=0
                 )
 
-                generated_volumes.append({
+                volume_entry = {
                     "seriesInstanceUid": uid,
                     "gifUrl": f"http://localhost:8150/files/{workspace_folder_name}/overlays/{gif_filename}"
-                })
+                }
+                generated_volumes.append(volume_entry)
                 logger.info(f"Generated GIF for {uid}")
+
+                # ── Progressive broadcast: notify caller immediately ──
+                if on_gif_ready is not None:
+                    try:
+                        on_gif_ready(volume_entry)
+                    except Exception as cb_err:
+                        logger.warning(f"on_gif_ready callback failed for {uid}: {cb_err}")
 
         except Exception as e:
             logger.error(f"Failed to generate GIF for {uid}: {e}", exc_info=True)
