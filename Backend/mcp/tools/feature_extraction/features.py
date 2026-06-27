@@ -34,6 +34,12 @@ from tool_logging import ToolEvent, log_tool_state, TextPayload, ProgressPayload
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+def _run_extractor(image_path: str, mask_path: str, params_file: str) -> dict:
+    from radiomics import featureextractor
+    extractor = featureextractor.RadiomicsFeatureExtractor(params_file)
+    result = extractor.execute(image_path, mask_path)
+    return {str(k): v for k, v in result.items() if not k.startswith("diagnostics_")}
+
 def _setup_logging(log_file: str, verbose: bool = True) -> None:
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.INFO if verbose else logging.WARNING)
@@ -248,10 +254,26 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         targets_csv_path = params.targets_csv
         if not (targets_csv_path and os.path.exists(targets_csv_path)):
             targets_csv_path = base_on_workspace_dir('populations/targets/targets.csv')
-        tdf = pd.read_csv(targets_csv_path)
-        id_col = params.id_column or tdf.columns[0]
-        tgt_col = target_column or tdf.columns[1]
-        target_dict = {str(row[id_col]): row[tgt_col] for _, row in tdf.iterrows()}
+        if targets_csv_path and os.path.exists(targets_csv_path):
+            tdf = pd.read_csv(targets_csv_path)
+            id_col  = params.id_column or tdf.columns[0]
+            tgt_col = params.target_column or (target_column if target_column in tdf.columns else tdf.columns[-1])
+            # Build lookup from primary id (UID) column
+            target_dict = {str(row[id_col]): row[tgt_col] for _, row in tdf.iterrows()}
+            # ALSO key by 'name' column (case_id / clinical_pid) if present,
+            # so NIfTI filename stems (e.g. 'case_00005') match the correct label.
+            if "name" in tdf.columns and "name" != id_col:
+                for _, row in tdf.iterrows():
+                    name_val = str(row["name"])
+                    if name_val and name_val not in target_dict:
+                        target_dict[name_val] = row[tgt_col]
+            logger.info(f"Loaded {len(target_dict)} label keys from {targets_csv_path} (id_col={id_col!r}, tgt_col={tgt_col!r})")
+        else:
+            logger.warning(
+                f"targets.csv not found at '{targets_csv_path}'. "
+                "Feature extraction will proceed without labels — 'target' column will be absent from output CSVs. "
+                "Run generate_targets (after extract_cohort_labels) before running feature extraction."
+            )
 
         image_files = sorted(_glob.glob(os.path.join(image_dir, params.image_pattern)))
         mask_files  = sorted(_glob.glob(os.path.join(mask_dir,  params.mask_pattern)))
@@ -327,12 +349,24 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                     tmp_mask_path = os.path.join(temp_dir, f"{subject_id}_lbl{lbl}.nii.gz")
                     sitk.WriteImage(bin_img, tmp_mask_path)
                     try:
-                        result = extractor.execute(files["image"], tmp_mask_path)
-                        features = {str(k): v for k, v in result.items() if not k.startswith("diagnostics_")}
+                        import concurrent.futures
+                        import multiprocessing
+                        ctx = multiprocessing.get_context('spawn')
+                        with concurrent.futures.ProcessPoolExecutor(max_workers=1, mp_context=ctx) as executor:
+                            future = executor.submit(_run_extractor, files["image"], tmp_mask_path, params_file)
+                            features = future.result(timeout=600)
+
                         features["subject_id"] = subject_id
                         if subject_id in target_dict:
                             features["target"] = target_dict[subject_id]
+                        # also try lookup by patient name (case_id / clinical_pid)
+                        elif any(str(v) == subject_id for v in target_dict):
+                            features["target"] = next(v for k, v in target_dict.items() if str(k) == subject_id)
                         all_features_by_label[lbl].append(features)
+                    except concurrent.futures.TimeoutError:
+                        logger.error(f"  {subject_id} label {lbl}: extraction timed out after 10 minutes — skipping")
+                    except concurrent.futures.process.BrokenProcessPool:
+                        logger.error(f"  {subject_id} label {lbl}: extraction crashed (OOM or Segfault) — skipping volume")
                     except Exception as exc:
                         logger.error(f"  {subject_id} label {lbl}: extraction failed — {exc}")
                     finally:

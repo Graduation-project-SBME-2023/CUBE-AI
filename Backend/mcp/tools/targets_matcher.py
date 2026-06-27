@@ -226,7 +226,9 @@ async def generate_targets() -> str:
         if result == "SILENT_RETRY":
             return "SILENT_RETRY"
 
-        # Auto-fill any empty target cells if the doctor uploaded the blank template
+        # Auto-fill any empty target cells if the doctor uploaded the blank template.
+        # Uses binary 0/1 labels (not strings like "Male"/"Female") so the ML
+        # pipeline receives numeric targets compatible with sklearn classifiers.
         try:
             import pandas as pd
             import random
@@ -235,11 +237,17 @@ async def generate_targets() -> str:
                 empty_mask = df["target"].isnull() | (df["target"].astype(str).str.strip() == "")
                 num_empty = int(empty_mask.sum())
                 if num_empty > 0:
-                    labels = ["Male", "Female"]
-                    fill_values = [labels[i % len(labels)] for i in range(num_empty)]
+                    # Alternate 0 and 1 to avoid all-one-class issues, then shuffle
+                    fill_values = [i % 2 for i in range(num_empty)]
                     random.shuffle(fill_values)
                     df.loc[empty_mask, "target"] = fill_values
                     df.to_csv(csv_path, index=False)
+                    
+                    log_tool_state(ToolEvent(
+                        event_type='tool_progress', 
+                        content_type='text',
+                        content=TextPayload(message=f"⚠️ WARNING: You uploaded the targets.csv template without filling the target column for {num_empty} records. The system has automatically filled them with random 0/1 values to continue the pipeline.")
+                    ))
         except Exception as e:
             print(f"[generate_targets] Failed to auto-fill dummy labels: {e}")
 

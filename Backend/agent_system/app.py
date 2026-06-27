@@ -71,9 +71,13 @@ app = FastAPI(
     description="Receive a clinical hypothesis, run the Planner → Executor pipeline.",
     version="0.1.0",
 )
+_cors_origins = os.environ.get(
+    "CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:8150"
+).split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in _cors_origins],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -98,30 +102,39 @@ app.mount(
 
 @app.get("/static/{file_path:path}")
 def serve_static_pdf(file_path: str):
-    # file_path may be an absolute path passed through the URL
+    # Resolve the requested path
     full_path = os.path.normpath(file_path)
     if not os.path.isabs(full_path):
-        # fallback: try relative to CWD
         full_path = os.path.abspath(full_path)
 
-    if not os.path.exists(full_path):
-        raise HTTPException(status_code=404, detail=f"File not found: {full_path}")
+    # Security: ensure the resolved path is strictly inside agents_workspace_dir.
+    # This prevents path traversal attacks (e.g., /static/../../../etc/passwd).
+    allowed_root = os.path.realpath(agents_workspace_dir)
+    resolved = os.path.realpath(full_path)
+    if not resolved.startswith(allowed_root + os.sep) and resolved != allowed_root:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: path is outside the allowed workspace directory."
+        )
 
-    if full_path.endswith(".pdf"):
+    if not os.path.exists(resolved):
+        raise HTTPException(status_code=404, detail=f"File not found: {resolved}")
+
+    if resolved.endswith(".pdf"):
         return FileResponse(
-            path=full_path,
+            path=resolved,
             media_type="application/pdf",
             headers={
-                "Content-Disposition": f"inline; filename={os.path.basename(full_path)}"
+                "Content-Disposition": f"inline; filename={os.path.basename(resolved)}"
             },
             content_disposition_type="inline",
         )
-    
-    # detect GIF explicitly
-    if full_path.endswith(".gif"):
-        return FileResponse(path=full_path, media_type="image/gif")
 
-    return FileResponse(path=full_path)
+    # detect GIF explicitly
+    if resolved.endswith(".gif"):
+        return FileResponse(path=resolved, media_type="image/gif")
+
+    return FileResponse(path=resolved)
 
 
 # Single shared service — the only stateful object routes need to know about

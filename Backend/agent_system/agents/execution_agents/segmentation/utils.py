@@ -661,13 +661,17 @@ def check_voxtell_label_availability(target_label):
 
 def get_model_dice_score(model_name, target_label):
     if model_name.lower() == "voxtell":
-        current_file = Path(__file__)
-        csv_filepath =os.path.join(current_file.parent.parent.parent.parent,"workspace", "supported.csv") 
-        df = pd.read_csv(csv_filepath)
-        dice_score = df.loc[
-                    df['Prompt'].str.lower().str.strip() == target_label,
-                    'VoxTell'
-                ].iloc[0]
+        try:
+            current_file = Path(__file__)
+            csv_filepath = os.path.join(current_file.parent.parent.parent.parent, "workspace", "supported.csv") 
+            df = pd.read_csv(csv_filepath)
+            dice_score = df.loc[
+                        df['Prompt'].str.lower().str.strip() == target_label,
+                        'VoxTell'
+                    ].iloc[0]
+        except Exception as e:
+            logger.warning(f"Failed to read VoxTell dice score from supported.csv ({e}). Using default.")
+            dice_score = 90.0
     else:
         dice_score = 90.0 # default score for other models (todo: should be in db)
     return float(dice_score)
