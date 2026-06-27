@@ -942,12 +942,13 @@ class PyCaretClassificationTool:
                     "output_dir": output_dir
                 }
         except Exception as e:
-            logger.error(e)
+            logger.error(f"Top-level error in classification: {e}", exc_info=True)
             return {
                     "status": "error",
                     "error_message": str(e),
                     "input_path": input_path,
                     "output_dir": output_dir
+
                 }
             
 # async def classification_modelling(
