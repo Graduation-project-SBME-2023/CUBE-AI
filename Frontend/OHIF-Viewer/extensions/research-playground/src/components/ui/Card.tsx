@@ -14,8 +14,19 @@ interface CardProps {
   className?: string;
 }
 
-export default function Card({ title, description, icon, ctaText, onClick, variant = 'standard', className }: CardProps) {
-  const gradientStyle = variant === 'agentic' ? theme.gradients.agentic : theme.gradients.standard;
+export default function Card({
+  title,
+  description,
+  icon,
+  ctaText,
+  onClick,
+  variant = 'standard',
+  className,
+}: CardProps) {
+  const gradientStyle =
+    variant === 'agentic'
+      ? theme.gradients.agentic
+      : theme.gradients.standard;
 
   return (
     <div
@@ -23,10 +34,27 @@ export default function Card({ title, description, icon, ctaText, onClick, varia
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       className={clsx(
-        'relative p-6 rounded-2xl border transition-all duration-300 text-left flex flex-col gap-4 shadow-xl cursor-pointer bg-[#000000] border-[#3c5d80]',
+        `
+        relative
+        p-6
+        rounded-2xl
+        border
+        transition-all
+        duration-300
+        text-left
+        flex
+        flex-col
+        gap-4
+        shadow-xl
+        cursor-pointer
+        bg-[#000000]
+        border-[#3c5d80]
+        min-h-[190px]
+        `,
         className
       )}
     >
+      {/* Gradient Overlay */}
       <div
         style={{
           position: 'absolute',
@@ -38,19 +66,37 @@ export default function Card({ title, description, icon, ctaText, onClick, varia
         }}
       />
 
+      {/* Header */}
       <div className="flex items-start gap-4 z-10">
         <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-[#0f1724]">
           {icon}
         </div>
+
         <div className="flex-1">
           <div className="text-lg font-bold text-white">{title}</div>
-          {description && <div className="text-sm text-[#91b9cd] mt-1">{description}</div>}
+
+          {description && (
+            <div
+              className="
+                text-sm
+                text-[#91b9cd]
+                mt-1
+                line-clamp-3
+                min-h-[3rem]
+              "
+            >
+              {description}
+            </div>
+          )}
         </div>
       </div>
 
+      {/* CTA */}
       {ctaText && (
         <div className="mt-auto z-10">
-          <div className="text-xs font-bold uppercase tracking-wider text-[#91b9cd]">{ctaText}</div>
+          <div className="text-xs font-bold uppercase tracking-wider text-[#91b9cd]">
+            {ctaText}
+          </div>
         </div>
       )}
     </div>
