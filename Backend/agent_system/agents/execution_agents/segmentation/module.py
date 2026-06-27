@@ -177,30 +177,97 @@ class SegmentationModule:
         # =========== download ========================    
         #finally download the volumes with its label masks 
         await asyncio.sleep(120)  
-        downloaded_uids = await download_and_pair_volumes(
+        downloaded_uids, skipped_uids = await download_and_pair_volumes(
                     workspace_dir,
                     datasetlist, 
                     chosen_path=chosen_path, 
                     selected_auto_model_for_volume = plan["selected_models"][0] if plan["selected_models"] else None
         )
         
+        # --- Log skipped volumes to scratchpad ---
+        if skipped_uids:
+            skip_msg = f"WARNING: Skipped {len(skipped_uids)} volumes because they exceeded the 16 GB RAM decompression limit. UIDs: {', '.join(skipped_uids)}"
+            logger.warning(skip_msg)
+            
+            # Append to scratchpad.json directly
+            scratchpad_path = os.path.join(workspace_dir, "scratchpad.json")
+            if os.path.exists(scratchpad_path):
+                try:
+                    with open(scratchpad_path, 'r', encoding='utf-8') as f:
+                        sp_data = json.load(f)
+                    
+                    if "segmentation_agent" in sp_data:
+                        from datetime import datetime, timezone
+                        sp_data["segmentation_agent"].setdefault("notes", []).append({
+                            "content": skip_msg,
+                            "created_at": datetime.now(timezone.utc).isoformat()
+                        })
+                        with open(scratchpad_path, 'w', encoding='utf-8') as f:
+                            json.dump(sp_data, f, indent=2)
+                except Exception as e:
+                    logger.error(f"Failed to write to scratchpad: {e}")
+        # -----------------------------------------
+        
         #============================ test segmentation view ===================================
         # downloaded_uids = ["1.2.826.0.1.3680043.8.498.15136386566608168882487015520907740870"]
         # ======================================================================================
         
-        # ================== Generate Overlays ===========================================
+        # ================== Generate Overlays (progressive) ====================
         gif_volumes = []
         if downloaded_uids:
-            
-            gif_volumes = await asyncio.to_thread(
-                generate_gif_overlays, 
-                workspace_dir, downloaded_uids
+            # Use a queue to bridge the sync GIF thread → async broadcaster
+            gif_queue: asyncio.Queue = asyncio.Queue()
+            plan_target  = plan['target_labels'][0]
+            plan_model   = plan["selected_models"][0] if plan["selected_models"] else None
+            plan_dice    = get_model_dice_score(plan_model, plan_target) if plan_model else None
+
+            def _on_gif_ready(volume_entry: dict):
+                """Called synchronously from the GIF thread; puts the entry into the queue."""
+                gif_queue.put_nowait(volume_entry)
+
+            async def _broadcast_progressively():
+                """Reads from the queue and broadcasts each GIF as it arrives."""
+                pending = len(downloaded_uids)
+                while pending > 0:
+                    try:
+                        volume_entry = await asyncio.wait_for(gif_queue.get(), timeout=120.0)
+                    except asyncio.TimeoutError:
+                        logger.warning("GIF progressive broadcast: timed out waiting for next GIF.")
+                        break
+                    gif_volumes.append(volume_entry)
+                    pending -= 1
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            await client.post(
+                                "http://localhost:8150/ws-broadcast",
+                                json={
+                                    "type": "segmentation_output",
+                                    "payload": {
+                                        "targetRoi": plan_target,
+                                        "selectedModel": plan_model,
+                                        "diceScore": plan_dice,
+                                        "volumes": gif_volumes,   # cumulative list
+                                        "latex": None,
+                                    },
+                                    "session_id": self.session_id
+                                }
+                            )
+                        logger.info(f"Progressive broadcast: sent {len(gif_volumes)}/{len(downloaded_uids)} GIFs")
+                    except Exception as broadcast_err:
+                        logger.warning(f"Progressive broadcast failed for {volume_entry.get('seriesInstanceUid')}: {broadcast_err}")
+
+            # Run GIF generation (blocking) and progressive broadcaster concurrently
+            await asyncio.gather(
+                asyncio.to_thread(generate_gif_overlays, workspace_dir, downloaded_uids, _on_gif_ready),
+                _broadcast_progressively(),
             )
             logger.info(f"gif_volumes sample: {gif_volumes[:1]}")
 
-        #=========== Prepare data for the frontend(payload)==============================
-        #todo: handle list of labels and models in front view and in function
-        # Attempt to include planner-generated initial LaTeX if available
+
+
+        #=========== Prepare final summary payload for frontend ========================
+        # GIFs were already sent progressively — this final message attaches latex
+        # and confirms all volumes are done. Volumes list kept for completeness.
         latex_content = None
         try:
             from pathlib import Path
@@ -210,25 +277,28 @@ class SegmentationModule:
         except Exception:
             latex_content = None
 
-        frontend_data = {
-            "targetRoi": plan['target_labels'][0],
-            "selectedModel": plan["selected_models"][0] if plan["selected_models"] else None,
-            "diceScore": get_model_dice_score(plan["selected_models"][0],plan["target_labels"][0]) if plan["selected_models"] else None,
-            "volumes": gif_volumes,
-            "latex": latex_content,
-        }
+        # Send final summary only if there is latex to attach, or no GIFs were sent yet
+        if latex_content or not gif_volumes:
+            frontend_data = {
+                "targetRoi": plan['target_labels'][0],
+                "selectedModel": plan["selected_models"][0] if plan["selected_models"] else None,
+                "diceScore": get_model_dice_score(plan["selected_models"][0], plan["target_labels"][0]) if plan["selected_models"] else None,
+                "volumes": gif_volumes,
+                "latex": latex_content,
+            }
+            logger.info("Module sending final summary to frontend...")
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                await client.post(
+                    "http://localhost:8150/ws-broadcast",
+                    json={
+                        "type": "segmentation_output",
+                        "payload": frontend_data,
+                        "session_id": self.session_id
+                    }
+                )
+        else:
+            logger.info("Module: GIFs already progressively sent — skipping redundant batch broadcast.")
 
-        # ==========sending data to fronted for review====================
-        logger.info("Module sending data to frontend for review...")
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            await client.post(
-                "http://localhost:8150/ws-broadcast",
-                json={
-                    "type": "segmentation_output",
-                    "payload": frontend_data,
-                    "session_id": self.session_id
-                }
-            )
 
         # Wait for user review message
         logger.info("Module paused: Waiting for human review via HTTP long-poll...")

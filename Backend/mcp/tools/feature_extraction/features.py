@@ -136,7 +136,14 @@ class AnalyzeImportanceInput(BaseModel):
 )
 async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
     """Extract radiomic features from medical images and segmentation masks using PyRadiomics.
-    (Unchanged from original — no chart_data needed here, FeaturesView gets it from analyze_importance.)
+
+    IMPORTANT — two separate concepts:
+    - `feature_classes`: statistical/textural feature groups computed ON an image type.
+      Valid values: 'firstorder', 'shape', 'glcm', 'glrlm', 'glszm', 'gldm', 'ngtdm', 'shape2D'.
+      Do NOT put 'wavelet', 'LoG', 'Gradient', etc. here — those are image filter types.
+    - `image_types`: image pre-processing filters applied before feature extraction.
+      Valid values: 'Original', 'Wavelet', 'LoG', 'Gradient', 'Exponential', 'SquareRoot'.
+      Default is 'Original,Wavelet' which covers the most common use case.
     """
     import glob as _glob
     import yaml
@@ -165,6 +172,24 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
     specific_features = _csv_str(params.specific_features)
     mask_labels_raw = _csv_int(params.mask_labels)
     pixel_spacing  = _csv_float(params.pixel_spacing) or [1.0, 1.0, 1.0]
+
+    # ── Guard: catch image-type names mistakenly passed as feature_classes ──────
+    # The LLM sometimes puts 'wavelet', 'LoG', 'Gradient' etc. in feature_classes.
+    # These are image filter types, not feature classes. Silently rescue them.
+    _valid_feature_classes = {"firstorder", "shape", "glcm", "glrlm", "glszm", "gldm", "ngtdm", "shape2D"}
+    _valid_image_types = {"original", "wavelet", "log", "gradient", "exponential", "squareroot", "lbp2d", "lbp3d"}
+    if feature_classes:
+        rescued_image_types = [fc for fc in feature_classes if fc.lower() in _valid_image_types]
+        feature_classes     = [fc for fc in feature_classes if fc.lower() in _valid_feature_classes]
+        if rescued_image_types:
+            logger.warning(
+                f"[wavelet-guard] Moved {rescued_image_types} from feature_classes → image_types. "
+                "These are image filter types, not feature classes."
+            )
+            # Capitalise to match PyRadiomics convention and merge with existing image_types
+            image_types = list(set(image_types) | {t.capitalize() for t in rescued_image_types})
+        if not feature_classes:
+            feature_classes = None  # fall through to default below
 
     temp_dir = None
     try:
