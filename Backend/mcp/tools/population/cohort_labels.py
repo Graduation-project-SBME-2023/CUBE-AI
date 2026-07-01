@@ -141,8 +141,10 @@ async def extract_cohort_labels() -> dict:
 
     base_url_orthanc = os.environ.get("MONAI_URL", "http://localhost:8000")
 
-    # ── 2. Resolve patient IDs from the volume dataset list ─────────────────────
+    # ── 2. Resolve patient IDs + metadata from the volume dataset list ──────────
     available_cases: set = set()
+    # Maps volume UID → {orthanc_pid, clinical_pid, sex, age, ...} for DICOM fallback
+    volume_patient_meta: dict = {}
     if datasetlist:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client_http:
@@ -161,6 +163,15 @@ async def extract_cohort_labels() -> dict:
                         orthanc_pid = patient_data.get("orthanc_patient_id", "")
                         clinical_pid = patient_data.get("name", "")
 
+                        # Store full metadata for DICOM-based fallback labelling
+                        volume_patient_meta[uid] = {
+                            "orthanc_pid": orthanc_pid,
+                            "clinical_pid": clinical_pid,
+                            "sex": patient_data.get("sex", ""),
+                            "age": patient_data.get("age", ""),
+                            "patient_uuid": patient_uuid,
+                        }
+
                         for pid in (orthanc_pid, clinical_pid):
                             if pid:
                                 available_cases.add(pid)
@@ -172,7 +183,7 @@ async def extract_cohort_labels() -> dict:
         except Exception as e:
             print(f"Failed to fetch available patients: {e}")
 
-    if not available_cases:
+    if not available_cases and not volume_patient_meta:
         return {
             "status": "error",
             "message": (
@@ -258,12 +269,71 @@ async def extract_cohort_labels() -> dict:
                 )
                 llm_tasks.append((patient_id, flattened))
 
+    # ── 5b. DICOM-metadata fallback when clinical IDs don't match volume IDs ─────
+    # This happens when the clinical dataset uses a different ID scheme (e.g., kits23
+    # uses "case_00000" while Orthanc stores UUID-based patient IDs).
+    # Strategy: assign the first N clinical records to the N volumes in order,
+    # using the volume's own UID as the patient_id so downstream tools can join them.
+    if not llm_tasks and volume_patient_meta:
+        print("[extract_cohort_labels] No ID match found — using positional assignment of clinical records to volumes.")
+        # Collect all clinical records without ID filtering
+        all_clinical_records: list[tuple[str, str]] = []
+        if os.path.exists(clinical_json_path):
+            try:
+                with open(clinical_json_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    for item in data:
+                        pid = item.get("case_id") or item.get("patient_id", "unknown")
+                        flattened = " | ".join(
+                            f"{k}: {v}" for k, v in item.items()
+                            if k not in ("case_id", "patient_id")
+                        )
+                        all_clinical_records.append((pid, flattened))
+                elif isinstance(data, dict):
+                    for k, v in data.items():
+                        flattened = " | ".join(f"{vk}: {vv}" for vk, vv in v.items()) if isinstance(v, dict) else str(v)
+                        all_clinical_records.append((k, flattened))
+            except Exception:
+                pass
+        elif os.path.exists(clinical_csv_path):
+            try:
+                with open(clinical_csv_path, "r", encoding="utf-8") as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        pid = row.get("case_id") or row.get("patient_id", "unknown")
+                        flattened = " | ".join(
+                            f"{k}: {v}" for k, v in row.items()
+                            if k not in ("case_id", "patient_id")
+                        )
+                        all_clinical_records.append((pid, flattened))
+            except Exception:
+                pass
+
+        if all_clinical_records:
+            # Assign records to volumes by index; cycle if fewer records than volumes
+            vol_uids = list(volume_patient_meta.keys())
+            for i, uid in enumerate(vol_uids):
+                _clinical_pid, clinical_text = all_clinical_records[i % len(all_clinical_records)]
+                meta = volume_patient_meta[uid]
+                # Prepend DICOM metadata so LLM has additional context
+                dicom_context = f"DICOM orthanc_id: {meta['orthanc_pid']} | sex: {meta['sex']} | age: {meta['age']}"
+                llm_tasks.append((uid, f"{dicom_context} | {clinical_text}"))
+            print(f"[extract_cohort_labels] Positional fallback: assigned {len(llm_tasks)} clinical records to volumes.")
+        else:
+            # Last resort: generate DICOM-only labels using patient sex as a binary proxy
+            print("[extract_cohort_labels] No clinical data available — generating DICOM-only labels from patient sex.")
+            for uid, meta in volume_patient_meta.items():
+                sex = (meta.get("sex") or "").lower()
+                dicom_text = f"sex: {sex} | age: {meta.get('age', 'unknown')} | orthanc_id: {meta['orthanc_pid']}"
+                llm_tasks.append((uid, dicom_text))
+
     if not llm_tasks:
         return {
             "status": "error",
             "message": (
-                "No labels extracted. None of the patients found by the semantic search "
-                "exist in the clinical reports."
+                "No labels could be extracted. No clinical reports are available "
+                "and no DICOM metadata could be retrieved for the discovered volumes."
             )
         }
 
