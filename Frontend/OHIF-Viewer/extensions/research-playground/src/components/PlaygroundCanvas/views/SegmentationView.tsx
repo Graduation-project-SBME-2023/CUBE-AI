@@ -14,6 +14,7 @@ function ReviewView({
     volumes,
     onSave,
     isLoading,
+    isFinished,
 }: {
     targetRoi: string;
     selectedModel: string;
@@ -21,6 +22,7 @@ function ReviewView({
     volumes: VolumeGif[];
     onSave: (results: { accepted: string[]; rejected: string[]; modified: string[] }) => void;
     isLoading: boolean;
+    isFinished: boolean;
 }) {
     const [reviewStatus, setReviewStatus] = useState<Record<string, ReviewStatus>>({});
 
@@ -88,14 +90,14 @@ function ReviewView({
                     <div className="flex items-center gap-3 mb-4 shrink-0 border-b border-[#1f2d40]/50 pb-4">
                         <button
                             onClick={handleRejectAll}
-                            disabled={volumes.length === 0 || isLoading}
+                            disabled={volumes.length === 0 || isLoading || !isFinished}
                             className="px-4 py-2 bg-[#1a1515] border border-red-900/50 text-red-400 hover:bg-red-900/20 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm flex items-center gap-2 transition-colors"
                         >
                             <XSquare size={15} /> Reject All
                         </button>
                         <button
                             onClick={handleAcceptAll}
-                            disabled={volumes.length === 0 || isLoading}
+                            disabled={volumes.length === 0 || isLoading || !isFinished}
                             className="px-4 py-2 bg-[#151f1a] border border-[#6fe5b8]/30 text-[#6fe5b8] hover:bg-[#6fe5b8]/10 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg text-sm flex items-center gap-2 transition-colors"
                         >
                             <CheckSquare size={15} /> Accept All
@@ -169,16 +171,19 @@ function ReviewView({
                                             <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
                                                 <button
                                                     onClick={() => handleModify(volume.seriesInstanceUid)}
-                                                    style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: isModified ? '#eab308' : 'transparent', color: isModified ? '#000' : '#9ca3af' }}
+                                                    disabled={!isFinished}
+                                                    style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: isFinished ? 'pointer' : 'not-allowed', background: isModified ? '#eab308' : 'transparent', color: isModified ? '#000' : '#9ca3af', opacity: isFinished ? 1 : 0.5 }}
                                                     title="Modify Interactively"
                                                 ><Edit size={14} /></button>
                                                 <button
                                                     onClick={() => handleToggle(volume.seriesInstanceUid, 'rejected')}
-                                                    style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: isRejected ? '#ef4444' : 'transparent', color: isRejected ? '#fff' : '#9ca3af' }}
+                                                    disabled={!isFinished}
+                                                    style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: isFinished ? 'pointer' : 'not-allowed', background: isRejected ? '#ef4444' : 'transparent', color: isRejected ? '#fff' : '#9ca3af', opacity: isFinished ? 1 : 0.5 }}
                                                 ><X size={14} /></button>
                                                 <button
                                                     onClick={() => handleToggle(volume.seriesInstanceUid, 'accepted')}
-                                                    style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: 'pointer', background: isAccepted ? '#6fe5b8' : 'transparent', color: isAccepted ? '#000' : '#9ca3af' }}
+                                                    disabled={!isFinished}
+                                                    style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: isFinished ? 'pointer' : 'not-allowed', background: isAccepted ? '#6fe5b8' : 'transparent', color: isAccepted ? '#000' : '#9ca3af', opacity: isFinished ? 1 : 0.5 }}
                                                 ><Check size={14} strokeWidth={3} /></button>
                                             </div>
                                         </div>
@@ -207,10 +212,20 @@ function ReviewView({
             </div>
 
             {/* Save */}
-            <div className="w-full flex justify-center shrink-0">
+            <div className="w-full flex justify-center items-center gap-6 shrink-0">
+                {volumes.length > 0 && !isFinished && (
+                    <span className="flex items-center gap-2 bg-[#5acce6]/10 border border-[#5acce6]/30 px-4 py-2.5 rounded-full text-[#5acce6] font-bold text-sm">
+                        <Loader2 size={16} className="animate-spin" /> Loading GIFs...
+                    </span>
+                )}
+                {volumes.length > 0 && isFinished && (
+                    <span className="flex items-center gap-2 bg-[#6fe5b8]/10 border border-[#6fe5b8]/30 px-4 py-2.5 rounded-full text-[#6fe5b8] font-bold text-sm">
+                        <Check size={16} strokeWidth={3} /> Finished
+                    </span>
+                )}
                 <button
                     onClick={handleSave}
-                    disabled={isLoading || volumes.length === 0}
+                    disabled={isLoading || volumes.length === 0 || !isFinished}
                     className="px-12 py-3 bg-[#5acce6] hover:bg-[#4ab5cc] disabled:bg-[#1f2d40] disabled:text-[#3c5d80] disabled:cursor-not-allowed text-black font-bold rounded-full flex items-center gap-2 transition-colors shadow-[0_0_20px_rgba(90,204,230,0.2)]"
                 >
                     <Save size={18} /> Save Review Results
@@ -229,7 +244,8 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
         diceScore: number | null;
         volumes: VolumeGif[];
         sessionId?: string;
-    }>({ targetRoi: '-', selectedModel: '-', diceScore: null, volumes: [], sessionId: undefined });
+        isFinished: boolean;
+    }>({ targetRoi: '-', selectedModel: '-', diceScore: null, volumes: [], sessionId: undefined, isFinished: false });
 
     const [isLoading, setIsLoading] = useState(true);
 
@@ -241,6 +257,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
                 diceScore:     segmentationData.diceScore     ?? null,
                 volumes:       segmentationData.volumes,
                 sessionId:     segmentationData.sessionId,
+                isFinished:    segmentationData.isFinished ?? false,
             });
             setIsLoading(false);
         } else {
@@ -273,6 +290,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
             volumes={data.volumes}
             onSave={handleSave}
             isLoading={isLoading}
+            isFinished={data.isFinished}
         />
     );
 }

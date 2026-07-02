@@ -373,7 +373,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                     </div>
                     <div className="flex gap-2 items-center text-xs font-mono">
                         {/* --- NEW: Download & Upload Buttons --- */}
-                        {accumulatedPop.uids.length > 0 && labellingMode !== 'automatic' && (
+                        {accumulatedPop.uids.length > 0 && labellingMode !== 'automatic' && labellingMode !== 'auto' && (
                             <div className="flex gap-2 mr-4">
                                 <button 
                                     onClick={handleDownloadCSV}

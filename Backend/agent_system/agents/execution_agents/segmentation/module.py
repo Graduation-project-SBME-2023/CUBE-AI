@@ -177,12 +177,18 @@ class SegmentationModule:
         # =========== download ========================    
         #finally download the volumes with its label masks 
         await asyncio.sleep(120)  
-        downloaded_uids, skipped_uids = await download_and_pair_volumes(
+        result = await download_and_pair_volumes(
                     workspace_dir,
                     datasetlist, 
                     chosen_path=chosen_path, 
                     selected_auto_model_for_volume = plan["selected_models"][0] if plan["selected_models"] else None
         )
+        # download_and_pair_volumes returns (successful_list, skipped_list) normally,
+        # but returns [] if datasetlist was empty — guard against both.
+        if isinstance(result, tuple):
+            downloaded_uids, skipped_uids = result
+        else:
+            downloaded_uids, skipped_uids = [], []
         
         # --- Log skipped volumes to scratchpad ---
         if skipped_uids:
@@ -248,6 +254,7 @@ class SegmentationModule:
                                         "diceScore": plan_dice,
                                         "volumes": gif_volumes,   # cumulative list
                                         "latex": None,
+                                        "isFinished": False,
                                     },
                                     "session_id": self.session_id
                                 }
@@ -277,27 +284,25 @@ class SegmentationModule:
         except Exception:
             latex_content = None
 
-        # Send final summary only if there is latex to attach, or no GIFs were sent yet
-        if latex_content or not gif_volumes:
-            frontend_data = {
-                "targetRoi": plan['target_labels'][0],
-                "selectedModel": plan["selected_models"][0] if plan["selected_models"] else None,
-                "diceScore": get_model_dice_score(plan["selected_models"][0], plan["target_labels"][0]) if plan["selected_models"] else None,
-                "volumes": gif_volumes,
-                "latex": latex_content,
-            }
-            logger.info("Module sending final summary to frontend...")
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                await client.post(
-                    "http://localhost:8150/ws-broadcast",
-                    json={
-                        "type": "segmentation_output",
-                        "payload": frontend_data,
-                        "session_id": self.session_id
-                    }
-                )
-        else:
-            logger.info("Module: GIFs already progressively sent — skipping redundant batch broadcast.")
+        # Always send final summary to signal completion!
+        frontend_data = {
+            "targetRoi": plan['target_labels'][0],
+            "selectedModel": plan["selected_models"][0] if plan["selected_models"] else None,
+            "diceScore": get_model_dice_score(plan["selected_models"][0], plan["target_labels"][0]) if plan["selected_models"] else None,
+            "volumes": gif_volumes,
+            "latex": latex_content,
+            "isFinished": True
+        }
+        logger.info("Module sending final summary to frontend...")
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            await client.post(
+                "http://localhost:8150/ws-broadcast",
+                json={
+                    "type": "segmentation_output",
+                    "payload": frontend_data,
+                    "session_id": self.session_id
+                }
+            )
 
 
         # Wait for user review message

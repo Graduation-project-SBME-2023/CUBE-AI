@@ -479,8 +479,8 @@ async def replay_logs(session_id: str):
 @app.get("/session/{session_id}/config")
 async def get_session_config(session_id: str):
     """Get the current configuration for a given session."""
-    workspace_root = os.path.abspath(os.path.join(current_dir, "..", "agents_workspace"))
-    workspace_folder = os.path.join(workspace_root, f"workspace_{session_id}")
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", os.path.abspath(os.path.join(current_dir, "..", "agents_workspace")))
+    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
     config_path = os.path.join(workspace_folder, "config.json")
     
     if not os.path.exists(config_path):

@@ -218,7 +218,19 @@ async def generate_targets() -> str:
     # ── Route ────────────────────────────────────────────────────────────────────
     if labelling_mode == "automatic":
         # ── AUTO MODE: join existing labels ─────────────────────────────
-        print(f"[generate_targets] Automatic mode — joining previously generated cohort labels...")
+        # GUARD: refuse to run if no volumes have been searched yet.
+        # This prevents the race condition where the LLM calls generate_targets
+        # before calling search_volumes_by_description.
+        if not datasetlist:
+            err_msg = (
+                "generate_targets called before volume search: datasetlist is empty in config.json. "
+                "You MUST call search_volumes_by_description first to populate the volume list, "
+                "then call generate_targets."
+            )
+            await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
+            return json.dumps({"status": "error", "message": err_msg})
+
+        print(f"[generate_targets] Automatic mode — joining previously generated cohort labels for {len(datasetlist)} volumes...")
         result = await _build_targets_from_labels(workspace_dir, datasetlist, config, csv_path)
 
     else:
