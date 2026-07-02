@@ -11,16 +11,10 @@
 
 from .deepedit import DeepEdit
 from .deepgrow import Deepgrow
-from .localization_spine import LocalizationSpine
 from .localization_vertebra import LocalizationVertebra
-from .segmentation import Segmentation
 from .segmentation_spleen import SegmentationSpleen
-from .segmentation_vertebra import SegmentationVertebra
-from .nnunet_liver import NnunetLiver
 from .sam import sam
-from .nnunet_lung import NnunetLung
 from .generic_segmentation import GenericSegmentation
-from .segment_liver import segmentliver
 from .vista import VISTAPOINT3D 
 from .nnInteractive import NNINTERACTIVE
 from .voxtell import voxtell

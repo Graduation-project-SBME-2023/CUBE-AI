@@ -301,7 +301,7 @@ class VertebraLocalizationPostProcessing(MapTransform):
                 centroid[f"label_{l + 1}"] = [x, y, z]
                 centroids.append(centroid)
 
-            print(centroids)
+            logger.info(centroids)
             if d.get(self.result) is None:
                 d[self.result] = dict()
             d[self.result]["centroids"] = centroids
