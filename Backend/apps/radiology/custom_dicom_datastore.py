@@ -9,9 +9,13 @@ logger = logging.getLogger(__name__)
 
 class MyDICOMWebDatastore(DICOMWebDatastore):
     def get_label_dir_dcm(self, image_id: str) -> str:
-        logger.info(f"jjjjjj Image ID: {image_id}")
+        """
+        Retrieves the directory path for the DICOM image label. 
+        Downloads the series if it doesn't already exist in the cache.
+        """
+        logger.info(f"Fetching Image ID: {image_id}")
         image_dir = os.path.realpath(os.path.join(self._datastore.image_path(), image_id))
-        logger.info(f"newwww Image Dir (cache): {image_dir}")
+        logger.info(f"Image Directory Cache: {image_dir}")
 
         if not os.path.exists(image_dir) or not os.listdir(image_dir):
             dicom.dicom_web_download_series(None, image_id, image_dir, self._client, self._fetch_by_frame)
