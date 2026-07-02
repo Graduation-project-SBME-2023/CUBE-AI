@@ -170,6 +170,13 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                     if (data.labelling_mode) {
                         setLabellingMode(data.labelling_mode);
                     }
+                    if (data.datasetlist && Array.isArray(data.datasetlist) && data.datasetlist.length > 0) {
+                        setAccumulatedPop(prev => ({
+                            ...prev,
+                            uids: data.datasetlist,
+                            count: data.datasetlist.length
+                        }));
+                    }
                 })
                 .catch(console.error);
         }
@@ -188,11 +195,11 @@ export default function DataCohortView({ populationData, segmentationData, sessi
     // --- NEW: DOWNLOAD TEMPLATE LOGIC ---
     const handleDownloadCSV = () => {
         if (accumulatedPop.uids.length === 0) return;
-        
+
         const header = "id,target\n";
         const rows = accumulatedPop.uids.map(uid => `${uid},`).join('\n');
         const csvContent = "data:text/csv;charset=utf-8," + header + rows;
-        
+
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
         link.setAttribute("href", encodedUri);
@@ -202,14 +209,14 @@ export default function DataCohortView({ populationData, segmentationData, sessi
         document.body.removeChild(link);
     };
 
-// --- UPLOAD FILLED CSV LOGIC ---
+    // --- UPLOAD FILLED CSV LOGIC ---
     const handleUploadCSV = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (!file) return;
 
         // 1. Grab the session ID that PlaygroundCanvas saved
         const activeSessionId = sessionStorage.getItem('active_cube_session');
-        
+
         if (!activeSessionId) {
             alert('Error: No active session found. Please start planning first.');
             if (fileInputRef.current) fileInputRef.current.value = '';
@@ -226,7 +233,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                 method: 'POST',
                 body: formData,
             });
-            
+
             if (response.ok) {
                 alert('Labels uploaded successfully! The agent will now continue.');
             } else {
@@ -373,31 +380,30 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                     </div>
                     <div className="flex gap-2 items-center text-xs font-mono">
                         {/* --- NEW: Download & Upload Buttons --- */}
-                        {accumulatedPop.uids.length > 0 && labellingMode !== 'automatic' && labellingMode !== 'auto' && (
+                        {accumulatedPop.uids.length > 0 && labellingMode !== 'automatic' && (
                             <div className="flex gap-2 mr-4">
-                                <button 
+                                <button
                                     onClick={handleDownloadCSV}
                                     className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1f2d40] hover:bg-[#3c5d80] text-[#91b9cd] hover:text-white border border-[#3c5d80] rounded transition-colors"
                                 >
                                     <Download size={14} /> Template
                                 </button>
-                                
-                                <input 
-                                    type="file" 
-                                    accept=".csv" 
-                                    ref={fileInputRef} 
-                                    className="hidden" 
+
+                                <input
+                                    type="file"
+                                    accept=".csv"
+                                    ref={fileInputRef}
+                                    className="hidden"
                                     onChange={handleUploadCSV}
                                 />
-                                
-                                <button 
+
+                                <button
                                     onClick={() => fileInputRef.current?.click()}
                                     disabled={isUploading}
-                                    className={`flex items-center gap-1.5 px-3 py-1.5 border rounded transition-colors shadow-[0_0_10px_rgba(92,230,176,0.2)] ${
-                                        isUploading 
-                                        ? 'bg-[#152e2e] text-gray-400 border-gray-600 cursor-not-allowed' 
-                                        : 'bg-[#152e2e] hover:bg-[#1f4242] text-[#5ce6b0] border-[#234d4d]'
-                                    }`}
+                                    className={`flex items-center gap-1.5 px-3 py-1.5 border rounded transition-colors shadow-[0_0_10px_rgba(92,230,176,0.2)] ${isUploading
+                                            ? 'bg-[#152e2e] text-gray-400 border-gray-600 cursor-not-allowed'
+                                            : 'bg-[#152e2e] hover:bg-[#1f4242] text-[#5ce6b0] border-[#234d4d]'
+                                        }`}
                                 >
                                     <Upload size={14} /> {isUploading ? 'Uploading...' : 'Upload Labels'}
                                 </button>
