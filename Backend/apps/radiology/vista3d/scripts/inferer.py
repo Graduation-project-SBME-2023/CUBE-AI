@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 # Copyright (c) MONAI Consortium
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -62,7 +64,7 @@ class Vista3dInferer(Inferer):
 
         """
         prompt_class = copy.deepcopy(class_vector)
-        print("arrived")
+        logger.info("arrived")
         if class_vector is not None:
             # Check if network has attribute 'point_head' directly or within its 'module'
             if hasattr(network, "point_head"):

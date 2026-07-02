@@ -83,7 +83,7 @@ class ImageProcessor:
 
         slice_indices = sorted(video_segments.keys())
         max_index = max(slice_indices)
-        print(f"Max num of slice is {max_index}")
+        logger.info(f"Max num of slice is {max_index}")
 
         # Get shape from first valid mask
         for idx in slice_indices:
@@ -129,7 +129,7 @@ class ImageProcessor:
         result[:min_shape[0], :min_shape[1], :min_shape[2]] = source[:min_shape[0], :min_shape[1], :min_shape[2]]
 
         if target_shape != source.shape:
-            print(f"Warning: Shape mismatch fixed. Target={target_shape}, Source={source.shape}")
+            logger.info(f"Warning: Shape mismatch fixed. Target={target_shape}, Source={source.shape}")
 
         return result
 
@@ -285,7 +285,7 @@ class ImageProcessor:
             try:
                 array = flat_array.reshape(dimensions)
             except ValueError:
-                print(f"Warning: Could not reshape to {dimensions}")
+                logger.info(f"Warning: Could not reshape to {dimensions}")
                 array = flat_array
         else:
             array = flat_array
@@ -444,33 +444,33 @@ class sam(BasicInferTask):
         slice_index=data['Auxillary_Box'][1]
         orientation_axis =data['Auxillary_Box'][2]
         obj_id=data["Auxillary_Id"]
-        print("obj_id",obj_id)
+        logger.info(f"obj_id: {obj_id}")
 
-        print("box_arr",box_arr)
-        print("slice_index",slice_index)
-        print("orientation_axis",orientation_axis)
+        logger.info(f"box_arr: {box_arr}")
+        logger.info(f"slice_index: {slice_index}")
+        logger.info(f"orientation_axis: {orientation_axis}")
 
         #Extract slice data
         slice_data = image_array[slice_index,:,:]
         slice_normalized = ((slice_data - np.min(slice_data)) / (np.max(slice_data) - np.min(slice_data)) * 255).astype(np.uint8)
 
-        print("image_array shape",image_array.shape)
-        print("Shape of slice",slice_data.shape)
+        logger.info(f"image_array shape: {image_array.shape}")
+        logger.info(f"Shape of slice: {slice_data.shape}")
         #Remove directory if it exists
         if os.path.exists(self.jpeg_filepath):
             try:
                 shutil.rmtree(self.jpeg_filepath)
-                print(f"Removed existing directory: {self.jpeg_filepath}")
+                logger.info(f"Removed existing directory: {self.jpeg_filepath}")
             except Exception as e:
-                print(f"Error removing directory: {e}")
+                logger.info(f"Error removing directory: {e}")
                 raise
 
         #Create fresh directory
         try:
             os.makedirs(self.jpeg_filepath, exist_ok=True)
-            print(f"Created clean directory: {self.jpeg_filepath}")
+            logger.info(f"Created clean directory: {self.jpeg_filepath}")
         except Exception as e:
-            print(f"Error creating directory: {e}")
+            logger.info(f"Error creating directory: {e}")
             raise
 
         # Convert to PIL Image and save as JPEG
@@ -490,21 +490,21 @@ class sam(BasicInferTask):
             labels=[],
             box=[box_arr] if len([box_arr]) > 0 else None
         )
-        print("out_mask_logits:", out_mask_logits)
-        print("obj_id:", out_obj_ids)
+        logger.info(f"out_mask_logits: {out_mask_logits}")
+        logger.info(f"obj_id: {out_obj_ids}")
 
         # Convert tensor to NumPy array where self.out_mask_logits=[obj_id][chanel:0 for grayscale]
         obj_id_int = int(obj_id)
 
         mask_array =out_mask_logits[0][0].cpu().numpy()
 
-        print("mask_array shape",mask_array.shape)
+        logger.info(f"mask_array shape: {mask_array.shape}")
 
         if obj_id not in self.object_bounds:
             self.object_bounds[obj_id] = [None, None]
 
-        print("obj_id_int:",obj_id_int)
-        print("self.object_bounds:",self.object_bounds)
+        logger.info(f"obj_id_int: {obj_id_int}")
+        logger.info(f"self.object_bounds: {self.object_bounds}")
 
         # Calculate width metrics (column indices where mask > 0)
         nonzero_cols = np.where(np.any(mask_array > 0, axis=0))[0]  # Get columns with at least one positive pixel
@@ -512,7 +512,7 @@ class sam(BasicInferTask):
         if len(nonzero_cols) > 0:
             min_col = np.min(nonzero_cols)
             max_col = np.max(nonzero_cols)
-            print(f"Segmentation spans columns: {min_col} to {max_col}")
+            logger.info(f"Segmentation spans columns: {min_col} to {max_col}")
                         
         if self.object_bounds[obj_id][0] is None or min_col < self.object_bounds[obj_id][0]:
             self.object_bounds[obj_id][0] = min_col
@@ -555,7 +555,7 @@ class sam(BasicInferTask):
             )
 
 
-        print(f"Current object bounds (width): {self.object_bounds[obj_id]}")
+        logger.info(f"Current object bounds (width): {self.object_bounds[obj_id]}")
              
     def _handle_mask(self, mask_data):
         """Handle mask refinement state."""
@@ -596,9 +596,9 @@ class sam(BasicInferTask):
    
     def _handle_3d(self, data, image_array):
         """handle 3D Propagation"""
-        print("self.StartSliceIndex in 3d ", self.StartSliceIndex)
+        logger.info(f"self.StartSliceIndex in 3d: {self.StartSliceIndex}")
         self.StartSliceIndex = image_array.shape[2] - int(self.StartSliceIndex) - 1
-        print("self.StartSliceIndex after inversion", self.StartSliceIndex)
+        logger.info(f"self.StartSliceIndex after inversion: {self.StartSliceIndex}")
 
 
         video_segments = {}
@@ -609,7 +609,7 @@ class sam(BasicInferTask):
 
         
         if not self.object_bounds:
-            print("no bounding box defined, defaulting to forward & Backward propagation for all slices")
+            logger.info("no bounding box defined, defaulting to forward & Backward propagation for all slices")
             for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(
                 self.inference_state,
                 start_frame_idx=int(self.StartSliceIndex),
@@ -634,7 +634,7 @@ class sam(BasicInferTask):
             # iteration over boundlimits
             for obj_id, bounds in self.object_bounds.items():
                 if bounds[0] is None or bounds[1] is None:
-                    print(f"Object {obj_id} has undefined bounds, defaulting to forward & Backward propagation")
+                    logger.info(f"Object {obj_id} has undefined bounds, defaulting to forward & Backward propagation")
                     for out_frame_idx, out_obj_ids, out_mask_logits in self.predictor.propagate_in_video(
                         self.inference_state,
                         start_frame_idx=int(self.StartSliceIndex),
@@ -660,7 +660,7 @@ class sam(BasicInferTask):
                     # calculate bounds with margin
                     lower_bound = max(0, bounds[0] - margin)
                     upper_bound = min(total_slices - 1, bounds[1] + margin)
-                    print(f"Object {obj_id} - Propagating from slice {lower_bound} to {upper_bound}")
+                    logger.info(f"Object {obj_id} - Propagating from slice {lower_bound} to {upper_bound}")
 
                     # forward to upper limits
                     if self.StartSliceIndex <= upper_bound:
@@ -706,7 +706,7 @@ class sam(BasicInferTask):
             # resize the mask to fit in the annotated image
             self.annotated_image = ImageProcessor.resize_to_match(self.annotated_image.shape, mask)
         else:
-            print("No valid segments generated")
+            logger.info("No valid segments generated")
 
         
     
@@ -734,7 +734,7 @@ class sam(BasicInferTask):
         #loop over all objects for segmentation
         for obj_id, prompt_details in data["sam2config"].items():
 
-            print("at obj_id:",obj_id,"coressponds",prompt_details)
+            logger.info(f"at obj_id: {obj_id} corresponds: {prompt_details}")
             points = prompt_details.get("points", [[], []])     #extract points
             boxes = prompt_details.get("boxes", [])             #extract boxes
 
@@ -752,10 +752,10 @@ class sam(BasicInferTask):
                             points_within_triggered_slice.append( [point[0],point[1]] )
                             Labels_within_triggered_slice.append(label)
 
-                    print("points_with_frames",points_with_frames)
-                    print("labels",labels)
-                    print("points_within_triggered_slice",points_within_triggered_slice)
-                    print("Labels_within_triggered_slice",Labels_within_triggered_slice)
+                    logger.info(f"points_with_frames: {points_with_frames}")
+                    logger.info(f"labels: {labels}")
+                    logger.info(f"points_within_triggered_slice: {points_within_triggered_slice}")
+                    logger.info(f"Labels_within_triggered_slice: {Labels_within_triggered_slice}")
 
 
                     boxes_within_triggered_slice=[]
@@ -764,7 +764,7 @@ class sam(BasicInferTask):
                             if box[1] == frame_idx:
                                 boxes_within_triggered_slice.append(box[0])
 
-                    print("boxes_within_triggered_slice",boxes_within_triggered_slice)
+                    logger.info(f"boxes_within_triggered_slice: {boxes_within_triggered_slice}")
 
                     if ( (len(boxes_within_triggered_slice) > 0) or (len(Labels_within_triggered_slice) >0) ):
 
@@ -774,11 +774,11 @@ class sam(BasicInferTask):
                         self.segment_2d(reversed_frame_idx,obj_id,points_within_triggered_slice,Labels_within_triggered_slice,boxes_within_triggered_slice)
 
                         #keep track of the min refrenced slice index for 3d segmentation
-                        print("frame_idx",frame_idx)
-                        print(" self.StartSliceIndex", self.StartSliceIndex)
+                        logger.info(f"frame_idx: {frame_idx}")
+                        logger.info(f"self.StartSliceIndex: {self.StartSliceIndex}")
                         if frame_idx < self.StartSliceIndex:
                             self.StartSliceIndex = frame_idx
-                        print(" self.StartSliceIndex inside the loop ",self.StartSliceIndex)
+                        logger.info(f"self.StartSliceIndex inside the loop: {self.StartSliceIndex}")
 
 
     def segment_2d(self,frame_idx,obj_id,points,labels,box):
@@ -792,8 +792,8 @@ class sam(BasicInferTask):
             labels=labels,
             box=box if len(box) > 0 else None
         )
-        print("out_mask_logits:", self.out_mask_logits)
-        print("obj_id:", self.out_obj_ids)
+        logger.info(f"out_mask_logits: {self.out_mask_logits}")
+        logger.info(f"obj_id: {self.out_obj_ids}")
 
         # Convert tensor to NumPy array where self.out_mask_logits=[obj_id][chanel:0 for grayscale]
         obj_id_int = int(obj_id)
@@ -806,7 +806,7 @@ class sam(BasicInferTask):
                 obj_id_int -= 1  # Decrement obj_id and try again
 
         # Clear the old segmentation
-        print(f"Before clearing, slice {frame_idx} unique values: {np.unique(self.annotated_image[:, :, int(frame_idx)])}")
+        logger.info(f"Before clearing, slice {frame_idx} unique values: {np.unique(self.annotated_image[:, :, int(frame_idx)])}")
 
         self.annotated_image[:, :, int(frame_idx)] = np.where(
             self.annotated_image[:, :, int(frame_idx)] == int(obj_id),
@@ -814,7 +814,7 @@ class sam(BasicInferTask):
             self.annotated_image[:, :, int(frame_idx)]
         )
 
-        print(f"After clearing, slice {frame_idx} unique values: {np.unique(self.annotated_image[:, :, int(frame_idx)])}")
+        logger.info(f"After clearing, slice {frame_idx} unique values: {np.unique(self.annotated_image[:, :, int(frame_idx)])}")
 
         # Add the new segmentation mask
         self.annotated_image[:, :, int(frame_idx)] = np.where(
@@ -823,7 +823,7 @@ class sam(BasicInferTask):
             self.annotated_image[:, :, int(frame_idx)]
         )
 
-        print(f"After adding new mask, slice {frame_idx} unique values: {np.unique(self.annotated_image[:, :, int(frame_idx)])}")
+        logger.info(f"After adding new mask, slice {frame_idx} unique values: {np.unique(self.annotated_image[:, :, int(frame_idx)])}")
 
 
 
