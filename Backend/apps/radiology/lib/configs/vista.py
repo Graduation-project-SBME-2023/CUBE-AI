@@ -156,7 +156,7 @@ class VISTAPOINT3D(TaskConfig):
             url = f"https://drive.google.com/uc?id={file_id}"
             gdown.download(url, self.path[0], quiet=False)
 
-            print(f"Checkpoint saved to: {self.path[0]}")
+            logger.info(f"Checkpoint saved to: {self.path[0]}")
 
 
         self.target_spacing = (1.5, 1.5, 1.5)  # target space for image
@@ -179,7 +179,7 @@ class VISTAPOINT3D(TaskConfig):
     def download_checkpoint(self, zip_path, extract_to='.'):
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             zip_ref.extractall(extract_to)
-            print(f"Extracted all files to: {os.path.abspath(extract_to)}")
+            logger.info(f"Extracted all files to: {os.path.abspath(extract_to)}")
 
    
 

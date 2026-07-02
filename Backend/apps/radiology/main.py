@@ -20,8 +20,6 @@ import lib.trainers
 import lib.infers
 from lib.activelearning import Last
 from lib.infers.deepgrow_pipeline import InferDeepgrowPipeline
-from lib.infers.vertebra_pipeline import InferVertebraPipeline
-
 import monailabel
 from monailabel.interfaces.app import MONAILabelApp
 from monailabel.interfaces.config import TaskConfig
@@ -68,13 +66,12 @@ class MyApp(MONAILabelApp):
         # Load models from app model implementation, e.g., --conf models <segmentation_spleen>
         models = conf.get("models")
         if not models:
-            print("Hello From main.py")
-            print("---------------------------------------------------------------------------------------")
-            print("Provide --conf models <name>")
-            print("Following are the available models.  You can pass comma (,) seperated names to pass multiple")
-            print(f"    all, {', '.join(configs.keys())}")
-            print("---------------------------------------------------------------------------------------")
-            print("")
+            logger.info("Hello From main.py")
+            logger.info("---------------------------------------------------------------------------------------")
+            logger.info("Provide --conf models <name>")
+            logger.info("Following are the available models.  You can pass comma (,) seperated names to pass multiple")
+            logger.info(f"    all, {', '.join(configs.keys())}")
+            logger.info("---------------------------------------------------------------------------------------")
             exit(-1)
 
         models = models.split(",")
@@ -83,13 +80,11 @@ class MyApp(MONAILabelApp):
         self.scribbles = conf.get("scribbles", "true") == "true"
         invalid = [m for m in models if m != "all" and not configs.get(m)]
         if invalid:
-            print("")
-            print("---------------------------------------------------------------------------------------")
-            print(f"Invalid Model(s) are provided: {invalid}")
-            print("Following are the available models.  You can pass comma (,) seperated names to pass multiple")
-            print(f"    all, {', '.join(configs.keys())}")
-            print("---------------------------------------------------------------------------------------")
-            print("")
+            logger.info("---------------------------------------------------------------------------------------")
+            logger.info(f"Invalid Model(s) are provided: {invalid}")
+            logger.info("Following are the available models.  You can pass comma (,) seperated names to pass multiple")
+            logger.info(f"    all, {', '.join(configs.keys())}")
+            logger.info("---------------------------------------------------------------------------------------")
             exit(-1)
 
         # Use Heuristic Planner to determine target spacing and spatial size based on dataset+gpu
@@ -97,9 +92,6 @@ class MyApp(MONAILabelApp):
         target_spacing = json.loads(conf.get("target_spacing", "[1.0, 1.0, 1.0]"))
         self.heuristic_planner = strtobool(conf.get("heuristic_planner", "false"))
         self.planner = HeuristicPlanner(spatial_size=spatial_size, target_spacing=target_spacing)
-
-        excluded = ["segmentation_vertebra", "segmentation", "nnunet_lung", "nnunet_liver",
-                    "localization_spine", "segment_liver"]
 
         # app models
         self.models: Dict[str, TaskConfig] = {}
@@ -110,8 +102,6 @@ class MyApp(MONAILabelApp):
                 # OO
                 if k == "generic_segmentation":
                     continue # To skip instantiating an object from the class generic at starting the application
-                if k in excluded:
-                    continue
                 if n == k or n == "all":
                     logger.info(f"+++ Adding Model: {k} => {v}")
                     self.models[k] = eval(f"{v}()")
@@ -132,6 +122,10 @@ class MyApp(MONAILabelApp):
         self.__init_workflows()
 
     def __init_workflows(self):
+        """
+        Initializes all workflows during application startup by reading the workflows_data.json file.
+        Creates tasks for each model found in the configuration.
+        """
      # initialize all the workflows when starting the application
         jsonPath = 'workflows_data.json'
         if os.path.exists(jsonPath):
@@ -148,6 +142,9 @@ class MyApp(MONAILabelApp):
  
 
     def update_jsonfile(self, model_name, labels, fold, plan_type):
+        """
+        Updates the json file that contains the workflows to ensure they persist across reboots.
+        """
         #Function to update the json file that contains the workflows, because we will use it when the application is rebooted
         jsonPath = 'workflows_data.json'
         new_data={
@@ -171,6 +168,10 @@ class MyApp(MONAILabelApp):
         logger.info(f"+++++ Added {model_name} workflow to the json file")
 
     def create_task(self, model_name, labels,fold, plan_type):
+        """
+        Creates a new task by configuring the generic segmentation model and registering 
+        its training and inference tasks. Also updates the workflow JSON file for persistence.
+        """
         # Update JSON file for persistence
         logging.info(f"Creating model '{model_name}' with labels: {labels}, fold: {fold}, plan_type: {plan_type}")
         logging.info("updating json file")
@@ -209,6 +210,9 @@ class MyApp(MONAILabelApp):
         logger.info(f"Successfully added model '{model_name}'  in trainer tasks.")    
 
     def initialize_inference_task(self, model_name):
+        """
+        Initializes and registers inference tasks for a given model.
+        """
         
         # Generate and register the InferTask
         infer_task = self.models[model_name].infer()
@@ -219,8 +223,7 @@ class MyApp(MONAILabelApp):
         else:
             self._infers[model_name] = infer_task
             
-        print("inferssss",self._infers)
-
+        logger.info(f"Infers: {self._infers}")
 
         return f"Successfully initialized inference task for model {model_name}"
         
@@ -228,6 +231,9 @@ class MyApp(MONAILabelApp):
 
 
     def create_jsonfile(self):
+        """
+        Creates an empty json file for workflows if it does not exist.
+        """
         #function to create a json file for the workflows, if it doesn't exist
         empty_data = {}
         jsonPath = 'workflows_data.json'
@@ -237,6 +243,9 @@ class MyApp(MONAILabelApp):
         logger.info("+++++++++ workflow's json file is created")        
 
     def init_datastore(self) -> Datastore:
+        """
+        Initializes a custom DICOM datastore instead of the default datastore.
+        """
         # Use your custom datastore instead of default
         datastore = super().init_datastore()
         datastore.__class__ = MyDICOMWebDatastore # only acceptable since no attributes differ from base class and custom class, just a different method implementation
@@ -245,6 +254,9 @@ class MyApp(MONAILabelApp):
         return datastore
 
     def init_infers(self) -> Dict[str, InferTask]:
+        """
+        Initializes inference tasks for all configured models, bundles, and pipelines.
+        """
         infers: Dict[str, InferTask] = {}
 
         #################################################
@@ -302,28 +314,13 @@ class MyApp(MONAILabelApp):
                 description="Combines Clara Deepgrow 2D and 3D models",
             )
 
-        #################################################
-        # Pipeline based on existing infers for vertebra segmentation
-        # Stages:
-        # 1/ localization spine
-        # 2/ localization vertebra
-        # 3/ segmentation vertebra
-        #################################################
-        if (
-            infers.get("localization_spine")
-            and infers.get("localization_vertebra")
-            and infers.get("segmentation_vertebra")
-        ):
-            infers["vertebra_pipeline"] = InferVertebraPipeline(
-                task_loc_spine=infers["localization_spine"],  # first stage
-                task_loc_vertebra=infers["localization_vertebra"],  # second stage
-                task_seg_vertebra=infers["segmentation_vertebra"],  # third stage
-                description="Combines three stage for vertebra segmentation",
-            )
         logger.info(infers)
         return infers
 
     def init_trainers(self) -> Dict[str, TrainTask]:
+        """
+        Initializes training tasks for all configured models and bundles.
+        """
         trainers: Dict[str, TrainTask] = {}
         if strtobool(self.conf.get("skip_trainers", "false")):
             return trainers
@@ -353,6 +350,9 @@ class MyApp(MONAILabelApp):
         return trainers
 
     def init_strategies(self) -> Dict[str, Strategy]:
+        """
+        Initializes active learning strategies (e.g., random, first, last).
+        """
         strategies: Dict[str, Strategy] = {
             "random": Random(),
             "first": First(),
@@ -375,6 +375,9 @@ class MyApp(MONAILabelApp):
         return strategies
 
     def init_scoring_methods(self) -> Dict[str, ScoringMethod]:
+        """
+        Initializes scoring methods used for active learning.
+        """
         methods: Dict[str, ScoringMethod] = {}
         if strtobool(self.conf.get("skip_scoring", "true")):
             return methods
@@ -449,9 +452,6 @@ def main():
         # Run on all devices
         for device in device_list():
             res = app.infer(request={"model": args.model, "image": image_id, "device": device})
-            # res = app.infer(
-            #     request={"model": "vertebra_pipeline", "image": image_id, "device": device, "slicer": False}
-            # )
             label = res["file"]
             label_json = res["params"]
             test_dir = os.path.join(args.studies, "test_labels")
@@ -460,9 +460,9 @@ def main():
             label_file = os.path.join(test_dir, image_id + file_ext(image_path))
             shutil.move(label, label_file)
 
-            print(label_json)
-            print(f"++++ Image File: {image_path}")
-            print(f"++++ Label File: {label_file}")
+            logger.info(label_json)
+            logger.info(f"++++ Image File: {image_path}")
+            logger.info(f"++++ Label File: {label_file}")
             break
         return
 

@@ -16,19 +16,9 @@
     "output_postfix": "trans",
     "separate_folder": true,
     "input_dict": {
-        "image": "/root/.cache/monailabel/dicom/277a51f05d17457dc20b8e11c9d93def/1.2.826.0.1.3680043.8.498.15136386566608168882487015520907740870.nii.gz",
+        "image": "/tmp/tmp13_rnomj.nii.gz",
         "label_prompt": [
-            133
-        ],
-        "points": [
-            [
-                136.57284545898438,
-                295.33172607421875,
-                19
-            ]
-        ],
-        "point_labels": [
-            1
+            115
         ]
     },
     "everything_labels": "$list(set([i+1 for i in range(132)]) - set([2,16,18,20,21,23,24,25,26,27,128,129,130,131,132]))",

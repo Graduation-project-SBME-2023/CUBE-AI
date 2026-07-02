@@ -91,7 +91,7 @@ class VISTAPOINT3D(BasicInferTask):
             # Swap X and Y
             point[0], point[1] = point[1], point[0]
 
-        print("Updated Points:", data["Points"]['points'])
+        logger.info(f"Updated Points: {data['Points']['points']}")
     
     def run_monai_inference(self,config_path, image_path, mode, label_index=None, point=None,point_labels=None):
         """
@@ -104,9 +104,9 @@ class VISTAPOINT3D(BasicInferTask):
         - point (list): List of [x, y, z] coordinates for the prompt.
         """
         config_dir = os.path.dirname(config_path)
-        print("config_dir", config_dir)
+        logger.info(f"config_dir: {config_dir}")
         # Ensure the config directory exists
-        print(os.listdir(config_dir))  # Prints all files in the directory
+        logger.info(f"config_dir contents: {os.listdir(config_dir)}")
 
 
         # Load the current inference.json file
@@ -155,7 +155,7 @@ class VISTAPOINT3D(BasicInferTask):
                 point_labels = data["Points"]['labels']
 
 
-        print("Running MONAI VISTA Inference...")
+        logger.info("Running MONAI VISTA Inference...")
         config_path = os.path.join(self.models_path, "configs", "vista", "inference.json")
 
         self.run_monai_inference(
@@ -170,27 +170,27 @@ class VISTAPOINT3D(BasicInferTask):
         if device.startswith("cuda"):
             torch.cuda.empty_cache()
 
-        print("maskkkk",data[self.input_key])
+        logger.info(f"input_key path: {data[self.input_key]}")
 
         file_ending = "_trans.nii.gz"
         basename = (    
             os.path.basename(data[self.input_key])
         )
         basename = re.sub(r"\.nii\.gz$", "", basename)
-        print("basename", basename) 
+        logger.info(f"basename: {basename}")
 
         output_path = os.path.join(self.output_dir, f"{basename}/{basename}{file_ending}")
-        print("output_path", output_path)
+        logger.info(f"output_path: {output_path}")
 
         if os.path.exists(output_path):
             outputs = nib.load(output_path).get_fdata()
             outputs = torch.from_numpy(outputs)
-            print("outputs shape", outputs.shape)
+            logger.info(f"outputs shape: {outputs.shape}")
             # see unique values in the outputs
             unique_values = torch.unique(outputs)
             # make class 255 to 0
             outputs[outputs == 255] = 0
-            print("Unique values in outputs:", unique_values)
+            logger.info(f"Unique values in outputs: {unique_values}")
             # shutil.rmtree(output_dir)
 
         data[self.output_label_key] = outputs

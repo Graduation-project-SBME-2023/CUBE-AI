@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 from collections import OrderedDict
 
 from sam2.sam2_video_predictor import SAM2VideoPredictor
@@ -39,12 +41,7 @@ def custom_load_video_frames(
         vmax = video_tensor.amax(dim=(1, 2), keepdim=True)
         video_tensor = (video_tensor - vmin) / (vmax - vmin + 1e-5) * 255.0  # [T, H, W]
 
-        # # Apply 95th percentile normalization frame-by-frame
-        # q95 = torch.stack([torch.quantile(f, 0.98, dim=None, keepdim=True) for f in video_tensor])  # [T, 1]
-        # q95 = q95.view(-1, 1, 1)  # [T, 1, 1]
-        # video_tensor = torch.clamp(video_tensor, max=q95)
-        # video_tensor = video_tensor / (q95 + 1e-5) * 255.0  # [T, H, W]
-        # print("first normalize from 0-255")
+        # Apply normalization frame-by-frame if needed
 
         video_tensor = video_tensor.unsqueeze(1)  # Add channel: [T, 1, H, W]
         video_tensor = video_tensor.repeat(1, 3, 1, 1)  # [T, 3, H, W] # channels for color not grayscale
@@ -126,23 +123,7 @@ class SAM2VolumePredictor(SAM2VideoPredictor):
             async_loading_frames=async_loading_frames,
             compute_device=compute_device,
         )
-        # @Break POint @@@@@
-        #     video_np = images.cpu().numpy()
-        #     # Save to .npz
-        #     print("video_height...",video_height)
-        #     print("video_width...",video_width)
-        #     print("video_np Shape:",video_np.shape)
-        #     print("video_np....")
-        #     print(video_np)
-
-        #     torch.save(
-        #     {
-        #         "images": images,  # this is still a tensor
-        #         "video_height": video_height,
-        #         "video_width": video_width,
-        #     },
-        #     "F:/uni/GP/deployment5/radiology/video_frames_output.pt"
-        # )
+        # Save to .npz or perform debug logging if needed
 
         inference_state = {}
         inference_state["images"] = images

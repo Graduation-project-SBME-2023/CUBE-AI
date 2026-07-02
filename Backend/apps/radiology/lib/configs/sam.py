@@ -27,7 +27,7 @@ from monailabel.tasks.activelearning.epistemic import Epistemic
 from monailabel.tasks.scoring.dice import Dice
 from monailabel.tasks.scoring.epistemic import EpistemicScoring
 from monailabel.tasks.scoring.sum import Sum
-from monailabel.utils.others.generic import download_file, strtobool
+from monailabel.utils.others.generic import strtobool
 
 import urllib.request
 
