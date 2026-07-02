@@ -477,9 +477,11 @@ async def download_and_pair_volumes(
     # ------------------------------------------------------------------ #
     found_volumes = {}
     if download_volumes:
-        found_volumes = await wait_and_find(MONAI_IMG_DIR, volumes_to_process, timeout_s=120)
+        logger.info("Waiting for images to appear...")
+        found_volumes = await wait_and_find(MONAI_IMG_DIR, volumes_to_process, timeout_s=600)
         
-    found_labels = await wait_and_find(MONAI_LABEL_DIR, labels_to_process, timeout_s=120)
+    logger.info("Waiting for labels to appear...")
+    found_labels = await wait_and_find(MONAI_LABEL_DIR, labels_to_process, timeout_s=600)
 
     # ------------------------------------------------------------------ #
     #  4. copy to workspace                                              #
@@ -573,7 +575,7 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
             end_z = min(max_z - 1, active_slices[-1] + 2)
 
             frames = []
-            for z in range(start_z, end_z + 1):
+            for z in range(start_z, end_z + 1, 2):
                 v_slice = vol_data[:, :, z]
                 m_slice = mask_data[:, :, z]
 
@@ -622,6 +624,13 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
 
         except Exception as e:
             logger.error(f"Failed to generate GIF for {uid}: {e}", exc_info=True)
+        finally:
+            # Force garbage collection to prevent CPU OOM
+            if 'vol_data' in locals(): del vol_data
+            if 'mask_data' in locals(): del mask_data
+            if 'frames' in locals(): del frames
+            import gc
+            gc.collect()
 
     return generated_volumes
 
@@ -660,17 +669,17 @@ def check_voxtell_label_availability(target_label):
 # ==================================
 
 def get_model_dice_score(model_name, target_label):
-    if model_name.lower() == "voxtell":
+    if model_name and model_name.lower() == "voxtell":
         try:
             current_file = Path(__file__)
             csv_filepath = os.path.join(current_file.parent.parent.parent.parent, "workspace", "supported.csv") 
             df = pd.read_csv(csv_filepath)
             dice_score = df.loc[
-                        df['Prompt'].str.lower().str.strip() == target_label,
+                        df['Prompt'].str.lower().str.strip() == target_label.lower().strip(),
                         'VoxTell'
                     ].iloc[0]
         except Exception as e:
-            logger.warning(f"Failed to read VoxTell dice score from supported.csv ({e}). Using default.")
+            logger.warning(f"Failed to read dice score from supported.csv for {model_name}, returning default 90.0: {e}")
             dice_score = 90.0
     else:
         dice_score = 90.0 # default score for other models (todo: should be in db)

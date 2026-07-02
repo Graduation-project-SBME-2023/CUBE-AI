@@ -9,6 +9,7 @@ export interface SegmentationData {
     selectedModel?: string;
     diceScore?: number | null;
     sessionId?: string;
+    isFinished?: boolean;
 }
 
 export interface ReviewContainerProps {
