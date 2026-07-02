@@ -32,15 +32,15 @@ const CustomChatWidget: React.FC = () => {
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
-    }  , [activeSessionId]);
+  }, [activeSessionId]);
 
 
   const messagesWithSummary = activeSession ? activeSession.summary
-      ? [
-          { id: "summary", role: "assistant", text: activeSession.summary, ts: 0 },
-          ...activeSession.messages,
-        ]
-      : activeSession.messages
+    ? [
+      { id: "summary", role: "assistant", text: activeSession.summary, ts: 0 },
+      ...activeSession.messages,
+    ]
+    : activeSession.messages
     : [];
 
 
@@ -73,14 +73,14 @@ const CustomChatWidget: React.FC = () => {
         prev.map((s) =>
           s.chat_id === chat_id
             ? {
-                ...s,
-                messages: msgs.map((m) => ({
-                  id: `db_${m.message_id}`,
-                  role: m.role,
-                  text: m.text,
-                  ts: new Date(m.timestamp).getTime(),
-                })),
-              }
+              ...s,
+              messages: msgs.map((m) => ({
+                id: `db_${m.message_id}`,
+                role: m.role,
+                text: m.text,
+                ts: new Date(m.timestamp).getTime(),
+              })),
+            }
             : s
         )
       );
@@ -181,14 +181,14 @@ const CustomChatWidget: React.FC = () => {
     const userMsg: Message = { id: makeId("u"), role: "user", text, ts: Date.now() };
     console.log("Sending message to session", sessionId);
     console.log(userMsg);
-  // Add to local state
+    // Add to local state
     setSessions((prev) =>
       prev.map((s) =>
         s.chat_id === sessionId ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() } : s
       )
     );
 
-  // Save to backend
+    // Save to backend
     await fetch(`${getMonaiBaseUrl()}/chat_messages/${sessionId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -200,7 +200,7 @@ const CustomChatWidget: React.FC = () => {
 
     setInput("");
     setIsTyping(true);
-    };
+  };
 
   const openSession = async (chat_id: string) => {
     setActiveSessionId(chat_id);
@@ -232,12 +232,12 @@ const CustomChatWidget: React.FC = () => {
 
       // USE THE REF HERE: This ensures we get the current ID without restarting the effect
       const currentSessionId = activeSessionIdRef.current ?? sessions[0]?.chat_id;
-      
+
       if (!currentSessionId) return;
 
       // Safely handle text vs object payloads
-      const textContent = typeof payload === "string" 
-        ? payload 
+      const textContent = typeof payload === "string"
+        ? payload
         : (payload.text || JSON.stringify(payload));
 
       const assistantMsg: Message = {
@@ -252,11 +252,11 @@ const CustomChatWidget: React.FC = () => {
       setSessions((prev) =>
         prev.map((s) =>
           s.chat_id === currentSessionId
-            ? { 
-                ...s, 
-                messages: [...s.messages, assistantMsg], 
-                last_activity: Date.now() 
-              }
+            ? {
+              ...s,
+              messages: [...s.messages, assistantMsg],
+              last_activity: Date.now()
+            }
             : s
         )
       );
@@ -273,7 +273,7 @@ const CustomChatWidget: React.FC = () => {
       }
 
       setIsTyping(false);
-      
+
       // Note: We avoid calling updateSessionLastActivity here if it triggers 
       // a fetch that updates 'sessions' again from the outside, 
       // but the local setSessions above handles the UI update.
@@ -286,8 +286,8 @@ const CustomChatWidget: React.FC = () => {
     return () => {
       unsubscribe();
     };
-    
-  // DEPENDENCY ARRAY IS EMPTY: This effect runs once on mount, never again.
+
+    // DEPENDENCY ARRAY IS EMPTY: This effect runs once on mount, never again.
   }, []);
   // --- Scroll to bottom ---
   useEffect(() => {
@@ -343,40 +343,40 @@ const CustomChatWidget: React.FC = () => {
                     <ul className="space-y-2">
                       {sortedSessions.map((s) => (
                         <li
-                              key={s.chat_id}
-                              className={`p-2 rounded-lg flex items-center justify-between cursor-pointer
+                          key={s.chat_id}
+                          className={`p-2 rounded-lg flex items-center justify-between cursor-pointer
                                 ${s.chat_id === activeSessionId ? "bg-gray-400 shadow-md" : "hover:bg-gray-50"}`}
-                            >
+                        >
 
-                            {/* LEFT SIDE — Text */}
-                            <div
-                              onClick={() => openSession(s.chat_id)}
-                              className="flex-1"
-                            >
-                              <div className="text-sm font-medium truncate w-[150px]">{s.title}</div>
-                              <div className={`text-xs truncate w-[150px] ${s.chat_id === activeSessionId ? "text-black" : "text-gray-500"}`}>
-                                {s.summary ?? s.messages[s.messages.length - 1]?.text?.slice(0, 60) ?? ""}
-                              </div>
+                          {/* LEFT SIDE — Text */}
+                          <div
+                            onClick={() => openSession(s.chat_id)}
+                            className="flex-1"
+                          >
+                            <div className="text-sm font-medium truncate w-[150px]">{s.title}</div>
+                            <div className={`text-xs truncate w-[150px] ${s.chat_id === activeSessionId ? "text-black" : "text-gray-500"}`}>
+                              {s.summary ?? s.messages[s.messages.length - 1]?.text?.slice(0, 60) ?? ""}
                             </div>
+                          </div>
 
-                            {/* RIGHT SIDE — Delete button */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setConfirmDeleteId(s.chat_id);
-                              }}
-                              className="ml-3 flex-shrink-0 p-1 rounded-md hover:bg-red-100 group"
-                              title="Delete"
+                          {/* RIGHT SIDE — Delete button */}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConfirmDeleteId(s.chat_id);
+                            }}
+                            className="ml-3 flex-shrink-0 p-1 rounded-md hover:bg-red-100 group"
+                            title="Delete"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg"
+                              className="w-4 h-4 text-red-500 group-hover:text-red-700"
+                              viewBox="0 0 24 24" fill="none" stroke="currentColor"
                             >
-                              <svg xmlns="http://www.w3.org/2000/svg"
-                                className="w-4 h-4 text-red-500 group-hover:text-red-700"
-                                viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                              >
-                                <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                                  d="M3 6h18M9 6v12m6-12v12M4 6l1 14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2l1-14M10 6a2 2 0 0 1 4 0" />
-                              </svg>
-                            </button>
-                          </li>
+                              <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                                d="M3 6h18M9 6v12m6-12v12M4 6l1 14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2l1-14M10 6a2 2 0 0 1 4 0" />
+                            </svg>
+                          </button>
+                        </li>
 
 
 
@@ -433,37 +433,37 @@ const CustomChatWidget: React.FC = () => {
         </div>
       )}
       {/* Delete Confirmation Modal */}
-{confirmDeleteId !== null && (
-  <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-50">
-    <div className="bg-white p-5 rounded-lg shadow-lg w-64">
-      <div className="font-semibold text-center mb-3">
-        Delete this chat?
-      </div>
-      <div className="text-xs text-gray-600 text-center mb-4">
-        This action cannot be undone.
-      </div>
+      {confirmDeleteId !== null && (
+        <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white p-5 rounded-lg shadow-lg w-64">
+            <div className="font-semibold text-center mb-3">
+              Delete this chat?
+            </div>
+            <div className="text-xs text-gray-600 text-center mb-4">
+              This action cannot be undone.
+            </div>
 
-      <div className="flex justify-between">
-        <button
-          onClick={() => setConfirmDeleteId(null)}
-          className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-sm"
-        >
-          Cancel
-        </button>
+            <div className="flex justify-between">
+              <button
+                onClick={() => setConfirmDeleteId(null)}
+                className="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-sm"
+              >
+                Cancel
+              </button>
 
-        <button
-          onClick={() => {
-            deleteSession(confirmDeleteId);
-            setConfirmDeleteId(null);
-          }}
-          className="px-3 py-1 rounded bg-red-600 hover:bg-red-700 text-white text-sm"
-        >
-          Delete
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+              <button
+                onClick={() => {
+                  deleteSession(confirmDeleteId);
+                  setConfirmDeleteId(null);
+                }}
+                className="px-3 py-1 rounded bg-red-600 hover:bg-red-700 text-white text-sm"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
