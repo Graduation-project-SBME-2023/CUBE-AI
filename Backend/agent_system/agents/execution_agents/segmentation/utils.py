@@ -641,48 +641,57 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
 def check_voxtell_label_availability(target_label):    
     """
     Checks if Voxtell can generate labels for the given target anatomical labels.
+    Returns True if the label is in supported.csv, False if not, None if the file is missing.
     """
-    # todo:supported label should be exist in db
     target_label = target_label.lower().strip()
     
-    current_file = Path(__file__)
-    csv_filepath =os.path.join(current_file.parent.parent.parent.parent, "supported.csv") 
+    csv_filepath = Path(__file__).parent.parent.parent.parent / "supported.csv"
     try:
         with open(csv_filepath, mode='r', encoding='utf-8') as file:
             reader = csv.DictReader(file)
-            
             for row in reader:
                 prompt = row['Prompt'].lower().strip()
-                
-                # Check if the target matches the prompt return the dice score then
                 if target_label == prompt:
                     return True
-                    
     except FileNotFoundError:
-        print(f"Error: The file {csv_filepath} was not found.")
+        logger.warning(f"supported.csv not found at {csv_filepath}")
         return None
 
-    # Return False if the loop finishes without finding a match
+    # Label not present in the CSV
     return False
 # ==================================
 #  get the Benchmark dice score of selected model (todo: should be in db)
 # ==================================
 
 def get_model_dice_score(model_name, target_label):
+    """
+    Returns the benchmark Dice score for the given model and target label.
+    Reads from supported.csv; falls back to 90.0 if the label is not found or the file is unreadable.
+    """
+    DEFAULT_DICE = 90.0
+
     if model_name and model_name.lower() == "voxtell":
         try:
-            current_file = Path(__file__)
-            csv_filepath = os.path.join(current_file.parent.parent.parent.parent, "workspace", "supported.csv") 
+            csv_filepath = Path(__file__).parent.parent.parent.parent / "supported.csv"
             df = pd.read_csv(csv_filepath)
-            dice_score = df.loc[
-                        df['Prompt'].str.lower().str.strip() == target_label.lower().strip(),
-                        'VoxTell'
-                    ].iloc[0]
+            mask = df['Prompt'].str.lower().str.strip() == target_label.lower().strip()
+            matches = df.loc[mask, 'VoxTell']
+            if matches.empty:
+                logger.info(
+                    f"Label '{target_label}' not found in supported.csv for {model_name}; "
+                    f"using default Dice score {DEFAULT_DICE}"
+                )
+                dice_score = DEFAULT_DICE
+            else:
+                dice_score = matches.iloc[0]
+        except FileNotFoundError:
+            logger.warning(f"supported.csv not found; returning default Dice score {DEFAULT_DICE}")
+            dice_score = DEFAULT_DICE
         except Exception as e:
-            logger.warning(f"Failed to read dice score from supported.csv for {model_name}, returning default 90.0: {e}")
-            dice_score = 90.0
+            logger.warning(f"Failed to read dice score from supported.csv for {model_name}: {e}; returning default {DEFAULT_DICE}")
+            dice_score = DEFAULT_DICE
     else:
-        dice_score = 90.0 # default score for other models (todo: should be in db)
+        dice_score = DEFAULT_DICE  # default score for other models (todo: should be in db)
     return float(dice_score)
 
 # =================================
