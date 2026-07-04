@@ -25,7 +25,7 @@ name: Build & Push MONAI Docker Images
 on:
   push:
     branches:
-      - monai-deployment
+      - Release-Version
     tags:
       - "v*.*.*"
   workflow_dispatch:
