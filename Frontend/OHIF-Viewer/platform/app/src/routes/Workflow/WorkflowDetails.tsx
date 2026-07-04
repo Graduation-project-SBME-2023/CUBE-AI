@@ -9,7 +9,7 @@ import { UINotificationService } from '@ohif/core';
 import { utils } from '@ohif/core';
 import filtersMeta from '../WorkList/filtersMeta';
 import { useNavigate } from 'react-router-dom';
-import { useLocation } from 'react-router';
+import { useLocation } from 'react-router-dom';
 import { getMonaiBaseUrl } from '../../utils/runtimeUrls';
 
 import {

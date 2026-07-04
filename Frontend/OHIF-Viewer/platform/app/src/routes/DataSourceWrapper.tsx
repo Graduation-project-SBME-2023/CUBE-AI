@@ -4,8 +4,7 @@ import PropTypes from 'prop-types';
 import { ExtensionManager, MODULE_TYPES, Types, log } from '@ohif/core';
 //
 import { extensionManager } from '../App.tsx';
-import { useParams, useLocation } from 'react-router';
-import { useNavigate } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import useSearchParams from '../hooks/useSearchParams.ts';
 
 const { TimingEnum } = Types;
