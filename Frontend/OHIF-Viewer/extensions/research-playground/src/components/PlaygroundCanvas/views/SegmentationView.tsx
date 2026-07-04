@@ -3,7 +3,6 @@ import { Check, X, CheckSquare, XSquare, Save, Loader2, Edit } from 'lucide-reac
 import { VolumeGif, ReviewContainerProps, ReviewStatus } from './segmentation/types';
 import { RightPanel } from './segmentation/Shared';
 import { handleModifyAction, saveSegmentationReview } from './segmentation/utils';
-import { getBackendApiBaseUrl } from '../../../utils/apiBase';
 
 // ─── Review View ──────────────────────────────────────────────────────────────
 
@@ -55,8 +54,8 @@ function ReviewView({
             const data = await handleModifyAction(uid);
             
             if (data.study_uid) {
-                // Open Monai Label in a new tab to preserve the current React state
-                window.open(`${getBackendApiBaseUrl()}/monai-label?StudyInstanceUIDs=${data.study_uid}`, '_blank');
+                // Open Monai Label viewer in a new tab — this is a FRONTEND route, not a backend API path
+                window.open(`${window.location.origin}/monai-label?StudyInstanceUIDs=${data.study_uid}`, '_blank');
             } else {
                 console.error("study_uid not found in the response body", data);
                 alert("Study UID missing from the server response.");
