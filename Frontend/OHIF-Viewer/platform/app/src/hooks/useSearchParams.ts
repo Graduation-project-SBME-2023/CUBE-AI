@@ -1,4 +1,4 @@
-import { useLocation } from 'react-router';
+import { useLocation } from 'react-router-dom';
 
 /**
  * It returns a URLSearchParams of the query parameters in the URL, where the keys are

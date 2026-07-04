@@ -42,7 +42,6 @@ const getCardClassName = (hovered: SystemVariant | null, mode: SystemVariant) =>
 // CUBE STARTUP COMPONENT (Main Export)
 // ==========================================
 const CubeStartUp = () => {
-    const navigate = useNavigate();
   const [hovered, setHovered] = useState<SystemVariant | null>(null);
 
     // Handle mode selection and navigation
@@ -51,11 +50,10 @@ const CubeStartUp = () => {
         
         if (mode === 'standard') {
             // Navigate to worklist for standard pipeline
-          navigate('/worklist');
+            window.location.href = '/worklist';
         } else if (mode === 'agentic') {
-            // Navigate to playground for agentic researcher
-            // Using a default chat_id or you can generate one
-            navigate('/agentic-home');
+            // Navigate to agentic home
+            window.location.href = '/agentic-home';
         }
     };
 

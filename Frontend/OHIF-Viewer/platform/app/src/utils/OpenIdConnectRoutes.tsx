@@ -1,6 +1,6 @@
 import React from 'react';
 import { useEffect } from 'react';
-import { Route, Routes, useLocation, useNavigate } from 'react-router';
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import CallbackPage from '../routes/CallbackPage';
 import SignoutCallbackComponent from '../routes/SignoutCallbackComponent';
 import getUserManagerForOpenIdConnectClient from './getUserManagerForOpenIdConnectClient.js';

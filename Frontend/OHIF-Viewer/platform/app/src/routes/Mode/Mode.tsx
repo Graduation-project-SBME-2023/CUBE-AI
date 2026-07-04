@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams, useLocation, useNavigate } from 'react-router';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import PropTypes from 'prop-types';
 // TODO: DicomMetadataStore should be injected?
 import { DicomMetadataStore, ServicesManager, utils, Types, log } from '@ohif/core';
