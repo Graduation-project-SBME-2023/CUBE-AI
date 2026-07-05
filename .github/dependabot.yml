@@ -1,0 +1,165 @@
+# =============================================================================
+# Dependabot Configuration — CUBE.AI Medical Imaging Platform
+# =============================================================================
+# POLICY: Dependabot opens PRs for HUMAN REVIEW ONLY.
+#   • No auto-merge, no auto-approve, no silent updates.
+#   • Critical medical/AI libraries are blocked from automatic major upgrades.
+#   • Stability and safety take precedence over freshness.
+# =============================================================================
+
+version: 2
+
+updates:
+  # -------------------------------------------------------------------
+  # 1. Python (pip) — Backend / AI pipeline dependencies
+  # -------------------------------------------------------------------
+  - package-ecosystem: "pip"
+    directory: "/Backend"                     # Location of requirements files / setup.py
+    schedule:
+      interval: "weekly"                      # Weekly is conservative enough for clinical systems
+      day: "monday"                           # Deterministic schedule for team planning
+      time: "06:00"                           # Early morning UTC — PRs ready for review at start of week
+      timezone: "Etc/UTC"
+
+    # ── PR limits ──────────────────────────────────────────────────
+    # Cap open PRs to avoid flooding the review queue.
+    open-pull-requests-limit: 5
+
+    # ── Grouping ───────────────────────────────────────────────────
+    # Batch patch + minor bumps into a single PR per group so
+    # reviewers see one consolidated changeset, not dozens of PRs.
+    groups:
+      # Non-critical Python deps: group patch + minor together
+      python-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+    # ── Ignored packages ───────────────────────────────────────────
+    # CRITICAL: Never auto-propose major-version bumps for core
+    # medical imaging, deep learning, or CUDA libraries.
+    # Major upgrades for these MUST go through manual evaluation,
+    # compatibility testing, and clinical validation.
+    ignore:
+      # --- Deep Learning / GPU ---
+      - dependency-name: "torch"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "torchvision"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "torchaudio"
+        update-types: ["version-update:semver-major"]
+
+      # --- Medical Imaging Framework ---
+      - dependency-name: "monai"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "monailabel"
+        update-types: ["version-update:semver-major"]
+
+      # --- Scientific / Numerical ---
+      - dependency-name: "numpy"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "scipy"
+        update-types: ["version-update:semver-major"]
+
+      # --- DICOM / Medical File Formats ---
+      - dependency-name: "pydicom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pydicom-seg"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "nibabel"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "highdicom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "SimpleITK"
+        update-types: ["version-update:semver-major"]
+
+      # --- CUDA / GPU Tooling ---
+      - dependency-name: "cupy*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "nvidia-*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "cuda-python"
+        update-types: ["version-update:semver-major"]
+
+      # --- nnU-Net Ecosystem ---
+      - dependency-name: "nnunetv2"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "nnInteractive"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "batchgenerators"
+        update-types: ["version-update:semver-major"]
+
+      # --- Quantization / Optimization ---
+      - dependency-name: "optimum-quanto"
+        update-types: ["version-update:semver-major"]
+
+    # ── Labels & Reviewers ─────────────────────────────────────────
+    # Tag PRs for easy triage in the review queue.
+    labels:
+      - "dependencies"
+      - "security"
+      - "needs-review"
+
+    # ── Commit message prefix ──────────────────────────────────────
+    commit-message:
+      prefix: "deps(pip)"                     # Clear commit-log attribution
+
+  # -------------------------------------------------------------------
+  # 2. Docker — Base image updates (Dockerfile.gpu)
+  # -------------------------------------------------------------------
+  - package-ecosystem: "docker"
+    directory: "/Backend"                     # Location of Dockerfile.gpu
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+
+    # Docker base image bumps are high-risk for CUDA/GPU stacks.
+    # Keep the PR queue minimal; each one needs manual GPU testing.
+    open-pull-requests-limit: 3
+
+    # Block major version bumps on the MONAI Label base image.
+    # A major jump could change CUDA runtime, Python version, or
+    # break the entire GPU pipeline.
+    ignore:
+      - dependency-name: "projectmonai/monailabel"
+        update-types: ["version-update:semver-major"]
+
+    labels:
+      - "dependencies"
+      - "docker"
+      - "needs-review"
+
+    commit-message:
+      prefix: "deps(docker)"
+
+  # -------------------------------------------------------------------
+  # 3. GitHub Actions — CI/CD workflow pinning
+  # -------------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"                            # Scans .github/workflows/
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+
+    # Actions updates are lower risk but still need review to avoid
+    # supply-chain attacks (compromised actions).
+    open-pull-requests-limit: 5
+
+    # Group all Actions patch + minor bumps into one PR.
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+    labels:
+      - "dependencies"
+      - "ci-cd"
+      - "needs-review"
+
+    commit-message:
+      prefix: "deps(actions)"

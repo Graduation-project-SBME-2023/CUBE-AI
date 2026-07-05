@@ -63,7 +63,7 @@
     "lucide-react": "^0.546.0",
     "react-chat-widget": "^3.1.4",
     "react-icons": "^5.5.0",
-    "react-router-dom": "^7.15.1",
+    "react-router-dom": "6.8.1",
     "react-transition-group": "^4.4.5",
     "regenerator-runtime": "^0.14.1"
   },
@@ -172,6 +172,8 @@
     "glob-parent": "^6.0.2",
     "trim": "^1.0.0",
     "package-json": "^8.1.0",
-    "@kitware/vtk.js": "29.7.0"
+    "@kitware/vtk.js": "29.7.0",
+    "react-router": "6.8.1",
+    "react-router-dom": "6.8.1"
   }
 }
