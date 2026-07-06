@@ -54,4 +54,4 @@ ENV nnUNet_preprocessed=/NN_Unet/nnUNet_preprocessed \
 # ------------------------------------------------------------
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic -c /alembic/alembic.ini upgrade head && python /monailabel/server_start.py"]
+CMD ["sh", "-c", "alembic -c /alembic/alembic.ini upgrade head && if [ ! -f /models/voxtell_v1.1/text_embeddings_cache.pkl ]; then python /apps/radiology/caching_generator.py; fi && python /monailabel/server_start.py"]
