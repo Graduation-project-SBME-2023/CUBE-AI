@@ -159,7 +159,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
     const hasPopData = populationData && populationData.status !== undefined;
     const hasSegData = segmentationData && segmentationData.status !== undefined;
 
-    const [labellingMode, setLabellingMode] = useState<string>('manual');
+    const [labellingMode, setLabellingMode] = useState<string>('automatic');
 
     useEffect(() => {
         const activeSessionId = sessionStorage.getItem('active_cube_session');

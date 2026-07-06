@@ -204,14 +204,14 @@ async def generate_targets() -> str:
     config_json_path = os.path.join(workspace_dir, "config.json")
     config: dict = {}
     datasetlist: list = []
-    labelling_mode = "manual"   # safe default
+    labelling_mode = "automatic"   # safe default
 
     if os.path.exists(config_json_path):
         try:
             with open(config_json_path, mode="r", encoding="utf-8") as f:
                 config = json.load(f)
                 datasetlist = config.get("datasetlist", [])
-                labelling_mode = config.get("labelling_mode", "manual")
+                labelling_mode = config.get("labelling_mode", "automatic")
         except (json.JSONDecodeError, OSError):
             pass
 
