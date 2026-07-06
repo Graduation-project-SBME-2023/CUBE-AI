@@ -30,6 +30,7 @@ services:
     command: >-
       sh -c "pip install --no-cache-dir -U torchvision --no-deps &&
       alembic -c /alembic/alembic.ini upgrade head &&
+      if [ ! -f /models/voxtell_v1.1/text_embeddings_cache.pkl ]; then python /apps/radiology/caching_generator.py; fi &&
       python /monailabel/server_start.py"
     env_file:
       - .env
