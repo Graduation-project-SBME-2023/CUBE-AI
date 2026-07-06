@@ -177,9 +177,19 @@ class SegmentationModule:
         # =========== download ========================    
         #finally download the volumes with its label masks 
         await asyncio.sleep(120)  
+        # Use eligible_volumes so we only download masks that were actually
+        # segmented in this run.  Using the full datasetlist would also try to
+        # fetch labels for volumes that were never segmented here, and
+        # pick_latest_or_auto would then return whatever old mask existed
+        # (e.g., a spleen mask from a previous experiment) even though the
+        # current hypothesis is about a completely different organ.
+        #
+        # Special case: if no volume was eligible (all had existing masks),
+        # fall back to the full list so we still download the existing correct masks.
+        volumes_to_download = eligible_volumes if eligible_volumes else datasetlist
         result = await download_and_pair_volumes(
                     workspace_dir,
-                    datasetlist, 
+                    volumes_to_download, 
                     chosen_path=chosen_path, 
                     selected_auto_model_for_volume = plan["selected_models"][0] if plan["selected_models"] else None
         )

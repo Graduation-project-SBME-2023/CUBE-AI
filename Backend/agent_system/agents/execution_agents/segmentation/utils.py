@@ -118,7 +118,7 @@ def parse_multipart_response(headers, body):
         if 'application/json' in headers_part:
             try:
                 json_text = body_part.decode('utf-8')
-                json_data = eval(json_text)          # safer: json.loads(json_text)
+                json_data = json.loads(json_text)
             except Exception as e:
                 raise ValueError(f"Failed to parse JSON part: {e}")
 
@@ -339,12 +339,37 @@ async def download_and_pair_volumes(
     def pick_latest_or_auto(labels, chosen_path="interactive", selected_auto_model=None):
         if not labels:
             return None
+
+        # --- Automatic path: must match the exact model that ran segmentation ---
         if chosen_path == "automatic" and selected_auto_model:
             for label in labels:
-                if label.get("segmentation_type") == selected_auto_model:
-                    logger.info(f"Found matching label: {label.get('label_series_instance_uid')}")
+                if selected_auto_model in label.get("segmentation_type", ""):
+                    logger.info(f"Found matching automatic label: {label.get('label_series_instance_uid')}")
                     return label
-            logger.warning(f"No label matched '{selected_auto_model}', falling back to latest")
+            # Do NOT fall back to the latest timestamp here.
+            # That would pair the volume with an old mask from a different organ
+            # (e.g., a spleen mask when the hypothesis is about lungs).
+            logger.warning(
+                f"No label matched automatic model '{selected_auto_model}' — "
+                f"skipping this volume to avoid wrong-organ pairing."
+            )
+            return None
+
+        # --- Interactive / VoxTell path: match by model name as well ---
+        if chosen_path == "interactive" and selected_auto_model:
+            for label in labels:
+                if selected_auto_model in label.get("segmentation_type", ""):
+                    logger.info(f"Found matching interactive label ({selected_auto_model}): {label.get('label_series_instance_uid')}")
+                    return label
+            # Same guard: do NOT fall back to latest — it would pick up an old
+            # mask for a completely different structure.
+            logger.warning(
+                f"No label matched interactive model '{selected_auto_model}' — "
+                f"skipping this volume to avoid wrong-organ pairing."
+            )
+            return None
+
+        # Only reach here when no model name is given at all — safe fallback.
         return max(labels, key=lambda x: x.get("created_at", ""))
 
     def trigger_download(url, task_name, uids_list):
@@ -446,7 +471,11 @@ async def download_and_pair_volumes(
         if not labels:
             logger.warning(f"No labels for {vol_uid}, skipping")
             continue
-        selected_model = selected_auto_model_for_volume if chosen_path == "automatic" else None
+        # Pass the model name for BOTH automatic and interactive paths so that
+        # pick_latest_or_auto can do an exact model-name match instead of
+        # falling back to the latest timestamp (which could be a mask for a
+        # different organ from a previous experiment).
+        selected_model = selected_auto_model_for_volume
         latest = pick_latest_or_auto(labels, chosen_path=chosen_path, selected_auto_model=selected_model)
         if not latest:
             continue
@@ -638,21 +667,30 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
 #  check the cababilities of voxtell
 #  ================================
 
-def check_voxtell_label_availability(target_label):    
+def normalize_label(label: str) -> str:
+    """Normalize an LLM-generated label to the space-separated form used in supported.csv and the VoxTell cache.
+    e.g.  'lung_nodule' -> 'lung nodule',  'Pulmonary_Nodule' -> 'pulmonary nodule'
+    """
+    return label.replace("_", " ").lower().strip()
+
+
+def check_voxtell_label_availability(target_label):
     """
     Checks if Voxtell can generate labels for the given target anatomical labels.
-    Returns True if the label is in supported.csv, False if not, None if the file is missing.
+    Returns the normalized label string (which is the correct cache key) if supported,
+    False if not found, None if the file is missing.
     """
-    target_label = target_label.lower().strip()
-    
+    # Normalize: LLM may output 'lung_nodule' but CSV/cache has 'lung nodule'
+    normalized = normalize_label(target_label)
+
     csv_filepath = Path(__file__).parent.parent.parent.parent / "supported.csv"
     try:
         with open(csv_filepath, mode='r', encoding='utf-8') as file:
             reader = csv.DictReader(file)
             for row in reader:
-                prompt = row['Prompt'].lower().strip()
-                if target_label == prompt:
-                    return True
+                prompt = normalize_label(row['Prompt'])
+                if normalized == prompt:
+                    return normalized   # return the canonical form for use as cache key
     except FileNotFoundError:
         logger.warning(f"supported.csv not found at {csv_filepath}")
         return None
@@ -674,7 +712,7 @@ def get_model_dice_score(model_name, target_label):
         try:
             csv_filepath = Path(__file__).parent.parent.parent.parent / "supported.csv"
             df = pd.read_csv(csv_filepath)
-            mask = df['Prompt'].str.lower().str.strip() == target_label.lower().strip()
+            mask = df['Prompt'].apply(normalize_label) == normalize_label(target_label)
             matches = df.loc[mask, 'VoxTell']
             if matches.empty:
                 logger.info(

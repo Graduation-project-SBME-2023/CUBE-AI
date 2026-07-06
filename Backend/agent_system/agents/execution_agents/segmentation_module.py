@@ -133,7 +133,7 @@ class SegmentationModule:
                 }
 
                 Rules:
-                - target_labels: Extract anatomical structures from the hypothesis (e.g., "spleen", "liver")
+                - target_labels: Extract anatomical structures from the hypothesis (e.g., "spleen", "liver","lung","colon","kidney","pancreas","aorta","vertebrae","trachea","esophagus")
                 - chosen_path: "automatic" if automatic models exist for the target labels, otherwise "interactive"
                 - automatic_models: List models where type contains "automatic" and match target labels
                 - interactive_models: List models where type contains "interactive"
@@ -324,6 +324,7 @@ class SegmentationModule:
                 logger.info(f"Volume {volume_uid} excluded (matching mask exists)")
 
         return eligible
+    
     async def check_having_mask(self, volume_uid: str):
         """
         Checks if a segmentation mask exists for the given volume SeriesInstanceUID (volume_uid).
@@ -335,6 +336,7 @@ class SegmentationModule:
             return response.json()
         else:
             return []
+    
     async def _run_automatic(
         self, volumes: List[str], labels: List[str], selected_auto_model: str, workspace_folder: str
     ):
@@ -397,6 +399,7 @@ class SegmentationModule:
                 logger.info(f"Completed segmentation for volume: {volume_uid}")
             except Exception as e:
                 logger.error(f"Segmentation failed for {volume_uid} : {e}")    
+
     async def run_segmentation(self,
         model: Annotated[
             str,
@@ -772,6 +775,7 @@ class SegmentationModule:
         logger.info(f"Total execution time: {total_duration:.1f}s")
         
         return result
+    
     async def run_batch_segmentation(
         self,
         model: Annotated[
@@ -999,6 +1003,7 @@ class SegmentationModule:
             }
         finally:
             logger.info(f"=== BATCH SEGMENTATION COMPLETED at {datetime.now()} ===")  
+
     async def _run_interactive(self, labels: List[str]):
         logger.info(f"Starting interactive segmentation guidance for labels: {labels}")
         

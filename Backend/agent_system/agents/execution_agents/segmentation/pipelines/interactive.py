@@ -87,16 +87,16 @@ async def run_interactive_pipeline(
             # =======================================
             try:
                 for label in labels:
-                    is_voxtell_supported = check_voxtell_label_availability(label)
-                    if is_voxtell_supported:
+                    canonical_label = check_voxtell_label_availability(label)
+                    if canonical_label:
                         selected_model = "voxtell"
                         result = await segmentation_service.run_segmentation(
-                        model="voxtell",
-                        series_instance_uid=volume_uid,
-                        label_info=label,
-                        params={"text_prompts": label}
-                )
-                        logger.info(f"Completed segmentation for volume: {volume_uid} with label: {label}")
+                            model="voxtell",
+                            series_instance_uid=volume_uid,
+                            label_info=canonical_label,           # use normalized form
+                            params={"text_prompts": [canonical_label]}  # must match cache key exactly
+                        )
+                        logger.info(f"Completed segmentation for volume: {volume_uid} with label: {canonical_label}")
                     else:
                         logger.info(f"Label '{label}' is not supported by VoxTell. Guiding user through interactive segmentation.")
                         pass
