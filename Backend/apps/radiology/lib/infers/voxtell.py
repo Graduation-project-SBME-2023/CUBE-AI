@@ -142,6 +142,14 @@ class MyVoxTellPredictor(VoxTellPredictor):
         "renal lesion":        "lesion",
         "kidney cancer":       "carcinoma",
         "renal cancer":        "carcinoma",
+        # Hepatic / liver oncology
+        "liver lesion":        "liver tumor",
+        "hepatic lesion":      "liver tumor",
+        "hepatic tumor":       "liver tumor",
+        "focal liver lesion":  "liver tumor",
+        "liver metastasis":    "liver tumor",
+        "liver cancer":        "hepatocellular carcinoma",
+        "hepatocellular carcinoma rcc": "hepatocellular carcinoma",
     }
 
     def embed_text_prompts(
