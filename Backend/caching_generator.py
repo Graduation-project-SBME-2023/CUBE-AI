@@ -51,6 +51,9 @@ TARGET_ORGANS = [
     # Renal / Kidney oncology
     "renal tumor", "kidney tumor", "renal mass", "renal cell carcinoma",
     "kidney lesion", "renal lesion",
+    # Hepatic / Liver oncology
+    "liver lesion", "hepatic lesion", "hepatic tumor", "focal liver lesion",
+    "liver cancer", "liver metastasis",
     # Skin / Other
     "skin", "organ",
 ]
