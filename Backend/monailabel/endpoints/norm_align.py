@@ -4,6 +4,7 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 import logging
+logger = logging.getLogger(__name__)
 
 
 # Configure logging to display timestamps, log level and messages

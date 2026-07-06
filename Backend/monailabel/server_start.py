@@ -1,7 +1,5 @@
 import uvicorn
 import os
-from seeders.all_seeders import all_seeders
-
 
 if __name__ == "__main__":
 

@@ -84,21 +84,21 @@ def download_label(label: str, tag: str, check_only=False):
 
 
 def zero_pad_label(instance_uid: str, start_index: int, end_index: int, target_shape: tuple):
-    print("111111111111")
+    logger.info("111111111111")
     label_path = LABEL_DATA_DIR / f"{instance_uid}.nii.gz"
-    print("2222222222222", label_path)
+    logger.info("2222222222222", label_path)
     if not label_path.exists():
         raise FileNotFoundError(f"Label NIfTI file not found: {label_path}")
 
     label_img = nib.load(str(label_path))
-    print("3333333333333333", label_img)
+    logger.info("3333333333333333", label_img)
     label_data = label_img.get_fdata()
     flipped_label = label_data[:, :, ::-1]  # Reverse along the third dimension
     padded_label = np.zeros(target_shape)
-    print("4444444444444444444444444")
+    logger.info("4444444444444444444444444")
     # Ensure dimensions match
     padded_label[:, :, start_index : end_index + 1] = flipped_label[:, :, : end_index - start_index + 1]
-    print("5555555555555555", padded_label.shape)
+    logger.info("5555555555555555", padded_label.shape)
     padded_label_img = nib.Nifti1Image(padded_label, label_img.affine, label_img.header)
     nib.save(padded_label_img, str(label_path))
     return padded_label
@@ -108,11 +108,11 @@ def zero_pad_label(instance_uid: str, start_index: int, end_index: int, target_s
 def process_data(series_instance_dict: Dict = Body(...)):
     instance: MONAILabelApp = app_instance()
     results = {}
-    print("enter pro")
+    logger.info("enter pro")
     for series_uid, instance_uid in series_instance_dict.items():
         # Locate NIfTI file
         nii_file = GENERAL_DATA_DIR / f"{series_uid}.nii.gz"
-        print("Looking for NIfTI at:", nii_file)
+        logger.info("Looking for NIfTI at:", nii_file)
 
         if not nii_file.exists():
             raise HTTPException(status_code=404, detail=f"NIfTI file not found for series UID: {series_uid}")
@@ -122,7 +122,7 @@ def process_data(series_instance_dict: Dict = Body(...)):
         nii_data = nii_img.get_fdata()
         affine = nii_img.affine
         num_slices = nii_data.shape[2]
-        print("nii_img", nii_img)
+        logger.info("nii_img", nii_img)
         slice_z_positions = [nib.affines.apply_affine(affine, [0, 0, z])[2] for z in range(num_slices)]
 
         # Get DICOM label path
@@ -138,7 +138,7 @@ def process_data(series_instance_dict: Dict = Body(...)):
             dicom_label_path = dicom_files[0]  # Selecting the first DICOM file
         else:
             raise HTTPException(status_code=404, detail=f"DICOM label directory not found for instance UID: {instance_uid}")
-        print("dicom path ", dicom_label_path)
+        logger.info("dicom path ", dicom_label_path)
         # Load DICOM SEG
         seg = pydicom.dcmread(dicom_label_path)
         seg_z_positions = [
@@ -149,12 +149,12 @@ def process_data(series_instance_dict: Dict = Body(...)):
         start_z_seg, end_z_seg = min(seg_z_positions), max(seg_z_positions)
         start_index = np.argmin(np.abs(np.array(slice_z_positions) - start_z_seg))
         end_index = np.argmin(np.abs(np.array(slice_z_positions) - end_z_seg))
-        print("start   end   ", start_index, end_index)
+        logger.info("start   end   ", start_index, end_index)
         # Zero pad label
         target_shape = nii_data.shape
-        print("target shape", target_shape)
+        logger.info("target shape", target_shape)
         padded_label = zero_pad_label(instance_uid, start_index, end_index, target_shape)
-        print("is that done???????????????????")
+        logger.info("is that done???????????????????")
         results[series_uid] = {
             "start_index": int(start_index),
             "end_index": int(end_index),

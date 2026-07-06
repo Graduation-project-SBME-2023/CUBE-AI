@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 from datetime import datetime
 import os
 import uuid
@@ -21,7 +23,7 @@ def seed_models():
     db = SessionLocal()
 
     if db.query(model.Model).count() != 0:
-        print("Models already seeded. Skipping.")
+        logger.info("Models already seeded. Skipping.")
         db.close()
         return
 
@@ -436,6 +438,6 @@ def seed_models():
     db.add_all(model_entries)
     db.commit()
 
-    print(f"{len(model_entries)} models seeded successfully!")
+    logger.info(f"{len(model_entries)} models seeded successfully!")
     db.close()
 
