@@ -42,7 +42,7 @@ export default function PlaygroundCanvas({
   const [pendingPrompt, setPendingPrompt] = useState<{ type: string; message: string } | null>(null);
   const [canExecute, setCanExecute] = useState(initialMode !== 'planning');
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
-  const [labellingMode, setLabellingMode] = useState<'manual' | 'automatic'>('manual');
+  const [labellingMode, setLabellingMode] = useState<'manual' | 'automatic'>('automatic');
   const [labellingModeLocked, setLabellingModeLocked] = useState(initialMode !== 'planning');
   const hasInitiatedPlan = useRef(false);
   const modeRef = useRef<'planning' | 'executing' | 'results'>(initialMode);

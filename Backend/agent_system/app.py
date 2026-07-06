@@ -484,7 +484,7 @@ async def get_session_config(session_id: str):
     config_path = os.path.join(workspace_folder, "config.json")
     
     if not os.path.exists(config_path):
-        return JSONResponse(content={"labelling_mode": "manual"}, status_code=200)
+        return JSONResponse(content={"labelling_mode": "automatic"}, status_code=200)
         
     try:
         with open(config_path, "r", encoding="utf-8") as f:
