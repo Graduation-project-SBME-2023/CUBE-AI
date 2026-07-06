@@ -145,7 +145,11 @@ class MyVoxTellPredictor(VoxTellPredictor):
             if key in self.embeddings_cache:
                 embeddings_list.append(self.embeddings_cache[key])
             else:
-                raise ValueError(f"Prompt '{key}' was not found in the cache! Add it to generate_cache.py")
+                raise ValueError(
+                    f"Prompt '{key}' was not found in the cache! "
+                    f"Add it to generate_cache.py and re-run it inside the container. "
+                    f"Available cached prompts: {sorted(self.embeddings_cache.keys())}"
+                )
 
         # Combine into a single tensor and push to GPU
         embeddings = torch.cat(embeddings_list, dim=1) 
@@ -253,10 +257,19 @@ class voxtell(BasicInferTask):
             # 2. Initialize the predictor (Only hits disk on the very first API request)
             self.initialize_predictor(device=torch.device(device))
             
-            # 3. Retrieve target prompt from MONAILabel client parameters or fallback
-            # Safe parsing: looks for 'params -> label' (standard MONAILabel UI parameter) or text_prompts
+            # 3. Retrieve target prompt from inference parameters.
+            #    Priority: params["text_prompts"] > params["label"] > data["text_prompts"] > "spleen"
             params = data.get("params", {})
-            text_prompts = params.get("label", data.get("text_prompts", "spleen"))
+            text_prompts = (
+                params.get("text_prompts")       # sent by interactive pipeline as list[str]
+                or params.get("label")           # sent by MONAILabel UI as a bare string
+                or data.get("text_prompts")      # injected directly into the data dict
+                or "spleen"                      # last-resort fallback
+            )
+            # Normalise: always work with a list internally
+            if isinstance(text_prompts, str):
+                text_prompts = [text_prompts]
+            logger.info(f"Resolved text_prompts for inference: {text_prompts}")
             
             # 4. Run inference
             voxtell_seg_np_ras = self.voxtell_predictor.predict_single_image(image_array, text_prompts)

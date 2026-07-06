@@ -230,8 +230,11 @@ class SegmentationService:
         # =========== create segmentation description =================
         labelmap_np: np.ndarray = segmentation_object["scalarData"]
         labelmap_np = labelmap_np.astype(np.uint8)
-        labelmap_np = np.transpose(labelmap_np, (2, 1, 0)) # to be numslices, rows, cols
-        print(f"Labelmap shape: {labelmap_np.shape}")
+        # MONAI returns (1, X, Y, Z) — squeeze the leading batch/channel dim to get (X, Y, Z)
+        if labelmap_np.ndim == 4 and labelmap_np.shape[0] == 1:
+            labelmap_np = labelmap_np.squeeze(0)
+        labelmap_np = np.transpose(labelmap_np, (2, 1, 0))  # (X, Y, Z) → (Z, Y, X) = (slices, rows, cols)
+        print(f"Labelmap shape after squeeze+transpose: {labelmap_np.shape}")
         description_segment = hd.seg.SegmentDescription(
             segment_number=1,
             segment_label=organ_list[0] if organ_list else "Segment",
