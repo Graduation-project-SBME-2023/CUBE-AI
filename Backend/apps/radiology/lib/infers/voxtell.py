@@ -131,6 +131,19 @@ class MyVoxTellPredictor(VoxTellPredictor):
             torch.cuda.empty_cache()
             check_memory("After INIT (VoxTell loaded, NO text model in RAM)", torch.device("cuda"))
 
+    # Fallback map: prompts not yet in the cache → nearest cached synonym.
+    # These cover common label variations that share the same semantic vector.
+    FALLBACK_PROMPT_MAP = {
+        "renal tumor":         "tumor",
+        "kidney tumor":        "tumor",
+        "renal mass":          "lesion",
+        "renal cell carcinoma":"carcinoma",
+        "kidney lesion":       "lesion",
+        "renal lesion":        "lesion",
+        "kidney cancer":       "carcinoma",
+        "renal cancer":        "carcinoma",
+    }
+
     def embed_text_prompts(
         self,
         text_prompts: Union[List[str], str]
@@ -144,6 +157,13 @@ class MyVoxTellPredictor(VoxTellPredictor):
             key = prompt.lower().strip()
             if key in self.embeddings_cache:
                 embeddings_list.append(self.embeddings_cache[key])
+            elif key in self.FALLBACK_PROMPT_MAP:
+                fallback_key = self.FALLBACK_PROMPT_MAP[key]
+                logger.warning(
+                    f"Prompt '{key}' not in cache — using fallback key '{fallback_key}'. "
+                    f"Add '{key}' to caching_generator.py and rebuild the cache for an exact embedding."
+                )
+                embeddings_list.append(self.embeddings_cache[fallback_key])
             else:
                 raise ValueError(
                     f"Prompt '{key}' was not found in the cache! "
