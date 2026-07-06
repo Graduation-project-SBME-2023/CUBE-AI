@@ -48,6 +48,9 @@ TARGET_ORGANS = [
     "metastases", "liver metastasis", "brain metastasis", "lymph node metastasis",
     "lymph nodes", "lymph node", "chest lymph node",
     "MS lesion",
+    # Renal / Kidney oncology
+    "renal tumor", "kidney tumor", "renal mass", "renal cell carcinoma",
+    "kidney lesion", "renal lesion",
     # Skin / Other
     "skin", "organ",
 ]

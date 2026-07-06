@@ -355,19 +355,28 @@ async def download_and_pair_volumes(
             )
             return None
 
-        # --- Interactive / VoxTell path: match by model name as well ---
-        if chosen_path == "interactive" and selected_auto_model:
-            for label in labels:
-                if selected_auto_model in label.get("segmentation_type", ""):
-                    logger.info(f"Found matching interactive label ({selected_auto_model}): {label.get('label_series_instance_uid')}")
-                    return label
-            # Same guard: do NOT fall back to latest — it would pick up an old
-            # mask for a completely different structure.
-            logger.warning(
-                f"No label matched interactive model '{selected_auto_model}' — "
-                f"skipping this volume to avoid wrong-organ pairing."
+        # --- Interactive / VoxTell path ---
+        # First try an exact model-name match in segmentation_type.
+        # If that fails (MONAI Label stores its own internal type strings, not
+        # the model name), fall back to the most recently created label.
+        # This is safe because run_interactive_pipeline just finished running
+        # voxtell on all eligible volumes, so the newest label is the one we want.
+        if chosen_path == "interactive":
+            if selected_auto_model:
+                for label in labels:
+                    if selected_auto_model in label.get("segmentation_type", ""):
+                        logger.info(
+                            f"Found matching interactive label ({selected_auto_model}): "
+                            f"{label.get('label_series_instance_uid')}"
+                        )
+                        return label
+            # Fall back to newest label — safe because we just ran segmentation.
+            latest = max(labels, key=lambda x: x.get("created_at", ""))
+            logger.info(
+                f"Interactive path: no exact model match for '{selected_auto_model}', "
+                f"using newest label: {latest.get('label_series_instance_uid')}"
             )
-            return None
+            return latest
 
         # Only reach here when no model name is given at all — safe fallback.
         return max(labels, key=lambda x: x.get("created_at", ""))

@@ -97,6 +97,20 @@ class SegmentationModule:
             raise ValueError("Segmentation step not found")
 
         instructions = segmentation_step["task_message"]["instructions"]
+        # Guard: if planning stored only a trivial stub (e.g. "fix", "run"),
+        # fall back to the hypothesis title so the PlannerAgent can still
+        # infer the correct anatomical target and model.
+        TRIVIAL_THRESHOLD = 50
+        if len(instructions.strip()) < TRIVIAL_THRESHOLD:
+            hypothesis_title = state.get("hypothesis", {}).get("title", "")
+            logger.warning(
+                f"Instructions appear trivially short ({len(instructions.strip())} chars): "
+                f"'{instructions.strip()}'. Falling back to hypothesis title as instruction context."
+            )
+            instructions = (
+                f"Perform ROI segmentation for the study: '{hypothesis_title}'. "
+                f"Identify the correct anatomical target from the hypothesis title and run the appropriate model."
+            )
         # hypothesis: str = state["hypothesis"]["hypothesis"]
         logger.info(f"Received instructions: {instructions}")
         datasetlist: List[str] = input_data.get("datasetlist", [])
