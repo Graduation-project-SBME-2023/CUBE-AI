@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 from fastapi import APIRouter, UploadFile, File, Query, HTTPException
 import shutil
 import json
@@ -17,8 +19,8 @@ async def upload_targets(file: UploadFile = File(...), session_id: str = Query(N
 
     csv_path = os.path.join(output_dir, "targets.csv")
 
-    print(f"========== DEBUG: SAVING FILE TO ==========")
-    print(os.path.abspath(csv_path))
+    logger.info(f"========== DEBUG: SAVING FILE TO ==========")
+    logger.info(os.path.abspath(csv_path))
 
     with open(csv_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -58,4 +60,4 @@ async def set_labelling_mode(
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4)
 
-    return {"message": f"Labelling mode set to '{mode}'", "session_id": session_id}
+    return {"message": f"Labelling mode set to '{mode}'", "session_id": session_id}

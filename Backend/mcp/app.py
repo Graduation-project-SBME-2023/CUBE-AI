@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 from fastapi import FastAPI
 import uvicorn
 
@@ -18,45 +20,6 @@ api = FastAPI(title="MCP Server API", version="1.0.0")
 
 
 
-'''
-
-Retrive inputs
-
-Segmentation and send inputs
-
-
-
-
-function 
-
-agent (tool = function)
-
-task == 
-agent.run()
-----
-
-return
-{ 
-    "data : tools >> tool x"
-    "function: call" 
-    "tools: (paramters)"
-}
-
-context
-retreive
-
-tool get_current_dataset()
-
-utils:
-
-ag y:
-- 
-
-paramter: json
-memory: dataset.json
-
-
-'''
 
 
 
@@ -109,7 +72,7 @@ async def list_tools():
                 "name": tool.name,
                 "description": tool.description
             })
-        print(f"✓ Found {tools_dict} tools")
+        logger.info(f"✓ Found {tools_dict} tools")
     except Exception as e:
         return {"error": str(e), "tools": []}
 
@@ -132,11 +95,11 @@ api.mount("/mcp", mcp.sse_app())
 # ----------------------
 if __name__ == "__main__":
     tool_count = len(getattr(mcp, "_tools", {}))
-    print(f"\n🚀 Starting server with {tool_count} tools loaded")
+    logger.info(f"\n Starting server with {tool_count} tools loaded")
     base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
-    print(f"📍 FastAPI endpoints: {base_url}")
-    print(f"📍 API Docs: {base_url}/docs")
-    print(f"📍 Tools List: {base_url}/tools\n")
+    logger.info(f" FastAPI endpoints: {base_url}")
+    logger.info(f" API Docs: {base_url}/docs")
+    logger.info(f" Tools List: {base_url}/tools\n")
 
 
     # Run FastAPI with uvicorn in hot-reload mode

@@ -50,7 +50,7 @@ class ToolEvent:
     event_type: EventType
     content_type: ContentType
     content: ContentPayload
-    source: str  = field(default=os.environ.get("AGENT_ID"))
+    source: str = field(default_factory=lambda: os.environ.get("AGENT_ID", "unknown"))
     timestamp: float = field(default_factory=time.time)
     session_id: str = None
 

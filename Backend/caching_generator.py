@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 import torch
 import pickle
 import os
@@ -58,7 +60,7 @@ TARGET_ORGANS = [
     "skin", "organ",
 ]
 
-print("Loading Qwen3-4B directly to GPU to generate permanent cache...")
+logger.info("Loading Qwen3-4B directly to GPU to generate permanent cache...")
 tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_PATH, padding_side='left', local_files_only=True)
 q_config = QuantoConfig(weights="int4")
 text_backbone = AutoModel.from_pretrained(
@@ -71,9 +73,9 @@ text_backbone.eval()
 
 cached_embeddings = {}
 
-print("Generating mathematical vectors...")
+logger.info("Generating mathematical vectors...")
 for organ in TARGET_ORGANS:
-    print(f" -> Embedding: {organ}")
+    logger.info(f" -> Embedding: {organ}")
     wrapped_text = wrap_with_instruction([organ])
     text_tokens = tokenizer(wrapped_text, padding=True, truncation=True, max_length=512, return_tensors="pt")
     text_tokens = {k: v.to("cuda") for k, v in text_tokens.items()}
@@ -88,5 +90,5 @@ for organ in TARGET_ORGANS:
 with open(CACHE_OUTPUT_PATH, "wb") as f:
     pickle.dump(cached_embeddings, f)
 
-print(f"\nSUCCESS! Cache saved to {CACHE_OUTPUT_PATH}")
-print("You can now safely delete the text model from your container's RAM pipeline!")
+logger.info(f"\nSUCCESS! Cache saved to {CACHE_OUTPUT_PATH}")
+logger.info("You can now safely delete the text model from your container's RAM pipeline!")

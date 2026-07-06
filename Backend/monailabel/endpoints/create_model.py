@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Query
 from monailabel.interfaces.utils.app import app_instance
 import logging
+logger = logging.getLogger(__name__)
 
-logging.basicConfig(level=logging.INFO)
 
 router = APIRouter(
     prefix="/create-model",

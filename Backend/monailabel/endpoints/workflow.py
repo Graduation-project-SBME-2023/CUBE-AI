@@ -117,14 +117,14 @@ async def update_workflow_uids(
     update_fields = []
     params = []
     if data.series_instance_uid is not None:
-        update_fields.append("volume_series_instance_uid = $1")
         params.append(data.series_instance_uid)
+        update_fields.append(f"volume_series_instance_uid = ${len(params)}")
     if data.instance_uid is not None:
-        update_fields.append("label_series_instance_uid = $2")
         params.append(data.instance_uid)
+        update_fields.append(f"label_series_instance_uid = ${len(params)}")
     if data.modality is not None:
-        update_fields.append("modality = $3")
         params.append(data.modality)
+        update_fields.append(f"modality = ${len(params)}")
 
     if not update_fields:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -133,12 +133,14 @@ async def update_workflow_uids(
 
     # Add study_uid to params for the WHERE clause
     params.append(data.study_uid)
+    study_uid_idx = len(params)
     params.append(data.task_name)
+    task_name_idx = len(params)
 
     query = f"""
     UPDATE workflow_details
     SET {', '.join(update_fields)}
-    WHERE study_uid = ${len(params)-1} AND task_name = ${len(params)}
+    WHERE study_uid = ${study_uid_idx} AND task_name = ${task_name_idx}
     """
     try:
         result = await conn.execute(query, *params)
@@ -252,7 +254,7 @@ async def filter_workflow_data(
 
 
 @router.post("/add", summary="Add a new task to workflow")
-async def add_workflow(data: ListWorkflowRequest, conn=Depends(get_db_connection)):
+async def add_task_to_workflow(data: ListWorkflowRequest, conn=Depends(get_db_connection)):
     query = """
         INSERT INTO workflow (task_name)
         VALUES ($1)
@@ -375,6 +377,7 @@ async def initialize_training(
         logger.info(f"6. Create nnUnet training task")
         logger.info(f"7. Create Model")
         logger.info(f"8. Start training - can be called from frontend, uses monai's default /train endpoint")
+        return {"message": "Training initialized", "task_name": task_name}
 
     except Exception as e:
         logger.error(f"Error starting nnUNet training: {e}")
