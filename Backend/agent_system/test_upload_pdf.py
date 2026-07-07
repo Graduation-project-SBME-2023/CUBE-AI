@@ -8,12 +8,6 @@ from agents.execution_agents.segmentation.ws_client_sender import send_ws_messag
 frontend_data = {
    "latex_pdf": "http://localhost:8150/static/document.pdf"
 }
-# pdf_file_name ="document"
-# pdf_path = os.path.join(workspace_dir, f"{pdf_fine_name}.pdf")
-
-#  frontend_data = {
-#     "latex_pdf": f"http://localhost:8150/static/overlays/{pdf_file_name}.pdf"
-#     }
 
 async def send_pdf(session_id=None):
     await send_ws_message_remote(

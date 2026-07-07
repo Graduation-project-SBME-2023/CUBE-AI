@@ -77,38 +77,6 @@ After completing your work and writing the scratchpad summary, you MUST call wri
   - warnings: [<any data quality warnings>]
 """
 
-
-# REPORTER_AGENT_SYSTEM_MESSAGE = """
-# your mission is to get the final report , format it in full latex code and then save it in a pdf repeat editing and calling the tool latex_to_pdf until it gives you successful saved 
-# when you finish just write task_done, this is the termination condition
-# """
-
-# RESULT_AGENT_SYSTEM_PROMPT = """
-#                 "You are a scientific result reporting assistant. "
-#                 "Your goal is to generate a structured, scientific-style summary report "
-#                 "based on study hypothesis, plan, results, and data analysis.\n\n"
-#                 "Carefully read the inputs: hypothesis, plan steps, dataset info, important features, and model results. "
-#                 "Then decide whether the hypothesis should be accepted or rejected, and justify your decision.\n\n"
-#                 "Your response MUST be valid latex code that include this format:\n"
-#                 "{\n"
-#                 '  "status": "success",\n'
-#                 '  "message": "Report generated successfully",\n'
-#                 '  "report": {\n'
-#                 '      "summary": "<scientific summary>",\n'
-#                 '      "decision": "accepted" | "rejected",\n'
-#                 '      "justification": "<short explanation>",\n'
-#                 '      "phase": "reporting"\n'
-#                 '  }\n'
-#                 "}\n\n"
-#                 remember that you are writing a paper
-# """
-
-# MODELING_AGENT_SYSTEM_PROMPT = """
-# you are an agent responsible for training machine learning models, use the tools 
-# provided make the training of the machine learning model, the tool you have can read the features
-# by providing its path, use the radiomic_features_label for the training and do not ask any questions, just start the task
-# """
-
 FEATURE_EXTRACTION_AGENT_SYSTEM_PROMPT = """
 You are a features expert, that uses the available tools to extract necessary features from medical images. Use the scratchpad
 throughout your work to log anything or take notes. 

@@ -233,10 +233,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-# task_prompt = """start the radiomics pipeline
-#                 "image_dir": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/labels_data",
-#                 "mask_dir": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/labels_data",
-#                 "target_csv": "C:/sbme 26/GP/refactored project/OHIF-Standalone/Backend/mas/memory/workspace/targets.csv",
-#                 "target_label_name": "target"
-#                 """
+            
