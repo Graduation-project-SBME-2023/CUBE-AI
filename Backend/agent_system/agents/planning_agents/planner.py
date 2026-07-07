@@ -19,12 +19,13 @@ import re
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Awaitable, Any
+from typing import Callable, Awaitable, Any, Optional
 
 import aiofiles
 import yaml
 
 from autogen_agentchat.messages import TextMessage
+from autogen_core import CancellationToken
 
 from services.session_service import SessionService
 from models.plans import *
@@ -51,6 +52,11 @@ OutputCallback = Callable[[str, Any], Awaitable[None]]
 
 logger = logging.getLogger(__name__)
 
+# Constants
+MAX_REFINEMENT_ITERATIONS = 10
+REFINEMENT_TIMEOUT_SECONDS = 300  # 5 minutes
+MAX_WS_MESSAGE_SIZE = 64000  # 64KB limit for WebSocket messages
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CLINICAL PLANNER
@@ -68,6 +74,9 @@ class ClinicalPlanner:
         3. Pipeline Planning — Dynamically selects and configures execution
            agents based on the confirmed hypothesis and literature evidence.
 
+    Thread-safety: Uses asyncio.Lock to prevent concurrent run() calls
+    for the same session.
+
     Attributes:
         input_provider (InputProvider): Async callable for user input collection.
         output_handler (OutputCallback): Async callable for WebSocket/UI output.
@@ -77,8 +86,7 @@ class ClinicalPlanner:
         state (PlannerState): Current planner state with hypothesis, plan,
                               knowledge base, and phase tracking.
         session (Session): Current user session with persistent identifiers.
-        session_service (SessionService): Service for persisting session state
-                                          to the database.
+        session_service (SessionService): Service for persisting session state.
         db_state_store (PlannerDbStateStore): Database-backed state persistence.
         log_path (Path): Path to the planner log file.
     """
@@ -114,6 +122,9 @@ class ClinicalPlanner:
         self.input_provider = input_provider
         self.output_handler = output_callback
 
+        # ── Concurrency Control ─────────────────────────────────────────
+        self._run_lock = asyncio.Lock()
+
         # ── Directory & Path Setup ──────────────────────────────────────
         root_dir = Path(__file__).parent.parent.parent
         log_dir = os.path.join(root_dir, "logs")
@@ -144,6 +155,7 @@ class ClinicalPlanner:
 
         # ── Internal State ──────────────────────────────────────────────
         self._pipeline_instructions: dict = {}
+        self._state_load_failed: bool = False
 
         # ── Initialize Logging ──────────────────────────────────────────
         self._initialize_logging()
@@ -174,19 +186,19 @@ class ClinicalPlanner:
         """
         Set up dual logging handlers (file + stdout) for the planner.
 
-        Logs are written to both the console and a timestamped log file
-        in the logs directory.
+        IMPORTANT: Only adds handlers if they don't already exist to prevent
+        duplicate log messages and memory leaks from repeated instantiation.
         """
-        os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
+        if not logger.handlers:
+            os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
 
-        file_handler = logging.FileHandler(self.log_path)
-        file_handler.setFormatter(
-            logging.Formatter("%(asctime)s - %(name)s - %(message)s")
-        )
-        std_handler = logging.StreamHandler(sys.stdout)
+            file_handler = logging.FileHandler(self.log_path)
+            file_handler.setFormatter(
+                logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+            )
 
-        logger.addHandler(file_handler)
-        logger.addHandler(std_handler)
+            logger.addHandler(file_handler)
+            logger.setLevel(logging.INFO)
 
     async def initialize(self) -> None:
         """
@@ -205,11 +217,38 @@ class ClinicalPlanner:
         """
         Send a structured message to the frontend via the output callback.
 
+        For large payloads (lit_review_output), automatically truncates
+        oversized fields to prevent WebSocket connection drops.
+
         Args:
             type_: Message type identifier (e.g., "msg", "hypothesis", "plan").
             data: Message payload (string, dict, or any serializable object).
             session_id: Optional session ID override. Defaults to current session.
         """
+        # Check payload size for literature review output
+        if type_ == "lit_review_output" and isinstance(data, dict):
+            try:
+                payload_size = len(json.dumps(data, ensure_ascii=False))
+                if payload_size > MAX_WS_MESSAGE_SIZE:
+                    logger.warning(
+                        "Literature review payload too large (%d bytes), "
+                        "truncating knowledge base fields",
+                        payload_size,
+                    )
+                    # Truncate the largest fields to prevent WS disconnection
+                    if "knowledge_base" in data:
+                        data["knowledge_base"] = (
+                            data["knowledge_base"][:50000]
+                            + "\n\n[... Truncated for WebSocket — full version in workspace ...]"
+                        )
+                    if "sources_guide" in data:
+                        data["sources_guide"] = (
+                            data["sources_guide"][:30000]
+                            + "\n\n[... Truncated for WebSocket — full version in workspace ...]"
+                        )
+            except Exception:
+                pass  # Best-effort size check
+
         await self.output_handler(type_, data, self.session.session_id)
 
     # ══════════════════════════════════════════════════════════════════════
@@ -225,7 +264,7 @@ class ClinicalPlanner:
             - ``` { ... } ```
             - Leading/trailing ```json or ```
             - Raw JSON with no fences
-            - APPOVED text appended to JSON
+            - APPROVED text appended to JSON
 
         Args:
             text: Raw LLM response text.
@@ -304,11 +343,16 @@ class ClinicalPlanner:
         Load planner state from the database via the state store.
 
         If no persisted state exists for the current session, a fresh
-        PlannerState is used. Errors are logged but not raised.
+        PlannerState is used. If loading fails, sets _state_load_failed
+        flag to prevent accidental overwrites.
+
+        Raises:
+            RuntimeError: If state loading fails critically (DB unreachable).
         """
         try:
             db_state = await self.db_state_store.load_state(self.session.session_id)
             self.state = db_state
+            self._state_load_failed = False
 
             if self.state.hypothesis.id:
                 logger.info(
@@ -325,6 +369,11 @@ class ClinicalPlanner:
                 )
         except Exception as e:
             logger.error("Load Error: %s", e)
+            self._state_load_failed = True
+            # Don't silently continue — notify the caller
+            raise RuntimeError(
+                f"Failed to load planner state for session {self.session.session_id}"
+            ) from e
 
     # ══════════════════════════════════════════════════════════════════════
     # LLM RESPONSE PROCESSING
@@ -683,6 +732,62 @@ class ClinicalPlanner:
             logger.error("Failed to save literature context: %s", e)
 
     # ══════════════════════════════════════════════════════════════════════
+    # RETRY LOGIC FOR LLM CALLS
+    # ══════════════════════════════════════════════════════════════════════
+
+    async def _call_agent_with_retry(
+        self,
+        agent,
+        prompt: str,
+        max_retries: int = 3,
+        cancellation_token: Optional[CancellationToken] = None,
+    ) -> Any:
+        """
+        Call an agent with exponential backoff retry logic.
+
+        LLM APIs can be unreliable — this wrapper provides resilience
+        against temporary failures, rate limits, and timeouts.
+
+        Args:
+            agent: The AutoGen agent to call.
+            prompt: The text prompt to send.
+            max_retries: Maximum number of retry attempts.
+            cancellation_token: Optional cancellation token for cooperative
+                                cancellation.
+
+        Returns:
+            The agent's response object.
+
+        Raises:
+            Exception: Re-raises the last exception if all retries are exhausted.
+        """
+        last_exception = None
+        for attempt in range(max_retries):
+            try:
+                response = await agent.on_messages(
+                    [TextMessage(content=prompt, source="user")],
+                    cancellation_token=cancellation_token,
+                )
+                return response
+            except Exception as e:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                    logger.warning(
+                        "Agent call failed (attempt %d/%d): %s. "
+                        "Retrying in %ds...",
+                        attempt + 1, max_retries, e, wait_time,
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(
+                        "Agent call failed after %d attempts: %s",
+                        max_retries, e,
+                    )
+
+        raise last_exception
+
+    # ══════════════════════════════════════════════════════════════════════
     # MAIN RUN — THREE-PHASE PIPELINE
     # ══════════════════════════════════════════════════════════════════════
 
@@ -690,6 +795,7 @@ class ClinicalPlanner:
         self,
         start_query: str = "Start",
         do_lit_review: bool = True,
+        cancellation_token: Optional[CancellationToken] = None,
     ) -> None:
         """
         Execute the full three-phase clinical research planning pipeline.
@@ -701,356 +807,394 @@ class ClinicalPlanner:
                and runs multi-agent literature review pipeline.
             3. Pipeline Planning — Dynamically designs the research execution
                plan using the PipelineArchitect agent. Supports refinement
-               loop until user approves.
+               loop (max {MAX_REFINEMENT_ITERATIONS} iterations with
+               {REFINEMENT_TIMEOUT_SECONDS}s timeout) until user approves.
 
         After all phases complete, compiles context-augmented task messages
         for downstream execution agents.
+
+        Thread-safety: Uses asyncio.Lock to prevent concurrent execution
+        for the same session.
 
         Args:
             start_query: Initial user query or clinical observation.
             do_lit_review: If True, runs the literature review phase.
                            If False, skips directly to pipeline planning.
+            cancellation_token: Optional token for cooperative cancellation
+                                of long-running operations.
 
         Raises:
-            No exceptions are raised — all errors are caught, logged, and
-            communicated to the user via WebSocket messages.
+            RuntimeError: If state loading fails.
+            Exception: Re-raised from agent calls if all retries exhausted.
         """
-        await self._load_state()
-        logger.info(
-            "Planner %s state before run: %s",
-            start_query, self.state,
-        )
-        self._pipeline_instructions = {}
-
-        # Exit early if hypothesis is already confirmed
-        if self.state.hypothesis.state == "confirmed":
+        # ── Concurrency Guard ─────────────────────────────────────────
+        async with self._run_lock:
+            await self._load_state()
             logger.info(
-                "Hypothesis already confirmed for session %s, skipping planning",
+                "Planner %s state before run: %s",
+                start_query, self.state,
+            )
+            self._pipeline_instructions = {}
+
+            # Exit early if hypothesis is already confirmed
+            if self.state.hypothesis.state == "confirmed":
+                logger.info(
+                    "Hypothesis already confirmed for session %s, skipping planning",
+                    self.session.session_id,
+                )
+                return
+
+            logger.info(
+                "State not confirmed, planning phases engaged (session_id=%s)",
                 self.session.session_id,
             )
-            return
 
-        logger.info(
-            "State not confirmed, planning phases engaged (session_id=%s)",
-            self.session.session_id,
-        )
+            # ══════════════════════════════════════════════════════════════
+            # PHASE 1: HYPOTHESIS STRUCTURING
+            # ══════════════════════════════════════════════════════════════
 
-        # ══════════════════════════════════════════════════════════════════
-        # PHASE 1: HYPOTHESIS STRUCTURING
-        # ══════════════════════════════════════════════════════════════════
+            hypothesis_architect = self.agents["hypothesis_architect"]
 
-        hypothesis_architect = self.agents["hypothesis_architect"]
-
-        # Determine initial user input
-        if start_query and not self.state.hypothesis.title:
-            user_input = start_query
-        else:
-            await self._send(
-                "msg",
-                "Please enter your clinical observation or research idea.",
-            )
-            user_input = await self.input_provider()
-
-        # Generate initial PICO hypothesis
-        prompt = (
-            f"User's clinical observation: {user_input}\n\n"
-            "Structure this into a full PICO hypothesis. "
-            "Return JSON with 'hypothesis' and 'message' fields."
-        )
-
-        response = await hypothesis_architect.on_messages(
-            [TextMessage(content=prompt, source="user")],
-            cancellation_token=None,
-        )
-        logger.info(
-            "HypothesisArchitect response: %s",
-            response.chat_message.content[:200],
-        )
-        await self._process_hypothesis_response(response.chat_message.content)
-
-        # Mark hypothesis as confirmed
-        self.state.hypothesis.state = "confirmed"
-        await self.session_service.confirm_hypothesis(self.session)
-        await self._send("hypothesis", self.state.hypothesis.model_dump())
-        await self._save_state()
-        await self._load_state()
-
-        # ══════════════════════════════════════════════════════════════════
-        # PHASE 2: LITERATURE REVIEW & KNOWLEDGE BUILDING
-        # ══════════════════════════════════════════════════════════════════
-
-        knowledge_base = ""
-        sources_guide = ""
-        knowledge_sections = {}
-
-        if do_lit_review:
-            # Create literature review agent node on the canvas
-            await self._send("lit_review_node", True)
-            await self._send(
-                "lit_review_log",
-                {"message": "Starting literature review", "status": "active"},
-            )
-
-            try:
-                # Build knowledge base
-                knowledge_base, sources_guide, papers, knowledge_sections = (
-                    await self._build_knowledge_base()
+            # Determine initial user input
+            if start_query and not self.state.hypothesis.title:
+                user_input = start_query
+            else:
+                await self._send(
+                    "msg",
+                    "Please enter your clinical observation or research idea.",
                 )
+                user_input = await self.input_provider()
 
-                # Run multi-agent literature review pipeline
-                workspace_dir = self.state_path.parent
-                lit_output_dir = workspace_dir / "literature_review_output"
+            # Generate initial PICO hypothesis
+            prompt = (
+                f"User's clinical observation: {user_input}\n\n"
+                "Structure this into a full PICO hypothesis. "
+                "Return JSON with 'hypothesis' and 'message' fields."
+            )
 
+            response = await self._call_agent_with_retry(
+                hypothesis_architect,
+                prompt,
+                cancellation_token=cancellation_token,
+            )
+            logger.info(
+                "HypothesisArchitect response: %s",
+                response.chat_message.content[:200],
+            )
+            await self._process_hypothesis_response(response.chat_message.content)
+
+            # Mark hypothesis as confirmed
+            self.state.hypothesis.state = "confirmed"
+            await self.session_service.confirm_hypothesis(self.session)
+
+            # Cache the hypothesis dump to avoid redundant serialization
+            hypothesis_dump = self.state.hypothesis.model_dump()
+            await self._send("hypothesis", hypothesis_dump)
+            await self._save_state()
+            # NOTE: Removed redundant _load_state() after _save_state()
+            # The in-memory state is authoritative after saving.
+
+            # ══════════════════════════════════════════════════════════════
+            # PHASE 2: LITERATURE REVIEW & KNOWLEDGE BUILDING
+            # ══════════════════════════════════════════════════════════════
+
+            knowledge_base = ""
+            sources_guide = ""
+            knowledge_sections = {}
+
+            if do_lit_review:
+                # Create literature review agent node on the canvas
+                await self._send("lit_review_node", True)
                 await self._send(
                     "lit_review_log",
-                    {
-                        "message": "Running literature review multi-agent pipeline",
-                        "status": "active",
-                    },
+                    {"message": "Starting literature review", "status": "active"},
                 )
 
-                await run_literature_review(
-                    pico=self._extract_pico_from_hypothesis(),
-                    model=getattr(self.client, "model", None)
-                    or "deepseek-v3.1:671b-cloud",
-                    output_dir=lit_output_dir,
-                    cache_dir=workspace_dir / ".knowledge_cache",
-                    prebuilt_knowledge={
+                try:
+                    # Build knowledge base
+                    knowledge_base, sources_guide, papers, knowledge_sections = (
+                        await self._build_knowledge_base()
+                    )
+
+                    # Run multi-agent literature review pipeline
+                    workspace_dir = self.state_path.parent
+                    lit_output_dir = workspace_dir / "literature_review_output"
+
+                    await self._send(
+                        "lit_review_log",
+                        {
+                            "message": "Running literature review multi-agent pipeline",
+                            "status": "active",
+                        },
+                    )
+
+                    await run_literature_review(
+                        pico=self._extract_pico_from_hypothesis(),
+                        model=getattr(self.client, "model", None)
+                        or "deepseek-v3.1:671b-cloud",
+                        output_dir=lit_output_dir,
+                        cache_dir=workspace_dir / ".knowledge_cache",
+                        prebuilt_knowledge={
+                            "knowledge_base": knowledge_base,
+                            "sources_guide": sources_guide,
+                            "papers": papers,
+                            "knowledge_sections": knowledge_sections,
+                        },
+                    )
+
+                    # ── Load Literature Output Files ──────────────────
+                    generated_context = {}
+                    ranked_papers = []
+
+                    context_path = lit_output_dir / "context.json"
+                    if context_path.exists():
+                        try:
+                            generated_context = json.loads(
+                                context_path.read_text(encoding="utf-8")
+                            )
+                        except Exception:
+                            generated_context = {}
+
+                    ranked_path = lit_output_dir / "ranked_papers.json"
+                    if ranked_path.exists():
+                        try:
+                            ranked_papers = json.loads(
+                                ranked_path.read_text(encoding="utf-8")
+                            )
+                        except Exception:
+                            ranked_papers = []
+
+                    # Save literature context for the reporter agent
+                    await self._save_literature_context(
+                        knowledge_base,
+                        sources_guide,
+                        generated_context=generated_context,
+                    )
+
+                    # Try to read generated literature report
+                    report_md = ""
+                    report_path = lit_output_dir / "literature_report.md"
+                    if report_path.exists():
+                        try:
+                            report_md = report_path.read_text(encoding="utf-8")
+                        except Exception:
+                            pass
+
+                    # ── Send Literature Output to Frontend ────────────
+                    lit_payload: dict = {
                         "knowledge_base": knowledge_base,
                         "sources_guide": sources_guide,
+                        "hypothesis": hypothesis_dump,
                         "papers": papers,
-                        "knowledge_sections": knowledge_sections,
-                    },
-                )
+                    }
+                    if report_md:
+                        lit_payload["report"] = report_md
+                    if generated_context:
+                        lit_payload["context"] = generated_context
+                    if ranked_papers:
+                        lit_payload["ranked_papers"] = ranked_papers
 
-                # ── Load Literature Output Files ──────────────────────
-                generated_context = {}
-                ranked_papers = []
+                    await self._send("lit_review_output", lit_payload)
+                    await self._send("lit_review_done", True)
 
-                context_path = lit_output_dir / "context.json"
-                if context_path.exists():
-                    try:
-                        generated_context = json.loads(
-                            context_path.read_text(encoding="utf-8")
-                        )
-                    except Exception:
-                        generated_context = {}
+                    # Report knowledge base stats to user
+                    kb_size = len(knowledge_base)
+                    sg_size = len(sources_guide)
+                    await self._send(
+                        "msg",
+                        (
+                            f"Knowledge base built successfully.\n"
+                            f"- Domain knowledge: {kb_size:,} characters\n"
+                            f"- Sources guide: {sg_size:,} characters\n\n"
+                            "Proceeding to pipeline planning informed by "
+                            "literature evidence..."
+                        ),
+                    )
 
-                ranked_path = lit_output_dir / "ranked_papers.json"
-                if ranked_path.exists():
-                    try:
-                        ranked_papers = json.loads(
-                            ranked_path.read_text(encoding="utf-8")
-                        )
-                    except Exception:
-                        ranked_papers = []
-
-                # Save literature context for the reporter agent
-                await self._save_literature_context(
-                    knowledge_base,
-                    sources_guide,
-                    generated_context=generated_context,
-                )
-
-                # Try to read generated literature report
-                report_md = ""
-                report_path = lit_output_dir / "literature_report.md"
-                if report_path.exists():
-                    try:
-                        report_md = report_path.read_text(encoding="utf-8")
-                    except Exception:
-                        pass
-
-                # ── Send Literature Output to Frontend ────────────────
-                lit_payload: dict = {
-                    "knowledge_base": knowledge_base,
-                    "sources_guide": sources_guide,
-                    "hypothesis": (
-                        self.state.hypothesis.model_dump()
-                        if self.state.hypothesis else {}
-                    ),
-                    "papers": papers,
-                }
-                if report_md:
-                    lit_payload["report"] = report_md
-                if generated_context:
-                    lit_payload["context"] = generated_context
-                if ranked_papers:
-                    lit_payload["ranked_papers"] = ranked_papers
-
-                await self._send("lit_review_output", lit_payload)
-                await self._send("lit_review_done", True)
-
-                # Report knowledge base stats to user
-                kb_size = len(knowledge_base)
-                sg_size = len(sources_guide)
+                except Exception as e:
+                    logger.error(
+                        "Knowledge building failed: %s", e, exc_info=True
+                    )
+                    await self._send("lit_review_done", True)
+                    await self._send(
+                        "msg",
+                        (
+                            f"Warning: Knowledge base construction failed ({e}). "
+                            "Pipeline planning will proceed without literature "
+                            "augmentation."
+                        ),
+                    )
+            else:
                 await self._send(
                     "msg",
-                    (
-                        f"Knowledge base built successfully.\n"
-                        f"- Domain knowledge: {kb_size:,} characters\n"
-                        f"- Sources guide: {sg_size:,} characters\n\n"
-                        "Proceeding to pipeline planning informed by "
-                        "literature evidence..."
-                    ),
+                    "Skipping literature review. Proceeding to pipeline planning...",
                 )
 
-            except Exception as e:
-                logger.error(
-                    "Knowledge building failed: %s", e, exc_info=True
-                )
-                await self._send("lit_review_done", True)
-                await self._send(
-                    "msg",
-                    (
-                        f"Warning: Knowledge base construction failed ({e}). "
-                        "Pipeline planning will proceed without literature "
-                        "augmentation."
-                    ),
-                )
-        else:
-            await self._send(
-                "msg",
-                "Skipping literature review. Proceeding to pipeline planning...",
+            # ══════════════════════════════════════════════════════════════
+            # PHASE 3: DYNAMIC PIPELINE PLANNING
+            # ══════════════════════════════════════════════════════════════
+
+            pipeline_architect = self.agents["pipeline_architect"]
+
+            # Summarize knowledge for the pipeline architect — balanced across
+            # all sections instead of blind truncation
+            kb_summary = summarize_knowledge_for_planning(
+                knowledge_sections, self.state.hypothesis
             )
 
-        # ══════════════════════════════════════════════════════════════════
-        # PHASE 3: DYNAMIC PIPELINE PLANNING
-        # ══════════════════════════════════════════════════════════════════
-
-        pipeline_architect = self.agents["pipeline_architect"]
-
-        # Summarize knowledge for the pipeline architect — balanced across
-        # all sections instead of blind truncation
-        kb_summary = summarize_knowledge_for_planning(
-            knowledge_sections, self.state.hypothesis
-        )
-
-        hypothesis_payload = self.state.hypothesis.model_dump()
-
-        pipeline_prompt = (
-            "CONFIRMED HYPOTHESIS (JSON):\n"
-            f"{json.dumps(hypothesis_payload, ensure_ascii=False, indent=2)}\n\n"
-            f"SUMMARIZED DOMAIN KNOWLEDGE (from literature review):\n"
-            f"{kb_summary}\n\n"
-            "Use the confirmed hypothesis as the primary source of study intent. "
-            "Do not ask for missing hypothesis details unless the hypothesis "
-            "JSON is empty.\n\n"
-            "Based on this hypothesis and the domain knowledge, design an optimal "
-            "research pipeline. Select the agents needed, order them logically, and "
-            "provide detailed, study-specific instructions for each agent. "
-            "Return JSON with 'steps', 'rationale', and 'message'."
-        )
-
-        response = await pipeline_architect.on_messages(
-            [TextMessage(content=pipeline_prompt, source="user")],
-            cancellation_token=None,
-        )
-        logger.info(
-            "PipelineArchitect response: %s",
-            response.chat_message.content[:200],
-        )
-        await self._process_pipeline_response(response.chat_message.content)
-
-        # ── Pipeline Refinement Loop ──────────────────────────────────
-        while True:
-            await self._send(
-                "plan_approval",
-                {
-                    "message": (
-                        "Review the pipeline plan. Approve it or describe changes."
-                    ),
-                },
-            )
-            user_feedback = await self.input_provider()
-
-            if "APPROVE" in user_feedback.upper():
-                break
-
-            refinement_prompt = (
-                f"User Feedback: {user_feedback}\n\n"
-                "Update the pipeline plan based on their feedback. "
-                "If the user is only asking a question that doesn't change "
-                "the plan, answer them thoroughly without updating the plan. "
-                "You can add, remove, or reorder steps. Update instructions as "
-                "needed. Return JSON with updated 'steps' if updated, "
-                "'rationale', and 'message'."
+            pipeline_prompt = (
+                "CONFIRMED HYPOTHESIS (JSON):\n"
+                f"{json.dumps(hypothesis_dump, ensure_ascii=False, indent=2)}\n\n"
+                f"SUMMARIZED DOMAIN KNOWLEDGE (from literature review):\n"
+                f"{kb_summary}\n\n"
+                "Use the confirmed hypothesis as the primary source of study intent. "
+                "Do not ask for missing hypothesis details unless the hypothesis "
+                "JSON is empty.\n\n"
+                "Based on this hypothesis and the domain knowledge, design an optimal "
+                "research pipeline. Select the agents needed, order them logically, and "
+                "provide detailed, study-specific instructions for each agent. "
+                "Return JSON with 'steps', 'rationale', and 'message'."
             )
 
-            response = await pipeline_architect.on_messages(
-                [TextMessage(content=refinement_prompt, source="user")],
-                cancellation_token=None,
+            response = await self._call_agent_with_retry(
+                pipeline_architect,
+                pipeline_prompt,
+                cancellation_token=cancellation_token,
+            )
+            logger.info(
+                "PipelineArchitect response: %s",
+                response.chat_message.content[:200],
             )
             await self._process_pipeline_response(response.chat_message.content)
 
-        # ══════════════════════════════════════════════════════════════════
-        # FINALIZE: Compile task messages with context augmentation
-        # ══════════════════════════════════════════════════════════════════
+            # ── Pipeline Refinement Loop (Bounded with Timeout) ──────────
+            refinement_count = 0
+            while refinement_count < MAX_REFINEMENT_ITERATIONS:
+                await self._send(
+                    "plan_approval",
+                    {
+                        "message": (
+                            "Review the pipeline plan. Approve it or describe changes."
+                        ),
+                    },
+                )
 
-        await self._save_state()
-        await self.session_service.confirm_plan(self.session)
-        await self._load_state()
-        await self._send(
-            "msg",
-            "Research plan confirmed. You can execute the agents now...",
-        )
+                try:
+                    user_feedback = await asyncio.wait_for(
+                        self.input_provider(),
+                        timeout=REFINEMENT_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Plan refinement timed out after %ds — using current plan",
+                        REFINEMENT_TIMEOUT_SECONDS,
+                    )
+                    await self._send(
+                        "msg",
+                        "Plan refinement timed out. The current plan will be used.",
+                    )
+                    break
 
-        try:
-            # Compile structured task messages with pre-structured knowledge sections
-            task_messages = compile_task_messages(
-                hypothesis=self.state.hypothesis,
-                plan=self.state.plan,
-                knowledge_sections=knowledge_sections,
-                sources_guide=sources_guide,
-                pipeline_instructions=self._pipeline_instructions,
-            )
+                if "APPROVE" in user_feedback.upper():
+                    break
+
+                refinement_prompt = (
+                    f"User Feedback: {user_feedback}\n\n"
+                    "Update the pipeline plan based on their feedback. "
+                    "If the user is only asking a question that doesn't change "
+                    "the plan, answer them thoroughly without updating the plan. "
+                    "You can add, remove, or reorder steps. Update instructions as "
+                    "needed. Return JSON with updated 'steps' if updated, "
+                    "'rationale', and 'message'."
+                )
+
+                response = await self._call_agent_with_retry(
+                    pipeline_architect,
+                    refinement_prompt,
+                    cancellation_token=cancellation_token,
+                )
+                await self._process_pipeline_response(response.chat_message.content)
+
+                refinement_count += 1
+
+            if refinement_count >= MAX_REFINEMENT_ITERATIONS:
+                logger.warning(
+                    "Max refinement iterations (%d) reached — using current plan",
+                    MAX_REFINEMENT_ITERATIONS,
+                )
+                await self._send(
+                    "msg",
+                    f"Maximum refinement iterations ({MAX_REFINEMENT_ITERATIONS}) "
+                    "reached. The current plan will be used.",
+                )
+
+            # ══════════════════════════════════════════════════════════════
+            # FINALIZE: Compile task messages with context augmentation
+            # ══════════════════════════════════════════════════════════════
+
             await self._save_state()
             await self.session_service.confirm_plan(self.session)
-
-            # Persist task messages to database
-            persisted_messages = (
-                await self.session_service.save_task_messages_for_plan(
-                    self.session,
-                    task_messages,
-                )
-            )
-
-            # Send task message summaries to UI
-            task_summaries = [
-                {
-                    "task_id": tm.task_id,
-                    "phase": tm.phase,
-                    "agent_id": tm.agent_id,
-                    "agent_title": tm.agent_title,
-                    "has_knowledge": bool(
-                        tm.context_augmentation.knowledge_summary
-                    ),
-                    "has_literature": bool(
-                        tm.context_augmentation.literature_findings
-                    ),
-                    "has_methodology": bool(
-                        tm.context_augmentation.methodology_guidance
-                    ),
-                    "instructions_preview": (
-                        tm.instructions[:150] + "..."
-                        if len(tm.instructions) > 150
-                        else tm.instructions
-                    ),
-                }
-                for tm in task_messages
-            ]
-            await self._send("task_messages", task_summaries)
-
-        except Exception as e:
-            logger.error(
-                "Task message compilation failed (non-fatal): %s",
-                e,
-                exc_info=True,
-            )
             await self._send(
                 "msg",
-                f"Warning: Task message compilation failed ({e}). "
-                "Pipeline will proceed with basic instructions.",
+                "Research plan confirmed. You can execute the agents now...",
             )
 
-        await self._send("modules_matched", True)
+            try:
+                # Compile structured task messages with pre-structured knowledge sections
+                task_messages = compile_task_messages(
+                    hypothesis=self.state.hypothesis,
+                    plan=self.state.plan,
+                    knowledge_sections=knowledge_sections,
+                    sources_guide=sources_guide,
+                    pipeline_instructions=self._pipeline_instructions,
+                )
+                await self._save_state()
+                await self.session_service.confirm_plan(self.session)
+
+                # Persist task messages to database
+                persisted_messages = (
+                    await self.session_service.save_task_messages_for_plan(
+                        self.session,
+                        task_messages,
+                    )
+                )
+
+                # Send task message summaries to UI
+                task_summaries = [
+                    {
+                        "task_id": tm.task_id,
+                        "phase": tm.phase,
+                        "agent_id": tm.agent_id,
+                        "agent_title": tm.agent_title,
+                        "has_knowledge": bool(
+                            tm.context_augmentation.knowledge_summary
+                        ),
+                        "has_literature": bool(
+                            tm.context_augmentation.literature_findings
+                        ),
+                        "has_methodology": bool(
+                            tm.context_augmentation.methodology_guidance
+                        ),
+                        "instructions_preview": (
+                            tm.instructions[:150] + "..."
+                            if len(tm.instructions) > 150
+                            else tm.instructions
+                        ),
+                    }
+                    for tm in task_messages
+                ]
+                await self._send("task_messages", task_summaries)
+
+            except Exception as e:
+                logger.error(
+                    "Task message compilation failed (non-fatal): %s",
+                    e,
+                    exc_info=True,
+                )
+                await self._send(
+                    "msg",
+                    f"Warning: Task message compilation failed ({e}). "
+                    "Pipeline will proceed with basic instructions.",
+                )
+
+            await self._send("modules_matched", True)
