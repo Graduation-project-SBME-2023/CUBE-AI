@@ -1,17 +1,18 @@
 """
-Context Compiler — AOT (Ahead-of-Time) task message generator.
+Context Compiler — AOT (Ahead-of-Time) Task Message Generator
 
 After the planner confirms a hypothesis and the knowledge builder fetches
 domain knowledge, the Context Compiler:
   1. Receives pre-structured knowledge sections from the knowledge builder.
   2. Selects the relevant knowledge slice for each execution agent.
   3. Assembles structured TaskMessage objects with:
-        - agent-specific instructions (contextualized to the hypothesis)
-        - context_augmentation (knowledge, literature, terminology, methods)
-        - hypothesis summary
+        - Agent-specific instructions (contextualized to the hypothesis)
+        - Context augmentation (knowledge, literature, terminology, methods)
+        - Hypothesis summary
   4. Returns the list of TaskMessages — one per pipeline step.
 
-Pipeline: knowledge_builder → (structured sections) → context_compiler → task messages
+Pipeline:
+    knowledge_builder → (structured sections) → context_compiler → task messages
 
 This implements the "AOT Context Compiler" from arch.html.
 """
@@ -30,19 +31,33 @@ from models.plans import (
 logger = logging.getLogger(__name__)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # HYPOTHESIS SUMMARIZER
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def _build_hypothesis_summary(hypothesis: ClinicalHypothesis) -> str:
-    """Create a compact, structured PICO hypothesis summary for agent prompts."""
+    """
+    Create a compact, structured PICO hypothesis summary for agent prompts.
+
+    Formats all PICO components (Population, Intervention, Comparison, Outcome)
+    plus the research question and clinical context into a readable text block
+    that can be prepended to any agent's task instructions.
+
+    Args:
+        hypothesis: The confirmed clinical hypothesis with full PICO fields.
+
+    Returns:
+        Formatted multi-line string summarizing the hypothesis.
+    """
     def _field_str(val):
+        """Handle nested dict fields gracefully."""
         if isinstance(val, dict):
             return ", ".join(f"{k}: {v}" for k, v in val.items())
         return str(val) if val else ""
 
     parts = [f"Study: {hypothesis.title}"]
 
+    # Build each PICO component if present
     pop = _field_str(hypothesis.population)
     if pop:
         parts.append(f"Population: {pop}")
@@ -74,60 +89,88 @@ def _build_hypothesis_summary(hypothesis: ClinicalHypothesis) -> str:
     return "\n".join(parts)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# AGENT-PHASE MAPPING
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# AGENT-TO-PHASE MAPPING
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# Maps each agent ID to its canonical pipeline phase name
 _PHASE_MAP = {
     "study_population_planner_agent": "cohort_discovery",
     "segmentation_agent":             "segmentation",
     "feature_extraction_agent":       "feature_extraction",
-    "modeling_agent":                  "modeling",
+    "modeling_agent":                 "modeling",
     "result_reporter_agent":          "result_analysis",
     "latex_reporter_agent":           "manuscript_generation",
 }
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# UTILITY: TRUNCATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
 def _truncate(text: str, max_chars: int = 4000) -> str:
-    """Truncate text to max_chars, ensuring we don't cut mid-sentence."""
+    """
+    Truncate text to max_chars, preferring sentence boundaries.
+
+    Avoids cutting mid-sentence by backtracking to the last period
+    if it's within a reasonable range (70% of max_chars).
+
+    Args:
+        text: The text to truncate.
+        max_chars: Maximum allowed characters.
+
+    Returns:
+        Truncated text with "[...truncated]" marker if shortened.
+    """
     if len(text) <= max_chars:
         return text
+
     cut = text[:max_chars]
     last_period = cut.rfind(".")
+
+    # Only use sentence boundary if it's not too far back
     if last_period > max_chars * 0.7:
         return cut[:last_period + 1] + "\n[...truncated]"
+
     return cut + "\n[...truncated]"
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # PER-AGENT CONTEXT BUILDERS
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# Each builder function receives the knowledge sections, sources guide, and
+# hypothesis, and returns (ContextAugmentation, domain_guidance_instructions).
+# The knowledge slices are tailored to what each agent actually needs.
 
 def _build_population_context(
     sections: Dict[str, str],
     sources_guide: str,
     hypothesis: ClinicalHypothesis,
 ) -> Tuple[ContextAugmentation, str]:
-    """Context for the population planner agent."""
+    """
+    Build context for the population planner (cohort discovery) agent.
+
+    Prioritizes anatomy/pathology knowledge and clinical guidelines
+    to inform inclusion/exclusion criteria and cohort selection.
+    """
     ctx = ContextAugmentation(
         knowledge_summary=_truncate(
-            sections.get("anatomy_pathology", ""),
-            3000,
+            sections.get("anatomy_pathology", ""), 3000,
         ),
         literature_findings=_truncate(
-            sections.get("clinical_guidelines", ""),
-            2000,
+            sections.get("clinical_guidelines", ""), 2000,
         ),
         methodology_guidance=(
-            "Use the clinical context and inclusion/exclusion criteria from the literature "
-            "to select an appropriate study cohort. Ensure demographic balance and adequate sample size."
+            "Use the clinical context and inclusion/exclusion criteria from "
+            "the literature to select an appropriate study cohort. Ensure "
+            "demographic balance and adequate sample size."
         ),
         terminology=_truncate(
-            sections.get("mesh_terminology", ""),
-            1500,
+            sections.get("mesh_terminology", ""), 1500,
         ),
         sources_guide=_truncate(sources_guide, 1500),
     )
+
     instructions = (
         f"Select the study population for the hypothesis: '{hypothesis.title}'.\n"
         f"Population definition: {hypothesis.population}\n\n"
@@ -145,26 +188,28 @@ def _build_segmentation_context(
     sources_guide: str,
     hypothesis: ClinicalHypothesis,
 ) -> Tuple[ContextAugmentation, str]:
-    """Context for the segmentation agent."""
+    """
+    Build context for the segmentation agent.
+
+    Focuses on anatomical knowledge, method trends, and terminology
+    to guide ROI selection and segmentation protocols.
+    """
     ctx = ContextAugmentation(
         knowledge_summary=_truncate(
-            sections.get("anatomy_pathology", ""),
-            2000,
+            sections.get("anatomy_pathology", ""), 2000,
         ),
         literature_findings=_truncate(
-            sections.get("literature_evidence", ""),
-            1500,
+            sections.get("literature_evidence", ""), 1500,
         ),
         methodology_guidance=_truncate(
-            sections.get("method_trends", ""),
-            1500,
+            sections.get("method_trends", ""), 1500,
         ),
         terminology=_truncate(
-            sections.get("mesh_terminology", ""),
-            1000,
+            sections.get("mesh_terminology", ""), 1000,
         ),
-        sources_guide="",
+        sources_guide="",  # Not needed for segmentation
     )
+
     instructions = (
         f"Perform ROI segmentation for the hypothesis: '{hypothesis.title}'.\n\n"
         "Use the domain knowledge in your context to:\n"
@@ -181,31 +226,33 @@ def _build_feature_extraction_context(
     sources_guide: str,
     hypothesis: ClinicalHypothesis,
 ) -> Tuple[ContextAugmentation, str]:
-    """Context for the feature extraction agent."""
+    """
+    Build context for the radiomics feature extraction agent.
+
+    Emphasizes literature evidence and method trends to guide feature
+    selection, normalization, and preprocessing choices.
+    """
     ctx = ContextAugmentation(
         knowledge_summary=_truncate(
-            sections.get("anatomy_pathology", ""),
-            1500,
+            sections.get("anatomy_pathology", ""), 1500,
         ),
         literature_findings=_truncate(
-            sections.get("literature_evidence", ""),
-            2500,
+            sections.get("literature_evidence", ""), 2500,
         ),
         methodology_guidance=_truncate(
-            sections.get("method_trends", ""),
-            2500,
+            sections.get("method_trends", ""), 2500,
         ),
         terminology=_truncate(
-            sections.get("mesh_terminology", ""),
-            1500,
+            sections.get("mesh_terminology", ""), 1500,
         ),
         sources_guide="",
     )
+
     instructions = (
         f"Extract radiomics features for the hypothesis: '{hypothesis.title}'.\n\n"
         "Use the domain knowledge in your context to:\n"
-        "- Select feature classes (shape, firstorder, GLCM, GLRLM, etc.) that the literature "
-        "identifies as most discriminative for this pathology\n"
+        "- Select feature classes (shape, firstorder, GLCM, GLRLM, etc.) that the "
+        "literature identifies as most discriminative for this pathology\n"
         "- Apply normalization and preprocessing consistent with published radiomics studies\n"
         "- Focus feature importance analysis on features known to correlate with the outcome\n"
         "- Reference the MeSH terminology for correct feature naming"
@@ -218,26 +265,33 @@ def _build_modeling_context(
     sources_guide: str,
     hypothesis: ClinicalHypothesis,
 ) -> Tuple[ContextAugmentation, str]:
-    """Context for the modeling agent."""
+    """
+    Build context for the ML modeling agent.
+
+    Prioritizes literature evidence and method trends to inform model
+    selection, evaluation metrics, and benchmarking against published results.
+    """
     ctx = ContextAugmentation(
-        knowledge_summary="",
+        knowledge_summary="",  # Modeling doesn't need anatomical knowledge
         literature_findings=_truncate(
-            sections.get("literature_evidence", ""),
-            3000,
+            sections.get("literature_evidence", ""), 3000,
         ),
         methodology_guidance=_truncate(
-            sections.get("method_trends", ""),
-            3000,
+            sections.get("method_trends", ""), 3000,
         ),
         terminology="",
         sources_guide="",
     )
+
     instructions = (
         f"Train and evaluate classification models for: '{hypothesis.title}'.\n\n"
         "Use the domain knowledge in your context to:\n"
-        "- Select model architectures that recent literature has validated for this type of radiomics study\n"
-        "- Apply evaluation metrics (AUC, sensitivity, specificity) consistent with published benchmarks\n"
-        "- Compare your results against the state-of-the-art performance reported in the literature\n"
+        "- Select model architectures that recent literature has validated for this "
+        "type of radiomics study\n"
+        "- Apply evaluation metrics (AUC, sensitivity, specificity) consistent with "
+        "published benchmarks\n"
+        "- Compare your results against the state-of-the-art performance reported in "
+        "the literature\n"
         "- Use the method trends to justify model selection and hyperparameter choices"
     )
     return ctx, instructions
@@ -248,26 +302,28 @@ def _build_result_reporter_context(
     sources_guide: str,
     hypothesis: ClinicalHypothesis,
 ) -> Tuple[ContextAugmentation, str]:
-    """Context for the result reporter agent."""
+    """
+    Build context for the result analysis agent.
+
+    Provides comprehensive literature evidence, clinical guidelines, and
+    sources for benchmarking, hypothesis validation, and scientific interpretation.
+    """
     ctx = ContextAugmentation(
         knowledge_summary=_truncate(
-            sections.get("anatomy_pathology", ""),
-            1500,
+            sections.get("anatomy_pathology", ""), 1500,
         ),
         literature_findings=_truncate(
-            sections.get("literature_evidence", ""),
-            3000,
+            sections.get("literature_evidence", ""), 3000,
         ),
         methodology_guidance=_truncate(
-            sections.get("clinical_guidelines", ""),
-            2000,
+            sections.get("clinical_guidelines", ""), 2000,
         ),
         terminology=_truncate(
-            sections.get("mesh_terminology", ""),
-            1000,
+            sections.get("mesh_terminology", ""), 1000,
         ),
         sources_guide=_truncate(sources_guide, 1500),
     )
+
     instructions = (
         f"Analyze results and validate the hypothesis: '{hypothesis.title}'.\n\n"
         "Use the domain knowledge in your context to:\n"
@@ -285,18 +341,24 @@ def _build_latex_reporter_context(
     sources_guide: str,
     hypothesis: ClinicalHypothesis,
 ) -> Tuple[ContextAugmentation, str]:
-    """Context for the LaTeX reporter agent."""
+    """
+    Build context for the LaTeX manuscript generation agent.
+
+    Focuses on literature evidence, sources for citations, and journal
+    landscape information to guide formatting and reference management.
+    """
     ctx = ContextAugmentation(
         knowledge_summary="",
         literature_findings=_truncate(
-            sections.get("literature_evidence", ""),
-            2000,
+            sections.get("literature_evidence", ""), 2000,
         ),
         methodology_guidance="",
         terminology="",
         sources_guide=_truncate(sources_guide, 2000),
     )
+
     journal_info = _truncate(sections.get("journal_landscape", ""), 1500)
+
     instructions = (
         f"Generate a LaTeX manuscript for the study: '{hypothesis.title}'.\n\n"
         "Use the domain knowledge in your context to:\n"
@@ -305,26 +367,28 @@ def _build_latex_reporter_context(
         "- Structure the manuscript with Introduction, Methods, Results, Discussion sections\n"
         "- Ensure clinical terminology matches established MeSH vocabulary\n"
     )
+
+    # Append journal-specific formatting guidance if available
     if journal_info:
         instructions += f"\nTarget journals and formatting context:\n{journal_info}"
 
     return ctx, instructions
 
 
-# Agent ID → context builder mapping
+# Registry mapping agent IDs to their context builder functions
 _CONTEXT_BUILDERS = {
     "study_population_planner_agent": _build_population_context,
     "segmentation_agent":             _build_segmentation_context,
     "feature_extraction_agent":       _build_feature_extraction_context,
-    "modeling_agent":                  _build_modeling_context,
+    "modeling_agent":                 _build_modeling_context,
     "result_reporter_agent":          _build_result_reporter_context,
     "latex_reporter_agent":           _build_latex_reporter_context,
 }
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN COMPILER FUNCTION
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def compile_task_messages(
     hypothesis: ClinicalHypothesis,
@@ -337,15 +401,20 @@ def compile_task_messages(
     Compile structured task messages for every step in the study plan.
 
     Each TaskMessage includes:
-        - Unique task_id
+        - Unique task_id (UUID)
         - Pipeline phase name
         - Agent-specific instructions enriched with hypothesis context
         - Pipeline architect's detailed instructions (from dynamic planning)
-        - context_augmentation with relevant knowledge slices
-        - Hypothesis summary
+        - Context augmentation with relevant knowledge slices
+        - Hypothesis summary for shared context
+
+    The instructions are layered in priority order:
+        1. Pipeline Architect's study-specific instructions (highest priority)
+        2. Planner's step description
+        3. Domain-informed guidance from knowledge base
 
     Args:
-        hypothesis:            The confirmed clinical hypothesis.
+        hypothesis:            The confirmed clinical hypothesis with PICO fields.
         plan:                  The confirmed study plan with customized steps.
         knowledge_sections:    Pre-structured dict from knowledge_builder mapping
                                canonical section keys (anatomy_pathology,
@@ -358,13 +427,19 @@ def compile_task_messages(
     Returns:
         List of TaskMessage objects, one per plan step, ordered by pipeline phase.
     """
-    logger.info("Context Compiler: Assembling task messages for %d steps", len(plan.steps))
+    logger.info(
+        "Context Compiler: Assembling task messages for %d steps",
+        len(plan.steps),
+    )
     pipeline_instructions = pipeline_instructions or {}
     sections = knowledge_sections or {}
 
-    logger.info("Using %d pre-structured knowledge sections: %s", len(sections), list(sections.keys()))
+    logger.info(
+        "Using %d pre-structured knowledge sections: %s",
+        len(sections), list(sections.keys()),
+    )
 
-    # Build compact hypothesis summary (shared across all agents)
+    # Build compact hypothesis summary shared across all agents
     hyp_summary = _build_hypothesis_summary(hypothesis)
 
     task_messages: List[TaskMessage] = []
@@ -378,27 +453,40 @@ def compile_task_messages(
         if builder_fn:
             ctx, domain_guidance = builder_fn(sections, sources_guide, hypothesis)
         else:
+            # Fallback for unknown agents — empty context, use description as guidance
             ctx = ContextAugmentation()
             domain_guidance = step.description
 
-        # Build layered instructions:
-        #   1. Pipeline Architect's study-specific instructions (top priority)
-        #   2. Planner's step description
-        #   3. Domain-informed guidance from knowledge base
+        # Build layered instructions in priority order
         instruction_parts = []
 
+        # Layer 1: Pipeline Architect's study-specific instructions (highest priority)
         planner_instr = pipeline_instructions.get(agent_id, "")
         if planner_instr:
-            instruction_parts.append(f"## Study-Specific Instructions\n{planner_instr}")
+            instruction_parts.append(
+                f"## Study-Specific Instructions\n{planner_instr}"
+            )
 
+        # Layer 2: Planner's step description
         if step.description:
-            instruction_parts.append(f"## Step Description\n{step.description}")
+            instruction_parts.append(
+                f"## Step Description\n{step.description}"
+            )
 
+        # Layer 3: Domain-informed guidance from knowledge base
         if domain_guidance:
-            instruction_parts.append(f"## Domain-Informed Guidance\n{domain_guidance}")
+            instruction_parts.append(
+                f"## Domain-Informed Guidance\n{domain_guidance}"
+            )
 
-        instructions = "\n\n".join(instruction_parts) if instruction_parts else step.description
+        # Combine layers or fall back to description alone
+        instructions = (
+            "\n\n".join(instruction_parts)
+            if instruction_parts
+            else step.description
+        )
 
+        # Assemble the complete task message
         task_msg = TaskMessage(
             task_id=str(uuid.uuid4()),
             phase=phase,
@@ -409,6 +497,8 @@ def compile_task_messages(
             hypothesis_summary=hyp_summary,
         )
         task_messages.append(task_msg)
+
+        # Attach task message back to the step for downstream access
         step.task_message = task_msg
 
         logger.info(
@@ -422,32 +512,49 @@ def compile_task_messages(
             len(instructions),
         )
 
-    logger.info("Context Compiler: Generated %d task messages", len(task_messages))
+    logger.info(
+        "Context Compiler: Generated %d task messages",
+        len(task_messages),
+    )
     return task_messages
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# TASK MESSAGE FORMATTER
+# ═══════════════════════════════════════════════════════════════════════════════
+
 def format_task_prompt(task_message: TaskMessage) -> str:
     """
-    Format a single TaskMessage into a text prompt suitable for passing
-    to an AutoGen agent via TextMessage.
+    Format a single TaskMessage into a text prompt for AutoGen agents.
 
-    This is the bridge between the structured TaskMessage and the
-    plain-text interface of the execution agents.
+    This is the bridge between the structured TaskMessage model and the
+    plain-text interface expected by execution agents. The output is
+    suitable for passing via TextMessage to any agent in the pipeline.
+
+    Args:
+        task_message: A fully populated TaskMessage with instructions,
+                      context augmentation, and hypothesis summary.
+
+    Returns:
+        Formatted multi-line string prompt.
     """
     parts = []
 
-    # Header
-    parts.append(f"═══ TASK: {task_message.agent_title} (Phase: {task_message.phase}) ═══\n")
+    # Header with task identity
+    parts.append(
+        f"═══ TASK: {task_message.agent_title} "
+        f"(Phase: {task_message.phase}) ═══\n"
+    )
 
-    # Hypothesis context
+    # Hypothesis context (shared across all agents)
     if task_message.hypothesis_summary:
         parts.append(f"── HYPOTHESIS ──\n{task_message.hypothesis_summary}\n")
 
-    # Instructions
+    # Instructions (layered: pipeline architect + domain guidance)
     if task_message.instructions:
         parts.append(f"── INSTRUCTIONS ──\n{task_message.instructions}\n")
 
-    # Context augmentation sections
+    # Context augmentation sections (in priority order)
     ctx = task_message.context_augmentation
     if ctx.knowledge_summary:
         parts.append(f"── DOMAIN KNOWLEDGE ──\n{ctx.knowledge_summary}\n")
@@ -463,9 +570,9 @@ def format_task_prompt(task_message: TaskMessage) -> str:
     return "\n".join(parts)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # KNOWLEDGE SUMMARIZER FOR PIPELINE PLANNING
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def summarize_knowledge_for_planning(
     knowledge_sections: Dict[str, str],
@@ -481,6 +588,15 @@ def summarize_knowledge_for_planning(
     proportionally so the planner sees anatomy, evidence, methods,
     guidelines, and datasets — all in one concise block.
 
+    Section allocation:
+        - Clinical Context (anatomy/pathology):    15%
+        - Key Evidence (literature):               25%
+        - Method Trends:                           20%
+        - Clinical Guidelines:                     15%
+        - Key Terminology (MeSH):                  10%
+        - Reference Datasets:                       8%
+        - Target Journals:                          7%
+
     Args:
         knowledge_sections: Pre-structured dict from knowledge_builder.
         hypothesis:         The confirmed clinical hypothesis.
@@ -494,20 +610,21 @@ def summarize_knowledge_for_planning(
 
     hyp_summary = _build_hypothesis_summary(hypothesis)
 
-    # Allocate character budget across sections proportionally
+    # Section configuration: (key, label, weight_percentage)
     _SECTION_CONFIG = [
-        ("anatomy_pathology",  "Clinical Context",   0.15),
-        ("literature_evidence", "Key Evidence",       0.25),
-        ("method_trends",      "Method Trends",       0.20),
-        ("clinical_guidelines", "Clinical Guidelines", 0.15),
-        ("mesh_terminology",   "Key Terminology",      0.10),
-        ("dataset_refs",       "Reference Datasets",   0.08),
-        ("journal_landscape",  "Target Journals",      0.07),
+        ("anatomy_pathology",   "Clinical Context",     0.15),
+        ("literature_evidence", "Key Evidence",         0.25),
+        ("method_trends",       "Method Trends",        0.20),
+        ("clinical_guidelines", "Clinical Guidelines",  0.15),
+        ("mesh_terminology",    "Key Terminology",      0.10),
+        ("dataset_refs",        "Reference Datasets",   0.08),
+        ("journal_landscape",   "Target Journals",      0.07),
     ]
 
     parts = [f"── HYPOTHESIS ──\n{hyp_summary}\n"]
     remaining = max_chars - len(parts[0])
 
+    # Allocate budget proportionally across available sections
     for key, label, weight in _SECTION_CONFIG:
         text = knowledge_sections.get(key, "")
         if not text:
@@ -526,6 +643,12 @@ def build_enriched_pipeline_prompt(task_messages: List[TaskMessage]) -> str:
     This is used as the `task=` parameter for GraphFlow.run_stream().
     The first agent (population planner) gets the full prompt; subsequent
     agents receive their own task messages via MessageFilterAgent.
+
+    Args:
+        task_messages: Ordered list of task messages, one per pipeline step.
+
+    Returns:
+        Complete formatted prompt string for the pipeline entry point.
     """
     if not task_messages:
         return "Run the pipeline."
@@ -538,6 +661,7 @@ def build_enriched_pipeline_prompt(task_messages: List[TaskMessage]) -> str:
     # Add a compact summary of the full pipeline for context
     prompt += "\n── PIPELINE OVERVIEW ──\n"
     for i, tm in enumerate(task_messages):
-        prompt += f"  {i+1}. [{tm.phase}] {tm.agent_title}: {tm.instructions[:100]}...\n"
+        preview = tm.instructions[:100] + "..." if len(tm.instructions) > 100 else tm.instructions
+        prompt += f"  {i+1}. [{tm.phase}] {tm.agent_title}: {preview}\n"
 
     return prompt
