@@ -10,47 +10,7 @@ VOXTELL_DIR     = os.environ.get("VOXTELL_DIR",     "/models/voxtell_v1.1")
 CACHE_OUTPUT_PATH = os.path.join(VOXTELL_DIR, "text_embeddings_cache.pkl")
 
 # add any anatomical structures you think you will ever need to segment here
-TARGET_ORGANS = [
-    # Core abdominal organs
-    "spleen", "liver", "left kidney", "right kidney", "pancreas", "gallbladder",
-    "duodenum", "stomach", "large intestine", "small intestine", "rectum",
-    # Vascular
-    "aorta", "pulmonary artery", "superior vena cava", "inferior vena cava",
-    "hepatic vessels", "portal vessels",
-    # Thoracic
-    "lung", "left lung", "right lung", "trachea", "esophagus", "heart",
-    # Adrenal / Urinary
-    "right adrenal gland", "left adrenal gland", "urinary bladder",
-    # Breast
-    "left breast", "right breast",
-    # Bones / Skeleton
-    "bones", "sacrum", "left hipbone", "right hipbone", "mandible", "spinal canal", "spinal cord",
-    # Brain / Head & Neck
-    "brainstem", "chiasma opticum",
-    "left cochlea", "right cochlea",
-    "left eye", "right eye",
-    "left lacrimal gland", "right lacrimal gland",
-    "left submandibular gland", "right submandibular gland",
-    "left parotid gland", "right parotid gland",
-    "left lens", "right lens",
-    "left optic nerve", "right optic nerve",
-    "larynx", "lips",
-    "superior constrictor muscle", "middle constrictor muscle", "inferior constrictor muscle",
-    # Cardiac chambers
-    "left ventricle", "right ventricle", "left atrium", "right atrium",
-    # Oncology / Lesions
-    "tumor", "lesion", "soft tissue lesion", "carcinoma",
-    "lung nodule", "lung lesion", "pulmonary nodule", "nodule",
-    "liver tumor", "lung tumor", "breast tumor",
-    "hepatocellular carcinoma", "pancreas tumor", "esophageal cancer",
-    "fdg-avid tumor", "fdg-avid breast cancer",
-    "breast cancer", "breast cancer metastasis",
-    "metastases", "liver metastasis", "brain metastasis", "lymph node metastasis",
-    "lymph nodes", "lymph node", "chest lymph node",
-    "MS lesion",
-    # Skin / Other
-    "skin", "organ",
-]
+TARGET_ORGANS = []
 
 print("Loading Qwen3-4B directly to GPU to generate permanent cache...")
 tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_PATH, padding_side='left', local_files_only=True)

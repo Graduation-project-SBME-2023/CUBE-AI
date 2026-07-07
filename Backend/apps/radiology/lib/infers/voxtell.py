@@ -99,40 +99,44 @@ class MyVoxTellPredictor(VoxTellPredictor):
             self,
             model_dir: str,
             device: torch.device = torch.device("cuda"),
-            text_encoding_model: str = None 
+            text_encoding_model: str = "Qwen/Qwen3-Embedding-0.6B" 
         ):
-            # Bypass parent's HuggingFace loading
-            with patch('transformers.AutoModel.from_pretrained') as mock_automodel, \
-                            patch('transformers.AutoTokenizer.from_pretrained') as mock_tokenizer:
-                            
-                            mock_automodel.return_value = MagicMock()
-                            mock_tokenizer.return_value = MagicMock()
-                
+        # Save these for the lazy-loader later
+        self.text_encoding_model_path = text_encoding_model
+        self.cache_output_path = os.path.join(model_dir, "text_embeddings_cache.pkl")
+        self.tokenizer = None
+        self.text_backbone = None
+
+        # Bypass parent's HuggingFace loading to keep VRAM clean on startup
+        with patch('transformers.AutoModel.from_pretrained') as mock_automodel, \
+             patch('transformers.AutoTokenizer.from_pretrained') as mock_tokenizer:
+            
+            mock_automodel.return_value = MagicMock()
+            mock_tokenizer.return_value = MagicMock()
+            
             super().__init__(
                 model_dir=model_dir,
                 device=device,
-                text_encoding_model="Qwen/Qwen3-Embedding-0.6B" # Ignored due to mock
+                text_encoding_model=self.text_encoding_model_path # Ignored due to mock
             )
-            self.perform_everything_on_device = False
-            
-            # 1. LOAD THE CACHED VECTORS INSTEAD OF THE TEXT MODEL
-            cache_path = os.path.join(model_dir, "text_embeddings_cache.pkl")
-            if os.path.exists(cache_path):
-                with open(cache_path, "rb") as f:
-                    self.embeddings_cache = pickle.load(f)
-                logger.info(f"Loaded cached embeddings for: {list(self.embeddings_cache.keys())}")
-            else:
-                logger.error(f"Cache file NOT FOUND at {cache_path}! Run generate_cache.py first.")
-                self.embeddings_cache = {}
+        
+        self.perform_everything_on_device = False
+        
+        # 1. LOAD THE CACHED VECTORS
+        if os.path.exists(self.cache_output_path):
+            with open(self.cache_output_path, "rb") as f:
+                self.embeddings_cache = pickle.load(f)
+            logger.info(f"Loaded cached embeddings for: {list(self.embeddings_cache.keys())}")
+        else:
+            logger.warning(f"Cache file NOT FOUND at {self.cache_output_path}! Will generate dynamically.")
+            self.embeddings_cache = {}
 
-            # 2. MOVE VOXTELL DIRECTLY TO GPU
-            # Since there is no text model, the GPU is empty and ready for VoxTell!
-            self.network = self.network.to(self.device)
-            torch.cuda.empty_cache()
-            check_memory("After INIT (VoxTell loaded, NO text model in RAM)", torch.device("cuda"))
+        # 2. MOVE VOXTELL DIRECTLY TO GPU
+        self.network = self.network.to(self.device)
+        torch.cuda.empty_cache()
+        check_memory("After INIT (VoxTell loaded, NO text model in RAM)", torch.device("cuda"))
 
-    # Fallback map: prompts not yet in the cache → nearest cached synonym.
-    # These cover common label variations that share the same semantic vector.
+    # Fallback map for common synonyms
     FALLBACK_PROMPT_MAP = {
         "renal tumor":         "tumor",
         "kidney tumor":        "tumor",
@@ -142,7 +146,6 @@ class MyVoxTellPredictor(VoxTellPredictor):
         "renal lesion":        "lesion",
         "kidney cancer":       "carcinoma",
         "renal cancer":        "carcinoma",
-        # Hepatic / liver oncology
         "liver lesion":        "liver tumor",
         "hepatic lesion":      "liver tumor",
         "hepatic tumor":       "liver tumor",
@@ -152,71 +155,100 @@ class MyVoxTellPredictor(VoxTellPredictor):
         "hepatocellular carcinoma rcc": "hepatocellular carcinoma",
     }
 
+    def generate_text_embedding(self, prompt: str) -> torch.Tensor:
+        """Lazily loads the text model onto the CPU to generate missing embeddings."""
+        if self.tokenizer is None or self.text_backbone is None:
+            logger.info(f"Lazy-loading HuggingFace text model '{self.text_encoding_model_path}' to CPU...")
+            self.tokenizer = AutoTokenizer.from_pretrained(self.text_encoding_model_path)
+            self.text_backbone = AutoModel.from_pretrained(self.text_encoding_model_path).to("cpu")
+            self.text_backbone.eval()
+
+        logger.info(f"Generating embedding for new prompt: '{prompt}'")
+        wrapped_text = wrap_with_instruction([prompt])
+        
+        text_tokens = self.tokenizer(
+            wrapped_text,
+            padding=True,
+            truncation=True,
+            max_length=512,
+            return_tensors="pt",
+        )
+        
+        # Explicitly keep everything on CPU to protect VRAM
+        with torch.no_grad():
+            text_output = self.text_backbone(**text_tokens)
+            embedding = last_token_pool(
+                text_output.last_hidden_state,
+                text_tokens["attention_mask"],
+            )
+            
+        return embedding.float().view(1, 1, -1)
+
     def embed_text_prompts(
         self,
         text_prompts: Union[List[str], str]
     ) -> torch.Tensor:
-        """Instantly retrieves the pre-calculated mathematical vectors."""
+        """Retrieves cached vectors or dynamically generates and saves them."""
         if isinstance(text_prompts, str):
             text_prompts = [text_prompts]
         
         embeddings_list = []
+        cache_updated = False
+        
         for prompt in text_prompts:
             key = prompt.lower().strip()
+            
             if key in self.embeddings_cache:
                 embeddings_list.append(self.embeddings_cache[key])
+                
             elif key in self.FALLBACK_PROMPT_MAP:
                 fallback_key = self.FALLBACK_PROMPT_MAP[key]
-                logger.warning(
-                    f"Prompt '{key}' not in cache — using fallback key '{fallback_key}'. "
-                    f"Add '{key}' to caching_generator.py and rebuild the cache for an exact embedding."
-                )
+                logger.info(f"Using fallback '{fallback_key}' for prompt '{key}'")
                 embeddings_list.append(self.embeddings_cache[fallback_key])
+                
             else:
-                raise ValueError(
-                    f"Prompt '{key}' was not found in the cache! "
-                    f"Add it to generate_cache.py and re-run it inside the container. "
-                    f"Available cached prompts: {sorted(self.embeddings_cache.keys())}"
-                )
+                logger.warning(f"Prompt '{key}' not found. Generating dynamically...")
+                # Generate on CPU
+                new_embedding = self.generate_text_embedding(key)
+                # Save to cache dictionary
+                self.embeddings_cache[key] = new_embedding.cpu()
+                embeddings_list.append(self.embeddings_cache[key])
+                cache_updated = True
 
-        # Combine into a single tensor and push to GPU
+        # Save cache back to disk if new items were added
+        if cache_updated:
+            try:
+                with open(self.cache_output_path, "wb") as f:
+                    pickle.dump(self.embeddings_cache, f)
+                logger.info(f"Updated text embedding cache saved to {self.cache_output_path}")
+            except Exception as e:
+                logger.error(f"Failed to save updated cache: {e}")
+
+        # Combine into a single tensor and push to GPU for inference
         embeddings = torch.cat(embeddings_list, dim=1) 
         return embeddings.to(self.device)    
-
 
     def predict_single_image(
         self,
         data: np.ndarray,
         text_prompts: Union[str, List[str]]
     ) -> np.ndarray:
-        """
-        Hyper-Optimized Offline-Embedding Pipeline
-        """
-        # ==========================================================
-        # PHASE 1: INSTANT TEXT EMBEDDING 
-        # ==========================================================
-        logger.info(f"Phase 1: Retrieving cached text embeddings for {text_prompts}...")
+        # (Your predict_single_image code remains exactly the same)
+        logger.info(f"Phase 1: Retrieving text embeddings for {text_prompts}...")
         embeddings = self.embed_text_prompts(text_prompts)
         check_memory("AFTER extracting the embedding", torch.device("cuda"))
 
-        # ==========================================================
-        # PHASE 2: IMAGE PREPROCESSING 
-        # ==========================================================
         logger.info("Phase 2: Preprocessing 3D Medical Image...")
         data, bbox, orig_shape = self.preprocess(data)
         logger.info(f"Preprocessed shape: {data.shape}")
         check_memory("AFTER preporcessing the data", torch.device("cuda"))
         
-        # ==========================================================
-        # PHASE 3: SLIDING WINDOW INFERENCE
-        # ==========================================================
         logger.info("Phase 3: Running sliding window inference...")
         prediction = self.predict_sliding_window_return_logits(
             data, embeddings
         ).to("cpu")
         check_memory("AFTER SLIDING WINDOW INFERENCE", torch.device("cuda"))
         
-        # Postprocess logits → binary masks
         with torch.no_grad():
             prediction = torch.sigmoid(prediction.float()) > 0.5
 
