@@ -8,6 +8,7 @@
 ║    3. Search_Executor_Agent → Fans out across PubMed, Arxiv,                ║
 ║                               SemanticScholar, EuropePMC                    ║
 ║    4. Relevance_Ranker_Agent→ Scores & ranks papers vs. PICO hypothesis      ║
+
 ║    5. Context_Compiler_Agent→ Produces context.json + Markdown report        ║
 ║                                                                              ║
 ║  Outputs (written to ./literature_review_output/):                           ║
@@ -64,10 +65,30 @@ if _current_dir not in sys.path:
 from knowledge_builder import (
   build_knowledge_base,
   _http_get,
+  _cache_key,
+  _get_cached,
+  _set_cache,
+  extract_concepts_from_pico,
   NCBI_API_KEY,
   PUBMED_DELAY,
   GENERIC_DELAY,
+  SEMANTIC_SCHOLAR_DELAY,  # 3.5s — S2 rate-limits aggressively without API key
 )
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Config loader (reads literature_review_config.json, falls back to defaults)
+# ──────────────────────────────────────────────────────────────────────────────
+from _config_loader import (
+    get_max_results,
+    get_year_from,
+    get_year_to,
+    get_min_quality_score,
+    get_active_databases,
+    LIT_CFG,
+)
+
+# Resolve config-driven defaults once at module load (callers can still override)
+_CFG_MAX_RESULTS: int = get_max_results()  # default 8, from config
 
 # ──────────────────────────────────────────────────────────────────────────────
 # AutoGen
@@ -140,28 +161,70 @@ def _safe_text(element, namespace: dict, tag: str, default: str = "") -> str:
 
 
 # ── Relevance pre-filter — discard obviously off-topic papers before scoring ──
-# DOMAIN_KEYWORDS: if NONE of these appear in title+abstract, paper is excluded.
-# Keeps the ranker focused on medical/imaging papers and cuts irrelevant noise.
-_DOMAIN_KEYWORDS: List[str] = [
-    "spleen", "splenic", "lymphoma", "leukaemia", "leukemia", "metastasis",
-    "malignancy", "cancer", "tumour", "tumor", "radiomics", "texture",
+# _DOMAIN_KEYWORDS_FALLBACK: broad catch-all for any medical imaging research.
+# Ensures the filter works for ANY PICO topic (not just spleen/lymphoma).
+# Per-run keywords derived from PICO via extract_concepts_from_pico() are
+# injected into _ACTIVE_DOMAIN_KEYWORDS at the start of run_literature_review().
+_DOMAIN_KEYWORDS_FALLBACK: List[str] = [
     "imaging", "CT", "MRI", "tomography", "radiology", "oncology",
-    "haematology", "hematology", "classification", "segmentation", "detection",
-    "diagnostic", "pathology", "feature extraction", "machine learning",
-    "deep learning", "random forest", "neural network", "abdominal",
+    "radiomics", "texture", "malignancy", "cancer", "tumour", "tumor",
+    "classification", "segmentation", "detection", "diagnostic", "pathology",
+    "feature extraction", "machine learning", "deep learning", "neural network",
+    "random forest", "clinical", "biomarker", "lesion", "neoplasm",
 ]
 
+# Module-level list that all tool functions close over.
+# Populated per-run in run_literature_review(); falls back to broad list.
+_ACTIVE_DOMAIN_KEYWORDS: List[str] = list(_DOMAIN_KEYWORDS_FALLBACK)
+
+# Legacy alias preserved for any external code that references _DOMAIN_KEYWORDS
+_DOMAIN_KEYWORDS = _ACTIVE_DOMAIN_KEYWORDS
+
+
+def _build_domain_keywords(pico: Optional[Dict[str, str]]) -> List[str]:
+    """
+    Derive domain keywords from PICO concepts via extract_concepts_from_pico().
+    Falls back to the broad fallback list if concept extraction returns too few.
+    """
+    if not pico:
+        return list(_DOMAIN_KEYWORDS_FALLBACK)
+    try:
+        concepts = extract_concepts_from_pico(pico)
+        kws: List[str] = []
+        kws.extend(concepts.get("organs", []))
+        kws.extend(concepts.get("pathologies", []))
+        kws.extend(concepts.get("modalities", []))
+        kws.extend(concepts.get("methods", []))
+        # Deduplicate while preserving order
+        seen: set = set()
+        unique_kws = [k for k in kws if not (k.lower() in seen or seen.add(k.lower()))]  # type: ignore[func-returns-value]
+        if len(unique_kws) >= 4:
+            # Combine PICO-specific keywords with the broad fallback for good coverage
+            combined = unique_kws + [
+                kw for kw in _DOMAIN_KEYWORDS_FALLBACK
+                if kw.lower() not in {k.lower() for k in unique_kws}
+            ]
+            return combined
+        # Too few PICO concepts extracted — use broad list (still safe)
+        return list(_DOMAIN_KEYWORDS_FALLBACK)
+    except Exception:
+        return list(_DOMAIN_KEYWORDS_FALLBACK)
+
+
 def _is_domain_relevant(title: str, abstract: str) -> bool:
-    """Return True if the paper mentions at least 2 domain keywords."""
-    #can we make this based on llm call or semantic similarity instead of keywords mathcing 
+    """
+    Return True if the paper mentions at least 2 of the active domain keywords.
+    Keywords are PICO-derived per run (set in run_literature_review) with a
+    broad medical-imaging fallback so no topic ever silently drops all papers.
+    """
     text = (title + " " + abstract).lower()
-    hits = sum(1 for kw in _DOMAIN_KEYWORDS if kw.lower() in text)
+    hits = sum(1 for kw in _ACTIVE_DOMAIN_KEYWORDS if kw.lower() in text)
     return hits >= 2
 
 
 # ── Tool 1: PubMed ────────────────────────────────────────────────────────────
 
-def search_pubmed(query: str, max_results: int = 8) -> str:
+def search_pubmed(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
     """
     Search PubMed via NCBI E-utilities with rate-limit delay and retry.
     Applies domain pre-filter to drop clearly off-topic papers.
@@ -253,7 +316,7 @@ def search_pubmed(query: str, max_results: int = 8) -> str:
 
 # ── Tool 2: Arxiv ─────────────────────────────────────────────────────────────
 
-def search_arxiv(query: str, max_results: int = 8) -> str:
+def search_arxiv(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
     """
     Search Arxiv with rate-limit delay and domain pre-filter.
     Targets cs.CV, eess.IV, cs.LG categories for medical imaging papers.
@@ -321,7 +384,7 @@ def search_arxiv(query: str, max_results: int = 8) -> str:
 
 # ── Tool 3: Semantic Scholar ──────────────────────────────────────────────────
 
-def search_semantic_scholar(query: str, max_results: int = 8) -> str:
+def search_semantic_scholar(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
     """
     Search Semantic Scholar with rate-limit delay and domain pre-filter.
 
@@ -332,7 +395,7 @@ def search_semantic_scholar(query: str, max_results: int = 8) -> str:
     BASE   = "https://api.semanticscholar.org/graph/v1/paper/search"
     fields = "title,authors,year,abstract,externalIds,citationCount,url"
 
-    time.sleep(GENERIC_DELAY)
+    time.sleep(SEMANTIC_SCHOLAR_DELAY)  # S2 rate-limits aggressively without API key
 
     params = urllib.parse.urlencode({
         "query" : query,
@@ -385,7 +448,7 @@ def search_semantic_scholar(query: str, max_results: int = 8) -> str:
 
 # ── Tool 4: Europe PMC ────────────────────────────────────────────────────────
 
-def search_europe_pmc(query: str, max_results: int = 8) -> str:
+def search_europe_pmc(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
     """
     Search Europe PMC with rate-limit delay and domain pre-filter.
 
@@ -1376,6 +1439,15 @@ async def run_literature_review(
 
     # ── Configure output path (workspace-scoped when provided) ───────────────
     set_output_dir(output_dir)
+
+    # ── Populate domain keyword list from this PICO (Fix #4) ─────────────────
+    # Replaces the static spleen/lymphoma list with PICO-specific concepts so
+    # the relevance pre-filter works for any research topic.
+    global _ACTIVE_DOMAIN_KEYWORDS
+    _ACTIVE_DOMAIN_KEYWORDS.clear()
+    _ACTIVE_DOMAIN_KEYWORDS.extend(_build_domain_keywords(pico))
+    print(f"[Pipeline] Domain keywords ({len(_ACTIVE_DOMAIN_KEYWORDS)}): "
+          f"{', '.join(_ACTIVE_DOMAIN_KEYWORDS[:8])}{'...' if len(_ACTIVE_DOMAIN_KEYWORDS) > 8 else ''}")
 
     # ── Build or reuse Dynamic Knowledge Base ─────────────────────────────────
     if prebuilt_knowledge and prebuilt_knowledge.get("knowledge_base") and prebuilt_knowledge.get("sources_guide"):
