@@ -1,8 +1,37 @@
+"""
+Agent Factory Module for Clinical Research Pipeline
+
+This module creates the planning agents responsible for hypothesis formulation
+and pipeline orchestration in the clinical research automation system.
+
+Architecture:
+    Phase 1: Hypothesis Architect → Structures clinical question in PICO format
+    Phase 2: Pipeline Architect    → Designs optimal execution pipeline
+"""
+
 from typing import Dict, Callable, Awaitable, Any
 from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 
-def create_model_client(api_key: str, model: str = "gpt-oss:120b-cloud"):
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MODEL CLIENT FACTORY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def create_model_client(
+    api_key: str,
+    model: str = "gpt-oss:120b-cloud"
+) -> OllamaChatCompletionClient:
+    """
+    Create an Ollama chat completion client with standard configuration.
+
+    Args:
+        api_key: Authentication key for the model service.
+        model: Model identifier string.
+
+    Returns:
+        Configured OllamaChatCompletionClient instance.
+    """
     return OllamaChatCompletionClient(
         model=model,
         model_info={
@@ -10,19 +39,24 @@ def create_model_client(api_key: str, model: str = "gpt-oss:120b-cloud"):
             "function_calling": True,
             "json_output": True,
         },
-        api_key=api_key
+        api_key=api_key,
     )
 
-# ══════════════════════════════════════════════════════════════════════════════
-# AVAILABLE PIPELINE AGENTS
-# ══════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AVAILABLE PIPELINE AGENTS CATALOGUE
+# ═══════════════════════════════════════════════════════════════════════════════
 # These are ALL the execution agents the system can schedule.
 # The Pipeline Architect dynamically selects which ones are needed.
+
 AVAILABLE_AGENTS = [
     {
         "id": "study_population_planner_agent",
         "title": "Cohort Discovery",
-        "description": "Query PACS, select study population, define inclusion/exclusion criteria, generate targets",
+        "description": (
+            "Query PACS, select study population, define inclusion/exclusion "
+            "criteria, generate targets"
+        ),
         "capabilities": [
             "DICOM query/retrieve from Orthanc PACS",
             "Patient cohort selection with inclusion/exclusion criteria",
@@ -34,43 +68,63 @@ AVAILABLE_AGENTS = [
     {
         "id": "segmentation_agent",
         "title": "Segmentation",
-        "description": "Run automatic or interactive ROI segmentation on selected volumes",
+        "description": (
+            "Run automatic or interactive ROI segmentation on selected volumes"
+        ),
         "capabilities": [
             "Automatic organ/lesion segmentation (VISTA3D, SAM2, nnU-Net)",
             "Interactive segmentation with point/scribble prompts",
             "Multi-label segmentation for complex anatomical regions",
             "Segmentation quality validation and mask refinement",
         ],
-        "when_needed": "Needed when ROI delineation is required for feature extraction or analysis",
+        "when_needed": (
+            "Needed when ROI delineation is required for feature extraction "
+            "or analysis"
+        ),
     },
     {
         "id": "feature_extraction_agent",
         "title": "Radiomics Feature Extraction",
-        "description": "Extract PyRadiomics features from image-mask pairs and rank feature importance",
+        "description": (
+            "Extract PyRadiomics features from image-mask pairs and rank "
+            "feature importance"
+        ),
         "capabilities": [
-            "IBSI-compliant radiomic feature extraction (shape, first-order, GLCM, GLRLM, GLSZM, GLDM)",
+            "IBSI-compliant radiomic feature extraction (shape, first-order, "
+            "GLCM, GLRLM, GLSZM, GLDM)",
             "Wavelet and LoG-filtered feature extraction",
             "Feature importance ranking and selection",
             "Normalization and preprocessing for radiomics",
         ],
-        "when_needed": "Needed when quantitative imaging biomarkers must be extracted from segmented regions",
+        "when_needed": (
+            "Needed when quantitative imaging biomarkers must be extracted "
+            "from segmented regions"
+        ),
     },
     {
         "id": "modeling_agent",
         "title": "ML Modeling",
-        "description": "Train and evaluate classification/regression models on extracted features",
+        "description": (
+            "Train and evaluate classification/regression models on extracted "
+            "features"
+        ),
         "capabilities": [
             "Classical ML: SVM, Random Forest, XGBoost, Logistic Regression",
             "Deep learning classifier training",
             "Cross-validation, hyperparameter tuning",
             "Model performance evaluation (AUC, sensitivity, specificity)",
         ],
-        "when_needed": "Needed when a predictive or classification model must be built from features",
+        "when_needed": (
+            "Needed when a predictive or classification model must be built "
+            "from features"
+        ),
     },
     {
         "id": "result_reporter_agent",
         "title": "Result Analysis",
-        "description": "Aggregate results, validate hypothesis, generate scientific summary",
+        "description": (
+            "Aggregate results, validate hypothesis, generate scientific summary"
+        ),
         "capabilities": [
             "Statistical analysis of model outputs",
             "Hypothesis validation against literature benchmarks",
@@ -82,50 +136,63 @@ AVAILABLE_AGENTS = [
     {
         "id": "latex_reporter_agent",
         "title": "Manuscript Generation",
-        "description": "Format findings as LaTeX and render final PDF report",
+        "description": (
+            "Format findings as LaTeX and render final PDF report"
+        ),
         "capabilities": [
             "LaTeX manuscript generation (IMRAD format)",
             "Bibliography and citation management",
             "Figure and table formatting",
             "Journal-specific formatting templates",
         ],
-        "when_needed": "Needed when a formal scientific manuscript or report is required",
+        "when_needed": (
+            "Needed when a formal scientific manuscript or report is required"
+        ),
     },
 ]
 
 
-def create_planner_agents(model_client, input_func: Callable[[], Awaitable[str]]) -> Dict[str, Any]:
+# ═══════════════════════════════════════════════════════════════════════════════
+# PLANNING AGENTS FACTORY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def create_planner_agents(
+    model_client: Any,
+    input_func: Callable[[], Awaitable[str]],
+) -> Dict[str, Any]:
     """
     Factory function to instantiate planning agents.
 
-    Returns two agents:
-      - hypothesis_architect: Structures the clinical hypothesis in full PICO format
-      - pipeline_architect:   Dynamically plans pipeline steps based on hypothesis + domain knowledge
+    Creates two specialized agents that work in sequence:
+      1. Hypothesis Architect — Structures the clinical hypothesis in full PICO format.
+      2. Pipeline Architect — Dynamically plans pipeline steps based on hypothesis
+         and domain knowledge.
+
+    Args:
+        model_client: The LLM client instance for agent communication.
+        input_func: Async callable for user input collection.
+
+    Returns:
+        Dictionary containing:
+            - "user_proxy": UserProxyAgent for human interaction.
+            - "hypothesis_architect": AssistantAgent for PICO hypothesis formulation.
+            - "pipeline_architect": AssistantAgent for pipeline design.
     """
 
-    # ── Agent catalogue for prompt injection ──────────────────────────────────
+    # Build formatted agent catalogue for prompt injection
     agent_catalogue = "\n".join([
-        f"  • ID: {a['id']}\n"
-        f"    Title: {a['title']}\n"
-        f"    Description: {a['description']}\n"
-        f"    Capabilities: {', '.join(a['capabilities'])}\n"
-        f"    When needed: {a['when_needed']}"
+        (
+            f"  • ID: {a['id']}\n"
+            f"    Title: {a['title']}\n"
+            f"    Description: {a['description']}\n"
+            f"    Capabilities: {', '.join(a['capabilities'])}\n"
+            f"    When needed: {a['when_needed']}"
+        )
         for a in AVAILABLE_AGENTS
     ])
 
-    return {
-        "user_proxy": UserProxyAgent(
-            name="User",
-            input_func=input_func,
-        ),
-
-        # ──────────────────────────────────────────────────────────────────────
-        # PHASE 1: HYPOTHESIS ARCHITECT
-        # ──────────────────────────────────────────────────────────────────────
-        "hypothesis_architect": AssistantAgent(
-            name="HypothesisArchitect",
-            model_client=model_client,
-            system_message="""\
+    # ── Phase 1: Hypothesis Architect System Prompt ───────────────────────
+    hypothesis_architect_prompt = """\
 You are an expert Clinical Research Hypothesis Architect. You are a board-certified 
 radiologist and clinical AI researcher with 15+ years of experience in oncological 
 imaging, radiomics methodology, and evidence-based medicine.
@@ -218,18 +285,16 @@ CONSTRAINTS
 • Comparison must include a gold standard or conventional alternative.
 • Outcome must include quantitative metrics.
 • Do NOT include pipeline steps in this phase — only the hypothesis.
-• CRITICAL JSON FORMATTING: If you include any LaTeX commands or paths in your instructions, you MUST double-escape all backslashes (e.g., use \\includegraphics instead of \includegraphics) so the JSON remains perfectly valid. Do not use unescaped backslashes
-• STRICT JSON ONLY: You must output ONLY valid JSON format without any markdown wrappers, fences (e.g. no ```json), or conversational text before or after the JSON.
-""",
-        ),
+• CRITICAL JSON FORMATTING: If you include any LaTeX commands or paths in your 
+  instructions, you MUST double-escape all backslashes (e.g., use \\\\includegraphics 
+  instead of \\includegraphics) so the JSON remains perfectly valid. Do not use 
+  unescaped backslashes.
+• STRICT JSON ONLY: You must output ONLY valid JSON format without any markdown 
+  wrappers, fences (e.g. no ```json), or conversational text before or after the JSON.
+"""
 
-        # ──────────────────────────────────────────────────────────────────────
-        # PHASE 3: PIPELINE ARCHITECT (runs after knowledge building)
-        # ──────────────────────────────────────────────────────────────────────
-        "pipeline_architect": AssistantAgent(
-            name="PipelineArchitect",
-            model_client=model_client,
-            system_message=f"""\
+    # ── Phase 2: Pipeline Architect System Prompt ────────────────────────
+    pipeline_architect_prompt = f"""\
 You are an expert Clinical Research Pipeline Architect. You design research 
 execution plans that are grounded in domain knowledge and literature evidence.
 
@@ -311,12 +376,31 @@ INTERACTION RULES
 CONSTRAINTS
 ───────────
 • Each step's `id` MUST match an agent ID from the catalogue above.
-• Order steps logically — data acquisition before processing, processing before analysis.
+• Order steps logically — data acquisition before processing, processing before 
+  analysis.
 • Instructions must be actionable and specific — not generic templates.
 • Reference domain knowledge when justifying method choices.
 • Include at minimum 3 steps and at maximum all {len(AVAILABLE_AGENTS)} agents.
-• CRITICAL JSON FORMATTING: If you include any LaTeX commands or paths in your instructions, you MUST double-escape all backslashes.
-• STRICT JSON ONLY: You must output ONLY valid JSON format without any markdown wrappers, fences (e.g. no ```json), or conversational text before or after the JSON.
-""",
+• CRITICAL JSON FORMATTING: If you include any LaTeX commands or paths in your 
+  instructions, you MUST double-escape all backslashes.
+• STRICT JSON ONLY: You must output ONLY valid JSON format without any markdown 
+  wrappers, fences (e.g. no ```json), or conversational text before or after the JSON.
+"""
+
+    # ── Agent Instantiation ──────────────────────────────────────────────
+    return {
+        "user_proxy": UserProxyAgent(
+            name="User",
+            input_func=input_func,
+        ),
+        "hypothesis_architect": AssistantAgent(
+            name="HypothesisArchitect",
+            model_client=model_client,
+            system_message=hypothesis_architect_prompt,
+        ),
+        "pipeline_architect": AssistantAgent(
+            name="PipelineArchitect",
+            model_client=model_client,
+            system_message=pipeline_architect_prompt,
         ),
     }
