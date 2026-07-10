@@ -40,7 +40,6 @@ from autogen_agentchat.teams import DiGraphBuilder, GraphFlow
 from autogen_agentchat.ui import Console
 
 # Import your existing custom agent classes
-# from agents.planning_agents.population_planner import PopulationPlannerAgent
 from agents.execution_agents.population_agent import PopulationPlannerAgent
 from agents.execution_agents.segmentation_agent import SegmentationAgent
 from agents.execution_agents.feature_extraction_agent import FeatureExtractionAgent
@@ -52,6 +51,32 @@ from agents.execution_agents.reporter_agent import ReporterAgent
 from models.plans import TaskMessage
 from agents.planning_agents.context_compiler import build_enriched_pipeline_prompt
 
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Agent registry — maps each planner agent_id to its async factory.
+# Add new agents here when extending the catalogue; nothing else needs
+# to change for them to be picked up by the dynamic builder.
+# ---------------------------------------------------------------------------
+AGENT_FACTORIES = {
+    "study_population_planner_agent": PopulationPlannerAgent.create,
+    "segmentation_agent":             SegmentationAgent.create,
+    "feature_extraction_agent":       FeatureExtractionAgent.create,
+    "modeling_agent":                 ModelingAgent.create,
+    "result_reporter_agent":          ResultReporterAgent.create,
+    "latex_reporter_agent":           ReporterAgent.create,
+}
+
+# Fallback order when the planner provides no task_messages.
+DEFAULT_PIPELINE_ORDER: List[str] = [
+    "study_population_planner_agent",
+    "segmentation_agent",
+    "feature_extraction_agent",
+    "modeling_agent",
+    "result_reporter_agent",
+    "latex_reporter_agent",
+]
+
 
 class BasicPipelineBuilder(DiGraphBuilder):
 
@@ -60,75 +85,98 @@ class BasicPipelineBuilder(DiGraphBuilder):
         self.task_messages = task_messages or []
 
     @classmethod
-    async def create(cls, workspace_folder=None, task_messages: Optional[List[TaskMessage]] = None, model_client=None, session_id=None):
+    async def create(
+        cls,
+        workspace_folder=None,
+        task_messages: Optional[List[TaskMessage]] = None,
+        model_client=None,
+        session_id=None,
+    ):
         setup_logging()
 
-        population_agent = await PopulationPlannerAgent.create(model_client=model_client,
-                                                               workspace_folder=workspace_folder, session_id=session_id)
-        seg_agent = await SegmentationAgent.create(model_client=model_client, workspace_folder=workspace_folder, session_id=session_id)
-        feat_agent = await FeatureExtractionAgent.create(model_client=model_client, workspace_folder=workspace_folder, session_id=session_id)
-        model_agent = await ModelingAgent.create(model_client=model_client, workspace_folder=workspace_folder, session_id=session_id)
-        report_agent = await ResultReporterAgent.create(model_client=model_client, workspace_folder=workspace_folder, session_id=session_id)
-        latex_agent = await ReporterAgent.create(model_client=model_client, workspace_folder=workspace_folder, session_id=session_id)
+        # ── Step 1: Resolve the ordered list of agent IDs from the planner ───
+        #
+        # We iterate over task_messages (already ordered by the planner) and
+        # keep only agent IDs that are registered in AGENT_FACTORIES.  This
+        # guards against the LLM hallucinating unknown agent names while still
+        # honouring any custom ordering the planner chose.
+        planned_ids: List[str] = []
+        if task_messages:
+            for tm in task_messages:
+                if tm.agent_id in AGENT_FACTORIES and tm.agent_id not in planned_ids:
+                    planned_ids.append(tm.agent_id)
 
-        filtered_seg_agent = MessageFilterAgent(
-            name="segmentation_agent",
-            wrapped_agent=seg_agent,
-            filter=MessageFilterConfig(per_source=[
-                PerSourceFilter(source="study_population_planner_agent", position="last", count=1)
-            ])
-        )
-
-        filtered_feat_agent = MessageFilterAgent(
-            name="feature_extraction_agent",
-            wrapped_agent=feat_agent,
-            filter=MessageFilterConfig(per_source=[
-                PerSourceFilter(source="segmentation_agent", position="last", count=1)
-            ])
-        )
-
-        filtered_model_agent = MessageFilterAgent(
-            name="modeling_agent",
-            wrapped_agent=model_agent,
-            filter=MessageFilterConfig(per_source=[
-                PerSourceFilter(source="feature_extraction_agent", position="last", count=1)
-            ])
-        )
-
-        filtered_report_agent = MessageFilterAgent(
-            name="result_reporter_agent",
-            wrapped_agent=report_agent,
-            filter=MessageFilterConfig(per_source=[
-                PerSourceFilter(source="user", position="first", count=1),
-                PerSourceFilter(source="modeling_agent", position="last", count=1)
-            ])
-        )
-
-        filtered_latex_agent = MessageFilterAgent(
-            name="latex_reporter_agent",
-            wrapped_agent=latex_agent,
-            filter=MessageFilterConfig(per_source=[
-                PerSourceFilter(source="result_reporter_agent", position="last", count=1)
-            ]
+        if not planned_ids:
+            # Planner produced no usable plan → run the complete default pipeline
+            logger.warning(
+                "No valid task_messages received from planner — "
+                "falling back to the default full pipeline."
             )
+            planned_ids = list(DEFAULT_PIPELINE_ORDER)
+
+        logger.info(
+            "Dynamic pipeline will run %d agent(s): %s",
+            len(planned_ids),
+            " → ".join(planned_ids),
         )
 
+        # ── Step 2: Instantiate only the agents that are actually needed ──────
+        #
+        # Previously ALL six agents were initialised on every run.  Now we only
+        # pay the startup cost (MCP server subprocess, tool listing, etc.) for
+        # the agents the planner selected.  For a liver-segmentation hypothesis
+        # this means feature_extraction_agent and modeling_agent are never
+        # created at all.
+        raw_agents: dict = {}
+        for agent_id in planned_ids:
+            factory = AGENT_FACTORIES[agent_id]
+            logger.info("Initialising agent: %s", agent_id)
+            raw_agents[agent_id] = await factory(
+                model_client=model_client,
+                workspace_folder=workspace_folder,
+                session_id=session_id,
+            )
+
+        # ── Step 3: Wrap agents with dynamic MessageFilterAgent ───────────────
+        #
+        # Wrapping rules:
+        #   - The FIRST agent receives the initial GraphFlow task prompt
+        #     directly, so it needs no filter.
+        #   - Every subsequent agent is wrapped so it sees ONLY the last
+        #     message from the agent that immediately precedes it in the plan.
+        #     The filter source is set to prev_id — the actual preceding agent's
+        #     name in this run's sequence — not a hardcoded string.
+        #
+        # This replaces the old fixed filter wiring where result_reporter_agent
+        # always waited for "modeling_agent" even when modeling was not in the
+        # plan, causing the reporter to never activate on segmentation studies.
+        wrapped: dict = {}  # agent_id → graph node (raw agent or wrapped)
+
+        for i, agent_id in enumerate(planned_ids):
+            raw = raw_agents[agent_id]
+
+            if i == 0:
+                # First node — receives the initial task; no filter needed
+                wrapped[agent_id] = raw
+            else:
+                prev_id = planned_ids[i - 1]
+                wrapped[agent_id] = MessageFilterAgent(
+                    name=agent_id,
+                    wrapped_agent=raw,
+                    filter=MessageFilterConfig(per_source=[
+                        PerSourceFilter(source=prev_id, position="last", count=1)
+                    ]),
+                )
+
+        # ── Step 4: Register nodes and build edges ────────────────────────────
         builder = cls(task_messages=task_messages)
+        node_list = list(wrapped.values())
 
-        # Nodes
-        builder.add_node(population_agent)
-        builder.add_node(filtered_seg_agent)
-        builder.add_node(filtered_feat_agent)
-        builder.add_node(filtered_model_agent)
-        builder.add_node(filtered_report_agent)
-        builder.add_node(filtered_latex_agent)
+        for node in node_list:
+            builder.add_node(node)
 
-        # Edges
-        builder.add_edge(population_agent, filtered_seg_agent)
-        builder.add_edge(filtered_seg_agent, filtered_feat_agent)
-        builder.add_edge(filtered_feat_agent, filtered_model_agent)
-        builder.add_edge(filtered_model_agent, filtered_report_agent)
-        builder.add_edge(filtered_report_agent, filtered_latex_agent)
+        for i in range(len(node_list) - 1):
+            builder.add_edge(node_list[i], node_list[i + 1])
 
         return builder
 
@@ -146,7 +194,11 @@ class BasicPipelineBuilder(DiGraphBuilder):
 
 
 async def main() -> None:
-    # 1. Initialize the raw agents
+    """
+    Local test entrypoint — runs the full default pipeline (all 6 agents).
+    This function is intentionally kept as a standalone test and is NOT
+    used by the production run path (app.py → session_service → run_pipeline).
+    """
     population_agent = await PopulationPlannerAgent.create()
     seg_agent = await SegmentationAgent.create()
     feat_agent = await FeatureExtractionAgent.create()
@@ -192,9 +244,7 @@ async def main() -> None:
         wrapped_agent=latex_agent,
         filter=MessageFilterConfig(per_source=[
             PerSourceFilter(source="result_reporter_agent", position="last", count=1)
-        ]
-
-        )
+        ])
     )
 
     builder = DiGraphBuilder()
@@ -206,16 +256,10 @@ async def main() -> None:
     builder.add_node(filtered_latex_agent)
 
     builder.add_edge(population_agent, filtered_seg_agent)
-
     builder.add_edge(filtered_seg_agent, filtered_feat_agent)
-
     builder.add_edge(filtered_feat_agent, filtered_model_agent)
-
     builder.add_edge(filtered_model_agent, filtered_report_agent)
-
     builder.add_edge(filtered_report_agent, filtered_latex_agent)
-
-
 
     flow = GraphFlow(
         participants=builder.get_participants(),
@@ -233,4 +277,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-            
