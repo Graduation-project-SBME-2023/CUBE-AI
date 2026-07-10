@@ -26,12 +26,48 @@ MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
 # MASK HELPERS
 # ===============================
 
-def matches_label(segmentation_type, label):
+def extract_organ_label(segmentation_type: str) -> str:
+    """
+    Extracts the organ/label portion from a segmentation_type string.
 
-    seg_norm = "".join(c for c in segmentation_type.lower() if c.isalpha())
-    label_norm = "".join(c for c in label.lower() if c.isalpha())
+    The stored format is:  '{organ label}-{model}-{timestamp}-...'
+    e.g. 'liver lesion-voxtell-01:48:31 PM-g'
+         'liver-vista-02:10:00 PM-g'
 
-    return label_norm in seg_norm
+    Strategy: split on '-' and consume tokens that look like the organ name
+    (i.e., stop at the first token that matches a known model name or looks
+    like a time HH:MM, or is a single letter suffix).  If no separator is
+    found return the whole string normalised.
+    """
+    KNOWN_MODELS = {"voxtell", "vista", "segmentation_spleen", "nnunet"}
+    parts = segmentation_type.split("-")
+    organ_parts = []
+    for part in parts:
+        p = part.strip().lower()
+        # Stop if we hit a known model name or a timestamp token (HH:MM)
+        if p in KNOWN_MODELS or re.match(r'^\d{1,2}:\d{2}$', p) or (len(p) == 1 and p.isalpha()):
+            break
+        organ_parts.append(part.strip())
+    return " ".join(organ_parts).lower() if organ_parts else segmentation_type.lower()
+
+
+def matches_label(segmentation_type: str, label: str) -> bool:
+    """
+    Returns True only when *label* is an **exact** match for the organ portion
+    of *segmentation_type*.
+
+    The segmentation_type format is '{organ label}-{model}-{timestamp}-...'
+    We extract just the organ part and compare it directly to the target label.
+
+    Examples
+    --------
+    matches_label("liver lesion-voxtell-01:48:31 PM-g", "liver")        → False
+    matches_label("liver-voxtell-01:48:31 PM-g",        "liver")        → True
+    matches_label("liver lesion-voxtell-01:48:31 PM-g", "liver lesion") → True
+    matches_label("liver-vista-02:10:00 PM-g",          "liver")        → True
+    """
+    organ = extract_organ_label(segmentation_type)
+    return organ == label.lower().strip()
 
 async def exclude_existing_masks(volumes, labels):
 
@@ -298,11 +334,12 @@ def ensure_required_patient_tags(datasets):
 #  Download Data
 #  ================================
 async def download_and_pair_volumes(
-    workspace_dir, 
-    datasetlist, 
-    chosen_path, 
-    selected_auto_model_for_volume, 
-    download_volumes=True  
+    workspace_dir,
+    datasetlist,
+    chosen_path,
+    selected_auto_model_for_volume,
+    download_volumes=True,
+    target_label=None,
 ):
     VOLUMES = datasetlist
     LABELS_BY_VOLUME_URL = f"{MONAI_URL}/segmentations/by-volume/"
@@ -336,22 +373,39 @@ async def download_and_pair_volumes(
             logger.error(f"Error fetching labels for {volume_uid}: {e}")
             return []
 
-    def pick_latest_or_auto(labels, chosen_path="interactive", selected_auto_model=None):
+    def pick_latest_or_auto(labels, chosen_path="interactive", selected_auto_model=None, target_label=None):
         if not labels:
             return None
 
-        # --- Automatic path: must match the exact model that ran segmentation ---
+        # --- Automatic path ---
         if chosen_path == "automatic" and selected_auto_model:
+            # 1st priority: mask produced by the exact auto-model (e.g. vista)
             for label in labels:
                 if selected_auto_model in label.get("segmentation_type", ""):
                     logger.info(f"Found matching automatic label: {label.get('label_series_instance_uid')}")
                     return label
+
+            # 2nd priority: any mask whose segmentation_type contains the *target organ*
+            # (word-boundary safe). This covers voxtell-generated masks being reused when
+            # the planner chose an auto-model for the same organ (e.g. vista for liver).
+            if target_label:
+                for label in labels:
+                    seg_type = label.get("segmentation_type", "")
+                    if matches_label(seg_type, target_label):
+                        logger.info(
+                            f"Auto-model '{selected_auto_model}' not found; reusing existing "
+                            f"'{target_label}' mask — "
+                            f"UID: {label.get('label_series_instance_uid')} | "
+                            f"segmentation_type: '{seg_type}'"
+                        )
+                        return label
+
             # Do NOT fall back to the latest timestamp here.
             # That would pair the volume with an old mask from a different organ
             # (e.g., a spleen mask when the hypothesis is about lungs).
             logger.warning(
-                f"No label matched automatic model '{selected_auto_model}' — "
-                f"skipping this volume to avoid wrong-organ pairing."
+                f"No label matched automatic model '{selected_auto_model}' or target label "
+                f"'{target_label}' — skipping this volume to avoid wrong-organ pairing."
             )
             return None
 
@@ -485,7 +539,7 @@ async def download_and_pair_volumes(
         # falling back to the latest timestamp (which could be a mask for a
         # different organ from a previous experiment).
         selected_model = selected_auto_model_for_volume
-        latest = pick_latest_or_auto(labels, chosen_path=chosen_path, selected_auto_model=selected_model)
+        latest = pick_latest_or_auto(labels, chosen_path=chosen_path, selected_auto_model=selected_model, target_label=target_label)
         if not latest:
             continue
         label_uid = latest.get("label_series_instance_uid")
