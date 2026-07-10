@@ -1,6 +1,6 @@
 from typing import Literal, Union
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 EventType = Literal[
     "tool_started",
@@ -46,6 +46,6 @@ class ToolEvent(BaseModel):
     content_type: ContentType
     content: ContentPayload
     session_id: str | None = None
-    timestamp: datetime = datetime.now()
+    timestamp: datetime = Field(default_factory=datetime.now)
 
 

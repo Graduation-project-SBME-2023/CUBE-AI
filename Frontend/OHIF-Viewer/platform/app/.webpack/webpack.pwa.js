@@ -62,6 +62,8 @@ module.exports = (env, argv) => {
         }
       },
     },
+    // ✅ DEV SPEED: eval-cheap-source-map is ~10x faster than cheap-module-source-map
+    ...(isProdBuild ? {} : { devtool: 'eval-cheap-source-map' }),
     resolve: {
   modules: [
     path.resolve(__dirname, '../node_modules'),
@@ -121,17 +123,20 @@ module.exports = (env, argv) => {
           PUBLIC_URL: PUBLIC_URL,
         },
       }),
-      // Generate a service worker for fast local loads
-      new InjectManifest({
-        swDest: 'sw.js',
-        swSrc: path.join(SRC_DIR, 'service-worker.js'),
-        // Increase the limit to 4mb:
-        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-        // Need to exclude the theme as it is updated independently
-        exclude: [/theme/],
-        // Cache large files for the manifests to avoid warning messages
-        maximumFileSizeToCacheInBytes: 1024 * 1024 * 50,
-      }),
+      // ✅ DEV SPEED: Skip service worker in dev (was precaching 124MB on every compile!)
+      // Only inject the service worker manifest for production builds
+      ...(isProdBuild
+        ? [
+            new InjectManifest({
+              swDest: 'sw.js',
+              swSrc: path.join(SRC_DIR, 'service-worker.js'),
+              // Need to exclude the theme as it is updated independently
+              exclude: [/theme/],
+              // Cache large files for the manifests to avoid warning messages
+              maximumFileSizeToCacheInBytes: 1024 * 1024 * 50,
+            }),
+          ]
+        : []),
     ],
     // https://webpack.js.org/configuration/dev-server/
     devServer: {

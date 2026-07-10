@@ -120,8 +120,13 @@ class SegmentationModule:
         logger.info(f"Planner plan: {plan}")
         target_labels = plan["target_labels"]
         chosen_path = plan["chosen_path"]
+        # Pass the selected model so a volume is only excluded when it already
+        # has a mask from the SAME model+organ pair.  A liver-voxtell mask will
+        # NOT block a fresh vista liver segmentation.
+        selected_models = plan.get("selected_models") or []
+        model_for_exclusion = selected_models[0] if selected_models else None
         eligible_volumes = await exclude_existing_masks(
-            datasetlist, target_labels
+            datasetlist, target_labels, model_name=model_for_exclusion
         )
         # ====== Logging before Segmentation =================
         payload = TextPayload(
@@ -190,22 +195,19 @@ class SegmentationModule:
         await receive_tool_event(environment_setup_event)
         # =========== download ========================    
         #finally download the volumes with its label masks 
-        await asyncio.sleep(120)  
-        # Use eligible_volumes so we only download masks that were actually
-        # segmented in this run.  Using the full datasetlist would also try to
-        # fetch labels for volumes that were never segmented here, and
-        # pick_latest_or_auto would then return whatever old mask existed
-        # (e.g., a spleen mask from a previous experiment) even though the
-        # current hypothesis is about a completely different organ.
-        #
-        # Special case: if no volume was eligible (all had existing masks),
-        # fall back to the full list so we still download the existing correct masks.
+        # Give MONAI a moment to persist new masks — but only when segmentation
+        # actually ran.  If all volumes already had existing masks (eligible_volumes
+        # is empty), there is nothing to wait for.
+        if eligible_volumes:
+            logger.info("Waiting 120 s for MONAI to persist new segmentation masks...")
+            await asyncio.sleep(120)
         volumes_to_download = eligible_volumes if eligible_volumes else datasetlist
         result = await download_and_pair_volumes(
                     workspace_dir,
                     volumes_to_download, 
                     chosen_path=chosen_path, 
-                    selected_auto_model_for_volume = plan["selected_models"][0] if plan["selected_models"] else None
+                    selected_auto_model_for_volume=plan["selected_models"][0] if plan["selected_models"] else None,
+                    target_label=target_labels[0] if target_labels else None,
         )
         # download_and_pair_volumes returns (successful_list, skipped_list) normally,
         # but returns [] if datasetlist was empty — guard against both.
@@ -247,9 +249,9 @@ class SegmentationModule:
         if downloaded_uids:
             # Use a queue to bridge the sync GIF thread → async broadcaster
             gif_queue: asyncio.Queue = asyncio.Queue()
-            plan_target  = plan['target_labels'][0]
-            plan_model   = plan["selected_models"][0] if plan["selected_models"] else None
-            plan_dice    = get_model_dice_score(plan_model, plan_target) if plan_model else None
+            plan_target  = plan.get('target_labels', [None])[0] if plan.get('target_labels') else None
+            plan_model   = plan["selected_models"][0] if plan.get("selected_models") else None
+            plan_dice    = get_model_dice_score(plan_model, plan_target) if plan_model and plan_target else None
 
             def _on_gif_ready(volume_entry: dict):
                 """Called synchronously from the GIF thread; puts the entry into the queue."""
@@ -260,7 +262,7 @@ class SegmentationModule:
                 pending = len(downloaded_uids)
                 while pending > 0:
                     try:
-                        volume_entry = await asyncio.wait_for(gif_queue.get(), timeout=120.0)
+                        volume_entry = await asyncio.wait_for(gif_queue.get(), timeout=300.0)
                     except asyncio.TimeoutError:
                         logger.warning("GIF progressive broadcast: timed out waiting for next GIF.")
                         break
@@ -309,10 +311,12 @@ class SegmentationModule:
             latex_content = None
 
         # Always send final summary to signal completion!
+        plan_target_final = plan.get('target_labels', [None])[0] if plan.get('target_labels') else None
+        plan_model_final = plan["selected_models"][0] if plan.get("selected_models") else None
         frontend_data = {
-            "targetRoi": plan['target_labels'][0],
-            "selectedModel": plan["selected_models"][0] if plan["selected_models"] else None,
-            "diceScore": get_model_dice_score(plan["selected_models"][0], plan["target_labels"][0]) if plan["selected_models"] else None,
+            "targetRoi": plan_target_final,
+            "selectedModel": plan_model_final,
+            "diceScore": get_model_dice_score(plan_model_final, plan_target_final) if plan_model_final and plan_target_final else None,
             "volumes": gif_volumes,
             "latex": latex_content,
             "isFinished": True
