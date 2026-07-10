@@ -1,470 +1,441 @@
 """
-SegmentationModule automates ROI segmentation.
-
-The module receives the workspace config and plan state, chooses the best
-segmentation path, prepares volume-mask pairs, streams review overlays, and
-applies the human review decision before handing off downstream.
+SegmentationModule – automates ROI segmentation.
+The module receives an imaging protocol and raw volumes, then runs a
+segmentation model (e.g., nnUNet, MONAI) to produce binary masks for the
+structure
 """
-
-from __future__ import annotations
-
 import asyncio
 import json
 import logging
 import os
-import sys
-from pathlib import Path
-from typing import Any
-
 import httpx
-from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
-
-from agent_system.models.tool_logging import TextPayload
-from client_config import create_model_client_from_config
-
-from .logging_config import emit_tool_event, emit_tool_events, setup_logging
-from .pipelines.automatic import run_automatic_pipeline
-from .pipelines.interactive import (
-    create_interactive_agent,
-    create_user_proxy_agent,
-    run_interactive_pipeline,
-)
+from pathlib import Path
+from typing import Dict, Any, Union, List
+from autogen_ext.models.ollama import OllamaChatCompletionClient
 from .planner import create_planner_agent, run_planner
+from .pipelines.automatic import run_automatic_pipeline
+from .pipelines.interactive import run_interactive_pipeline, create_interactive_agent, create_user_proxy_agent
+from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
 from .services import SegmentationService
-from .utils import (
-    cleanup_discarded,
-    download_and_pair_volumes,
-    exclude_existing_masks,
-    generate_gif_overlays,
-    get_model_dice_score,
-)
-from .ws_client_sender import BASE_URL, send_ws_message_remote
-
+from .utils import exclude_existing_masks, download_and_pair_volumes, generate_gif_overlays, cleanup_discarded, get_model_dice_score
+from .logging_config import setup_logging
+import logging
+from client_config import create_model_client_from_config
+import httpx
+from agent_system.models.tool_logging import ProgressPayload, TextPayload, ToolEvent
+from agent_system.tool_logging import receive_tool_event
 setup_logging()
 
 logger = logging.getLogger("SegmentationModule")
 
-AGENT_ID = "segmentation_agent"
-TRIVIAL_INSTRUCTIONS_THRESHOLD = 50
-MASK_PERSISTENCE_DELAY_SECONDS = 120
-REVIEW_POLL_TIMEOUT_SECONDS = 330.0
-GIF_QUEUE_POLL_SECONDS = 5.0
-
-
 class SegmentationModule:
-    def __init__(
-        self,
-        config_path: str = "config.json",
-        model_name: str = "gpt-oss:120b-cloud",
-        session_id: str | None = None,
-    ):
+
+    def __init__(self, config_path: str = "config.json", model_name: str = "gpt-oss:120b-cloud", session_id: str = None):
+
         self.config_path = config_path
         self.model_name = model_name
         self.session_id = session_id
-        self.model_client = None
+        self.model_client = None  
         self.PlannerAgent = None
         self.UserProxyAgent = None
         self.UserFallbackAgent = None
-        self.segmentation_service: SegmentationService | None = None
+        self.segmentation_service = None
+
 
     async def initialize(self):
+        # intialize model client
         self.model_client = create_model_client_from_config()
-        logger.info("Model client initialized with: %s", self.model_client)
+        logger.info(f"Model client initialized with : {self.model_client}")
 
-        backend_dir = Path(__file__).resolve().parents[4]
-        server_path = backend_dir / "mcp" / "server.py"
-        logger.info("Starting MCP server at %s with session_id=%s", server_path, self.session_id)
-
+        # MCP server connection
+        current_file = Path(__file__).resolve()
+        backend_dir = current_file.parent.parent.parent.parent.parent
+        server_path = backend_dir / "mcp" / "server.py"   
+        logger.info(f"Starting MCP server at: {server_path}, with session id: {self.session_id}")
         env = os.environ.copy()
-        env.update({"SESSION_ID": self.session_id or "", "AGENT_ID": AGENT_ID})
-        mcp_server = StdioServerParams(
-            command=sys.executable,
-            args=[str(server_path)],
-            read_timeout_seconds=2000,
-            env=env,
+        env.update({
+            "SESSION_ID": self.session_id, "AGENT_ID": 'segmentation_agent'
+        })
+        math_server = StdioServerParams(
+            command="python", args=[str(server_path)], read_timeout_seconds=2000, env=env
         )
-
         try:
-            tools = await mcp_server_tools(mcp_server)
-        except Exception:
-            logger.exception("Failed to connect to MCP server at %s", server_path)
-            raise
-
-        discovery_tools = [tool for tool in tools if tool.name == "list_models"]
-        if not discovery_tools:
-            raise RuntimeError("Missing required MCP tool: list_models")
-
-        self.PlannerAgent = create_planner_agent(self.model_client, discovery_tools)
-        self.UserFallbackAgent = create_interactive_agent(self.model_client, discovery_tools)
+            tools = await mcp_server_tools(math_server)
+            logger.info(f"Connected! Available tools count: {len(tools)}")
+            
+        except Exception as e:
+            logger.error(f"Failed to connect: {e}")
+            raise 
+        
+        self.discovery_tools = [t for t in tools if t.name == "list_models"]
+        assert self.discovery_tools, "Missing list_models" 
+        
+        # intialize agents and services
+        self.PlannerAgent = create_planner_agent(self.model_client, self.discovery_tools)
+        logger.info("PlannerAgent initialized.")
+        self.UserFallbackAgent = create_interactive_agent(self.model_client, self.discovery_tools)
         self.UserProxyAgent = create_user_proxy_agent(self.model_client)
         self.segmentation_service = SegmentationService()
-        logger.info("Segmentation agents and service initialized.")
 
-    async def run(self, input_data: str | dict[str, Any], workspace_dir: str):
-        config, state = self._load_config_and_state(input_data, workspace_dir)
-        instructions = self._get_segmentation_instructions(state)
-        datasetlist = config.get("datasetlist", [])
-        logger.info("Will prepare segmentations for %s volumes.", len(datasetlist))
 
-        plan = await run_planner(self.PlannerAgent, instructions)
-        logger.info("Planner plan: %s", plan)
-
-        target_labels = plan.get("target_labels") or []
-        target_label = self._primary_target_label(target_labels)
-        chosen_path = plan.get("chosen_path", "interactive")
-        selected_model = self._selected_model(plan)
-
-        eligible_volumes = await exclude_existing_masks(
-            datasetlist,
-            target_labels,
-            model_name=selected_model,
-        )
-        await self._emit_existing_mask_summary(datasetlist, eligible_volumes)
-
-        logger.info("Eligible volumes for segmentation: %s", len(eligible_volumes))
-        if eligible_volumes:
-            await self._run_segmentation_path(
-                chosen_path=chosen_path,
-                eligible_volumes=eligible_volumes,
-                target_labels=target_labels,
-                selected_models=plan.get("selected_models") or [],
-            )
-        else:
-            logger.info("All requested volumes already have matching masks.")
-
-        await emit_tool_event(
-            event_type="tool_finished",
-            content=TextPayload(message="Segmentation complete."),
-            session_id=self.session_id,
-        )
-
-        downloaded_uids, skipped_uids = await self._prepare_review_dataset(
-            workspace_dir=workspace_dir,
-            datasetlist=datasetlist,
-            eligible_volumes=eligible_volumes,
-            chosen_path=chosen_path,
-            selected_model=selected_model,
-            target_label=target_label,
-        )
-        self._append_skip_warning(workspace_dir, skipped_uids)
-
-        gif_volumes = await self._generate_and_stream_overlays(
-            workspace_dir=workspace_dir,
-            downloaded_uids=downloaded_uids,
-            target_label=target_label,
-            selected_model=selected_model,
-        )
-        await self._send_final_frontend_update(
-            workspace_dir=workspace_dir,
-            target_label=target_label,
-            selected_model=selected_model,
-            gif_volumes=gif_volumes,
-        )
-
-        review_result = await self._wait_for_review()
-        await self._apply_review_result(workspace_dir, review_result)
-        return {"status": "finished"}
-
-    def _load_config_and_state(
-        self,
-        input_data: str | dict[str, Any],
-        workspace_dir: str,
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        if isinstance(input_data, dict):
-            if "plan" in input_data:
-                return self._read_workspace_config(workspace_dir), input_data
-            return input_data, self._read_workspace_state(workspace_dir)
-
-        config_path = Path(input_data)
-        state_path = config_path.with_name("state.json")
-        with config_path.open("r", encoding="utf-8") as config_file:
-            config = json.load(config_file)
-        with state_path.open("r", encoding="utf-8") as state_file:
-            state = json.load(state_file)
-        return config, state
-
-    def _read_workspace_config(self, workspace_dir: str) -> dict[str, Any]:
-        config_path = Path(workspace_dir) / "config.json"
-        with config_path.open("r", encoding="utf-8") as config_file:
-            return json.load(config_file)
-
-    def _read_workspace_state(self, workspace_dir: str) -> dict[str, Any]:
-        state_path = Path(workspace_dir) / "state.json"
-        with state_path.open("r", encoding="utf-8") as state_file:
-            return json.load(state_file)
-
-    def _get_segmentation_instructions(self, state: dict[str, Any]) -> str:
+    async def run(self, input_data: Union[str, Dict[str, Any]], workspace_dir: str):
+        # input data is config_path
+        if isinstance(input_data, str):
+            state_path = input_data.replace('config', 'state')
+            with open(state_path, 'r') as f:
+                state = json.load(f)
+            with open(input_data, "r") as f:
+                input_data = json.load(f)
         steps = state.get("plan", {}).get("steps", [])
-        segmentation_step = next((step for step in steps if step.get("module") == AGENT_ID), None)
+
+        segmentation_step = next(
+            (s for s in steps if s.get("module") == "segmentation_agent"),
+            None
+        )
+
         if not segmentation_step:
-            raise ValueError("Segmentation step not found in state plan.")
+            raise ValueError("Segmentation step not found")
 
-        instructions = segmentation_step.get("task_message", {}).get("instructions", "")
-        if len(instructions.strip()) >= TRIVIAL_INSTRUCTIONS_THRESHOLD:
-            logger.info("Received instructions: %s", instructions)
-            return instructions
-
-        hypothesis_title = state.get("hypothesis", {}).get("title", "")
-        logger.warning(
-            "Instructions are too short (%s chars): '%s'. Falling back to hypothesis title.",
-            len(instructions.strip()),
-            instructions.strip(),
-        )
-        return (
-            f"Perform ROI segmentation for the study: '{hypothesis_title}'. "
-            "Identify the correct anatomical target from the hypothesis title and run the appropriate model."
-        )
-
-    async def _emit_existing_mask_summary(self, datasetlist, eligible_volumes) -> None:
-        payload = TextPayload(
-            message=f"Found existing masks for {len(datasetlist) - len(eligible_volumes)} volumes."
-        )
-        await emit_tool_events(
-            event_types=["tool_started", "tool_finished"],
-            content=payload,
-            session_id=self.session_id,
-        )
-
-    async def _run_segmentation_path(
-        self,
-        *,
-        chosen_path: str,
-        eligible_volumes: list[str],
-        target_labels: list[str],
-        selected_models: list[str],
-    ) -> None:
-        if self.segmentation_service is None:
-            raise RuntimeError("Segmentation service has not been initialized.")
-
-        if chosen_path == "automatic" and selected_models:
-            await run_automatic_pipeline(
-                eligible_volumes,
-                target_labels,
-                selected_models,
-                self.segmentation_service,
-                self.session_id,
-            )
-            return
-
-        if chosen_path == "automatic":
+        instructions = segmentation_step["task_message"]["instructions"]
+        # Guard: if planning stored only a trivial stub (e.g. "fix", "run"),
+        # fall back to the hypothesis title so the PlannerAgent can still
+        # infer the correct anatomical target and model.
+        TRIVIAL_THRESHOLD = 50
+        if len(instructions.strip()) < TRIVIAL_THRESHOLD:
+            hypothesis_title = state.get("hypothesis", {}).get("title", "")
             logger.warning(
-                "Planner selected automatic segmentation without a model. Falling back to interactive path."
+                f"Instructions appear trivially short ({len(instructions.strip())} chars): "
+                f"'{instructions.strip()}'. Falling back to hypothesis title as instruction context."
             )
-
-        await run_interactive_pipeline(
-            self.UserFallbackAgent,
-            self.UserProxyAgent,
-            eligible_volumes,
-            target_labels,
-            self.segmentation_service,
-            self.session_id,
+            instructions = (
+                f"Perform ROI segmentation for the study: '{hypothesis_title}'. "
+                f"Identify the correct anatomical target from the hypothesis title and run the appropriate model."
+            )
+        # hypothesis: str = state["hypothesis"]["hypothesis"]
+        logger.info(f"Received instructions: {instructions}")
+        datasetlist: List[str] = input_data.get("datasetlist", [])
+        logger.info(f"Will prepare segmentations for {len(datasetlist)} volumes.")
+        #1. plan
+        plan = await run_planner(self.PlannerAgent,instructions)
+        logger.info(f"Planner plan: {plan}")
+        target_labels = plan["target_labels"]
+        chosen_path = plan["chosen_path"]
+        # Pass the selected model so a volume is only excluded when it already
+        # has a mask from the SAME model+organ pair.  A liver-voxtell mask will
+        # NOT block a fresh vista liver segmentation.
+        selected_models = plan.get("selected_models") or []
+        model_for_exclusion = selected_models[0] if selected_models else None
+        eligible_volumes = await exclude_existing_masks(
+            datasetlist, target_labels, model_name=model_for_exclusion
         )
-
-    async def _prepare_review_dataset(
-        self,
-        *,
-        workspace_dir: str,
-        datasetlist: list[str],
-        eligible_volumes: list[str],
-        chosen_path: str,
-        selected_model: str | None,
-        target_label: str | None,
-    ) -> tuple[list[str], list[str]]:
-        payload = TextPayload(message="Creating segmentation review dataset.")
-        await emit_tool_events(
-            event_types=["tool_started", "tool_progress"],
+        # ====== Logging before Segmentation =================
+        payload = TextPayload(
+            message=f'Found existing masks for {len(datasetlist) - len(eligible_volumes)} volumes'
+        )
+        plan_log_event = ToolEvent(
+            event_type='tool_started',
+            source='segmentation_agent',
+            content_type='text',
             content=payload,
             session_id=self.session_id,
         )
+        await receive_tool_event(plan_log_event)
+        plan_log_event = ToolEvent(
+            event_type='tool_finished',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload,
+            session_id=self.session_id,
+        )
+        await receive_tool_event(plan_log_event)
+        
+        # =========== test ===============
 
+        # plan ={'target_labels': ['Spleen'], 'chosen_path': 'automatic','selected_models': ['segmentation_spleen']}
+        # =================================
+        
+        logger.info(
+            f"Eligible volumes for segmentation: {len(eligible_volumes)}"
+        )
+        #whether it's automatic or interactive
+        if chosen_path == "automatic" and eligible_volumes:
+            selected_auto_models = plan["selected_models"] if plan["selected_models"] else None
+            await run_automatic_pipeline(eligible_volumes, target_labels, selected_auto_models, self.segmentation_service, self.session_id)
+
+        elif eligible_volumes:
+            selected_interactive_model = await run_interactive_pipeline(self.UserFallbackAgent, self.UserProxyAgent, eligible_volumes, target_labels, self.segmentation_service, self.session_id)
+        # ========= logging after Segmentation ================
+        payload = TextPayload(message=f'Segmentation...Done')
+        segmentation_tool_event = ToolEvent(
+            event_type='tool_finished',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload,
+            session_id=self.session_id,
+        )
+        await receive_tool_event(segmentation_tool_event)  
+        
+        # ===========  loggin before download ====================  
+        payload = TextPayload(message='Creating dataset...')
+        environment_setup_event = ToolEvent(
+            event_type='tool_started',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload,
+            session_id=self.session_id,
+        )
+        await receive_tool_event(environment_setup_event)
+        environment_setup_event = ToolEvent(
+            event_type='tool_progress',
+            source='segmentation_agent',
+            content_type='text',
+            content=payload,
+            session_id=self.session_id,
+        )
+        await receive_tool_event(environment_setup_event)
+        # =========== download ========================    
+        #finally download the volumes with its label masks 
+        # Give MONAI a moment to persist new masks — but only when segmentation
+        # actually ran.  If all volumes already had existing masks (eligible_volumes
+        # is empty), there is nothing to wait for.
         if eligible_volumes:
-            logger.info("Waiting %s seconds for MONAI to persist new masks.", MASK_PERSISTENCE_DELAY_SECONDS)
-            await asyncio.sleep(MASK_PERSISTENCE_DELAY_SECONDS)
-
-        volumes_to_download = eligible_volumes or datasetlist
+            logger.info("Waiting 120 s for MONAI to persist new segmentation masks...")
+            await asyncio.sleep(120)
+        volumes_to_download = eligible_volumes if eligible_volumes else datasetlist
         result = await download_and_pair_volumes(
-            workspace_dir,
-            volumes_to_download,
-            chosen_path=chosen_path,
-            selected_auto_model_for_volume=selected_model,
-            target_label=target_label,
+                    workspace_dir,
+                    volumes_to_download, 
+                    chosen_path=chosen_path, 
+                    selected_auto_model_for_volume=plan["selected_models"][0] if plan["selected_models"] else None,
+                    target_label=target_labels[0] if target_labels else None,
         )
+        # download_and_pair_volumes returns (successful_list, skipped_list) normally,
+        # but returns [] if datasetlist was empty — guard against both.
         if isinstance(result, tuple):
-            return result
-        if isinstance(result, list):
-            return result, []
-        return [], []
-
-    def _append_skip_warning(self, workspace_dir: str, skipped_uids: list[str]) -> None:
-        if not skipped_uids:
-            return
-
-        skip_msg = (
-            f"WARNING: Skipped {len(skipped_uids)} volumes because they exceeded the "
-            f"16 GB RAM decompression limit. UIDs: {', '.join(skipped_uids)}"
-        )
-        logger.warning(skip_msg)
-
-        scratchpad_path = Path(workspace_dir) / "scratchpad.json"
-        if not scratchpad_path.exists():
-            return
-
-        try:
-            with scratchpad_path.open("r", encoding="utf-8") as scratchpad_file:
-                scratchpad = json.load(scratchpad_file)
-
-            agent_section = scratchpad.get("agents", {}).get(AGENT_ID) or scratchpad.get(AGENT_ID)
-            if agent_section is None:
-                return
-
-            from datetime import datetime, timezone
-
-            agent_section.setdefault("notes", []).append(
-                {"content": skip_msg, "created_at": datetime.now(timezone.utc).isoformat()}
-            )
-            with scratchpad_path.open("w", encoding="utf-8") as scratchpad_file:
-                json.dump(scratchpad, scratchpad_file, indent=2)
-        except Exception:
-            logger.exception("Failed to write skipped-volume warning to scratchpad.")
-
-    async def _generate_and_stream_overlays(
-        self,
-        *,
-        workspace_dir: str,
-        downloaded_uids: list[str],
-        target_label: str | None,
-        selected_model: str | None,
-    ) -> list[dict[str, Any]]:
-        if not downloaded_uids:
-            return []
-
-        gif_queue: asyncio.Queue = asyncio.Queue()
-        gif_volumes: list[dict[str, Any]] = []
-        dice_score = get_model_dice_score(selected_model, target_label) if selected_model and target_label else None
-
-        def on_gif_ready(volume_entry: dict[str, Any]) -> None:
-            gif_queue.put_nowait(volume_entry)
-
-        async def broadcast_progressively(generation_task: asyncio.Task) -> None:
-            while True:
-                if generation_task.done() and gif_queue.empty():
-                    break
-
+            downloaded_uids, skipped_uids = result
+        else:
+            downloaded_uids, skipped_uids = [], []
+        
+        # --- Log skipped volumes to scratchpad ---
+        if skipped_uids:
+            skip_msg = f"WARNING: Skipped {len(skipped_uids)} volumes because they exceeded the 16 GB RAM decompression limit. UIDs: {', '.join(skipped_uids)}"
+            logger.warning(skip_msg)
+            
+            # Append to scratchpad.json directly
+            scratchpad_path = os.path.join(workspace_dir, "scratchpad.json")
+            if os.path.exists(scratchpad_path):
                 try:
-                    volume_entry = await asyncio.wait_for(
-                        gif_queue.get(),
-                        timeout=GIF_QUEUE_POLL_SECONDS,
-                    )
-                except asyncio.TimeoutError:
-                    if generation_task.done():
+                    with open(scratchpad_path, 'r', encoding='utf-8') as f:
+                        sp_data = json.load(f)
+                    
+                    if "segmentation_agent" in sp_data:
+                        from datetime import datetime, timezone
+                        sp_data["segmentation_agent"].setdefault("notes", []).append({
+                            "content": skip_msg,
+                            "created_at": datetime.now(timezone.utc).isoformat()
+                        })
+                        with open(scratchpad_path, 'w', encoding='utf-8') as f:
+                            json.dump(sp_data, f, indent=2)
+                except Exception as e:
+                    logger.error(f"Failed to write to scratchpad: {e}")
+        # -----------------------------------------
+        
+        #============================ test segmentation view ===================================
+        # downloaded_uids = ["1.2.826.0.1.3680043.8.498.15136386566608168882487015520907740870"]
+        # ======================================================================================
+        
+        # ================== Generate Overlays (progressive) ====================
+        gif_volumes = []
+        if downloaded_uids:
+            # Use a queue to bridge the sync GIF thread → async broadcaster
+            gif_queue: asyncio.Queue = asyncio.Queue()
+            plan_target  = plan.get('target_labels', [None])[0] if plan.get('target_labels') else None
+            plan_model   = plan["selected_models"][0] if plan.get("selected_models") else None
+            plan_dice    = get_model_dice_score(plan_model, plan_target) if plan_model and plan_target else None
+
+            def _on_gif_ready(volume_entry: dict):
+                """Called synchronously from the GIF thread; puts the entry into the queue."""
+                gif_queue.put_nowait(volume_entry)
+
+            async def _broadcast_progressively():
+                """Reads from the queue and broadcasts each GIF as it arrives."""
+                pending = len(downloaded_uids)
+                while pending > 0:
+                    try:
+                        volume_entry = await asyncio.wait_for(gif_queue.get(), timeout=300.0)
+                    except asyncio.TimeoutError:
+                        logger.warning("GIF progressive broadcast: timed out waiting for next GIF.")
                         break
-                    logger.debug("Waiting for segmentation GIF generation.")
-                    continue
+                    gif_volumes.append(volume_entry)
+                    pending -= 1
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            await client.post(
+                                "http://localhost:8150/ws-broadcast",
+                                json={
+                                    "type": "segmentation_output",
+                                    "payload": {
+                                        "targetRoi": plan_target,
+                                        "selectedModel": plan_model,
+                                        "diceScore": plan_dice,
+                                        "volumes": gif_volumes,   # cumulative list
+                                        "latex": None,
+                                        "isFinished": False,
+                                    },
+                                    "session_id": self.session_id
+                                }
+                            )
+                        logger.info(f"Progressive broadcast: sent {len(gif_volumes)}/{len(downloaded_uids)} GIFs")
+                    except Exception as broadcast_err:
+                        logger.warning(f"Progressive broadcast failed for {volume_entry.get('seriesInstanceUid')}: {broadcast_err}")
 
-                gif_volumes.append(volume_entry)
-                await self._send_frontend_update(
-                    target_label=target_label,
-                    selected_model=selected_model,
-                    dice_score=dice_score,
-                    volumes=gif_volumes,
-                    latex=None,
-                    is_finished=False,
-                )
-                logger.info("Sent %s/%s segmentation GIFs.", len(gif_volumes), len(downloaded_uids))
+            # Run GIF generation (blocking) and progressive broadcaster concurrently
+            await asyncio.gather(
+                asyncio.to_thread(generate_gif_overlays, workspace_dir, downloaded_uids, _on_gif_ready),
+                _broadcast_progressively(),
+            )
+            logger.info(f"gif_volumes sample: {gif_volumes[:1]}")
 
-        generation_task = asyncio.create_task(
-            asyncio.to_thread(generate_gif_overlays, workspace_dir, downloaded_uids, on_gif_ready)
-        )
-        await asyncio.gather(generation_task, broadcast_progressively(generation_task))
-        return gif_volumes
 
-    async def _send_final_frontend_update(
-        self,
-        *,
-        workspace_dir: str,
-        target_label: str | None,
-        selected_model: str | None,
-        gif_volumes: list[dict[str, Any]],
-    ) -> None:
-        dice_score = get_model_dice_score(selected_model, target_label) if selected_model and target_label else None
-        await self._send_frontend_update(
-            target_label=target_label,
-            selected_model=selected_model,
-            dice_score=dice_score,
-            volumes=gif_volumes,
-            latex=self._read_initial_latex(workspace_dir),
-            is_finished=True,
-        )
 
-    async def _send_frontend_update(
-        self,
-        *,
-        target_label: str | None,
-        selected_model: str | None,
-        dice_score: float | None,
-        volumes: list[dict[str, Any]],
-        latex: str | None,
-        is_finished: bool,
-    ) -> None:
-        payload = {
-            "targetRoi": target_label,
-            "selectedModel": selected_model,
-            "diceScore": dice_score,
-            "volumes": volumes,
-            "latex": latex,
-            "isFinished": is_finished,
+        #=========== Prepare final summary payload for frontend ========================
+        # GIFs were already sent progressively — this final message attaches latex
+        # and confirms all volumes are done. Volumes list kept for completeness.
+        latex_content = None
+        try:
+            from pathlib import Path
+            tex_path = Path(workspace_dir) / "initial_report.tex"
+            if tex_path.exists():
+                latex_content = tex_path.read_text(encoding="utf-8")
+        except Exception:
+            latex_content = None
+
+        # Always send final summary to signal completion!
+        plan_target_final = plan.get('target_labels', [None])[0] if plan.get('target_labels') else None
+        plan_model_final = plan["selected_models"][0] if plan.get("selected_models") else None
+        frontend_data = {
+            "targetRoi": plan_target_final,
+            "selectedModel": plan_model_final,
+            "diceScore": get_model_dice_score(plan_model_final, plan_target_final) if plan_model_final and plan_target_final else None,
+            "volumes": gif_volumes,
+            "latex": latex_content,
+            "isFinished": True
         }
-        try:
-            await send_ws_message_remote("segmentation_output", payload, session_id=self.session_id)
-        except Exception:
-            logger.exception("Failed to send segmentation_output update.")
-
-    def _read_initial_latex(self, workspace_dir: str) -> str | None:
-        tex_path = Path(workspace_dir) / "initial_report.tex"
-        try:
-            return tex_path.read_text(encoding="utf-8") if tex_path.exists() else None
-        except Exception:
-            logger.exception("Failed to read initial_report.tex.")
-            return None
-
-    async def _wait_for_review(self) -> dict[str, list[str]]:
-        logger.info("Waiting for human segmentation review via HTTP long-poll.")
-        review_url = f"{BASE_URL}/segmentation-review/wait/{self.session_id}"
-        async with httpx.AsyncClient(timeout=REVIEW_POLL_TIMEOUT_SECONDS) as client:
-            while True:
-                try:
-                    response = await client.get(review_url)
-                    if response.status_code == 408:
-                        logger.info("Review long-poll timed out on server; reconnecting.")
-                        continue
-
-                    response.raise_for_status()
-                    return response.json()
-                except httpx.ReadTimeout:
-                    logger.info("Review client read timeout reached; reconnecting.")
-
-    async def _apply_review_result(self, workspace_dir: str, review_result: dict[str, list[str]]) -> None:
-        accepted = review_result.get("accepted", [])
-        rejected = review_result.get("rejected", [])
-        modified = review_result.get("modified", [])
-        logger.info("Review complete. Accepted=%s Rejected=%s Modified=%s", accepted, rejected, modified)
-
-        cleanup_discarded(workspace_dir, accepted, modified)
-        if modified:
-            logger.info("Fetching updated labels for modified UIDs.")
-            await download_and_pair_volumes(
-                workspace_dir,
-                datasetlist=modified,
-                chosen_path="interactive",
-                selected_auto_model_for_volume=None,
-                download_volumes=False,
+        logger.info("Module sending final summary to frontend...")
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            await client.post(
+                "http://localhost:8150/ws-broadcast",
+                json={
+                    "type": "segmentation_output",
+                    "payload": frontend_data,
+                    "session_id": self.session_id
+                }
             )
 
-    def _selected_model(self, plan: dict[str, Any]) -> str | None:
-        selected_models = plan.get("selected_models") or []
-        return selected_models[0] if selected_models else None
 
-    def _primary_target_label(self, target_labels: list[str]) -> str | None:
-        return target_labels[0] if target_labels else None
+        # Wait for user review message
+        logger.info("Module paused: Waiting for human review via HTTP long-poll...")
+        async with httpx.AsyncClient(timeout=330.0) as client:
+                    while True:
+                        try:
+                            response = await client.get(
+                                f"http://localhost:8150/segmentation-review/wait/{self.session_id}"
+                            )
+
+                            # if time out reconnect
+                            if response.status_code == 408:
+                                logger.info("Server ended the long-poll (408 Timeout). Reconnecting...")
+                                continue
+                            # for other errors, log and raise
+                            response.raise_for_status()
+                            # successful response, break the loop and process results
+                            user_results = response.json()
+                            break
+                        except httpx.ReadTimeout:
+                            logger.info("Client read timeout reached. Reconnecting...")
+                            continue
+
+        final_accepted_uids = user_results.get("accepted", [])
+        final_rejected_uids = user_results.get("rejected", [])
+        final_modified_uids = user_results.get("modified", [])
+        logger.info(f"Module resumed! Accepted: {final_accepted_uids}, Rejected: {final_rejected_uids}, Modified: {final_modified_uids}")
+
+        # #============= accepted and modified uids just kept only in the folder=================
+        cleanup_discarded(workspace_dir, final_accepted_uids, final_modified_uids)
+        if final_modified_uids:
+            logger.info("Fetching updated labels for modified UIDs...")
+            for uid in final_modified_uids:
+                temp_mask_path = os.path.join(workspace_dir, "temp_segmentations", f"seg_{uid}_modified.nii.gz")
+                target_mask_path = os.path.join(workspace_dir, "masks", f"{uid}.nii.gz")
+                if os.path.exists(temp_mask_path):
+                    logger.info(f"Using explicitly uploaded modified mask for {uid}")
+                    import shutil
+                    shutil.copy2(temp_mask_path, target_mask_path)
+                else:
+                    logger.info(f"No explicitly uploaded mask found for {uid}, falling back to datastore")
+                    await download_and_pair_volumes(
+                        workspace_dir,
+                        datasetlist=[uid],
+                        chosen_path="interactive",
+                        selected_auto_model_for_volume=None,
+                        download_volumes=False
+                    )
+
+            # --- REGENERATE GIFS FOR MODIFIED MASKS ---
+            logger.info("Re-generating GIFs for modified masks...")
+            modified_gif_entries = []
+            def _on_gif_ready_modified(volume_entry: dict):
+                modified_gif_entries.append(volume_entry)
+            
+            await asyncio.to_thread(generate_gif_overlays, workspace_dir, final_modified_uids, _on_gif_ready_modified)
+            
+            # Update gif_volumes array with the new entries
+            for mod_entry in modified_gif_entries:
+                for i, existing_entry in enumerate(gif_volumes):
+                    if existing_entry.get("seriesInstanceUid") == mod_entry.get("seriesInstanceUid"):
+                        gif_volumes[i] = mod_entry
+                        break
+            
+            # Re-broadcast final summary so the chat UI updates the GIFs!
+            frontend_data["volumes"] = gif_volumes
+            logger.info("Module sending updated summary to frontend with modified GIFs...")
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    await client.post(
+                        "http://localhost:8150/ws-broadcast",
+                        json={
+                            "type": "segmentation_output",
+                            "payload": frontend_data,
+                            "session_id": self.session_id
+                        }
+                    )
+            except Exception as e:
+                logger.error(f"Failed to rebroadcast updated GIFs: {e}")
+
+        return {"status": "finished"}
+    
+# for testing the agent alone 
+async def test_module():
+    """Test function for the SegmentationModule"""
+    try:
+        logger.info("Starting SegmentationModule test...")
+        
+        agent = SegmentationModule(session_id="68dac4a1-ecdb-4145-9f23-874a85d1d6bb")
+        await agent.initialize()
+        
+        current_file = Path(__file__)
+        workspace_folder = os.path.join(current_file.parent.parent.parent.parent,"workspace_68dac4a1-ecdb-4145-9f23-874a85d1d6bb")
+        config_path = os.path.join(workspace_folder, "config.json")
+        result = await agent.run(config_path, workspace_folder)
+        
+        logger.info("Test completed successfully!")
+        logger.info(f"Result: {result}")
+        
+    except Exception as e:
+        logger.error(f"Test failed with error: {e}", exc_info=True)
+
+
+if __name__ == "__main__":
+    asyncio.run(test_module())
 
 __all__ = ["SegmentationModule"]

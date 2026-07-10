@@ -8,7 +8,7 @@ from typing import Dict
 
 import httpx
 # pyrefly: ignore [missing-import]
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, File, UploadFile
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, File, UploadFile, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import APIRouter, UploadFile, File
@@ -811,15 +811,211 @@ async def segmentation_review(data: dict):
         "rejected": data.get("rejected", []),
         "modified": data.get("modified", []),
     }
+    logger.info(f"[Review] Received triage for session={session_id}: {review_payload}")
+    
     # resolve the waiting module if it's already polling
     future = _review_futures.pop(session_id, None)
     if future and not future.done():
         future.set_result(review_payload)
+        logger.info(f"[Review] Resolved waiting future for session={session_id}")
     else:
         # store it in case the module polls later
         _review_futures[f"ready:{session_id}"] = review_payload  # plain dict, not future
+        logger.info(f"[Review] No active future found for session={session_id}. Stored as ready:{session_id} for later pickup.")
     
     return {"status": "ok"}
+
+
+@app.post("/segmentation-review/upload-mask")
+async def upload_modified_mask(
+    session_id: str = Form(...),
+    series_instance_uid: str = Form(...),
+    file: UploadFile = File(...)
+):
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+    output_dir = os.path.join(workspace_folder, 'temp_segmentations')
+    
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create directories: {str(e)}")
+    
+    file_path = os.path.join(output_dir, f"seg_{series_instance_uid}_modified.nii.gz")
+    # The frontend mask matches the full DICOM volume space.
+    # The workspace stores volumes in 'volumes/' and masks in 'masks/'.
+    base_volume_path = os.path.join(workspace_folder, "volumes", f"{series_instance_uid}.nii.gz")
+    original_mask_path = os.path.join(workspace_folder, "masks", f"{series_instance_uid}.nii.gz")
+    
+    try:
+        import nibabel as nib
+        import numpy as np
+        import json
+        
+        # Read the raw byte array uploaded by the frontend
+        raw_bytes = await file.read()
+        actual_bytes = len(raw_bytes)
+        
+        # Try to load the base volume NIfTI for shape and affine
+        ref_nii = None
+        ref_shape = None
+        
+        if os.path.exists(base_volume_path):
+            ref_nii = nib.load(base_volume_path)
+            ref_shape = ref_nii.shape[:3]
+            logger.info(f"Using base volume for reference: shape={ref_shape}")
+        elif os.path.exists(original_mask_path):
+            ref_nii = nib.load(original_mask_path)
+            ref_shape = ref_nii.shape[:3]
+            logger.info(f"Using original mask for reference: shape={ref_shape}")
+        
+        # If neither file exists, try to infer shape from the frontend-provided dimensions
+        if ref_shape is None:
+            raise FileNotFoundError(
+                f"Neither base volume ({base_volume_path}) nor original mask ({original_mask_path}) found."
+            )
+        
+        # Check if the raw bytes match the reference shape
+        expected_voxels = int(np.prod(ref_shape))
+        
+        if actual_bytes == expected_voxels:
+            dtype = np.uint8
+        elif actual_bytes == expected_voxels * 2:
+            dtype = np.uint16
+        elif actual_bytes == expected_voxels * 4:
+            dtype = np.float32
+        else:
+            # The frontend volume may have a different shape than the stored mask
+            # (e.g., full 59 slices vs cropped 30 slices). 
+            # Try common dtypes against the raw byte count.
+            inferred_shape = None
+            for try_dtype, bpp in [(np.uint8, 1), (np.uint16, 2), (np.float32, 4)]:
+                total_voxels = actual_bytes // bpp
+                if actual_bytes % bpp == 0 and total_voxels > 0:
+                    # Assume X and Y match the reference, compute Z
+                    if ref_shape[0] * ref_shape[1] > 0:
+                        z_slices = total_voxels // (ref_shape[0] * ref_shape[1])
+                        if z_slices * ref_shape[0] * ref_shape[1] == total_voxels and z_slices > 0:
+                            inferred_shape = (ref_shape[0], ref_shape[1], z_slices)
+                            dtype = try_dtype
+                            logger.info(f"Inferred frontend volume shape: {inferred_shape} with dtype={try_dtype}")
+                            break
+            
+            if inferred_shape is None:
+                raise ValueError(
+                    f"Size mismatch: reference shape {ref_shape} ({expected_voxels} voxels), "
+                    f"received {actual_bytes} bytes. Could not infer frontend shape."
+                )
+            ref_shape = inferred_shape
+        
+        # Convert raw bytes to a flat array and reshape
+        flat_array = np.frombuffer(raw_bytes, dtype=dtype)
+        reshaped_array = flat_array.reshape(ref_shape, order='F')
+        
+        # Create a new NIfTI image with the modified data
+        affine = ref_nii.affine if ref_nii is not None else np.eye(4)
+        new_nii = nib.Nifti1Image(reshaped_array, affine)
+        nib.save(new_nii, file_path)
+        logger.info(f"Saved modified mask: {file_path}, shape={ref_shape}, dtype={dtype}")
+        
+    except Exception as e:
+        logger.error(f"Failed to process and save modified mask: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to process mask: {str(e)}")
+    
+    return {
+        "message": "Modified mask saved successfully", 
+        "session_id": session_id,
+        "path": os.path.abspath(file_path)
+    }
+
+
+@app.get("/segmentation-review/mask/{session_id}/{series_uid}")
+async def get_segmentation_mask(session_id: str, series_uid: str):
+    """
+    Serve the agent-generated mask for a given session and series UID as an NRRD file.
+    The mask is converted from NIfTI (.nii.gz) to NRRD on-the-fly so the existing
+    frontend SegmentationReader.parseNrrdData() pipeline works without modification.
+
+    Search order:
+      1. temp_segmentations/ – user-uploaded modified masks (highest priority)
+      2. masks/              – agent-generated masks
+    """
+    import io
+    import numpy as np
+
+    try:
+        import nibabel as nib
+        import nrrd
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"Required library missing: {e}")
+
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", os.path.dirname(os.path.abspath(__file__)))
+    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+
+    # Search locations in priority order
+    candidates = [
+        os.path.join(workspace_folder, "temp_segmentations", f"seg_{series_uid}_modified.nii.gz"),
+        os.path.join(workspace_folder, "masks", f"{series_uid}.nii.gz"),
+    ]
+
+    nifti_path = None
+    for path in candidates:
+        if os.path.isfile(path):
+            nifti_path = path
+            break
+
+    if not nifti_path:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No mask found for series '{series_uid}' in session '{session_id}'"
+        )
+
+    logger.info(f"Serving mask (as NRRD) for session={session_id}, series={series_uid}: {nifti_path}")
+
+    try:
+        # Load NIfTI and convert to uint16 (matches what the frontend Uint16Array expects)
+        nii = nib.load(nifti_path)
+        data = nii.get_fdata().astype(np.uint16)
+
+        # Build NRRD header from NIfTI metadata to preserve orientation
+        affine = nii.affine.copy()
+        
+        # NIfTI uses RAS+ coordinates, NRRD here uses LPS+.
+        # We negate the X and Y axes in the affine matrix to map correctly.
+        affine[0, :] = -affine[0, :]
+        affine[1, :] = -affine[1, :]
+        
+        header = {
+            "type": "uint16",
+            "dimension": 3,
+            "space": "left-posterior-superior",
+            "sizes": list(data.shape),
+            "space directions": [
+                [float(affine[0,0]), float(affine[1,0]), float(affine[2,0])],
+                [float(affine[0,1]), float(affine[1,1]), float(affine[2,1])],
+                [float(affine[0,2]), float(affine[1,2]), float(affine[2,2])],
+            ],
+            "space origin": [float(affine[0,3]), float(affine[1,3]), float(affine[2,3])],
+            "kinds": ["domain", "domain", "domain"],
+            "endian": "little",
+            "encoding": "gzip",
+        }
+
+        # Serialize to NRRD bytes in memory
+        buffer = io.BytesIO()
+        nrrd.write(buffer, data, header)
+        nrrd_bytes = buffer.getvalue()
+
+        return Response(
+            content=nrrd_bytes,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f"attachment; filename={series_uid}.nrrd"},
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to convert mask to NRRD: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to convert mask: {str(e)}")
 
 
 @app.get("/segmentation-review/wait/{session_id}")
