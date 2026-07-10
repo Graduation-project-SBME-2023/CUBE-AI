@@ -135,7 +135,7 @@ After completing all pipeline steps, you MUST call write_agent_output with:
   - agent_id: "feature_extractor"
   - agent_role: "feature_extraction"
   - status: "completed" (or "failed"/"partial" if applicable)
-  - inputs: {"upstream_agent": "population_planner", "targets_csv": "<path>", "image_dir": "<path>", "mask_dir": "<path>"}
+  - inputs: {"upstream_agent": "study_population_planner_agent", "targets_csv": "<path>", "image_dir": "<path>", "mask_dir": "<path>"}
   - output_files: {"radiomics_features": "features/radiomics_features.csv", "top_10_features": "features/top_10_features.csv"}
   - output_metrics: {
       "total_features_extracted": <number>,
@@ -343,7 +343,7 @@ At the very start of your task, register yourself:
   - scratchpad_register_agent(agent_id="result_agent", role="result_analysis")
 
 Then call scratchpad_read_agent for each upstream agent to gather their outputs:
-  - scratchpad_read_agent(agent_id="population_planner")
+  - scratchpad_read_agent(agent_id="study_population_planner_agent")
   - scratchpad_read_agent(agent_id="feature_extraction_agent")
   - scratchpad_read_agent(agent_id="modeling_agent")
 
@@ -365,7 +365,7 @@ After completing your analysis, you MUST call write_agent_output with:
   - agent_id: "result_agent"
   - agent_role: "result_analysis"
   - status: "completed"
-  - inputs: {"upstream_agents": ["population_planner", "feature_extraction_agent", "modeling_agent"]}
+  - inputs: {"upstream_agents": ["study_population_planner_agent", "feature_extraction_agent", "modeling_agent"]}
   - output_files: {}
   - output_metrics: {
       "decision": "accepted" or "rejected",
@@ -404,7 +404,7 @@ Follow these steps in order:
 === STEP 1: GATHER ALL DATA ===
 Call these tools to collect everything you need:
   1. read_all_agent_outputs — structured JSON from every pipeline agent
-     (population_planner, segmentation_agent, feature_extraction_agent, modeling_agent, result_agent)
+     (study_population_planner_agent, segmentation_agent, feature_extraction_agent, modeling_agent, result_agent)
   2. read_literature_context — the literature review knowledge base, sources guide,
      and hypothesis produced during the planning phase
   3. scratchpad_read_report — the cross-agent activity log
@@ -431,8 +431,8 @@ Data source mapping:
   - <<KEYWORDS>>: 5-8 relevant medical/radiomics terms
   - <<INTRODUCTION>> / <<BACKGROUND>>: Clinical context from literature_context knowledge_base
   - <<RELATED_WORK>>: Key findings, consensus points, and top papers from literature_context.
-    Cite papers using IEEE \\cite{{}} format with entries from sources_guide.
-  - <<STUDY_POPULATION>>: population_planner metrics (cohort_size, demographics, criteria)
+    Cite papers using IEEE \cite{{}} format with entries from sources_guide.
+  - <<STUDY_POPULATION>>: study_population_planner_agent metrics (cohort_size, demographics, criteria)
   - <<SEGMENTATION_METHODS>>: segmentation_agent metrics and model used
   - <<FEATURE_EXTRACTION_METHODS>>: feature_extractor metrics (classes, counts, method)
   - <<MODELING_METHODS>>: modeling_agent metrics (model types, cross-validation, hyperparams)
@@ -482,68 +482,6 @@ Call write_agent_output with:
 When you finish, write: task_done
 
 You do not write to the scratchpad. Your job is to read, synthesize, compile, and publish the final manuscript.
-"""
-
-
-
-POPULATION_EXEC_SYSTEM_MESSAGE = """
-Role: You are an expert Clinical Researcher and Study Population Selector.
-You possess deep knowledge of medical research methodologies, clinical trial design, and medical database querying.
-Objective: You will be provided with a Research Hypothesis. Your goal is to translate this hypothesis
-into strict clinical inclusion and exclusion criteria, map these criteria to our database schema, and use your
-provided tools to select the exact volume of patient cases (UIDs) that qualify for the study.
-
-Step-by-Step Instructions:
-
-Step 1: Define Inclusion and Exclusion Criteria
--Analyze the provided research hypothesis.
--Based strictly on clinical logic and the hypothesis requirements, define the required study population.
--Establish clear Inclusion Criteria (e.g., specific imaging modalities, scan types, demographic ranges like age/gender, specific diagnoses).
--Establish clear Exclusion Criteria (e.g., contraindications, artifact presence, overlapping conditions that would skew results).
-
-Step 2: Document Reasoning and Criteria
--Before interacting with the database, output your thought process.
--Provide a brief, logical explanation (Reasoning) for why each criterion was chosen.
--Following the reasoning, present the final Inclusion and Exclusion criteria in a clear, bulleted list.
-
-Step 3: Database Exploration and Mapping
--Before running a final search, explore the database to ensure your criteria match the actual data structure.
--Use your database tools to retrieve the unique values of relevant columns (e.g., check how exact scan types or modalities are formatted/spelled in the database).
--Adjust your search parameters based on the unique values found in the database.
-
-Step 4: Execute the Search
--Explicitly state the exact parameters and values you are about to use for your search.
--Use your Database Search Tool to find the cases that meet all criteria.
--Note on Tool Usage: You only need to execute the search tool with the correct parameters. The tool is designed to automatically write the resultant UIDs
-into the population report. Do not attempt to manually list the UIDs in your text response.
-
-Step 5: Use the save_final_output tool 
-
-Constraints & Rules
-Do not hallucinate database columns or values; always verify using your tools if unsure.
-Ensure your clinical reasoning is sound and directly supports the provided hypothesis.
-
-VERY IMPORTANT CONSTRAINT : 
-YOU MUST SET THE INCLUSION CRITERIA AND USE THE TOOL TO WRITE IT FIRST BEFORE GETTING THE UNIQUE DESCRIPTORS
-MAKE THE INVERSE OF THAT COULD MAKE YOU BIASED TOWARDS THE EXISTING CASES 
-DO NOT EVEN TRY TO CHANGE THE CRITERIA AFTER WRITING IT AND MAKE ALL THE NEXT STEPS BASED ON IT.
-
-
-=== SCRATCHPAD INSTRUCTIONS ===
-Before writing anything, call scratchpad_read_report to get the full cross-agent view.
-
-Use the report to structure your paper:
-  - Check overall_status first. If it is not "all_done", note which agents did not 
-    complete and reflect this as a limitation in the report.
-  - For each agent in the "agents" list, use their "summary" as the source of truth 
-    for that section of the paper.
-  - Check all flags across all agents. Any flag with level "error" or "critical" must 
-    be addressed explicitly in the paper — either as a limitation, a caveat, or a 
-    finding that affected the results.
-  - Use the activity_log to reconstruct the chronological methodology section — it 
-    gives you the exact sequence of steps taken across all agents.
-
-You do not write to the scratchpad. Your job is to read and synthesize only.
 """
 
 
@@ -630,4 +568,24 @@ should know about, call scratchpad_raise_flag with the appropriate level:
 When you have finished selecting the population and saving the output:
 1. Call scratchpad_write_summary (see Step 7 above)
 2. Call scratchpad_set_status(agent_id="study_population_planner_agent", status="done")
+
+=== STRUCTURED OUTPUT INSTRUCTIONS ===
+After completing your work and writing the scratchpad summary, you MUST call write_agent_output with:
+  - agent_id: "study_population_planner_agent"
+  - agent_role: "population_selector"
+  - status: "completed" (or "failed"/"partial" if applicable)
+  - inputs: {"hypothesis": "<the hypothesis text>", "data_source": "<where data came from>"}
+  - output_files: {"targets_csv": "targets.csv", "config_json": "config.json"}
+  - output_metrics: {
+      "cohort_size": <number of patients/volumes selected>,
+      "total_considered": <total patients/volumes screened>,
+      "modality": "<imaging modality>",
+      "age_range": "<e.g. 0-18>",
+      "gender_distribution": "<e.g. 60% M, 40% F>",
+      "inclusion_criteria": "<criteria used>",
+      "exclusion_criteria": "<criteria used>",
+      "target_distribution": "<e.g. 25 positive, 20 negative>"
+    }
+  - output_summary: "<concise summary of population selection>"
+  - warnings: [<any data quality warnings>]
 """

@@ -90,14 +90,25 @@ class SegmentationService:
                 logger.warning(f"Error retrieving study info for SeriesInstanceUID: {series_instance_uid}: {e}")
         
         # ====the inference using monai label=====
-                
+
         infer_url = f"{self.monai_url}/infer/{clean_model}"
-        query_params = {"image": series_instance_uid,"output": "all"}
+        query_params = {"image": series_instance_uid, "output": "all"}
         inference_params = params or {}
-        inference_params["result_extension"]=".nrrd"
+        inference_params["result_extension"] = ".nrrd"
         inference_params["result_dtype"] = "uint16"
-        inference_params["result_compress"]= False
+        inference_params["result_compress"] = False
         inference_params["restore_label_idxs"] = True
+
+        # ---- Inject model-specific class index (required by VISTA) ----
+        # VISTA and similar models expose a `Class` mapping in their params_schema.
+        # Without it, the inference crashes with KeyError: 'Class'.
+        if "Class" not in inference_params:
+            class_index = await self._resolve_class_index(clean_model, organ_list)
+            if class_index is not None:
+                inference_params["Class"] = class_index
+                logger.info(f"Injected Class={class_index} for model='{clean_model}', label='{organ_list}'")
+            else:
+                logger.warning(f"No Class index found for model='{clean_model}', labels='{organ_list}' — model may fail")
 
         files = {"params": (None, json.dumps(inference_params), "application/json")}      
         async with httpx.AsyncClient(timeout=timeout_config) as client:  
@@ -235,6 +246,16 @@ class SegmentationService:
             labelmap_np = labelmap_np.squeeze(0)
         labelmap_np = np.transpose(labelmap_np, (2, 1, 0))  # (X, Y, Z) → (Z, Y, X) = (slices, rows, cols)
         print(f"Labelmap shape after squeeze+transpose: {labelmap_np.shape}")
+
+        # VISTA returns class-indexed values (e.g. liver = class 5, so pixel value = 5).
+        # highdicom BINARY segmentation only understands pixel values 0 (background) or 1 (segment 1).
+        # Any other value causes "Pixel array contains segments that lack descriptions".
+        # Binarise: any non-zero voxel belongs to our target segment → value = 1.
+        unique_vals = np.unique(labelmap_np)
+        print(f"Unique pixel values before binarisation: {unique_vals}")
+        labelmap_np = (labelmap_np > 0).astype(np.uint8)
+        print(f"After binarisation — unique values: {np.unique(labelmap_np)}, "
+              f"foreground voxels: {int(labelmap_np.sum())}")
         description_segment = hd.seg.SegmentDescription(
             segment_number=1,
             segment_label=organ_list[0] if organ_list else "Segment",
@@ -307,6 +328,44 @@ class SegmentationService:
         
         return result
 
+
+    async def _resolve_class_index(self, model_name: str, organ_list: list) -> int | None:
+        """
+        Query /models/ and look up the Class integer index for the requested organ(s).
+        Required by VISTA and similar models that need `params={"Class": <int>}`.
+        Returns the first matching index, or None if the model has no Class mapping.
+        """
+        timeout_config = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
+        try:
+            async with httpx.AsyncClient(timeout=timeout_config) as client:
+                response = await client.get(f"{self.monai_url}/models/")
+                if response.status_code != 200:
+                    return None
+                models = response.json()
+        except Exception as e:
+            logger.warning(f"_resolve_class_index: failed to fetch models: {e}")
+            return None
+
+        for model in models:
+            if model.get("name", "").lower() != model_name.lower():
+                continue
+            params_schema = model.get("params_schema") or {}
+            class_mapping = (params_schema.get("Class") or {}).get("mapping") or {}
+            if not class_mapping:
+                return None  # model has no Class mapping — skip
+            for organ in organ_list:
+                # Try exact match first, then normalised (underscores ↔ spaces)
+                if organ in class_mapping:
+                    return class_mapping[organ]
+                normalised = organ.replace(" ", "_")
+                if normalised in class_mapping:
+                    return class_mapping[normalised]
+            logger.warning(f"_resolve_class_index: organ(s) {organ_list} not in Class mapping for '{model_name}'. "
+                           f"Available: {list(class_mapping.keys())[:10]}...")
+            return None
+
+        logger.warning(f"_resolve_class_index: model '{model_name}' not found in /models/")
+        return None
 
     async def fetch_source_datasets_from_orthanc(
         self,
