@@ -257,7 +257,7 @@ class SegmentationModule:
                 pending = len(downloaded_uids)
                 while pending > 0:
                     try:
-                        volume_entry = await asyncio.wait_for(gif_queue.get(), timeout=120.0)
+                        volume_entry = await asyncio.wait_for(gif_queue.get(), timeout=300.0)
                     except asyncio.TimeoutError:
                         logger.warning("GIF progressive broadcast: timed out waiting for next GIF.")
                         break
