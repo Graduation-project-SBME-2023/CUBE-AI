@@ -144,6 +144,7 @@ Follow these steps in order:
    - Segmentation method used
    - Number of volumes segmented
    - Any quality issues encountered
+   - If any masks were modified by the user, explicitly note this and ensure downstream tasks use the user-modified mask.
 5. Call scratchpad_set_status(agent_id="segmentation_agent", status="done").
 
 Do NOT ask questions. Run the tool and report results.
@@ -157,6 +158,7 @@ When segmentation is complete:
    - Segmentation method used
    - Number of volumes segmented
    - Any quality issues encountered
+   - Mention if any mask was user-modified
 2. Call scratchpad_set_status(agent_id="segmentation_agent", status="done")
 
 === STRUCTURED OUTPUT INSTRUCTIONS ===

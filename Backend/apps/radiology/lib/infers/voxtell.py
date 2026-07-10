@@ -119,6 +119,11 @@ class MyVoxTellPredictor(VoxTellPredictor):
                 device=device,
                 text_encoding_model=self.text_encoding_model_path # Ignored due to mock
             )
+            
+        # The parent class assigned MagicMock() to these. 
+        # We must set them to None so the lazy-loader triggers when needed.
+        self.tokenizer = None
+        self.text_backbone = None
         
         self.perform_everything_on_device = False
         
@@ -160,7 +165,11 @@ class MyVoxTellPredictor(VoxTellPredictor):
         if self.tokenizer is None or self.text_backbone is None:
             logger.info(f"Lazy-loading HuggingFace text model '{self.text_encoding_model_path}' to CPU...")
             self.tokenizer = AutoTokenizer.from_pretrained(self.text_encoding_model_path)
-            self.text_backbone = AutoModel.from_pretrained(self.text_encoding_model_path).to("cpu")
+            self.text_backbone = AutoModel.from_pretrained(
+                self.text_encoding_model_path, 
+                torch_dtype=torch.float16,
+                low_cpu_mem_usage=True
+            ).to("cpu")
             self.text_backbone.eval()
 
         logger.info(f"Generating embedding for new prompt: '{prompt}'")

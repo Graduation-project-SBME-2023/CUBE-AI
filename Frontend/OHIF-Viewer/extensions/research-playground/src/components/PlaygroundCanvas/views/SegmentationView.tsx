@@ -14,6 +14,7 @@ function ReviewView({
     onSave,
     isLoading,
     isFinished,
+    sessionId,
 }: {
     targetRoi: string;
     selectedModel: string;
@@ -22,6 +23,7 @@ function ReviewView({
     onSave: (results: { accepted: string[]; rejected: string[]; modified: string[] }) => void;
     isLoading: boolean;
     isFinished: boolean;
+    sessionId?: string;
 }) {
     const [reviewStatus, setReviewStatus] = useState<Record<string, ReviewStatus>>({});
 
@@ -55,7 +57,12 @@ function ReviewView({
             
             if (data.study_uid) {
                 // Open Monai Label viewer in a new tab — this is a FRONTEND route, not a backend API path
-                window.open(`${window.location.origin}/monai-label?StudyInstanceUIDs=${data.study_uid}`, '_blank');
+                const params = new URLSearchParams({
+                    StudyInstanceUIDs: data.study_uid,
+                    session_id: sessionId || '',
+                    series_uid: uid
+                });
+                window.open(`${window.location.origin}/monai-label?${params.toString()}`, '_blank');
             } else {
                 console.error("study_uid not found in the response body", data);
                 alert("Study UID missing from the server response.");
@@ -290,6 +297,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
             onSave={handleSave}
             isLoading={isLoading}
             isFinished={data.isFinished}
+            sessionId={data.sessionId}
         />
     );
 }

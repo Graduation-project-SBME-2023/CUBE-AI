@@ -26,79 +26,6 @@ Use the returned task_message.instructions and context_augmentation as the prima
 If the tool returns status other than 'ok', raise a scratchpad flag and stop.
 """
 
-import os
-import json
-
-def write_inclusion_criteria( criteria: str, modality: str):
-    """
-    Updates or creates a JSON file with inclusion criteria and modalities.
-    """
-    json_path = os.path.join(root_dir, "workspace", "populations", "populations", "population.json")
-    if os.path.exists(json_path):
-        with open(json_path, 'r') as file:
-            try:
-                data = json.load(file)
-            except json.JSONDecodeError:
-                data = {} 
-    else:
-        os.makedirs(os.path.dirname(json_path), exist_ok=True)
-        data = {}
-
-    data['modality'] = modality
-    data['criteria'] = criteria
-    with open(json_path, 'w') as file:
-        json.dump(data, file, indent=4)
-        
-def get_unique_descriptions():
-    csv_path = os.path.join(root_dir, "workspace", "fake_data", "data.csv")
-    if os.path.exists(csv_path):
-        with open(csv_path, 'r') as file:
-            try:
-                data = pd.read_csv(csv_path)
-            except FileNotFoundError:
-                return "file not found"
-    return data['series_description'].unique().tolist()   
-
-def search_using_keywords(words_to_include:list, words_to_exclude:list = []):
-    """
-    perform the final search and writes down the final included cases, when this function terminates correctly then the task is done
-    the inputs are the words to include and words to exclude in the cases that will be use in the study population 
-    """
-    csv_path = os.path.join(root_dir, "workspace", "fake_data", "data.csv")
-    json_path = os.path.join(root_dir, "workspace", "populations", "populations", "population.json")
-    if os.path.exists(csv_path):
-        with open(csv_path, 'r') as file:
-            try:
-                csv_data = pd.read_csv(csv_path)
-            except FileNotFoundError:
-                return "file not found"
-    descriptions = csv_data['series_description'].tolist()
-    # print(descriptions)
-    keyword_filtered_results = [description for description in descriptions if any(word in description for word in words_to_include)]
-    if len(words_to_exclude):
-        keyword_filtered_results = [filtered_result for filtered_result in keyword_filtered_results if any(word not in filtered_result for word in words_to_exclude)]
-    
-    if os.path.exists(json_path):
-        with open(json_path, 'r') as file:
-            try:
-                data = json.load(file)
-            except json.JSONDecodeError:
-                data = {} 
-    else:
-        os.makedirs(os.path.dirname(json_path), exist_ok=True)
-        data = {}
-    
-    selected_volumes = csv_data[csv_data['series_description'].isin(keyword_filtered_results)]
-    selected_volumes_uids = selected_volumes['volume_series_instance_uid'].tolist()
-    # print(selected_volumes_uids)
-    
-    data["datasetlist"] = selected_volumes_uids
-    with open(json_path, 'w') as file:
-        json.dump(data, file, indent=4)
-    return f"number of the {len(keyword_filtered_results)}"
-        
-
-
 class PopulationPlannerAgent(AssistantAgent):
     def __init__(self, name, model_client, tools, description, system_message, max_tool_iterations):
         super().__init__(name=name,
@@ -117,31 +44,26 @@ class PopulationPlannerAgent(AssistantAgent):
         if not os.path.exists(mcp_server_path):
             raise FileNotFoundError(f"MCP server not found at: {mcp_server_path}")
         env = os.environ.copy()
+        cfg = None
         try:
             from client_config import get_client_config
             cfg = get_client_config()
-            base_url = cfg.base_url or os.environ.get("OLLAMA_BASE_URL")
-            if not base_url:
-                raise RuntimeError("Model base_url is not configured. Cannot initialize LLM tools.")
-            env.update({
-                "WORKSPACE_DIR": workspace_folder,
-                "SESSION_ID": session_id,
-                "AGENT_ID": "study_population_planner_agent",
-                "MODEL_BASE_URL": base_url,
-                "MODEL_NAME": cfg.model,
-                "MODEL_API_KEY": cfg.api_key or "ollama",
-                "LLM_CONCURRENCY_LIMIT": os.environ.get("LLM_CONCURRENCY_LIMIT", "5")
-            })
-        except (ImportError, RuntimeError):
-            env.update({
-                "WORKSPACE_DIR": workspace_folder,
-                "SESSION_ID": session_id,
-                "AGENT_ID": "study_population_planner_agent",
-                "MODEL_BASE_URL": os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-                "MODEL_NAME": os.environ.get("MODEL_NAME", "llama3.1"),
-                "MODEL_API_KEY": os.environ.get("MODEL_API_KEY", "ollama"),
-                "LLM_CONCURRENCY_LIMIT": os.environ.get("LLM_CONCURRENCY_LIMIT", "5")
-            })
+        except ImportError:
+            pass
+
+        base_url = (cfg.base_url if cfg else None) or os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+        model_name = (cfg.model if cfg else None) or os.environ.get("MODEL_NAME", "llama3.1")
+        api_key = (cfg.api_key if cfg else None) or os.environ.get("MODEL_API_KEY", "ollama")
+
+        env.update({
+            "WORKSPACE_DIR": workspace_folder,
+            "SESSION_ID": session_id,
+            "AGENT_ID": "study_population_planner_agent",
+            "MODEL_BASE_URL": base_url,
+            "MODEL_NAME": model_name,
+            "MODEL_API_KEY": api_key,
+            "LLM_CONCURRENCY_LIMIT": os.environ.get("LLM_CONCURRENCY_LIMIT", "5")
+        })
         mcp_server = StdioServerParams(
             command=sys.executable,
             args=[mcp_server_path],
@@ -162,18 +84,20 @@ class PopulationPlannerAgent(AssistantAgent):
             'scratchpad_register_agent',
             'scratchpad_raise_flag',
             'scratchpad_write_summary',
-            'scratchpad_set_status'
+            'scratchpad_set_status',
+            'write_agent_output'
         ]
         
         # Only add extract_cohort_labels if mode is automatic
-        config_path = os.path.join(workspace_folder, "config.json")
         try:
-            import json
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as f:
-                    config_data = json.load(f)
-                    if config_data.get("labelling_mode") == "automatic":
-                        desired_tools.insert(3, 'extract_cohort_labels')
+            if workspace_folder:
+                config_path = os.path.join(workspace_folder, "config.json")
+                import json
+                if os.path.exists(config_path):
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        config_data = json.load(f)
+                        if config_data.get("labelling_mode") == "automatic":
+                            desired_tools.insert(3, 'extract_cohort_labels')
         except Exception as e:
             logger.error(f"Failed to read labelling_mode from config: {e}")
 
