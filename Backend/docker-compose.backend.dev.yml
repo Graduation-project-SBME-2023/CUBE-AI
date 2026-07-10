@@ -15,7 +15,8 @@ services:
       NNUNET_DIR: /NN_Unet
       GENERAL_DATA_DIR: /General_Data
     command: >-
-      sh -c "pip install --no-cache-dir -U torchvision --no-deps &&
+      sh -c "pip install --no-cache-dir 'torch==2.5.1' --no-deps --index-url https://download.pytorch.org/whl/cu124 &&
+      pip install --no-cache-dir 'torchvision==0.20.1' --no-deps --index-url https://download.pytorch.org/whl/cu124 &&
       alembic -c /alembic/alembic.ini upgrade head &&
       if [ ! -f /models/voxtell_v1.1/text_embeddings_cache.pkl ]; then python /apps/radiology/caching_generator.py; fi &&
       python /monailabel/server_start.py"
