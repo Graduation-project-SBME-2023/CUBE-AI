@@ -14,16 +14,30 @@ updates:
   # 1. Python (pip) — Backend / AI pipeline dependencies
   # -------------------------------------------------------------------
   - package-ecosystem: "pip"
-    directory: "/Backend"                     # Location of requirements files / setup.py
+    directory: "/Backend/agent_system"        # Exact location of requirements.txt
+    # NOTE: Dependabot reads requirements.txt files only.
+    #       If you add pyproject.toml or Pipfile, add a new entry.
     schedule:
       interval: "weekly"                      # Weekly is conservative enough for clinical systems
       day: "monday"                           # Deterministic schedule for team planning
       time: "06:00"                           # Early morning UTC — PRs ready for review at start of week
       timezone: "Etc/UTC"
 
+    # ── Versioning strategy ────────────────────────────────────────
+    # "lockfile-only" ensures Dependabot only proposes pinned exact
+    # versions — never loose ranges. Critical for reproducibility
+    # in a medical AI context.
+    versioning-strategy: "lockfile-only"
+
     # ── PR limits ──────────────────────────────────────────────────
     # Cap open PRs to avoid flooding the review queue.
     open-pull-requests-limit: 5
+
+    # ── Assignees ──────────────────────────────────────────────────
+    # Always assign someone so PRs don't go unreviewed.
+    # Replace with your actual GitHub username.
+    assignees:
+      - "ALMASA"                              # Update to your GitHub username
 
     # ── Grouping ───────────────────────────────────────────────────
     # Batch patch + minor bumps into a single PR per group so
@@ -74,9 +88,36 @@ updates:
         update-types: ["version-update:semver-major"]
 
       # --- CUDA / GPU Tooling ---
-      - dependency-name: "cupy*"
+      # NOTE: Wildcards (cupy*, nvidia-*) are unreliable in the pip
+      # ecosystem. Each cupy variant is listed explicitly to guarantee
+      # the ignore rule is actually applied.
+      - dependency-name: "cupy-cuda11x"
         update-types: ["version-update:semver-major"]
-      - dependency-name: "nvidia-*"
+      - dependency-name: "cupy-cuda12x"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "cupy-cuda113"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "cupy-cuda114"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "cupy-cuda115"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "cupy-cuda116"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "cupy-cuda117"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "cupy-cuda118"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "nvidia-cublas-cu11"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "nvidia-cublas-cu12"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "nvidia-cuda-runtime-cu11"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "nvidia-cuda-runtime-cu12"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "nvidia-cudnn-cu11"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "nvidia-cudnn-cu12"
         update-types: ["version-update:semver-major"]
       - dependency-name: "cuda-python"
         update-types: ["version-update:semver-major"]
@@ -105,10 +146,108 @@ updates:
       prefix: "deps(pip)"                     # Clear commit-log attribution
 
   # -------------------------------------------------------------------
-  # 2. Docker — Base image updates (Dockerfile.gpu)
+  # 2. npm (yarn) — Root-level JS packages (Tailwind, React, Flowbite)
+  #    File: /package.json
+  # -------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/"                            # Root package.json (tailwindcss, react, flowbite)
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+
+    open-pull-requests-limit: 5
+
+    assignees:
+      - "ALMASA"                              # Update to your GitHub username
+
+    groups:
+      npm-root-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+    # Block major React and Tailwind bumps — breaking changes likely.
+    ignore:
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "tailwindcss"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@tailwindcss/cli"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@tailwindcss/vite"
+        update-types: ["version-update:semver-major"]
+
+    labels:
+      - "dependencies"
+      - "frontend"
+      - "needs-review"
+
+    commit-message:
+      prefix: "deps(npm)"
+
+  # -------------------------------------------------------------------
+  # 3. npm (yarn) — OHIF Viewer monorepo
+  #    File: /Frontend/OHIF-Viewer/package.json  (yarn workspaces)
+  #    OHIF uses Yarn Berry workspaces; treat it as its own ecosystem.
+  # -------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/Frontend/OHIF-Viewer"        # OHIF monorepo root
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+
+    # OHIF has a massive dependency graph. Keep PR count low to
+    # avoid overwhelming reviewers with medical imaging library bumps.
+    open-pull-requests-limit: 5
+
+    assignees:
+      - "ALMASA"                              # Update to your GitHub username
+
+    groups:
+      # Bundle all safe patch + minor OHIF deps together
+      ohif-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+    # Block major bumps on core OHIF imaging libraries.
+    # These libraries handle DICOM rendering and medical image
+    # processing — major upgrades require clinical validation.
+    ignore:
+      - dependency-name: "@cornerstonejs/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "cornerstone-tools"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "dicom-parser"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "dcmjs"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@ohif/*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+
+    labels:
+      - "dependencies"
+      - "ohif-viewer"
+      - "needs-review"
+
+    commit-message:
+      prefix: "deps(ohif)"
+
+  # -------------------------------------------------------------------
+  # 4. Docker — Base image updates (Dockerfile.gpu / Dockerfile.cpu)
   # -------------------------------------------------------------------
   - package-ecosystem: "docker"
-    directory: "/Backend"                     # Location of Dockerfile.gpu
+    directory: "/Backend"                     # Location of Dockerfile.gpu and Dockerfile.cpu
     schedule:
       interval: "weekly"
       day: "monday"
@@ -119,11 +258,26 @@ updates:
     # Keep the PR queue minimal; each one needs manual GPU testing.
     open-pull-requests-limit: 3
 
+    assignees:
+      - "ALMASA"                              # Update to your GitHub username
+
+    # ── Docker grouping ───────────────────────────────────────────
+    # Batch safe patch + minor Docker image bumps into one PR.
+    groups:
+      docker-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
     # Block major version bumps on the MONAI Label base image.
     # A major jump could change CUDA runtime, Python version, or
     # break the entire GPU pipeline.
     ignore:
       - dependency-name: "projectmonai/monailabel"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "nvidia/cuda"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pytorch/pytorch"
         update-types: ["version-update:semver-major"]
 
     labels:
@@ -135,7 +289,32 @@ updates:
       prefix: "deps(docker)"
 
   # -------------------------------------------------------------------
-  # 3. GitHub Actions — CI/CD workflow pinning
+  # 5. Docker — Frontend image
+  # -------------------------------------------------------------------
+  - package-ecosystem: "docker"
+    directory: "/Frontend"                    # Location of Frontend dockerfile
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+
+    open-pull-requests-limit: 2
+
+    assignees:
+      - "ALMASA"                              # Update to your GitHub username
+
+    labels:
+      - "dependencies"
+      - "docker"
+      - "frontend"
+      - "needs-review"
+
+    commit-message:
+      prefix: "deps(docker-frontend)"
+
+  # -------------------------------------------------------------------
+  # 6. GitHub Actions — CI/CD workflow pinning
   # -------------------------------------------------------------------
   - package-ecosystem: "github-actions"
     directory: "/"                            # Scans .github/workflows/
@@ -148,6 +327,9 @@ updates:
     # Actions updates are lower risk but still need review to avoid
     # supply-chain attacks (compromised actions).
     open-pull-requests-limit: 5
+
+    assignees:
+      - "ALMASA"                              # Update to your GitHub username
 
     # Group all Actions patch + minor bumps into one PR.
     groups:
