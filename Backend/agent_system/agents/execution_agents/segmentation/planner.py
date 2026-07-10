@@ -1,5 +1,9 @@
 import json
+import logging
+
 from autogen_agentchat.agents import AssistantAgent
+
+logger = logging.getLogger(__name__)
 
 
 def create_planner_agent(model_client, discovery_tools):
@@ -76,12 +80,10 @@ async def run_planner(agent, instruction):
 
     result = await agent.run(task=task)
     for i, msg in enumerate(result.messages):
-        print("\n" + "=" * 80)
-        print(f"[{i}] TYPE: {type(msg).__name__}")
-        print(msg)
+        logger.debug("Planner message [%s] type=%s content=%s", i, type(msg).__name__, msg)
     content = result.messages[-1].content
 
     try:
         return json.loads(content)
-    except Exception as e:
+    except Exception:
         raise RuntimeError(f"Invalid JSON from PlannerAgent: {content}")

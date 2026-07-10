@@ -1,31 +1,25 @@
-import asyncio
-import sys
-import os
+import json
 import logging
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.abspath(os.path.join(current_dir, "..", "..", ".."))
+sys.path.append(root_dir)
 
 TASK_CONTEXT_BOOTSTRAP = """=== TASK CONTEXT BOOTSTRAP (MANDATORY) ===
 Before doing anything else, call read_agent_task_context exactly once.
 Use the returned task_message.instructions and context_augmentation as the primary task specification.
 """
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.abspath(os.path.join(current_dir, "..", "..", ".."))
-sys.path.append(root_dir)
-
-from pathlib import Path
 from autogen_agentchat.agents import AssistantAgent
-from agent_system.clients.ollamaClient import OllamaClient
-from autogen_core.models import SystemMessage
-from autogen_agentchat.ui import Console
-from autogen_core import CancellationToken
-
-from agent_system.descriptions.models_descriptions import RESULT_AGENT_DESCRIPTION
-from agent_system.system_prompts.system_messages import RESULT_AGENT_SYSTEM_PROMPT
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
-
 from autogen_core.tools import FunctionTool
+
+from agent_system.clients.ollamaClient import OllamaClient
 
 from .segmentation.module import SegmentationModule
 
@@ -35,38 +29,19 @@ async def segmentation_tool(workspace_folder: str | None = None):
     :arg workspace_folder: The workspace folder to save outputs to.
     """
     try:
-        # print("Starting SegmentationModule test...")
-
-        # Initialize
         if workspace_folder is None:
-            return RuntimeError("Please specify a workspace folder")
+            raise ValueError("Please specify a workspace folder")
 
         folder_name = Path(workspace_folder).name
         session_id = folder_name.removeprefix("workspace_")
         agent = SegmentationModule(session_id=session_id)
         await agent.initialize()
 
-        # current_file = Path(__file__)
-        # config_path = os.path.join(current_file.parent.parent.parent, "workspace", "config.json")
-        if workspace_folder is None:
-            current_file = Path(__file__)
-            workspace_folder = os.path.join(
-                current_file.parent.parent.parent, "workspace"
-            )
         config_path = os.path.join(workspace_folder, "config.json")
-        # print(f"Running with config: {config_path}")
-
-        # Run the agent and capture the result
         result = await agent.run(config_path, workspace_folder)
 
-        # print("Test completed successfully!")
-        # print(f"Result: {result}")
-
-        # Write output file
         outputs_dir = os.path.join(workspace_folder, "outputs")
         os.makedirs(outputs_dir, exist_ok=True)
-        import json
-        from datetime import datetime, timezone
         output_data = {
             "agent_id": "segmentation_agent",
             "agent_role": "roi_segmentation",
@@ -81,14 +56,14 @@ async def segmentation_tool(workspace_folder: str | None = None):
             "errors": [],
             "warnings": []
         }
-        with open(os.path.join(outputs_dir, "segmentation_agent_output.json"), "w") as f:
-            json.dump(output_data, f, indent=2)
+        output_path = Path(outputs_dir) / "segmentation_agent_output.json"
+        output_path.write_text(json.dumps(output_data, indent=2), encoding="utf-8")
 
         return result
 
-    except Exception as e:
-        # print(f"Test failed with error: {e}", exc_info=True)
-        raise e
+    except Exception:
+        logger.exception("Segmentation tool failed")
+        raise
 
 
 class SegmentationAgent(AssistantAgent):
@@ -212,24 +187,3 @@ After completing segmentation, you MUST call write_agent_output with:
     def get_desired_tools(mcp_tools, desired_tools):
         return [tool for tool in mcp_tools if tool.name in desired_tools]
 
-
-async def main():
-    # Initialize the agent using the factory method
-    current_file = Path(__file__)
-    workspace_folder = os.path.join(current_file.parent.parent.parent.parent,"agents_workspace","workspace_testing_validation_segmentation_123")
-    agent = await SegmentationAgent.create(workspace_folder=workspace_folder, session_id="testing_validation_segmentation_123")
-
-    # # Now you can use the agent normally
-    # print(f"Agent initialized with {agent._tools} tools.")
-    # print(agent._max_tool_iterations)
-    # for tool in agent._tools:
-    #     print(tool.name)
-    await Console(
-        agent.run_stream(
-            task="run segmentation", cancellation_token=CancellationToken()
-        )
-    )
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
