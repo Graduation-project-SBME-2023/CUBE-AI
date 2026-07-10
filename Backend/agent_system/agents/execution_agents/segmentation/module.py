@@ -360,14 +360,53 @@ class SegmentationModule:
         cleanup_discarded(workspace_dir, final_accepted_uids, final_modified_uids)
         if final_modified_uids:
             logger.info("Fetching updated labels for modified UIDs...")
-            await download_and_pair_volumes(
-                workspace_dir,
-                datasetlist=final_modified_uids,
-                chosen_path="interactive",
-                selected_auto_model_for_volume=None,
-                download_volumes=False
-            )
+            for uid in final_modified_uids:
+                temp_mask_path = os.path.join(workspace_dir, "temp_segmentations", f"seg_{uid}_modified.nii.gz")
+                target_mask_path = os.path.join(workspace_dir, "masks", f"{uid}.nii.gz")
+                if os.path.exists(temp_mask_path):
+                    logger.info(f"Using explicitly uploaded modified mask for {uid}")
+                    import shutil
+                    shutil.copy2(temp_mask_path, target_mask_path)
+                else:
+                    logger.info(f"No explicitly uploaded mask found for {uid}, falling back to datastore")
+                    await download_and_pair_volumes(
+                        workspace_dir,
+                        datasetlist=[uid],
+                        chosen_path="interactive",
+                        selected_auto_model_for_volume=None,
+                        download_volumes=False
+                    )
 
+            # --- REGENERATE GIFS FOR MODIFIED MASKS ---
+            logger.info("Re-generating GIFs for modified masks...")
+            modified_gif_entries = []
+            def _on_gif_ready_modified(volume_entry: dict):
+                modified_gif_entries.append(volume_entry)
+            
+            await asyncio.to_thread(generate_gif_overlays, workspace_dir, final_modified_uids, _on_gif_ready_modified)
+            
+            # Update gif_volumes array with the new entries
+            for mod_entry in modified_gif_entries:
+                for i, existing_entry in enumerate(gif_volumes):
+                    if existing_entry.get("seriesInstanceUid") == mod_entry.get("seriesInstanceUid"):
+                        gif_volumes[i] = mod_entry
+                        break
+            
+            # Re-broadcast final summary so the chat UI updates the GIFs!
+            frontend_data["volumes"] = gif_volumes
+            logger.info("Module sending updated summary to frontend with modified GIFs...")
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    await client.post(
+                        "http://localhost:8150/ws-broadcast",
+                        json={
+                            "type": "segmentation_output",
+                            "payload": frontend_data,
+                            "session_id": self.session_id
+                        }
+                    )
+            except Exception as e:
+                logger.error(f"Failed to rebroadcast updated GIFs: {e}")
 
         return {"status": "finished"}
     

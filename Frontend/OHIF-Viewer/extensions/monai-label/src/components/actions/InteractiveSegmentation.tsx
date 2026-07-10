@@ -6,8 +6,7 @@ import ModelBasedRendering from '../../tools/ModelBasedRendering';
 import getActiveViewportEnabledElement from '../../../../cornerstone/src/utils/getActiveViewportEnabledElement';
 import { getEnabledElement } from '@cornerstonejs/core';
 import { getEnabledElement as OHIFgetEnabledElement } from '../../../../cornerstone/src/state';
-import { getRenderingEngines, utilities as csUtils } from '@cornerstonejs/core';
-
+import { getRenderingEngines, utilities as csUtils, cache } from '@cornerstonejs/core';
 
 export default class InteractiveSegmentation extends BaseTab {
   modelSelector: any;
@@ -916,8 +915,146 @@ export default class InteractiveSegmentation extends BaseTab {
               />
             }
           />
+          <br/>
+          {new URLSearchParams(window.location.search).get('session_id') && (
+            <button
+              className="actionInput"
+              style={{
+                backgroundColor: '#010839',
+                color: '#7bcfe9',
+                fontWeight: 'bold',
+                fontSize: '14px',
+                width: '100%',
+                padding: '8px 14px',
+                borderRadius: '6px',
+                border: '2px solid #010839',
+                cursor: 'pointer',
+                marginTop: '10px',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                transition: 'all 0.2s ease-in-out'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgb(72, 193, 230)';
+                e.currentTarget.style.color = 'rgb(255, 255, 255)';
+                e.currentTarget.style.borderColor = 'rgb(72, 193, 230)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = '#010839';
+                e.currentTarget.style.color = '#7bcfe9';
+                e.currentTarget.style.borderColor = '#010839';
+              }}
+              onClick={this.onClickSubmitToAgent}
+            >
+              Submit Modifications to Agent
+            </button>
+          )}
         </div>
       </div>
     );
   }
+
+  onClickSubmitToAgent = async () => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const sessionId = urlParams.get('session_id');
+      const seriesUid = urlParams.get('series_uid') || this.props.viewConstants.SeriesInstanceUID;
+
+      if (!sessionId) {
+        alert("No session ID found.");
+        return;
+      }
+
+      const { viewportGridService } = this.props.servicesManager.services;
+      const { activeViewportId } = viewportGridService.getState();
+      
+      let labelVolume = null;
+
+      // 1. Try to get it from cornerstoneTools segmentation state
+      try {
+        const segs = cornerstoneTools.segmentation.state.getSegmentations();
+        if (segs && segs.length > 0) {
+          const seg = segs[0];
+          // In OHIF v3 / Cornerstone3D, volumeId is often under representationData
+          const volId = (seg.representationData && seg.representationData.LABELMAP && seg.representationData.LABELMAP.volumeId) || seg.volumeId;
+          if (volId) {
+            labelVolume = cache.getVolume(volId);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not extract segmentation from state:', err);
+      }
+
+      // 2. Fallback to activeViewportId if it's a valid ID
+      if (!labelVolume && activeViewportId) {
+        try {
+          labelVolume = cache.getVolume(activeViewportId);
+        } catch (err) {}
+      }
+
+      // 3. Fallback to hardcoded '1' if it was loaded that way
+      if (!labelVolume) {
+        try {
+          labelVolume = cache.getVolume('1');
+        } catch (err) {}
+      }
+
+      if (!labelVolume) {
+        this.notification.show({ title: 'MONAI Label', message: 'No labelmap found to submit.', type: 'warning', duration: 4000 });
+        return;
+      }
+
+      this.notification.show({ title: 'Agent System', message: 'Uploading modified mask...', type: 'info', duration: 4000 });
+
+      // If scalarData is backed by a SharedArrayBuffer, we must copy it to a normal ArrayBuffer 
+      // before constructing a Blob. We can do this by creating a new typed array of the same type.
+      let safeData = labelVolume.scalarData;
+      if (safeData.buffer && safeData.buffer instanceof SharedArrayBuffer) {
+        // Create a copy of the typed array (e.g. Uint16Array or Float32Array)
+        safeData = new safeData.constructor(safeData);
+      }
+
+      const labelBlob = new Blob([safeData], { type: 'application/octet-stream' });
+      
+      const formData = new FormData();
+      formData.append('session_id', sessionId);
+      formData.append('series_instance_uid', seriesUid);
+      formData.append('dimensions', JSON.stringify(labelVolume.dimensions));
+      formData.append('file', labelBlob, 'label.nii.gz');
+
+      const response = await fetch('http://localhost:8150/segmentation-review/upload-mask', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`Upload failed: ${response.status}`);
+      }
+
+      // Now tell the agent "review is done" so it unblocks from the long-poll
+      // and processes the modified mask (regenerates GIFs, etc.)
+      const triageResponse = await fetch('http://localhost:8150/segmentation-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          accepted: [],
+          rejected: [],
+          modified: [seriesUid],
+        }),
+      });
+
+      if (!triageResponse.ok) {
+        console.warn(`Triage POST returned ${triageResponse.status}, agent may not update GIFs.`);
+      }
+      
+      this.notification.show({ title: 'Agent System', message: 'Modified mask successfully sent to agent! GIFs will update shortly.', type: 'success', duration: 5000 });
+      // The user requested to NOT close the tab automatically.
+    } catch (e) {
+      console.error(e);
+      alert(`Error submitting to agent: ${e.message}`);
+      this.notification.show({ title: 'Agent System', message: 'Failed to upload mask.', type: 'error', duration: 5000 });
+    }
+  };
 }

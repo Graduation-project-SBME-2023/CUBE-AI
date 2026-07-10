@@ -765,11 +765,12 @@ def cleanup_discarded(workspace_dir, accepted_uids, modified_uids):
                     os.remove(os.path.join(volumes_dir, fname))
                     logger.info(f"Removed discarded volume: {fname}")
 
-    # cleanup masks (labels)
+    # cleanup masks (labels) — keep for both accepted AND modified
+    uids_to_keep_masks = set(accepted_uids) | set(modified_uids)
     if os.path.exists(masks_dir):
         for fname in os.listdir(masks_dir):
             if fname.lower().endswith(".nii.gz"):
                 uid = fname.replace(".nii.gz", "")
-                if uid not in accepted_uids:
+                if uid not in uids_to_keep_masks:
                     os.remove(os.path.join(masks_dir, fname))
-                    logger.info(f"Removed mask (discarded or pending modification): {fname}")
+                    logger.info(f"Removed mask (discarded): {fname}")
