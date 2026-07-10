@@ -16,9 +16,9 @@
     "output_postfix": "trans",
     "separate_folder": true,
     "input_dict": {
-        "image": "/root/.cache/monailabel/dicom/277a51f05d17457dc20b8e11c9d93def/1.3.6.1.4.1.14519.5.2.1.6919.4624.166590751219290172962622660001.nii.gz",
+        "image": "/root/.cache/monailabel/dicom/277a51f05d17457dc20b8e11c9d93def/1.3.6.1.4.1.14519.5.2.1.6919.4624.319956314021047038498210610134.nii.gz",
         "label_prompt": [
-            1
+            5
         ]
     },
     "everything_labels": "$list(set([i+1 for i in range(132)]) - set([2,16,18,20,21,23,24,25,26,27,128,129,130,131,132]))",
@@ -140,7 +140,7 @@
                 "_target_": "ToDeviced",
                 "keys": "pred",
                 "device": "cpu",
-                "_disabled_": true
+                "_disabled_": false
             },
             {
                 "_target_": "monai.apps.vista3d.transforms.VistaPostTransformd",

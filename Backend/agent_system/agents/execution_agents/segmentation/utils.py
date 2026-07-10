@@ -69,8 +69,24 @@ def matches_label(segmentation_type: str, label: str) -> bool:
     organ = extract_organ_label(segmentation_type)
     return organ == label.lower().strip()
 
-async def exclude_existing_masks(volumes, labels):
+async def exclude_existing_masks(volumes, labels, model_name=None):
+    """
+    Returns the subset of volumes that still need segmentation.
 
+    A volume is EXCLUDED (i.e., skipped) only when it already has a mask that
+    matches BOTH the target organ AND the selected model.  If only the organ
+    matches but a different model was used, the volume stays eligible so the
+    pipeline can produce a mask with the correct model.
+
+    Parameters
+    ----------
+    volumes    : list of volume SeriesInstanceUIDs
+    labels     : list of target organ labels, e.g. ["liver"]
+    model_name : name of the selected automatic model, e.g. "vista".
+                 When provided, a volume is only excluded if its existing mask
+                 was produced by THIS model.  When None, any matching-organ mask
+                 is sufficient to exclude the volume (original behaviour).
+    """
     eligible = []
 
     for volume_uid in volumes:
@@ -80,19 +96,21 @@ async def exclude_existing_masks(volumes, labels):
         try:
             segmentations = await check_having_mask(volume_uid)
 
-            # empty list → no mask
             if not segmentations:
                 has_mask = False
             else:
-                # Smart label-based search
                 for seg in segmentations:
                     seg_type = seg.get("segmentation_type", "")
                     for label in labels:
-                        if matches_label(seg_type, label):
+                        organ_ok  = matches_label(seg_type, label)
+                        # If a model name is given, also require it to appear in seg_type.
+                        model_ok  = (model_name is None) or (model_name in seg_type)
+                        if organ_ok and model_ok:
                             has_mask = True
                             logger.info(
                                 f"Match found: volume={volume_uid}, "
-                                f"label={label}, segmentation_type={seg_type}"
+                                f"label={label}, model={model_name}, "
+                                f"segmentation_type={seg_type}"
                             )
                             break
                     if has_mask:
@@ -106,7 +124,7 @@ async def exclude_existing_masks(volumes, labels):
             eligible.append(volume_uid)
             logger.info(f"Volume {volume_uid} added to eligible list")
         else:
-            logger.info(f"Volume {volume_uid} excluded (matching mask exists)")
+            logger.info(f"Volume {volume_uid} excluded (matching mask exists for model='{model_name}', labels={labels})")
 
     return eligible
 

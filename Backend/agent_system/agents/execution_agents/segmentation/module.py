@@ -120,8 +120,13 @@ class SegmentationModule:
         logger.info(f"Planner plan: {plan}")
         target_labels = plan["target_labels"]
         chosen_path = plan["chosen_path"]
+        # Pass the selected model so a volume is only excluded when it already
+        # has a mask from the SAME model+organ pair.  A liver-voxtell mask will
+        # NOT block a fresh vista liver segmentation.
+        selected_models = plan.get("selected_models") or []
+        model_for_exclusion = selected_models[0] if selected_models else None
         eligible_volumes = await exclude_existing_masks(
-            datasetlist, target_labels
+            datasetlist, target_labels, model_name=model_for_exclusion
         )
         # ====== Logging before Segmentation =================
         payload = TextPayload(

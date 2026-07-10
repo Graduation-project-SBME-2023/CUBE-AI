@@ -140,7 +140,7 @@
                 "_target_": "ToDeviced",
                 "keys": "pred",
                 "device": "cpu",
-                "_disabled_": true
+                "_disabled_": false
             },
             {
                 "_target_": "monai.apps.vista3d.transforms.VistaPostTransformd",
