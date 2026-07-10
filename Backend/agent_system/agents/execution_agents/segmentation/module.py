@@ -249,9 +249,9 @@ class SegmentationModule:
         if downloaded_uids:
             # Use a queue to bridge the sync GIF thread → async broadcaster
             gif_queue: asyncio.Queue = asyncio.Queue()
-            plan_target  = plan['target_labels'][0]
-            plan_model   = plan["selected_models"][0] if plan["selected_models"] else None
-            plan_dice    = get_model_dice_score(plan_model, plan_target) if plan_model else None
+            plan_target  = plan.get('target_labels', [None])[0] if plan.get('target_labels') else None
+            plan_model   = plan["selected_models"][0] if plan.get("selected_models") else None
+            plan_dice    = get_model_dice_score(plan_model, plan_target) if plan_model and plan_target else None
 
             def _on_gif_ready(volume_entry: dict):
                 """Called synchronously from the GIF thread; puts the entry into the queue."""
@@ -311,10 +311,12 @@ class SegmentationModule:
             latex_content = None
 
         # Always send final summary to signal completion!
+        plan_target_final = plan.get('target_labels', [None])[0] if plan.get('target_labels') else None
+        plan_model_final = plan["selected_models"][0] if plan.get("selected_models") else None
         frontend_data = {
-            "targetRoi": plan['target_labels'][0],
-            "selectedModel": plan["selected_models"][0] if plan["selected_models"] else None,
-            "diceScore": get_model_dice_score(plan["selected_models"][0], plan["target_labels"][0]) if plan["selected_models"] else None,
+            "targetRoi": plan_target_final,
+            "selectedModel": plan_model_final,
+            "diceScore": get_model_dice_score(plan_model_final, plan_target_final) if plan_model_final and plan_target_final else None,
             "volumes": gif_volumes,
             "latex": latex_content,
             "isFinished": True

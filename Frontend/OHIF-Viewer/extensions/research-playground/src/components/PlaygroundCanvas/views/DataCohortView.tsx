@@ -129,8 +129,12 @@ export default function DataCohortView({ populationData, segmentationData, sessi
             const next = { ...prev };
 
             if (populationData.tool === 'write_inclusion_criteria') {
-                if (populationData.inclusion_criteria) next.inclusion = populationData.inclusion_criteria;
-                if (populationData.exclusion_criteria) next.exclusion = populationData.exclusion_criteria;
+                if (populationData.inclusion_criteria) {
+                    next.inclusion = Array.isArray(populationData.inclusion_criteria) ? populationData.inclusion_criteria : [populationData.inclusion_criteria as any];
+                }
+                if (populationData.exclusion_criteria) {
+                    next.exclusion = Array.isArray(populationData.exclusion_criteria) ? populationData.exclusion_criteria : [populationData.exclusion_criteria as any];
+                }
                 if (populationData.modality) next.modality = populationData.modality;
             }
 
@@ -143,8 +147,12 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                 const metrics = populationData.outputs.metrics;
                 if (metrics.cohort_size) next.count = metrics.cohort_size;
                 if (metrics.match_rate) next.matchRate = metrics.match_rate;
-                if (metrics.inclusion_criteria) next.inclusion = metrics.inclusion_criteria;
-                if (metrics.exclusion_criteria) next.exclusion = metrics.exclusion_criteria;
+                if (metrics.inclusion_criteria) {
+                    next.inclusion = Array.isArray(metrics.inclusion_criteria) ? metrics.inclusion_criteria : [metrics.inclusion_criteria as any];
+                }
+                if (metrics.exclusion_criteria) {
+                    next.exclusion = Array.isArray(metrics.exclusion_criteria) ? metrics.exclusion_criteria : [metrics.exclusion_criteria as any];
+                }
                 if (populationData.outputs.summary) next.summary = populationData.outputs.summary;
             }
 
