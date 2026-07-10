@@ -74,6 +74,12 @@ export default class MonaiLabelClient {
     return await MonaiLabelClient.api_put_data(url, data, 'json');
   }
 
+  async get_label(image) {
+    let url = new URL('datastore/label', this.server_url);
+    url.searchParams.append('image', image);
+    return axios.get(url.toString(), { responseType: 'arraybuffer' });
+  }
+
   async is_train_running() {
     let url = new URL('train/', this.server_url);
     url.searchParams.append('check_if_running', 'true');

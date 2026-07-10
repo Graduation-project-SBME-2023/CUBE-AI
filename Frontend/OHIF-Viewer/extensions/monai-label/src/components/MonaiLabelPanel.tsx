@@ -189,8 +189,76 @@ export default class MonaiLabelPanel extends Component {
       this.setState({ info: response.data });
       this.setState({ isDataReady: true });
 
+      // If we are editing an existing mask (session active), auto-load it!
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('session_id') && params.get('series_uid')) {
+        this.loadExistingLabel(params.get('series_uid'));
+      }
+
       // calc image embedding(if SAM model)
       // AutoSegmentation.calculateImageEmbeddings(true);
+    }
+  };
+
+  loadExistingLabel = async (seriesUid) => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionId = urlParams.get('session_id');
+
+    if (!sessionId || !seriesUid) {
+      console.warn('loadExistingLabel: missing session_id or series_uid, skipping.');
+      return;
+    }
+
+    this.notification.show({
+      title: 'Agent System',
+      message: 'Loading existing mask for editing...',
+      type: 'info',
+      duration: 5000,
+    });
+
+    try {
+      // Fetch the mask from our agent backend (port 8150).
+      // The backend converts NIfTI → NRRD on-the-fly so parseNrrdData works unchanged.
+      const maskUrl = `http://localhost:8150/segmentation-review/mask/${sessionId}/${seriesUid}`;
+      const res = await fetch(maskUrl);
+
+      if (!res.ok) {
+        if (res.status === 404) {
+          this.notification.show({ title: 'Agent System', message: 'No existing mask found for this session.', type: 'warning', duration: 4000 });
+        } else {
+          throw new Error(`Mask endpoint returned HTTP ${res.status}`);
+        }
+        return;
+      }
+
+      const arrayBuffer = await res.arrayBuffer();
+
+      // Re-fetch label names from the MONAI info endpoint to stay in sync
+      const client = this.client();
+      const infoRes = await client.info();
+      const labels = infoRes?.data?.labels?.slice(1) ?? [];
+
+      // Give the viewport a moment to finish mounting before injecting the mask
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // _update parses NRRD data and loads it into Cornerstone3D
+      const segmentationId = await this._update({ data: arrayBuffer, centroids: {} }, labels);
+      this.saveSegmentation('existing', segmentationId);
+
+      this.notification.show({
+        title: 'Agent System',
+        message: 'Existing mask loaded — you can now edit it!',
+        type: 'success',
+        duration: 5000,
+      });
+    } catch (e) {
+      console.error('loadExistingLabel error:', e);
+      this.notification.show({
+        title: 'Agent System',
+        message: 'Failed to load existing mask. Check the console for details.',
+        type: 'error',
+        duration: 5000,
+      });
     }
   };
 
