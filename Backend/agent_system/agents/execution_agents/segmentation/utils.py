@@ -11,6 +11,7 @@ import nrrd
 import numpy as np
 import tempfile
 import requests
+import httpx
 import highdicom as hd
 from typing import Dict, Any, Tuple
 from pydicom.uid import generate_uid
@@ -22,6 +23,7 @@ import csv
 import pandas as pd
 
 MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
+REQUEST_TIMEOUT_SECONDS = 10.0
 # ===============================
 # MASK HELPERS
 # ===============================
@@ -61,10 +63,10 @@ def matches_label(segmentation_type: str, label: str) -> bool:
 
     Examples
     --------
-    matches_label("liver lesion-voxtell-01:48:31 PM-g", "liver")        → False
-    matches_label("liver-voxtell-01:48:31 PM-g",        "liver")        → True
-    matches_label("liver lesion-voxtell-01:48:31 PM-g", "liver lesion") → True
-    matches_label("liver-vista-02:10:00 PM-g",          "liver")        → True
+    matches_label("liver lesion-voxtell-01:48:31 PM-g", "liver")        -> False
+    matches_label("liver-voxtell-01:48:31 PM-g",        "liver")        -> True
+    matches_label("liver lesion-voxtell-01:48:31 PM-g", "liver lesion") -> True
+    matches_label("liver-vista-02:10:00 PM-g",          "liver")        -> True
     """
     organ = extract_organ_label(segmentation_type)
     return organ == label.lower().strip()
@@ -116,8 +118,8 @@ async def exclude_existing_masks(volumes, labels, model_name=None):
                     if has_mask:
                         break
 
-        except Exception as e:
-            logger.error(f"Error checking mask: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Error checking mask for volume %s", volume_uid)
             has_mask = False
 
         if not has_mask:
@@ -134,17 +136,18 @@ async def check_having_mask(volume_uid):
     Calls the endpoint /segmentations/by-volume/{volume_uid} and returns the list of segmentations.
     """
     url = f"{MONAI_URL}/segmentations/by-volume/{volume_uid}"
-    response = requests.get(url)
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
+        response = await client.get(url)
     if response.status_code == 200:
         return response.json()
-    else:
-        return []
+    logger.warning("GET %s returned %s", url, response.status_code)
+    return []
 
 def parse_multipart_response(headers, body):
     """
     Parses a multipart/mixed response that contains:
-    - One part with Content-Type: application/json     → centroids dict
-    - One part with Content-Type: application/octet-stream → NRRD binary data
+    - One part with Content-Type: application/json -> centroids dict
+    - One part with Content-Type: application/octet-stream -> NRRD binary data
     Returns:
         (nrrd_bytes: bytes, centroids: dict)
     """
@@ -185,7 +188,7 @@ def parse_multipart_response(headers, body):
             "need application/json and application/octet-stream"
         )
 
-    # Return in same order as original TS → data first, then centroids
+    # Return in same order as original TS: data first, then centroids.
     return nrrd_bytes, json_data.get('centroids', {})
 
 def split_multipart(buffer, boundary):
@@ -272,13 +275,13 @@ def parse_nrrd_data(nrrd_bytes):
             os.remove(tmp_path)
         
         if data_array.dtype != np.uint16:
-            print(f"Warning: NRRD data type is {data_array.dtype}, converting to uint16")
+            logger.warning("NRRD data type is %s; converting to uint16", data_array.dtype)
             data_array = data_array.astype(np.uint16)
 
         return data_array, header
 
     except Exception as e:
-        # If pynrrd fails → fallback to manual gzip handling (rare)
+        # If pynrrd fails, fall back to manual gzip handling.
         try:
             if nrrd_bytes.startswith(b'\x1f\x8b'):  # gzip magic number
                 decompressed = gzip.decompress(nrrd_bytes)
@@ -291,7 +294,7 @@ def parse_nrrd_data(nrrd_bytes):
                     os.remove(tmp_path)
                 return data_array.astype(np.uint16), header
             else:
-                raise e
+                raise
         except Exception as inner_e:
             raise ValueError(f"Failed to parse NRRD data: {inner_e}") from inner_e
 
@@ -387,8 +390,8 @@ async def download_and_pair_volumes(
                 logger.warning(f"GET {url} returned {r.status_code}")
                 return []
             return r.json()
-        except Exception as e:
-            logger.error(f"Error fetching labels for {volume_uid}: {e}")
+        except Exception:
+            logger.exception("Error fetching labels for %s", volume_uid)
             return []
 
     def pick_latest_or_auto(labels, chosen_path="interactive", selected_auto_model=None, target_label=None):
@@ -419,29 +422,29 @@ async def download_and_pair_volumes(
                     # Warn explicitly so the mismatch is visible in the logs.
                     logger.warning(
                         f"Model '{selected_auto_model}' found but WRONG ORGAN: "
-                        f"segmentation_type='{seg_type}', expected='{target_label}' — skipping."
+                        f"segmentation_type='{seg_type}', expected='{target_label}'; skipping."
                     )
 
             # 2nd priority: any mask whose organ matches the target (any model).
             # Covers the case where a voxtell-liver mask exists but the plan
-            # chose vista for liver — still correct to reuse it.
+            # chose vista for liver; still correct to reuse it.
             if target_label:
                 for label in labels:
                     seg_type = label.get("segmentation_type", "")
                     if matches_label(seg_type, target_label):
                         logger.info(
                             f"2nd-priority: no model+organ match; reusing existing "
-                            f"'{target_label}' mask (any model) — "
+                            f"'{target_label}' mask (any model): "
                             f"UID: {label.get('label_series_instance_uid')} | "
                             f"segmentation_type: '{seg_type}'"
                         )
                         return label
 
-            # No match found — do NOT fall back to latest timestamp, that risks
+            # No match found. Do not fall back to latest timestamp, which risks
             # pairing the volume with a mask from a completely different organ.
             logger.warning(
                 f"No label matched (model='{selected_auto_model}' AND organ='{target_label}') "
-                f"or organ-only fallback — skipping this volume to avoid wrong-organ pairing."
+                f"or organ-only fallback; skipping this volume to avoid wrong-organ pairing."
             )
             return None
 
@@ -460,7 +463,7 @@ async def download_and_pair_volumes(
                         )
                         return label
             elif selected_auto_model:
-                # No target_label provided — model-name match only (degenerate case).
+                # No target_label provided: model-name match only.
                 for label in labels:
                     if selected_auto_model in label.get("segmentation_type", ""):
                         logger.info(
@@ -468,7 +471,7 @@ async def download_and_pair_volumes(
                             f"{label.get('label_series_instance_uid')}"
                         )
                         return label
-            # Fall back to newest label — safe because we just ran segmentation.
+            # Fall back to newest label; safe because we just ran segmentation.
             latest = max(labels, key=lambda x: x.get("created_at", ""))
             logger.info(
                 f"Interactive path: no exact model+organ match, "
@@ -476,7 +479,7 @@ async def download_and_pair_volumes(
             )
             return latest
 
-        # Only reach here when no model name is given at all — safe fallback.
+        # Only reach here when no model name is given at all.
         return max(labels, key=lambda x: x.get("created_at", ""))
 
     def trigger_download(url, task_name, uids_list):
@@ -485,13 +488,13 @@ async def download_and_pair_volumes(
         logger.info(f"POST {url} | task={task_name} | uids={uids_list}")
         try:
             r = requests.post(url, params={"task_name": task_name}, json=uids_list, timeout=60)
-            logger.info(f"Trigger response: {r.status_code}")
+            logger.info("Trigger response: %s", r.status_code)
             if r.status_code != 200:
-                logger.error(f"Trigger failed: {r.text[:300]}")
+                logger.error("Trigger failed: %s", r.text[:300])
                 return False
             return True
-        except Exception as e:
-            logger.error(f"Trigger exception: {e}")
+        except Exception:
+            logger.exception("Trigger exception")
             return False
 
     async def wait_and_find(search_dir, uid_to_search_key, timeout_s=120, poll_interval=3.0):
@@ -501,10 +504,10 @@ async def download_and_pair_volumes(
         Parameters
         ----------
         uid_to_search_key : dict | list
-            * dict  → maps an arbitrary key (e.g. label_uid) to the substring
+            * dict  -> maps an arbitrary key (e.g. label_uid) to the substring
                       that should appear in the filename (e.g. volume_uid).
                       `found` is keyed by the *dict key*.
-            * list  → each element is both the key and the search substring
+            * list  -> each element is both the key and the search substring
                       (legacy behaviour).
         """
         # Normalise to dict form
@@ -536,26 +539,26 @@ async def download_and_pair_volumes(
                             full_path = os.path.join(root, fname)
                             found[key] = full_path
                             remaining_keys.discard(key)
-                            logger.info(f"Found [{key}] → {full_path}")
+                            logger.info("Found [%s] -> %s", key, full_path)
 
             if remaining_keys:
                 elapsed = timeout_s - (deadline - time.time())
                 logger.debug(
-                    f"Found {len(found)}/{len(uid_to_search_key)} — "
+                    f"Found {len(found)}/{len(uid_to_search_key)}; "
                     f"waiting... ({elapsed:.0f}s elapsed)"
                 )
                 await asyncio.sleep(poll_interval)
 
         if remaining_keys:
             missing_info = {k: uid_to_search_key[k] for k in remaining_keys}
-            logger.warning(f"Timeout — missing keys/search-substrings: {missing_info}")
+            logger.warning("Timeout; missing keys/search-substrings: %s", missing_info)
         return found
 
     def copy_volume(src_path, volume_uid, dest_dir):
         dst = os.path.join(dest_dir, f"{volume_uid}.nii.gz")
         shutil.copy2(src_path, dst)
         size_mb = os.path.getsize(dst) / 1_048_576
-        logger.info(f"Copied volume → {dst} ({size_mb:.2f} MB)")
+        logger.info("Copied volume -> %s (%.2f MB)", dst, size_mb)
         return dst
 
     def copy_and_normalize_label(src_path, volume_uid, dest_dir):
@@ -572,7 +575,11 @@ async def download_and_pair_volumes(
             
             # If the uncompressed array will take more than 16 GB of RAM, skip it to prevent crash
             if estimated_ram_gb > 16.0:
-                logger.error(f"Skipping label {volume_uid}: requires {estimated_ram_gb:.2f} GB of RAM, exceeding the 16 GB safety limit.")
+                logger.error(
+                    "Skipping label %s: requires %.2f GB of RAM, exceeding the 16 GB safety limit.",
+                    volume_uid,
+                    estimated_ram_gb,
+                )
                 return "SKIPPED_OOM"
             # ---------------------------
 
@@ -580,17 +587,17 @@ async def download_and_pair_volumes(
             logger.info(f"Label unique values before normalize: {np.unique(data)}")
             if np.max(data) == 255:
                 data = (data > 0).astype(np.uint8)
-                logger.info("Converted {0,255} → {0,1}")
+                logger.info("Converted {0,255} -> {0,1}")
             nib.save(nib.Nifti1Image(data, nii.affine, nii.header), dst)
             size_mb = os.path.getsize(dst) / 1_048_576
-            logger.info(f"Saved normalized label → {dst} ({size_mb:.2f} MB)")
+            logger.info("Saved normalized label -> %s (%.2f MB)", dst, size_mb)
             return dst
-        except Exception as e:
-            logger.error(f"Error normalizing label {src_path}: {e}")
+        except Exception:
+            logger.exception("Error normalizing label %s", src_path)
             return None
 
     # ------------------------------------------------------------------ #
-    #  1. pair volumes ↔ labels                                          #
+    #  1. pair volumes and labels                                        #
     # ------------------------------------------------------------------ #
     volumes_to_process = []
     labels_to_process  = []
@@ -619,13 +626,13 @@ async def download_and_pair_volumes(
         labels_to_process.append(label_uid)
 
     if not volumes_to_process:
-        logger.error("Nothing to process — aborting.")
-        return []
+        logger.error("Nothing to process; aborting.")
+        return [], []
 
     logger.info(f"Pairs ready: {len(volumes_to_process)}")
 
     # ------------------------------------------------------------------ #
-    #  2. trigger downloads (POST → MONAI saves to its local dirs)       #
+    #  2. trigger downloads (POST; MONAI saves to its local dirs)        #
     # ------------------------------------------------------------------ #
     if download_volumes:
         trigger_download(DOWNLOAD_IMAGES_URL, TASK_NAME, volumes_to_process)
@@ -655,7 +662,7 @@ async def download_and_pair_volumes(
                     if f.lower().endswith(".nii.gz"):
                         existing.append(os.path.join(root, f))
             logger.info(
-                f"MONAI_LABEL_DIR='{MONAI_LABEL_DIR}' — "
+                f"MONAI_LABEL_DIR='{MONAI_LABEL_DIR}'; "
                 f"{len(existing)} .nii.gz file(s) already present. "
                 f"Sample: {existing[:5]}"
             )
@@ -665,14 +672,14 @@ async def download_and_pair_volumes(
         logger.warning(f"Diagnostic scan failed: {_diag_err}")
 
     # Search by label_uid in filename (MONAI saves as {label_uid}.nii.gz).
-    # found_labels is keyed by label_uid → file path.
+    # found_labels is keyed by label_uid -> file path.
     found_labels = await wait_and_find(
         MONAI_LABEL_DIR,
         labels_to_process,   # plain list: key == search substring == label_uid
         timeout_s=600
     )
     logger.info(
-        f"Label files found: {len(found_labels)}/{len(labels_to_process)} — "
+        f"Label files found: {len(found_labels)}/{len(labels_to_process)}; "
         f"keys: {list(found_labels.keys())[:3]}..."
     )
 
@@ -686,7 +693,7 @@ async def download_and_pair_volumes(
         if not label_src:
             logger.error(
                 f"Label file never appeared for volume={vol_uid} "
-                f"(label_uid={label_uid}) — skipping pair"
+                f"(label_uid={label_uid}); skipping pair"
             )
             continue
 
@@ -694,7 +701,7 @@ async def download_and_pair_volumes(
         if download_volumes:
             vol_src = found_volumes.get(vol_uid)
             if not vol_src:
-                logger.error(f"Volume file never appeared for {vol_uid} — skipping pair")
+                logger.error("Volume file never appeared for %s; skipping pair", vol_uid)
                 continue
             vol_result = copy_volume(vol_src, vol_uid, FINAL_DIR_IMG)
 
@@ -707,7 +714,7 @@ async def download_and_pair_volumes(
         if vol_result and label_result:
             successful.append(vol_uid)
         else:
-            logger.error(f"Failed to copy vol/label for {vol_uid}")
+            logger.error("Failed to copy vol/label for %s", vol_uid)
 
     logger.info("=" * 60)
     logger.info(f"DONE: {len(successful)}/{len(volumes_to_process)} pairs ready in workspace")
@@ -749,8 +756,7 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
             vol_data = nib.load(vol_path).get_fdata()
             mask_data = nib.load(mask_path).get_fdata()
 
-            # warn and cap against shape mismatch in Z >> problem happens with subset of vol !
-            # todo: check why seg returns sometimes the mask not over all sliceson subset only 
+            # Some models return masks for a subset of slices; cap Z to the common range.
             if vol_data.shape != mask_data.shape:
                 logger.warning(
                     f"Shape mismatch for {uid}: vol={vol_data.shape}, mask={mask_data.shape}. "
@@ -811,15 +817,15 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
                 generated_volumes.append(volume_entry)
                 logger.info(f"Generated GIF for {uid}")
 
-                # ── Progressive broadcast: notify caller immediately ──
+                # Notify caller immediately for progressive broadcast.
                 if on_gif_ready is not None:
                     try:
                         on_gif_ready(volume_entry)
                     except Exception as cb_err:
                         logger.warning(f"on_gif_ready callback failed for {uid}: {cb_err}")
 
-        except Exception as e:
-            logger.error(f"Failed to generate GIF for {uid}: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Failed to generate GIF for %s", uid)
         finally:
             # Force garbage collection to prevent CPU OOM
             if 'vol_data' in locals(): del vol_data
@@ -865,7 +871,7 @@ def check_voxtell_label_availability(target_label):
     # Label not present in the CSV
     return False
 # ==================================
-#  get the Benchmark dice score of selected model (todo: should be in db)
+#  get the Benchmark dice score of selected model
 # ==================================
 
 def get_model_dice_score(model_name, target_label):
@@ -896,7 +902,7 @@ def get_model_dice_score(model_name, target_label):
             logger.warning(f"Failed to read dice score from supported.csv for {model_name}: {e}; returning default {DEFAULT_DICE}")
             dice_score = DEFAULT_DICE
     else:
-        dice_score = DEFAULT_DICE  # default score for other models (todo: should be in db)
+        dice_score = DEFAULT_DICE
     return float(dice_score)
 
 # =================================

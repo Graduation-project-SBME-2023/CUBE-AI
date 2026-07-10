@@ -1,16 +1,17 @@
-import asyncio
 import logging
-from autogen_agentchat.ui import Console
+
 from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
-from agent_system.models.tool_logging import ProgressPayload, TextPayload, ToolEvent
-from agent_system.tool_logging import receive_tool_event
+from agent_system.models.tool_logging import ProgressPayload, TextPayload
+
+from ..logging_config import emit_tool_event, emit_tool_events
+from ..utils import check_voxtell_label_availability
+from .common import raise_for_segmentation_error
 
 logger = logging.getLogger(__name__)
-from ..utils import check_voxtell_label_availability
+
 
 def create_interactive_agent(model_client, discovery_tools):
-
-    agent = AssistantAgent(
+    return AssistantAgent(
         name="UserFallbackAgent",
         model_client=model_client,
         tools=discovery_tools,
@@ -26,146 +27,91 @@ def create_interactive_agent(model_client, discovery_tools):
             Rules:
             - You MUST NOT run segmentation or check masks.
             - You MUST wait for user confirmation via UserProxy.
-            - Terminate only when user confirm that the task is done.
+            - Terminate only when the user confirms the task is done.
             """,
-            reflect_on_tool_use= True,
-            max_tool_iterations=3 # need to optimize
+        reflect_on_tool_use=True,
+        max_tool_iterations=3,
     )
 
-    return agent
 
 def create_user_proxy_agent(model_client):
-    agent = UserProxyAgent(name="HumanUser")
-    return agent
+    return UserProxyAgent(name="HumanUser")
 
-# todo: make it return the dice score if it voxtell
+
+def _supported_voxtell_labels(labels):
+    supported = []
+    unsupported = []
+    for label in labels:
+        canonical_label = check_voxtell_label_availability(label)
+        if canonical_label:
+            supported.append(canonical_label)
+        else:
+            unsupported.append(label)
+    return supported, unsupported
+
+
 async def run_interactive_pipeline(
     user_fallback_agent,
     user_proxy,
     volumes,
     labels,
     segmentation_service,
-    session_id
+    session_id,
 ):
-        # ================ logging ======================
-        payload = TextPayload(message=f'Starting Automatic Segmentation on {len(volumes)}...')
-        tool_started = ToolEvent(
-            event_type='tool_started',
-            source='segmentation_agent',
-            content_type='text',
-            content=payload,
+    payload = TextPayload(message=f"Starting interactive segmentation on {len(volumes)} volumes.")
+    await emit_tool_events(
+        event_types=["tool_started", "tool_progress"],
+        content=payload,
+        session_id=session_id,
+    )
+
+    selected_model = None
+    logger.info("Starting interactive segmentation guidance for labels: %s", labels)
+    supported_labels, unsupported_labels = _supported_voxtell_labels(labels)
+    if unsupported_labels:
+        logger.warning(
+            "VoxTell does not support these labels and they require manual segmentation: %s",
+            unsupported_labels,
+        )
+    if not supported_labels:
+        raise RuntimeError(f"No requested labels are supported by VoxTell: {labels}")
+
+    failures = []
+    for index, volume_uid in enumerate(volumes, start=1):
+        logger.info(
+            "[%s/%s] Guiding user through interactive segmentation for volume: %s",
+            index,
+            len(volumes),
+            volume_uid,
+        )
+        await emit_tool_event(
+            event_type="tool_progress",
+            content=ProgressPayload(current=index, total=len(volumes), label="Segmenting volumes"),
+            content_type="progress",
             session_id=session_id,
         )
-        await receive_tool_event(tool_started)
-        tool_progress = ToolEvent(
-            event_type='tool_progress',
-            source='segmentation_agent',
-            content_type='progress',
-            content=payload,
-            session_id=session_id,
-        )
-        await receive_tool_event(tool_progress)
-        #===============================================    
-        selected_model = None
-        logger.info(f"Starting interactive segmentation guidance for labels: {labels}")
-        for idx, volume_uid in enumerate(volumes, start=1):
-            logger.info(f"[{idx}/{len(volumes)}] Guiding user through interactive segmentation for volume: {volume_uid}")
-            # ============ logging =================
-            payload = ProgressPayload(
-                current=idx,
-                total=len(volumes),
-                label='Segmenting Volumes'
-            )
-            tool_progress = ToolEvent(
-                event_type='tool_progress',
-                source='segmentation_agent',
-                content_type='progress',
-                content=payload,
-                session_id=session_id,
-            )
-            await receive_tool_event(tool_progress)
-            # =======================================
-            try:
-                for label in labels:
-                    canonical_label = check_voxtell_label_availability(label)
-                    if canonical_label:
-                        selected_model = "voxtell"
-                        result = await segmentation_service.run_segmentation(
-                            model="voxtell",
-                            series_instance_uid=volume_uid,
-                            label_info=canonical_label,           # use normalized form
-                            params={"text_prompts": [canonical_label]}  # must match cache key exactly
-                        )
-                        logger.info(f"Completed segmentation for volume: {volume_uid} with label: {canonical_label}")
-                    else:
-                        logger.info(f"Label '{label}' is not supported by VoxTell. Guiding user through interactive segmentation.")
-                        pass
-                        # todo : make function that guide the user to choose between the supported models for this label and then run it and return the result to the user
-                        # todo: append the volumes and labels that need interactive segmentation to run function with them
-            except Exception as e:
-                logger.error(f"Segmentation failed for {volume_uid} : {e}")      
-        return selected_model
-        
-        # # console 
-        # logger.info("Providing initial guidance to user...")
-        # await Console(
-        #     user_fallback_agent.run_stream(
-        #         task=(
-        #             f"Guide the user through interactive segmentation for these labels: {labels}. "
-        #             "Explain available interactive segmentation models and their parameters. "
-        #             "answer there question precisely and also provide precise overview unless they ask for details"
-        #             "Tell the user they can ask questions, or press Enter if they have no more questions."
-        #             "terminare when they confirm that they make all masks needed you need to check this."
-        #         )
-        #     )
-        # )
 
-        # logger.info("Entering interactive Q&A loop")
-        
-        # loop = asyncio.get_running_loop()
+        try:
+            for canonical_label in supported_labels:
+                selected_model = "voxtell"
+                result = await segmentation_service.run_segmentation(
+                    model=selected_model,
+                    series_instance_uid=volume_uid,
+                    label_info=canonical_label,
+                    params={"text_prompts": [canonical_label]},
+                )
+                raise_for_segmentation_error(result, volume_uid, canonical_label)
+                logger.info(
+                    "Completed interactive segmentation for volume %s with label %s",
+                    volume_uid,
+                    canonical_label,
+                )
+        except Exception as exc:
+            failures.append((volume_uid, str(exc)))
+            logger.exception("Interactive segmentation failed for %s", volume_uid)
 
-        # while True:
-        #     user_input = await loop.run_in_executor(
-        #         None, input, "\nUser (type your question, or press Enter to finish)> "
-        #     )
+    if failures:
+        failed_uids = ", ".join(uid for uid, _ in failures)
+        raise RuntimeError(f"Interactive segmentation failed for {len(failures)} volumes: {failed_uids}")
 
-        #     if not user_input.strip():
-        #         logger.info("User pressed Enter with no input - terminating session")
-        #         print("\nInteractive session ended.\n")
-        #         break
-            
-        #     # termination words
-        #     exit_phrases = ["done", "finish", "finished", "no more", "that's all", "exit", "quit", "bye", "complete"]
-        #     if any(phrase in user_input.lower() for phrase in exit_phrases):
-        #         logger.info(f"User indicated completion: '{user_input}'")
-        #         print("\ Great! Interactive session completed.\n")
-        #         break
-
-        #     logger.info(f"[User Input] {user_input}")
-            
-        #     task_message = (
-        #         f"The user asked: \"{user_input}\"\n\n"
-        #         f"Context: We are guiding them through interactive segmentation for labels: {labels}\n\n"
-        #         "Please provide a concise answer to their specific question. "
-        #         "Do NOT repeat previous answers or conversation history."
-        #     )
-
-        #     try:
-        #         print("\nUserFallbackAgent> ", end="", flush=True)
-                
-        #         full_response = ""
-        #         async for message in user_fallback_agent.run_stream(task=task_message):
-        #             if hasattr(message, 'content') and message.content:
-        #                 print(message.content, end="", flush=True)
-        #                 full_response += message.content
-                
-        #         print("\n") 
-                
-        #         logger.info(f"[Agent Response] {full_response}")
-                
-        #     except Exception as e:
-        #         logger.error(f"Error during interactive response: {e}", exc_info=True)
-        #         print(f"\n Error: {str(e)}\n")
-        #         break
-
-        # logger.info("Interactive session completed.")    
+    return selected_model
