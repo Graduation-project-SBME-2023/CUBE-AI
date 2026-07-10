@@ -379,55 +379,81 @@ async def download_and_pair_volumes(
 
         # --- Automatic path ---
         if chosen_path == "automatic" and selected_auto_model:
-            # 1st priority: mask produced by the exact auto-model (e.g. vista)
+            # 1st priority: mask produced by the EXACT model FOR THE EXACT ORGAN.
+            # Both conditions must hold:
+            #   (a) model name appears in segmentation_type  (e.g. "vista")
+            #   (b) organ extracted from segmentation_type   == target_label
+            #
+            # Without (b), a "heart-vista-..." mask would be picked when
+            # segmenting "liver" just because the model name matches.
             for label in labels:
-                if selected_auto_model in label.get("segmentation_type", ""):
-                    logger.info(f"Found matching automatic label: {label.get('label_series_instance_uid')}")
+                seg_type = label.get("segmentation_type", "")
+                model_matches = selected_auto_model in seg_type
+                organ_matches = matches_label(seg_type, target_label) if target_label else True
+                if model_matches and organ_matches:
+                    logger.info(
+                        f"1st-priority match: model='{selected_auto_model}' + "
+                        f"organ='{target_label}' in segmentation_type='{seg_type}' "
+                        f"-> UID={label.get('label_series_instance_uid')}"
+                    )
                     return label
+                elif model_matches and not organ_matches:
+                    # Warn explicitly so the mismatch is visible in the logs.
+                    logger.warning(
+                        f"Model '{selected_auto_model}' found but WRONG ORGAN: "
+                        f"segmentation_type='{seg_type}', expected='{target_label}' — skipping."
+                    )
 
-            # 2nd priority: any mask whose segmentation_type contains the *target organ*
-            # (word-boundary safe). This covers voxtell-generated masks being reused when
-            # the planner chose an auto-model for the same organ (e.g. vista for liver).
+            # 2nd priority: any mask whose organ matches the target (any model).
+            # Covers the case where a voxtell-liver mask exists but the plan
+            # chose vista for liver — still correct to reuse it.
             if target_label:
                 for label in labels:
                     seg_type = label.get("segmentation_type", "")
                     if matches_label(seg_type, target_label):
                         logger.info(
-                            f"Auto-model '{selected_auto_model}' not found; reusing existing "
-                            f"'{target_label}' mask — "
+                            f"2nd-priority: no model+organ match; reusing existing "
+                            f"'{target_label}' mask (any model) — "
                             f"UID: {label.get('label_series_instance_uid')} | "
                             f"segmentation_type: '{seg_type}'"
                         )
                         return label
 
-            # Do NOT fall back to the latest timestamp here.
-            # That would pair the volume with an old mask from a different organ
-            # (e.g., a spleen mask when the hypothesis is about lungs).
+            # No match found — do NOT fall back to latest timestamp, that risks
+            # pairing the volume with a mask from a completely different organ.
             logger.warning(
-                f"No label matched automatic model '{selected_auto_model}' or target label "
-                f"'{target_label}' — skipping this volume to avoid wrong-organ pairing."
+                f"No label matched (model='{selected_auto_model}' AND organ='{target_label}') "
+                f"or organ-only fallback — skipping this volume to avoid wrong-organ pairing."
             )
             return None
 
         # --- Interactive / VoxTell path ---
-        # First try an exact model-name match in segmentation_type.
-        # If that fails (MONAI Label stores its own internal type strings, not
-        # the model name), fall back to the most recently created label.
-        # This is safe because run_interactive_pipeline just finished running
-        # voxtell on all eligible volumes, so the newest label is the one we want.
+        # Apply the same model+organ dual-check so a wrong-organ mask is never
+        # picked during interactive runs either.
         if chosen_path == "interactive":
-            if selected_auto_model:
+            if selected_auto_model and target_label:
+                for label in labels:
+                    seg_type = label.get("segmentation_type", "")
+                    if selected_auto_model in seg_type and matches_label(seg_type, target_label):
+                        logger.info(
+                            f"Interactive: exact model+organ match "
+                            f"(model='{selected_auto_model}', organ='{target_label}'): "
+                            f"{label.get('label_series_instance_uid')}"
+                        )
+                        return label
+            elif selected_auto_model:
+                # No target_label provided — model-name match only (degenerate case).
                 for label in labels:
                     if selected_auto_model in label.get("segmentation_type", ""):
                         logger.info(
-                            f"Found matching interactive label ({selected_auto_model}): "
+                            f"Interactive: model-only match for '{selected_auto_model}': "
                             f"{label.get('label_series_instance_uid')}"
                         )
                         return label
             # Fall back to newest label — safe because we just ran segmentation.
             latest = max(labels, key=lambda x: x.get("created_at", ""))
             logger.info(
-                f"Interactive path: no exact model match for '{selected_auto_model}', "
+                f"Interactive path: no exact model+organ match, "
                 f"using newest label: {latest.get('label_series_instance_uid')}"
             )
             return latest
@@ -450,14 +476,33 @@ async def download_and_pair_volumes(
             logger.error(f"Trigger exception: {e}")
             return False
 
-    async def wait_and_find(search_dir, uids, timeout_s=120, poll_interval=3.0):
-        deadline  = time.time() + timeout_s
-        found     = {}
-        remaining_uids = set(uids)
+    async def wait_and_find(search_dir, uid_to_search_key, timeout_s=120, poll_interval=3.0):
+        """
+        Waits for NIfTI files to appear in *search_dir*.
 
-        logger.info(f"Waiting for {len(uids)} file(s) in {search_dir} (timeout={timeout_s}s)")
+        Parameters
+        ----------
+        uid_to_search_key : dict | list
+            * dict  → maps an arbitrary key (e.g. label_uid) to the substring
+                      that should appear in the filename (e.g. volume_uid).
+                      `found` is keyed by the *dict key*.
+            * list  → each element is both the key and the search substring
+                      (legacy behaviour).
+        """
+        # Normalise to dict form
+        if isinstance(uid_to_search_key, list):
+            uid_to_search_key = {u: u for u in uid_to_search_key}
 
-        while time.time() < deadline and remaining_uids:
+        deadline       = time.time() + timeout_s
+        found          = {}
+        remaining_keys = set(uid_to_search_key.keys())
+
+        logger.info(
+            f"Waiting for {len(remaining_keys)} file(s) in {search_dir} "
+            f"(timeout={timeout_s}s)"
+        )
+
+        while time.time() < deadline and remaining_keys:
             if not os.path.isdir(search_dir):
                 logger.warning(f"Directory does not exist yet: {search_dir}")
                 await asyncio.sleep(poll_interval)
@@ -467,20 +512,25 @@ async def download_and_pair_volumes(
                 for fname in files:
                     if not fname.lower().endswith(".nii.gz"):
                         continue
-                    for uid in list(remaining_uids):
-                        if uid in fname:
+                    for key in list(remaining_keys):
+                        search_substr = uid_to_search_key[key]
+                        if search_substr in fname:
                             full_path = os.path.join(root, fname)
-                            found[uid] = full_path
-                            remaining_uids.discard(uid)
-                            logger.info(f"Found: {full_path}")
+                            found[key] = full_path
+                            remaining_keys.discard(key)
+                            logger.info(f"Found [{key}] → {full_path}")
 
-            if remaining_uids:
+            if remaining_keys:
                 elapsed = timeout_s - (deadline - time.time())
-                logger.debug(f"Found {len(found)}/{len(uids)} — waiting... ({elapsed:.0f}s elapsed)")
+                logger.debug(
+                    f"Found {len(found)}/{len(uid_to_search_key)} — "
+                    f"waiting... ({elapsed:.0f}s elapsed)"
+                )
                 await asyncio.sleep(poll_interval)
 
-        if remaining_uids:
-            logger.warning(f"Timeout — missing UIDs: {remaining_uids}")
+        if remaining_keys:
+            missing_info = {k: uid_to_search_key[k] for k in remaining_keys}
+            logger.warning(f"Timeout — missing keys/search-substrings: {missing_info}")
         return found
 
     def copy_volume(src_path, volume_uid, dest_dir):
@@ -567,13 +617,46 @@ async def download_and_pair_volumes(
     # ------------------------------------------------------------------ #
     #  3. wait for files to appear in MONAI's local dirs                 #
     # ------------------------------------------------------------------ #
+    # MONAI's /datastore/labels endpoint converts the DICOM SEG to NIfTI
+    # and saves it as:  {label_series_instance_uid}.nii.gz
+    # NOT by volume UID.  Pass labels_to_process as a plain list so that
+    # wait_and_find searches for the label UID in the filename.
+
     found_volumes = {}
     if download_volumes:
         logger.info("Waiting for images to appear...")
         found_volumes = await wait_and_find(MONAI_IMG_DIR, volumes_to_process, timeout_s=600)
-        
+
     logger.info("Waiting for labels to appear...")
-    found_labels = await wait_and_find(MONAI_LABEL_DIR, labels_to_process, timeout_s=600)
+    # Diagnostic: log what's already in MONAI_LABEL_DIR before waiting
+    try:
+        if os.path.isdir(MONAI_LABEL_DIR):
+            existing = []
+            for root, _, files in os.walk(MONAI_LABEL_DIR):
+                for f in files:
+                    if f.lower().endswith(".nii.gz"):
+                        existing.append(os.path.join(root, f))
+            logger.info(
+                f"MONAI_LABEL_DIR='{MONAI_LABEL_DIR}' — "
+                f"{len(existing)} .nii.gz file(s) already present. "
+                f"Sample: {existing[:5]}"
+            )
+        else:
+            logger.warning(f"MONAI_LABEL_DIR does not exist yet: {MONAI_LABEL_DIR}")
+    except Exception as _diag_err:
+        logger.warning(f"Diagnostic scan failed: {_diag_err}")
+
+    # Search by label_uid in filename (MONAI saves as {label_uid}.nii.gz).
+    # found_labels is keyed by label_uid → file path.
+    found_labels = await wait_and_find(
+        MONAI_LABEL_DIR,
+        labels_to_process,   # plain list: key == search substring == label_uid
+        timeout_s=600
+    )
+    logger.info(
+        f"Label files found: {len(found_labels)}/{len(labels_to_process)} — "
+        f"keys: {list(found_labels.keys())[:3]}..."
+    )
 
     # ------------------------------------------------------------------ #
     #  4. copy to workspace                                              #
@@ -583,10 +666,13 @@ async def download_and_pair_volumes(
     for vol_uid, label_uid in zip(volumes_to_process, labels_to_process):
         label_src = found_labels.get(label_uid)
         if not label_src:
-            logger.error(f"Label file never appeared for {label_uid} — skipping pair")
+            logger.error(
+                f"Label file never appeared for volume={vol_uid} "
+                f"(label_uid={label_uid}) — skipping pair"
+            )
             continue
 
-        vol_result = True # Default to True if we aren't downloading volumes
+        vol_result = True  # Default to True if we aren't downloading volumes
         if download_volumes:
             vol_src = found_volumes.get(vol_uid)
             if not vol_src:
