@@ -72,7 +72,8 @@ module.exports = (env, argv, { SRC_DIR, ENTRY }) => {
       //   // include all types of chunks
       //   chunks: 'all',
       // },
-      //runtimeChunk: 'single',
+      // ✅ DEV SPEED: Separates runtime chunk so HMR only rebuilds changed modules
+      runtimeChunk: isProdBuild ? false : 'single',
       minimize: isProdBuild,
       sideEffects: false,
     },
@@ -94,6 +95,10 @@ module.exports = (env, argv, { SRC_DIR, ENTRY }) => {
     },
     cache: {
       type: 'filesystem',
+      // ✅ Version the cache so it auto-invalidates if webpack config changes
+      buildDependencies: {
+        config: [__filename],
+      },
     },
     module: {
       noParse: [/(codec)/, /(dicomicc)/],
@@ -102,6 +107,12 @@ module.exports = (env, argv, { SRC_DIR, ENTRY }) => {
           test: /\.js$/,
           enforce: 'pre',
           use: 'source-map-loader',
+          // ✅ Only load source maps from our own source, not node_modules (saves huge time)
+          include: [
+            path.resolve(__dirname, '../platform'),
+            path.resolve(__dirname, '../extensions'),
+            path.resolve(__dirname, '../modes'),
+          ],
         },
         transpileJavaScriptRule(mode),
         loadWebWorkersRule,
