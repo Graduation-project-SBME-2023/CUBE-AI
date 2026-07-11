@@ -3,7 +3,7 @@ name: Build & Push Frontend Image
 on:
   push:
     branches:
-      - Release-Version
+      - Release
 
 jobs:
   build-and-push:
