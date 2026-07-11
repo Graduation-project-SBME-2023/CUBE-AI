@@ -22,6 +22,7 @@ from tools.save_population import save_final_output
 from tools.latex.get_final_report import get_final_report
 from tools.latex.latex_to_pdf import latex_to_pdf
 from tools.latex.template_tools import get_latex_template, list_latex_templates
+from tools.latex.list_plots import list_workspace_plots
 from tools.get_modeling_results import get_modeling_results
 from tools.targets_matcher import generate_targets
 

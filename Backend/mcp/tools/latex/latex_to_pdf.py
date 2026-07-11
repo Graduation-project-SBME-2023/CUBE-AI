@@ -1,5 +1,7 @@
 import subprocess
 import tempfile
+import shutil
+import glob
 import sys
 import os
 import asyncio
@@ -20,6 +22,11 @@ async def latex_to_pdf(
     Use this tool in scenarios such as:
     1. When you need to convert generated LaTeX content into a final, downloadable PDF file.
     2. To save a formatted report or summary to the local file system.
+
+    Images: Any .png or .jpg files found in the workspace (features/, modeling/,
+    outputs/ subdirectories) are automatically copied into the compilation
+    directory. Use \\includegraphics{filename.png} (basename only, no path)
+    in your LaTeX source to embed them.
     """
     try:
         with tempfile.TemporaryDirectory() as temp:
@@ -29,6 +36,26 @@ async def latex_to_pdf(
             log_event = ToolEvent('tool_progress', 'text', payload)
             log_tool_state(log_event)
             tex_path = os.path.join(temp, "document.tex")
+
+            # ── Copy workspace images into the temp dir so \includegraphics works ──
+            workspace_folder = os.environ.get("WORKSPACE_DIR", "")
+            if workspace_folder and os.path.isdir(workspace_folder):
+                copied_images = []
+                for ext in ("*.png", "*.jpg", "*.jpeg"):
+                    for img_path in glob.glob(
+                        os.path.join(workspace_folder, "**", ext), recursive=True
+                    ):
+                        basename = os.path.basename(img_path)
+                        dest = os.path.join(temp, basename)
+                        # Avoid overwriting if two images share the same name
+                        if not os.path.exists(dest):
+                            shutil.copy2(img_path, dest)
+                            copied_images.append(basename)
+                if copied_images:
+                    payload = TextPayload(
+                        message=f"Copied {len(copied_images)} images into compilation directory."
+                    )
+                    log_tool_state(ToolEvent("tool_progress", "text", payload))
 
             # Write LaTeX to .tex file
             with open(tex_path, "w", encoding="utf-8") as f:
