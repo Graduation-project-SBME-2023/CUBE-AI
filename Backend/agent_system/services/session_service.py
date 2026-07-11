@@ -473,30 +473,27 @@ class SessionService:
         # use backend client first to update the logs of the specific step
         # then update the frontend via ws
 
-        step = next((step for step in session.plan.steps if step.module == agent), None)
-        if step and step.id:
-            body = {
-                "status": "RUNNING",
-                "log": log,
-            }
-            await BackendClient.update_plan_step(step.id, body)
-            
+        step_id = next(step.id for step in session.plan.steps if step.module == agent)
+        body = {
+            "status": "RUNNING",
+            "log": log,
+        }
+        await BackendClient.update_plan_step(step_id, body)
         await self._ws_send(log.get("type"), log.get("payload"), log.get("session_id"))
 
     async def update_tool_views(self, session, agent, msg_type, payload):
-        step = next((step for step in session.plan.steps if step.module == agent), None)
+        step_id = next(step.id for step in session.plan.steps if step.module == agent)
 
-        if step and step.id:
-            body = {
-                "status": "RUNNING",
-                "log": {
-                    "type": msg_type,
-                    "payload": payload,
-                    "session_id": session.session_id,
-                },
-            }
+        body = {
+            "status": "RUNNING",
+            "log": {
+                "type": msg_type,
+                "payload": payload,
+                "session_id": session.session_id,
+            },
+        }
 
-            await BackendClient.update_plan_step(step.id, body)
+        await BackendClient.update_plan_step(step_id, body)
 
     async def recover_execution_state(self, session_id: str) -> dict | None:
         """
