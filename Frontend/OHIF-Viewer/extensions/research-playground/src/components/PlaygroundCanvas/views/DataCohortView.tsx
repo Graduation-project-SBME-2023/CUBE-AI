@@ -202,8 +202,6 @@ export default function DataCohortView({ populationData, segmentationData, sessi
 
     // --- NEW: DOWNLOAD TEMPLATE LOGIC ---
     const handleDownloadCSV = () => {
-        if (accumulatedPop.uids.length === 0) return;
-
         const header = "id,target\n";
         const rows = accumulatedPop.uids.map(uid => `${uid},`).join('\n');
         const csvContent = "data:text/csv;charset=utf-8," + header + rows;
@@ -388,7 +386,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                     </div>
                     <div className="flex gap-2 items-center text-xs font-mono">
                         {/* --- NEW: Download & Upload Buttons --- */}
-                        {accumulatedPop.uids.length > 0 && labellingMode !== 'automatic' && (
+                        {labellingMode !== 'automatic' && (
                             <div className="flex gap-2 mr-4">
                                 <button
                                     onClick={handleDownloadCSV}
