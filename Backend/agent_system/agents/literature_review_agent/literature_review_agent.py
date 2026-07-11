@@ -103,16 +103,10 @@ from autogen_ext.models.ollama import OllamaChatCompletionClient
 # ──────────────────────────────────────────────────────────────────────────────
 # Output directory
 # ──────────────────────────────────────────────────────────────────────────────
-OUTPUT_DIR = Path("./literature_review_output")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def set_output_dir(output_dir: Optional[Path]) -> Path:
-  """Set output directory for literature review artifacts in this process."""
-  global OUTPUT_DIR
-  OUTPUT_DIR = Path(output_dir) if output_dir else Path("./literature_review_output")
-  OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-  return OUTPUT_DIR
+# Default fallback output dir — used only when run_literature_review() is
+# called without an explicit output_dir (e.g. standalone CLI usage).
+# NEVER mutated at module level; each call creates its own local path.
+_DEFAULT_OUTPUT_DIR = Path("./literature_review_output")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -173,12 +167,8 @@ _DOMAIN_KEYWORDS_FALLBACK: List[str] = [
     "random forest", "clinical", "biomarker", "lesion", "neoplasm",
 ]
 
-# Module-level list that all tool functions close over.
-# Populated per-run in run_literature_review(); falls back to broad list.
-_ACTIVE_DOMAIN_KEYWORDS: List[str] = list(_DOMAIN_KEYWORDS_FALLBACK)
-
-# Legacy alias preserved for any external code that references _DOMAIN_KEYWORDS
-_DOMAIN_KEYWORDS = _ACTIVE_DOMAIN_KEYWORDS
+# Domain keywords are built fresh per run_literature_review() call and
+# passed explicitly to each search closure — no shared mutable global.
 
 
 def _build_domain_keywords(pico: Optional[Dict[str, str]]) -> List[str]:
@@ -211,27 +201,27 @@ def _build_domain_keywords(pico: Optional[Dict[str, str]]) -> List[str]:
         return list(_DOMAIN_KEYWORDS_FALLBACK)
 
 
-def _is_domain_relevant(title: str, abstract: str) -> bool:
+def _is_domain_relevant(title: str, abstract: str, keywords: List[str]) -> bool:
     """
-    Return True if the paper mentions at least 2 of the active domain keywords.
-    Keywords are PICO-derived per run (set in run_literature_review) with a
-    broad medical-imaging fallback so no topic ever silently drops all papers.
+    Return True if the paper mentions at least 2 of the given domain keywords.
+    Keywords are PICO-derived per run and passed explicitly — no global state.
     """
     text = (title + " " + abstract).lower()
-    hits = sum(1 for kw in _ACTIVE_DOMAIN_KEYWORDS if kw.lower() in text)
+    hits = sum(1 for kw in keywords if kw.lower() in text)
     return hits >= 2
 
 
 # ── Tool 1: PubMed ────────────────────────────────────────────────────────────
 
-def search_pubmed(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
+def _search_pubmed(query: str, max_results: int, keywords: List[str]) -> str:
     """
     Search PubMed via NCBI E-utilities with rate-limit delay and retry.
-    Applies domain pre-filter to drop clearly off-topic papers.
+    Applies domain pre-filter using the provided keywords list.
 
     Args:
         query       : MeSH / Boolean keyword query string.
-        max_results : Number of results (default 8 — keeps context window small).
+        max_results : Number of results to retrieve.
+        keywords    : Session-scoped domain keywords for relevance filtering.
     """
     BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
     api_suffix = f"&api_key={NCBI_API_KEY}" if NCBI_API_KEY else ""
@@ -286,7 +276,7 @@ def search_pubmed(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
                 pmid = medline.findtext("PMID", default="")
 
                 # Domain pre-filter — drop papers with no medical imaging relevance
-                if not _is_domain_relevant(title, abstract):
+                if not _is_domain_relevant(title, abstract, keywords):
                     continue
 
                 results.append({
@@ -316,14 +306,15 @@ def search_pubmed(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
 
 # ── Tool 2: Arxiv ─────────────────────────────────────────────────────────────
 
-def search_arxiv(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
+def _search_arxiv(query: str, max_results: int, keywords: List[str]) -> str:
     """
     Search Arxiv with rate-limit delay and domain pre-filter.
     Targets cs.CV, eess.IV, cs.LG categories for medical imaging papers.
 
     Args:
         query       : Free-text query string.
-        max_results : Number of results (default 8).
+        max_results : Number of results to retrieve.
+        keywords    : Session-scoped domain keywords for relevance filtering.
     """
     BASE      = "http://export.arxiv.org/api/query?"
     NAMESPACE = {"atom": "http://www.w3.org/2005/Atom"}
@@ -356,7 +347,7 @@ def search_arxiv(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
             ]
             author_str = ", ".join(authors[:5]) + (" et al." if len(authors) > 5 else "")
 
-            if not _is_domain_relevant(title, summary):
+            if not _is_domain_relevant(title, summary, keywords):
                 continue
 
             results.append({
@@ -384,13 +375,14 @@ def search_arxiv(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
 
 # ── Tool 3: Semantic Scholar ──────────────────────────────────────────────────
 
-def search_semantic_scholar(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
+def _search_semantic_scholar(query: str, max_results: int, keywords: List[str]) -> str:
     """
     Search Semantic Scholar with rate-limit delay and domain pre-filter.
 
     Args:
         query       : Natural language or keyword query.
-        max_results : Number of results (default 8).
+        max_results : Number of results to retrieve.
+        keywords    : Session-scoped domain keywords for relevance filtering.
     """
     BASE   = "https://api.semanticscholar.org/graph/v1/paper/search"
     fields = "title,authors,year,abstract,externalIds,citationCount,url"
@@ -411,7 +403,7 @@ def search_semantic_scholar(query: str, max_results: int = _CFG_MAX_RESULTS) -> 
             title    = paper.get("title", "No Title") or "No Title"
             abstract = (paper.get("abstract") or "")[:800]
 
-            if not _is_domain_relevant(title, abstract):
+            if not _is_domain_relevant(title, abstract, keywords):
                 continue
 
             authors    = [a.get("name", "") for a in paper.get("authors", [])]
@@ -448,13 +440,14 @@ def search_semantic_scholar(query: str, max_results: int = _CFG_MAX_RESULTS) -> 
 
 # ── Tool 4: Europe PMC ────────────────────────────────────────────────────────
 
-def search_europe_pmc(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
+def _search_europe_pmc(query: str, max_results: int, keywords: List[str]) -> str:
     """
     Search Europe PMC with rate-limit delay and domain pre-filter.
 
     Args:
         query       : Free-text or structured Europe PMC query.
-        max_results : Number of results (default 8).
+        max_results : Number of results to retrieve.
+        keywords    : Session-scoped domain keywords for relevance filtering.
     """
     BASE   = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
     params = urllib.parse.urlencode({
@@ -475,7 +468,7 @@ def search_europe_pmc(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
             title    = hit.get("title", "No Title").strip()
             abstract = (hit.get("abstractText") or "")[:800]
 
-            if not _is_domain_relevant(title, abstract):
+            if not _is_domain_relevant(title, abstract, keywords):
                 continue
 
             pmid  = hit.get("pmid", "")
@@ -560,16 +553,17 @@ def score_paper_relevance(paper_json: str, pico_json: str) -> str:
 
 # ── Tool 6: Save output files ─────────────────────────────────────────────────
 
-def save_output(filename: str, content: str) -> str:
+def _save_output(filename: str, content: str, output_dir: Path) -> str:
     """
-  Save string content to the configured literature review output directory.
+    Save string content to the given output directory.
 
     Args:
-        filename : Target filename (e.g., 'context.json', 'report.md').
-        content  : String content to write.
+        filename   : Target filename (e.g., 'context.json', 'report.md').
+        content    : String content to write.
+        output_dir : Session-scoped output directory Path.
     """
     try:
-        path = OUTPUT_DIR / filename
+        path = output_dir / filename
         path.write_text(content, encoding="utf-8")
         return f"Saved successfully → {path.resolve()}"
     except Exception as exc:
@@ -1437,17 +1431,15 @@ async def run_literature_review(
     if missing:
         raise ValueError(f"PICO input is missing required keys: {missing}")
 
-    # ── Configure output path (workspace-scoped when provided) ───────────────
-    set_output_dir(output_dir)
+    # ── Configure output path — session-scoped, never a shared global ────────
+    _output_dir = Path(output_dir) if output_dir else _DEFAULT_OUTPUT_DIR
+    _output_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Populate domain keyword list from this PICO (Fix #4) ─────────────────
-    # Replaces the static spleen/lymphoma list with PICO-specific concepts so
-    # the relevance pre-filter works for any research topic.
-    global _ACTIVE_DOMAIN_KEYWORDS
-    _ACTIVE_DOMAIN_KEYWORDS.clear()
-    _ACTIVE_DOMAIN_KEYWORDS.extend(_build_domain_keywords(pico))
-    print(f"[Pipeline] Domain keywords ({len(_ACTIVE_DOMAIN_KEYWORDS)}): "
-          f"{', '.join(_ACTIVE_DOMAIN_KEYWORDS[:8])}{'...' if len(_ACTIVE_DOMAIN_KEYWORDS) > 8 else ''}")
+    # ── Build session-scoped domain keywords — no shared global state ─────────
+    # Each concurrent call gets its own list derived from its PICO.
+    domain_kws: List[str] = _build_domain_keywords(pico)
+    print(f"[Pipeline] Domain keywords ({len(domain_kws)}): "
+          f"{', '.join(domain_kws[:8])}{'...' if len(domain_kws) > 8 else ''}")
 
     # ── Build or reuse Dynamic Knowledge Base ─────────────────────────────────
     if prebuilt_knowledge and prebuilt_knowledge.get("knowledge_base") and prebuilt_knowledge.get("sources_guide"):
@@ -1474,6 +1466,29 @@ async def run_literature_review(
     # ── LLM Client ───────────────────────────────────────────────────────────
     print(f"[Pipeline] Initialising Ollama client  model='{model}'")
     model_client = OllamaClient(model=model)
+
+    # ── Session-scoped tool closures ──────────────────────────────────────────
+    # Each closure captures _output_dir and domain_kws for THIS specific call.
+    # Concurrent users get fully isolated instances — no shared global state.
+    def search_pubmed(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
+        """Search PubMed via NCBI E-utilities for clinical/medical literature."""
+        return _search_pubmed(query, max_results, domain_kws)
+
+    def search_arxiv(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
+        """Search Arxiv for AI/technical preprints on medical imaging."""
+        return _search_arxiv(query, max_results, domain_kws)
+
+    def search_semantic_scholar(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
+        """Search Semantic Scholar for cross-disciplinary papers."""
+        return _search_semantic_scholar(query, max_results, domain_kws)
+
+    def search_europe_pmc(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
+        """Search Europe PMC for open-access life-science papers."""
+        return _search_europe_pmc(query, max_results, domain_kws)
+
+    def save_output(filename: str, content: str) -> str:
+        """Save a file to the literature_review_output directory."""
+        return _save_output(filename, content, _output_dir)
 
     # ── FunctionTool wrappers ─────────────────────────────────────────────────
     t_pubmed    = FunctionTool(search_pubmed,           description="Search PubMed for clinical/medical literature.")
@@ -1560,7 +1575,7 @@ PICO JSON (for programmatic use):
     print("  Agentic AI Radiology Researcher — Literature Review Pipeline")
     print("═" * 72)
     print(f"\n  Hypothesis:\n  {pico['hypothesis']}\n")
-    print(f"  Output directory: {OUTPUT_DIR.resolve()}\n")
+    print(f"  Output directory: {_output_dir.resolve()}\n")
     print("─" * 72 + "\n")
 
     try:
@@ -1582,10 +1597,10 @@ PICO JSON (for programmatic use):
 
     # ── Collect output paths ──────────────────────────────────────────────────
     outputs = {
-        "context_json"      : str(OUTPUT_DIR / "context.json"),
-        "literature_report" : str(OUTPUT_DIR / "literature_report.md"),
-        "ranked_papers"     : str(OUTPUT_DIR / "ranked_papers.json"),
-        "output_directory"  : str(OUTPUT_DIR.resolve()),
+        "context_json"      : str(_output_dir / "context.json"),
+        "literature_report" : str(_output_dir / "literature_report.md"),
+        "ranked_papers"     : str(_output_dir / "ranked_papers.json"),
+        "output_directory"  : str(_output_dir.resolve()),
     }
 
     print("\n" + "═" * 72)
