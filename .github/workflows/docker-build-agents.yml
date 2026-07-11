@@ -3,7 +3,7 @@ name: Build and Push Multi-Platform Agents Docker Image
 on:
   push:
     branches:
-      - Release-Version
+      - Release
 
 jobs:
   build-and-push:
