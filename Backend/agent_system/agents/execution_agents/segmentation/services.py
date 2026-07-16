@@ -259,13 +259,27 @@ class SegmentationService:
         labelmap_np = np.transpose(labelmap_np, (2, 1, 0))
         logger.info("Labelmap shape after squeeze+transpose: %s", labelmap_np.shape)
 
-        # VISTA returns class-indexed values (e.g. liver = class 5, so pixel value = 5).
-        # highdicom BINARY segmentation only understands pixel values 0 (background) or 1 (segment 1).
-        # Any other value causes "Pixel array contains segments that lack descriptions".
-        # Binarise: any non-zero voxel belongs to our target segment.
+        # VISTA returns class-indexed values (e.g. liver = class 5, gallbladder = 4, ...).
+        # highdicom BINARY segmentation only understands pixel values 0 or 1.
+        # We MUST extract only the target organ's class index voxels before binarising.
+        # Using `> 0` would merge ALL segmented organs (gallbladder, spleen, liver, etc.)
+        # into a single mask, causing the wrong organ to appear highlighted in the GIF.
         unique_vals = np.unique(labelmap_np)
         logger.info("Unique pixel values before binarisation: %s", unique_vals)
-        labelmap_np = (labelmap_np > 0).astype(np.uint8)
+
+        target_class_index = inference_params.get("Class")  # the index we sent to VISTA
+        if target_class_index is not None and len(unique_vals) > 2:
+            # Multi-class output: isolate only the requested organ's class
+            logger.info(
+                "Multi-class VISTA output detected. Extracting organ class index=%s for label=%s",
+                target_class_index,
+                organ_list,
+            )
+            labelmap_np = (labelmap_np == int(target_class_index)).astype(np.uint8)
+        else:
+            # Binary output ({0, 1} or {0, 255}) or no class info — safe to use > 0
+            labelmap_np = (labelmap_np > 0).astype(np.uint8)
+
         logger.info(
             "After binarisation: unique=%s foreground_voxels=%s",
             np.unique(labelmap_np),
@@ -375,12 +389,9 @@ class SegmentationService:
             if not class_mapping:
                 return None
             for organ in organ_list:
-                # Try exact match first, then normalized underscores.
-                if organ in class_mapping:
-                    return class_mapping[organ]
-                normalized = organ.replace(" ", "_")
-                if normalized in class_mapping:
-                    return class_mapping[normalized]
+                for candidate in self._class_key_candidates(organ):
+                    if candidate in class_mapping:
+                        return class_mapping[candidate]
             logger.warning(
                 "_resolve_class_index: organs %s not in Class mapping for '%s'. Available: %s...",
                 organ_list,
@@ -391,6 +402,32 @@ class SegmentationService:
 
         logger.warning("_resolve_class_index: model '%s' not found in /models/", model_name)
         return None
+
+    @staticmethod
+    def _class_key_candidates(label: str) -> list[str]:
+        normalized = "_".join(str(label or "").lower().strip().split())
+        candidates = [normalized]
+
+        parts = normalized.split("_")
+        if parts and parts[0] in {"left", "right"} and len(parts) > 1:
+            candidates.append("_".join(parts[1:] + [parts[0]]))
+
+        aliases = {
+            "large_intestine": "colon",
+            "small_intestine": "small_bowel",
+            "urinary_bladder": "urinary_bladder",
+            "portal_vessels": "portal_vein_and_splenic_vein",
+            "portal_vein": "portal_vein_and_splenic_vein",
+            "heart": "heart_myocardium",
+            "left_atrium": "heart_atrium_left",
+            "right_atrium": "heart_atrium_right",
+            "left_ventricle": "heart_ventricle_left",
+            "right_ventricle": "heart_ventricle_right",
+        }
+        if normalized in aliases:
+            candidates.append(aliases[normalized])
+
+        return list(dict.fromkeys(candidates))
 
     async def fetch_source_datasets_from_orthanc(
         self,

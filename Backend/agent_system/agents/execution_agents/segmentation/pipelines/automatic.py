@@ -58,5 +58,14 @@ async def run_automatic_pipeline(
             logger.exception("Segmentation failed for %s", volume_uid)
 
     if failures:
+        # Log failures as warnings but do NOT raise — partial success is still useful.
+        # A single OOM-killed volume (exit 137) must not abort the entire pipeline.
         failed_uids = ", ".join(uid for uid, _ in failures)
-        raise RuntimeError(f"Automatic segmentation failed for {len(failures)} volumes: {failed_uids}")
+        logger.warning(
+            "Automatic segmentation partially failed: %d/%d volumes could not be processed. "
+            "Failed UIDs: %s. Downstream download/GIF steps will proceed for successful volumes.",
+            len(failures), len(volumes), failed_uids,
+        )
+        return {"partial_failure": True, "failed_uids": [uid for uid, _ in failures]}
+
+    return {"partial_failure": False, "failed_uids": []}

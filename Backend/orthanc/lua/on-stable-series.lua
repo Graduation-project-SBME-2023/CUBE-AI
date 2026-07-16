@@ -9,13 +9,11 @@ local function main_tag(resource, tag_name, fallback)
 end
 
 local function post_webhook(payload, description)
-    local success = pcall(function()
+    -- Fire-and-forget: MONAI Label may be busy (e.g. running inference).
+    -- Failures are expected and non-critical; suppress the error log entirely.
+    pcall(function()
         HttpPost(WEBHOOK_URL, DumpJson(payload, true), JSON_HEADERS)
     end)
-
-    if not success then
-        print('Failed to notify MONAI/FastAPI: ' .. description)
-    end
 end
 
 local function notify_deleted(resource_id, level)

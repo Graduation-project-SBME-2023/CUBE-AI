@@ -5,6 +5,7 @@ from pathlib import Path
 from transformers import AutoTokenizer, AutoModel
 from huggingface_hub import snapshot_download
 from voxtell.utils.text_embedding import last_token_pool, wrap_with_instruction
+from lib.configs.voxtell_supported_labels import VOXTELL_SUPPORTED_LABELS
 
 # Container paths (mounted via docker-compose volumes)
 TEXT_MODEL_PATH = os.environ.get("TEXT_MODEL_PATH", "/models/qwen3-4b-embedding")
@@ -23,8 +24,8 @@ if not os.path.isdir(TEXT_MODEL_PATH):
 VOXTELL_DIR     = os.environ.get("VOXTELL_DIR",     "/models/voxtell_v1.1")
 CACHE_OUTPUT_PATH = os.path.join(VOXTELL_DIR, "text_embeddings_cache.pkl")
 
-# add any anatomical structures you think you will ever need to segment here
-TARGET_ORGANS = []
+# Keep the pre-generated cache aligned with the VoxTell model configuration.
+TARGET_ORGANS = list(VOXTELL_SUPPORTED_LABELS)
 
 print("Loading Qwen3-4B directly to GPU to generate permanent cache...")
 tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_PATH, padding_side='left', local_files_only=True)

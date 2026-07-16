@@ -39,6 +39,7 @@ from typing import List, Union
 from huggingface_hub import snapshot_download
 
 import urllib.request
+from lib.configs.voxtell_supported_labels import VOXTELL_SUPPORTED_LABELS
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class voxtell(TaskConfig):
         self.labels = {
             "Seg": 1,
         }
+        self.supported_prompts = VOXTELL_SUPPORTED_LABELS
         self.model_name = "voxtell_v1.1"
 
         # Download model if not present

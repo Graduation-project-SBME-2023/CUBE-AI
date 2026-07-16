@@ -6,6 +6,8 @@ import json
 import shutil
 import time
 import asyncio
+import importlib.util
+from functools import lru_cache
 from pathlib import Path
 import nrrd
 import numpy as np
@@ -19,11 +21,11 @@ import nibabel as nib
 import logging
 logger = logging.getLogger(__name__)
 from PIL import Image
-import csv
-import pandas as pd
 
 MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
 REQUEST_TIMEOUT_SECONDS = 10.0
+KNOWN_SEGMENTATION_MODELS = {"voxtell", "vista", "segmentation_spleen", "nnunet"}
+DEFAULT_DICE_SCORE = 90.0
 # ===============================
 # MASK HELPERS
 # ===============================
@@ -41,16 +43,18 @@ def extract_organ_label(segmentation_type: str) -> str:
     like a time HH:MM, or is a single letter suffix).  If no separator is
     found return the whole string normalised.
     """
-    KNOWN_MODELS = {"voxtell", "vista", "segmentation_spleen", "nnunet"}
-    parts = segmentation_type.split("-")
+    if not segmentation_type:
+        return ""
+
+    parts = str(segmentation_type).split("-")
     organ_parts = []
     for part in parts:
-        p = part.strip().lower()
+        p = _normalize_model_name(part)
         # Stop if we hit a known model name or a timestamp token (HH:MM)
-        if p in KNOWN_MODELS or re.match(r'^\d{1,2}:\d{2}$', p) or (len(p) == 1 and p.isalpha()):
+        if p in KNOWN_SEGMENTATION_MODELS or re.match(r'^\d{1,2}:\d{2}', part.strip()) or (len(p) == 1 and p.isalpha()):
             break
         organ_parts.append(part.strip())
-    return " ".join(organ_parts).lower() if organ_parts else segmentation_type.lower()
+    return normalize_label(" ".join(organ_parts)) if organ_parts else normalize_label(segmentation_type)
 
 
 def matches_label(segmentation_type: str, label: str) -> bool:
@@ -69,7 +73,30 @@ def matches_label(segmentation_type: str, label: str) -> bool:
     matches_label("liver-vista-02:10:00 PM-g",          "liver")        -> True
     """
     organ = extract_organ_label(segmentation_type)
-    return organ == label.lower().strip()
+    return organ == normalize_label(label)
+
+
+def _normalize_model_name(model_name: str) -> str:
+    return normalize_label(model_name).replace(" ", "_")
+
+
+def segmentation_model_matches(segmentation_type: str, model_name: str) -> bool:
+    if not segmentation_type or not model_name:
+        return False
+
+    expected = _normalize_model_name(model_name)
+    return any(_normalize_model_name(part) == expected for part in str(segmentation_type).split("-"))
+
+
+def label_record_matches_model(label_record: dict, model_name: str) -> bool:
+    if not model_name:
+        return True
+
+    for key in ("name", "model_name"):
+        if _normalize_model_name(label_record.get(key, "")) == _normalize_model_name(model_name):
+            return True
+
+    return segmentation_model_matches(label_record.get("segmentation_type", ""), model_name)
 
 async def exclude_existing_masks(volumes, labels, model_name=None):
     """
@@ -104,9 +131,8 @@ async def exclude_existing_masks(volumes, labels, model_name=None):
                 for seg in segmentations:
                     seg_type = seg.get("segmentation_type", "")
                     for label in labels:
-                        organ_ok  = matches_label(seg_type, label)
-                        # If a model name is given, also require it to appear in seg_type.
-                        model_ok  = (model_name is None) or (model_name in seg_type)
+                        organ_ok = matches_label(seg_type, label)
+                        model_ok = label_record_matches_model(seg, model_name)
                         if organ_ok and model_ok:
                             has_mask = True
                             logger.info(
@@ -354,6 +380,38 @@ def ensure_required_patient_tags(datasets):
 #  ================================
 #  Download Data
 #  ================================
+def _get_vista_class_index(target_label: str) -> int | None:
+    """
+    Returns the integer class index for a target organ label in the VISTA
+    model's multi-class NIfTI output, or None if not found.
+
+    VISTA encodes each organ as a unique positive integer in the output
+    NIfTI file (e.g. liver=5, gallbladder=4). We look this up from the
+    VISTA params_schema mapping registered in the DB.
+    """
+    try:
+        resp = requests.get(f"{MONAI_URL}/models/", timeout=5)
+        if resp.status_code != 200:
+            return None
+        for m in resp.json():
+            if m.get("name", "").lower() != "vista":
+                continue
+            mapping = (
+                (m.get("params_schema") or {})
+                .get("Class", {})
+                .get("mapping", {})
+            )
+            # Try exact, then normalized variants
+            norm = normalize_label(target_label)          # e.g. "liver"
+            norm_under = norm.replace(" ", "_")           # e.g. "liver"
+            for key, idx in mapping.items():
+                if normalize_label(key) in (norm, norm_under):
+                    return int(idx)
+    except Exception as e:
+        logger.warning("Could not fetch VISTA class index for '%s': %s", target_label, e)
+    return None
+
+
 async def download_and_pair_volumes(
     workspace_dir,
     datasetlist,
@@ -400,87 +458,100 @@ async def download_and_pair_volumes(
 
         # --- Automatic path ---
         if chosen_path == "automatic" and selected_auto_model:
-            # 1st priority: mask produced by the EXACT model FOR THE EXACT ORGAN.
-            # Both conditions must hold:
-            #   (a) model name appears in segmentation_type  (e.g. "vista")
-            #   (b) organ extracted from segmentation_type   == target_label
-            #
-            # Without (b), a "heart-vista-..." mask would be picked when
-            # segmenting "liver" just because the model name matches.
+            if not target_label:
+                logger.warning(
+                    "Automatic mask selection requires target_label when model='%s'; skipping.",
+                    selected_auto_model,
+                )
+                return None
+
+            # Mask selection is intentionally strict: model and organ must both match.
             for label in labels:
                 seg_type = label.get("segmentation_type", "")
-                model_matches = selected_auto_model in seg_type
-                organ_matches = matches_label(seg_type, target_label) if target_label else True
+                model_matches = label_record_matches_model(label, selected_auto_model)
+                organ_matches = matches_label(seg_type, target_label)
                 if model_matches and organ_matches:
                     logger.info(
-                        f"1st-priority match: model='{selected_auto_model}' + "
-                        f"organ='{target_label}' in segmentation_type='{seg_type}' "
-                        f"-> UID={label.get('label_series_instance_uid')}"
+                        "Selected exact mask: model='%s', organ='%s', segmentation_type='%s', UID=%s",
+                        selected_auto_model,
+                        target_label,
+                        seg_type,
+                        label.get("label_series_instance_uid"),
                     )
                     return label
                 elif model_matches and not organ_matches:
-                    # Warn explicitly so the mismatch is visible in the logs.
                     logger.warning(
-                        f"Model '{selected_auto_model}' found but WRONG ORGAN: "
-                        f"segmentation_type='{seg_type}', expected='{target_label}'; skipping."
+                        "Model '%s' matched but organ did not: segmentation_type='%s', expected='%s'; skipping.",
+                        selected_auto_model,
+                        seg_type,
+                        target_label,
                     )
 
-            # 2nd priority: any mask whose organ matches the target (any model).
-            # Covers the case where a voxtell-liver mask exists but the plan
-            # chose vista for liver; still correct to reuse it.
-            if target_label:
-                for label in labels:
-                    seg_type = label.get("segmentation_type", "")
-                    if matches_label(seg_type, target_label):
-                        logger.info(
-                            f"2nd-priority: no model+organ match; reusing existing "
-                            f"'{target_label}' mask (any model): "
-                            f"UID: {label.get('label_series_instance_uid')} | "
-                            f"segmentation_type: '{seg_type}'"
-                        )
-                        return label
-
-            # No match found. Do not fall back to latest timestamp, which risks
-            # pairing the volume with a mask from a completely different organ.
             logger.warning(
-                f"No label matched (model='{selected_auto_model}' AND organ='{target_label}') "
-                f"or organ-only fallback; skipping this volume to avoid wrong-organ pairing."
+                "No exact mask matched model='%s' and organ='%s'; skipping this volume.",
+                selected_auto_model,
+                target_label,
             )
             return None
 
         # --- Interactive / VoxTell path ---
-        # Apply the same model+organ dual-check so a wrong-organ mask is never
-        # picked during interactive runs either.
+        # Interactive labels may not always preserve model metadata, so prefer
+        # model+organ and then allow organ-only. Never fall back across organs.
         if chosen_path == "interactive":
-            if selected_auto_model and target_label:
+            if target_label:
                 for label in labels:
                     seg_type = label.get("segmentation_type", "")
-                    if selected_auto_model in seg_type and matches_label(seg_type, target_label):
+                    if selected_auto_model and label_record_matches_model(label, selected_auto_model) and matches_label(seg_type, target_label):
                         logger.info(
-                            f"Interactive: exact model+organ match "
-                            f"(model='{selected_auto_model}', organ='{target_label}'): "
-                            f"{label.get('label_series_instance_uid')}"
+                            "Interactive exact model+organ match: model='%s', organ='%s', UID=%s",
+                            selected_auto_model,
+                            target_label,
+                            label.get("label_series_instance_uid"),
                         )
                         return label
-            elif selected_auto_model:
-                # No target_label provided: model-name match only.
-                for label in labels:
-                    if selected_auto_model in label.get("segmentation_type", ""):
-                        logger.info(
-                            f"Interactive: model-only match for '{selected_auto_model}': "
-                            f"{label.get('label_series_instance_uid')}"
-                        )
-                        return label
-            # Fall back to newest label; safe because we just ran segmentation.
-            latest = max(labels, key=lambda x: x.get("created_at", ""))
-            logger.info(
-                f"Interactive path: no exact model+organ match, "
-                f"using newest label: {latest.get('label_series_instance_uid')}"
-            )
-            return latest
 
-        # Only reach here when no model name is given at all.
-        return max(labels, key=lambda x: x.get("created_at", ""))
+                for label in labels:
+                    seg_type = label.get("segmentation_type", "")
+                    if matches_label(seg_type, target_label):
+                        logger.info(
+                            "Interactive organ-only match: organ='%s', segmentation_type='%s', UID=%s",
+                            target_label,
+                            seg_type,
+                            label.get("label_series_instance_uid"),
+                        )
+                        return label
+
+                logger.warning(
+                    "Interactive path found no label matching organ='%s'; skipping this volume.",
+                    target_label,
+                )
+                return None
+
+            if selected_auto_model:
+                for label in labels:
+                    if label_record_matches_model(label, selected_auto_model):
+                        logger.info(
+                            "Interactive model-only match for '%s' without target_label: UID=%s",
+                            selected_auto_model,
+                            label.get("label_series_instance_uid"),
+                        )
+                        return label
+                logger.warning(
+                    "Interactive path had model='%s' but no target_label and no model match; skipping.",
+                    selected_auto_model,
+                )
+                return None
+
+            logger.warning(
+                "Interactive path has no model or target_label; skipping instead of selecting the newest label."
+            )
+            return None
+
+        logger.warning(
+            "Unknown segmentation path '%s'; skipping instead of selecting the newest label.",
+            chosen_path,
+        )
+        return None
 
     def trigger_download(url, task_name, uids_list):
         if not uids_list:
@@ -561,19 +632,27 @@ async def download_and_pair_volumes(
         logger.info("Copied volume -> %s (%.2f MB)", dst, size_mb)
         return dst
 
-    def copy_and_normalize_label(src_path, volume_uid, dest_dir):
+    def copy_and_normalize_label(src_path, volume_uid, dest_dir, organ_class_index=None):
+        """
+        Normalize a segmentation label NIfTI and save it as a binary {0,1} mask.
+
+        Handles three formats:
+          1. Binary {0, 255}  – simple threshold to {0,1}.
+          2. Binary {0, 1}    – already correct, save as-is.
+          3. Multi-class      – VISTA-style integer-per-organ output.
+                               If *organ_class_index* is given, extract only
+                               that organ's voxels (e.g. liver=5).  Without
+                               an index we fall back to a generic >0 mask and
+                               log a warning so the problem is visible.
+        """
         dst = os.path.join(dest_dir, f"{volume_uid}.nii.gz")
         try:
             nii  = nib.load(src_path)
             
             # --- MEMORY SAFETY CHECK ---
-            # Calculate total voxels from the shape (width * height * depth)
             total_voxels = np.prod(nii.shape)
-            # get_fdata() casts to float64, which is 8 bytes per voxel
             estimated_ram_bytes = total_voxels * 8
             estimated_ram_gb = estimated_ram_bytes / (1024**3)
-            
-            # If the uncompressed array will take more than 16 GB of RAM, skip it to prevent crash
             if estimated_ram_gb > 16.0:
                 logger.error(
                     "Skipping label %s: requires %.2f GB of RAM, exceeding the 16 GB safety limit.",
@@ -584,10 +663,38 @@ async def download_and_pair_volumes(
             # ---------------------------
 
             data = nii.get_fdata()
-            logger.info(f"Label unique values before normalize: {np.unique(data)}")
-            if np.max(data) == 255:
+            unique_vals = np.unique(data)
+            logger.info(f"Label unique values before normalize: {unique_vals}")
+
+            max_val = float(np.max(data))
+
+            if max_val == 255.0:
+                # Binary DICOM-style mask: {0, 255} → {0, 1}
                 data = (data > 0).astype(np.uint8)
                 logger.info("Converted {0,255} -> {0,1}")
+
+            elif max_val <= 1.0:
+                # Already binary {0, 1} — keep as uint8
+                data = data.astype(np.uint8)
+                logger.info("Label already binary {0,1}; keeping as-is.")
+
+            else:
+                # Multi-class label (e.g. VISTA: liver=5, gallbladder=4, ...)
+                if organ_class_index is not None:
+                    logger.info(
+                        "Multi-class label detected (max=%.0f). "
+                        "Extracting organ class index=%d for volume %s.",
+                        max_val, organ_class_index, volume_uid,
+                    )
+                    data = (np.round(data).astype(np.int32) == organ_class_index).astype(np.uint8)
+                else:
+                    logger.warning(
+                        "Multi-class label (max=%.0f) but no organ_class_index supplied for %s — "
+                        "falling back to >0 binarization (may include wrong organs).",
+                        max_val, volume_uid,
+                    )
+                    data = (data > 0).astype(np.uint8)
+
             nib.save(nib.Nifti1Image(data, nii.affine, nii.header), dst)
             size_mb = os.path.getsize(dst) / 1_048_576
             logger.info("Saved normalized label -> %s (%.2f MB)", dst, size_mb)
@@ -615,11 +722,22 @@ async def download_and_pair_volumes(
         # different organ from a previous experiment).
         selected_model = selected_auto_model_for_volume
         latest = pick_latest_or_auto(labels, chosen_path=chosen_path, selected_auto_model=selected_model, target_label=target_label)
+        
         if not latest:
+            if chosen_path == "interactive":
+                logger.info(f"No existing label found for {vol_uid}, but keeping volume for interactive manual segmentation.")
+                volumes_to_process.append(vol_uid)
+                labels_to_process.append(None)
             continue
+            
         label_uid = latest.get("label_series_instance_uid")
         if not label_uid:
+            if chosen_path == "interactive":
+                logger.info(f"Empty label UID for {vol_uid}, but keeping volume for interactive manual segmentation.")
+                volumes_to_process.append(vol_uid)
+                labels_to_process.append(None)
             continue
+            
         vol_uid_confirmed = latest.get("volume_series_instance_uid") or vol_uid
         logger.info(f"Paired: volume={vol_uid_confirmed}  label={label_uid}")
         volumes_to_process.append(vol_uid_confirmed)
@@ -637,7 +755,8 @@ async def download_and_pair_volumes(
     if download_volumes:
         trigger_download(DOWNLOAD_IMAGES_URL, TASK_NAME, volumes_to_process)
     
-    trigger_download(DOWNLOAD_LABELS_URL, TASK_NAME, labels_to_process)
+    valid_labels = [uid for uid in labels_to_process if uid is not None]
+    trigger_download(DOWNLOAD_LABELS_URL, TASK_NAME, valid_labels)
 
     # ------------------------------------------------------------------ #
     #  3. wait for files to appear in MONAI's local dirs                 #
@@ -675,27 +794,51 @@ async def download_and_pair_volumes(
     # found_labels is keyed by label_uid -> file path.
     found_labels = await wait_and_find(
         MONAI_LABEL_DIR,
-        labels_to_process,   # plain list: key == search substring == label_uid
+        valid_labels,   # plain list: key == search substring == label_uid
         timeout_s=600
     )
     logger.info(
-        f"Label files found: {len(found_labels)}/{len(labels_to_process)}; "
+        f"Label files found: {len(found_labels)}/{len(valid_labels)}; "
         f"keys: {list(found_labels.keys())[:3]}..."
     )
 
     # ------------------------------------------------------------------ #
     #  4. copy to workspace                                              #
     # ------------------------------------------------------------------ #
+
+    # Resolve the organ class index for multi-class models (e.g. VISTA).
+    # This is done once, outside the per-volume loop.
+    organ_class_index = None
+    if selected_auto_model_for_volume and target_label:
+        organ_class_index = _get_vista_class_index(target_label)
+        if organ_class_index is not None:
+            logger.info(
+                "Resolved organ class index for model='%s', label='%s': %d",
+                selected_auto_model_for_volume, target_label, organ_class_index,
+            )
+        else:
+            logger.info(
+                "No VISTA class index found for model='%s', label='%s' — "
+                "will use standard binarization.",
+                selected_auto_model_for_volume, target_label,
+            )
+
     successful = []
     skipped_oom = []
     for vol_uid, label_uid in zip(volumes_to_process, labels_to_process):
-        label_src = found_labels.get(label_uid)
-        if not label_src:
+        label_src = found_labels.get(label_uid) if label_uid else None
+        if not label_src and label_uid:
             logger.error(
                 f"Label file never appeared for volume={vol_uid} "
                 f"(label_uid={label_uid}); skipping pair"
             )
             continue
+        elif not label_src and not label_uid:
+            if chosen_path == "interactive":
+                logger.info(f"Interactive manual volume {vol_uid} has no label, proceeding with volume only.")
+            else:
+                logger.error(f"No label UID for volume={vol_uid} and path is not interactive; skipping pair")
+                continue
 
         vol_result = True  # Default to True if we aren't downloading volumes
         if download_volumes:
@@ -705,7 +848,13 @@ async def download_and_pair_volumes(
                 continue
             vol_result = copy_volume(vol_src, vol_uid, FINAL_DIR_IMG)
 
-        label_result = copy_and_normalize_label(label_src, vol_uid, FINAL_DIR_LABEL)
+        if label_src:
+            label_result = copy_and_normalize_label(
+                label_src, vol_uid, FINAL_DIR_LABEL,
+                organ_class_index=organ_class_index,
+            )
+        else:
+            label_result = True # No label to process for interactive manual
 
         if label_result == "SKIPPED_OOM":
             skipped_oom.append(vol_uid)
@@ -841,69 +990,99 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
 #  ================================
 
 def normalize_label(label: str) -> str:
-    """Normalize an LLM-generated label to the space-separated form used in supported.csv and the VoxTell cache.
+    """Normalize an LLM-generated label to the space-separated form used by model label catalogs.
     e.g.  'lung_nodule' -> 'lung nodule',  'Pulmonary_Nodule' -> 'pulmonary nodule'
     """
-    return label.replace("_", " ").lower().strip()
+    return re.sub(r"\s+", " ", str(label or "").replace("_", " ")).lower().strip()
+
+
+@lru_cache(maxsize=1)
+def get_voxtell_supported_labels() -> dict[str, float]:
+    catalog_path = (
+        Path(__file__).resolve().parents[4]
+        / "apps"
+        / "radiology"
+        / "lib"
+        / "configs"
+        / "voxtell_supported_labels.py"
+    )
+    if not catalog_path.exists():
+        logger.warning("VoxTell supported-label catalog not found at %s", catalog_path)
+        return {}
+
+    spec = importlib.util.spec_from_file_location("voxtell_supported_labels", catalog_path)
+    if not spec or not spec.loader:
+        logger.warning("Unable to load VoxTell supported-label catalog at %s", catalog_path)
+        return {}
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    labels = getattr(module, "VOXTELL_SUPPORTED_LABELS", {})
+    return {normalize_label(label): float(score) for label, score in labels.items()}
 
 
 def check_voxtell_label_availability(target_label):
     """
-    Checks if Voxtell can generate labels for the given target anatomical labels.
+    Checks if VoxTell can generate labels for the given target anatomical labels.
     Returns the normalized label string (which is the correct cache key) if supported,
-    False if not found, None if the file is missing.
+    False if not found, None if the catalog is missing.
     """
-    # Normalize: LLM may output 'lung_nodule' but CSV/cache has 'lung nodule'
     normalized = normalize_label(target_label)
-
-    csv_filepath = Path(__file__).parent.parent.parent.parent / "supported.csv"
-    try:
-        with open(csv_filepath, mode='r', encoding='utf-8') as file:
-            reader = csv.DictReader(file)
-            for row in reader:
-                prompt = normalize_label(row['Prompt'])
-                if normalized == prompt:
-                    return normalized   # return the canonical form for use as cache key
-    except FileNotFoundError:
-        logger.warning(f"supported.csv not found at {csv_filepath}")
+    supported_labels = get_voxtell_supported_labels()
+    if not supported_labels:
         return None
 
-    # Label not present in the CSV
-    return False
+    return normalized if normalized in supported_labels else False
 # ==================================
 #  get the Benchmark dice score of selected model
 # ==================================
 
-def get_model_dice_score(model_name, target_label):
-    """
-    Returns the benchmark Dice score for the given model and target label.
-    Reads from supported.csv; falls back to 90.0 if the label is not found or the file is unreadable.
-    """
-    DEFAULT_DICE = 90.0
+def _norm_label(label: str) -> str:
+    """Lowercase and replace spaces/hyphens with underscores for dict key lookup."""
+    return re.sub(r"[\s\-]+", "_", str(label or "").strip().lower())
 
-    if model_name and model_name.lower() == "voxtell":
-        try:
-            csv_filepath = Path(__file__).parent.parent.parent.parent / "supported.csv"
-            df = pd.read_csv(csv_filepath)
-            mask = df['Prompt'].apply(normalize_label) == normalize_label(target_label)
-            matches = df.loc[mask, 'VoxTell']
-            if matches.empty:
-                logger.info(
-                    f"Label '{target_label}' not found in supported.csv for {model_name}; "
-                    f"using default Dice score {DEFAULT_DICE}"
-                )
-                dice_score = DEFAULT_DICE
-            else:
-                dice_score = matches.iloc[0]
-        except FileNotFoundError:
-            logger.warning(f"supported.csv not found; returning default Dice score {DEFAULT_DICE}")
-            dice_score = DEFAULT_DICE
-        except Exception as e:
-            logger.warning(f"Failed to read dice score from supported.csv for {model_name}: {e}; returning default {DEFAULT_DICE}")
-            dice_score = DEFAULT_DICE
-    else:
-        dice_score = DEFAULT_DICE
-    return float(dice_score)
+
+@lru_cache(maxsize=32)
+def _fetch_model_labels(model_name: str) -> dict:
+    """
+    Fetch the labels dict for a model from GET /models/ (cached per process).
+    Returns {label_name: dice_score_0_to_1, ...} or {} on failure.
+    """
+    try:
+        resp = requests.get(f"{MONAI_URL}/models/", timeout=5)
+        if resp.status_code == 200:
+            for m in resp.json():
+                if m.get("name", "").lower() == model_name.lower():
+                    labels = m.get("labels") or {}
+                    return labels if isinstance(labels, dict) else {}
+    except Exception as e:
+        logger.warning("Could not fetch model labels for '%s': %s", model_name, e)
+    return {}
+
+
+def get_model_dice_score(model_name: str, target_label: str) -> float:
+    """
+    Returns the benchmark Dice score as a percentage (0–100) for the given
+    model and anatomical label, looked up from the model's labels dict in the DB.
+    Falls back to DEFAULT_DICE_SCORE if not found.
+    """
+    labels = _fetch_model_labels(model_name or "")
+    norm = _norm_label(target_label)
+
+    # Try normalised key variants: "liver", "kidney_right", "kidney right"
+    score = (
+        labels.get(norm)
+        or labels.get(normalize_label(target_label))
+        or labels.get(normalize_label(target_label).replace(" ", "_"))
+    )
+
+    if score is not None:
+        raw = float(score)
+        # Values ≤ 1.0 are on 0-1 scale → multiply to get percentage
+        return raw * 100.0 if raw <= 1.0 else raw
+
+    return DEFAULT_DICE_SCORE
+
 
 # =================================
 #  remove volumes and labels from working space that was discarded by user
