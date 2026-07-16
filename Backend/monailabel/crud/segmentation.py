@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from fastapi import HTTPException
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -36,17 +37,27 @@ async def get_segmentations(db: AsyncSession, skip: int = 0, limit: int = 100) -
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
-# Create
+# Create (idempotent — skips if label_series_instance_uid already exists)
 async def create_segmentation(db: AsyncSession, segmentation: SegmentationCreate) -> Segmentation:
-    db_seg = Segmentation(**segmentation.dict())
-    db.add(db_seg)
+    stmt = (
+        pg_insert(Segmentation)
+        .values(**segmentation.dict())
+        .on_conflict_do_nothing(index_elements=["label_series_instance_uid"])
+    )
     try:
+        await db.execute(stmt)
         await db.commit()
-        await db.refresh(db_seg)
-        return db_seg
     except SQLAlchemyError as e:
         await db.rollback()
-        raise HTTPException(status_code=400, detail= str(e))
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Return the row (existing or newly inserted)
+    result = await db.execute(
+        select(Segmentation).where(
+            Segmentation.label_series_instance_uid == segmentation.label_series_instance_uid
+        )
+    )
+    return result.scalar_one()
 
 
 async def update_segmentation(
@@ -115,7 +126,7 @@ async def get_segmentations_by_volume(db: AsyncSession, volume_uid: str) -> List
 async def get_segmentations_by_model(db: AsyncSession, model_name: str) -> List[Segmentation]:
     try:
         result = await db.execute(
-            select(Segmentation).where(Segmentation.model_name == model_name)
+            select(Segmentation).where(Segmentation.name == model_name)
         )
         return result.scalars().all()
     except SQLAlchemyError as e:
@@ -125,7 +136,7 @@ async def get_segmentations_by_model(db: AsyncSession, model_name: str) -> List[
 async def get_unvalidated_segmentations(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[Segmentation]:
     try:
         result = await db.execute(
-            select(Segmentation).where(Segmentation.model_name == None).offset(skip).limit(limit)
+            select(Segmentation).where(Segmentation.name == None).offset(skip).limit(limit)
         )
         return result.scalars().all()
     except SQLAlchemyError as e:
@@ -157,12 +168,12 @@ async def search_segmentations(
 # Simple statistics: count per model_name, count per segmentation_type
 async def get_segmentation_stats(db: AsyncSession):
     try:
-        # Count per model_name
+        # Count per model name
         result_model = await db.execute(
             select(
-                Segmentation.model_name,
+                Segmentation.name,
                 func.count(Segmentation.label_series_instance_uid)
-            ).group_by(Segmentation.model_name)
+            ).group_by(Segmentation.name)
         )
         counts_by_model = [{"model_name": m, "count": c} for m, c in result_model.all()]
 

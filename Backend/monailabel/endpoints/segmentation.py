@@ -25,16 +25,6 @@ router = APIRouter(prefix="/segmentations", tags=["Segmentations"])
 
 
 
-# ----------------------------------------------------------------------
-# Get by label UID
-# ----------------------------------------------------------------------
-@router.get("/{label_uid}", response_model=Segmentation)
-async def read_segmentation(label_uid: str, db: AsyncSession = Depends(get_db)):
-    seg = await get_segmentation(db, label_uid)
-    if not seg:
-        raise HTTPException(status_code=404, detail="Segmentation not found")
-    return seg
-
 
 # ----------------------------------------------------------------------
 # List all (paginated)
@@ -139,3 +129,13 @@ async def search_segmentations_endpoint(
 async def get_segmentation_stats_endpoint(db: AsyncSession = Depends(get_db)):
     return await get_segmentation_stats(db)
 
+
+# ----------------------------------------------------------------------
+# Get by label UID (Wildcard, must be last)
+# ----------------------------------------------------------------------
+@router.get("/{label_uid}", response_model=Segmentation)
+async def read_segmentation(label_uid: str, db: AsyncSession = Depends(get_db)):
+    seg = await get_segmentation(db, label_uid)
+    if not seg:
+        raise HTTPException(status_code=404, detail="Segmentation not found")
+    return seg

@@ -3,6 +3,8 @@ logger = logging.getLogger(__name__)
 from datetime import datetime
 import os
 import uuid
+import importlib.util
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -16,6 +18,28 @@ sync_url = database_url.replace("+asyncpg", "") if database_url else None
 
 sync_engine = create_engine(sync_url)
 SessionLocal = sessionmaker(bind=sync_engine, autoflush=False, autocommit=False)
+
+
+def _load_voxtell_supported_labels() -> dict[str, float]:
+    catalog_path = (
+        Path(__file__).resolve().parents[2]
+        / "apps"
+        / "radiology"
+        / "lib"
+        / "configs"
+        / "voxtell_supported_labels.py"
+    )
+    spec = importlib.util.spec_from_file_location("voxtell_supported_labels", catalog_path)
+    if not spec or not spec.loader:
+        logger.warning("Unable to load VoxTell supported-label catalog at %s", catalog_path)
+        return {}
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return getattr(module, "VOXTELL_SUPPORTED_LABELS", {})
+
+
+VOXTELL_SUPPORTED_LABELS = _load_voxtell_supported_labels()
 
 
 def seed_models():
@@ -53,7 +77,7 @@ def seed_models():
             modality="any",
             dimension=3,
             anatomy=["any"],
-            labels={},
+            labels=VOXTELL_SUPPORTED_LABELS,
             params_schema={
                 "text_prompts": {
                     "type": "list[string]",

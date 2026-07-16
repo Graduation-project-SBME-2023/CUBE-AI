@@ -157,13 +157,38 @@ class SegmentationModule:
         logger.info(
             f"Eligible volumes for segmentation: {len(eligible_volumes)}"
         )
-        #whether it's automatic or interactive
+        # ---- Run segmentation (automatic or interactive) ----
+        pipeline_failed_uids = []  # UIDs that couldn't be segmented (e.g. OOM kill)
+
         if chosen_path == "automatic" and eligible_volumes:
             selected_auto_models = plan["selected_models"] if plan["selected_models"] else None
-            await run_automatic_pipeline(eligible_volumes, target_labels, selected_auto_models, self.segmentation_service, self.session_id)
+            try:
+                seg_result = await run_automatic_pipeline(
+                    eligible_volumes, target_labels, selected_auto_models,
+                    self.segmentation_service, self.session_id
+                )
+                # run_automatic_pipeline now returns a dict on partial failure
+                if isinstance(seg_result, dict) and seg_result.get("partial_failure"):
+                    pipeline_failed_uids = seg_result.get("failed_uids", [])
+                    logger.warning(
+                        "Partial segmentation failure: %d volumes could not be processed: %s",
+                        len(pipeline_failed_uids), pipeline_failed_uids
+                    )
+            except Exception as seg_exc:
+                # Defensive catch — any unexpected error should not abort the
+                # download / GIF / human-review flow for the volumes that DID succeed.
+                logger.error(
+                    "run_automatic_pipeline raised an unexpected error: %s — "
+                    "proceeding to download/review for remaining volumes.",
+                    seg_exc, exc_info=True
+                )
 
         elif eligible_volumes:
-            selected_interactive_model = await run_interactive_pipeline(self.UserFallbackAgent, self.UserProxyAgent, eligible_volumes, target_labels, self.segmentation_service, self.session_id)
+            selected_interactive_model = await run_interactive_pipeline(
+                self.UserFallbackAgent, self.UserProxyAgent,
+                eligible_volumes, target_labels, self.segmentation_service, self.session_id
+            )
+
         # ========= logging after Segmentation ================
         payload = TextPayload(message=f'Segmentation...Done')
         segmentation_tool_event = ToolEvent(
@@ -175,7 +200,7 @@ class SegmentationModule:
         )
         await receive_tool_event(segmentation_tool_event)  
         
-        # ===========  loggin before download ====================  
+        # ===========  logging before download ====================  
         payload = TextPayload(message='Creating dataset...')
         environment_setup_event = ToolEvent(
             event_type='tool_started',
@@ -194,14 +219,18 @@ class SegmentationModule:
         )
         await receive_tool_event(environment_setup_event)
         # =========== download ========================    
-        #finally download the volumes with its label masks 
         # Give MONAI a moment to persist new masks — but only when segmentation
         # actually ran.  If all volumes already had existing masks (eligible_volumes
         # is empty), there is nothing to wait for.
         if eligible_volumes:
             logger.info("Waiting 120 s for MONAI to persist new segmentation masks...")
             await asyncio.sleep(120)
-        volumes_to_download = eligible_volumes if eligible_volumes else datasetlist
+
+        # Exclude volumes that failed segmentation — only download successful ones
+        successful_eligible = [v for v in eligible_volumes if v not in pipeline_failed_uids]
+        volumes_to_download = successful_eligible if successful_eligible else (
+            datasetlist if not eligible_volumes else []
+        )
         result = await download_and_pair_volumes(
                     workspace_dir,
                     volumes_to_download, 
@@ -377,7 +406,8 @@ class SegmentationModule:
                         workspace_dir,
                         datasetlist=[uid],
                         chosen_path="interactive",
-                        selected_auto_model_for_volume=None,
+                        selected_auto_model_for_volume=plan_model_final,
+                        target_label=plan_target_final,
                         download_volumes=False
                     )
 

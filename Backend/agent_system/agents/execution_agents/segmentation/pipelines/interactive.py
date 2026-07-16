@@ -74,7 +74,12 @@ async def run_interactive_pipeline(
             unsupported_labels,
         )
     if not supported_labels:
-        raise RuntimeError(f"No requested labels are supported by VoxTell: {labels}")
+        logger.warning(
+            "No requested labels are supported by VoxTell: %s. "
+            "Skipping interactive segmentation (VoxTell catalog may be missing or the labels are not in the catalog).",
+            labels,
+        )
+        return None
 
     failures = []
     for index, volume_uid in enumerate(volumes, start=1):

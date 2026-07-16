@@ -1448,7 +1448,7 @@ def main() -> None:
         "--model",
         default=_default_ollama_model(),
         help=(
-            "Judge model name. Examples: qwen2.5-coder:7b, gpt-oss:20b, gpt-oss:120b."
+            "Judge model name. Examples: qwen2.5-coder:7b, gpt-oss:20b, gpt-oss:120b-cloud."
         ),
     )
     parser.add_argument(
