@@ -230,7 +230,10 @@ class SegmentationModule:
 
         # Exclude volumes that failed segmentation — only download successful ones
         successful_eligible = [v for v in eligible_volumes if v not in pipeline_failed_uids]
-        volumes_to_download = successful_eligible if successful_eligible else (
+        # Volumes that already had a valid mask (excluded from segmentation) must still
+        # go through download/GIF/QC so they appear alongside newly segmented volumes.
+        already_masked = [v for v in datasetlist if v not in eligible_volumes]
+        volumes_to_download = successful_eligible + already_masked if (successful_eligible or already_masked) else (
             datasetlist if not eligible_volumes else []
         )
         plan_model = plan["selected_models"][0] if plan.get("selected_models") else None
