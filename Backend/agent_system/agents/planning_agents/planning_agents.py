@@ -361,11 +361,15 @@ For study_population_planner_agent:
    volume_path, label (benign/malignant), histopathology_confirmed."
 
 For segmentation_agent:
-  "Segment the spleen on each CT volume using VISTA3D for initial automatic 
-   segmentation, followed by manual refinement if Dice < 0.85. Use the splenic 
-   parenchyma as ROI — exclude the hilum and major vessels. Literature shows 
-   semi-automatic segmentation reduces inter-observer variability (ICC > 0.90). 
-   Export masks as NIfTI for PyRadiomics compatibility."
+  "CRITICAL: Determine the segmentation target from the hypothesis.
+   - If the study investigates a DISEASE on an organ (e.g. 'cancerous spleens',
+     'liver tumors', 'kidney cancer'), the target is the PATHOLOGY on that organ
+     (e.g. 'spleen lesion', 'splenic tumor', 'liver tumor') — NOT the healthy organ.
+   - If the study investigates the organ itself (e.g. 'spleen volume measurement'),
+     the target is the healthy organ (e.g. 'spleen').
+   For this study: segment splenic lesions/tumors on each CT volume. Use VISTA3D or
+   VoxTell for organ-specific pathology segmentation. Export masks as NIfTI for
+   PyRadiomics compatibility."
 
 INTERACTION RULES
 ─────────────────
