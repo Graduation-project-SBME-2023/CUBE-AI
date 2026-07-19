@@ -210,10 +210,31 @@ def _build_segmentation_context(
         sources_guide="",  # Not needed for segmentation
     )
 
+    # Build a rich hypothesis context block so the PlannerAgent can
+    # distinguish between healthy-organ vs. pathology-on-organ requests.
+    hyp_context_parts = [f"Study title: {hypothesis.title}"]
+    if hypothesis.hypothesis:
+        hyp_context_parts.append(f"Hypothesis: {hypothesis.hypothesis}")
+    if hypothesis.population:
+        pop = hypothesis.population
+        if isinstance(pop, dict):
+            pop = ", ".join(f"{k}: {v}" for k, v in pop.items())
+        hyp_context_parts.append(f"Population: {pop}")
+    if hypothesis.clinical_context:
+        hyp_context_parts.append(f"Clinical context: {hypothesis.clinical_context}")
+    hyp_block = "\n".join(hyp_context_parts)
+
     instructions = (
-        f"Perform ROI segmentation for the hypothesis: '{hypothesis.title}'.\n\n"
+        f"Perform ROI segmentation for the following study:\n"
+        f"{hyp_block}\n\n"
+        "CRITICAL — Read the hypothesis carefully to determine the segmentation target:\n"
+        "- If the hypothesis studies a DISEASE or PATHOLOGY of an organ (e.g., 'cancerous spleens',\n"
+        "  'liver tumors', 'lung nodules'), the segmentation target is the PATHOLOGY on that organ\n"
+        "  (e.g., 'spleen lesion', 'liver tumor', 'lung nodule'), NOT the healthy organ alone.\n"
+        "- If the hypothesis studies the organ itself with no disease mentioned (e.g., 'spleen volume',\n"
+        "  'liver morphology'), the segmentation target is the healthy organ.\n\n"
         "Use the domain knowledge in your context to:\n"
-        "- Identify the correct anatomical regions to segment based on clinical literature\n"
+        "- Identify the correct anatomical regions to segment based on the hypothesis and clinical literature\n"
         "- Follow evidence-based segmentation protocols mentioned in recent studies\n"
         "- Apply appropriate segmentation methods for the imaging modality described\n"
         "- Ensure segmented ROIs match the standard terminology from MeSH"

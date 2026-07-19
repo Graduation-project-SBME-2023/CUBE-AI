@@ -108,7 +108,35 @@ class SegmentationModule:
                 f"Perform ROI segmentation for the study: '{hypothesis_title}'. "
                 f"Identify the correct anatomical target from the hypothesis title and run the appropriate model."
             )
-        # hypothesis: str = state["hypothesis"]["hypothesis"]
+
+        # ── Always enrich instructions with full hypothesis context ────────
+        # The Pipeline Architect's instructions may say "segment the spleen"
+        # when the hypothesis actually says "cancerous spleens".  By appending
+        # the hypothesis statement, population, and clinical context, the
+        # PlannerAgent can distinguish healthy-organ vs pathology targets.
+        hyp_data = state.get("hypothesis", {})
+        hyp_enrichment_parts = []
+        if hyp_data.get("hypothesis"):
+            hyp_enrichment_parts.append(f"Hypothesis: {hyp_data['hypothesis']}")
+        if hyp_data.get("population"):
+            pop = hyp_data["population"]
+            if isinstance(pop, dict):
+                pop = ", ".join(f"{k}: {v}" for k, v in pop.items())
+            hyp_enrichment_parts.append(f"Population: {pop}")
+        if hyp_data.get("clinical_context"):
+            hyp_enrichment_parts.append(f"Clinical context: {hyp_data['clinical_context']}")
+
+        if hyp_enrichment_parts:
+            enrichment = "\n".join(hyp_enrichment_parts)
+            instructions = (
+                f"{instructions}\n\n"
+                f"── HYPOTHESIS CONTEXT (use this to determine the correct segmentation target) ──\n"
+                f"{enrichment}\n\n"
+                f"IMPORTANT: If the hypothesis mentions disease/pathology (cancer, tumor, lesion, "
+                f"malignancy), the segmentation target must be the PATHOLOGY on the organ, "
+                f"NOT the healthy organ alone."
+            )
+
         logger.info(f"Received instructions: {instructions}")
         datasetlist: List[str] = input_data.get("datasetlist", [])
         logger.info(f"Will prepare segmentations for {len(datasetlist)} volumes.")
