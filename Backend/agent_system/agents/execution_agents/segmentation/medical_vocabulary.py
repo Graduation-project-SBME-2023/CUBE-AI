@@ -110,43 +110,35 @@ STRUCTURAL_ALIASES: dict[str, str | list[str]] = {
 }
 
 # ═══════════════════════════════════════════════════════════════════
-# 4. FLAT MEDICAL SYNONYMS
+# 4. FLAT MEDICAL SYNONYMS  (auto-generated — do NOT edit manually)
 #    Used by check_voxtell_label_availability for set-equality matching.
 #    Flat one-to-one dict: maps a word to its canonical concept so that
 #    "left kidney" and "kidney left" produce the same concept set.
 #    Targets are canonical concept words, not necessarily catalog labels.
+#
+#    Built automatically from ANATOMICAL_SYNONYMS (single-target entries)
+#    and PATHOLOGY_SYNONYMS (all mapped to the canonical concept "lesion").
+#    To add a new synonym, edit ANATOMICAL_SYNONYMS or PATHOLOGY_SYNONYMS
+#    above — do NOT add entries here.
 # ═══════════════════════════════════════════════════════════════════
+# Anatomical: use the first (and usually only) canonical replacement word.
 FLAT_MEDICAL_SYNONYMS: dict[str, str] = {
-    # Anatomical adjectives → canonical organ word
-    "renal":          "kidney",
-    "hepatic":        "liver",
-    "hepatocellular": "liver",
-    "splenic":        "spleen",
-    "pulmonary":      "lung",
-    "gastric":        "stomach",
-    "cardiac":        "heart",
-    "myocardial":     "heart",
-    "pancreatic":     "pancreas",
-    "cerebral":       "brain",
-    "cranial":        "brain",
-    "osseous":        "bone",
-    "skeletal":       "bone",
-    "adrenal":        "adrenal gland",
-    "vesical":        "urinary bladder",
-    "mammary":        "breast",
-    "prostatic":      "prostate",
-    "rectal":         "rectum",
-    # Pathology synonyms → canonical concept word
-    "tumor":          "lesion",
-    "tumour":         "lesion",
-    "cancer":         "lesion",
-    "carcinoma":      "lesion",
-    "mass":           "lesion",
-    "nodule":         "lesion",
-    "growth":         "lesion",
-    "malignancy":     "lesion",
-    "neoplasm":       "lesion",
+    key: vals[0]
+    for key, vals in ANATOMICAL_SYNONYMS.items()
+    if vals
 }
+# Pathology: collapse all clinical terms to the canonical concept "lesion".
+FLAT_MEDICAL_SYNONYMS.update({
+    "tumor":      "lesion",
+    "tumour":     "lesion",
+    "cancer":     "lesion",
+    "carcinoma":  "lesion",
+    "mass":       "lesion",
+    "nodule":     "lesion",
+    "growth":     "lesion",
+    "malignancy": "lesion",
+    "neoplasm":   "lesion",
+})
 
 # ═══════════════════════════════════════════════════════════════════
 # 5. VOXTELL PROMPT ALIASES
