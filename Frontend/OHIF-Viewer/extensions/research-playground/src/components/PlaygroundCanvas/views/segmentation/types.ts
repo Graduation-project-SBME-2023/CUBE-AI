@@ -7,7 +7,6 @@ export interface SegmentationData {
     volumes?: VolumeGif[];
     targetRoi?: string;
     selectedModel?: string;
-    diceScore?: number | null;
     sessionId?: string;
     isFinished?: boolean;
 }

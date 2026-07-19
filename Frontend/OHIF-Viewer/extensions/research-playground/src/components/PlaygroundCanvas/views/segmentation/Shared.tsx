@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Target, Cpu, Percent, ChevronDown, ChevronUp } from 'lucide-react';
+import { Target, Cpu, ChevronDown, ChevronUp } from 'lucide-react';
 
 export function CollapsibleSection({
     title,
@@ -39,11 +39,9 @@ export function CollapsibleSection({
 export function RightPanel({
     targetRoi,
     selectedModel,
-    diceScore,
 }: {
     targetRoi: string;
     selectedModel: string;
-    diceScore: number | null;
 }) {
     return (
         <div className="w-64 flex flex-col gap-3 shrink-0 overflow-y-auto pr-0.5">
@@ -60,14 +58,6 @@ export function RightPanel({
                             <Cpu size={11} /> Selected Model
                         </p>
                         <div className="text-sm font-bold text-white">{selectedModel}</div>
-                    </div>
-                    <div>
-                        <p className="text-[#566a84] text-[10px] uppercase flex items-center gap-1 mb-0.5">
-                            <Percent size={11} /> Benchmarking Dice Score
-                        </p>
-                        <div className="text-xl font-mono font-bold text-[#6fe5b8]">
-                            {diceScore !== null ? diceScore.toFixed(3) : '—'}
-                        </div>
                     </div>
                 </div>
             </CollapsibleSection>

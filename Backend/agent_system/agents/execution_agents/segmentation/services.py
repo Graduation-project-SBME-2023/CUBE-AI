@@ -2,6 +2,7 @@ import httpx
 import os
 import logging
 import json
+import asyncio
 from datetime import datetime
 from typing import Annotated, Any, Dict
 from pydantic import Field
@@ -26,8 +27,13 @@ from .medical_vocabulary import (
 
 logger = logging.getLogger(__name__)
 
-INFERENCE_TIMEOUT = httpx.Timeout(connect=30.0, read=1800.0, write=30.0, pool=30.0)
+INFERENCE_TIMEOUT = httpx.Timeout(connect=30.0, read=1800.0, write=60.0, pool=30.0)
 QUICK_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
+
+# Retry settings for transient server-disconnect errors (e.g. when monailabel
+# is under heavy RAM pressure and drops the connection after finishing inference)
+_MAX_INFERENCE_RETRIES = 3
+_RETRY_BACKOFF_SECONDS = [5, 15, 30]   # wait before each retry attempt
 
 
 class SegmentationService:
@@ -122,30 +128,71 @@ class SegmentationService:
                 )
 
         files = {"params": (None, json.dumps(inference_params), "application/json")}      
-        async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
+
+        # ---- Inference with retry on transient server-disconnect errors ----
+        # The monailabel server can disconnect mid-response when RAM is near capacity
+        # (97%+ RAM observed in logs). The inference itself finishes, but the HTTP
+        # connection is dropped before the response arrives. A short backoff lets the
+        # server free memory and accept the next request normally.
+        inference_start = datetime.now()
+        inference_duration = 0.0
+        response = None
+        last_exc = None
+
+        for attempt in range(1, _MAX_INFERENCE_RETRIES + 1):
             try:
-                inference_start = datetime.now()
-                response = await client.post(infer_url, params=query_params, files=files)
+                async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
+                    response = await client.post(infer_url, params=query_params, files=files)
                 inference_duration = (datetime.now() - inference_start).total_seconds()
-                
                 logger.info(
-                    "Inference completed in %.1fs with status %s",
+                    "Inference completed in %.1fs with status %s (attempt %s/%s)",
                     inference_duration,
                     response.status_code,
+                    attempt,
+                    _MAX_INFERENCE_RETRIES,
                 )
-                
+                last_exc = None
+                break  # success — exit retry loop
+
             except httpx.TimeoutException as e:
                 elapsed = (datetime.now() - start_time).total_seconds()
                 logger.error("Inference timeout after %.1fs: %s", elapsed, e)
                 return {
-                    "error": True, 
-                    "stage": "inference_timeout", 
+                    "error": True,
+                    "stage": "inference_timeout",
                     "message": f"Inference exceeded timeout after {elapsed:.1f}s. Try with smaller volume or different model.",
-                    "elapsed_seconds": elapsed
+                    "elapsed_seconds": elapsed,
                 }
+            except (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadError) as e:
+                last_exc = e
+                elapsed = (datetime.now() - inference_start).total_seconds()
+                if attempt < _MAX_INFERENCE_RETRIES:
+                    wait = _RETRY_BACKOFF_SECONDS[attempt - 1]
+                    logger.warning(
+                        "Inference attempt %s/%s failed after %.1fs (%s: %s). "
+                        "Server likely under memory pressure. Retrying in %ss...",
+                        attempt,
+                        _MAX_INFERENCE_RETRIES,
+                        elapsed,
+                        type(e).__name__,
+                        e,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(
+                        "Inference failed after %s attempts: %s",
+                        _MAX_INFERENCE_RETRIES,
+                        e,
+                    )
             except Exception as e:
-                logger.exception("Inference request failed")
+                logger.exception("Inference request failed (attempt %s/%s)", attempt, _MAX_INFERENCE_RETRIES)
                 return {"error": True, "stage": "inference_request", "message": str(e)}
+
+        if last_exc is not None:
+            # All retries exhausted for a transient connection error
+            logger.exception("Inference request failed after all retries", exc_info=last_exc)
+            return {"error": True, "stage": "inference_request", "message": str(last_exc)}
 
         result = {
             "endpoint": infer_url,

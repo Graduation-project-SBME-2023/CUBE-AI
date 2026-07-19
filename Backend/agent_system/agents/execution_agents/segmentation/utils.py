@@ -1031,18 +1031,23 @@ def check_voxtell_label_availability(target_label):
     """
     Checks if VoxTell can handle the given label.
 
-    VoxTell is a text-prompt model — it can semantically segment any label,
+    VoxTell is a text-prompt model — it can semantically segment ANY label,
     even one not listed in voxtell_supported_labels.py, by generating a new
-    embedding dynamically. The catalog only records labels with a KNOWN Dice score.
+    embedding dynamically. The catalog only records labels with a KNOWN benchmark.
 
     Returns:
       - The exact catalog label string  → if found (matched via semantic concepts)
-      - The raw target_label string     → if NOT found in catalog (VoxTell can still try)
-      - None                            → if catalog failed to load entirely
+      - The raw target_label string     → for all other cases (catalog miss OR catalog
+                                         load failure). VoxTell will attempt segmentation
+                                         via dynamic embedding; quality is unvalidated (N/A).
     """
     supported_labels = get_voxtell_supported_labels()
     if not supported_labels:
-        return None  # catalog load failure — cannot proceed
+        logger.warning(
+            "VoxTell catalog could not be loaded for '%s' — proceeding with raw label (unvalidated).",
+            target_label,
+        )
+        return target_label  # catalog load failure — VoxTell can still try
 
     target_concepts = get_semantic_concepts(target_label)
 
@@ -1053,9 +1058,9 @@ def check_voxtell_label_availability(target_label):
             return cat_label
 
     # Not in catalog — but VoxTell can still segment it via dynamic embedding generation.
-    # Return the raw label so the pipeline continues; Dice score will be 0 (unvalidated).
+    # Return the raw label so the pipeline continues; quality is unvalidated (N/A).
     logger.info(
-        "VoxTell: '%s' not in catalog — will proceed with dynamic embedding (Dice=0, unvalidated).",
+        "VoxTell: '%s' not in catalog — will proceed with dynamic embedding (unvalidated, N/A).",
         target_label,
     )
     return target_label

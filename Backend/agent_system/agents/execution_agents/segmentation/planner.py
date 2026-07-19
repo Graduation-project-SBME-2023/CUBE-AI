@@ -17,14 +17,14 @@ def create_planner_agent(model_client, discovery_tools):
         system_message="""
         You are PlannerAgent — a medical image segmentation router.
         Your job: given a clinical instruction, discover all available models, find the best matching
-        label using medically-informed semantic reasoning, and select the model with the highest Dice score.
+        label using medically-informed semantic reasoning, and select the most appropriate model.
 
         Output ONLY a single valid JSON object (no other text):
         {
             "target_labels": ["exact_catalog_label"],
-            "chosen_path": "automatic" | "interactive" | "manual",
+            "chosen_path": "automatic" | "interactive",
             "selected_models": ["model_name"],
-            "reason": "concise explanation of label match and dice score comparison"
+            "reason": "concise explanation of label match and model selection"
         }
 
         ═══════════════ MATCHING RULES ═══════════════
@@ -45,7 +45,6 @@ def create_planner_agent(model_client, discovery_tools):
         - "pancreatic cancer" → find "pancreas tumor". NEVER pick "tumor" (whole body).
         - "lung nodule" → find "lung nodule", "lung lesion". NEVER pick "lesion" (whole body).
         - "liver cancer" → find "hepatocellular carcinoma", "liver_tumor". NEVER pick "carcinoma" (whole body).
-        - If NO organ-specific pathology label exists → UNSUPPORTED. Honest and correct.
 
         EXCEPTION: Generic pathology labels ARE acceptable ONLY when the user's request is also generic
         with no specific organ mentioned (e.g., "find any tumor", "detect any lesion in the scan").
@@ -57,30 +56,21 @@ def create_planner_agent(model_client, discovery_tools):
         c) Medical synonyms (auto-generated from the same vocabulary the code uses):
 {build_prompt_synonym_section()}
         d) Separators: spaces, underscores, and hyphens are interchangeable ("left_kidney" = "left kidney").
-        e) Laterality expansion: if no side specified, check both left and right versions and pick the higher Dice.
+        e) Laterality expansion: if no side specified, check both left and right versions.
 
-        RULE 4 — DICE SCORE IS THE PRIMARY SELECTOR
-        After collecting ALL semantically valid candidate labels across ALL models (automatic and interactive):
-        - Compare their Dice scores numerically.
-        - Select the model with the HIGHEST Dice score for the matched label.
-        - If tied within 1%, prefer automatic over interactive.
-        - Model type (automatic vs interactive) does NOT matter — only the Dice score decides.
+        RULE 4 — MODEL SELECTION PRIORITY
+        After finding the best matching label:
+        - Prefer automatic models (VISTA, nnUNet) when they have a specific catalog label matching the request.
+        - If no automatic model has an exact or close match → use VoxTell (interactive path).
+        - If tied between two automatic models, prefer the one with the more specific label match.
 
         RULE 5 — VOXTELL ACCEPTS ANY MEDICALLY VALID TEXT PROMPT
         VoxTell is a text-prompt model. It can segment ANY anatomical label or pathology
         described in natural language, even if that label is NOT listed in its catalog.
-        - If a label IS in the VoxTell catalog → use its known Dice score for comparison.
-        - If a label is NOT in the VoxTell catalog → VoxTell can still try it with Dice=0 (unvalidated).
-        - Dice=0 means: prefer an automatic model if it has a matching label with a real Dice score.
-          But if no automatic model has a specific organ-pathology label, choose VoxTell with Dice=0
-          rather than returning UNSUPPORTED — it is better to attempt than to refuse.
-        - NEVER return UNSUPPORTED just because VoxTell's catalog doesn't list the label.
-
-        RULE 6 — UNSUPPORTED IS ONLY CORRECT WHEN NO MODEL CAN HELP
-        Return UNSUPPORTED only when:
-          a) No automatic model has an organ-specific pathology label, AND
-          b) The request is for an organ-specific pathology that is clinically nonsensical to route to VoxTell.
-        For all reasonable medical requests, prefer VoxTell with Dice=0 over UNSUPPORTED.
+        - If a label IS in the VoxTell catalog → prefer it as it has been validated.
+        - If a label is NOT in the VoxTell catalog → VoxTell can still segment it via dynamic embedding.
+        - NEVER reject a request because VoxTell's catalog doesn't list the label.
+        - If no automatic model has the label, always route to VoxTell.
         """,
         max_tool_iterations=2
     )
@@ -97,7 +87,7 @@ async def run_planner(agent, instruction):
         ═══════════════ FOLLOW THESE STEPS EXACTLY ═══════════════
 
         STEP 1 — Discover models:
-        Call the tool to get ALL available segmentation models, their labels, and Dice scores.
+        Call the tool to get ALL available segmentation models and their labels.
 
         STEP 2 — Understand the clinical intent:
         Answer:
@@ -112,10 +102,10 @@ async def run_planner(agent, instruction):
         IF HEALTHY ORGAN (no disease/pathology mentioned):
           - Find the healthy organ label using anatomical synonyms if needed.
           - Apply fuzzy matching: word order, plurals, underscores vs spaces, left/right variants.
-          - Collect all candidates across all models, compare Dice scores, pick the highest.
+          - Collect all candidates across all models.
 
         IF PATHOLOGY on a SPECIFIC ORGAN:
-          Priority 1 — Organ-specific pathology label:
+          Priority 1 — Organ-specific pathology label in an automatic model:
             - "splenic lesion" → search for: "spleen_lesion", "splenic_tumor", "splenic_lesion".
             - "liver cancer" → search for: "hepatocellular carcinoma", "liver_tumor", "liver_cancer".
             - "pancreatic cancer" → search for: "pancreas tumor", "pancreas_tumor".
@@ -130,17 +120,20 @@ async def run_planner(agent, instruction):
 {build_prompt_synonym_section()}
             - Still organ-anchored — do NOT lose the organ specificity.
 
-          Priority 3 — UNSUPPORTED:
-            - Declare UNSUPPORTED if no organ-specific pathology label exists after exhaustive search.
-            - FORBIDDEN fallbacks (they produce wrong results):
+          Priority 3 — VoxTell with the best matching label:
+            - If no automatic model has a specific organ-pathology label, route to VoxTell.
+            - VoxTell accepts ANY label including organ-pathology combinations not in its catalog.
+            - Use the most descriptive, organ-specific label as the text prompt.
+            - FORBIDDEN fallbacks (they produce wrong results for organ-specific requests):
               * Generic "lesion" (segments whole body, not just the organ)
               * Generic "tumor" (segments whole body)
               * Generic "carcinoma" (segments whole body)
               * The healthy organ label (segments the organ, not the disease)
 
-        STEP 4 — Compare Dice scores:
-        List all valid candidates: [label, model_name, dice_score].
-        Select the one with the HIGHEST dice score. If tied, prefer automatic.
+        STEP 4 — Select the model:
+        - Prefer automatic models when they have a specific catalog label for the request.
+        - Fall back to VoxTell (interactive path) when no automatic model has the label.
+        - VoxTell is always a valid choice — never output manual or empty selected_models for reasonable requests.
 
         STEP 5 — Output final JSON only:
 
@@ -148,28 +141,21 @@ async def run_planner(agent, instruction):
             "target_labels": ["the_exact_catalog_label_you_chose"],
             "chosen_path": "automatic",
             "selected_models": ["model_name"],
-            "reason": "Instruction=X. Intent=[healthy organ/organ+pathology]. Best label=Y in model=Z with Dice=W. Compared: [other candidates with scores]. Chosen: highest Dice."
+            "reason": "Instruction=X. Intent=[healthy organ/organ+pathology]. Best label=Y in model=Z. Chosen because [label specificity reasoning]."
         }}
         or
         {{
-            "target_labels": ["the_exact_catalog_label_you_chose"],
+            "target_labels": ["the_exact_label_or_text_prompt"],
             "chosen_path": "interactive",
             "selected_models": ["voxtell"],
-            "reason": "Instruction=X. Best label=Y in interactive model with Dice=W beats automatic Dice=V."
-        }}
-        or
-        {{
-            "target_labels": ["UNSUPPORTED"],
-            "chosen_path": "manual",
-            "selected_models": [],
-            "reason": "No organ-specific pathology label found. Generic whole-body labels rejected to avoid incorrect segmentation."
+            "reason": "Instruction=X. No automatic model has an exact match. Using VoxTell with label Y as text prompt."
         }}
 
         FINAL REMINDERS:
-        - Dice score is the ONLY selection criterion. Not model type.
         - Healthy organ requests are normal — use the organ label directly.
         - Generic labels (lesion, tumor, carcinoma) are forbidden for organ-specific pathology requests.
         - Fuzzy match: plurals, word order, synonyms all count as valid matches.
+        - VoxTell can segment ANY label — never refuse a reasonable medical request.
         - Output ONLY valid JSON. Zero text outside the JSON.
         """
 

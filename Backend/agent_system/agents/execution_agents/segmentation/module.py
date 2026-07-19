@@ -8,22 +8,19 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import httpx
 from pathlib import Path
-from typing import Dict, Any, Union, List
-from autogen_ext.models.ollama import OllamaChatCompletionClient
+from typing import Any, Dict, List, Union
+from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
+from client_config import create_model_client_from_config
+from agent_system.models.tool_logging import TextPayload
 from .planner import create_planner_agent, run_planner
 from .pipelines.automatic import run_automatic_pipeline
 from .pipelines.interactive import run_interactive_pipeline, create_interactive_agent, create_user_proxy_agent
-from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
 from .services import SegmentationService
-from .utils import exclude_existing_masks, download_and_pair_volumes, generate_gif_overlays, cleanup_discarded, get_model_dice_score
-from .logging_config import setup_logging
-import logging
-from client_config import create_model_client_from_config
-import httpx
-from agent_system.models.tool_logging import ProgressPayload, TextPayload, ToolEvent
-from agent_system.tool_logging import receive_tool_event
+from .utils import exclude_existing_masks, download_and_pair_volumes, generate_gif_overlays, cleanup_discarded
+from .logging_config import setup_logging, emit_tool_event, emit_tool_events
 setup_logging()
 
 logger = logging.getLogger("SegmentationModule")
@@ -129,25 +126,13 @@ class SegmentationModule:
             datasetlist, target_labels, model_name=model_for_exclusion
         )
         # ====== Logging before Segmentation =================
-        payload = TextPayload(
-            message=f'Found existing masks for {len(datasetlist) - len(eligible_volumes)} volumes'
-        )
-        plan_log_event = ToolEvent(
-            event_type='tool_started',
-            source='segmentation_agent',
-            content_type='text',
-            content=payload,
+        await emit_tool_events(
+            event_types=["tool_started", "tool_finished"],
+            content=TextPayload(
+                message=f'Found existing masks for {len(datasetlist) - len(eligible_volumes)} volumes'
+            ),
             session_id=self.session_id,
         )
-        await receive_tool_event(plan_log_event)
-        plan_log_event = ToolEvent(
-            event_type='tool_finished',
-            source='segmentation_agent',
-            content_type='text',
-            content=payload,
-            session_id=self.session_id,
-        )
-        await receive_tool_event(plan_log_event)
         
         # =========== test ===============
 
@@ -159,6 +144,7 @@ class SegmentationModule:
         )
         # ---- Run segmentation (automatic or interactive) ----
         pipeline_failed_uids = []  # UIDs that couldn't be segmented (e.g. OOM kill)
+        skip_wait = False
 
         if chosen_path == "automatic" and eligible_volumes:
             selected_auto_models = plan["selected_models"] if plan["selected_models"] else None
@@ -188,55 +174,45 @@ class SegmentationModule:
                 self.UserFallbackAgent, self.UserProxyAgent,
                 eligible_volumes, target_labels, self.segmentation_service, self.session_id
             )
+            if not selected_interactive_model:
+                skip_wait = True
 
         # ========= logging after Segmentation ================
-        payload = TextPayload(message=f'Segmentation...Done')
-        segmentation_tool_event = ToolEvent(
-            event_type='tool_finished',
-            source='segmentation_agent',
-            content_type='text',
-            content=payload,
+        await emit_tool_event(
+            event_type="tool_finished",
+            content=TextPayload(message="Segmentation...Done"),
             session_id=self.session_id,
         )
-        await receive_tool_event(segmentation_tool_event)  
-        
-        # ===========  logging before download ====================  
-        payload = TextPayload(message='Creating dataset...')
-        environment_setup_event = ToolEvent(
-            event_type='tool_started',
-            source='segmentation_agent',
-            content_type='text',
-            content=payload,
+
+        # ===========  logging before download ====================
+        await emit_tool_events(
+            event_types=["tool_started", "tool_progress"],
+            content=TextPayload(message="Creating dataset..."),
             session_id=self.session_id,
         )
-        await receive_tool_event(environment_setup_event)
-        environment_setup_event = ToolEvent(
-            event_type='tool_progress',
-            source='segmentation_agent',
-            content_type='text',
-            content=payload,
-            session_id=self.session_id,
-        )
-        await receive_tool_event(environment_setup_event)
         # =========== download ========================    
         # Give MONAI a moment to persist new masks — but only when segmentation
         # actually ran.  If all volumes already had existing masks (eligible_volumes
         # is empty), there is nothing to wait for.
-        if eligible_volumes:
+        if eligible_volumes and not skip_wait:
             logger.info("Waiting 120 s for MONAI to persist new segmentation masks...")
             await asyncio.sleep(120)
+        elif skip_wait:
+            logger.info("Skipping 120s wait because no AI segmentation was performed (manual mode fallback).")
 
         # Exclude volumes that failed segmentation — only download successful ones
         successful_eligible = [v for v in eligible_volumes if v not in pipeline_failed_uids]
         volumes_to_download = successful_eligible if successful_eligible else (
             datasetlist if not eligible_volumes else []
         )
+        plan_model = plan["selected_models"][0] if plan.get("selected_models") else None
+        plan_target = target_labels[0] if target_labels else None
         result = await download_and_pair_volumes(
-                    workspace_dir,
-                    volumes_to_download, 
-                    chosen_path=chosen_path, 
-                    selected_auto_model_for_volume=plan["selected_models"][0] if plan["selected_models"] else None,
-                    target_label=target_labels[0] if target_labels else None,
+            workspace_dir,
+            volumes_to_download,
+            chosen_path=chosen_path,
+            selected_auto_model_for_volume=plan_model,
+            target_label=plan_target,
         )
         # download_and_pair_volumes returns (successful_list, skipped_list) normally,
         # but returns [] if datasetlist was empty — guard against both.
@@ -278,10 +254,6 @@ class SegmentationModule:
         if downloaded_uids:
             # Use a queue to bridge the sync GIF thread → async broadcaster
             gif_queue: asyncio.Queue = asyncio.Queue()
-            plan_target  = plan.get('target_labels', [None])[0] if plan.get('target_labels') else None
-            plan_model   = plan["selected_models"][0] if plan.get("selected_models") else None
-            plan_dice    = get_model_dice_score(plan_model, plan_target) if plan_model and plan_target else None
-
             def _on_gif_ready(volume_entry: dict):
                 """Called synchronously from the GIF thread; puts the entry into the queue."""
                 gif_queue.put_nowait(volume_entry)
@@ -306,7 +278,7 @@ class SegmentationModule:
                                     "payload": {
                                         "targetRoi": plan_target,
                                         "selectedModel": plan_model,
-                                        "diceScore": plan_dice,
+                                        "diceScore": None,
                                         "volumes": gif_volumes,   # cumulative list
                                         "latex": None,
                                         "isFinished": False,
@@ -332,7 +304,6 @@ class SegmentationModule:
         # and confirms all volumes are done. Volumes list kept for completeness.
         latex_content = None
         try:
-            from pathlib import Path
             tex_path = Path(workspace_dir) / "initial_report.tex"
             if tex_path.exists():
                 latex_content = tex_path.read_text(encoding="utf-8")
@@ -340,12 +311,11 @@ class SegmentationModule:
             latex_content = None
 
         # Always send final summary to signal completion!
-        plan_target_final = plan.get('target_labels', [None])[0] if plan.get('target_labels') else None
-        plan_model_final = plan["selected_models"][0] if plan.get("selected_models") else None
+        # plan_model / plan_target were set when download_and_pair_volumes was called above
         frontend_data = {
-            "targetRoi": plan_target_final,
-            "selectedModel": plan_model_final,
-            "diceScore": get_model_dice_score(plan_model_final, plan_target_final) if plan_model_final and plan_target_final else None,
+            "targetRoi": plan_target,
+            "selectedModel": plan_model,
+            "diceScore": None,
             "volumes": gif_volumes,
             "latex": latex_content,
             "isFinished": True
@@ -398,7 +368,6 @@ class SegmentationModule:
                 target_mask_path = os.path.join(workspace_dir, "masks", f"{uid}.nii.gz")
                 if os.path.exists(temp_mask_path):
                     logger.info(f"Using explicitly uploaded modified mask for {uid}")
-                    import shutil
                     shutil.copy2(temp_mask_path, target_mask_path)
                 else:
                     logger.info(f"No explicitly uploaded mask found for {uid}, falling back to datastore")
@@ -406,8 +375,8 @@ class SegmentationModule:
                         workspace_dir,
                         datasetlist=[uid],
                         chosen_path="interactive",
-                        selected_auto_model_for_volume=plan_model_final,
-                        target_label=plan_target_final,
+                        selected_auto_model_for_volume=plan_model,
+                        target_label=plan_target,
                         download_volumes=False
                     )
 

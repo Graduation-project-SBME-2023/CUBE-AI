@@ -1,3 +1,15 @@
+# VOXTELL_SUPPORTED_LABELS — catalog of anatomical structures with KNOWN benchmark performance.
+#
+# The numeric values are historical Dice scores (0–100) measured on the VoxTell validation set.
+# They are kept here for reference ONLY — the segmentation planner no longer uses them for
+# model selection decisions.
+#
+# PURPOSE OF THIS FILE (post-dice-removal):
+#   1. caching_generator.py uses the KEYS to pre-warm the text embedding cache at container start.
+#   2. utils.py / check_voxtell_label_availability() uses the KEYS to detect known vs. unknown labels.
+#   3. Unknown labels are accepted by VoxTell via dynamic embedding at inference time (N/A quality).
+#
+# To add a newly validated label: append its key (label name) with any numeric placeholder (e.g. 0).
 VOXTELL_SUPPORTED_LABELS = {
     "gallbladder": 85.28,
     "duodenum": 66.97,
