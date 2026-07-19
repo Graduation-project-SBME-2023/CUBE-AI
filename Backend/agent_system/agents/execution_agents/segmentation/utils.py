@@ -1029,20 +1029,36 @@ def get_semantic_concepts(label: str) -> set:
 
 def check_voxtell_label_availability(target_label):
     """
-    Checks if VoxTell can generate labels for the given target anatomical labels.
-    Uses strict semantic concept matching (Layer 2 of Defense in Depth).
+    Checks if VoxTell can handle the given label.
+
+    VoxTell is a text-prompt model — it can semantically segment any label,
+    even one not listed in voxtell_supported_labels.py, by generating a new
+    embedding dynamically. The catalog only records labels with a KNOWN Dice score.
+
+    Returns:
+      - The exact catalog label string  → if found (matched via semantic concepts)
+      - The raw target_label string     → if NOT found in catalog (VoxTell can still try)
+      - None                            → if catalog failed to load entirely
     """
     supported_labels = get_voxtell_supported_labels()
     if not supported_labels:
-        return None
+        return None  # catalog load failure — cannot proceed
 
     target_concepts = get_semantic_concepts(target_label)
-    
+
+    # Try to find an exact semantic match in the catalog
     for cat_label in supported_labels:
         if target_concepts == get_semantic_concepts(cat_label):
+            logger.info("VoxTell catalog match: '%s' → '%s'", target_label, cat_label)
             return cat_label
-            
-    return False
+
+    # Not in catalog — but VoxTell can still segment it via dynamic embedding generation.
+    # Return the raw label so the pipeline continues; Dice score will be 0 (unvalidated).
+    logger.info(
+        "VoxTell: '%s' not in catalog — will proceed with dynamic embedding (Dice=0, unvalidated).",
+        target_label,
+    )
+    return target_label
 # ==================================
 #  get the Benchmark dice score of selected model
 # ==================================
@@ -1074,7 +1090,14 @@ def get_model_dice_score(model_name: str, target_label: str) -> float:
     """
     Returns the benchmark Dice score as a percentage (0–100) for the given
     model and anatomical label, looked up from the model's labels dict in the DB.
-    Falls back to DEFAULT_DICE_SCORE if not found.
+
+    Special case — VoxTell with an unknown label:
+      Returns 0.0 instead of DEFAULT_DICE_SCORE, because VoxTell can still
+      attempt segmentation via dynamic embedding, but the quality is unvalidated.
+      This ensures automatic models with real Dice scores are preferred, and VoxTell
+      is only chosen when it is the only organ-specific option available.
+
+    Falls back to DEFAULT_DICE_SCORE for all other models if not found.
     """
     labels = _fetch_model_labels(model_name or "")
     norm = _norm_label(target_label)
@@ -1090,6 +1113,14 @@ def get_model_dice_score(model_name: str, target_label: str) -> float:
         raw = float(score)
         # Values ≤ 1.0 are on 0-1 scale → multiply to get percentage
         return raw * 100.0 if raw <= 1.0 else raw
+
+    # VoxTell: label not in catalog → return 0.0 (unvalidated, but can still try)
+    if model_name and "voxtell" in model_name.lower():
+        logger.debug(
+            "get_model_dice_score: '%s' not in VoxTell catalog — returning 0.0 (unvalidated).",
+            target_label,
+        )
+        return 0.0
 
     return DEFAULT_DICE_SCORE
 

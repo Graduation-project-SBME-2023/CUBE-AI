@@ -66,9 +66,21 @@ def create_planner_agent(model_client, discovery_tools):
         - If tied within 1%, prefer automatic over interactive.
         - Model type (automatic vs interactive) does NOT matter — only the Dice score decides.
 
-        RULE 5 — UNSUPPORTED IS SOMETIMES THE RIGHT ANSWER
-        Honest UNSUPPORTED is better than a clinically wrong segmentation.
-        Do NOT use generic whole-body labels just to avoid UNSUPPORTED.
+        RULE 5 — VOXTELL ACCEPTS ANY MEDICALLY VALID TEXT PROMPT
+        VoxTell is a text-prompt model. It can segment ANY anatomical label or pathology
+        described in natural language, even if that label is NOT listed in its catalog.
+        - If a label IS in the VoxTell catalog → use its known Dice score for comparison.
+        - If a label is NOT in the VoxTell catalog → VoxTell can still try it with Dice=0 (unvalidated).
+        - Dice=0 means: prefer an automatic model if it has a matching label with a real Dice score.
+          But if no automatic model has a specific organ-pathology label, choose VoxTell with Dice=0
+          rather than returning UNSUPPORTED — it is better to attempt than to refuse.
+        - NEVER return UNSUPPORTED just because VoxTell's catalog doesn't list the label.
+
+        RULE 6 — UNSUPPORTED IS ONLY CORRECT WHEN NO MODEL CAN HELP
+        Return UNSUPPORTED only when:
+          a) No automatic model has an organ-specific pathology label, AND
+          b) The request is for an organ-specific pathology that is clinically nonsensical to route to VoxTell.
+        For all reasonable medical requests, prefer VoxTell with Dice=0 over UNSUPPORTED.
         """,
         max_tool_iterations=2
     )
