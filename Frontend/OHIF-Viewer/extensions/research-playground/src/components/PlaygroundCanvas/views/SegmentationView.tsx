@@ -9,7 +9,6 @@ import { handleModifyAction, saveSegmentationReview } from './segmentation/utils
 function ReviewView({
     targetRoi,
     selectedModel,
-    diceScore,
     volumes,
     onSave,
     isLoading,
@@ -18,7 +17,6 @@ function ReviewView({
 }: {
     targetRoi: string;
     selectedModel: string;
-    diceScore: number | null;
     volumes: VolumeGif[];
     onSave: (results: { accepted: string[]; rejected: string[]; modified: string[] }) => void;
     isLoading: boolean;
@@ -213,7 +211,6 @@ function ReviewView({
                 <RightPanel
                     targetRoi={targetRoi}
                     selectedModel={selectedModel}
-                    diceScore={diceScore}
                 />
             </div>
 
@@ -247,11 +244,10 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
     const [data, setData] = useState<{
         targetRoi: string;
         selectedModel: string;
-        diceScore: number | null;
         volumes: VolumeGif[];
         sessionId?: string;
         isFinished: boolean;
-    }>({ targetRoi: '-', selectedModel: '-', diceScore: null, volumes: [], sessionId: undefined, isFinished: false });
+    }>({ targetRoi: '-', selectedModel: '-', volumes: [], sessionId: undefined, isFinished: false });
 
     const [isLoading, setIsLoading] = useState(true);
 
@@ -260,7 +256,6 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
             setData({
                 targetRoi:     segmentationData.targetRoi     || '-',
                 selectedModel: segmentationData.selectedModel || '-',
-                diceScore:     segmentationData.diceScore     ?? null,
                 volumes:       segmentationData.volumes,
                 sessionId:     segmentationData.sessionId,
                 isFinished:    segmentationData.isFinished ?? false,
@@ -292,7 +287,6 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
         <ReviewView
             targetRoi={data.targetRoi}
             selectedModel={data.selectedModel}
-            diceScore={data.diceScore}
             volumes={data.volumes}
             onSave={handleSave}
             isLoading={isLoading}

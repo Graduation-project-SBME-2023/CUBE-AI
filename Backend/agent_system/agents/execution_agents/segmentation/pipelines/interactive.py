@@ -4,7 +4,6 @@ from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
 from agent_system.models.tool_logging import ProgressPayload, TextPayload
 
 from ..logging_config import emit_tool_event, emit_tool_events
-from ..utils import check_voxtell_label_availability
 from .common import raise_for_segmentation_error
 
 logger = logging.getLogger(__name__)
@@ -38,18 +37,6 @@ def create_user_proxy_agent(model_client):
     return UserProxyAgent(name="HumanUser")
 
 
-def _supported_voxtell_labels(labels):
-    supported = []
-    unsupported = []
-    for label in labels:
-        canonical_label = check_voxtell_label_availability(label)
-        if canonical_label:
-            supported.append(canonical_label)
-        else:
-            unsupported.append(label)
-    return supported, unsupported
-
-
 async def run_interactive_pipeline(
     user_fallback_agent,
     user_proxy,
@@ -66,20 +53,9 @@ async def run_interactive_pipeline(
     )
 
     selected_model = None
-    logger.info("Starting interactive segmentation guidance for labels: %s", labels)
-    supported_labels, unsupported_labels = _supported_voxtell_labels(labels)
-    if unsupported_labels:
-        logger.warning(
-            "VoxTell does not support these labels and they require manual segmentation: %s",
-            unsupported_labels,
-        )
-    if not supported_labels:
-        logger.warning(
-            "No requested labels are supported by VoxTell: %s. "
-            "Skipping interactive segmentation (VoxTell catalog may be missing or the labels are not in the catalog).",
-            labels,
-        )
-        return None
+    # VoxTell accepts ANY label — known labels use a validated prompt, unknown labels
+    # use dynamic embedding generation. We pass all labels as-is.
+    logger.info("Starting interactive segmentation for labels: %s (VoxTell accepts all)", labels)
 
     failures = []
     for index, volume_uid in enumerate(volumes, start=1):
@@ -97,7 +73,7 @@ async def run_interactive_pipeline(
         )
 
         try:
-            for canonical_label in supported_labels:
+            for canonical_label in labels:
                 selected_model = "voxtell"
                 result = await segmentation_service.run_segmentation(
                     model=selected_model,
