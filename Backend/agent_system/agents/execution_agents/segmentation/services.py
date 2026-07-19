@@ -18,6 +18,11 @@ from .utils import (
     parse_nrrd_data,
     ensure_required_patient_tags
 )
+from .medical_vocabulary import (
+    ANATOMICAL_SYNONYMS,
+    PATHOLOGY_SYNONYMS,
+    STRUCTURAL_ALIASES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +110,11 @@ class SegmentationService:
                     organ_list,
                 )
             else:
+                if clean_model.lower() == "vista":
+                    msg = f"VISTA requires a Class index but none was found for labels: {organ_list}"
+                    logger.error(msg)
+                    return {"error": True, "stage": "upload", "message": msg}
+                
                 logger.warning(
                     "No Class index found for model='%s', labels=%s; model may fail",
                     clean_model,
@@ -405,27 +415,59 @@ class SegmentationService:
 
     @staticmethod
     def _class_key_candidates(label: str) -> list[str]:
-        normalized = "_".join(str(label or "").lower().strip().split())
+        """
+        Generate all fuzzy variant forms of a label for robust catalog lookup.
+        Synonym/alias tables are imported from medical_vocabulary.py — edit there.
+
+        Handles:
+        - Word order:   "left kidney" ↔ "kidney_left"
+        - Plurals:      "tumors" → "tumor", "lesions" → "lesion"
+        - Separators:   underscores / spaces / hyphens are interchangeable
+        - Anatomical synonyms: hepatic=liver, renal=kidney, splenic=spleen, etc.
+        - Pathology synonyms: cancer=carcinoma=tumor; lesion=mass=nodule
+        - Structural aliases: large_intestine=colon, portal_vein=portal_vein_and_splenic_vein, etc.
+        """
+        raw = str(label or "").lower().strip()
+        # Normalise separators: hyphens and spaces → underscore
+        normalized = "_".join(raw.replace("-", " ").split())
         candidates = [normalized]
 
+        # ── 1. Laterality word-order swap ────────────────────────────────────
         parts = normalized.split("_")
         if parts and parts[0] in {"left", "right"} and len(parts) > 1:
             candidates.append("_".join(parts[1:] + [parts[0]]))
+        elif parts and parts[-1] in {"left", "right"} and len(parts) > 1:
+            candidates.append("_".join([parts[-1]] + parts[:-1]))
 
-        aliases = {
-            "large_intestine": "colon",
-            "small_intestine": "small_bowel",
-            "urinary_bladder": "urinary_bladder",
-            "portal_vessels": "portal_vein_and_splenic_vein",
-            "portal_vein": "portal_vein_and_splenic_vein",
-            "heart": "heart_myocardium",
-            "left_atrium": "heart_atrium_left",
-            "right_atrium": "heart_atrium_right",
-            "left_ventricle": "heart_ventricle_left",
-            "right_ventricle": "heart_ventricle_right",
-        }
-        if normalized in aliases:
-            candidates.append(aliases[normalized])
+        # ── 2. Plural → singular stripping ───────────────────────────────────
+        plural_stripped = normalized.rstrip("s") if normalized.endswith("s") else None
+        if plural_stripped and plural_stripped != normalized:
+            candidates.append(plural_stripped)
+            ps_parts = plural_stripped.split("_")
+            if ps_parts and ps_parts[0] in {"left", "right"} and len(ps_parts) > 1:
+                candidates.append("_".join(ps_parts[1:] + [ps_parts[0]]))
+            elif ps_parts and ps_parts[-1] in {"left", "right"} and len(ps_parts) > 1:
+                candidates.append("_".join([ps_parts[-1]] + ps_parts[:-1]))
+
+        # ── 3. Anatomical synonyms (from medical_vocabulary.py) ───────────────
+        for syn, replacements in ANATOMICAL_SYNONYMS.items():
+            if syn in normalized:
+                for rep in replacements:
+                    candidates.append(normalized.replace(syn, rep))
+
+        # ── 4. Pathology synonyms (from medical_vocabulary.py) ───────────────
+        for syn, replacements in PATHOLOGY_SYNONYMS.items():
+            if syn in normalized:
+                for rep in replacements:
+                    candidates.append(normalized.replace(syn, rep))
+
+        # ── 5. Structural aliases (from medical_vocabulary.py) ───────────────
+        alias_val = STRUCTURAL_ALIASES.get(normalized)
+        if alias_val:
+            if isinstance(alias_val, list):
+                candidates.extend(alias_val)
+            else:
+                candidates.append(alias_val)
 
         return list(dict.fromkeys(candidates))
 

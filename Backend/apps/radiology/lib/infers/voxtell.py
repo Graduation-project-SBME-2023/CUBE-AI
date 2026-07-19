@@ -45,6 +45,15 @@ from monai.inferers import Inferer, SlidingWindowInferer, SliceInferer
 from monailabel.interfaces.tasks.infer_v2 import InferType
 from monailabel.tasks.infer.basic_infer import BasicInferTask
 
+# Medical vocabulary is maintained centrally — do not duplicate synonyms here.
+import sys, os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../agent_system/agents/execution_agents/segmentation")))
+try:
+    from medical_vocabulary import VOXTELL_PROMPT_ALIASES
+except ImportError:
+    # Fallback if run outside the agent_system context (e.g. standalone MONAI)
+    VOXTELL_PROMPT_ALIASES = {}
+
 
 logger = logging.getLogger(__name__)
 
@@ -141,24 +150,10 @@ class MyVoxTellPredictor(VoxTellPredictor):
         torch.cuda.empty_cache()
         check_memory("After INIT (VoxTell loaded, NO text model in RAM)", torch.device("cuda"))
 
-    # Fallback map for common synonyms
-    FALLBACK_PROMPT_MAP = {
-        "renal tumor":         "tumor",
-        "kidney tumor":        "tumor",
-        "renal mass":          "lesion",
-        "renal cell carcinoma":"carcinoma",
-        "kidney lesion":       "lesion",
-        "renal lesion":        "lesion",
-        "kidney cancer":       "carcinoma",
-        "renal cancer":        "carcinoma",
-        "liver lesion":        "liver tumor",
-        "hepatic lesion":      "liver tumor",
-        "hepatic tumor":       "liver tumor",
-        "focal liver lesion":  "liver tumor",
-        "liver metastasis":    "liver tumor",
-        "liver cancer":        "hepatocellular carcinoma",
-        "hepatocellular carcinoma rcc": "hepatocellular carcinoma",
-    }
+    # Prompt alias map — imported from medical_vocabulary.py (single source of truth).
+    # Every value is a label that actually exists in VOXTELL_SUPPORTED_LABELS.
+    # Edit medical_vocabulary.VOXTELL_PROMPT_ALIASES to add new remappings.
+    FALLBACK_PROMPT_MAP = VOXTELL_PROMPT_ALIASES
 
     def generate_text_embedding(self, prompt: str) -> torch.Tensor:
         """Lazily loads the text model onto the CPU to generate missing embeddings."""

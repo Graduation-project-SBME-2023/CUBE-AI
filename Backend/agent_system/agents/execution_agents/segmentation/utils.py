@@ -1021,18 +1021,28 @@ def get_voxtell_supported_labels() -> dict[str, float]:
     return {normalize_label(label): float(score) for label, score in labels.items()}
 
 
+from .medical_vocabulary import FLAT_MEDICAL_SYNONYMS
+
+def get_semantic_concepts(label: str) -> set:
+    words = label.lower().replace("_", " ").split()
+    return set(FLAT_MEDICAL_SYNONYMS.get(w, w) for w in words)
+
 def check_voxtell_label_availability(target_label):
     """
     Checks if VoxTell can generate labels for the given target anatomical labels.
-    Returns the normalized label string (which is the correct cache key) if supported,
-    False if not found, None if the catalog is missing.
+    Uses strict semantic concept matching (Layer 2 of Defense in Depth).
     """
-    normalized = normalize_label(target_label)
     supported_labels = get_voxtell_supported_labels()
     if not supported_labels:
         return None
 
-    return normalized if normalized in supported_labels else False
+    target_concepts = get_semantic_concepts(target_label)
+    
+    for cat_label in supported_labels:
+        if target_concepts == get_semantic_concepts(cat_label):
+            return cat_label
+            
+    return False
 # ==================================
 #  get the Benchmark dice score of selected model
 # ==================================
