@@ -309,7 +309,6 @@ class SegmentationModule:
                                     "payload": {
                                         "targetRoi": plan_target,
                                         "selectedModel": plan_model,
-                                        "diceScore": None,
                                         "volumes": gif_volumes,   # cumulative list
                                         "latex": None,
                                         "isFinished": False,
@@ -346,7 +345,6 @@ class SegmentationModule:
         frontend_data = {
             "targetRoi": plan_target,
             "selectedModel": plan_model,
-            "diceScore": None,
             "volumes": gif_volumes,
             "latex": latex_content,
             "isFinished": True
