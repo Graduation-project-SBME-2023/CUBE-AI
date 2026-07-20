@@ -26,9 +26,19 @@ function ReviewView({
     const [reviewStatus, setReviewStatus] = useState<Record<string, ReviewStatus>>({});
 
     useEffect(() => {
-        const initial: Record<string, ReviewStatus> = {};
-        volumes.forEach(v => { initial[v.seriesInstanceUid] = 'pending'; });
-        setReviewStatus(initial);
+        setReviewStatus(prev => {
+            const next = { ...prev };
+            let changed = false;
+            volumes.forEach(v => {
+                // Default to 'accepted' if this volume hasn't been seen yet.
+                // This prevents resetting user choices when new GIFs progressively load in.
+                if (!next[v.seriesInstanceUid]) {
+                    next[v.seriesInstanceUid] = 'accepted';
+                    changed = true;
+                }
+            });
+            return changed ? next : prev;
+        });
     }, [volumes]);
 
     const handleToggle = useCallback((uid: string, status: 'accepted' | 'rejected' | 'modified') =>
