@@ -3,17 +3,12 @@ vista_labels.py
 ───────────────
 Single source of truth for the VISTA3D segmentation model's label catalog.
 
-Contains two dicts:
+Contains:
   - VISTA_CLASS_MAP  : {label_name: class_index}  — the integer class index VISTA
                        outputs in its NIfTI segmentation mask (e.g. liver=5).
                        Used by:
                          • apps/radiology/lib/configs/vista.py  (self.labels)
                          • monailabel/seeders/model.py           (params_schema.Class.mapping)
-
-  - VISTA_DICE_SCORES : {label_name: dice_score_0_to_1}  — benchmark Dice scores
-                        for each label.
-                        Used by:
-                         • monailabel/seeders/model.py           (labels field in DB)
 
 To add, remove, or rename a VISTA label — edit ONLY this file.
 """
@@ -126,114 +121,4 @@ VISTA_CLASS_MAP: dict[str, int] = {
     "iliopsoas_left": 102,
     "iliopsoas_right": 103,
     "urinary_bladder": 104,
-}
-
-# ═══════════════════════════════════════════════════════════════════
-# Benchmark Dice scores  (label → Dice on 0–1 scale)
-# ═══════════════════════════════════════════════════════════════════
-VISTA_DICE_SCORES: dict[str, float] = {
-    "spleen": 0.94,
-    "kidney_right": 0.93,
-    "kidney_left": 0.93,
-    "gallbladder": 0.88,
-    "liver": 0.95,
-    "stomach": 0.90,
-    "aorta": 0.91,
-    "inferior_vena_cava": 0.88,
-    "portal_vein_and_splenic_vein": 0.86,
-    "pancreas": 0.87,
-    "adrenal_gland_right": 0.78,
-    "adrenal_gland_left": 0.78,
-    "lung_upper_lobe_left": 0.93,
-    "lung_lower_lobe_left": 0.92,
-    "lung_upper_lobe_right": 0.93,
-    "lung_middle_lobe_right": 0.91,
-    "lung_lower_lobe_right": 0.92,
-    "vertebrae_L5": 0.89,
-    "vertebrae_L4": 0.89,
-    "vertebrae_L3": 0.88,
-    "vertebrae_L2": 0.88,
-    "vertebrae_L1": 0.88,
-    "vertebrae_T12": 0.87,
-    "vertebrae_T11": 0.87,
-    "vertebrae_T10": 0.87,
-    "vertebrae_T9": 0.86,
-    "vertebrae_T8": 0.86,
-    "vertebrae_T7": 0.86,
-    "vertebrae_T6": 0.85,
-    "vertebrae_T5": 0.85,
-    "vertebrae_T4": 0.85,
-    "vertebrae_T3": 0.84,
-    "vertebrae_T2": 0.84,
-    "vertebrae_T1": 0.84,
-    "vertebrae_C7": 0.84,
-    "vertebrae_C6": 0.84,
-    "vertebrae_C5": 0.83,
-    "vertebrae_C4": 0.83,
-    "vertebrae_C3": 0.82,
-    "vertebrae_C2": 0.82,
-    "vertebrae_C1": 0.82,
-    "esophagus": 0.83,
-    "trachea": 0.88,
-    "heart_myocardium": 0.88,
-    "heart_atrium_left": 0.89,
-    "heart_ventricle_left": 0.90,
-    "heart_atrium_right": 0.88,
-    "heart_ventricle_right": 0.89,
-    "pulmonary_artery": 0.84,
-    "brain": 0.96,
-    "iliac_artery_left": 0.86,
-    "iliac_artery_right": 0.86,
-    "iliac_vena_left": 0.85,
-    "iliac_vena_right": 0.85,
-    "small_bowel": 0.80,
-    "duodenum": 0.78,
-    "colon": 0.82,
-    "rib_left_1": 0.83,
-    "rib_left_2": 0.83,
-    "rib_left_3": 0.83,
-    "rib_left_4": 0.83,
-    "rib_left_5": 0.83,
-    "rib_left_6": 0.83,
-    "rib_left_7": 0.83,
-    "rib_left_8": 0.83,
-    "rib_left_9": 0.83,
-    "rib_left_10": 0.83,
-    "rib_left_11": 0.83,
-    "rib_left_12": 0.83,
-    "rib_right_1": 0.83,
-    "rib_right_2": 0.83,
-    "rib_right_3": 0.83,
-    "rib_right_4": 0.83,
-    "rib_right_5": 0.83,
-    "rib_right_6": 0.83,
-    "rib_right_7": 0.83,
-    "rib_right_8": 0.83,
-    "rib_right_9": 0.83,
-    "rib_right_10": 0.83,
-    "rib_right_11": 0.83,
-    "rib_right_12": 0.83,
-    "humerus_left": 0.86,
-    "humerus_right": 0.86,
-    "scapula_left": 0.85,
-    "scapula_right": 0.85,
-    "clavicula_left": 0.84,
-    "clavicula_right": 0.84,
-    "femur_left": 0.90,
-    "femur_right": 0.90,
-    "hip_left": 0.88,
-    "hip_right": 0.88,
-    "sacrum": 0.87,
-    "face": 0.92,
-    "gluteus_maximus_left": 0.84,
-    "gluteus_maximus_right": 0.84,
-    "gluteus_medius_left": 0.83,
-    "gluteus_medius_right": 0.83,
-    "gluteus_minimus_left": 0.82,
-    "gluteus_minimus_right": 0.82,
-    "autochthon_left": 0.81,
-    "autochthon_right": 0.81,
-    "iliopsoas_left": 0.83,
-    "iliopsoas_right": 0.83,
-    "urinary_bladder": 0.90,
 }

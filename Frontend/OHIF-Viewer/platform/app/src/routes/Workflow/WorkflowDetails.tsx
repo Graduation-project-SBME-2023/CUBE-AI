@@ -1486,36 +1486,6 @@ function WorkflowDetailPage({
                   </div>
                 </div>
 
-                {/* Dice Metric Progress Bar */}
-                {[{ label: 'Dice Metric', color: '#00b300', value: 0 }].map(
-                  ({ label, color, value }, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center space-x-4"
-                    >
-                      {/* Label */}
-                      <span
-                        className="w-28 items-center justify-center text-black"
-                        style={{ fontSize: '13px' }}
-                      >
-                        {label}
-                      </span>
-                      {/* Progress Bar */}
-                      <div className="relative h-3 w-full rounded-full bg-gray-300 ">
-                        <div
-                          className="absolute top-0 left-0 flex h-full items-center justify-center rounded-full text-sm text-black"
-                          style={{
-                            width: `${value}%`,
-                            background: `linear-gradient(to right, red 0%, orange 25%, yellow 50%, lightgreen 75%, green 100%)`,
-                          }}
-                        ></div>
-                        <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-black">
-                          {value}%
-                        </div>
-                      </div>
-                    </div>
-                  )
-                )}
               </div>
             </div>
           </div>

@@ -30,17 +30,14 @@ def _load_module_from_configs(module_filename: str):
     return module
 
 
-def _load_vista_labels() -> tuple[dict, dict]:
+def _load_vista_labels() -> dict:
     module = _load_module_from_configs("vista_labels.py")
     if module is None:
-        return {}, {}
-    return (
-        getattr(module, "VISTA_CLASS_MAP", {}),
-        getattr(module, "VISTA_DICE_SCORES", {}),
-    )
+        return {}
+    return getattr(module, "VISTA_CLASS_MAP", {})
 
 
-VISTA_CLASS_MAP, VISTA_DICE_SCORES = _load_vista_labels()
+VISTA_CLASS_MAP = _load_vista_labels()
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -56,11 +53,11 @@ sync_engine = create_engine(sync_url)
 SessionLocal = sessionmaker(bind=sync_engine, autoflush=False, autocommit=False)
 
 
-def _load_voxtell_supported_labels() -> dict[str, float]:
+def _load_voxtell_supported_labels() -> list:
     module = _load_module_from_configs("voxtell_supported_labels.py")
     if module is None:
         return {}
-    return getattr(module, "VOXTELL_SUPPORTED_LABELS", {})
+    return getattr(module, "VOXTELL_SUPPORTED_LABELS", [])
 
 
 VOXTELL_SUPPORTED_LABELS = _load_voxtell_supported_labels()
@@ -85,9 +82,6 @@ def seed_models():
             modality="CT",
             dimension=3,
             anatomy=["spleen"],
-            labels={
-                "spleen": 0.96
-            },
             params_schema=None,
             model_id=str(uuid.uuid4()),
             created_at=datetime.now(),
@@ -101,7 +95,6 @@ def seed_models():
             modality="any",
             dimension=3,
             anatomy=["any"],
-            labels=VOXTELL_SUPPORTED_LABELS,
             params_schema={
                 "text_prompts": {
                     "type": "list[string]",
@@ -125,8 +118,6 @@ def seed_models():
             dimension=2,
             # anatomy list derived from VISTA_CLASS_MAP — single source of truth
             anatomy=list(VISTA_CLASS_MAP.keys()),
-            # Dice scores from VISTA_DICE_SCORES — single source of truth
-            labels=VISTA_DICE_SCORES,
             params_schema={
                 "Class": {
                     # Class index mapping from VISTA_CLASS_MAP — single source of truth

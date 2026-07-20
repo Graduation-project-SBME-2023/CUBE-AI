@@ -25,7 +25,6 @@ from PIL import Image
 MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
 REQUEST_TIMEOUT_SECONDS = 10.0
 KNOWN_SEGMENTATION_MODELS = {"voxtell", "vista", "segmentation_spleen", "nnunet"}
-DEFAULT_DICE_SCORE = 90.0
 # ===============================
 # MASK HELPERS
 # ===============================
@@ -997,7 +996,7 @@ def normalize_label(label: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def get_voxtell_supported_labels() -> dict[str, float]:
+def get_voxtell_supported_labels() -> dict:
     catalog_path = (
         Path(__file__).resolve().parents[4]
         / "apps"
@@ -1017,8 +1016,8 @@ def get_voxtell_supported_labels() -> dict[str, float]:
 
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    labels = getattr(module, "VOXTELL_SUPPORTED_LABELS", {})
-    return {normalize_label(label): float(score) for label, score in labels.items()}
+    labels = getattr(module, "VOXTELL_SUPPORTED_LABELS", [])
+    return [normalize_label(label) for label in labels]
 
 
 from .medical_vocabulary import FLAT_MEDICAL_SYNONYMS
@@ -1064,72 +1063,6 @@ def check_voxtell_label_availability(target_label):
         target_label,
     )
     return target_label
-# ==================================
-#  get the Benchmark dice score of selected model
-# ==================================
-
-def _norm_label(label: str) -> str:
-    """Lowercase and replace spaces/hyphens with underscores for dict key lookup."""
-    return re.sub(r"[\s\-]+", "_", str(label or "").strip().lower())
-
-
-@lru_cache(maxsize=32)
-def _fetch_model_labels(model_name: str) -> dict:
-    """
-    Fetch the labels dict for a model from GET /models/ (cached per process).
-    Returns {label_name: dice_score_0_to_1, ...} or {} on failure.
-    """
-    try:
-        resp = requests.get(f"{MONAI_URL}/models/", timeout=5)
-        if resp.status_code == 200:
-            for m in resp.json():
-                if m.get("name", "").lower() == model_name.lower():
-                    labels = m.get("labels") or {}
-                    return labels if isinstance(labels, dict) else {}
-    except Exception as e:
-        logger.warning("Could not fetch model labels for '%s': %s", model_name, e)
-    return {}
-
-
-def get_model_dice_score(model_name: str, target_label: str) -> float:
-    """
-    Returns the benchmark Dice score as a percentage (0–100) for the given
-    model and anatomical label, looked up from the model's labels dict in the DB.
-
-    Special case — VoxTell with an unknown label:
-      Returns 0.0 instead of DEFAULT_DICE_SCORE, because VoxTell can still
-      attempt segmentation via dynamic embedding, but the quality is unvalidated.
-      This ensures automatic models with real Dice scores are preferred, and VoxTell
-      is only chosen when it is the only organ-specific option available.
-
-    Falls back to DEFAULT_DICE_SCORE for all other models if not found.
-    """
-    labels = _fetch_model_labels(model_name or "")
-    norm = _norm_label(target_label)
-
-    # Try normalised key variants: "liver", "kidney_right", "kidney right"
-    score = (
-        labels.get(norm)
-        or labels.get(normalize_label(target_label))
-        or labels.get(normalize_label(target_label).replace(" ", "_"))
-    )
-
-    if score is not None:
-        raw = float(score)
-        # Values ≤ 1.0 are on 0-1 scale → multiply to get percentage
-        return raw * 100.0 if raw <= 1.0 else raw
-
-    # VoxTell: label not in catalog → return 0.0 (unvalidated, but can still try)
-    if model_name and "voxtell" in model_name.lower():
-        logger.debug(
-            "get_model_dice_score: '%s' not in VoxTell catalog — returning 0.0 (unvalidated).",
-            target_label,
-        )
-        return 0.0
-
-    return DEFAULT_DICE_SCORE
-
-
 # =================================
 #  remove volumes and labels from working space that was discarded by user
 # =================================
