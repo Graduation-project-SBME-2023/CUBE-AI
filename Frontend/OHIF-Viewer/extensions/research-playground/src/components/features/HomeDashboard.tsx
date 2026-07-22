@@ -75,6 +75,10 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
 
       const data = await response.json();
       const sessionId = String(data.chat_id);
+      // Persist the Literature Review preference so it survives navigation away and back via history
+      try {
+        localStorage.setItem(`cube_session_prefs_${sessionId}`, JSON.stringify({ includeLitReview }));
+      } catch (_) {/* ignore storage errors */}
       navigate('/playground', {
         state: {
           hypothesis,
@@ -85,10 +89,14 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
       });
     } catch (err) {
       console.error('Failed to create session:', err);
+      const fallbackId = makeFallbackSessionId();
+      try {
+        localStorage.setItem(`cube_session_prefs_${fallbackId}`, JSON.stringify({ includeLitReview }));
+      } catch (_) {/* ignore storage errors */}
       navigate('/playground', {
         state: {
           hypothesis,
-          sessionId: makeFallbackSessionId(),
+          sessionId: fallbackId,
           sendInitialMessage: true,
           includeLitReview,
         },
@@ -97,10 +105,25 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
   };
 
   const handleProjectClick = (project: any) => {
+    const sessionId = project.chat_id || project.id || project.session_id;
+
+    // Restore the Literature Review preference that was saved when this session was first created
+    let includeLitReviewRestored = true;
+    try {
+      const saved = localStorage.getItem(`cube_session_prefs_${sessionId}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.includeLitReview === 'boolean') {
+          includeLitReviewRestored = parsed.includeLitReview;
+        }
+      }
+    } catch (_) {/* ignore storage errors */}
+
     const state = {
-      sessionId: project.chat_id || project.id || project.session_id,
+      sessionId,
       hypothesis: project.title || project.description || null,
       sendInitialMessage: false,
+      includeLitReview: includeLitReviewRestored,
     };
 
     if (onNavigate) {
