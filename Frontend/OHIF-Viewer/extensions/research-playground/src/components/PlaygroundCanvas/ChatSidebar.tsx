@@ -83,12 +83,13 @@ const ChatSidebar = ({
               : [],
             summary: '',
             last_activity: Date.now(),
-          }, ...prev];
+          }];
         }
-        return prev;
+        // Already in list — keep only this session so history stays scoped
+        return prev.filter(s => String(s.chat_id) === String(externalSessionId));
       });
-      // Optionally refresh sessions list so the new one appears in history
-      fetchChatSessions();
+      // Refresh just this session's metadata from the DB (title, summary, etc.)
+      fetchChatSessions(String(externalSessionId));
     }
     if (sendInitialMessage) {
       // if (websocketService.isConnected()) {
@@ -176,7 +177,33 @@ const ChatSidebar = ({
     setIsResizing(true);
   };
 
-  const fetchChatSessions = async () => {
+  const fetchChatSessions = async (scopedSessionId?: string) => {
+    // When the playground is scoped to a specific research session, only fetch that
+    // session's metadata — never pull the global list, which would pollute the
+    // history drawer with sessions from completely different studies.
+    if (scopedSessionId && isUuid(String(scopedSessionId))) {
+      try {
+        const r = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/${scopedSessionId}`);
+        if (!r.ok) return;
+        const s = await r.json();
+        if (!isMountedRef.current) return;
+        setSessions(prev => {
+          const idx = prev.findIndex(x => String(x.chat_id) === String(s.chat_id));
+          const entry = {
+            chat_id: s.chat_id,
+            title: s.title || `Chat ${s.chat_id}`,
+            messages: idx !== -1 && prev[idx].messages.length > 0 ? prev[idx].messages : [],
+            summary: s.summary,
+            last_activity: s.last_activity ? new Date(s.last_activity).getTime() : 0,
+          };
+          if (idx === -1) return [entry, ...prev];
+          return prev.map((x, i) => (i === idx ? entry : x));
+        });
+      } catch (err) {}
+      return;
+    }
+
+    // No scoped session — fetch the full global list (used when no externalSessionId)
     try {
       const r = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/`);
       if (!r.ok) {
@@ -190,7 +217,6 @@ const ChatSidebar = ({
         summary: s.summary,
         last_activity: s.last_activity ? new Date(s.last_activity).getTime() : 0,
       }));
-      // Merge DB sessions with existing local sessions to preserve WS-delivered messages
       if (!isMountedRef.current) return;
       setSessions(prev => {
         const merged = [...prev];
@@ -199,7 +225,6 @@ const ChatSidebar = ({
           if (idx === -1) {
             merged.push(dbSession);
           } else {
-            // Keep existing messages (from WS) if DB returned none
             merged[idx] = {
               ...dbSession,
               messages: merged[idx].messages.length > 0 ? merged[idx].messages : dbSession.messages,
@@ -362,7 +387,8 @@ const ChatSidebar = ({
   // Only connect WebSocket once for the app session (not just when sidebar is open)
   useEffect(() => {
     websocketService.connect();
-    fetchChatSessions();
+    // If scoped to a specific session, only fetch that session; otherwise load all
+    fetchChatSessions(externalSessionId ? String(externalSessionId) : undefined);
     const handleWS = async data => {
       console.log('[ChatSidebar] WS received:', data);
 
