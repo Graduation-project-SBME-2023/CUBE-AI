@@ -171,7 +171,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
     os.makedirs(output_dir, exist_ok=True)
     log_file = os.path.join(output_dir, "radiomics_extraction.log")
     _setup_logging(log_file)
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
 
     image_types   = _csv_str(params.image_types)   or ["Original", "Wavelet"]
     feature_classes = _csv_str(params.feature_classes)
@@ -352,16 +352,14 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                         import concurrent.futures
                         import multiprocessing
                         ctx = multiprocessing.get_context('spawn')
-                        with concurrent.futures.ProcessPoolExecutor(max_workers=1, mp_context=ctx) as executor:
+                        _n_workers = max(1, min(params.n_workers, os.cpu_count() or 1))
+                        with concurrent.futures.ProcessPoolExecutor(max_workers=_n_workers, mp_context=ctx) as executor:
                             future = executor.submit(_run_extractor, files["image"], tmp_mask_path, params_file)
                             features = future.result(timeout=600)
 
                         features["subject_id"] = subject_id
                         if subject_id in target_dict:
                             features["target"] = target_dict[subject_id]
-                        # also try lookup by patient name (case_id / clinical_pid)
-                        elif any(str(v) == subject_id for v in target_dict):
-                            features["target"] = next(v for k, v in target_dict.items() if str(k) == subject_id)
                         all_features_by_label[lbl].append(features)
                     except concurrent.futures.TimeoutError:
                         logger.error(f"  {subject_id} label {lbl}: extraction timed out after 10 minutes — skipping")
@@ -460,7 +458,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
     os.makedirs(output_dir, exist_ok=True)
     log_file = os.path.join(output_dir, "feature_importance_analysis.log")
     _setup_logging(log_file)
-    logger = logging.getLogger()
+    logger = logging.getLogger(__name__)
 
     target_column = 'target'
 

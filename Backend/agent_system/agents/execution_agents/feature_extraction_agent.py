@@ -60,6 +60,14 @@ class FeatureExtractionAgent(AssistantAgent):
             mcp_server_path = os.path.abspath(mcp_server_path)
         if not os.path.exists(mcp_server_path):
             raise FileNotFoundError(f"MCP server not found at: {mcp_server_path}")
+        if not workspace_folder:
+            raise ValueError(
+                "workspace_folder is required — pass the absolute path to the agent workspace directory."
+            )
+        if not session_id:
+            raise ValueError(
+                "session_id is required — pass the active pipeline session UUID."
+            )
         env = os.environ.copy()
         env.update({
             "WORKSPACE_DIR": workspace_folder,
@@ -92,57 +100,6 @@ class FeatureExtractionAgent(AssistantAgent):
             "write_agent_output",
         ]
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
-
-        # feature_extraction_tool_wrapper = FunctionTool(
-        #     func=extract_radiomic_features,
-        #     description="""
-        #     This tool extracts radiomic features from medical images (CT, MRI, etc.) using PyRadiomics.
-        #     It processes images and their corresponding segmentation masks, and can handle multiple labels within masks.
-        #     Features are extracted for each label and saved separately to CSV files.
-        #
-        #     Args:
-        #         image_types: Image preprocessing types (e.g., ["Original", "Wavelet", "LoG"]) | Optional
-        #         specific_features: Specific features to extract (e.g., ["original_firstorder_Mean"]) | Optional
-        #         normalize: Whether to normalize image intensities | Optional
-        #         bin_width: Bin width for discretizing image intensities | Optional
-        #         resample: Whether to resample the image | Optional
-        #         pixel_spacing: Target pixel spacing for resampling [x, y, z] | Optional
-        #         force_2d: Whether to extract features in 2D mode | Optional
-        #         n_workers: Number of parallel workers | Optional
-        #         workspace_folder: The workspace folder to output files to | Optional
-        #
-        #     Returns:
-        #         Dictionary with feature extraction results and file paths
-        #     """,
-        #     name="PyRadiomicsFeatureExtractionTool"
-        # )
-        #
-        # feature_importance_tool_wrapper = FunctionTool(
-        #     func=analyze_feature_importance,
-        #     description="""
-        #     Performs feature importance analysis on tabular data for classification or regression tasks to\
-        #     identify the most relevant features using various methods, and outputs CSV files with the selected features.
-        #
-        #     Analyze feature importance for tabular data and output results.
-        #
-        #     Args:
-        #         input_path: Path to input CSV file
-        #         target_column: Target column name for prediction
-        #         task_type: 'classification' or 'regression' (auto-detected if None)
-        #         method: Feature selection method ('rf', 'f_test', 'mutual_info', 'rfe')
-        #         top_features: Comma-separated list of top features to select
-        #         encode_categorical: Method for encoding categorical features
-        #         max_onehot_cardinality: Max unique values for one-hot encoding if auto
-        #         create_plots: Whether to generate visualization plots
-        #         top_n_plot: Number of top features to show in importance plots
-        #         workspace_folder: The workspace folder to output files to | Optional
-        #
-        #     Returns:
-        #         Dictionary with analysis results and file paths
-        #     """,
-        #     name="FeatureImportanceAnalysisTool"
-        # )
-
         name = "feature_extraction_agent"
         # tools = [feature_extraction_tool_wrapper, feature_importance_tool_wrapper, *final_mcp_tools]
         tools = final_mcp_tools
@@ -177,7 +134,9 @@ async def main():
     workspace_dir = os.path.join(BASE_DIR, "..", "..", "workspace")
 
     agent = await FeatureExtractionAgent.create(
-        workspace_folder=workspace_dir, mcp_server_path=SERVER_PATH
+        workspace_folder=workspace_dir,
+        mcp_server_path=SERVER_PATH,
+        session_id="dev-session",
     )
 
     # Now you can use the agent normally
