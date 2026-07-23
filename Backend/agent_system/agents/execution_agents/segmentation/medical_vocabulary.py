@@ -7,7 +7,7 @@ and fuzzy-matching utilities used across the segmentation pipeline.
 Files that consume this module:
   - segmentation/services.py   (_class_key_candidates)
   - segmentation/planner.py    (builds the AI prompt synonym section dynamically)
-  - segmentation/utils.py      (check_voxtell_label_availability, get_semantic_concepts)
+  - segmentation/utils.py      (normalize_label, extract_organ_label, matches_label)
   - apps/radiology/lib/infers/voxtell.py  (FALLBACK_PROMPT_MAP)
 
 To add a new synonym or alias, edit ONLY this file.

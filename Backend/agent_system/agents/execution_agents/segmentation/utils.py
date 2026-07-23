@@ -6,8 +6,6 @@ import json
 import shutil
 import time
 import asyncio
-import importlib.util
-from functools import lru_cache
 from pathlib import Path
 import nrrd
 import numpy as np
@@ -992,9 +990,9 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
 
     return generated_volumes
 
-#  ================================
-#  check the cababilities of voxtell
-#  ================================
+# =================================
+#  Label normalisation
+# =================================
 
 def normalize_label(label: str) -> str:
     """Normalize an LLM-generated label to the space-separated form used by model label catalogs.
@@ -1002,75 +1000,13 @@ def normalize_label(label: str) -> str:
     """
     return re.sub(r"\s+", " ", str(label or "").replace("_", " ")).lower().strip()
 
+# NOTE: VoxTell label availability is no longer checked here.
+# VoxTell's embed_text_prompts() handles all three cases at inference time:
+#   1. Cache hit  → use pre-computed embedding directly.
+#   2. Fallback alias → use the nearest cached embedding.
+#   3. Cache miss → generate a dynamic embedding on the fly and persist it.
+# A static catalog check in the agent layer added no value and is removed.
 
-@lru_cache(maxsize=1)
-def get_voxtell_supported_labels() -> dict:
-    catalog_path = (
-        Path(__file__).resolve().parents[4]
-        / "apps"
-        / "radiology"
-        / "lib"
-        / "configs"
-        / "voxtell_supported_labels.py"
-    )
-    if not catalog_path.exists():
-        logger.warning("VoxTell supported-label catalog not found at %s", catalog_path)
-        return {}
-
-    spec = importlib.util.spec_from_file_location("voxtell_supported_labels", catalog_path)
-    if not spec or not spec.loader:
-        logger.warning("Unable to load VoxTell supported-label catalog at %s", catalog_path)
-        return {}
-
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    labels = getattr(module, "VOXTELL_SUPPORTED_LABELS", [])
-    return [normalize_label(label) for label in labels]
-
-
-from .medical_vocabulary import FLAT_MEDICAL_SYNONYMS
-
-def get_semantic_concepts(label: str) -> set:
-    words = label.lower().replace("_", " ").split()
-    return set(FLAT_MEDICAL_SYNONYMS.get(w, w) for w in words)
-
-def check_voxtell_label_availability(target_label):
-    """
-    Checks if VoxTell can handle the given label.
-
-    VoxTell is a text-prompt model — it can semantically segment ANY label,
-    even one not listed in voxtell_supported_labels.py, by generating a new
-    embedding dynamically. The catalog only records labels with a KNOWN benchmark.
-
-    Returns:
-      - The exact catalog label string  → if found (matched via semantic concepts)
-      - The raw target_label string     → for all other cases (catalog miss OR catalog
-                                         load failure). VoxTell will attempt segmentation
-                                         via dynamic embedding; quality is unvalidated (N/A).
-    """
-    supported_labels = get_voxtell_supported_labels()
-    if not supported_labels:
-        logger.warning(
-            "VoxTell catalog could not be loaded for '%s' — proceeding with raw label (unvalidated).",
-            target_label,
-        )
-        return target_label  # catalog load failure — VoxTell can still try
-
-    target_concepts = get_semantic_concepts(target_label)
-
-    # Try to find an exact semantic match in the catalog
-    for cat_label in supported_labels:
-        if target_concepts == get_semantic_concepts(cat_label):
-            logger.info("VoxTell catalog match: '%s' → '%s'", target_label, cat_label)
-            return cat_label
-
-    # Not in catalog — but VoxTell can still segment it via dynamic embedding generation.
-    # Return the raw label so the pipeline continues; quality is unvalidated (N/A).
-    logger.info(
-        "VoxTell: '%s' not in catalog — will proceed with dynamic embedding (unvalidated, N/A).",
-        target_label,
-    )
-    return target_label
 # =================================
 #  remove volumes and labels from working space that was discarded by user
 # =================================
