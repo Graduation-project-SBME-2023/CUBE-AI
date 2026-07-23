@@ -49,10 +49,11 @@ from monailabel.tasks.infer.basic_infer import BasicInferTask
 import sys, os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../agent_system/agents/execution_agents/segmentation")))
 try:
-    from medical_vocabulary import VOXTELL_PROMPT_ALIASES
+    from medical_vocabulary import VOXTELL_PROMPT_ALIASES, FLAT_MEDICAL_SYNONYMS
 except ImportError:
     # Fallback if run outside the agent_system context (e.g. standalone MONAI)
     VOXTELL_PROMPT_ALIASES = {}
+    FLAT_MEDICAL_SYNONYMS = {}
 
 
 logger = logging.getLogger(__name__)
@@ -202,22 +203,37 @@ class MyVoxTellPredictor(VoxTellPredictor):
         for prompt in text_prompts:
             key = prompt.lower().strip()
             
-            if key in self.embeddings_cache:
-                embeddings_list.append(self.embeddings_cache[key])
-                
-            elif key in self.FALLBACK_PROMPT_MAP:
-                fallback_key = self.FALLBACK_PROMPT_MAP[key]
-                logger.info(f"Using fallback '{fallback_key}' for prompt '{key}'")
-                embeddings_list.append(self.embeddings_cache[fallback_key])
-                
-            else:
-                logger.warning(f"Prompt '{key}' not found. Generating dynamically...")
-                # Generate on CPU
-                new_embedding = self.generate_text_embedding(key)
-                # Save to cache dictionary
-                self.embeddings_cache[key] = new_embedding.cpu()
-                embeddings_list.append(self.embeddings_cache[key])
-                cache_updated = True
+            # Helper to get semantic concepts for matching
+            def get_semantic_concepts(l: str) -> set:
+                import re
+                norm = re.sub(r"\s+", " ", str(l or "").replace("_", " ")).lower().strip()
+                return set(FLAT_MEDICAL_SYNONYMS.get(w, w) for w in norm.split())
+            
+            target_concepts = get_semantic_concepts(key)
+            match_found = False
+            
+            # 1. Check if semantically equivalent prompt already exists in cache
+            for cached_key in self.embeddings_cache:
+                if get_semantic_concepts(cached_key) == target_concepts:
+                    logger.info(f"Using semantically equivalent cached key '{cached_key}' for prompt '{key}'")
+                    embeddings_list.append(self.embeddings_cache[cached_key])
+                    match_found = True
+                    break
+                    
+            if not match_found:
+                if key in self.FALLBACK_PROMPT_MAP:
+                    fallback_key = self.FALLBACK_PROMPT_MAP[key]
+                    logger.info(f"Using fallback '{fallback_key}' for prompt '{key}'")
+                    embeddings_list.append(self.embeddings_cache[fallback_key])
+                    
+                else:
+                    logger.warning(f"Prompt '{key}' not found. Generating dynamically...")
+                    # Generate on CPU
+                    new_embedding = self.generate_text_embedding(key)
+                    # Save to cache dictionary
+                    self.embeddings_cache[key] = new_embedding.cpu()
+                    embeddings_list.append(self.embeddings_cache[key])
+                    cache_updated = True
 
         # Save cache back to disk if new items were added
         if cache_updated:
