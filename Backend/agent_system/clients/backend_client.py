@@ -11,6 +11,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 BASE_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
+DEFAULT_TIMEOUT = httpx.Timeout(connect=30.0, read=600.0, write=60.0, pool=60.0)
 
 
 class BackendClient:
@@ -122,7 +123,7 @@ class BackendClient:
             )
             return None
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.post(
                     f"{BASE_URL}/hypotheses/",
@@ -134,7 +135,7 @@ class BackendClient:
             except httpx.HTTPError as e:
                 logger.info(e)
                 logger.error(
-                    f"Failed to create hypothesis for session {session_id}: {e}"
+                    f"Failed to create hypothesis for session {session_id}: {type(e).__name__}: {e}"
                 )
                 return None
 
@@ -149,7 +150,7 @@ class BackendClient:
             )
             return None
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.patch(
                     f"{BASE_URL}/hypotheses/{hypothesis.id}",
@@ -158,7 +159,7 @@ class BackendClient:
                 response.raise_for_status()
                 return cls._parse_hypothesis(response.json())
             except httpx.HTTPError as e:
-                logger.error(f"Failed to update hypothesis {hypothesis.id}: {e}")
+                logger.error(f"Failed to update hypothesis {hypothesis.id}: {type(e).__name__}: {e}")
                 return None
 
     @classmethod
@@ -170,7 +171,7 @@ class BackendClient:
             )
             return None
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.get(
                     f"{BASE_URL}/hypotheses/by-chat/{session_id}",
@@ -181,7 +182,7 @@ class BackendClient:
                 return cls._parse_hypothesis(response.json())
             except httpx.HTTPError as e:
                 logger.error(
-                    f"Failed to fetch hypothesis for session {session_id}: {e}"
+                    f"Failed to fetch hypothesis for session {session_id}: {type(e).__name__}: {e}"
                 )
                 return None
 
@@ -213,7 +214,7 @@ class BackendClient:
             ],
         }
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.post(
                     f"{BASE_URL}/plans/with_steps",
@@ -224,7 +225,7 @@ class BackendClient:
                 return StudyPlan(**response.json())
             except httpx.HTTPError as e:
                 logger.error(
-                    f"Failed to create plan for hypothesis {plan.hypothesis_id}: {e}"
+                    f"Failed to create plan for hypothesis {plan.hypothesis_id}: {type(e).__name__}: {e}"
                 )
                 return None
 
@@ -252,7 +253,7 @@ class BackendClient:
             ],
         }
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.patch(
                     f"{BASE_URL}/plans/{plan.id}/with_steps",
@@ -261,7 +262,7 @@ class BackendClient:
                 response.raise_for_status()
                 return StudyPlan(**response.json())
             except httpx.HTTPError as e:
-                logger.error(f"Failed to update plan with id {plan.id}: {e}")
+                logger.error(f"Failed to update plan with id {plan.id}: {type(e).__name__}: {e}")
                 return None
 
     @classmethod
@@ -273,7 +274,7 @@ class BackendClient:
             )
             return None
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.get(
                     f"{BASE_URL}/plans/by-hypothesis/{hypothesis_id}",
@@ -293,7 +294,7 @@ class BackendClient:
                 return StudyPlan(**first_plan)
             except httpx.HTTPError as e:
                 logger.error(
-                    f"Failed to fetch plan for hypothesis {hypothesis_id}: {e}"
+                    f"Failed to fetch plan for hypothesis {hypothesis_id}: {type(e).__name__}: {e}"
                 )
                 return None
 
@@ -304,7 +305,7 @@ class BackendClient:
     @classmethod
     async def update_plan_step(cls, step_id: str, data: dict) -> dict | None:
         """Patch a single plan step's status and/or logs."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.patch(
                     f"{BASE_URL}/steps/{step_id}/status",
@@ -313,13 +314,13 @@ class BackendClient:
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
-                logger.error(f"Failed to update plan step {step_id}: {e}")
+                logger.error(f"Failed to update plan step {step_id}: {type(e).__name__}: {e}")
                 return None
 
     @classmethod
     async def get_plan_steps(cls, plan_id: str) -> list[dict]:
         """Fetch all steps for a plan — used to recover execution state."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.get(
                     f"{BASE_URL}/steps/plan/{plan_id}",
@@ -327,7 +328,7 @@ class BackendClient:
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
-                logger.error(f"Failed to fetch steps for plan {plan_id}: {e}")
+                logger.error(f"Failed to fetch steps for plan {plan_id}: {type(e).__name__}: {e}")
                 return []
 
     # ------------------------------------------------------------------
@@ -349,7 +350,7 @@ class BackendClient:
 
         payload = cls._build_task_message_payload(task_message)
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.post(
                     f"{BASE_URL}/task-messages/step/{step_id}",
@@ -363,7 +364,7 @@ class BackendClient:
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
-                logger.error(f"Failed to save task message for step {step_id}: {e}")
+                logger.error(f"Failed to save task message for step {step_id}: {type(e).__name__}: {e}")
                 return None
 
     @classmethod
@@ -375,7 +376,7 @@ class BackendClient:
             )
             return None
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.get(f"{BASE_URL}/task-messages/step/{step_id}")
                 if response.status_code == 404:
@@ -383,7 +384,7 @@ class BackendClient:
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
-                logger.error(f"Failed to read task message for step {step_id}: {e}")
+                logger.error(f"Failed to read task message for step {step_id}: {type(e).__name__}: {e}")
                 return None
 
     @classmethod
@@ -403,7 +404,7 @@ class BackendClient:
             "sources_guide": context_augmentation.get("sources_guide", ""),
         }
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.patch(
                     f"{BASE_URL}/context-augmentations/task/{task_id}",
@@ -413,14 +414,14 @@ class BackendClient:
                 return response.json()
             except httpx.HTTPError as e:
                 logger.error(
-                    f"Failed to save context augmentation for task {task_id}: {e}"
+                    f"Failed to save context augmentation for task {task_id}: {type(e).__name__}: {e}"
                 )
                 return None
 
     @classmethod
     async def get_context_augmentation_by_task_id(cls, task_id: str) -> dict | None:
         """Read context augmentation by task_id."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.get(
                     f"{BASE_URL}/context-augmentations/task/{task_id}"
@@ -431,7 +432,7 @@ class BackendClient:
                 return response.json()
             except httpx.HTTPError as e:
                 logger.error(
-                    f"Failed to read context augmentation for task {task_id}: {e}"
+                    f"Failed to read context augmentation for task {task_id}: {type(e).__name__}: {e}"
                 )
                 return None
 
@@ -442,7 +443,7 @@ class BackendClient:
     @classmethod
     async def get_hypothesis_history(cls, limit: int = 20) -> list[dict]:
         """Fetch hypothesis history: recent chat sessions with their hypotheses."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 sessions_resp = await client.get(
                     f"{BASE_URL}/chat_sessions/",
@@ -502,7 +503,7 @@ class BackendClient:
                 logger.info(f"Fetched hypothesis history: {len(history)} items")
                 return history
             except httpx.HTTPError as e:
-                logger.error(f"Failed to fetch hypothesis history: {e}")
+                logger.error(f"Failed to fetch hypothesis history: {type(e).__name__}: {e}")
                 return []
 
     # ------------------------------------------------------------------
@@ -511,7 +512,7 @@ class BackendClient:
     @classmethod
     async def save_log(cls, log: WS_Log) -> WS_Log:
         """Save a ws log whenever the socket store sends any message."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.post(
                     f"{BASE_URL}/ws_logs/",
@@ -520,13 +521,13 @@ class BackendClient:
                 response.raise_for_status()
                 return WS_Log(**response.json())
             except httpx.HTTPError as e:
-                logger.error(f"Failed to save ws log {log.msg_type}: {e}")
+                logger.error(f"Failed to save ws log {log.msg_type}: {type(e).__name__}: {e}")
                 return log
 
     @classmethod
     async def get_logs(cls, session_id: str) -> list[WS_Log]:
         """Get all logs sent in a session."""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.get(
                     f"{BASE_URL}/ws_logs/session/{session_id}",
@@ -535,7 +536,7 @@ class BackendClient:
                 data = response.json()
                 return [WS_Log(**item) for item in data]
             except httpx.HTTPError as e:
-                logger.error(f"Failed to retrieve ws logs for session {session_id}: {e}")
+                logger.error(f"Failed to retrieve ws logs for session {session_id}: {type(e).__name__}: {e}")
                 return []
 
 
