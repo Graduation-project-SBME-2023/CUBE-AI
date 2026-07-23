@@ -19,7 +19,15 @@ from .planner import create_planner_agent, run_planner
 from .pipelines.automatic import run_automatic_pipeline
 from .pipelines.interactive import run_interactive_pipeline, create_interactive_agent, create_user_proxy_agent
 from .services import SegmentationService
-from .utils import exclude_existing_masks, download_and_pair_volumes, generate_gif_overlays, cleanup_discarded
+from .utils import (
+    check_having_mask,
+    exclude_existing_masks,
+    download_and_pair_volumes,
+    generate_gif_overlays,
+    cleanup_discarded,
+    label_record_matches_model,
+    matches_label,
+)
 from .logging_config import setup_logging, emit_tool_event, emit_tool_events
 setup_logging()
 
@@ -170,9 +178,59 @@ class SegmentationModule:
         logger.info(
             f"Eligible volumes for segmentation: {len(eligible_volumes)}"
         )
+
+        async def _wait_for_masks_to_sync(volume_uids: list[str], model_name: str | None, target_label: str | None):
+            if not volume_uids or not target_label:
+                return
+
+            pending = set(volume_uids)
+            deadline = asyncio.get_running_loop().time() + 120.0
+            while pending and asyncio.get_running_loop().time() < deadline:
+                synced = []
+                for uid in list(pending):
+                    try:
+                        labels_for_volume = await check_having_mask(uid)
+                    except Exception as exc:
+                        logger.warning("Mask sync poll failed for %s: %s", uid, exc)
+                        continue
+                    for label_record in labels_for_volume:
+                        seg_type = label_record.get("segmentation_type", "")
+                        if matches_label(seg_type, target_label) and label_record_matches_model(label_record, model_name):
+                            synced.append(uid)
+                            break
+
+                for uid in synced:
+                    pending.discard(uid)
+
+                if pending:
+                    logger.info(
+                        "Waiting for MONAI/Orthanc mask sync: %d/%d visible; pending sample=%s",
+                        len(volume_uids) - len(pending),
+                        len(volume_uids),
+                        list(pending)[:3],
+                    )
+                    await emit_tool_event(
+                        event_type="tool_progress",
+                        content=TextPayload(
+                            message=(
+                                f"Waiting for {len(pending)} segmentation mask"
+                                f"{'' if len(pending) == 1 else 's'} to sync..."
+                            )
+                        ),
+                        session_id=self.session_id,
+                    )
+                    await asyncio.sleep(5.0)
+
+            if pending:
+                logger.warning(
+                    "Timed out waiting for %d mask record(s) to sync before download: %s",
+                    len(pending),
+                    list(pending),
+                )
         # ---- Run segmentation (automatic or interactive) ----
         pipeline_failed_uids = []  # UIDs that couldn't be segmented (e.g. OOM kill)
         skip_wait = False
+        selected_interactive_model = None
 
         if chosen_path == "automatic" and eligible_volumes:
             selected_auto_models = plan["selected_models"] if plan["selected_models"] else None
@@ -218,15 +276,17 @@ class SegmentationModule:
             content=TextPayload(message="Creating dataset..."),
             session_id=self.session_id,
         )
+        plan_model = plan["selected_models"][0] if plan.get("selected_models") else selected_interactive_model
+        plan_target = target_labels[0] if target_labels else None
         # =========== download ========================    
         # Give MONAI a moment to persist new masks — but only when segmentation
         # actually ran.  If all volumes already had existing masks (eligible_volumes
         # is empty), there is nothing to wait for.
         if eligible_volumes and not skip_wait:
-            logger.info("Waiting 120 s for MONAI to persist new segmentation masks...")
-            await asyncio.sleep(120)
+            successful_eligible_for_sync = [v for v in eligible_volumes if v not in pipeline_failed_uids]
+            await _wait_for_masks_to_sync(successful_eligible_for_sync, plan_model, plan_target)
         elif skip_wait:
-            logger.info("Skipping 120s wait because no AI segmentation was performed (manual mode fallback).")
+            logger.info("Skipping mask sync wait because no AI segmentation was performed (manual mode fallback).")
 
         # Exclude volumes that failed segmentation — only download successful ones
         successful_eligible = [v for v in eligible_volumes if v not in pipeline_failed_uids]
@@ -236,8 +296,6 @@ class SegmentationModule:
         volumes_to_download = successful_eligible + already_masked if (successful_eligible or already_masked) else (
             datasetlist if not eligible_volumes else []
         )
-        plan_model = plan["selected_models"][0] if plan.get("selected_models") else None
-        plan_target = target_labels[0] if target_labels else None
         result = await download_and_pair_volumes(
             workspace_dir,
             volumes_to_download,
@@ -282,24 +340,49 @@ class SegmentationModule:
         
         # ================== Generate Overlays (progressive) ====================
         gif_volumes = []
+        failed_gif_uids = []
         if downloaded_uids:
             # Use a queue to bridge the sync GIF thread → async broadcaster
+            loop = asyncio.get_running_loop()
             gif_queue: asyncio.Queue = asyncio.Queue()
             def _on_gif_ready(volume_entry: dict):
                 """Called synchronously from the GIF thread; puts the entry into the queue."""
-                gif_queue.put_nowait(volume_entry)
+                loop.call_soon_threadsafe(gif_queue.put_nowait, volume_entry)
+
+            def _generate_gifs_with_done():
+                try:
+                    return generate_gif_overlays(workspace_dir, downloaded_uids, _on_gif_ready)
+                except Exception:
+                    logger.exception("GIF overlay generation crashed.")
+                    return []
+                finally:
+                    loop.call_soon_threadsafe(gif_queue.put_nowait, None)
 
             async def _broadcast_progressively():
                 """Reads from the queue and broadcasts each GIF as it arrives."""
-                pending = len(downloaded_uids)
-                while pending > 0:
+                sent_uids = set()
+                while True:
                     try:
-                        volume_entry = await asyncio.wait_for(gif_queue.get(), timeout=300.0)
+                        volume_entry = await asyncio.wait_for(gif_queue.get(), timeout=60.0)
                     except asyncio.TimeoutError:
-                        logger.warning("GIF progressive broadcast: timed out waiting for next GIF.")
+                        logger.info(
+                            "GIF progressive broadcast: still waiting for overlay generation "
+                            "(sent %d/%d GIFs so far).",
+                            len(sent_uids), len(downloaded_uids),
+                        )
+                        continue
+                    if volume_entry is None:
+                        logger.info(
+                            "GIF progressive broadcast: generator finished after sending %d/%d GIFs.",
+                            len(sent_uids), len(downloaded_uids),
+                        )
                         break
+                    uid = volume_entry.get("seriesInstanceUid")
+                    if uid in sent_uids:
+                        logger.warning("Duplicate GIF callback ignored for %s", uid)
+                        continue
                     gif_volumes.append(volume_entry)
-                    pending -= 1
+                    sent_uids.add(uid)
                     try:
                         async with httpx.AsyncClient(timeout=30.0) as client:
                             await client.post(
@@ -312,6 +395,10 @@ class SegmentationModule:
                                         "volumes": gif_volumes,   # cumulative list
                                         "latex": None,
                                         "isFinished": False,
+                                        "progress": {
+                                            "total": len(downloaded_uids),
+                                            "generated": len(gif_volumes),
+                                        },
                                     },
                                     "session_id": self.session_id
                                 }
@@ -321,10 +408,21 @@ class SegmentationModule:
                         logger.warning(f"Progressive broadcast failed for {volume_entry.get('seriesInstanceUid')}: {broadcast_err}")
 
             # Run GIF generation (blocking) and progressive broadcaster concurrently
-            await asyncio.gather(
-                asyncio.to_thread(generate_gif_overlays, workspace_dir, downloaded_uids, _on_gif_ready),
-                _broadcast_progressively(),
-            )
+            await asyncio.gather(asyncio.to_thread(_generate_gifs_with_done), _broadcast_progressively())
+            generated_gif_uids = {v.get("seriesInstanceUid") for v in gif_volumes}
+            failed_gif_uids = [uid for uid in downloaded_uids if uid not in generated_gif_uids]
+            empty_mask_uids = [v.get("seriesInstanceUid") for v in gif_volumes if v.get("isEmptyMask")]
+
+            if empty_mask_uids:
+                logger.info(
+                    "GIF generation completed: %d volume(s) have empty masks: %s",
+                    len(empty_mask_uids), empty_mask_uids,
+                )
+            if failed_gif_uids:
+                logger.warning(
+                    "GIF generation finished with %d missing preview file(s): %s",
+                    len(failed_gif_uids), failed_gif_uids,
+                )
             logger.info(f"gif_volumes sample: {gif_volumes[:1]}")
 
 
@@ -346,6 +444,15 @@ class SegmentationModule:
             "targetRoi": plan_target,
             "selectedModel": plan_model,
             "volumes": gif_volumes,
+            "failedVolumes": [
+                {"seriesInstanceUid": uid, "reason": "Volume mask is empty" if uid in empty_mask_uids else "Volume preview file missing"}
+                for uid in (set(failed_gif_uids) | set(empty_mask_uids))
+            ],
+            "progress": {
+                "total": len(downloaded_uids),
+                "generated": len(gif_volumes),
+                "failed": len(failed_gif_uids) + len(empty_mask_uids),
+            },
             "latex": latex_content,
             "isFinished": True
         }
@@ -360,10 +467,12 @@ class SegmentationModule:
                 }
             )
 
-
-        # Wait for user review message
+        # Wait for user review message — use a persistent server-side event so
+        # reconnects simply re-attach to the same event slot (no lost reviews).
+        # Server timeout is 3600 s; client timeout is 3610 s to guarantee the
+        # server fires 408 before the client raises ReadTimeout.
         logger.info("Module paused: Waiting for human review via HTTP long-poll...")
-        async with httpx.AsyncClient(timeout=330.0) as client:
+        async with httpx.AsyncClient(timeout=3610.0) as client:
                     while True:
                         try:
                             response = await client.get(
@@ -373,6 +482,7 @@ class SegmentationModule:
                             # if time out reconnect
                             if response.status_code == 408:
                                 logger.info("Server ended the long-poll (408 Timeout). Reconnecting...")
+                                await asyncio.sleep(0.5)  # brief pause before reconnect
                                 continue
                             # for other errors, log and raise
                             response.raise_for_status()
@@ -381,6 +491,7 @@ class SegmentationModule:
                             break
                         except httpx.ReadTimeout:
                             logger.info("Client read timeout reached. Reconnecting...")
+                            await asyncio.sleep(0.5)  # brief pause before reconnect
                             continue
 
         final_accepted_uids = user_results.get("accepted", [])

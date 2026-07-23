@@ -916,16 +916,20 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
             z_indices = np.any(mask_data[:, :, :max_z] > 0, axis=(0, 1))
             active_slices = np.where(z_indices)[0]
 
+            is_empty_mask = False
             if len(active_slices) == 0:
-                logger.warning(f"Empty mask for {uid}.")
-                continue
+                logger.warning(f"Empty mask for {uid}. Generating volume preview GIF without mask overlay.")
+                is_empty_mask = True
+                start_z = max(0, max_z // 4)
+                end_z = min(max_z - 1, (3 * max_z) // 4)
+            else:
+                # padding
+                start_z = max(0, active_slices[0] - 2)
+                end_z = min(max_z - 1, active_slices[-1] + 2)
 
-            # padding
-            start_z = max(0, active_slices[0] - 2)
-            end_z = min(max_z - 1, active_slices[-1] + 2)
-
+            step = 2 if (end_z - start_z) < 100 else 4
             frames = []
-            for z in range(start_z, end_z + 1, 2):
+            for z in range(start_z, end_z + 1, step):
                 v_slice = vol_data[:, :, z]
                 m_slice = mask_data[:, :, z]
 
@@ -939,9 +943,10 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
                 # convert to rgb "cyan"
                 rgb_frame = np.stack([v_norm] * 3, axis=-1)
 
-                # overlay
-                mask_idx = m_slice > 0
-                rgb_frame[mask_idx] = [90, 204, 230]
+                # overlay if mask is not empty
+                if not is_empty_mask:
+                    mask_idx = m_slice > 0
+                    rgb_frame[mask_idx] = [90, 204, 230]
 
                 # rotate 90
                 rgb_frame = np.rot90(rgb_frame)
@@ -960,10 +965,13 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
 
                 volume_entry = {
                     "seriesInstanceUid": uid,
-                    "gifUrl": f"http://localhost:8150/files/{workspace_folder_name}/overlays/{gif_filename}"
+                    "gifUrl": f"http://localhost:8150/files/{workspace_folder_name}/overlays/{gif_filename}",
+                    "isEmptyMask": is_empty_mask
                 }
+                if is_empty_mask:
+                    volume_entry["warning"] = "Volume mask is empty"
                 generated_volumes.append(volume_entry)
-                logger.info(f"Generated GIF for {uid}")
+                logger.info(f"Generated GIF for {uid} (empty_mask={is_empty_mask})")
 
                 # Notify caller immediately for progressive broadcast.
                 if on_gif_ready is not None:

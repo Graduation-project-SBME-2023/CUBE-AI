@@ -4,7 +4,7 @@ from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
 from agent_system.models.tool_logging import ProgressPayload, TextPayload
 
 from ..logging_config import emit_tool_event, emit_tool_events
-from .common import raise_for_segmentation_error
+from .common import raise_for_segmentation_error, run_with_progress_heartbeat
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +57,14 @@ async def run_interactive_pipeline(
     # use dynamic embedding generation. We pass all labels as-is.
     logger.info("Starting interactive segmentation for labels: %s (VoxTell accepts all)", labels)
 
+    # Emit initial progress (0 completed) before any volume segmentation starts
+    await emit_tool_event(
+        event_type="tool_progress",
+        content=ProgressPayload(current=0, total=len(volumes), label="Segmenting volumes"),
+        content_type="progress",
+        session_id=session_id,
+    )
+
     failures = []
     for index, volume_uid in enumerate(volumes, start=1):
         logger.info(
@@ -65,9 +73,14 @@ async def run_interactive_pipeline(
             len(volumes),
             volume_uid,
         )
+        # Emit in-progress step (current = index - 0.5) so progress bar animates between index-1 and index
         await emit_tool_event(
             event_type="tool_progress",
-            content=ProgressPayload(current=index, total=len(volumes), label="Segmenting volumes"),
+            content=ProgressPayload(
+                current=index - 0.5,
+                total=len(volumes),
+                label="Segmenting volumes"
+            ),
             content_type="progress",
             session_id=session_id,
         )
@@ -75,11 +88,18 @@ async def run_interactive_pipeline(
         try:
             for canonical_label in labels:
                 selected_model = "voxtell"
-                result = await segmentation_service.run_segmentation(
-                    model=selected_model,
-                    series_instance_uid=volume_uid,
-                    label_info=canonical_label,
-                    params={"text_prompts": [canonical_label]},
+                result = await run_with_progress_heartbeat(
+                    segmentation_service.run_segmentation(
+                        model=selected_model,
+                        series_instance_uid=volume_uid,
+                        label_info=canonical_label,
+                        params={"text_prompts": [canonical_label]},
+                    ),
+                    session_id=session_id,
+                    current=index - 0.5,
+                    total=len(volumes),
+                    label=f"Segmenting volume {index} of {len(volumes)}",
+                    volume_uid=volume_uid,
                 )
                 raise_for_segmentation_error(result, volume_uid, canonical_label)
                 logger.info(
@@ -87,9 +107,30 @@ async def run_interactive_pipeline(
                     volume_uid,
                     canonical_label,
                 )
+            # Emit completed progress step (current = index)
+            await emit_tool_event(
+                event_type="tool_progress",
+                content=ProgressPayload(
+                    current=index,
+                    total=len(volumes),
+                    label="Segmenting volumes"
+                ),
+                content_type="progress",
+                session_id=session_id,
+            )
         except Exception as exc:
             failures.append((volume_uid, str(exc)))
             logger.exception("Interactive segmentation failed for %s", volume_uid)
+            await emit_tool_event(
+                event_type="tool_progress",
+                content=ProgressPayload(
+                    current=index,
+                    total=len(volumes),
+                    label="Segmenting volumes"
+                ),
+                content_type="progress",
+                session_id=session_id,
+            )
 
     if failures:
         failed_uids = ", ".join(uid for uid, _ in failures)

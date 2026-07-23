@@ -24,7 +24,7 @@ class MarkdownPayload(BaseModel):
 
 
 class ProgressPayload(BaseModel):
-    current: int
+    current: Union[int, float]
     total: int
     label: str | None = None
 

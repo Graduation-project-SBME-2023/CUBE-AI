@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Check, X, CheckSquare, XSquare, Save, Loader2, Edit } from 'lucide-react';
-import { VolumeGif, ReviewContainerProps, ReviewStatus } from './segmentation/types';
+import { FailedVolume, SegmentationProgress, VolumeGif, ReviewContainerProps, ReviewStatus } from './segmentation/types';
 import { RightPanel } from './segmentation/Shared';
 import { handleModifyAction, saveSegmentationReview } from './segmentation/utils';
 
@@ -10,6 +10,8 @@ function ReviewView({
     targetRoi,
     selectedModel,
     volumes,
+    failedVolumes,
+    progress,
     onSave,
     isLoading,
     isFinished,
@@ -18,6 +20,8 @@ function ReviewView({
     targetRoi: string;
     selectedModel: string;
     volumes: VolumeGif[];
+    failedVolumes: FailedVolume[];
+    progress?: SegmentationProgress;
     onSave: (results: { accepted: string[]; rejected: string[]; modified: string[] }) => void;
     isLoading: boolean;
     isFinished: boolean;
@@ -92,6 +96,9 @@ function ReviewView({
     const rejectedCount = Object.values(reviewStatus).filter(s => s === 'rejected').length;
     const modifiedCount = Object.values(reviewStatus).filter(s => s === 'modified').length;
     const pendingCount  = Object.values(reviewStatus).filter(s => s === 'pending').length;
+    const totalCount = progress?.total ?? volumes.length + failedVolumes.length;
+    const generatedCount = progress?.generated ?? volumes.length;
+    const failedCount = progress?.failed ?? failedVolumes.length;
 
     return (
         <div className="p-4 w-full h-full flex flex-col gap-4 bg-[#000000] overflow-hidden">
@@ -119,6 +126,9 @@ function ReviewView({
 
                         {volumes.length > 0 && (
                             <div className="ml-auto flex items-center gap-4 text-[10px]">
+                                <span className="text-[#8aa5c0]">
+                                    {generatedCount}/{totalCount} overlays
+                                </span>
                                 <span className="flex items-center gap-1 text-[#6fe5b8]">
                                     <CheckSquare size={11} /> {acceptedCount} accepted
                                 </span>
@@ -203,17 +213,48 @@ function ReviewView({
                                         </div>
 
                                         {/* GIF */}
-                                        <div style={{ flex: 1, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                                        <div style={{ flex: 1, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
                                             <img
                                                 src={volume.gifUrl}
                                                 alt={volume.seriesInstanceUid.slice(-8)}
                                                 style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
                                             />
+                                            {volume.isEmptyMask && (
+                                                <div style={{
+                                                    position: 'absolute', top: '6px', left: '6px',
+                                                    background: 'rgba(234, 179, 8, 0.85)',
+                                                    color: '#000',
+                                                    fontSize: '9px', fontWeight: 'bold',
+                                                    padding: '2px 6px', borderRadius: '4px',
+                                                    textTransform: 'uppercase', letterSpacing: '0.5px',
+                                                    boxShadow: '0 2px 4px rgba(0,0,0,0.5)'
+                                                }}>
+                                                    Empty Mask
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                 );
                             })}
                         </div>
+
+                        {failedVolumes.length > 0 && (
+                            <div className="mt-2 rounded-lg border border-[#7f1d1d] bg-[#1a1010] p-3 text-xs text-red-200">
+                                <div className="mb-2 font-semibold text-red-300">
+                                    {failedCount} volume{failedCount === 1 ? ' mask is empty or missing' : ' masks are empty or missing'}
+                                </div>
+                                <div className="space-y-1 font-mono text-[10px] text-red-200/80">
+                                    {failedVolumes.map(volume => (
+                                        <div key={volume.seriesInstanceUid} className="flex gap-2">
+                                            <span>{volume.seriesInstanceUid.slice(-8)}</span>
+                                            <span className="font-sans text-red-200/60">
+                                                {volume.reason || 'Volume mask is empty.'}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -248,25 +289,27 @@ function ReviewView({
     );
 }
 
-// ─── Container (default export) ───────────────────────────────────────────────
-
 export default function SegmentationView({ segmentationData }: ReviewContainerProps) {
     const [data, setData] = useState<{
         targetRoi: string;
         selectedModel: string;
         volumes: VolumeGif[];
+        failedVolumes: FailedVolume[];
+        progress?: SegmentationProgress;
         sessionId?: string;
         isFinished: boolean;
-    }>({ targetRoi: '-', selectedModel: '-', volumes: [], sessionId: undefined, isFinished: false });
+    }>({ targetRoi: '-', selectedModel: '-', volumes: [], failedVolumes: [], progress: undefined, sessionId: undefined, isFinished: false });
 
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        if (segmentationData?.volumes?.length) {
+        if (segmentationData?.volumes?.length || segmentationData?.failedVolumes?.length || segmentationData?.isFinished) {
             setData({
                 targetRoi:     segmentationData.targetRoi     || '-',
                 selectedModel: segmentationData.selectedModel || '-',
-                volumes:       segmentationData.volumes,
+                volumes:       segmentationData.volumes || [],
+                failedVolumes: segmentationData.failedVolumes || [],
+                progress:      segmentationData.progress,
                 sessionId:     segmentationData.sessionId,
                 isFinished:    segmentationData.isFinished ?? false,
             });
@@ -298,6 +341,8 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
             targetRoi={data.targetRoi}
             selectedModel={data.selectedModel}
             volumes={data.volumes}
+            failedVolumes={data.failedVolumes}
+            progress={data.progress}
             onSave={handleSave}
             isLoading={isLoading}
             isFinished={data.isFinished}

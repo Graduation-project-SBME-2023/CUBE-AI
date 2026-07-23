@@ -121,11 +121,13 @@ class SegmentationService:
                     logger.error(msg)
                     return {"error": True, "stage": "upload", "message": msg}
                 
-                logger.warning(
-                    "No Class index found for model='%s', labels=%s; model may fail",
-                    clean_model,
-                    organ_list,
-                )
+                # VoxTell uses text prompts and does not require a fixed catalog class index
+                if clean_model.lower() != "voxtell":
+                    logger.warning(
+                        "No Class index found for model='%s', labels=%s; model may fail",
+                        clean_model,
+                        organ_list,
+                    )
 
         files = {"params": (None, json.dumps(inference_params), "application/json")}      
 
@@ -402,7 +404,9 @@ class SegmentationService:
             response = await client.post(f"{self.orthanc_url}/instances", headers=headers, content=seg_bytes_io.read())
 
             if response.status_code in (200, 201):
-                logger.info(f"DICOM-SEG successfully uploaded to Orthanc. InstanceID: {response.json()['ID']}")
+                instance_id = response.json()["ID"]
+                logger.info(f"DICOM-SEG successfully uploaded to Orthanc. InstanceID: {instance_id}")
+                await self._sync_uploaded_segmentation_series(instance_id, seg.SeriesInstanceUID)
             else:
                 logger.error("Failed to upload DICOM-SEG: %s %s", response.status_code, response.text)
                 result["upload_error"] = True
@@ -412,6 +416,53 @@ class SegmentationService:
         
         
         return result
+
+    async def _sync_uploaded_segmentation_series(self, instance_id: str, dicom_series_uid: str) -> None:
+        """
+        Proactively sync the newly uploaded SEG instead of waiting for Orthanc's
+        Lua stable-series webhook. The Lua hook can be delayed or time out when
+        MONAI is busy with the next large inference.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=QUICK_TIMEOUT) as client:
+                instance_response = await client.get(f"{self.orthanc_url}/instances/{instance_id}")
+                if instance_response.status_code != 200:
+                    logger.warning(
+                        "Could not resolve uploaded SEG instance %s for direct sync: status=%s",
+                        instance_id,
+                        instance_response.status_code,
+                    )
+                    return
+
+                orthanc_series_id = instance_response.json().get("ParentSeries")
+                if not orthanc_series_id:
+                    logger.warning("Uploaded SEG instance %s has no ParentSeries.", instance_id)
+                    return
+
+                sync_response = await client.post(
+                    f"{self.monai_url}/sync/orthanc-webhook",
+                    json={
+                        "change_type": "stable_series",
+                        "resource_id": orthanc_series_id,
+                        "level": "series",
+                        "modality": "SEG",
+                        "series_uid": str(dicom_series_uid),
+                    },
+                )
+                if sync_response.status_code == 200:
+                    logger.info(
+                        "Direct Orthanc sync accepted for uploaded SEG series: orthanc_series_id=%s",
+                        orthanc_series_id,
+                    )
+                else:
+                    logger.warning(
+                        "Direct Orthanc sync failed for uploaded SEG series %s: status=%s body=%s",
+                        orthanc_series_id,
+                        sync_response.status_code,
+                        sync_response.text[:200],
+                    )
+        except Exception as exc:
+            logger.warning("Direct Orthanc sync failed for uploaded SEG instance %s: %s", instance_id, exc)
 
     @staticmethod
     def _normalize_label_info(label_info) -> list[str]:
