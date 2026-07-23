@@ -56,21 +56,20 @@ def extract_organ_label(segmentation_type: str) -> str:
 
 def matches_label(segmentation_type: str, label: str) -> bool:
     """
-    Returns True only when *label* is an **exact** match for the organ portion
-    of *segmentation_type*.
+    Returns True only when *label* is a semantic match for the organ portion
+    of *segmentation_type*, considering synonyms like 'splenic' == 'spleen'.
 
     The segmentation_type format is '{organ label}-{model}-{timestamp}-...'
-    We extract just the organ part and compare it directly to the target label.
-
-    Examples
-    --------
-    matches_label("liver lesion-voxtell-01:48:31 PM-g", "liver")        -> False
-    matches_label("liver-voxtell-01:48:31 PM-g",        "liver")        -> True
-    matches_label("liver lesion-voxtell-01:48:31 PM-g", "liver lesion") -> True
-    matches_label("liver-vista-02:10:00 PM-g",          "liver")        -> True
+    We extract just the organ part and compare it semantically to the target label.
     """
+    from .medical_vocabulary import FLAT_MEDICAL_SYNONYMS
+    
+    def get_semantic_concepts(l: str) -> set:
+        words = normalize_label(l).split()
+        return set(FLAT_MEDICAL_SYNONYMS.get(w, w) for w in words)
+
     organ = extract_organ_label(segmentation_type)
-    return organ == normalize_label(label)
+    return get_semantic_concepts(organ) == get_semantic_concepts(label)
 
 
 def _normalize_model_name(model_name: str) -> str:
