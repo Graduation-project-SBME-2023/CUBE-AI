@@ -169,7 +169,7 @@ After completing segmentation, you MUST call write_agent_output with:
   - inputs: {{"workspace_folder": "{workspace_folder}"}}
   - output_files: {{"labels_dir": "labels_data/"}}
   - output_metrics: {{
-      "segmentation_method": "<method used, e.g. MONAI Label VISTA3D>",
+      "segmentation_method": "<method used, e.g. VoxTell text-prompt segmentation>",
       "volumes_segmented": <number>,
       "roi_description": "<what was segmented>"
     }}

@@ -72,7 +72,7 @@ AVAILABLE_AGENTS = [
             "Run automatic or interactive ROI segmentation on selected volumes"
         ),
         "capabilities": [
-            "Automatic organ/lesion segmentation (VISTA3D, SAM2, nnU-Net)",
+            "Text-prompt organ/lesion segmentation via VoxTell (any anatomy or pathology)",
             "Interactive segmentation with point/scribble prompts",
             "Multi-label segmentation for complex anatomical regions",
             "Segmentation quality validation and mask refinement",
@@ -367,8 +367,8 @@ For segmentation_agent:
      (e.g. 'spleen lesion', 'splenic tumor', 'liver tumor') — NOT the healthy organ.
    - If the study investigates the organ itself (e.g. 'spleen volume measurement'),
      the target is the healthy organ (e.g. 'spleen').
-   For this study: segment splenic lesions/tumors on each CT volume. Use VISTA3D or
-   VoxTell for organ-specific pathology segmentation. Export masks as NIfTI for
+   For this study: segment splenic lesions/tumors on each CT volume. Use VoxTell
+   for organ-specific pathology segmentation via text prompt. Export masks as NIfTI for
    PyRadiomics compatibility."
 
 INTERACTION RULES

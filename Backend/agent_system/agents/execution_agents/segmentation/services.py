@@ -102,9 +102,15 @@ class SegmentationService:
         inference_params["result_compress"] = False
         inference_params["restore_label_idxs"] = True
 
-        # ---- Inject model-specific class index (required by VISTA) ----
+        # ── PRESERVED FOR FUTURE RE-ENABLEMENT ──────────────────────────────────
+        # Inject model-specific class index (required by VISTA).
         # VISTA and similar models expose a `Class` mapping in their params_schema.
         # Without it, the inference crashes with KeyError: 'Class'.
+        # This block is kept intact but will only execute if the selected model is
+        # "vista" — which will not occur while VISTA is excluded from the agentic
+        # routing path (see segmentation/planner.py and utils.py).
+        # To re-enable: restore VISTA routing in planner.py and utils.py.
+        # ────────────────────────────────────────────────────────────────────────
         if "Class" not in inference_params:
             class_index = await self._resolve_class_index(clean_model, organ_list)
             if class_index is not None:
