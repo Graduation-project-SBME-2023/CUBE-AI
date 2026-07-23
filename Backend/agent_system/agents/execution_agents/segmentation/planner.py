@@ -16,15 +16,19 @@ def create_planner_agent(model_client, discovery_tools):
         tools=discovery_tools,
         system_message="""
         You are PlannerAgent — a medical image segmentation router.
-        Your job: given a clinical instruction, discover all available models, find the best matching
-        label using medically-informed semantic reasoning, and select the most appropriate model.
+        Your job: given a clinical instruction, determine the best anatomical label or
+        pathology description and route the request to VoxTell for segmentation.
+
+        VoxTell is a text-prompt segmentation model. It is the ONLY active automatic
+        segmentation model in this pipeline. It can segment ANY anatomical label or
+        pathology described in natural language.
 
         Output ONLY a single valid JSON object (no other text):
         {
-            "target_labels": ["exact_catalog_label"],
-            "chosen_path": "automatic" | "interactive",
-            "selected_models": ["model_name"],
-            "reason": "concise explanation of label match and model selection"
+            "target_labels": ["exact_or_descriptive_label"],
+            "chosen_path": "interactive",
+            "selected_models": ["voxtell"],
+            "reason": "concise explanation of label choice"
         }
 
         ═══════════════ MATCHING RULES ═══════════════
@@ -32,45 +36,43 @@ def create_planner_agent(model_client, discovery_tools):
         RULE 1 — DETERMINE INTENT: Healthy organ vs. Pathology
         First, decide what the user is asking for:
         - HEALTHY ORGAN: "segment the spleen", "delineate the liver", "measure the kidney"
-          → Correct: pick the healthy organ label ("spleen", "liver", "kidney_left").
+          → Pick the healthy organ label (e.g. "spleen", "liver", "kidney_left").
         - ORGAN + PATHOLOGY: "splenic lesion", "liver cancer", "kidney tumor", "lung nodule"
-          → Correct: find a label that captures BOTH the organ AND the specific pathology.
-          → FORBIDDEN: picking a healthy-organ-only label (e.g., "spleen" for "splenic lesion").
+          → Construct an organ-specific pathology label (e.g. "spleen lesion", "liver tumor").
+          → FORBIDDEN: picking a healthy-organ-only label for a pathology request.
 
-        RULE 2 — ORGAN-ANCHORED PATHOLOGY (Anti Whole-Body Bug)
-        When a pathology is requested for a SPECIFIC organ, the matched label MUST be organ-specific.
-        Generic whole-body labels like "lesion", "tumor", "carcinoma" with no organ qualifier segment
-        findings EVERYWHERE in the body — they are clinically WRONG for organ-specific requests.
-        - "splenic lesion" → find "spleen_lesion", "splenic_tumor". NEVER pick "lesion" (whole body).
-        - "pancreatic cancer" → find "pancreas tumor". NEVER pick "tumor" (whole body).
-        - "lung nodule" → find "lung nodule", "lung lesion". NEVER pick "lesion" (whole body).
-        - "liver cancer" → find "hepatocellular carcinoma", "liver_tumor". NEVER pick "carcinoma" (whole body).
+        RULE 2 — ORGAN-ANCHORED PATHOLOGY
+        When a pathology is requested for a SPECIFIC organ, the label MUST be organ-specific.
+        Generic labels like "lesion", "tumor", "carcinoma" with no organ qualifier are
+        clinically WRONG for organ-specific requests.
+        - "splenic lesion" → use "spleen lesion" or "splenic tumor". NEVER just "lesion".
+        - "pancreatic cancer" → use "pancreas tumor". NEVER just "tumor".
+        - "lung nodule" → use "lung nodule" or "lung lesion". NEVER just "lesion".
+        - "liver cancer" → use "liver tumor" or "hepatocellular carcinoma". NEVER just "carcinoma".
 
-        EXCEPTION: Generic pathology labels ARE acceptable ONLY when the user's request is also generic
-        with no specific organ mentioned (e.g., "find any tumor", "detect any lesion in the scan").
+        EXCEPTION: Generic pathology labels ARE acceptable ONLY when the user's request is
+        also generic with no specific organ (e.g. "find any tumor", "detect any lesion").
 
-        RULE 3 — FUZZY LABEL MATCHING (Smart Search, Not String Matching)
-        When searching the catalog, apply all of the following transformations to find matches:
-        a) Word order: "left kidney" = "kidney left" = "kidney_left" = "left_kidney" — all are the same.
-        b) Plural/Singular: "tumors"="tumor", "lesions"="lesion", "nodules"="nodule", "vessels"="vessel".
-        c) Medical synonyms (auto-generated from the same vocabulary the code uses):
+        RULE 3 — FUZZY LABEL MATCHING
+        Apply these transformations to find the best label:
+        a) Word order: "left kidney" = "kidney left" = "kidney_left" — all are the same.
+        b) Plural/Singular: "tumors"="tumor", "lesions"="lesion", "nodules"="nodule".
+        c) Medical synonyms:
 {build_prompt_synonym_section()}
-        d) Separators: spaces, underscores, and hyphens are interchangeable ("left_kidney" = "left kidney").
-        e) Laterality expansion: if no side specified, check both left and right versions.
+        d) Separators: spaces, underscores, and hyphens are interchangeable.
+        e) Laterality expansion: if no side specified, use the unqualified label.
 
-        RULE 4 — MODEL SELECTION PRIORITY
-        After finding the best matching label:
-        - Prefer automatic models (VISTA, nnUNet) when they have a specific catalog label matching the request.
-        - If no automatic model has an exact or close match → use VoxTell (interactive path).
-        - If tied between two automatic models, prefer the one with the more specific label match.
+        RULE 4 — VOXTELL ACCEPTS ANY MEDICALLY VALID TEXT PROMPT
+        VoxTell can segment ANY anatomical label or pathology described in natural language,
+        even if no catalog lists it explicitly.
+        - Use the most descriptive, organ-specific label possible as the text prompt.
+        - NEVER reject a request because no catalog entry exists.
+        - Always produce a valid label — never leave target_labels empty.
 
-        RULE 5 — VOXTELL ACCEPTS ANY MEDICALLY VALID TEXT PROMPT
-        VoxTell is a text-prompt model. It can segment ANY anatomical label or pathology
-        described in natural language, even if that label is NOT listed in its catalog.
-        - If a label IS in the VoxTell catalog → prefer it as it has been validated.
-        - If a label is NOT in the VoxTell catalog → VoxTell can still segment it via dynamic embedding.
-        - NEVER reject a request because VoxTell's catalog doesn't list the label.
-        - If no automatic model has the label, always route to VoxTell.
+        ROUTING SUMMARY
+        - chosen_path is ALWAYS "interactive"
+        - selected_models is ALWAYS ["voxtell"]
+        - target_labels must be the best organ/pathology label derived from the instruction
         """,
         max_tool_iterations=2
     )
@@ -80,81 +82,54 @@ def create_planner_agent(model_client, discovery_tools):
 
 async def run_planner(agent, instruction):
     task = f"""
-        Analyze this clinical instruction and find the best segmentation model:
+        Analyze this clinical instruction and determine the best segmentation label for VoxTell:
 
         INSTRUCTION: {instruction}
 
         ═══════════════ FOLLOW THESE STEPS EXACTLY ═══════════════
 
-        STEP 1 — Discover models:
-        Call the tool to get ALL available segmentation models and their labels.
-
-        STEP 2 — Understand the clinical intent:
+        STEP 1 — Understand the clinical intent:
         Answer:
         a) What is the TARGET ANATOMY? (e.g., liver, spleen, kidney, pancreas)
         b) Is there a PATHOLOGY? (cancer, tumor, lesion, nodule, carcinoma, malignancy, etc.)
         c) CRITICAL — Is this a HEALTHY organ or DISEASED?
-           - "Segment the spleen" → HEALTHY → find label "spleen". Valid and common.
-           - "Splenic lesion" → DISEASED → must find an organ-specific pathology label.
+           - "Segment the spleen" → HEALTHY → label = "spleen".
+           - "Splenic lesion" → DISEASED → label = "spleen lesion" (organ-specific pathology).
 
-        STEP 3 — Search for matching labels:
+        STEP 2 — Construct the best label:
 
         IF HEALTHY ORGAN (no disease/pathology mentioned):
-          - Find the healthy organ label using anatomical synonyms if needed.
-          - Apply fuzzy matching: word order, plurals, underscores vs spaces, left/right variants.
-          - Collect all candidates across all models.
+          - Use the healthy organ label with standard anatomical naming.
+          - Apply fuzzy matching: word order, plurals, underscores vs spaces.
 
         IF PATHOLOGY on a SPECIFIC ORGAN:
-          Priority 1 — Organ-specific pathology label in an automatic model:
-            - "splenic lesion" → search for: "spleen_lesion", "splenic_tumor", "splenic_lesion".
-            - "liver cancer" → search for: "hepatocellular carcinoma", "liver_tumor", "liver_cancer".
-            - "pancreatic cancer" → search for: "pancreas tumor", "pancreas_tumor".
-            - "lung nodule" → search for: "lung nodule", "lung_nodule", "lung lesion", "lung_lesion".
-            - "kidney tumor" → search for: "kidney_tumor", "renal_tumor", "kidney_cancer".
-            - Apply FUZZY MATCHING: "lung nodules" matches "lung nodule"; "kidney tumors" matches "kidney tumor".
-            - Apply WORD ORDER: "tumor kidney" matches "kidney tumor"; "left kidney" matches "kidney_left".
+          - Construct an organ-specific pathology label:
+            "splenic lesion" → "spleen lesion"
+            "liver cancer" → "liver tumor"
+            "pancreatic cancer" → "pancreas tumor"
+            "lung nodule" → "lung nodule"
+            "kidney tumor" → "kidney tumor"
+          - Apply FUZZY MATCHING: plurals, word order, synonyms all count.
+          - FORBIDDEN labels (too generic for organ-specific requests):
+            * "lesion" (segments whole body)
+            * "tumor" (segments whole body)
+            * "carcinoma" (segments whole body)
+            * The healthy organ label alone
 
-          Priority 2 — Synonym expansion (still organ-specific):
-            - Expand both the organ AND the pathology name using all known synonyms.
-            - Apply these synonyms (same as what the code uses internally):
-{build_prompt_synonym_section()}
-            - Still organ-anchored — do NOT lose the organ specificity.
-
-          Priority 3 — VoxTell with the best matching label:
-            - If no automatic model has a specific organ-pathology label, route to VoxTell.
-            - VoxTell accepts ANY label including organ-pathology combinations not in its catalog.
-            - Use the most descriptive, organ-specific label as the text prompt.
-            - FORBIDDEN fallbacks (they produce wrong results for organ-specific requests):
-              * Generic "lesion" (segments whole body, not just the organ)
-              * Generic "tumor" (segments whole body)
-              * Generic "carcinoma" (segments whole body)
-              * The healthy organ label (segments the organ, not the disease)
-
-        STEP 4 — Select the model:
-        - Prefer automatic models when they have a specific catalog label for the request.
-        - Fall back to VoxTell (interactive path) when no automatic model has the label.
-        - VoxTell is always a valid choice — never output manual or empty selected_models for reasonable requests.
-
-        STEP 5 — Output final JSON only:
+        STEP 3 — Output final JSON only:
 
         {{
-            "target_labels": ["the_exact_catalog_label_you_chose"],
-            "chosen_path": "automatic",
-            "selected_models": ["model_name"],
-            "reason": "Instruction=X. Intent=[healthy organ/organ+pathology]. Best label=Y in model=Z. Chosen because [label specificity reasoning]."
-        }}
-        or
-        {{
-            "target_labels": ["the_exact_label_or_text_prompt"],
+            "target_labels": ["the_best_label_you_chose"],
             "chosen_path": "interactive",
             "selected_models": ["voxtell"],
-            "reason": "Instruction=X. No automatic model has an exact match. Using VoxTell with label Y as text prompt."
+            "reason": "Instruction=X. Intent=[healthy organ/organ+pathology]. Best label=Y. VoxTell will segment via text prompt."
         }}
 
         FINAL REMINDERS:
+        - chosen_path MUST always be "interactive".
+        - selected_models MUST always be ["voxtell"].
         - Healthy organ requests are normal — use the organ label directly.
         - Generic labels (lesion, tumor, carcinoma) are forbidden for organ-specific pathology requests.
-        - Fuzzy match: plurals, word order, synonyms all count as valid matches.
         - VoxTell can segment ANY label — never refuse a reasonable medical request.
         - Output ONLY valid JSON. Zero text outside the JSON.
         """
@@ -168,3 +143,30 @@ async def run_planner(agent, instruction):
         return json.loads(content)
     except Exception:
         raise RuntimeError(f"Invalid JSON from PlannerAgent: {content}")
+
+
+# ── PRESERVED MULTI-MODEL ROUTING (VISTA / segmentation_spleen) ─────────────
+# The routing rules below were used when VISTA and segmentation_spleen were
+# active. They are commented out for easy re-enablement.
+#
+# To restore multi-model routing:
+# 1. Replace the system_message and task above with the content below.
+# 2. Add "vista" and "segmentation_spleen" back to KNOWN_SEGMENTATION_MODELS
+#    in utils.py.
+# 3. Restore VISTA class injection path in services.py if needed.
+#
+# RULE 4 (old):
+#   - Prefer automatic models (VISTA, nnUNet) when they have a specific catalog
+#     label matching the request.
+#   - If no automatic model has an exact or close match → use VoxTell.
+#   - If tied between two automatic models, prefer the one with the more
+#     specific label match.
+#
+# STEP 3 (old) — Select the model:
+#   - Prefer automatic models when they have a specific catalog label.
+#   - Fall back to VoxTell when no automatic model has the label.
+#   - chosen_path = "automatic" with selected_models = ["vista"] or ["segmentation_spleen"]
+#   - chosen_path = "interactive" with selected_models = ["voxtell"] for fallback
+# ────────────────────────────────────────────────────────────────────────────
+
+

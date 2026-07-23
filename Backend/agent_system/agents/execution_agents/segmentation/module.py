@@ -172,7 +172,8 @@ class SegmentationModule:
         
         # =========== test ===============
 
-        # plan ={'target_labels': ['Spleen'], 'chosen_path': 'automatic','selected_models': ['segmentation_spleen']}
+        # Example: plan = {'target_labels': ['spleen'], 'chosen_path': 'interactive', 'selected_models': ['voxtell']}
+        # (VISTA and segmentation_spleen are preserved in code but excluded from agentic routing)
         # =================================
         
         logger.info(
