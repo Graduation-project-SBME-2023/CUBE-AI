@@ -44,7 +44,7 @@
   "OrthancPeersInDatabase": false,
   "HttpProxy": "",
   "HttpVerbose": false,
-  "HttpTimeout": 300,
+  "HttpTimeout": 10,
   "HttpsVerifyPeers": true,
   "HttpsCACertificates": "",
   "UserMetadata": {},

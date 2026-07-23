@@ -730,7 +730,14 @@ async def ws_broadcast(data: dict):
     )
     return {"status": "ok"}
     
-_review_futures: Dict[str, asyncio.Future] = {}
+# ── Review long-poll state ──────────────────────────────────────────────────
+# Keyed by session_id.  Each entry is a dict with two keys:
+#   "event"  – asyncio.Event set when a review arrives
+#   "result" – the review payload dict (populated before event.set())
+# A separate "ready:{session_id}" key stores a plain dict for reviews that
+# arrived before the module started polling (unchanged behaviour).
+_review_futures: Dict[str, asyncio.Future] = {}  # kept for ready-prefix entries
+_review_events: Dict[str, dict] = {}  # session_id -> {"event": Event, "result": dict|None}
 
 # ----------------------------------------------------------------------
 # Population targets saving & mode endpoint
@@ -813,15 +820,16 @@ async def segmentation_review(data: dict):
     }
     logger.info(f"[Review] Received triage for session={session_id}: {review_payload}")
     
-    # resolve the waiting module if it's already polling
-    future = _review_futures.pop(session_id, None)
-    if future and not future.done():
-        future.set_result(review_payload)
-        logger.info(f"[Review] Resolved waiting future for session={session_id}")
+    # resolve the waiting module if it's already polling via the event mechanism
+    ev_entry = _review_events.get(session_id)
+    if ev_entry is not None:
+        ev_entry["result"] = review_payload
+        ev_entry["event"].set()
+        logger.info(f"[Review] Resolved waiting event for session={session_id}")
     else:
-        # store it in case the module polls later
+        # store it in case the module polls later (pre-existing ready-prefix scheme)
         _review_futures[f"ready:{session_id}"] = review_payload  # plain dict, not future
-        logger.info(f"[Review] No active future found for session={session_id}. Stored as ready:{session_id} for later pickup.")
+        logger.info(f"[Review] No active poller for session={session_id}. Stored as ready:{session_id} for later pickup.")
     
     return {"status": "ok"}
 
@@ -1019,25 +1027,46 @@ async def get_segmentation_mask(session_id: str, series_uid: str):
 
 
 @app.get("/segmentation-review/wait/{session_id}")
-async def wait_for_review(session_id: str, timeout: int = 300):
-    """Long-poll endpoint: blocks until the frontend submits a review."""
-    # check if result already arrived
+async def wait_for_review(session_id: str, timeout: int = 3600):
+    """Long-poll endpoint: blocks until the frontend submits a review.
+
+    Uses a persistent asyncio.Event so that reconnecting clients re-attach to
+    the *same* event rather than creating a new Future every time.  This means
+    a review submitted during a brief reconnect window is never lost.
+    """
+    # ── Fast path: review already arrived before this poll ───────────────────
     ready_key = f"ready:{session_id}"
     if ready_key in _review_futures:
         result = _review_futures.pop(ready_key)
+        # clean up event entry if present
+        _review_events.pop(session_id, None)
         return result
 
-    # otherwise register a future and wait
-    loop = asyncio.get_running_loop()
-    future = loop.create_future()
-    _review_futures[session_id] = future
+    # ── Also check the event store (review arrived while another poll was alive)
+    ev_entry = _review_events.get(session_id)
+    if ev_entry is not None and ev_entry["event"].is_set():
+        result = ev_entry["result"]
+        _review_events.pop(session_id, None)
+        return result
+
+    # ── Register / reuse a persistent event for this session ─────────────────
+    if session_id not in _review_events:
+        _review_events[session_id] = {"event": asyncio.Event(), "result": None}
+    ev_entry = _review_events[session_id]
 
     try:
-        result = await asyncio.wait_for(future, timeout=timeout)
-        return result
+        await asyncio.wait_for(asyncio.shield(ev_entry["event"].wait()), timeout=timeout)
     except asyncio.TimeoutError:
-        _review_futures.pop(session_id, None)
+        # Connection timed out — return 408 so the client reconnects, but
+        # intentionally keep _review_events[session_id] alive so the next
+        # connection reuses the same event and result slot.
+        logger.debug(f"[Review] Long-poll timeout for session={session_id}. Client will reconnect.")
         raise HTTPException(status_code=408, detail="Review timeout")
+
+    # Event was set — collect result and clean up
+    result = ev_entry["result"]
+    _review_events.pop(session_id, None)
+    return result
 
 # ----------------------------------------------------------------------
 # Entry point

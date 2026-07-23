@@ -10,7 +10,8 @@ end
 
 local function post_webhook(payload, description)
     -- Fire-and-forget: MONAI Label may be busy (e.g. running inference).
-    -- Failures are expected and non-critical; suppress the error log entirely.
+    -- Failures are expected and non-critical. Orthanc may still log transport
+    -- failures internally; keep HttpTimeout low so this cannot block for minutes.
     pcall(function()
         HttpPost(WEBHOOK_URL, DumpJson(payload, true), JSON_HEADERS)
     end)
