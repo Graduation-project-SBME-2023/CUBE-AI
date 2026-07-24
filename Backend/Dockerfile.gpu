@@ -63,28 +63,23 @@ RUN pip install --no-cache-dir -U pip && \
 # voxtell_requirements.txt is copied into the image so we never
 # need to bind-mount it just to install deps.
 COPY ./voxtell_requirements.txt /voxtell_requirements.txt
-# so the ofrcing of kernals related to sm120
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel ninja
+# Pin setuptools<70 to preserve pkg_resources needed by girder_client
+RUN pip install --no-cache-dir --upgrade pip "setuptools<70" wheel ninja
 
 RUN sed -i '/optimum-quanto/d' /voxtell_requirements.txt
 
 RUN pip install --no-cache-dir -r /voxtell_requirements.txt
 
-# Downgrade PyTorch from the base-image version to 2.5.1+cu124.
-# Must be done before torchvision so the C++ ABI versions align.
-# --no-deps avoids re-pulling torchaudio and other large wheels.
+# Install optimum-quanto FIRST (before torch/torchvision).
+# --no-deps prevents it from pulling an incompatible PyPI torch.
+RUN pip install --no-deps --no-cache-dir git+https://github.com/huggingface/optimum-quanto.git
+
+# Install torch 2.5.1 + torchvision 0.20.1 from CUDA 12.4 index LAST
+# so they are never overwritten by any earlier dependency.
 RUN pip install --no-cache-dir \
         "torch==2.5.1" \
-        --no-deps \
-        --index-url https://download.pytorch.org/whl/cu124
-
-# torchvision 0.20.1 is the exact compatible release for torch==2.5.1+cu124.
-RUN pip install --no-cache-dir \
         "torchvision==0.20.1" \
-        --no-deps \
         --index-url https://download.pytorch.org/whl/cu124
-
-RUN pip install git+https://github.com/huggingface/optimum-quanto.git
 
 # ------------------------------------------------------------
 # 3. Patched pydicom-seg sources
