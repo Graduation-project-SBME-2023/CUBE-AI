@@ -147,6 +147,8 @@ class SegmentationModule:
 
         logger.info(f"Received instructions: {instructions}")
         datasetlist: List[str] = input_data.get("datasetlist", [])
+        if not datasetlist:
+            raise ValueError("The datasetlist is empty. The upstream population planner likely failed to find eligible volumes.")
         logger.info(f"Will prepare segmentations for {len(datasetlist)} volumes.")
         #1. plan
         plan = await run_planner(self.PlannerAgent,instructions)
@@ -257,10 +259,21 @@ class SegmentationModule:
                 )
 
         elif eligible_volumes:
-            selected_interactive_model = await run_interactive_pipeline(
+            interactive_result = await run_interactive_pipeline(
                 self.UserFallbackAgent, self.UserProxyAgent,
                 eligible_volumes, target_labels, self.segmentation_service, self.session_id
             )
+            # run_interactive_pipeline now always returns (selected_model, failed_uids)
+            # instead of raising RuntimeError — so the download/review flow is always reached.
+            selected_interactive_model, interactive_failed = interactive_result
+            if interactive_failed:
+                pipeline_failed_uids.extend(uid for uid, _ in interactive_failed)
+                logger.warning(
+                    "%d volume(s) failed interactive segmentation and will be skipped "
+                    "in download but reported in the review UI: %s",
+                    len(interactive_failed),
+                    [uid for uid, _ in interactive_failed],
+                )
             if not selected_interactive_model:
                 skip_wait = True
 
@@ -342,6 +355,7 @@ class SegmentationModule:
         # ================== Generate Overlays (progressive) ====================
         gif_volumes = []
         failed_gif_uids = []
+        empty_mask_uids = []  # always initialised — may stay empty if no volumes downloaded
         if downloaded_uids:
             # Use a queue to bridge the sync GIF thread → async broadcaster
             loop = asyncio.get_running_loop()
@@ -445,10 +459,18 @@ class SegmentationModule:
             "targetRoi": plan_target,
             "selectedModel": plan_model,
             "volumes": gif_volumes,
-            "failedVolumes": [
-                {"seriesInstanceUid": uid, "reason": "Volume mask is empty" if uid in empty_mask_uids else "Volume preview file missing"}
-                for uid in (set(failed_gif_uids) | set(empty_mask_uids))
-            ],
+            "failedVolumes": (
+                # Volumes that failed segmentation (never downloaded)
+                [
+                    {"seriesInstanceUid": uid, "reason": "Segmentation failed (HTTP 500 from inference service)"}
+                    for uid in pipeline_failed_uids
+                ] +
+                # Volumes that downloaded but GIF generation failed or mask was empty
+                [
+                    {"seriesInstanceUid": uid, "reason": "Volume mask is empty" if uid in empty_mask_uids else "Volume preview file missing"}
+                    for uid in (set(failed_gif_uids) | set(empty_mask_uids))
+                ]
+            ),
             "progress": {
                 "total": len(downloaded_uids),
                 "generated": len(gif_volumes),
