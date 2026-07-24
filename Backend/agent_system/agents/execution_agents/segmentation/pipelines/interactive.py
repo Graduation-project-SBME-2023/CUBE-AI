@@ -132,8 +132,4 @@ async def run_interactive_pipeline(
                 session_id=session_id,
             )
 
-    if failures:
-        failed_uids = ", ".join(uid for uid, _ in failures)
-        raise RuntimeError(f"Interactive segmentation failed for {len(failures)} volumes: {failed_uids}")
-
-    return selected_model
+    return selected_model, failures

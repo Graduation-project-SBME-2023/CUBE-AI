@@ -167,14 +167,18 @@ After completing segmentation, you MUST call write_agent_output with:
   - agent_role: "roi_segmentation"
   - status: "completed" (or "failed"/"partial")
   - inputs: {{"workspace_folder": "{workspace_folder}"}}
-  - output_files: {{"labels_dir": "labels_data/"}}
+  - output_files: {{
+      "labels_dir": "labels_data/",
+      "volumes_dir": "volumes/",
+      "masks_dir": "masks/"
+    }}
   - output_metrics: {{
       "segmentation_method": "<method used, e.g. VoxTell text-prompt segmentation>",
       "volumes_segmented": <number>,
       "roi_description": "<what was segmented>"
     }}
   - output_summary: "<concise summary of segmentation results>"
-  - warnings: [<any quality warnings>]
+  - warnings: [<any quality warnings, including any volumes that failed segmentation>]
 """
         return cls(
             name=name,
