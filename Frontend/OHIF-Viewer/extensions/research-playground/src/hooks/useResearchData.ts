@@ -42,7 +42,10 @@ export function useResearchData() {
 
   const setModelingData = useCallback(
     (payload: any) =>
-      setData(prev => (prev.modelingData === payload ? prev : { ...prev, modelingData: payload })),
+      setData(prev => ({
+        ...prev,
+        modelingData: { ...(prev.modelingData ?? {}), ...payload },
+      })),
     [setData]
   );
 

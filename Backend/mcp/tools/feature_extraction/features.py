@@ -20,7 +20,7 @@ import re
 import shutil
 import tempfile
 import time
-from typing import Optional
+from typing import Any, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -58,13 +58,26 @@ def _setup_logging(log_file: str, verbose: bool = True) -> None:
     logging.getLogger('radiomics').setLevel(logging.ERROR)
 
 
-def _csv_str(value: Optional[str]) -> Optional[list]:
-    if value and value.strip():
+def _csv_str(value: Optional[Union[str, List[Any]]]) -> Optional[list]:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str) and value.strip():
         return [v.strip() for v in value.split(",") if v.strip()]
     return None
 
 
-def _csv_int(value: Optional[str]) -> Optional[list]:
+def _csv_int(value: Optional[Union[int, str, List[Any]]]) -> Optional[list]:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return [value]
+    if isinstance(value, list):
+        try:
+            return [int(p) for p in value]
+        except ValueError as exc:
+            raise ValueError(f"Expected integer list, got: {value!r}") from exc
     parts = _csv_str(value)
     if parts is None:
         return None
@@ -74,7 +87,16 @@ def _csv_int(value: Optional[str]) -> Optional[list]:
         raise ValueError(f"Expected comma-separated integers, got: {value!r}") from exc
 
 
-def _csv_float(value: Optional[str]) -> Optional[list]:
+def _csv_float(value: Optional[Union[float, int, str, List[Any]]]) -> Optional[list]:
+    if value is None:
+        return None
+    if isinstance(value, (float, int)):
+        return [float(value)]
+    if isinstance(value, list):
+        try:
+            return [float(p) for p in value]
+        except ValueError as exc:
+            raise ValueError(f"Expected float list, got: {value!r}") from exc
     parts = _csv_str(value)
     if parts is None:
         return None
@@ -95,31 +117,34 @@ def _safe(v) -> Optional[float]:
 # ── Input Models ───────────────────────────────────────────────────────────────
 
 class ExtractFeaturesInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="ignore")
 
-    image_types: Optional[str] = Field(default=None)
-    feature_classes: Optional[str] = Field(default=None)
-    specific_features: Optional[str] = Field(default=None)
-    mask_labels: Optional[str] = Field(default=None)
-    pixel_spacing: Optional[str] = Field(default=None)
+    image_types: Optional[Union[str, List[str]]] = Field(default=None)
+    feature_classes: Optional[Union[str, List[str]]] = Field(default=None)
+    specific_features: Optional[Union[str, List[str]]] = Field(default=None)
+    mask_labels: Optional[Union[int, str, List[Union[int, str]]]] = Field(default=None)
+    pixel_spacing: Optional[Union[float, str, List[Union[float, str]]]] = Field(default=None)
     image_pattern: str = Field(default="*.nii.gz")
     mask_pattern: str = Field(default="*.nii.gz")
     normalize: bool = Field(default=True)
     bin_width: float = Field(default=25.0)
     resample: bool = Field(default=True)
     force_2d: bool = Field(default=False)
-    n_workers: int = Field(default=1)
+    n_workers: int = Field(default=1, ge=1)
     targets_csv: WorkspacePath = Field(default=None)
     id_column: Optional[str] = Field(default=None)
     target_column: Optional[str] = Field(default=None)
     id_pattern: Optional[str] = Field(default=None)
+    image_dir: WorkspacePath = Field(default=None)
+    mask_dir: WorkspacePath = Field(default=None)
+    output_dir: WorkspacePath = Field(default=None)
 
 
 class AnalyzeImportanceInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="ignore")
 
     input_path: WorkspacePath = Field(...)
-    top_features: str = Field(default="10")
+    top_features: Union[int, str, List[Union[int, str]]] = Field(default="10")
     task_type: Optional[str] = Field(default=None)
     method: str = Field(default="rf")
     encode_categorical: str = Field(default="auto")
@@ -163,15 +188,56 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
             "error_message": "PyRadiomics / SimpleITK not installed. Run: pip install pyradiomics simpleitk",
         }, indent=2)
 
-    output_dir = base_on_workspace_dir('features')
-    image_dir = base_on_workspace_dir('volumes')
-    mask_dir = base_on_workspace_dir('masks')
+    output_dir = base_on_workspace_dir(params.output_dir) if params.output_dir else base_on_workspace_dir('features')
+
+    # Resolve image_dir with auto-discovery fallback
+    requested_image_dir = base_on_workspace_dir(params.image_dir) if params.image_dir else None
+    if requested_image_dir and os.path.isdir(requested_image_dir):
+        image_dir = requested_image_dir
+    else:
+        # Search workspace candidates if requested image_dir is missing or not provided
+        candidates_img = ['volumes', 'images', 'series', 'data/volumes', 'data/images', 'data']
+        found_img_dir = None
+        for cand in candidates_img:
+            cand_path = base_on_workspace_dir(cand)
+            if cand_path and os.path.isdir(cand_path):
+                files = _glob.glob(os.path.join(cand_path, params.image_pattern))
+                if files:
+                    found_img_dir = cand_path
+                    break
+                elif found_img_dir is None:
+                    found_img_dir = cand_path
+        image_dir = found_img_dir or (requested_image_dir or base_on_workspace_dir('volumes'))
+
+    # Resolve mask_dir with auto-discovery fallback
+    requested_mask_dir = base_on_workspace_dir(params.mask_dir) if params.mask_dir else None
+    if requested_mask_dir and os.path.isdir(requested_mask_dir):
+        mask_dir = requested_mask_dir
+    else:
+        candidates_mask = ['masks', 'segmentations', 'data/masks', 'data/segmentations']
+        found_mask_dir = None
+        for cand in candidates_mask:
+            cand_path = base_on_workspace_dir(cand)
+            if cand_path and os.path.isdir(cand_path):
+                files = _glob.glob(os.path.join(cand_path, params.mask_pattern))
+                if files:
+                    found_mask_dir = cand_path
+                    break
+                elif found_mask_dir is None:
+                    found_mask_dir = cand_path
+        mask_dir = found_mask_dir or (requested_mask_dir or base_on_workspace_dir('masks'))
+
     target_column = 'target'
 
     os.makedirs(output_dir, exist_ok=True)
     log_file = os.path.join(output_dir, "radiomics_extraction.log")
     _setup_logging(log_file)
     logger = logging.getLogger(__name__)
+
+    if requested_image_dir and requested_image_dir != image_dir:
+        logger.warning(f"Requested image_dir '{requested_image_dir}' not found. Discovered image directory: '{image_dir}'")
+    if requested_mask_dir and requested_mask_dir != mask_dir:
+        logger.warning(f"Requested mask_dir '{requested_mask_dir}' not found. Discovered mask directory: '{mask_dir}'")
 
     image_types   = _csv_str(params.image_types)   or ["Original", "Wavelet"]
     feature_classes = _csv_str(params.feature_classes)
@@ -182,7 +248,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
     # ── Guard: catch image-type names mistakenly passed as feature_classes ──────
     # The LLM sometimes puts 'wavelet', 'LoG', 'Gradient' etc. in feature_classes.
     # These are image filter types, not feature classes. Silently rescue them.
-    _valid_feature_classes = {"firstorder", "shape", "glcm", "glrlm", "glszm", "gldm", "ngtdm", "shape2D"}
+    _valid_feature_classes = {"firstorder", "shape", "glcm", "glrlm", "glszm", "gldm", "ngtdm", "shape2d"}
     _valid_image_types = {"original", "wavelet", "log", "gradient", "exponential", "squareroot", "lbp2d", "lbp3d"}
     if feature_classes:
         rescued_image_types = [fc for fc in feature_classes if fc.lower() in _valid_image_types]
@@ -197,11 +263,34 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         if not feature_classes:
             feature_classes = None  # fall through to default below
 
+    image_type_names = {
+        "original": "Original", "wavelet": "Wavelet", "log": "LoG",
+        "gradient": "Gradient", "exponential": "Exponential",
+        "squareroot": "SquareRoot", "lbp2d": "LBP2D", "lbp3d": "LBP3D",
+    }
+    unknown_image_types = [value for value in image_types if value.lower() not in image_type_names]
+    image_types = [image_type_names[value.lower()] for value in image_types if value.lower() in image_type_names]
+    if unknown_image_types:
+        logger.warning("Ignoring unsupported image type(s): %s", unknown_image_types)
+    if not image_types:
+        image_types = ["Original", "Wavelet"]
+
+    feature_class_names = {
+        "firstorder": "firstorder", "shape": "shape", "glcm": "glcm",
+        "glrlm": "glrlm", "glszm": "glszm", "gldm": "gldm",
+        "ngtdm": "ngtdm", "shape2d": "shape2D",
+    }
+    if feature_classes:
+        feature_classes = [feature_class_names[value.lower()] for value in feature_classes]
+
     temp_dir = None
     try:
         for path, name in [(image_dir, "image_dir"), (mask_dir, "mask_dir")]:
             if not os.path.isdir(path):
-                raise ValueError(f"{name} does not exist or is not a directory: {path}")
+                return json.dumps({
+                    "status": "error",
+                    "error_message": f"{name} does not exist or is not a directory: '{path}'. Please ensure images and masks exist before running feature extraction.",
+                }, indent=2)
 
         if feature_classes is None and specific_features is None:
             feature_classes = ["firstorder", "shape", "glcm", "glrlm", "glszm", "gldm", "ngtdm"]
@@ -254,26 +343,63 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         targets_csv_path = params.targets_csv
         if not (targets_csv_path and os.path.exists(targets_csv_path)):
             targets_csv_path = base_on_workspace_dir('populations/targets/targets.csv')
-        if targets_csv_path and os.path.exists(targets_csv_path):
-            tdf = pd.read_csv(targets_csv_path)
-            id_col  = params.id_column or tdf.columns[0]
-            tgt_col = params.target_column or (target_column if target_column in tdf.columns else tdf.columns[-1])
-            # Build lookup from primary id (UID) column
-            target_dict = {str(row[id_col]): row[tgt_col] for _, row in tdf.iterrows()}
-            # ALSO key by 'name' column (case_id / clinical_pid) if present,
-            # so NIfTI filename stems (e.g. 'case_00005') match the correct label.
-            if "name" in tdf.columns and "name" != id_col:
-                for _, row in tdf.iterrows():
-                    name_val = str(row["name"])
-                    if name_val and name_val not in target_dict:
-                        target_dict[name_val] = row[tgt_col]
-            logger.info(f"Loaded {len(target_dict)} label keys from {targets_csv_path} (id_col={id_col!r}, tgt_col={tgt_col!r})")
-        else:
-            logger.warning(
-                f"targets.csv not found at '{targets_csv_path}'. "
-                "Feature extraction will proceed without labels — 'target' column will be absent from output CSVs. "
-                "Run generate_targets (after extract_cohort_labels) before running feature extraction."
-            )
+
+        if not (targets_csv_path and os.path.exists(targets_csv_path)):
+            return json.dumps({
+                "status": "error",
+                "error_message": (
+                    f"targets.csv not found at '{targets_csv_path}'. "
+                    "Feature extraction requires targets.csv to assign target labels for downstream importance analysis and modeling. "
+                    "Run generate_targets (after extract_cohort_labels) before running feature extraction."
+                ),
+            }, indent=2)
+
+        tdf = pd.read_csv(targets_csv_path)
+        if tdf.empty:
+            return json.dumps({
+                "status": "error",
+                "error_message": f"targets.csv at '{targets_csv_path}' is empty. Feature extraction requires valid target labels.",
+            }, indent=2)
+
+        id_col  = params.id_column or tdf.columns[0]
+        tgt_col = params.target_column or (target_column if target_column in tdf.columns else tdf.columns[-1])
+        if id_col not in tdf.columns or tgt_col not in tdf.columns:
+            return json.dumps({
+                "status": "error",
+                "error_message": (
+                    f"targets.csv must contain id column '{id_col}' and target column '{tgt_col}'. "
+                    f"Available columns: {tdf.columns.tolist()}"
+                ),
+            }, indent=2)
+
+        def _normalise_id(value: Any) -> str:
+            value = str(value).strip().casefold()
+            for extension in (".nii.gz", ".nii"):
+                if value.endswith(extension):
+                    return value[:-len(extension)]
+            return value
+
+        valid_targets = tdf.dropna(subset=[id_col, tgt_col])
+        if valid_targets.empty:
+            return json.dumps({
+                "status": "error",
+                "error_message": f"targets.csv at '{targets_csv_path}' has no rows with both an ID and target label.",
+            }, indent=2)
+
+        # Build a normalised lookup so case and NIfTI extensions do not make
+        # otherwise valid labels disappear from the training table.
+        target_dict = {
+            _normalise_id(row[id_col]): row[tgt_col]
+            for _, row in valid_targets.iterrows()
+        }
+        # ALSO key by 'name' column (case_id / clinical_pid) if present,
+        # so NIfTI filename stems (e.g. 'case_00005') match the correct label.
+        if "name" in valid_targets.columns and "name" != id_col:
+            for _, row in valid_targets.iterrows():
+                name_val = _normalise_id(row["name"])
+                if name_val and name_val not in target_dict:
+                    target_dict[name_val] = row[tgt_col]
+        logger.info(f"Loaded {len(target_dict)} label keys from {targets_csv_path} (id_col={id_col!r}, tgt_col={tgt_col!r})")
 
         image_files = sorted(_glob.glob(os.path.join(image_dir, params.image_pattern)))
         mask_files  = sorted(_glob.glob(os.path.join(mask_dir,  params.mask_pattern)))
@@ -306,6 +432,24 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
 
         if not pairs:
             raise ValueError("No matching image-mask pairs found.")
+
+        paired_subject_count = len(pairs)
+        unlabeled_subject_ids = [sid for sid in pairs if _normalise_id(sid) not in target_dict]
+        pairs = {
+            sid: files for sid, files in pairs.items()
+            if _normalise_id(sid) in target_dict
+        }
+        if not pairs:
+            return json.dumps({
+                "status": "error",
+                "error_message": (
+                    "No image-mask pair could be matched to a target label. "
+                    "Check targets.csv identifiers or provide id_pattern/id_column."
+                ),
+                "unlabeled_subject_ids": unlabeled_subject_ids,
+            }, indent=2)
+        if unlabeled_subject_ids:
+            logger.warning("Skipping %s image-mask pair(s) with no target label: %s", len(unlabeled_subject_ids), unlabeled_subject_ids)
 
         if mask_labels_raw is None:
             found: set = set()
@@ -358,8 +502,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                             features = future.result(timeout=600)
 
                         features["subject_id"] = subject_id
-                        if subject_id in target_dict:
-                            features["target"] = target_dict[subject_id]
+                        features["target"] = target_dict[_normalise_id(subject_id)]
                         all_features_by_label[lbl].append(features)
                     except concurrent.futures.TimeoutError:
                         logger.error(f"  {subject_id} label {lbl}: extraction timed out after 10 minutes — skipping")
@@ -379,6 +522,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
 
         csv_paths: dict = {}
         num_features: dict = {}
+        default_feature_table = None
 
         for lbl, rows in all_features_by_label.items():
             if not rows:
@@ -393,10 +537,31 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
             csv_paths[f"label_{lbl}"] = csv_path
             num_features[lbl] = len(feat_cols)
 
+            # The downstream modeling agent expects exactly one row per
+            # subject. With multiple ROIs, use the first successfully
+            # extracted requested label rather than overwriting the alias
+            # with whichever label happened to be processed last.
+            if default_feature_table is None:
+                default_feature_table = df
+
+        if default_feature_table is None:
+            return json.dumps({
+                "status": "error",
+                "error_message": "No radiomic features were extracted from any matched image-mask pair.",
+                "paired_subjects": paired_subject_count,
+                "labeled_subjects": len(pairs),
+            }, indent=2)
+
+        default_csv_path = os.path.join(output_dir, "radiomics_features.csv")
+        default_feature_table.to_csv(default_csv_path, index=False)
+        csv_paths["radiomics_features"] = default_csv_path
+
         return json.dumps({
             "status": "success",
             "csv_paths": csv_paths,
             "num_subjects": len(pairs),
+            "paired_subjects": paired_subject_count,
+            "unlabeled_subject_ids": unlabeled_subject_ids,
             "num_features": num_features,
             "mask_labels": mask_labels_raw,
             "params_file": params_file,
@@ -485,7 +650,9 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             logger.warning(f"Unsupported encode_categorical '{params.encode_categorical}'. Falling back to 'auto'.")
             params.encode_categorical = "auto"
 
-        top_features_list = sorted(set(_csv_int(params.top_features) or [10]))
+        top_features_list = sorted({n for n in (_csv_int(params.top_features) or [10]) if n > 0})
+        if not top_features_list:
+            raise ValueError("top_features must contain at least one positive integer.")
 
         # ── Stage 1: Data loading & preprocessing ──────────────────────────
         payload = TextPayload(message=f"Analysing feature importance for {os.path.basename(params.input_path)}...")
@@ -496,9 +663,19 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             raise ValueError(f"target_column '{target_column}' not found in data.")
 
         X = df.drop(columns=[target_column])
-        if "subject_id" in X.columns:
-            X = X.drop(columns=["subject_id"])
+        id_cols_to_drop = [
+            c for c in X.columns
+            if c.lower() in ("id", "subject_id", "subjectid", "patientid", "patient_id", "case_id", "caseid", "name", "uid", "pat_id", "unnamed: 0")
+            or c.lower().endswith("_id")
+        ]
+        if id_cols_to_drop:
+            X = X.drop(columns=id_cols_to_drop)
         y = df[target_column]
+
+        if X.shape[1] == 0:
+            raise ValueError("No usable feature columns remain after removing identifiers and the target column.")
+        if y.isna().any():
+            raise ValueError("The target column contains missing values.")
 
         if params.task_type:
             task_type = params.task_type
@@ -575,7 +752,9 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             est = (RandomForestClassifier if task_type == "classification"
                    else RandomForestRegressor)(n_estimators=100, random_state=42)
             sel = RFE(est, n_features_to_select=min(n, X.shape[1]), step=0.1).fit(X, y)
-            return X.columns[sel.get_support()].tolist(), sel.ranking_
+            # Lower RFE rankings are better; negate them so the common
+            # descending sort below retains the selected features first.
+            return X.columns[sel.get_support()].tolist(), -sel.ranking_
 
         method_fn = {"rf": _rf_importance, "f_test": _f_test_importance,
                      "mutual_info": _mutual_info_importance, "rfe": _rfe_importance}[params.method]

@@ -1240,8 +1240,13 @@ class FeatureImportanceAnalysisTool:
             # Separate features and target
         
             X = df.drop(columns=[target_column])
-            if subject_id_column in X.columns:
-                X.drop(columns=[subject_id_column])
+            id_cols_to_drop = [
+                c for c in X.columns
+                if c.lower() in ("id", "subject_id", "subjectid", "patientid", "patient_id", "case_id", "caseid", "name", "uid", "pat_id", "unnamed: 0")
+                or c.lower().endswith("_id")
+            ]
+            if id_cols_to_drop:
+                X = X.drop(columns=id_cols_to_drop, errors="ignore")
             y = df[target_column]
             
             # Detect task type if not specified
@@ -2200,6 +2205,7 @@ class FeatureImportanceAnalysisTool:
 
 
 async def extract_radiomic_features(
+            feature_classes: Union[str, List[str]] = None,
             specific_features: Union[str, List[str]] = None,   
             image_types: Union[str, List[str]] = "Original",   
             normalize: bool = True,
@@ -2229,13 +2235,16 @@ async def extract_radiomic_features(
     targets_csv = os.path.join(workspace_folder, 'populations', 'targets', 'targets.csv')
     target_column = 'target'
 
+    feature_classes = safe_parse(feature_classes)
+    specific_features = safe_parse(specific_features)
+    image_types = safe_parse(image_types)
 
     def run_extraction():
         kwargs = dict(
             image_dir=image_dir,
             mask_dir=mask_dir,
             output_dir=output_dir,
-            feature_classes=None,
+            feature_classes=feature_classes,
             specific_features=specific_features,
             image_types=image_types,
             normalize=normalize,
@@ -2250,10 +2259,6 @@ async def extract_radiomic_features(
                 "target_column": target_column
             })
         return PyRadiomicsFeatureExtractionTool().forward(**kwargs)
-
-    # feature_classes = safe_parse(feature_classes)
-    specific_features = safe_parse(specific_features)
-    image_types = safe_parse(image_types)
 
     loop = asyncio.get_event_loop()
     with ThreadPoolExecutor() as pool:

@@ -56,7 +56,7 @@ class ModelingAgent(AssistantAgent):
         except Exception as exc:
             logger.exception("Failed to initialize MCP tools from %s", mcp_server_path)
             raise RuntimeError(f"Failed to initialize MCP tools from {mcp_server_path}") from exc
-        desired_mcp_tools = ['pycaret_train_classifier', 'pycaret_run_inference', 'scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',
+        desired_mcp_tools = ['read_agent_task_context', 'pycaret_train_classifier', 'pycaret_run_inference', 'scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',
                              'scratchpad_write_summary', 'scratchpad_set_status', 'scratchpad_read_agent',
                              'write_agent_output', 'browse_workspace']
         
