@@ -64,6 +64,7 @@ export function useResearchData() {
   return useMemo(
     () => ({
       data,
+      setData,
       setLiteratureOutput,
       setPopulationData,
       setSegmentationData,
@@ -75,6 +76,7 @@ export function useResearchData() {
     }),
     [
       data,
+      setData,
       setFeaturesData,
       setImportanceData,
       setLatexData,

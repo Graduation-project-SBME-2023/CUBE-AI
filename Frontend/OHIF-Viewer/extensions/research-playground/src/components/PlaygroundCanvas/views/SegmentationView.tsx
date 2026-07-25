@@ -314,6 +314,9 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
                 isFinished:    segmentationData.isFinished ?? false,
             });
             setIsLoading(false);
+        } else if (!segmentationData) {
+            setData({ targetRoi: '-', selectedModel: '-', volumes: [], failedVolumes: [], progress: undefined, sessionId: undefined, isFinished: false });
+            setIsLoading(true);
         } else {
             setIsLoading(true);
         }
