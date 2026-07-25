@@ -1,17 +1,19 @@
 import React from 'react';
-import { Pause, Play, RotateCcw, BookOpen, Bot, Upload } from 'lucide-react';
+import { Pause, Play, RotateCcw, BookOpen, Bot, Upload, Square } from 'lucide-react';
 
 interface CanvasHeaderProps {
   mode: 'planning' | 'executing' | 'results';
   literatureEnabled: boolean;
   canExecute: boolean;
   isPaused: boolean;
+  isStopping: boolean;
+  hasStopped: boolean;
   isConnected: boolean;
   labellingMode: 'manual' | 'automatic';
   labellingModeLocked: boolean;
   onStart: () => void;
   onTogglePause: () => void;
-  onRestart: () => void;
+  onStop: () => void;
   onReset: () => void;
   onToggleLabellingMode: () => void;
 }
@@ -21,12 +23,14 @@ export default function CanvasHeader({
   literatureEnabled,
   canExecute,
   isPaused,
+  isStopping,
+  hasStopped,
   isConnected,
   labellingMode,
   labellingModeLocked,
   onStart,
   onTogglePause,
-  onRestart,
+  onStop,
   onReset,
   onToggleLabellingMode,
 }: CanvasHeaderProps) {
@@ -70,20 +74,29 @@ export default function CanvasHeader({
           <>
             <button
               onClick={onTogglePause}
+              disabled={isStopping || hasStopped}
               className={`flex items-center gap-2 rounded border px-3 py-1.5 text-xs font-medium transition-colors ${
-                isPaused
-                  ? 'border-[#705228] bg-[#3b2d1c] text-[#f8ce46]'
-                  : 'border-[#3c5d80] bg-[#151a1f] text-[#91b9cd] hover:border-[#91b9cd]'
+                isStopping || hasStopped
+                  ? 'cursor-not-allowed border-[#3c5d80] bg-[#1d2a33] text-[#5c7a99] opacity-50'
+                  : isPaused
+                    ? 'border-[#ffc107] bg-[#332b00] text-[#ffc107] hover:bg-[#4d4000]'
+                    : 'border-[#3c5d80] bg-[#151a1f] text-[#91b9cd] hover:border-[#91b9cd]'
               }`}
             >
               {isPaused ? <Play size={14} /> : <Pause size={14} />}
               {isPaused ? 'Resume' : 'Pause'}
             </button>
             <button
-              onClick={onRestart}
-              className="flex items-center gap-2 rounded border border-[#3c5d80] bg-[#151a1f] px-3 py-1.5 text-xs text-[#91b9cd] transition-colors hover:bg-[#2c1a1f] hover:text-[#ff6b6b]"
+              onClick={onStop}
+              disabled={isStopping || hasStopped}
+              className={`flex items-center gap-2 rounded border px-3 py-1.5 text-xs font-medium transition-colors ${
+                isStopping || hasStopped
+                  ? 'cursor-not-allowed border-[#7a1e1e] bg-[#3b1010] text-[#ff6b6b] opacity-80 animate-pulse'
+                  : 'border-[#3c5d80] bg-[#151a1f] text-[#91b9cd] hover:border-[#ff6b6b] hover:bg-[#2c1a1f] hover:text-[#ff6b6b]'
+              }`}
             >
-              <RotateCcw size={14} /> Restart
+              <Square size={12} fill="currentColor" />
+              {hasStopped ? 'Stopped' : isStopping ? 'Stopping...' : 'Stop'}
             </button>
           </>
         )}
