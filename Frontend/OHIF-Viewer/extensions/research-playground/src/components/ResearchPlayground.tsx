@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, FlaskConical, List, MessageSquare, PlayCircle, Rocket, Settings } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import PhaseSidebar from './PlaygroundCanvas/PhaseSidebar';
@@ -53,7 +53,22 @@ function ResearchPlaygroundInner() {
   // True once we know the restored mode — gates both canvas mount and log replay
   // so PlaygroundCanvas always receives the correct initialMode on first render.
   const [restoredModeReady, setRestoredModeReady] = useState(!sessionId);
-  const { data, setLiteratureOutput, setPopulationData, setSegmentationData, setFeaturesData, setImportanceData, setModelingData, setReportData, setLatexData } = useResearchData();
+  const { data, setData, setLiteratureOutput, setPopulationData, setSegmentationData, setFeaturesData, setImportanceData, setModelingData, setReportData, setLatexData } = useResearchData();
+
+  // Clear all tab results when the user restarts execution
+  const clearAllTabData = useCallback(() => {
+    setData(prev => ({
+      ...prev,
+      populationData: null,
+      segmentationData: null,
+      featuresData: null,
+      importanceData: null,
+      modelingData: null,
+      reportData: null,
+      latexData: null,
+    }));
+    setUpdatedPhaseIds([]);
+  }, [setData]);
   const sidebarPhases = useMemo(
     () => phases.filter(phase => phase.id !== 'planning' && phase.id !== 'execution'),
     [phases]
@@ -196,7 +211,7 @@ function ResearchPlaygroundInner() {
         // Only render once the restored mode is known — prevents PlaygroundCanvas
         // from mounting with mode='planning' then receiving plan_approval during replay.
         node: restoredModeReady
-          ? <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} includeLitReview={includeLitReview} onLiteratureOutput={setLiteratureOutput} initialMode={restoredMode} />
+          ? <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} includeLitReview={includeLitReview} onLiteratureOutput={setLiteratureOutput} initialMode={restoredMode} onRestart={clearAllTabData} />
           : null,
       },
       { id: 'execution', node: <ExecutionView sessionId={sessionId} /> },

@@ -10,9 +10,10 @@ interface PlanningViewProps {
     includeLitReview?: boolean;
     onLiteratureOutput?: (data: any) => void;
     initialMode?: 'planning' | 'executing' | 'results';
+    onRestart?: () => void;
 }
 
-export default function PlanningView({ initialHypothesis, sessionId, includeLitReview = true, onLiteratureOutput, initialMode }: PlanningViewProps) {
+export default function PlanningView({ initialHypothesis, sessionId, includeLitReview = true, onLiteratureOutput, initialMode, onRestart }: PlanningViewProps) {
     const [isRegistryOpen, setIsRegistryOpen] = useState(true);
 
     useEffect(() => {
@@ -31,7 +32,7 @@ export default function PlanningView({ initialHypothesis, sessionId, includeLitR
                 <p className="text-[11px] uppercase tracking-widest text-[#5a8aaa] font-semibold">Planning Canvas</p>
             </div>
             {/* Reuse your existing Graph Engine */}
-            <PlaygroundCanvas initialHypothesis={initialHypothesis} session_id={sessionId as any} includeLitReview={includeLitReview} onLiteratureOutput={onLiteratureOutput} initialMode={initialMode} />
+            <PlaygroundCanvas initialHypothesis={initialHypothesis} session_id={sessionId as any} includeLitReview={includeLitReview} onLiteratureOutput={onLiteratureOutput} initialMode={initialMode} onClearTabData={onRestart} />
             
             {/* Reuse your existing Registry
             <AgentRegistry 
