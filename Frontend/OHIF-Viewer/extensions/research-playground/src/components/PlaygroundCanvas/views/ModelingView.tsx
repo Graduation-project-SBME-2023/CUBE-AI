@@ -18,7 +18,10 @@ interface PrCurve   { precision: number[]; recall: number[]; }
 interface PerModelData {
     label: string;
     cv_metrics: Record<string, number | null>;
-    holdout_metrics: Record<string, number | null>;
+    holdout_metrics: Record<string, number | null> & {
+        confusion_matrix?: number[][];
+        confusion_matrix_labels?: string[];
+    };
     confusion_matrix: number[][] | null;
     confusion_matrix_labels: string[] | null;
     roc_curve: RocCurve | null;
@@ -504,10 +507,19 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
 
     const h = (id: string): Set<string> => hidden[id] ?? new Set();
     const chartData = data.chart_data;
-    const hasCharts = !!(chartData && Object.keys(chartData.per_model ?? {}).length);
-    const modelKeys = hasCharts ? Object.keys(chartData!.per_model) : [];
+    // A comparison table is useful even when tuning/holdout evaluation failed
+    // for every individual model, so do not hide the whole experiment.
+    const hasCharts = !!(
+        chartData &&
+        (Object.keys(chartData.per_model ?? {}).length || chartData.comparison_table?.length)
+    );
+    const modelKeys = hasCharts ? Object.keys(chartData!.per_model ?? {}) : [];
     const activeKey = selectedModel ?? modelKeys[0] ?? null;
-    const activeModel = activeKey && hasCharts ? chartData!.per_model[activeKey] : null;
+    const activeModel = activeKey && hasCharts ? chartData!.per_model?.[activeKey] : null;
+    // Backward-compatible fallback for results emitted before the backend
+    // promoted these fields to the per-model chart-data level.
+    const confusionMatrix = activeModel?.confusion_matrix ?? activeModel?.holdout_metrics?.confusion_matrix ?? null;
+    const confusionMatrixLabels = activeModel?.confusion_matrix_labels ?? activeModel?.holdout_metrics?.confusion_matrix_labels;
 
     const MetricBar = () => (
         <div className="flex gap-2 flex-wrap">
@@ -608,11 +620,11 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
             {/* Confusion matrices */}
             {modelKeys.length > 0 && (
                 <Section title="Confusion Matrices" icon={<Target size={13} />}
-                    expandContent={activeModel?.confusion_matrix && (
+                    expandContent={confusionMatrix && (
                         <div className="flex flex-col lg:flex-row gap-8 items-start">
                             <ConfusionMatrix
-                                matrix={activeModel.confusion_matrix}
-                                labels={activeModel.confusion_matrix_labels ?? activeModel.confusion_matrix.map((_, i) => String(i))}
+                                matrix={confusionMatrix}
+                                labels={confusionMatrixLabels ?? confusionMatrix.map((_, i) => String(i))}
                             />
                             {activeModel.holdout_metrics && (
                                 <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -644,11 +656,11 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
                             </button>
                         ))}
                     </div>
-                    {activeModel?.confusion_matrix ? (
+                    {confusionMatrix ? (
                         <div className="flex flex-col lg:flex-row gap-6 items-start">
                             <ConfusionMatrix
-                                matrix={activeModel.confusion_matrix}
-                                labels={activeModel.confusion_matrix_labels ?? activeModel.confusion_matrix.map((_, i) => String(i))}
+                                matrix={confusionMatrix}
+                                labels={confusionMatrixLabels ?? confusionMatrix.map((_, i) => String(i))}
                             />
                             {activeModel.holdout_metrics && Object.keys(activeModel.holdout_metrics).length > 0 && (
                                 <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3">

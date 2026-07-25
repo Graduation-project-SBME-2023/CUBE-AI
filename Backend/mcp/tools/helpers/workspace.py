@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 
-from typing import Annotated
+from typing import Annotated, Optional
 from pydantic import BeforeValidator
 
 WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "../../../agent_system/workspace")
@@ -12,9 +12,11 @@ def get_workspace() -> str:
     return WORKSPACE_DIR
 
 
-def base_on_workspace_dir(path: str) -> str:
-    if not path or not path.strip():
-        raise ValueError(f"Workspace dir must not be empty")
+def base_on_workspace_dir(path: Optional[str]) -> Optional[str]:
+    if path is None:
+        return None
+    if not isinstance(path, (str, Path)) or not str(path).strip():
+        return None
 
     p = Path(path)
     workspace_idx = next(
@@ -30,4 +32,4 @@ def base_on_workspace_dir(path: str) -> str:
     return str(Path(WORKSPACE_DIR) / relative)
 
 
-WorkspacePath = Annotated[str, BeforeValidator(base_on_workspace_dir)]
+WorkspacePath = Annotated[Optional[str], BeforeValidator(base_on_workspace_dir)]

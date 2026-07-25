@@ -139,11 +139,13 @@ def _holdout_metrics(predictions: pd.DataFrame, y_true: pd.Series) -> dict:
     unique_classes = np.unique(y_true)
     is_binary = len(unique_classes) == 2
 
+    # Macro averaging is defined even if a very small holdout set contains
+    # only one observed class.
     metrics: dict = {
         "accuracy": _safe_float(accuracy_score(y_true, y_pred)),
-        "f1":       _safe_float(f1_score(y_true, y_pred, average="binary" if is_binary else "macro", zero_division=0)),
-        "precision":_safe_float(precision_score(y_true, y_pred, average="binary" if is_binary else "macro", zero_division=0)),
-        "recall":   _safe_float(recall_score(y_true, y_pred, average="binary" if is_binary else "macro", zero_division=0)),
+        "f1":       _safe_float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
+        "precision":_safe_float(precision_score(y_true, y_pred, average="macro", zero_division=0)),
+        "recall":   _safe_float(recall_score(y_true, y_pred, average="macro", zero_division=0)),
     }
 
     cm = confusion_matrix(y_true, y_pred)
@@ -187,7 +189,7 @@ class TrainClassifierInput(BaseModel):
         default=None, description="Experiment label. Auto-generated from timestamp if omitted."
     )
     fold: int = Field(
-        default=2, description="Number of cross-validation folds."
+        default=5, description="Number of cross-validation folds."
     )
     session_id: Optional[int] = Field(
         default=None, description="Random seed for reproducibility. Randomly chosen if omitted."
@@ -299,13 +301,13 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         data = pd.read_csv(params.input_path)
         logger.info(f"Data loaded: {data.shape[0]} rows × {data.shape[1]} cols")
 
-        MIN_ROWS = 10  # conservative minimum for any meaningful CV
+        MIN_ROWS = 6
         if data.shape[0] < MIN_ROWS:
             return json.dumps({
                 "status": "error",
                 "error_message": (
                     f"Dataset has only {data.shape[0]} rows which is too few for reliable "
-                    f"cross-validation training. A minimum of {MIN_ROWS} rows is recommended. "
+                    f"cross-validation training. At least {MIN_ROWS} rows are required. "
                     f"Consider collecting more data or merging with other datasets."
                 ),
                 "input_path": params.input_path,
@@ -316,20 +318,74 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         if target_column not in data.columns:
             raise ValueError(f"Target column '{target_column}' not found in data.")
 
+        if data[target_column].isna().any():
+            return json.dumps({
+                "status": "error",
+                "error_message": "The target column contains missing values. Every training row needs a target label.",
+                "input_path": params.input_path,
+            }, indent=2)
+
         class_counts = data[target_column].value_counts()
-        min_class_count = class_counts.min()
-        if min_class_count < params.fold:
+        if len(class_counts) < 2:
+            return json.dumps({
+                "status": "error",
+                "error_message": "Classification requires at least two target classes.",
+                "input_path": params.input_path,
+                "class_distribution": class_counts.to_dict(),
+            }, indent=2)
+
+        min_class_count = int(class_counts.min())
+        n_rows = data.shape[0]
+        requested_fold = max(2, params.fold)
+        effective_fold = min(requested_fold, min_class_count)
+        if effective_fold < 2:
             return json.dumps({
                 "status": "error",
                 "error_message": (
-                    f"The rarest class has only {min_class_count} sample(s), which is fewer "
-                    f"than fold={params.fold}. Stratified CV requires at least fold samples "
-                    f"per class. Either reduce fold or collect more data."
+                    f"The rarest class has only {min_class_count} sample(s). At least two "
+                    "samples per class are required for 2-fold cross-validation."
                 ),
                 "input_path": params.input_path,
                 "class_distribution": class_counts.to_dict(),
-                "fold": params.fold,
+                "fold": requested_fold,
             }, indent=2)
+
+        # ── Adaptive dataset-size handling ───────────────────────────────
+        # For small datasets we must:
+        #   1. Cap CV folds so each fold has ≥ 2 samples per class
+        #   2. Disable SMOTE when the minority class is too small for its
+        #      default k_neighbors (5, meaning 6 total samples needed)
+        #   3. Restrict candidate models to lightweight ones
+        #   4. Use a larger train split to maximise training samples
+        SMOTE_MIN_SAMPLES = 7  # SMOTE default k_neighbors=5 → need ≥ 6 minority samples in train
+        SMALL_COHORT_THRESHOLD = 30
+
+        # Estimate minority-class training samples after train/test split
+        train_ratio = 0.8 if n_rows < 50 else 0.7
+        estimated_train_minority = int(min_class_count * train_ratio)
+
+        is_small_cohort = n_rows < SMALL_COHORT_THRESHOLD
+
+        # Decide whether SMOTE is safe
+        if params.fix_imbalance and estimated_train_minority < SMOTE_MIN_SAMPLES:
+            effective_fix_imbalance = False
+            logger.warning(
+                "Disabling fix_imbalance (SMOTE): minority class has ~%d training "
+                "samples, but SMOTE needs at least %d. ",
+                estimated_train_minority, SMOTE_MIN_SAMPLES,
+            )
+        else:
+            effective_fix_imbalance = params.fix_imbalance
+
+        if is_small_cohort:
+            effective_n_select = min(params.n_select, 2)
+            logger.warning(
+                "Small cohort (%d rows): using %d-fold CV, %d candidate model(s), "
+                "fix_imbalance=%s.",
+                n_rows, effective_fold, effective_n_select, effective_fix_imbalance,
+            )
+        else:
+            effective_n_select = params.n_select
 
         # Store ground truth for holdout evaluation
         y_holdout = None  # will be set after setup splits data
@@ -350,9 +406,9 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             target=target_column,
             session_id=session_id,
             experiment_name=experiment_name,
-            fold=params.fold,
+            fold=effective_fold,
             use_gpu=use_gpu,
-            fix_imbalance=params.fix_imbalance,
+            fix_imbalance=effective_fix_imbalance,
             preprocess=params.preprocess,
             data_split_stratify=params.data_split_stratify,
             data_split_shuffle=params.data_split_shuffle,
@@ -361,6 +417,10 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             transformation=params.transformation,
             pca=params.pca,
         )
+        # For small datasets, allocate more rows to training
+        if n_rows < 50:
+            setup_kwargs["train_size"] = 0.8
+            logger.info("Using train_size=0.8 for small dataset (%d rows).", n_rows)
         for key, value in [
             ("ignore_features", _csv_list(params.ignore_features)),
             ("numeric_features", _csv_list(params.numeric_features)),
@@ -372,6 +432,22 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                 setup_kwargs[key] = value
 
         def _try_setup(kwargs):
+            # PyCaret minor versions expose slightly different setup
+            # parameters. Remove every unsupported optional parameter, not
+            # just the first one, before falling back to the legacy path.
+            kwargs = dict(kwargs)
+            while True:
+                try:
+                    return setup(**kwargs)
+                except TypeError as exc:
+                    message = str(exc)
+                    if "unexpected keyword argument" not in message:
+                        break
+                    parameter = message.split("'")[1]
+                    if parameter not in kwargs:
+                        break
+                    logger.warning("Removing unsupported setup parameter '%s' and retrying.", parameter)
+                    kwargs.pop(parameter)
             try:
                 return setup(**kwargs)
             except TypeError as exc:
@@ -383,8 +459,16 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                     return setup(**kwargs)
                 raise
             except Exception:
-                minimal = {"data": data, "target": target_column, "session_id": session_id}
-                logger.warning("Setup failed – retrying with minimal params.")
+                minimal = {
+                    "data": data,
+                    "target": target_column,
+                    "session_id": session_id,
+                    "fold": effective_fold,
+                    "fix_imbalance": effective_fix_imbalance,
+                }
+                if n_rows < 50:
+                    minimal["train_size"] = 0.8
+                logger.warning("Setup failed - retrying with minimal params.")
                 return setup(**minimal)
 
         _try_setup(setup_kwargs)
@@ -402,7 +486,10 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         payload = ProgressPayload(current=2, total=TOTAL_STAGES, label="Comparing models")
         log_tool_state(ToolEvent("tool_progress", "progress", payload))
 
-        compare_kwargs: dict = {"n_select": params.n_select}
+        compare_kwargs: dict = {"n_select": effective_n_select}
+        if is_small_cohort and not params.include_models:
+            # These models can train with only a few observations per CV fold.
+            compare_kwargs["include"] = ["lr", "nb", "dt", "ridge", "svm", "knn", "rf"]
         if params.include_models:
             compare_kwargs["include"] = _csv_list(params.include_models)
         if params.exclude_models:
@@ -565,8 +652,11 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                     "label": label,
                     "cv_metrics": cv_metrics,
                     "holdout_metrics": chart_info.get("metrics", {})           if chart_info else {},
-                    "confusion_matrix": chart_info.get("confusion_matrix")     if chart_info else None,
-                    "confusion_matrix_labels": chart_info.get("confusion_matrix_labels") if chart_info else None,
+                    # _holdout_metrics keeps confusion data inside its metrics
+                    # dictionary. Reading it at the outer level always yielded
+                    # null, even when a confusion-matrix image was generated.
+                    "confusion_matrix": chart_info.get("metrics", {}).get("confusion_matrix") if chart_info else None,
+                    "confusion_matrix_labels": chart_info.get("metrics", {}).get("confusion_matrix_labels") if chart_info else None,
                     "roc_curve": chart_info.get("roc_curve")                   if chart_info else None,
                     "pr_curve":  chart_info.get("pr_curve")                    if chart_info else None,
                 }
@@ -620,8 +710,8 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                     "label": "Blended",
                     "cv_metrics": blend_cv_metrics,
                     "holdout_metrics": chart_info.get("metrics", {})           if chart_info else {},
-                    "confusion_matrix": chart_info.get("confusion_matrix")     if chart_info else None,
-                    "confusion_matrix_labels": chart_info.get("confusion_matrix_labels") if chart_info else None,
+                    "confusion_matrix": chart_info.get("metrics", {}).get("confusion_matrix") if chart_info else None,
+                    "confusion_matrix_labels": chart_info.get("metrics", {}).get("confusion_matrix_labels") if chart_info else None,
                     "roc_curve": chart_info.get("roc_curve")                   if chart_info else None,
                     "pr_curve":  chart_info.get("pr_curve")                    if chart_info else None,
                 }
@@ -672,7 +762,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             "chart_data": {
                 "comparison_table": comparison_table,
                 "per_model": per_model_chart,
-                "fold": params.fold,
+                "fold": effective_fold,
             },
         }, indent=2)
 

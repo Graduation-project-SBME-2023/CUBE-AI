@@ -64,6 +64,26 @@ const MessageSquareIcon: any = MessageSquare;
 const FlaskConicalIcon: any = FlaskConical;
 const SettingsIcon: any = Settings;
 
+function normalizeModelingPayload(payload: any): Record<string, any> {
+    if (!payload || typeof payload !== 'object') return {};
+
+    const result = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+    const isExperiment = (value: any) => Boolean(
+        value &&
+        typeof value === 'object' &&
+        (value.chart_data || value.experiment_name || value.tool === 'classification')
+    );
+
+    if (isExperiment(result)) {
+        const experimentName = result.experiment_name || 'classification_experiment';
+        return { [experimentName]: result };
+    }
+
+    return Object.fromEntries(
+        Object.entries(result).filter(([, value]) => isExperiment(value))
+    );
+}
+
 export default function ResearchPlayground() {
     const location = useLocation();
     const navigate = useNavigate();
@@ -139,7 +159,10 @@ export default function ResearchPlayground() {
                     }
                     break;
                 case 'modeling_output':
-                    setModelingData(payload);
+                    setModelingData((prev: any) => ({
+                        ...(prev ?? {}),
+                        ...normalizeModelingPayload(payload),
+                    }));
                     break;
                 case 'report_output':
                     setReportData(payload);

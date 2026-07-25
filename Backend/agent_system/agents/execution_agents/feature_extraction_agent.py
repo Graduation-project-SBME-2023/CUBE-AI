@@ -49,6 +49,7 @@ class FeatureExtractionAgent(AssistantAgent):
         workspace_folder=None,
         mcp_server_path=None,
         session_id=None,
+        max_tool_iterations=35,
     ):
         model_client = OllamaClient() if not model_client else model_client
 
@@ -98,6 +99,7 @@ class FeatureExtractionAgent(AssistantAgent):
             "scratchpad_set_status",
             "scratchpad_read_agent",
             "write_agent_output",
+            "browse_workspace",
         ]
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
         name = "feature_extraction_agent"
@@ -113,7 +115,7 @@ class FeatureExtractionAgent(AssistantAgent):
             tools=tools,
             description=description,
             system_message=system_message,
-            max_tool_iterations=20,
+            max_tool_iterations=max_tool_iterations,
         )
 
     @staticmethod

@@ -21,6 +21,33 @@ import { ResearchRouteState } from '../types';
 
 const DEFAULT_PHASE = 'planning';
 
+/**
+ * Modeling updates can arrive as either the raw PyCaret response or the
+ * experiment-keyed payload produced by PipelineMonitor. Convert both forms
+ * before state is updated so live updates and replayed messages render alike.
+ */
+function normalizeModelingPayload(payload: any): Record<string, any> {
+  if (!payload || typeof payload !== 'object') return {};
+
+  const result = payload.data && typeof payload.data === 'object' ? payload.data : payload;
+  const isExperiment = (value: any) => Boolean(
+    value &&
+      typeof value === 'object' &&
+      (value.chart_data || value.experiment_name || value.tool === 'classification')
+  );
+
+  if (isExperiment(result)) {
+    const experimentName = result.experiment_name || 'classification_experiment';
+    return { [experimentName]: result };
+  }
+
+  // Agent-output summaries are ordinary objects too, but their fields
+  // (inputs, outputs, errors, warnings) are not modeling experiments.
+  return Object.fromEntries(
+    Object.entries(result).filter(([, value]) => isExperiment(value))
+  );
+}
+
 function ResearchPlaygroundInner() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -150,7 +177,10 @@ function ResearchPlaygroundInner() {
           else setFeaturesData(payload);
           break;
         case 'modeling_output':
-          setModelingData(payload);
+          // setModelingData is a custom context helper, not React's raw
+          // setState function. Pass the normalized object directly; the
+          // helper performs the merge with existing experiments.
+          setModelingData(normalizeModelingPayload(payload));
           break;
         case 'report_output':
           setReportData({ ...payload, sessionId: event.session_id || sessionId });

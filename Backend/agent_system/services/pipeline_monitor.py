@@ -25,13 +25,18 @@ logger = logging.getLogger(__name__)
 
 # ── Agent-to-view mapping for tool result emission ────────────────────────────
 
-def _parse_tool_content(content: str) -> Dict[str, Any]:
+def _parse_tool_content(content: Any) -> Dict[str, Any]:
     """Attempt to parse tool result content as JSON, always returning a dict."""
     if not content:
         return {}
 
+    # Some MCP/AutoGen versions hand us an already-decoded result instead of
+    # the JSON string representation used by older versions.
+    if isinstance(content, dict):
+        return content
+
     try:
-        parsed = json.loads(content)
+        parsed = json.loads(content) if isinstance(content, str) else content
 
         # Case 1: already a dict
         if isinstance(parsed, dict):
@@ -157,27 +162,32 @@ async def _emit_tool_result_to_view(
 
     # ── Modeling agent ────────────────────────────────────────────────────
     elif "modeling" in source.lower():
-        msg_type = "modeling_output"
         if tool_name == "write_agent_output":
-            agent_data = await _read_agent_output_file(workspace_folder, "modeling_agent")
-            payload = agent_data if agent_data else parsed
-            data = payload
-            await emit_modeling_output(payload, session_id)
+            # This summary is for the reporter agent. It has no chart_data,
+            # so it must never be persisted or replayed as a modeling view
+            # event; otherwise its fields (inputs, outputs, warnings, etc.)
+            # appear as fake experiments in the UI.
+            return None, None
 
         elif tool_name == "pycaret_train_classifier":
-            # Forward chart_data directly — drives all frontend chart components
-            data = {
+            msg_type = "modeling_output"
+            # Build a per-experiment entry with chart_data for the frontend.
+            # The frontend ModelingView expects Record<string, ModelingData>
+            # keyed by experiment_name so each call appends a new accordion.
+            exp_name = parsed.get("experiment_name") or "experiment"
+            experiment_entry = {
                 "tool": "classification",
                 "status": parsed.get("status", "completed"),
-                "experiment_name": parsed.get("experiment_name"),
+                "experiment_name": exp_name,
                 "model_summary": parsed.get("model_summary"),
                 "final_model_path": parsed.get("final_model_path"),
                 "created_files": parsed.get("created_files", []),
                 "individual_model_paths": parsed.get("individual_model_paths", {}),
                 "model_test_predictions": parsed.get("model_test_predictions", {}),
-                # NEW — full chart payload for React components
+                # Full chart payload for React chart components
                 "chart_data": parsed.get("chart_data"),
             }
+            data = {exp_name: experiment_entry}
             await emit_modeling_output(data, session_id)
 
     # ── Result Reporter agent ─────────────────────────────────────────────
