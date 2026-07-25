@@ -177,15 +177,21 @@ async def run_planner(session: Session, message: str, do_lit_review: bool = True
 
 async def run_pipeline(session: Session) -> None:
     base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    workspace_folder = os.path.join(
+    original_workspace = os.path.join(
         base_agents_workspace, f"workspace_{session.session_id}"
     )
+    # On restart, session.workspace_folder is set to a new retry folder.
+    # On first run it is None, so we fall back to the original.
+    workspace_folder = getattr(session, "workspace_folder", None) or original_workspace
+    os.makedirs(workspace_folder, exist_ok=True)
     pipeline_logger = logging.getLogger("Execution Pipeline")
+
     logging.getLogger("autogen_core").setLevel(logging.CRITICAL)
     logging.getLogger("autogen_core.events").setLevel(logging.CRITICAL)
 
     # Load planner state: hypothesis + task messages (if available)
-    state_file = os.path.join(workspace_folder, "state.json")
+    # Always read from the original workspace — that's where the planner wrote state.json
+    state_file = os.path.join(original_workspace, "state.json")
     task_messages = []
     hypothesis = None
     try:
@@ -194,7 +200,7 @@ async def run_pipeline(session: Session) -> None:
                 content = await f.read()
                 if content.strip():
                     planner_state = PlannerState.model_validate_json(content)
-                    task_messages = planner_state.task_messages
+                    task_messages = [step.task_message for step in planner_state.plan.steps if step.task_message is not None]
                     hypothesis = planner_state.hypothesis.title
                     logger.info(
                         f"Loaded {len(task_messages)} task messages from planner state"
@@ -214,10 +220,40 @@ async def run_pipeline(session: Session) -> None:
     if session.cancel_event.is_set():
         raise asyncio.CancelledError()
 
+    from autogen_core import CancellationToken
+    cancellation_token = CancellationToken()
+
+    async def cancel_on_event():
+        await session.cancel_event.wait()
+        cancellation_token.cancel()
+
+    cancel_task = asyncio.create_task(cancel_on_event())
+
+    def make_pausable(client):
+        original_create = client.create
+        original_create_stream = client.create_stream
+        
+        async def wrapped_create(*args, **kwargs):
+            await session.pause_event.wait()
+            if session.cancel_event.is_set():
+                raise asyncio.CancelledError()
+            return await original_create(*args, **kwargs)
+            
+        async def wrapped_create_stream(*args, **kwargs):
+            await session.pause_event.wait()
+            if session.cancel_event.is_set():
+                raise asyncio.CancelledError()
+            async for chunk in original_create_stream(*args, **kwargs):
+                yield chunk
+
+        client.create = wrapped_create
+        client.create_stream = wrapped_create_stream
+        return client
+
     graph_builder = await BasicPipelineBuilder.create(
         workspace_folder=workspace_folder,
         task_messages=task_messages,
-        model_client=create_model_client_from_config(),
+        model_client=make_pausable(create_model_client_from_config()),
         session_id=session.session_id,
     )
 
@@ -240,7 +276,7 @@ async def run_pipeline(session: Session) -> None:
     await session.execution_monitor._broadcast()
 
     try:
-        async for event in graph_flow.run_stream(task=task_prompt):
+        async for event in graph_flow.run_stream(task=task_prompt, cancellation_token=cancellation_token):
             if session.cancel_event.is_set():
                 raise asyncio.CancelledError()
             await session.pause_event.wait()
@@ -308,6 +344,8 @@ async def run_pipeline(session: Session) -> None:
         logger.error(f"here, {e} occured, check in this method")
         logger.error(e)
         await session.execution_monitor.on_pipeline_error(e)
+    finally:
+        cancel_task.cancel()
 
 
 # ----------------------------------------------------------------------
@@ -350,19 +388,19 @@ async def resume_execution(request: SessionControlRequest):
 @app.post("/stop")
 async def stop_execution(request: SessionControlRequest):
     try:
+        session = session_service.store.require(request.session_id)
+
         session_service.stop(request.session_id)
+
+        # Bug fix #1: broadcast run_stopped so the frontend resets its mode
+        asyncio.create_task(
+            ws_manager.send_ws_message("run_stopped", "stopped", session_id=request.session_id)
+        )
+
         return {"session_id": request.session_id, "status": "stopped"}
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
-
-@app.post("/restart")
-async def restart_execution(request: SessionControlRequest):
-    try:
-        await session_service.restart_execution(request.session_id, run_pipeline)
-        return {"session_id": request.session_id, "status": "restarted"}
-    except KeyError:
-        raise HTTPException(status_code=404, detail="Session not found")
 
 
 @app.get("/status/{session_id}")

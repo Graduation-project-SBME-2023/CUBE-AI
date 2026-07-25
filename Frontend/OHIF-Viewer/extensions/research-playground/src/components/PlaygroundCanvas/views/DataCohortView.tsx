@@ -123,7 +123,18 @@ export default function DataCohortView({ populationData, segmentationData, sessi
     const [hoveredUid, setHoveredUid] = useState<string | null>(null);
 
     useEffect(() => {
-        if (!populationData) return;
+        if (!populationData) {
+            setAccumulatedPop({
+                count: null,
+                uids: [],
+                inclusion: [],
+                exclusion: [],
+                modality: 'Awaiting...',
+                summary: '',
+                matchRate: null,
+            });
+            return;
+        }
 
         setAccumulatedPop(prev => {
             const next = { ...prev };

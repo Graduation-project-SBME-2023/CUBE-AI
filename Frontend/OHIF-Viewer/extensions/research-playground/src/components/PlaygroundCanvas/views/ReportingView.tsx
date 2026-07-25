@@ -36,7 +36,12 @@ export default function ReportingView({ reportData, latexData, sessionId }: Repo
 
     useEffect(() => {
         setEditableLatex(latexText || '');
-    }, [latexText]);
+        if (!latexData) {
+            setCompiledPdfUrl('');
+            setCompileStatus('idle');
+            setCompileError('');
+        }
+    }, [latexText, latexData]);
 
     useEffect(() => {
         if (latexData?.output_filename) {
