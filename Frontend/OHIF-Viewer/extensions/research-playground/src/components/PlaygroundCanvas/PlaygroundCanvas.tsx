@@ -15,6 +15,8 @@ interface PlaygroundCanvasProps {
   onLiteratureOutput?: (data: any) => void;
   /** Pre-resolved mode (e.g. 'executing') from session restore — avoids timing race with WS replay */
   initialMode?: 'planning' | 'executing' | 'results';
+  /** Called when execution starts or restarts — parent should clear all tab data */
+  onClearTabData?: () => void;
 }
 
 export default function PlaygroundCanvas({
@@ -23,6 +25,7 @@ export default function PlaygroundCanvas({
   includeLitReview = true,
   onLiteratureOutput,
   initialMode = 'planning',
+  onClearTabData,
 }: PlaygroundCanvasProps) {
   const normalizeKey = useCallback(
     (value?: string | null) =>
@@ -38,6 +41,8 @@ export default function PlaygroundCanvas({
   const [nodes, setNodes] = useState<FlowNode[]>(() => createInitialNodes(initialHypothesis));
   const [edges, setEdges] = useState<FlowEdge[]>(INITIAL_EDGES);
   const [isPaused, setIsPaused] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const [hasStopped, setHasStopped] = useState(false);
   const [isConnected, setIsConnected] = useState(websocketService.isConnected());
   const [pendingPrompt, setPendingPrompt] = useState<{ type: string; message: string } | null>(null);
   const [canExecute, setCanExecute] = useState(initialMode !== 'planning');
@@ -497,6 +502,23 @@ export default function PlaygroundCanvas({
         setPendingPrompt(null);
         updateCurrentAgent('run_finished');
       }
+
+      if (type === 'run_stopped') {
+        // Pipeline was stopped by the user — mark all active agent nodes as cancelled
+        // and stay in 'executing' mode so Restart / Re-run buttons are still visible
+        setIsPaused(false);
+        setHasStopped(true);
+        setNodes(prev =>
+          prev.map(n => {
+            if (n.type !== 'agent') return n;
+            const d = n.data as AgentNodeData;
+            if (d.status === 'active') {
+              return { ...n, data: { ...d, status: 'failed', isExpanded: false } };
+            }
+            return n;
+          })
+        );
+      }
     });
 
     const unsubscribeStatus = websocketService.onStatusChange(status => setIsConnected(status));
@@ -559,6 +581,8 @@ export default function PlaygroundCanvas({
   );
 
   const startExecution = async () => {
+    // Clear old tab results immediately so stale data isn't shown while new run begins
+    onClearTabData?.();
     setMode('executing');
     setIsPaused(false);
     setNodes(resetNodeLogs);
@@ -580,16 +604,19 @@ export default function PlaygroundCanvas({
     });
   };
 
-  const restartExecution = async () => {
-    await fetch(`${getAgentsApiBaseUrl()}/restart`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: String(session_id) }),
-    });
-    setIsPaused(false);
-    setMode('executing');
-    setNodes(resetNodeLogs);
-    setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
+
+  const stopExecution = async () => {
+    if (isStopping) return;
+    setIsStopping(true);
+    try {
+      await fetch(`${getAgentsApiBaseUrl()}/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: String(session_id) }),
+      });
+    } finally {
+      setIsStopping(false);
+    }
   };
 
   const resetWorkflow = () => {
@@ -658,12 +685,14 @@ export default function PlaygroundCanvas({
         literatureEnabled={!!nodes.find(n => n.id === 'literature_review')}
         canExecute={canExecute}
         isPaused={isPaused}
+        isStopping={isStopping}
+        hasStopped={hasStopped}
         isConnected={isConnected}
         labellingMode={labellingMode}
         labellingModeLocked={labellingModeLocked}
         onStart={startExecution}
         onTogglePause={togglePause}
-        onRestart={restartExecution}
+        onStop={stopExecution}
         onReset={resetWorkflow}
         onToggleLabellingMode={toggleLabellingMode}
       />

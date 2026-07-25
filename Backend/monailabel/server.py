@@ -70,3 +70,13 @@ async def lifespan(app):
 
 
 monai_server_app.router.lifespan_context = lifespan
+
+import os
+import threading
+
+@monai_server_app.post("/restart")
+def restart_monailabel():
+    def kill_server():
+        os._exit(1)
+    threading.Timer(0.5, kill_server).start()
+    return {"status": "restarting"}
