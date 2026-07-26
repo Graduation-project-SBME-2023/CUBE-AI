@@ -777,6 +777,54 @@ async def ws_broadcast(data: dict):
 _review_futures: Dict[str, asyncio.Future] = {}  # kept for ready-prefix entries
 _review_events: Dict[str, dict] = {}  # session_id -> {"event": Event, "result": dict|None}
 
+
+# ── Review disk-persistence helpers ──────────────────────────────────────────
+# Saves/loads the human-review result to disk so it survives Docker restarts.
+# File: <workspace>/review_result.json
+
+def _review_disk_path(session_id: str) -> str:
+    base = os.environ.get("AGENTS_WORKSPACE_DIR", "/app/agents_workspace")
+    workspace = os.path.join(base, f"workspace_{session_id}")
+    return os.path.join(workspace, "review_result.json")
+
+
+def _persist_review_to_disk(session_id: str, payload: dict) -> None:
+    """Write the review payload to disk so it survives a container restart."""
+    try:
+        path = _review_disk_path(session_id)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+        logger.info(f"[Review] Persisted review to disk for session={session_id}: {path}")
+    except Exception as exc:
+        logger.error(f"[Review] Failed to persist review to disk for session={session_id}: {exc}")
+
+
+def _load_review_from_disk(session_id: str) -> dict | None:
+    """Load a persisted review result from disk (returns None if not found)."""
+    try:
+        path = _review_disk_path(session_id)
+        if not os.path.isfile(path):
+            return None
+        with open(path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        logger.info(f"[Review] Loaded review from disk for session={session_id}: {path}")
+        return payload
+    except Exception as exc:
+        logger.error(f"[Review] Failed to load review from disk for session={session_id}: {exc}")
+        return None
+
+
+def _clear_review_from_disk(session_id: str) -> None:
+    """Delete the persisted review file once it has been consumed."""
+    try:
+        path = _review_disk_path(session_id)
+        if os.path.isfile(path):
+            os.remove(path)
+            logger.info(f"[Review] Cleared disk review for session={session_id}")
+    except Exception as exc:
+        logger.warning(f"[Review] Failed to clear disk review for session={session_id}: {exc}")
+
 # ----------------------------------------------------------------------
 # Population targets saving & mode endpoint
 # ----------------------------------------------------------------------
@@ -857,18 +905,21 @@ async def segmentation_review(data: dict):
         "modified": data.get("modified", []),
     }
     logger.info(f"[Review] Received triage for session={session_id}: {review_payload}")
-    
-    # resolve the waiting module if it's already polling via the event mechanism
+
+    # Always persist to disk first so the result survives container restarts.
+    _persist_review_to_disk(session_id, review_payload)
+
+    # Resolve the waiting module if it's already polling via the event mechanism.
     ev_entry = _review_events.get(session_id)
     if ev_entry is not None:
         ev_entry["result"] = review_payload
         ev_entry["event"].set()
         logger.info(f"[Review] Resolved waiting event for session={session_id}")
     else:
-        # store it in case the module polls later (pre-existing ready-prefix scheme)
+        # Store in memory so the module can pick it up if it reconnects before restart.
         _review_futures[f"ready:{session_id}"] = review_payload  # plain dict, not future
         logger.info(f"[Review] No active poller for session={session_id}. Stored as ready:{session_id} for later pickup.")
-    
+
     return {"status": "ok"}
 
 
@@ -1074,10 +1125,16 @@ async def wait_for_review(session_id: str, timeout: int = 3600):
     """
     # ── Fast path: review already arrived before this poll ───────────────────
     ready_key = f"ready:{session_id}"
+    # Also check disk so review results survive Docker restarts.
+    if ready_key not in _review_futures:
+        disk_result = _load_review_from_disk(session_id)
+        if disk_result is not None:
+            _review_futures[ready_key] = disk_result
     if ready_key in _review_futures:
         result = _review_futures.pop(ready_key)
-        # clean up event entry if present
+        # clean up event entry and disk file if present
         _review_events.pop(session_id, None)
+        _clear_review_from_disk(session_id)
         return result
 
     # ── Also check the event store (review arrived while another poll was alive)
@@ -1085,6 +1142,7 @@ async def wait_for_review(session_id: str, timeout: int = 3600):
     if ev_entry is not None and ev_entry["event"].is_set():
         result = ev_entry["result"]
         _review_events.pop(session_id, None)
+        _clear_review_from_disk(session_id)   # clean up disk file here too
         return result
 
     # ── Register / reuse a persistent event for this session ─────────────────
@@ -1104,7 +1162,50 @@ async def wait_for_review(session_id: str, timeout: int = 3600):
     # Event was set — collect result and clean up
     result = ev_entry["result"]
     _review_events.pop(session_id, None)
+    _clear_review_from_disk(session_id)
     return result
+
+# ----------------------------------------------------------------------
+# Session Recovery
+# ----------------------------------------------------------------------
+
+
+@app.post("/session/{session_id}/recover")
+async def recover_session(session_id: str):
+    """
+    Re-create the in-memory Session and restart the execution pipeline after
+    a container restart.
+
+    Call this when:
+    - GET /status/{session_id} returns 404 (session lost from memory), AND
+    - GET /session/{session_id}/execution-state shows RUNNING agents in the DB
+      (pipeline was mid-flight when the server died).
+
+    The endpoint is idempotent: if the session is already active in memory it
+    returns immediately without spawning a second task.
+    """
+    existing = session_service.get_session(session_id)
+    if existing and existing.execution_task and not existing.execution_task.done():
+        logger.info(f"[Recover] Session {session_id} is already running — skipping recovery.")
+        return {"session_id": session_id, "status": "already_running"}
+
+    logger.info(f"[Recover] Recovering session {session_id} after restart.")
+
+    # Re-create the session in the store (get_or_create is safe here).
+    session = session_service.store.get_or_create(session_id)
+
+    # Broadcast RUNNING state so the frontend toolbar updates.
+    asyncio.create_task(
+        session_service._ws_send("state_update", {"state": "RUNNING"}, session_id=session_id)
+    )
+
+    # Re-run the full pipeline — the segmentation module will call
+    # /segmentation-review/wait, hit the fast-path (disk result present), and
+    # continue without blocking for another human review.
+    await session_service.start_execution(session_id, run_pipeline)
+
+    return {"session_id": session_id, "status": "recovery_started"}
+
 
 # ----------------------------------------------------------------------
 # Entry point
