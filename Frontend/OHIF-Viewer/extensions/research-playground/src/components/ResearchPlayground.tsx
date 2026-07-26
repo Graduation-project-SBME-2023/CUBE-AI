@@ -126,13 +126,31 @@ function ResearchPlaygroundInner() {
                         setRestoredMode('executing');
                     }
                 } else {
-                    // Backend has no in-memory session (e.g. restarted) — check execution-state
+                    // Backend has no in-memory session (e.g. after Docker restart) — check execution-state
                     const execRes = await fetch(`http://localhost:8150/session/${sessionId}/execution-state`);
                     if (execRes.ok) {
                         const execData = await execRes.json();
                         if (Array.isArray(execData?.agents) && execData.agents.length > 0) {
                             const allDone = execData.agents.every((a: any) => a.status === 'COMPLETED');
                             setRestoredMode(allDone ? 'results' : 'executing');
+
+                            // Fix 3: If the pipeline was mid-flight when the server restarted,
+                            // trigger server-side recovery so the session re-enters memory and
+                            // picks up any persisted review result automatically.
+                            const hasRunningAgents = execData.agents.some(
+                                (a: any) => a.status === 'RUNNING' || a.status === 'PENDING'
+                            );
+                            if (hasRunningAgents && !allDone) {
+                                console.log('[ResearchPlayground] Triggering session recovery after restart...');
+                                try {
+                                    await fetch(`http://localhost:8150/session/${sessionId}/recover`, {
+                                        method: 'POST',
+                                    });
+                                    console.log('[ResearchPlayground] Session recovery triggered successfully.');
+                                } catch (recoverErr) {
+                                    console.error('[ResearchPlayground] Session recovery failed:', recoverErr);
+                                }
+                            }
                         }
                     }
                 }

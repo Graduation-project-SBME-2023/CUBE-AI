@@ -907,9 +907,34 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
                 )
             max_z = min(vol_data.shape[2], mask_data.shape[2])
 
-            # safe zone
+            # Diagnostic: compare full-mask signal vs. capped-Z signal
+            full_mask_unique = np.unique(mask_data)
+            capped_mask_unique = np.unique(mask_data[:, :, :max_z])
+            logger.info(f"Mask unique (full): {full_mask_unique}  |  unique (capped to Z={max_z}): {capped_mask_unique}")
+
+            # safe zone — search within capped range first
             z_indices = np.any(mask_data[:, :, :max_z] > 0, axis=(0, 1))
             active_slices = np.where(z_indices)[0]
+
+            # If the capped range has no signal but the full mask does, the tumor
+            # lives in slices beyond max_z (shape mismatch where mask > volume in Z).
+            # Fall back to searching the full mask and clamping slice indices to max_z-1.
+            if len(active_slices) == 0 and np.any(mask_data > 0):
+                logger.warning(
+                    f"Mask for {uid} has signal outside the capped Z range "
+                    f"(max_z={max_z}, mask.shape[2]={mask_data.shape[2]}). "
+                    f"Falling back to full-mask Z search."
+                )
+                z_indices_full = np.any(mask_data > 0, axis=(0, 1))
+                active_slices_full = np.where(z_indices_full)[0]
+                # Clamp to the volume's Z extent so we don't index out-of-bounds
+                active_slices = active_slices_full[active_slices_full < max_z]
+                if len(active_slices) == 0 and len(active_slices_full) > 0:
+                    # All signal is completely out of the volume's Z range — use centre
+                    logger.warning(
+                        f"All mask signal for {uid} is beyond the volume Z range; "
+                        f"rendering centre slices as preview."
+                    )
 
             is_empty_mask = False
             if len(active_slices) == 0:
