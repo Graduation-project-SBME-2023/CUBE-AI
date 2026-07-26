@@ -378,14 +378,23 @@ class sam(BasicInferTask):
             # Initialize the predictor for new task
             self.initialize_predictor(device=device)
             
-            if not hasattr(self, "current_volume_id") or self.current_volume_id != volume_id:
+            # A failed request clears the in-memory state.  Do not try to reuse
+            # the old volume id in that case: initialise a fresh state instead.
+            # Previously a failed 2D box request left ``current_volume_id`` set
+            # but removed ``inference_state``, causing the following 3D request
+            # to fail with ``AttributeError: ... inference_state``.
+            has_state = getattr(self, "inference_state", None) is not None
+            has_saved_state = bool(getattr(self, "temp_state_path", None)) and os.path.exists(
+                self.temp_state_path
+            )
+            if self.current_volume_id != volume_id or (not has_state and not has_saved_state):
                 logger.info(f"Initializing NEW volume: {volume_id}")
                 self.current_volume_id = volume_id
                 self._initialize_new_volume(data, image_array)
             else:
                 logger.info(f"Reusing existing volume state: {volume_id}")
                 # load cached state if available
-                if hasattr(self, "temp_state_path") and self.temp_state_path:
+                if not has_state and has_saved_state:
                     self.inference_state = StateManager.load_state(self.temp_state_path)
                     self.annotated_image = np.zeros_like(image_array, dtype=np.int32)
                     self.object_bounds = {}                    
@@ -712,14 +721,15 @@ class sam(BasicInferTask):
     
     def cleanup_inference_state(self):
         """Helper method to clean up inference state safely"""
-        if hasattr(self, 'inference_state'):
+        inference_state = getattr(self, "inference_state", None)
+        if inference_state is not None:
             try:
-                for key in self.inference_state:
-                    if isinstance(self.inference_state[key], dict):
-                        for subkey in self.inference_state[key]:
-                            tensor = self.inference_state[key][subkey]
+                for key in inference_state:
+                    if isinstance(inference_state[key], dict):
+                        for subkey in inference_state[key]:
+                            tensor = inference_state[key][subkey]
                             if isinstance(tensor, torch.Tensor):
-                                self.inference_state[key][subkey] = tensor.cpu()
+                                inference_state[key][subkey] = tensor.cpu()
                 del self.inference_state
                 gc.collect()
                 if torch.cuda.is_available():
@@ -758,11 +768,25 @@ class sam(BasicInferTask):
                     logger.info(f"Labels_within_triggered_slice: {Labels_within_triggered_slice}")
 
 
-                    boxes_within_triggered_slice=[]
-                    if len(boxes) > 0:
-                        for box in boxes[0]:
-                            if box[1] == frame_idx:
-                                boxes_within_triggered_slice.append(box[0])
+                    boxes_within_triggered_slice = []
+                    if boxes:
+                        # The UI sends one entry per box as
+                        # ``[[xmin, ymin, xmax, ymax], slice_index, plane]``.
+                        # Older payloads wrapped that list once more, so accept
+                        # both forms.  Iterating ``boxes[0]`` unconditionally
+                        # treated the slice index integer as a box and raised
+                        # ``TypeError: 'int' object is not subscriptable``.
+                        box_entries = boxes
+                        if len(boxes) == 1 and isinstance(boxes[0], list) and boxes[0] and isinstance(boxes[0][0], list) and isinstance(boxes[0][0][0], list):
+                            box_entries = boxes[0]
+
+                        for box_entry in box_entries:
+                            if not isinstance(box_entry, (list, tuple)) or len(box_entry) < 2:
+                                logger.warning("Ignoring malformed SAM box prompt: %r", box_entry)
+                                continue
+                            box_coords, box_slice = box_entry[0], box_entry[1]
+                            if int(box_slice) == int(frame_idx):
+                                boxes_within_triggered_slice.append(box_coords)
 
                     logger.info(f"boxes_within_triggered_slice: {boxes_within_triggered_slice}")
 

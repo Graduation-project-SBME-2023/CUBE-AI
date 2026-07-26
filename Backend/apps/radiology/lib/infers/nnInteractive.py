@@ -11,6 +11,7 @@
 
 from typing import Callable, Sequence
 import os
+import inspect
 import nibabel as nib
 from typing import Optional, Tuple
 import numpy as np
@@ -70,8 +71,7 @@ class NNINTERACTIVE(BasicInferTask):
             **kwargs,
         )
         self.target_spacing = target_spacing
-        radiology_path = Path("../../../models")
-        self.BASE_PATH =radiology_path
+        self.BASE_PATH = Path(os.getenv("MODELS_DIR", "/models"))
         self.DATA_PATH = Path("/apps/radiology")
         self.session=None
 
@@ -82,47 +82,61 @@ class NNINTERACTIVE(BasicInferTask):
     def pre_transforms(self, data=None) -> Sequence[Callable]:
         return []
 
-    def adjust_points(self, data, viewport=None):
-        """
-        Adjusts the Z coordinate and swaps X/Y for all points.
-        """
-        image_array = nib.load(data["image"]).get_fdata()
-        x_dim = image_array.shape[0]
-        y_dim = image_array.shape[1]
-        z_dim = image_array.shape[2] 
-        updated_points = []
-        x = data["Points"]['points'][-1]["0"]
-        y = data["Points"]['points'][-1]["1"]
-        z = data["Points"]['points'][-1]["2"]
-        point = (int(x), int(y), int(z))
-        updated_points=point
-        print("Updated Points in  view:", updated_points)
+    def get_point_interactions(self, data):
+        """Validate UI prompts and convert them to ``(point, is_positive)`` pairs."""
+        prompts = data.get("Points") or {}
+        points = prompts.get("points") or []
+        labels = prompts.get("labels") or []
+        if len(points) != len(labels):
+            raise ValueError("Points.points and Points.labels must have the same length")
 
+        image_shape = nib.load(data[self.input_key]).shape[:3]
+        interactions = []
+        for point, label in zip(points, labels):
+            if isinstance(point, dict):
+                point = [point.get(str(index), point.get(index)) for index in range(3)]
+            if not isinstance(point, (list, tuple, np.ndarray)) or len(point) != 3:
+                raise ValueError(f"Invalid nnInteractive point: {point!r}")
 
-        data["Points"]['points']= updated_points
+            coordinates = tuple(int(round(float(value))) for value in point)
+            if any(value < 0 or value >= image_shape[index] for index, value in enumerate(coordinates)):
+                raise ValueError(f"nnInteractive point {coordinates} is outside image bounds {image_shape}")
+            interactions.append((coordinates, bool(int(label))))
+
+        if not interactions:
+            raise ValueError("At least one positive or negative point is required for nnInteractive")
+        return interactions
 
 
     # Intilization function
     def initialize_session(self, device: str = "cuda"):
-        # Initialize inference session
+        # nnInteractive changed optional constructor arguments across releases.
+        # Only pass options advertised by the installed package so a container
+        # upgrade cannot prevent a segmentation session from being created.
+        options = {
+            "device": torch.device(device),
+            "use_torch_compile": False,
+            "verbose": True,
+            "torch_n_threads": os.cpu_count(),
+            "do_autozoom": True,
+        }
+        supported = inspect.signature(nnInteractiveInferenceSession).parameters
+        accepts_kwargs = any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in supported.values()
+        )
         session = nnInteractiveInferenceSession(
-            device=torch.device(device),  # Use CPU
-            use_torch_compile=False,
-            verbose=True,
-            torch_n_threads=os.cpu_count(),
-            do_autozoom=True,
-            use_pinned_memory=True,
+            **(options if accepts_kwargs else {name: value for name, value in options.items() if name in supported})
         )
         logger.info("session initialized")
         return session
 
     # load the model
-    def load_model(self,session, model_path):
-        try:
-            session.initialize_from_trained_model_folder(model_path)
-            logger.info("Model loaded successfully!")
-        except Exception as e:
-            logger.error(f"Error loading model: {e}")
+    def load_model(self, session, model_path):
+        if not os.path.isdir(model_path):
+            raise FileNotFoundError(f"nnInteractive model directory does not exist: {model_path}")
+        session.initialize_from_trained_model_folder(model_path)
+        logger.info("nnInteractive model loaded from %s", model_path)
 
 
     def load_volume(self,volume_path):
@@ -136,7 +150,7 @@ class NNINTERACTIVE(BasicInferTask):
     def nnInteractive_segmentation(self,volume_path,
                         output_path,
                         model_path,
-                        point_coordinates: tuple,
+                        point_interactions,
                         device: str = "cuda",
                         Interactive: bool = True,
                         new_object=False,
@@ -161,6 +175,9 @@ class NNINTERACTIVE(BasicInferTask):
         if should_reset_session:
             logger.info(f"Initializing new session. Reason: {'no session' if session is None else 'reset requested' if reset_session else 'different image'}")
             session = self.initialize_session(device)
+            # nnInteractive derives its preprocessing pipeline from the model
+            # configuration, so load the trained model before accepting an image.
+            self.load_model(session, model_path)
             session.set_image(img.numpy())
             target_tensor = torch.zeros(img.shape[1:], dtype=torch.uint8)
             session.set_target_buffer(target_tensor)
@@ -169,8 +186,6 @@ class NNINTERACTIVE(BasicInferTask):
             session._current_image_shape = current_shape
             session._current_volume_path = current_volume_path
             logger.info(f"model path {model_path}")
-            # Load model for new session
-            self.load_model(session, model_path)
         elif new_object:
             logger.info("Resetting interactions for new object on same image")
             session.reset_interactions()
@@ -185,15 +200,12 @@ class NNINTERACTIVE(BasicInferTask):
         if not hasattr(session, 'model'):
             self.load_model(session, model_path)
 
-        POINT_COORDINATES = point_coordinates # points in (x,y,z)   
+        for point_coordinates, include_interaction in point_interactions:
+            logger.info("Applying nnInteractive point %s (positive=%s)", point_coordinates, include_interaction)
+            session.add_point_interaction(point_coordinates, include_interaction=include_interaction)
 
-        logger.info(f"====== points: {POINT_COORDINATES} ======")
-
-        session.add_point_interaction(POINT_COORDINATES, include_interaction=Interactive)
-
-        results = session.target_buffer.clone()
-
-        results_np = results.cpu().numpy()
+        results = session.target_buffer
+        results_np = results.detach().cpu().numpy() if isinstance(results, torch.Tensor) else np.asarray(results)
 
         # Load the original image to get spatial information
         ref_img = nib.load(volume_path)
@@ -217,23 +229,15 @@ class NNINTERACTIVE(BasicInferTask):
 
     def run_inferer(self, data, convert_to_batch=True, device="cuda"):
 
-        print("Running nnInteractive Inference...")
-        print("data", data)
-        print("view port", data["Points"]['viewPort'])
-
-        # adjust points
-        self.adjust_points(data,viewport=data["Points"]['viewPort'])
-
-        # check point label
-        print("point label", data["Points"]['labels'])
+        logger.info("Running nnInteractive inference")
+        point_interactions = self.get_point_interactions(data)
 
         self.session, output_path=self.nnInteractive_segmentation(
             volume_path=data[self.input_key],
             output_path=os.path.join(self.DATA_PATH,"Data","output"),
             model_path=os.path.join(self.BASE_PATH,"nnInteractive_v1.0"),
-            point_coordinates=data["Points"]['points'],  # Example coordinates
-            Interactive=data['Points']['labels'][0],
-            new_object=data['resetInteractions'],
+            point_interactions=point_interactions,
+            new_object=bool(data.get('resetInteractions', False)),
             session=self.session,
             device=device
         )
