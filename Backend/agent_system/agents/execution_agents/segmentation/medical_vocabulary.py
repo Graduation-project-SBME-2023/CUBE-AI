@@ -127,7 +127,6 @@ PATHOLOGY_SYNONYMS: dict[str, list[str]] = {
 # ═══════════════════════════════════════════════════════════════════
 # 3. STRUCTURAL ALIASES
 #    Maps non-standard label names to their exact catalog equivalents.
-#    Used for the VISTA class-index lookup and other catalog lookups.
 #    All target values must be real catalog keys.
 # ═══════════════════════════════════════════════════════════════════
 STRUCTURAL_ALIASES: dict[str, str | list[str]] = {

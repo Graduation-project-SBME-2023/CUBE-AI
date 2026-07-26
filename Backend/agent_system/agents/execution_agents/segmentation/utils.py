@@ -22,7 +22,18 @@ from PIL import Image
 
 MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
 REQUEST_TIMEOUT_SECONDS = 10.0
-KNOWN_SEGMENTATION_MODELS = {"voxtell", "vista", "segmentation_spleen", "nnunet"}
+KNOWN_SEGMENTATION_MODELS = {
+    "voxtell", 
+    "vista", 
+    "segmentation_spleen", 
+    "nnunet", 
+    "deepedit", 
+    "deepgrow_2d", 
+    "deepgrow_3d", 
+    "localization_vertebra", 
+    "nninteractive", 
+    "sam"
+}
 # ===============================
 # MASK HELPERS
 # ===============================
@@ -33,7 +44,6 @@ def extract_organ_label(segmentation_type: str) -> str:
 
     The stored format is:  '{organ label}-{model}-{timestamp}-...'
     e.g. 'liver lesion-voxtell-01:48:31 PM-g'
-         'liver-vista-02:10:00 PM-g'
 
     Strategy: split on '-' and consume tokens that look like the organ name
     (i.e., stop at the first token that matches a known model name or looks
@@ -51,7 +61,9 @@ def extract_organ_label(segmentation_type: str) -> str:
         if p in KNOWN_SEGMENTATION_MODELS or re.match(r'^\d{1,2}:\d{2}', part.strip()) or (len(p) == 1 and p.isalpha()):
             break
         organ_parts.append(part.strip())
-    return normalize_label(" ".join(organ_parts)) if organ_parts else normalize_label(segmentation_type)
+    if organ_parts:
+        return " ".join(organ_parts).lower().strip()
+    return str(segmentation_type).lower().strip()
 
 
 def matches_label(segmentation_type: str, label: str) -> bool:
@@ -65,15 +77,14 @@ def matches_label(segmentation_type: str, label: str) -> bool:
     from .medical_vocabulary import FLAT_MEDICAL_SYNONYMS
     
     def get_semantic_concepts(l: str) -> set:
-        words = normalize_label(l).split()
+        words = str(l or "").replace("_", " ").lower().strip().split()
         return set(FLAT_MEDICAL_SYNONYMS.get(w, w) for w in words)
 
     organ = extract_organ_label(segmentation_type)
     return get_semantic_concepts(organ) == get_semantic_concepts(label)
 
-
 def _normalize_model_name(model_name: str) -> str:
-    return normalize_label(model_name).replace(" ", "_")
+    return str(model_name).lower().strip().replace(" ", "_")
 
 
 def segmentation_model_matches(segmentation_type: str, model_name: str) -> bool:
@@ -107,7 +118,7 @@ async def exclude_existing_masks(volumes, labels, model_name=None):
     ----------
     volumes    : list of volume SeriesInstanceUIDs
     labels     : list of target organ labels, e.g. ["liver"]
-    model_name : name of the selected automatic model, e.g. "vista".
+    model_name : name of the selected automatic model, e.g. "voxtell".
                  When provided, a volume is only excluded if its existing mask
                  was produced by THIS model.  When None, any matching-organ mask
                  is sufficient to exclude the volume (original behaviour).
@@ -376,37 +387,6 @@ def ensure_required_patient_tags(datasets):
 #  ================================
 #  Download Data
 #  ================================
-def _get_vista_class_index(target_label: str) -> int | None:
-    """
-    Returns the integer class index for a target organ label in the VISTA
-    model's multi-class NIfTI output, or None if not found.
-
-    VISTA encodes each organ as a unique positive integer in the output
-    NIfTI file (e.g. liver=5, gallbladder=4). We look this up from the
-    VISTA params_schema mapping registered in the DB.
-    """
-    try:
-        resp = requests.get(f"{MONAI_URL}/models/", timeout=5)
-        if resp.status_code != 200:
-            return None
-        for m in resp.json():
-            if m.get("name", "").lower() != "vista":
-                continue
-            mapping = (
-                (m.get("params_schema") or {})
-                .get("Class", {})
-                .get("mapping", {})
-            )
-            # Try exact, then normalized variants
-            norm = normalize_label(target_label)          # e.g. "liver"
-            norm_under = norm.replace(" ", "_")           # e.g. "liver"
-            for key, idx in mapping.items():
-                if normalize_label(key) in (norm, norm_under):
-                    return int(idx)
-    except Exception as e:
-        logger.warning("Could not fetch VISTA class index for '%s': %s", target_label, e)
-    return None
-
 
 async def download_and_pair_volumes(
     workspace_dir,
@@ -628,18 +608,13 @@ async def download_and_pair_volumes(
         logger.info("Copied volume -> %s (%.2f MB)", dst, size_mb)
         return dst
 
-    def copy_and_normalize_label(src_path, volume_uid, dest_dir, organ_class_index=None):
+    def copy_and_normalize_label(src_path, volume_uid, dest_dir):
         """
         Normalize a segmentation label NIfTI and save it as a binary {0,1} mask.
 
-        Handles three formats:
+        Handles two formats:
           1. Binary {0, 255}  – simple threshold to {0,1}.
           2. Binary {0, 1}    – already correct, save as-is.
-          3. Multi-class      – VISTA-style integer-per-organ output.
-                               If *organ_class_index* is given, extract only
-                               that organ's voxels (e.g. liver=5).  Without
-                               an index we fall back to a generic >0 mask and
-                               log a warning so the problem is visible.
         """
         dst = os.path.join(dest_dir, f"{volume_uid}.nii.gz")
         try:
@@ -666,28 +641,10 @@ async def download_and_pair_volumes(
                 # Binary DICOM-style mask: {0, 255} → {0, 1}
                 data = (data > 0).astype(np.uint8)
                 logger.info("Converted {0,255} -> {0,1}")
-
-            elif max_val <= 1.0:
-                # Already binary {0, 1} — keep as uint8
-                data = data.astype(np.uint8)
-                logger.info("Label already binary {0,1}; keeping as-is.")
-
             else:
-                # Multi-class label (e.g. VISTA: liver=5, gallbladder=4, ...)
-                if organ_class_index is not None:
-                    logger.info(
-                        "Multi-class label detected (max=%.0f). "
-                        "Extracting organ class index=%d for volume %s.",
-                        max_val, organ_class_index, volume_uid,
-                    )
-                    data = (np.round(data).astype(np.int32) == organ_class_index).astype(np.uint8)
-                else:
-                    logger.warning(
-                        "Multi-class label (max=%.0f) but no organ_class_index supplied for %s — "
-                        "falling back to >0 binarization (may include wrong organs).",
-                        max_val, volume_uid,
-                    )
-                    data = (data > 0).astype(np.uint8)
+                # Already binary {0, 1} or any other value — binarize with >0
+                data = (data > 0).astype(np.uint8)
+                logger.info("Label binarized with >0; keeping as-is.")
 
             nib.save(nib.Nifti1Image(data, nii.affine, nii.header), dst)
             size_mb = os.path.getsize(dst) / 1_048_576
@@ -800,23 +757,6 @@ async def download_and_pair_volumes(
     #  4. copy to workspace                                              #
     # ------------------------------------------------------------------ #
 
-    # Resolve the organ class index for multi-class models (e.g. VISTA).
-    # This is done once, outside the per-volume loop.
-    organ_class_index = None
-    if selected_auto_model_for_volume and target_label:
-        organ_class_index = _get_vista_class_index(target_label)
-        if organ_class_index is not None:
-            logger.info(
-                "Resolved organ class index for model='%s', label='%s': %d",
-                selected_auto_model_for_volume, target_label, organ_class_index,
-            )
-        else:
-            logger.info(
-                "No VISTA class index found for model='%s', label='%s' — "
-                "will use standard binarization.",
-                selected_auto_model_for_volume, target_label,
-            )
-
     successful = []
     skipped_oom = []
     for vol_uid, label_uid in zip(volumes_to_process, labels_to_process):
@@ -845,7 +785,6 @@ async def download_and_pair_volumes(
         if label_src:
             label_result = copy_and_normalize_label(
                 label_src, vol_uid, FINAL_DIR_LABEL,
-                organ_class_index=organ_class_index,
             )
         else:
             label_result = True # No label to process for interactive manual
@@ -1016,11 +955,7 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
 #  Label normalisation
 # =================================
 
-def normalize_label(label: str) -> str:
-    """Normalize an LLM-generated label to the space-separated form used by model label catalogs.
-    e.g.  'lung_nodule' -> 'lung nodule',  'Pulmonary_Nodule' -> 'pulmonary nodule'
-    """
-    return re.sub(r"\s+", " ", str(label or "").replace("_", " ")).lower().strip()
+
 
 # NOTE: VoxTell label availability is no longer checked here.
 # VoxTell's embed_text_prompts() handles all three cases at inference time:

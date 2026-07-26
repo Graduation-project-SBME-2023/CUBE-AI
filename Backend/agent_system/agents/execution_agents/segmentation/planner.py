@@ -145,28 +145,3 @@ async def run_planner(agent, instruction):
         raise RuntimeError(f"Invalid JSON from PlannerAgent: {content}")
 
 
-# ── PRESERVED MULTI-MODEL ROUTING (VISTA / segmentation_spleen) ─────────────
-# The routing rules below were used when VISTA and segmentation_spleen were
-# active. They are commented out for easy re-enablement.
-#
-# To restore multi-model routing:
-# 1. Replace the system_message and task above with the content below.
-# 2. Add "vista" and "segmentation_spleen" back to KNOWN_SEGMENTATION_MODELS
-#    in utils.py.
-# 3. Restore VISTA class injection path in services.py if needed.
-#
-# RULE 4 (old):
-#   - Prefer automatic models (VISTA, nnUNet) when they have a specific catalog
-#     label matching the request.
-#   - If no automatic model has an exact or close match → use VoxTell.
-#   - If tied between two automatic models, prefer the one with the more
-#     specific label match.
-#
-# STEP 3 (old) — Select the model:
-#   - Prefer automatic models when they have a specific catalog label.
-#   - Fall back to VoxTell when no automatic model has the label.
-#   - chosen_path = "automatic" with selected_models = ["vista"] or ["segmentation_spleen"]
-#   - chosen_path = "interactive" with selected_models = ["voxtell"] for fallback
-# ────────────────────────────────────────────────────────────────────────────
-
-
