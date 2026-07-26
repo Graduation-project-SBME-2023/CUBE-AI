@@ -110,29 +110,19 @@ _PHASE_MAP = {
 
 def _truncate(text: str, max_chars: int = 4000) -> str:
     """
-    Truncate text to max_chars, preferring sentence boundaries.
+    Pass-through function — no truncation applied.
 
-    Avoids cutting mid-sentence by backtracking to the last period
-    if it's within a reasonable range (70% of max_chars).
+    Previously truncated text to max_chars, but memory limits have been
+    removed. The full text is always returned regardless of max_chars.
 
     Args:
-        text: The text to truncate.
-        max_chars: Maximum allowed characters.
+        text: The text to return.
+        max_chars: Unused — kept for signature compatibility.
 
     Returns:
-        Truncated text with "[...truncated]" marker if shortened.
+        The original text, unmodified.
     """
-    if len(text) <= max_chars:
-        return text
-
-    cut = text[:max_chars]
-    last_period = cut.rfind(".")
-
-    # Only use sentence boundary if it's not too far back
-    if last_period > max_chars * 0.7:
-        return cut[:last_period + 1] + "\n[...truncated]"
-
-    return cut + "\n[...truncated]"
+    return text
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -598,7 +588,7 @@ def format_task_prompt(task_message: TaskMessage) -> str:
 def summarize_knowledge_for_planning(
     knowledge_sections: Dict[str, str],
     hypothesis: ClinicalHypothesis,
-    max_chars: int = 6000,
+    max_chars: int = 10_000_000,  # No limit — full content is always included
 ) -> str:
     """
     Create a balanced, structured summary of the knowledge base for the
