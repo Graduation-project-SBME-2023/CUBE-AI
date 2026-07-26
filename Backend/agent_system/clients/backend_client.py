@@ -11,9 +11,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 BASE_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
-DEFAULT_TIMEOUT = httpx.Timeout(connect=5.0, read=60.0, write=60.0, pool=15.0)
-
-
+DEFAULT_TIMEOUT = httpx.Timeout(connect=30.0, read=600.0, write=60.0, pool=60.0)
 class BackendClient:
     """
     Async HTTP client for the backend REST API.
