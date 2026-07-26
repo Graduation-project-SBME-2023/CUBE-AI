@@ -645,17 +645,15 @@ async def download_and_pair_volumes(
         try:
             nii  = nib.load(src_path)
             
-            # --- MEMORY SAFETY CHECK ---
+            # --- VOLUME SIZE LOGGING ---
             total_voxels = np.prod(nii.shape)
             estimated_ram_bytes = total_voxels * 8
             estimated_ram_gb = estimated_ram_bytes / (1024**3)
-            if estimated_ram_gb > 16.0:
-                logger.error(
-                    "Skipping label %s: requires %.2f GB of RAM, exceeding the 16 GB safety limit.",
-                    volume_uid,
-                    estimated_ram_gb,
-                )
-                return "SKIPPED_OOM"
+            logger.info(
+                "Label %s estimated RAM: %.2f GB (no limit enforced).",
+                volume_uid,
+                estimated_ram_gb,
+            )
             # ---------------------------
 
             data = nii.get_fdata()

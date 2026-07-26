@@ -326,7 +326,7 @@ class SegmentationModule:
         
         # --- Log skipped volumes to scratchpad ---
         if skipped_uids:
-            skip_msg = f"WARNING: Skipped {len(skipped_uids)} volumes because they exceeded the 16 GB RAM decompression limit. UIDs: {', '.join(skipped_uids)}"
+            skip_msg = f"WARNING: Skipped {len(skipped_uids)} volumes during download/pairing. UIDs: {', '.join(skipped_uids)}"
             logger.warning(skip_msg)
             
             # Append to scratchpad.json directly
