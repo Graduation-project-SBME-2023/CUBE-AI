@@ -156,8 +156,7 @@ class SegmentationModule:
         target_labels = plan["target_labels"]
         chosen_path = plan["chosen_path"]
         # Pass the selected model so a volume is only excluded when it already
-        # has a mask from the SAME model+organ pair.  A liver-voxtell mask will
-        # NOT block a fresh vista liver segmentation.
+        # has a mask from the SAME model+organ pair.
         selected_models = plan.get("selected_models") or []
         model_for_exclusion = selected_models[0] if selected_models else None
         eligible_volumes = await exclude_existing_masks(
@@ -172,12 +171,7 @@ class SegmentationModule:
             session_id=self.session_id,
         )
         
-        # =========== test ===============
 
-        # Example: plan = {'target_labels': ['spleen'], 'chosen_path': 'interactive', 'selected_models': ['voxtell']}
-        # (VISTA and segmentation_spleen are preserved in code but excluded from agentic routing)
-        # =================================
-        
         logger.info(
             f"Eligible volumes for segmentation: {len(eligible_volumes)}"
         )

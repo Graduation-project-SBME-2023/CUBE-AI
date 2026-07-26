@@ -19,11 +19,6 @@ from .utils import (
     parse_nrrd_data,
     ensure_required_patient_tags
 )
-from .medical_vocabulary import (
-    ANATOMICAL_SYNONYMS,
-    PATHOLOGY_SYNONYMS,
-    STRUCTURAL_ALIASES,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -62,14 +57,14 @@ class SegmentationService:
             Dict[str, Any] | None,
             Field(description="Optional inference parameters")
         ] = None,
-    ):  
+    ):
         start_time = datetime.now()
         clean_model = model.strip().rstrip(",")
-        
+
         frame_of_reference_uid = None
         study_instance_uid = None
         organ_list = self._normalize_label_info(label_info)
-        
+
         # =========== get the study from the series UID ===========
         get_study_url = f"{self.monai_url}/volumes/{series_instance_uid}/study"
         async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
@@ -91,7 +86,7 @@ class SegmentationService:
                     )
             except Exception:
                 logger.exception("Error retrieving study info for SeriesInstanceUID %s", series_instance_uid)
-        
+
         # ====the inference using monai label=====
 
         infer_url = f"{self.monai_url}/infer/{clean_model}"
@@ -102,40 +97,7 @@ class SegmentationService:
         inference_params["result_compress"] = False
         inference_params["restore_label_idxs"] = True
 
-        # ── PRESERVED FOR FUTURE RE-ENABLEMENT ──────────────────────────────────
-        # Inject model-specific class index (required by VISTA).
-        # VISTA and similar models expose a `Class` mapping in their params_schema.
-        # Without it, the inference crashes with KeyError: 'Class'.
-        # This block is kept intact but will only execute if the selected model is
-        # "vista" — which will not occur while VISTA is excluded from the agentic
-        # routing path (see segmentation/planner.py and utils.py).
-        # To re-enable: restore VISTA routing in planner.py and utils.py.
-        # ────────────────────────────────────────────────────────────────────────
-        if "Class" not in inference_params:
-            class_index = await self._resolve_class_index(clean_model, organ_list)
-            if class_index is not None:
-                inference_params["Class"] = class_index
-                logger.info(
-                    "Injected Class=%s for model='%s', labels=%s",
-                    class_index,
-                    clean_model,
-                    organ_list,
-                )
-            else:
-                if clean_model.lower() == "vista":
-                    msg = f"VISTA requires a Class index but none was found for labels: {organ_list}"
-                    logger.error(msg)
-                    return {"error": True, "stage": "upload", "message": msg}
-                
-                # VoxTell uses text prompts and does not require a fixed catalog class index
-                if clean_model.lower() != "voxtell":
-                    logger.warning(
-                        "No Class index found for model='%s', labels=%s; model may fail",
-                        clean_model,
-                        organ_list,
-                    )
-
-        files = {"params": (None, json.dumps(inference_params), "application/json")}      
+        files = {"params": (None, json.dumps(inference_params), "application/json")}
 
         # ---- Inference with retry on transient server-disconnect errors ----
         # The monailabel server can disconnect mid-response when RAM is near capacity
@@ -212,10 +174,10 @@ class SegmentationService:
 
         if response.status_code != 200:
             result["error"] = True
-            result["server_response"] = response.text[:500] 
+            result["server_response"] = response.text[:500]
             logger.error("Inference failed with status %s: %s", response.status_code, response.text[:200])
-            return result          
-            
+            return result
+
         # ===== parsing the response into nrrd and centroids ============
         nrrd_data, centroids = parse_multipart_response(
             response.headers,
@@ -226,9 +188,9 @@ class SegmentationService:
             len(nrrd_data),
             list(centroids),
         )
-        
-        # ==== parse the nrrd and extrace centroids ijk =====
-        
+
+        # ==== parse the nrrd and extract centroids ijk =====
+
         # parse the nrrd data into numpy array and header
         image, header = parse_nrrd_data(nrrd_data)
         logger.info(
@@ -254,14 +216,14 @@ class SegmentationService:
                     labels = response_info.json().get("labels", [])
                 else:
                     logger.warning("MONAI Label /info/ returned %s", response_info.status_code)
-        
+
             except Exception:
                 logger.exception("Error fetching MONAI Label info")
-                
+
         logger.info("Available labels in MONAI Label: %s", labels)
-        
-        # the centroid world and image coordinates 
-        
+
+        # the centroid world and image coordinates
+
         centroids_ijk = {}
 
         for key, value in centroids.items():
@@ -272,7 +234,7 @@ class SegmentationService:
                 "world": []
             }
         # ==== create the segmentation object =====
-        
+
         segmentation_object = {
             "id": series_instance_uid,
             "label": f"Segmentation_{series_instance_uid}",
@@ -287,16 +249,16 @@ class SegmentationService:
             ],
             "isActive": True,
             "activeSegmentIndex": 1,
-            "scalarData": image, 
+            "scalarData": image,
             "FrameOfReferenceUID": frame_of_reference_uid,
             "centroidsIJK": centroids_ijk
         }
-        
+
         logger.info(
             "Constructed segmentation object with %s segments",
             len(segmentation_object["segments"]),
         )
-        
+
         # ========== create pydicom datasets for the original series ============
         dicom_datasets = await self.fetch_source_datasets_from_orthanc(
             series_instance_uid=series_instance_uid
@@ -306,15 +268,14 @@ class SegmentationService:
         cols = dicom_datasets[0].Columns
         logger.info("Source CT geometry: rows=%s cols=%s slices=%s", rows, cols, num_slices)
 
-
         # ========== inject missing tags due to de-identification (if any) ============
         ensure_required_patient_tags(dicom_datasets)
         # ============== create Algorithm description=================
         algorithm_identification = hd.AlgorithmIdentificationSequence(
-                name=f'Automatic Segmentation',
+                name='Automatic Segmentation',
                 version='0.0',
                 family=codes.cid7162.ArtificialIntelligence
-            ) 
+            )
         # =========== create segmentation description =================
         labelmap_np: np.ndarray = segmentation_object["scalarData"]
         labelmap_np = labelmap_np.astype(np.uint8)
@@ -324,26 +285,8 @@ class SegmentationService:
         labelmap_np = np.transpose(labelmap_np, (2, 1, 0))
         logger.info("Labelmap shape after squeeze+transpose: %s", labelmap_np.shape)
 
-        # VISTA returns class-indexed values (e.g. liver = class 5, gallbladder = 4, ...).
-        # highdicom BINARY segmentation only understands pixel values 0 or 1.
-        # We MUST extract only the target organ's class index voxels before binarising.
-        # Using `> 0` would merge ALL segmented organs (gallbladder, spleen, liver, etc.)
-        # into a single mask, causing the wrong organ to appear highlighted in the GIF.
-        unique_vals = np.unique(labelmap_np)
-        logger.info("Unique pixel values before binarisation: %s", unique_vals)
-
-        target_class_index = inference_params.get("Class")  # the index we sent to VISTA
-        if target_class_index is not None and len(unique_vals) > 2:
-            # Multi-class output: isolate only the requested organ's class
-            logger.info(
-                "Multi-class VISTA output detected. Extracting organ class index=%s for label=%s",
-                target_class_index,
-                organ_list,
-            )
-            labelmap_np = (labelmap_np == int(target_class_index)).astype(np.uint8)
-        else:
-            # Binary output ({0, 1} or {0, 255}) or no class info — safe to use > 0
-            labelmap_np = (labelmap_np > 0).astype(np.uint8)
+        # VoxTell always returns binary masks — binarize with >0
+        labelmap_np = (labelmap_np > 0).astype(np.uint8)
 
         logger.info(
             "After binarisation: unique=%s foreground_voxels=%s",
@@ -386,7 +329,7 @@ class SegmentationService:
                 software_versions='-',
                 device_serial_number='XYZ',
                 omit_empty_frames=False,
-            ) 
+            )
         referenced_frames = (
             len(seg.PerFrameFunctionalGroupsSequence)
             if hasattr(seg, "PerFrameFunctionalGroupsSequence")
@@ -398,10 +341,10 @@ class SegmentationService:
             referenced_frames,
         )
 
-        logger.info(f"Created DICOM-SEG object with SeriesInstanceUID: {seg.SeriesInstanceUID}")    
-        
+        logger.info(f"Created DICOM-SEG object with SeriesInstanceUID: {seg.SeriesInstanceUID}")
+
         # ========== saving to orthanc ====================
-        
+
         seg_bytes_io = io.BytesIO()
         seg.save_as(seg_bytes_io)
         seg_bytes_io.seek(0)
@@ -419,8 +362,6 @@ class SegmentationService:
                 result["upload_status_code"] = response.status_code
                 result["upload_response"] = response.text[:500]
 
-        
-        
         return result
 
     async def _sync_uploaded_segmentation_series(self, instance_id: str, dicom_series_uid: str) -> None:
@@ -478,114 +419,17 @@ class SegmentationService:
             return [label.strip().lower() for label in label_info.split(",") if label.strip()]
         return ["segmentation"]
 
-
-    async def _resolve_class_index(self, model_name: str, organ_list: list) -> int | None:
-        """
-        Query /models/ and look up the Class integer index for the requested organ(s).
-        Required by VISTA and similar models that need `params={"Class": <int>}`.
-        Returns the first matching index, or None if the model has no Class mapping.
-        """
-        try:
-            async with httpx.AsyncClient(timeout=QUICK_TIMEOUT) as client:
-                response = await client.get(f"{self.monai_url}/models/")
-                if response.status_code != 200:
-                    return None
-                models = response.json()
-        except Exception:
-            logger.exception("_resolve_class_index: failed to fetch models")
-            return None
-
-        for model in models:
-            if model.get("name", "").lower() != model_name.lower():
-                continue
-            params_schema = model.get("params_schema") or {}
-            class_mapping = (params_schema.get("Class") or {}).get("mapping") or {}
-            if not class_mapping:
-                return None
-            for organ in organ_list:
-                for candidate in self._class_key_candidates(organ):
-                    if candidate in class_mapping:
-                        return class_mapping[candidate]
-            logger.warning(
-                "_resolve_class_index: organs %s not in Class mapping for '%s'. Available: %s...",
-                organ_list,
-                model_name,
-                list(class_mapping.keys())[:10],
-            )
-            return None
-
-        logger.warning("_resolve_class_index: model '%s' not found in /models/", model_name)
-        return None
-
-    @staticmethod
-    def _class_key_candidates(label: str) -> list[str]:
-        """
-        Generate all fuzzy variant forms of a label for robust catalog lookup.
-        Synonym/alias tables are imported from medical_vocabulary.py — edit there.
-
-        Handles:
-        - Word order:   "left kidney" ↔ "kidney_left"
-        - Plurals:      "tumors" → "tumor", "lesions" → "lesion"
-        - Separators:   underscores / spaces / hyphens are interchangeable
-        - Anatomical synonyms: hepatic=liver, renal=kidney, splenic=spleen, etc.
-        - Pathology synonyms: cancer=carcinoma=tumor; lesion=mass=nodule
-        - Structural aliases: large_intestine=colon, portal_vein=portal_vein_and_splenic_vein, etc.
-        """
-        raw = str(label or "").lower().strip()
-        # Normalise separators: hyphens and spaces → underscore
-        normalized = "_".join(raw.replace("-", " ").split())
-        candidates = [normalized]
-
-        # ── 1. Laterality word-order swap ────────────────────────────────────
-        parts = normalized.split("_")
-        if parts and parts[0] in {"left", "right"} and len(parts) > 1:
-            candidates.append("_".join(parts[1:] + [parts[0]]))
-        elif parts and parts[-1] in {"left", "right"} and len(parts) > 1:
-            candidates.append("_".join([parts[-1]] + parts[:-1]))
-
-        # ── 2. Plural → singular stripping ───────────────────────────────────
-        plural_stripped = normalized.rstrip("s") if normalized.endswith("s") else None
-        if plural_stripped and plural_stripped != normalized:
-            candidates.append(plural_stripped)
-            ps_parts = plural_stripped.split("_")
-            if ps_parts and ps_parts[0] in {"left", "right"} and len(ps_parts) > 1:
-                candidates.append("_".join(ps_parts[1:] + [ps_parts[0]]))
-            elif ps_parts and ps_parts[-1] in {"left", "right"} and len(ps_parts) > 1:
-                candidates.append("_".join([ps_parts[-1]] + ps_parts[:-1]))
-
-        # ── 3. Anatomical synonyms (from medical_vocabulary.py) ───────────────
-        for syn, replacements in ANATOMICAL_SYNONYMS.items():
-            if syn in normalized:
-                for rep in replacements:
-                    candidates.append(normalized.replace(syn, rep))
-
-        # ── 4. Pathology synonyms (from medical_vocabulary.py) ───────────────
-        for syn, replacements in PATHOLOGY_SYNONYMS.items():
-            if syn in normalized:
-                for rep in replacements:
-                    candidates.append(normalized.replace(syn, rep))
-
-        # ── 5. Structural aliases (from medical_vocabulary.py) ───────────────
-        alias_val = STRUCTURAL_ALIASES.get(normalized)
-        if alias_val:
-            if isinstance(alias_val, list):
-                candidates.extend(alias_val)
-            else:
-                candidates.append(alias_val)
-
-        return list(dict.fromkeys(candidates))
-
     async def fetch_source_datasets_from_orthanc(
         self,
         series_instance_uid,
         timeout: float = 300.0
-    )-> list[pydicom.Dataset]:
+    ) -> list[pydicom.Dataset]:
         """
         Fetch all DICOM instances of a series using Orthanc REST API.
         Returns list of pydicom.Dataset objects.
         """
         timeout_config = httpx.Timeout(timeout)
-        
+
         async with httpx.AsyncClient(timeout=timeout_config) as client:
             logger.info("Searching series by SeriesInstanceUID: %s", series_instance_uid)
 
@@ -601,10 +445,10 @@ class SegmentationService:
             if not results:
                 raise ValueError(f"Series with SeriesInstanceUID {series_instance_uid} not found in Orthanc")
 
-            series_id = results[0] 
+            series_id = results[0]
             logger.info("Resolved Orthanc series_id: %s", series_id)
 
-            # get  list of Instance IDs
+            # get list of Instance IDs
             series_response = await client.get(f"{self.orthanc_url}/series/{series_id}")
             series_response.raise_for_status()
             series_data = series_response.json()
