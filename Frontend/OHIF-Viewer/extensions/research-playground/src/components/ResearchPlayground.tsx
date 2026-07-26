@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, FlaskConical, List, MessageSquare, PlayCircle, Rocket, Settings } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import PhaseSidebar from './PlaygroundCanvas/PhaseSidebar';
@@ -20,6 +20,18 @@ import { fetchSessionExecutionState, fetchSessionPlanState, replaySessionLogs } 
 import { ResearchRouteState } from '../types';
 
 const DEFAULT_PHASE = 'planning';
+
+// An output can be emitted several times while an agent works.  A module is
+// considered ready for a user-facing update only after its owning agent has
+// reported COMPLETED through pipeline_agent_status.
+const OUTPUT_EVENT_AGENTS: Record<string, { agent: string; phase: string }> = {
+  population_output: { agent: 'study_population_planner_agent', phase: 'data' },
+  segmentation_output: { agent: 'segmentation_agent', phase: 'segmentation' },
+  features_output: { agent: 'feature_extraction_agent', phase: 'features' },
+  modeling_output: { agent: 'modeling_agent', phase: 'modeling' },
+  report_output: { agent: 'result_reporter_agent', phase: 'reporting' },
+  latex_output: { agent: 'latex_reporter_agent', phase: 'reporting' },
+};
 
 /**
  * Modeling updates can arrive as either the raw PyCaret response or the
@@ -76,11 +88,114 @@ function ResearchPlaygroundInner() {
   const sessionId = routeState.sessionId || routeState.session_id || null;
   const sendInitialMessage = routeState.sendInitialMessage || false;
   const initialUserMessage = sendInitialMessage ? hypothesis : undefined;
+  // Dashboard/history navigation always sets sendInitialMessage to false.  It
+  // is a read-only visit, not a new result arriving in the current workflow.
+  const isHistoricalNavigation = Boolean(sessionId && !sendInitialMessage);
+  const activePhaseRef = useRef(activePhase);
+  const viewedPhaseIdsRef = useRef<Set<string>>(new Set());
+  const updateStateRef = useRef({
+    sessionId: sessionId ? String(sessionId) : '',
+    isHydrating: Boolean(sessionId),
+    isHistorical: isHistoricalNavigation,
+    outputRevisionByAgent: new Map<string, number>(),
+    completedAgents: new Set<string>(),
+    notifiedRevisionByAgent: new Map<string, number>(),
+  });
 
   // True once we know the restored mode — gates both canvas mount and log replay
   // so PlaygroundCanvas always receives the correct initialMode on first render.
   const [restoredModeReady, setRestoredModeReady] = useState(!sessionId);
   const { data, setData, setLiteratureOutput, setPopulationData, setSegmentationData, setFeaturesData, setImportanceData, setModelingData, setReportData, setLatexData } = useResearchData();
+
+  const viewedPhasesStorageKey = useMemo(
+    () => (sessionId ? `cube_viewed_phase_updates_${sessionId}` : null),
+    [sessionId]
+  );
+
+  const markPhaseViewed = useCallback(
+    (phaseId: string) => {
+      if (!phaseId) return;
+      viewedPhaseIdsRef.current.add(phaseId);
+      if (!viewedPhasesStorageKey) return;
+      try {
+        localStorage.setItem(
+          viewedPhasesStorageKey,
+          JSON.stringify(Array.from(viewedPhaseIdsRef.current))
+        );
+      } catch (_) {
+        // Storage is an enhancement only; an unavailable browser storage must
+        // never prevent the workflow UI from rendering.
+      }
+    },
+    [viewedPhasesStorageKey]
+  );
+
+  const tryShowCompletedUpdate = useCallback((agentName: string) => {
+    const state = updateStateRef.current;
+    const output = Object.values(OUTPUT_EVENT_AGENTS).find(item => item.agent === agentName);
+    const revision = state.outputRevisionByAgent.get(agentName) || 0;
+    const notifiedRevision = state.notifiedRevisionByAgent.get(agentName) || 0;
+
+    // Ignore replayed/historical data and all intermediate agent output.  The
+    // requestAnimationFrame below runs after React has committed the final data
+    // update to the corresponding view.
+    if (
+      !output ||
+      state.isHydrating ||
+      state.isHistorical ||
+      !state.completedAgents.has(agentName) ||
+      revision <= notifiedRevision
+    ) {
+      return;
+    }
+
+    state.notifiedRevisionByAgent.set(agentName, revision);
+    if (activePhaseRef.current === output.phase || viewedPhaseIdsRef.current.has(output.phase)) {
+      return;
+    }
+
+    requestAnimationFrame(() => {
+      const currentState = updateStateRef.current;
+      if (
+        currentState.isHydrating ||
+        currentState.isHistorical ||
+        activePhaseRef.current === output.phase ||
+        viewedPhaseIdsRef.current.has(output.phase)
+      ) {
+        return;
+      }
+      setUpdatedPhaseIds(prev => (prev.includes(output.phase) ? prev : [...prev, output.phase]));
+    });
+  }, []);
+
+  useEffect(() => {
+    activePhaseRef.current = activePhase;
+    markPhaseViewed(activePhase);
+  }, [activePhase, markPhaseViewed]);
+
+  useEffect(() => {
+    const state = updateStateRef.current;
+    state.sessionId = sessionId ? String(sessionId) : '';
+    state.isHydrating = Boolean(sessionId);
+    state.isHistorical = isHistoricalNavigation;
+    state.outputRevisionByAgent.clear();
+    state.completedAgents.clear();
+    state.notifiedRevisionByAgent.clear();
+    viewedPhaseIdsRef.current = new Set();
+
+    if (viewedPhasesStorageKey) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(viewedPhasesStorageKey) || '[]');
+        if (Array.isArray(saved)) viewedPhaseIdsRef.current = new Set(saved.filter(Boolean));
+      } catch (_) {
+        // Treat invalid or unavailable storage as an empty viewed set.
+      }
+    }
+
+    // The initial phase is already on screen, so it is viewed even when this
+    // effect runs after the active-phase effect during a session change.
+    markPhaseViewed(activePhaseRef.current);
+  }, [isHistoricalNavigation, markPhaseViewed, sessionId, viewedPhasesStorageKey]);
 
   // Clear all tab results when the user restarts execution
   const clearAllTabData = useCallback(() => {
@@ -121,6 +236,7 @@ function ResearchPlaygroundInner() {
                     const { state } = await statusRes.json();
                     const upperState = state?.toUpperCase();
                     if (upperState === 'COMPLETED') {
+                        updateStateRef.current.isHistorical = true;
                         setRestoredMode('results');
                     } else if (['RUNNING', 'PAUSED', 'FAILED'].includes(upperState)) {
                         setRestoredMode('executing');
@@ -132,6 +248,7 @@ function ResearchPlaygroundInner() {
                         const execData = await execRes.json();
                         if (Array.isArray(execData?.agents) && execData.agents.length > 0) {
                             const allDone = execData.agents.every((a: any) => a.status === 'COMPLETED');
+                            if (allDone) updateStateRef.current.isHistorical = true;
                             setRestoredMode(allDone ? 'results' : 'executing');
 
                             // Fix 3: If the pipeline was mid-flight when the server restarted,
@@ -180,22 +297,15 @@ function ResearchPlaygroundInner() {
         console.error('[ResearchPlayground] Failed to replay logs:', err);
       } finally {
         websocketService.stopReplayCapture();
+        // Replayed events populate the views, but must never be presented as
+        // a new update.  Future live events for an active session may alert.
+        updateStateRef.current.isHydrating = false;
       }
     };
     replay();
   }, [sessionId, viewsReady, restoredModeReady]);
 
   useEffect(() => {
-    const eventToPhaseMap: Record<string, string> = {
-      literature_output: 'literature',
-      population_output: 'data',
-      segmentation_output: 'segmentation',
-      features_output: 'features',
-      modeling_output: 'modeling',
-      report_output: 'reporting',
-      latex_output: 'reporting',
-    };
-
     const unsubscribe = websocketService.subscribe((event: any) => {
       const { type, payload } = event;
       switch (type) {
@@ -225,15 +335,28 @@ function ResearchPlaygroundInner() {
           break;
       }
 
-      const phaseId = eventToPhaseMap[type];
-      if (phaseId && phases.some(phase => phase.id === phaseId) && phaseId !== activePhase) {
-        setUpdatedPhaseIds(prev => (prev.includes(phaseId) ? prev : [...prev, phaseId]));
+      const output = OUTPUT_EVENT_AGENTS[type];
+      if (output) {
+        const state = updateStateRef.current;
+        state.outputRevisionByAgent.set(
+          output.agent,
+          (state.outputRevisionByAgent.get(output.agent) || 0) + 1
+        );
+        tryShowCompletedUpdate(output.agent);
+      }
+
+      if (type === 'pipeline_agent_status' || type === 'Pipeline_agent_status') {
+        for (const agent of payload?.agents || []) {
+          const agentName = String(agent?.name || '');
+          if (String(agent?.status || '').toUpperCase() === 'COMPLETED') {
+            updateStateRef.current.completedAgents.add(agentName);
+            tryShowCompletedUpdate(agentName);
+          }
+        }
       }
     });
     return unsubscribe;
   }, [
-    activePhase,
-    phases,
     setFeaturesData,
     setImportanceData,
     setLatexData,
@@ -241,6 +364,7 @@ function ResearchPlaygroundInner() {
     setPopulationData,
     setReportData,
     setSegmentationData,
+    tryShowCompletedUpdate,
   ]);
 
   useEffect(() => {
@@ -248,6 +372,7 @@ function ResearchPlaygroundInner() {
   }, [activePhase]);
 
   const selectPhase = (id: string) => {
+    markPhaseViewed(id);
     setUpdatedPhaseIds(prev => prev.filter(phaseId => phaseId !== id));
     setActivePhase(id);
   };
