@@ -560,6 +560,26 @@ export default class InteractiveSegmentation extends BaseTab {
     return [point[1], point[0], point[2]];
   }
 
+  getNnInteractivePrompts = (worldToIndex) => {
+    const manager = cornerstoneTools.annotation.state.getAnnotationManager();
+    const saved = manager.saveAnnotations();
+    const frameOfReferenceUID = Object.keys(saved)[0];
+    const annotations = frameOfReferenceUID ? saved[frameOfReferenceUID] : {};
+
+    const toIndex = (annotation) =>
+      worldToIndex(annotation.data.handles.points[0]).map(value => Math.round(value));
+    const pointsForTool = (toolName, label) =>
+      Object.values(annotations?.[toolName] || {}).map(annotation => ({
+        point: toIndex(annotation),
+        label,
+      }));
+
+    return [
+      ...pointsForTool('ProbeMONAILabelPos', 1),
+      ...pointsForTool('ProbeMONAILabelNeg', 0),
+    ];
+  }
+
   onRunInference = async () => {
     console.log(' run inference start');
     const { currentModel, currentObject, clickPoints, flagNninteractive } = this.state;
@@ -676,22 +696,22 @@ export default class InteractiveSegmentation extends BaseTab {
       params['State'] = "3d";
 
     } else if (model === 'nninteractive') {
-      const allPoints = [
-        ...(positive_points[currentObject] || []),
-        ...(negative_points[currentObject] || []),
-      ];
-      const swappedPoints = allPoints.map(([x, y, z]) => new Float32Array([y, x, z]));
-      params['viewPort'] = viewportInfo.viewportId;
+      // nnInteractive consumes the volume IJK coordinates directly.  The
+      // previous implementation referenced disabled variables
+      // (positive_points/negative_points), so no valid request could be sent.
+      const prompts = this.getNnInteractivePrompts(worldToIndex);
+      if (!prompts.length) {
+        this.notification.show({
+          title: 'MONAI Label - nnInteractive',
+          message: 'Add a positive or negative point before running inference.',
+          type: 'warning',
+          duration: 5000,
+        });
+        return;
+      }
       params['Points'] = {
-        points:swappedPoints ,
-        labels: [
-          ...(positive_points[currentObject]
-            ? new Array(positive_points[currentObject].length).fill(1)
-            : []),
-          ...(negative_points[currentObject]
-            ? new Array(negative_points[currentObject].length).fill(0)
-            : []),
-        ],
+        points: prompts.map(({ point }) => point),
+        labels: prompts.map(({ label }) => label),
         viewport: viewportInfo.viewportId,
       };
       params['resetInteractions'] = this.resetnnInteractiveAll;

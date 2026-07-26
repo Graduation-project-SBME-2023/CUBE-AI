@@ -311,12 +311,25 @@ export default class MonaiLabelPanel extends Component {
     const { image: buffer, header } = ret;
     const data = new Uint16Array(buffer);
 
-    // Reformat centroids
+    // Reformat centroids.  Most models return an object keyed by label, while
+    // localization_vertebra returns an array of one-label objects.  Supporting
+    // both prevents a successful backend inference from failing before its mask
+    // is rendered in OHIF.
     const centroidsIJK = new Map();
-    for (const [key, value] of Object.entries(response.centroids)) {
+    const centroids = response.centroids || {};
+    const centroidEntries = Array.isArray(centroids)
+      ? centroids.flatMap(entry => Object.entries(entry || {}))
+      : Object.entries(centroids);
+    for (const [, value] of centroidEntries) {
+      if (!Array.isArray(value) || value.length < 4) {
+        console.warn('Ignoring invalid centroid returned by MONAI Label:', value);
+        continue;
+      }
       const segmentIndex = parseInt(value[0], 10);
-      const image = value.slice(1).map((v) => parseFloat(v));
-      centroidsIJK.set(segmentIndex, { image: image, world: [] });
+      const image = value.slice(1, 4).map((v) => parseFloat(v));
+      if (Number.isFinite(segmentIndex) && image.every(Number.isFinite)) {
+        centroidsIJK.set(segmentIndex, { image: image, world: [] });
+      }
     }
     console.log('centroidsIJK', centroidsIJK);
 
