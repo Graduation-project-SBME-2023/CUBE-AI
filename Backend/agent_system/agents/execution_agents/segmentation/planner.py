@@ -74,7 +74,7 @@ def create_planner_agent(model_client, discovery_tools):
         - selected_models is ALWAYS ["voxtell"]
         - target_labels must be the best organ/pathology label derived from the instruction
         """,
-        max_tool_iterations=2
+        max_tool_iterations=10  # No hard cap on tool calls
     )
 
     return planner
