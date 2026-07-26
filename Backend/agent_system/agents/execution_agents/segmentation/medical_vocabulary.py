@@ -26,28 +26,66 @@ IMPORTANT RULE for any mapping added here:
 #    All target values must exist as labels in the model catalog.
 # ═══════════════════════════════════════════════════════════════════
 ANATOMICAL_SYNONYMS: dict[str, list[str]] = {
-    "hepatic":        ["liver"],
-    "hepatocellular": ["liver"],
-    "renal":          ["kidney"],
-    "splenic":        ["spleen"],
-    "pulmonary":      ["lung"],
-    "cardiac":        ["heart"],
-    "myocardial":     ["heart"],
-    "pancreatic":     ["pancreas"],
-    "colonic":        ["colon", "large intestine"],
-    "gastric":        ["stomach"],
-    "cerebral":       ["brain"],
-    "cranial":        ["brain"],
-    "osseous":        ["bone", "bones"],
-    "skeletal":       ["bone", "bones"],
-    "adrenal":        ["adrenal gland"],
-    "vesical":        ["urinary bladder"],
-    "bowel":          ["small intestine"],
-    "mammary":        ["breast"],
-    "prostatic":      ["prostate"],
-    "rectal":         ["rectum"],
-    "oesophageal":    ["esophagus"],
-    "esophageal":     ["esophagus"],
+    # ── Adjectival → canonical organ name ────────────────────────────────────
+    # Liver
+    "hepatic":         ["liver"],
+    "hepatocellular":  ["liver"],
+    # Kidney / Renal
+    "renal":           ["kidney"],
+    "nephrotic":       ["kidney"],   # from lit-review: nephrotic syndrome papers
+    "nephric":         ["kidney"],
+    # Spleen
+    "splenic":         ["spleen"],
+    # Lung
+    "pulmonary":       ["lung"],
+    "bronchial":       ["lung"],     # from lit-review: _ORGAN_TERMS
+    "pulmonological":  ["lung"],
+    # Heart
+    "cardiac":         ["heart"],
+    "myocardial":      ["heart"],
+    "cardiovascular":  ["heart"],
+    # Pancreas
+    "pancreatic":      ["pancreas"],
+    # Colon / GI
+    "colonic":         ["colon", "large intestine"],
+    "colorectal":      ["colon", "rectum"],  # from lit-review: colorectal cancer papers
+    # Stomach
+    "gastric":         ["stomach"],
+    # Brain
+    "cerebral":        ["brain"],
+    "cranial":         ["brain"],
+    "intracranial":    ["brain"],    # from lit-review: _ORGAN_TERMS
+    "neurological":    ["brain"],
+    # Breast
+    "mammary":         ["breast"],
+    "mammographic":    ["breast"],   # from lit-review: mammographic studies
+    # Prostate
+    "prostatic":       ["prostate"],
+    # Bone
+    "osseous":         ["bone", "bones"],
+    "skeletal":        ["bone", "bones"],
+    # Adrenal
+    "adrenal":         ["adrenal gland"],
+    # Bladder
+    "vesical":         ["urinary bladder"],
+    "urothelial":      ["urinary bladder"],  # from labels.json: urothelial carcinoma
+    # Small intestine / bowel
+    "bowel":           ["small intestine"],
+    "intestinal":      ["small intestine"],
+    # Rectum
+    "rectal":          ["rectum"],
+    # Esophagus
+    "oesophageal":     ["esophagus"],
+    "esophageal":      ["esophagus"],
+    # Ovary (from lit-review: ovarian cancer papers)
+    "ovarian":         ["ovary"],
+    # Thyroid (from lit-review: _ORGAN_TERMS)
+    "thyroid":         ["thyroid"],
+    # Uterus (from labels.json: uterine fibroid, uterine leiomyoma)
+    "uterine":         ["uterus"],
+    # Lymph nodes (from lit-review: lymph node metastasis papers)
+    "lymphatic":       ["lymph node"],
+    "nodal":           ["lymph node"],
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -58,12 +96,32 @@ ANATOMICAL_SYNONYMS: dict[str, list[str]] = {
 #    All target values must exist as labels in the model catalog.
 # ═══════════════════════════════════════════════════════════════════
 PATHOLOGY_SYNONYMS: dict[str, list[str]] = {
-    "cancer":     ["tumor", "carcinoma"],
-    "malignancy": ["tumor", "carcinoma"],
-    "neoplasm":   ["tumor", "carcinoma"],
-    "mass":       ["lesion", "tumor"],
-    "growth":     ["lesion", "tumor"],
-    "nodule":     ["lesion"],
+    # ── Clinical pathology terms → catalog-safe equivalents ──────────────────
+    # Core
+    "cancer":        ["tumor", "carcinoma"],
+    "malignancy":    ["tumor", "carcinoma"],
+    "malignant":     ["tumor", "carcinoma"],
+    "neoplasm":      ["tumor", "carcinoma"],
+    "mass":          ["lesion", "tumor"],
+    "growth":        ["lesion", "tumor"],
+    "nodule":        ["lesion"],
+    # From lit-review _PATHOLOGY_TERMS
+    "metastasis":    ["lesion", "tumor"],   # metastatic deposits → lesion
+    "metastatic":    ["lesion", "tumor"],
+    "metastases":    ["lesion", "tumor"],
+    "adenocarcinoma":["carcinoma"],
+    "sarcoma":       ["tumor"],
+    "hemangioma":    ["lesion"],            # benign vascular lesion
+    "haemangioma":   ["lesion"],
+    "abscess":       ["lesion"],
+    "infarct":       ["lesion"],
+    "benign":        ["lesion"],
+    "cyst":          ["lesion"],
+    "fibroid":       ["lesion"],            # from labels.json: uterine fibroid
+    "leiomyoma":     ["lesion"],            # from labels.json: uterine leiomyoma
+    "myoma":         ["lesion"],
+    "schwannoma":    ["lesion"],            # from labels.json: vestibular schwannoma
+    "hamartoma":     ["lesion"],
 }
 
 # ═══════════════════════════════════════════════════════════════════
@@ -110,35 +168,110 @@ STRUCTURAL_ALIASES: dict[str, str | list[str]] = {
 }
 
 # ═══════════════════════════════════════════════════════════════════
-# 4. FLAT MEDICAL SYNONYMS  (auto-generated — do NOT edit manually)
-#    Used by check_voxtell_label_availability for set-equality matching.
-#    Flat one-to-one dict: maps a word to its canonical concept so that
-#    "left kidney" and "kidney left" produce the same concept set.
-#    Targets are canonical concept words, not necessarily catalog labels.
+# 4. FLAT MEDICAL SYNONYMS
+#    Used by get_semantic_concepts() in both utils.py and voxtell.py
+#    for set-equality semantic matching.
+#
+#    Maps a SINGLE WORD to its canonical concept word so that
+#    "splenic lesions" and "spleen lesion" yield the same concept set.
 #
 #    Built automatically from ANATOMICAL_SYNONYMS (single-target entries)
-#    and PATHOLOGY_SYNONYMS (all mapped to the canonical concept "lesion").
+#    and PATHOLOGY_SYNONYMS (collapsed to canonical "lesion").
 #    To add a new synonym, edit ANATOMICAL_SYNONYMS or PATHOLOGY_SYNONYMS
 #    above — do NOT add entries here.
+#
+#    PLURAL HANDLING: all singular pathology/anatomy words are also
+#    mapped with their common plural form so "lesions" == "lesion",
+#    "tumors" == "tumor", "kidneys" == "kidney", etc.
+#    This is the fix for the plural gap identified in 48ff95a7.
 # ═══════════════════════════════════════════════════════════════════
+
 # Anatomical: use the first (and usually only) canonical replacement word.
 FLAT_MEDICAL_SYNONYMS: dict[str, str] = {
     key: vals[0]
     for key, vals in ANATOMICAL_SYNONYMS.items()
     if vals
 }
+
 # Pathology: collapse all clinical terms to the canonical concept "lesion".
-FLAT_MEDICAL_SYNONYMS.update({
-    "tumor":      "lesion",
-    "tumour":     "lesion",
-    "cancer":     "lesion",
-    "carcinoma":  "lesion",
-    "mass":       "lesion",
-    "nodule":     "lesion",
-    "growth":     "lesion",
-    "malignancy": "lesion",
-    "neoplasm":   "lesion",
+_PATHOLOGY_TO_LESION = {
+    "tumor":        "lesion",
+    "tumour":       "lesion",
+    "cancer":       "lesion",
+    "carcinoma":    "lesion",
+    "mass":         "lesion",
+    "nodule":       "lesion",
+    "growth":       "lesion",
+    "malignancy":   "lesion",
+    "malignant":    "lesion",
+    "neoplasm":     "lesion",
+    "metastasis":   "lesion",
+    "metastatic":   "lesion",
+    "abscess":      "lesion",
+    "infarct":      "lesion",
+    "cyst":         "lesion",
+    "fibroid":      "lesion",
+    "leiomyoma":    "lesion",
+    "myoma":        "lesion",
+    "schwannoma":   "lesion",
+    "hamartoma":    "lesion",
+    "adenocarcinoma": "lesion",
+    "sarcoma":      "lesion",
+    "hemangioma":   "lesion",
+    "haemangioma":  "lesion",
+    "benign":       "lesion",
+}
+FLAT_MEDICAL_SYNONYMS.update(_PATHOLOGY_TO_LESION)
+
+# ── Plural forms ─────────────────────────────────────────────────────────────
+# Map each plural to the same canonical concept as its singular.
+# This closes the gap where "lesions" != "lesion", "tumors" != "tumor",
+# "kidneys" != "kidney" in get_semantic_concepts() set comparison.
+_PLURAL_FORMS: dict[str, str] = {}
+
+# Anatomy plurals: map "livers" → "liver", "kidneys" → "kidney", etc.
+for _word, _canonical in list(FLAT_MEDICAL_SYNONYMS.items()):
+    if not _word.endswith("s"):            # not already plural
+        _plural = _word + "s"
+        if _plural not in FLAT_MEDICAL_SYNONYMS:
+            _PLURAL_FORMS[_plural] = _canonical
+
+# Pathology plurals: explicit forms that need a canonical target
+_PLURAL_FORMS.update({
+    "lesions":          "lesion",
+    "tumors":           "lesion",
+    "tumours":          "lesion",
+    "cancers":          "lesion",
+    "carcinomas":       "lesion",
+    "masses":           "lesion",
+    "nodules":          "lesion",
+    "growths":          "lesion",
+    "malignancies":     "lesion",
+    "neoplasms":        "lesion",
+    "metastases":       "lesion",
+    "abscesses":        "lesion",
+    "infarcts":         "lesion",
+    "cysts":            "lesion",
+    "fibroids":         "lesion",
+    "schwannomas":      "lesion",
+    "sarcomas":         "lesion",
+    "hemangiomas":      "lesion",
+    "haemangiomas":     "lesion",
+    # Common anatomy plurals that need explicit mapping
+    "kidneys":          "kidney",
+    "lungs":            "lung",
+    "livers":           "liver",
+    "spleens":          "spleen",
+    "pancreases":       "pancreas",
+    "stomachs":         "stomach",
+    "bones":            "bone",
+    "ovaries":          "ovary",
+    "glands":           "gland",
+    "lymph nodes":      "lymph node",
+    "vessels":          "vessel",
 })
+
+FLAT_MEDICAL_SYNONYMS.update(_PLURAL_FORMS)
 
 # ═══════════════════════════════════════════════════════════════════
 # 5. VOXTELL PROMPT ALIASES
@@ -154,58 +287,113 @@ FLAT_MEDICAL_SYNONYMS.update({
 #    the planner will correctly return UNSUPPORTED instead.
 # ═══════════════════════════════════════════════════════════════════
 VOXTELL_PROMPT_ALIASES: dict[str, str] = {
-    # Liver pathology → "hepatocellular carcinoma" (EXISTS in VoxTell: 73.24)
-    "liver cancer":             "hepatocellular carcinoma",
-    "liver tumor":              "hepatocellular carcinoma",
-    "liver lesion":             "hepatocellular carcinoma",
-    "hepatic lesion":           "hepatocellular carcinoma",
-    "hepatic tumor":            "hepatocellular carcinoma",
-    "focal liver lesion":       "hepatocellular carcinoma",
-    "liver metastasis":         "hepatocellular carcinoma",
-    "hcc":                      "hepatocellular carcinoma",
+    # ── Liver pathology → "hepatocellular carcinoma" (EXISTS in labels.json) ──
+    "liver cancer":              "hepatocellular carcinoma",
+    "liver tumor":               "hepatocellular carcinoma",
+    "liver lesion":              "hepatocellular carcinoma",
+    "hepatic lesion":            "hepatocellular carcinoma",
+    "hepatic tumor":             "hepatocellular carcinoma",
+    "focal liver lesion":        "hepatocellular carcinoma",
+    "liver metastasis":          "hepatocellular carcinoma",
+    "liver metastases":          "hepatocellular carcinoma",   # plural form
+    "hcc":                       "hepatocellular carcinoma",
+    "hepatic carcinoma":         "hepatocellular carcinoma",
+    "liver adenocarcinoma":      "hepatocellular carcinoma",   # from lit-review pathology
 
-    # Lung pathology → "lung nodule" (EXISTS: 45.32) or "lung lesion" (EXISTS: 45.32)
-    "pulmonary nodule":         "lung nodule",
-    "pulmonary lesion":         "lung lesion",
-    "lung cancer":              "lung lesion",
-    "lung mass":                "lung nodule",
+    # ── Lung pathology → "lung nodule" / "lung lesion" (EXISTS in labels.json) ─
+    "pulmonary nodule":          "lung nodule",
+    "pulmonary nodules":         "lung nodule",   # plural
+    "pulmonary lesion":          "lung lesion",
+    "pulmonary lesions":         "lung lesion",   # plural
+    "pulmonary mass":            "lung nodule",
+    "lung cancer":               "lung lesion",
+    "lung mass":                 "lung nodule",
+    "lung tumor":                "lung lesion",
+    "bronchial lesion":          "lung lesion",   # from lit-review: bronchial = lung
+    "lung metastasis":           "lung lesion",
+    "lung metastases":           "lung lesion",   # plural
 
-    # Pancreas pathology → "pancreas tumor" (EXISTS: 35.66)
-    "pancreatic cancer":        "pancreas tumor",
-    "pancreatic tumor":         "pancreas tumor",
-    "pancreatic lesion":        "pancreas tumor",
-    "pancreatic mass":          "pancreas tumor",
+    # ── Pancreas pathology → "pancreas tumor" (EXISTS in labels.json) ──────────
+    "pancreatic cancer":         "pancreas tumor",
+    "pancreatic tumor":          "pancreas tumor",
+    "pancreatic lesion":         "pancreas tumor",
+    "pancreatic mass":           "pancreas tumor",
+    "pancreatic carcinoma":      "pancreas tumor",
+    "pancreatic adenocarcinoma": "pancreas tumor",  # from lit-review: adenocarcinoma
 
-    # Esophagus pathology → "esophageal cancer" (EXISTS: 69.07)
-    "esophageal tumor":         "esophageal cancer",
-    "oesophageal cancer":       "esophageal cancer",
-    "esophagus cancer":         "esophageal cancer",
-    "esophagus tumor":          "esophageal cancer",
+    # ── Esophagus pathology → "esophageal cancer" (EXISTS in labels.json) ──────
+    "esophageal tumor":          "esophageal cancer",
+    "oesophageal cancer":        "esophageal cancer",
+    "oesophageal tumor":         "esophageal cancer",
+    "esophagus cancer":          "esophageal cancer",
+    "esophagus tumor":           "esophageal cancer",
+    "esophageal carcinoma":      "esophageal cancer",
 
-    # Soft tissue → "soft tissue lesion" (EXISTS: 40.34)
-    "soft tissue tumor":        "soft tissue lesion",
-    "soft tissue mass":         "soft tissue lesion",
+    # ── Soft tissue → "soft tissue lesion" (EXISTS in labels.json) ─────────────
+    "soft tissue tumor":         "soft tissue lesion",
+    "soft tissue mass":          "soft tissue lesion",
+    "soft tissue sarcoma":       "soft tissue lesion",  # from lit-review: sarcoma
 
-    # Brain → "tumor" (EXISTS: 77.23)  — VoxTell has no brain-specific tumor label
-    # so we use the generic tumor label which is better than nothing.
-    "brain tumor":              "tumor",
-    "brain lesion":             "tumor",
-    "glioma":                   "tumor",
-    "glioblastoma":             "tumor",
+    # ── Bladder → "urinary bladder cancer" (EXISTS in labels.json) ─────────────
+    # from labels.json: "urinary bladder cancer", "urothelial bladder cancer",
+    # "urothelial carcinoma", "vesical cancer", "vesical carcinoma"
+    "bladder cancer":            "urinary bladder cancer",
+    "bladder tumor":             "urinary bladder cancer",
+    "bladder lesion":            "urinary bladder cancer",
+    "urothelial cancer":         "urinary bladder cancer",
+    "vesical tumor":             "urinary bladder cancer",
+    "bladder carcinoma":         "urinary bladder cancer",
 
-    # Breast → "fdg-avid breast cancer" (EXISTS: 72.27)
-    "breast cancer":            "fdg-avid breast cancer",
-    "breast tumor":             "fdg-avid breast cancer",
+    # ── Uterus → "uterine fibroid" / "uterine leiomyoma" (EXISTS in labels.json) 
+    # from lit-review: uterine pathology papers
+    "uterine tumor":             "uterine fibroid",
+    "uterine lesion":            "uterine fibroid",
+    "uterine mass":              "uterine fibroid",
+    "uterine myoma":             "uterine fibroid",
 
-    # FDG-avid / metabolic → "fdg-avid tumor" (EXISTS: 83.24)
-    "fdg avid tumor":           "fdg-avid tumor",
-    "metabolic tumor":          "fdg-avid tumor",
-    "pet positive tumor":       "fdg-avid tumor",
+    # ── Brain → "tumor" (EXISTS in labels.json) — no brain-specific tumor label ─
+    # from lit-review: glioma, glioblastoma are key brain pathology terms
+    "brain tumor":               "tumor",
+    "brain lesion":              "tumor",
+    "brain tumors":              "tumor",   # plural
+    "glioma":                    "tumor",
+    "glioblastoma":              "tumor",
+    "glioblastoma multiforme":   "tumor",   # from lit-review: GBM
+    "intracranial tumor":        "tumor",   # from lit-review: intracranial = brain
+    "intracranial lesion":       "tumor",
+    "cerebral tumor":            "tumor",
+    "cerebral lesion":           "tumor",
+    "whole brain tumor":         "tumor",   # from labels.json: "whole brain tumor"
 
-    # MS → "ms lesion" (EXISTS: 72.71)
+    # ── Breast → "fdg-avid breast cancer" (EXISTS in labels.json) ──────────────
+    "breast cancer":             "fdg-avid breast cancer",
+    "breast tumor":              "fdg-avid breast cancer",
+    "breast lesion":             "fdg-avid breast cancer",
+    "breast carcinoma":          "fdg-avid breast cancer",
+    "mammary tumor":             "fdg-avid breast cancer",  # from anatomical synonyms
+    "mammary lesion":            "fdg-avid breast cancer",
+
+    # ── FDG-avid / PET → "fdg-avid tumor" (EXISTS in labels.json) ──────────────
+    "fdg avid tumor":            "fdg-avid tumor",
+    "metabolic tumor":           "fdg-avid tumor",
+    "pet positive tumor":        "fdg-avid tumor",
+    "uptaking tumor":            "fdg-avid tumor",  # from labels.json: "uptaking tumor"
+    "uptaking malignancy":       "fdg-avid tumor",  # from labels.json: "uptaking malignancy"
+    "uptaking neoplasm":         "fdg-avid tumor",  # from labels.json: "uptaking neoplasm"
+
+    # ── MS / white matter → "ms lesion" (EXISTS in labels.json) ────────────────
     "multiple sclerosis lesion": "ms lesion",
-    "demyelinating lesion":     "ms lesion",
-    "white matter lesion":      "ms lesion",
+    "demyelinating lesion":      "ms lesion",
+    "white matter lesion":       "ms lesion",
+    "white matter lesions":      "ms lesion",  # plural — from labels.json
+    "wmh":                       "ms lesion",  # from labels.json: "wmh"
+    "wmh lesions":               "ms lesion",  # from labels.json: "wmh lesions"
+
+    # ── Vestibular schwannoma → "vestibular schwannoma" (EXISTS in labels.json) ─
+    # from labels.json: "vestibular schwannoma lesion", "vestibular nerve schwannoma"
+    "acoustic neuroma":          "vestibular schwannoma",
+    "vestibular nerve tumor":    "vestibular schwannoma",  # from labels.json
+    "acoustic neurinoma":        "vestibular schwannoma",
 }
 
 
