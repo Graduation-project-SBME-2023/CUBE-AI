@@ -1402,7 +1402,7 @@ CONSTRAINTS
 async def run_literature_review(
     pico: Dict[str, str],
     model: str = OllamaClient.DEFAULT_MODEL,
-    max_turns: int = 30,
+    max_turns: int = 100,  # No hard cap — allow full pipeline completion
   output_dir: Optional[Path] = None,
   cache_dir: Optional[Path] = None,
   prebuilt_knowledge: Optional[Dict[str, Any]] = None,

@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 # Constants
 MAX_REFINEMENT_ITERATIONS = 10
 REFINEMENT_TIMEOUT_SECONDS = 300  # 5 minutes
-MAX_WS_MESSAGE_SIZE = 64000  # 64KB limit for WebSocket messages
+MAX_WS_MESSAGE_SIZE = 10_000_000  # 10MB — effectively no limit for WebSocket messages
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -225,29 +225,16 @@ class ClinicalPlanner:
             data: Message payload (string, dict, or any serializable object).
             session_id: Optional session ID override. Defaults to current session.
         """
-        # Check payload size for literature review output
+        # No payload truncation — full content is always sent
         if type_ == "lit_review_output" and isinstance(data, dict):
             try:
                 payload_size = len(json.dumps(data, ensure_ascii=False))
-                if payload_size > MAX_WS_MESSAGE_SIZE:
-                    logger.warning(
-                        "Literature review payload too large (%d bytes), "
-                        "truncating knowledge base fields",
-                        payload_size,
-                    )
-                    # Truncate the largest fields to prevent WS disconnection
-                    if "knowledge_base" in data:
-                        data["knowledge_base"] = (
-                            data["knowledge_base"][:50000]
-                            + "\n\n[... Truncated for WebSocket — full version in workspace ...]"
-                        )
-                    if "sources_guide" in data:
-                        data["sources_guide"] = (
-                            data["sources_guide"][:30000]
-                            + "\n\n[... Truncated for WebSocket — full version in workspace ...]"
-                        )
+                logger.debug(
+                    "Literature review payload size: %d bytes",
+                    payload_size,
+                )
             except Exception:
-                pass  # Best-effort size check
+                pass
 
         await self.output_handler(type_, data, self.session.session_id)
 
