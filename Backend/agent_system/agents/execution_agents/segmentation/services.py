@@ -93,9 +93,14 @@ class SegmentationService:
         query_params = {"image": series_instance_uid, "output": "all"}
         inference_params = dict(params or {})
         inference_params["result_extension"] = ".nrrd"
-        inference_params["result_dtype"] = "uint16"
+        inference_params["result_dtype"] = "uint8"
         inference_params["result_compress"] = False
-        inference_params["restore_label_idxs"] = True
+        # NOTE: restore_label_idxs MUST be False for Voxtell.
+        # Voxtell is a binary text-prompted model — it has no fixed label index map.
+        # When True, MONAI's BasicInferTask remaps foreground pixel values (1) to
+        # whatever index 'liver tumor' occupies in the label dict. Since that index
+        # often resolves to 0 (background), the entire mask is silently erased.
+        inference_params["restore_label_idxs"] = False
 
         files = {"params": (None, json.dumps(inference_params), "application/json")}
 
@@ -193,14 +198,33 @@ class SegmentationService:
 
         # parse the nrrd data into numpy array and header
         image, header = parse_nrrd_data(nrrd_data)
+        raw_unique = np.unique(image)
+        raw_max = float(image.max())
+        raw_foreground = int((image > 0).sum())
         logger.info(
             "MONAI output: shape=%s unique=%s nrrd_sizes=%s space_directions=%s space_origin=%s",
             image.shape,
-            np.unique(image),
+            raw_unique,
             header.get("sizes"),
             header.get("space directions"),
             header.get("space origin"),
         )
+        logger.info(
+            "[DEBUG] Raw pred stats: max=%.4f foreground_voxels=%s unique_values=%s",
+            raw_max,
+            raw_foreground,
+            raw_unique.tolist(),
+        )
+        if raw_foreground == 0:
+            logger.warning(
+                "[EMPTY MASK] MONAI returned an all-zero mask for series %s. "
+                "The model found no foreground voxels for prompt '%s'. "
+                "This may indicate: (1) the organ/lesion is not visible in this scan, "
+                "(2) the text prompt does not match any cached embedding, or "
+                "(3) the sigmoid threshold (0.5) is too high for this volume.",
+                series_instance_uid,
+                label_info,
+            )
 
         logger.info(
             "Parsed NRRD data: image_shape=%s, image_dtype=%s, header_keys=%s",
