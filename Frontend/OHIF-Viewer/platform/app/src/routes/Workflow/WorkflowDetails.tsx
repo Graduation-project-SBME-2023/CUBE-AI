@@ -8,9 +8,7 @@ import MonaiLabelClient from '../../../../../extensions/monai-label/src/services
 import { UINotificationService } from '@ohif/core';
 import { utils } from '@ohif/core';
 import filtersMeta from '../WorkList/filtersMeta';
-import { useNavigate } from 'react-router-dom';
-import { useLocation } from 'react-router-dom';
-import { getMonaiBaseUrl } from '../../utils/runtimeUrls';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 import {
   Icon,
@@ -87,7 +85,7 @@ function WorkflowDetailPage({
   dataPath,
   onRefresh,
   servicesManager,
-  extensionManager
+  extensionManager,
 }) {
   const ServerSettings = useRef();
 
@@ -116,7 +114,6 @@ function WorkflowDetailPage({
 
   const [isMonaiInitialized, setIsMonaiInitialized] = useState(false);
 
-
   const [workflowStudies, setWorkflowStudies] = useState([]);
   const [previousStudies, setPreviousStudies] = useState([]);
   const [modelConfig, setModelConfig] = useState('2d');
@@ -128,14 +125,13 @@ function WorkflowDetailPage({
 
   const [workflowDetails, setWorkflowDetails] = useState(null);
 
-
   const client = () => {
     const settings =
       ServerSettings && ServerSettings.current && ServerSettings.current.state
         ? ServerSettings.current.state
         : null;
 
-    return new MonaiLabelClient(settings ? settings.url : getMonaiBaseUrl());
+    return new MonaiLabelClient(settings ? settings.url : 'http://127.0.0.1:8000');
   };
 
   const onInfo = async () => {
@@ -218,7 +214,7 @@ function WorkflowDetailPage({
   useEffect(() => {
     const fetchAnnotationStatus = async () => {
       try {
-        const url = `${getMonaiBaseUrl()}/workflow/${encodeURIComponent(
+        const url = `http://localhost:8000/workflow/${encodeURIComponent(
           workflowName
         )}/filter-annotated`;
         const response = await fetch(url, {
@@ -378,10 +374,8 @@ function WorkflowDetailPage({
 
   const fetchTrainFlag = async (taskName, caseId) => {
     try {
-      const url = `${getMonaiBaseUrl()}/workflow/${encodeURIComponent(taskName)}/get-train?study_uid=${encodeURIComponent(caseId)}`;
-      const response = await fetch(
-        url
-      );
+      const url = `http://localhost:8000/workflow/${encodeURIComponent(taskName)}/get-train?study_uid=${encodeURIComponent(caseId)}`;
+      const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch train flag');
       }
@@ -430,7 +424,7 @@ function WorkflowDetailPage({
         study_uid: studyInstanceUid,
         train: trainFlag,
       }).toString();
-      const url = `${getMonaiBaseUrl()}/workflow/${encodeURIComponent(workflowDetails.workflowName)}/update-train?${queryParams}`;
+      const url = `http://localhost:8000/workflow/${encodeURIComponent(workflowDetails.workflowName)}/update-train?${queryParams}`;
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -484,26 +478,14 @@ function WorkflowDetailPage({
   };
 
   const handleDeletion = async () => {
-    let notification = new UINotificationService();
-
-    if (selectedStudies.length === 0) {
-      notification.show({
-        title: 'Delete Failed',
-        message: 'Please select at least one study to delete.',
-        type: 'warning',
-        duration: 3000,
-      });
-      return;
-    }
-
     // Prepare the records to be deleted
     const recordsToDelete = selectedStudies.map(studyInstanceUid => ({
-      study_uid: studyInstanceUid,
+      case_id: studyInstanceUid,
       task_name: workflowName,
     }));
 
     try {
-      const response = await fetch(`${getMonaiBaseUrl()}/workflow/delete-multiple`, {
+      const response = await fetch('http://localhost:8000/workflow/delete-multiple', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -528,9 +510,9 @@ function WorkflowDetailPage({
       setWorkflowStudies(
         studies.filter(study => workflowDetails.Studies.includes(study.studyInstanceUid))
       );
-      selectedStudies.forEach(studyInstanceUid => {
-        g_workflowManagerInstance.deleteStudyFromWorkflow(workflowName, studyInstanceUid);
-      });
+      // selectedStudies.forEach(studyInstanceUid => {
+      //   g_workflowManagerInstance.deleteStudyFromWorkflow(workflowName, studyInstanceUid);
+      // });
       // Clear the selection
       setSelectedStudies([]);
     } catch (error) {
@@ -621,55 +603,16 @@ function WorkflowDetailPage({
     setIsTraining(true);
 
     try {
-      const url = `${getMonaiBaseUrl()}/workflow/${encodeURIComponent(workflowName)}/train`;
-      const fetchedWorkflowDataResponse = await fetch(
-        url,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ task_name: workflowName }),
-        }
-      );
+      const url = `http://localhost:8000/workflow/${encodeURIComponent(workflowName)}/train`;
+      const fetchedWorkflowDataResponse = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_name: workflowName }),
+      });
       let fetchedData = await fetchedWorkflowDataResponse.json();
       if (!fetchedWorkflowDataResponse.ok) {
         throw new Error(`Error: ${fetchedWorkflowDataResponse.status}`);
       }
-
-
-      // try {
-      //   const apiUrl = 'http://localhost:8000/NN_UNet/create_task';
-      //   const body = {
-      //     task_name: workflowDetails.workflowName,
-      //     channel_names: modalityDict,
-      //     labels: labelsDictionary,
-      //     images: images,
-      //   };
-      //   const response = await fetch(apiUrl, {
-      //     method: 'POST',
-      //     headers: {
-      //       'Content-Type': 'application/json',
-      //     },
-      //     body: JSON.stringify({
-      //       task_name: body.task_name,
-      //       channel_names: body.channel_names,
-      //       labels: body.labels,
-      //       images: body.images,
-      //     }),
-      //   });
-      //   if (!response.ok) {
-      //     throw new Error(`Error: ${response.status}`);
-      //   }
-      //   const result = await response.json();
-      //   console.log('Process Data Response:', result);
-      //   notification.show({
-      //     title: 'Process Status',
-      //     message: 'Data is Processed Successfully',
-      //     type: 'success',
-      //     duration: 5000,
-      //   });
-      // } catch (error) {
-      //   console.error('Error processing data:', error);
-      // }
 
       const queryParams = new URLSearchParams({
         model_name: workflowDetails.workflowName,
@@ -681,7 +624,7 @@ function WorkflowDetailPage({
       try {
         // Construct query string
 
-        const response = await fetch(`${getMonaiBaseUrl()}/create-model?${queryParams}`, {
+        const response = await fetch(`http://localhost:8000/create-model?${queryParams}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -705,7 +648,7 @@ function WorkflowDetailPage({
           const queryParams = new URLSearchParams({
             model_name: workflowDetails.workflowName,
           }).toString();
-          const response = await fetch(`${getMonaiBaseUrl()}/train/${workflowName}`, {
+          const response = await fetch(`http://localhost:8000/train/${workflowName}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -766,7 +709,7 @@ function WorkflowDetailPage({
     }
 
     navigate({
-      pathname: '/worklist',
+      pathname: '/',
       search: decodeURIComponent(searchQuery.toString()),
     });
   };
@@ -916,12 +859,10 @@ function WorkflowDetailPage({
       // not clicked on.
       expandedContent: (
         <StudyListExpandedRow
-          seriesTableColumns={
-            {}
-          }
+          seriesTableColumns={{}}
           seriesTableDataSource={
             seriesInStudiesMap.has(studyInstanceUid)
-              ? seriesInStudiesMap.get(studyInstanceUid).map(s => { })
+              ? seriesInStudiesMap.get(studyInstanceUid).map(s => {})
               : []
           }
         >
@@ -959,7 +900,7 @@ function WorkflowDetailPage({
                           variant={isValidMode ? 'contained' : 'disabled'}
                           disabled={!isValidMode}
                           endIcon={<Icon name="launch-arrow" />} // launch-arrow | launch-info
-                          onClick={() => { }}
+                          onClick={() => {}}
                           data-cy={`mode-${mode.routeName}-${studyInstanceUid}`}
                         >
                           {t(`Modes:${mode.displayName}`)}
@@ -979,520 +920,356 @@ function WorkflowDetailPage({
     };
   });
 
-  return (
-    <div className="h-screen bg-gray-900">
-      <div className="bg-gray-900 shadow-md">
-        <div className="bg-secondary-dark flex items-center justify-start space-x-4 px-6">
-          <button
-            onClick={onClickReturnButton}
-            className="text-white hover:text-gray-300 focus:outline-none"
-            aria-label="Go back"
-          >
-            <Icon
-              name="chevron-left"
-              className="text-primary-active w-8"
-            />
-          </button>
-          <Typography
-            variant="h4"
-            className="py-3 text-lg font-light text-white"
-          >
+return (
+  <div className="h-screen bg-[#0d1526]">
+
+  {/* Top Navbar */}
+  <div className="bg-[#101c35] border-b border-[#1a2540] relative z-10">
+    <div className="flex items-center justify-between px-6 h-14">
+      <div className="flex items-center space-x-4">
+        <button
+          onClick={onClickReturnButton}
+          className="group relative flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-200 hover:bg-[#1a2540] active:scale-95"
+          aria-label="Go back"
+        >
+          <Icon
+            name="chevron-left"
+            className="text-[#5a8ab8] group-hover:text-[#4a9eff] h-5 w-5 transition-colors duration-200"
+          />
+        </button>
+
+        <div className="h-6 w-px bg-[#1a2540]" />
+
+        <div className="flex items-center space-x-2.5">
+          <Typography variant="h4" className="text-[14px] font-semibold text-[#c8d8f0] tracking-tight">
             {workflowName}
           </Typography>
-        </div>
-      </div>
-
-      <div
-        className="flex"
-        style={{ height: 'calc(100vh - 64px)' }}
-      >
-        {/* Left Panel containing the "Studies", "Select All", and "Delete" buttons */}
-        <div className="flex-1 overflow-y-auto bg-gray-900 p-6">
-          {/* Top section with Studies label and buttons */}
-          <div className="mb-6 flex items-center justify-between">
-            {/* Styled "Studies" label */}
-            {/* <h1 className="font-large text-lg text-white">Studies</h1> */}
-            <Typography
-              variant="h5"
-              className="text-lg font-light text-white"
-            >
-              Studies
-            </Typography>
-            {/* Positioned Clear button inside the left panel */}
-            <div className="space-x-2">
-              <LegacyButton
-                rounded="full"
-                variant="outlined"
-                color="primaryActive"
-                border="primaryActive"
-                onClick={handleSelectAll}
-              >
-                {selectAll ? 'Unselect All' : 'Select All'}
-              </LegacyButton>
-
-              {/*NEWWWW STYLE*/}
-              <LegacyButton
-                rounded="full"
-                variant="outlined"
-                color="white"
-                style={{ backgroundColor: '#c4251a' }}
-                // border="red"
-                className="border-none  text-white hover:bg-red-700" // Custom Tailwind classes for further control
-                onClick={handleDeletion}
-              >
-                {t('Delete')}
-              </LegacyButton>
-            </div>
-          </div>
-          <div className="max-h-full ">
-            <div>
-              <TableHeader tableHeader={tableHeader} />
-            </div>
-            {hasStudies ? (
-              <StudyListTable
-                tableDataSource={tableDataSource}
-                numOfStudies={studiesTotal}
-                querying={querying}
-                filtersMeta={filtersMeta}
-              />
-            ) : (
-              <EmptyStudies />
-            )}
-          </div>
-        </div>
-        {/* Right Panel */}
-        <div
-          className="flex-2 h-full overflow-y-auto"
-          style={{
-            backgroundColor: '#789',
-            borderTopLeftRadius: '6px',
-            borderTopRightRadius: '6px',
-          }}
-        >
-          <div
-            className="rounded-lg shadow-md"
-            style={{ backgroundColor: '#789', padding: '0px' }}
-          >
-            {/* Header */}
-            <Typography
-              variant="h6"
-              className="bg-primary-dark mb-4 p-3 text-center text-lg"
-              style={{
-                color: '#348cfd',
-                fontSize: '1rem',
-                borderTopLeftRadius: '6px', // Match the container's rounded corners
-                borderTopRightRadius: '6px',
-              }}
-            >
-              Workflow Server
-            </Typography>
-
-            {/* Content */}
-            <div className="flex flex-col items-center space-y-4 p-3">
-              {/* Dynamic "Connected" label */}
-              <Typography
-                variant="subtitle"
-                style={{
-                  color: isConnected ? '#1fd655' : '#484f48',
-                  fontSize: '12px',
-                  fontWeight: 'bold',
-                  backgroundColor: '#789',
-                }}
-              >
-                {isConnected ? 'Connected' : 'Not Connected'}
-              </Typography>
-            </div>
-            {/* Model Section */}
-            <div
-              className="rounded-lg shadow-md"
-              style={{ backgroundColor: '#737678', width: '100%' }}
-            >
-              {/* Model Info Header */}
-              <div
-                className="py-2 text-left text-white"
-                style={{
-                  fontSize: '13px',
-                  paddingLeft: '10px',
-                  width: '100%',
-                  backgroundColor: 'black',
-                  borderTopLeftRadius: '8px', // Match the container's rounded corners
-                  borderTopRightRadius: '8px',
-                }}
-              >
-                Model
-              </div>
-              <div style={{ margin: '10px' }}>
-                {/* Labels Header with Add Button */}
-                <div className="mb-3 flex w-full items-center justify-between">
-                  <label
-                    style={{
-                      fontSize: '13px',
-                      color: 'black',
-                      textAlign: 'center',
-                    }}
-                  >
-                    Labels :
-                  </label>
-                  <button
-                    className="customButton"
-                    onClick={addLabel}
-                    style={{
-                      width: '25px',
-                      height: '25px',
-                      color: 'black',
-                      border: '1px solid black',
-                      borderRadius: '50%',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backgroundColor: '#add8e6',
-                      transition: 'background-color 0.3s ease',
-                    }}
-                  >
-                    +
-                  </button>
-                </div>
-
-                {/* Render Dynamically Added Labels */}
-                {labels.map(labelObj => (
-                  <div
-                    key={labelObj.id}
-                    className="mb-2 flex items-center"
-                  >
-                    <label
-                      style={{
-                        fontSize: '11px',
-                        color: 'black',
-                        marginTop: '3px',
-                        paddingLeft: '10px',
-                        marginBottom: '10px',
-                      }}
-                    >
-                      {labelObj.label}:
-                    </label>
-                    <input
-                      id={`input-${labelObj.id}`}
-                      type="text"
-                      placeholder="Enter Label"
-                      onBlur={e => handleLabelBlur(labelObj.id, e.target.value)} // Update dictionary only when input loses focus
-                      style={{
-                        fontSize: '11px',
-                        padding: '2px 8px',
-                        border: '1px solid #ccc',
-                        borderRadius: '4px',
-                        outline: 'none',
-                        backgroundColor: 'white',
-                        color: 'black',
-                        marginBottom: '10px',
-                      }}
-                    />
-                    {/* Delete Button */}
-                    <button
-                      onClick={() => handleDeleteLabel(labelObj.id)}
-                      className="bg-red flex items-center justify-center rounded-full p-1 hover:bg-red-600 "
-                      style={{
-                        width: '20px',
-                        height: '20px',
-                        marginBottom: '10px',
-                        marginLeft: '5px',
-                      }}
-                    >
-                      <Icon
-                        name="old-trash"
-                        className="text-sm text-red-600 hover:text-white"
-                      />
-                    </button>
-                  </div>
-                ))}
-                <div className="flex w-full items-center justify-between">
-                  <label
-                    style={{
-                      fontSize: '13px',
-                      color: 'black',
-                      textAlign: 'center',
-                    }}
-                  >
-                    Model Type:
-                  </label>
-                  <select
-                    value={modelConfig}
-                    onChange={e => setModelConfig(e.target.value)}
-                    style={{
-                      fontSize: '11px',
-                      padding: '2px 6px',
-                      border: '1px solid #ccc',
-                      borderRadius: '4px',
-                      outline: 'none',
-                      backgroundColor: 'white',
-                      color: 'black',
-                    }}
-                  >
-                    <option value="2d">2D</option>
-                    <option value="3d_lowres">3D</option>
-                    <option value="3d_fullres">3D Full Resolution</option>
-                  </select>
-                </div>
-              </div>
-              {/* Number of Folds Section */}
-              <div
-                style={{
-                  margin: '10px',
-                  position: 'relative',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-              >
-                <div className="mt-2 mb-3 flex items-center justify-between">
-                  <label
-                    style={{
-                      fontSize: '13px',
-                      color: 'black',
-                      textAlign: 'left',
-                    }}
-                  >
-                    Number of Folds:
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="5"
-                    value={numFolds}
-                    onChange={e => setNumFolds(Number(e.target.value))}
-                    style={{
-                      fontSize: '11px',
-                      padding: '2px 6px',
-                      width: '60px',
-                      border: '1px solid #ccc',
-                      borderRadius: '4px',
-                      outline: 'none',
-                      backgroundColor: 'white',
-                      color: 'black',
-                      textAlign: 'center',
-                    }}
-                  />
-                  {/* Info Icon */}
-                  <div
-                    style={{
-                      position: 'relative',
-                      display: 'inline-block',
-                      cursor: 'pointer',
-                      marginLeft: '10px',
-                    }}
-                    title="Folds are used for k-fold cross-validation, splitting the data into multiple subsets for training and validation. Increasing folds improves generalization but takes more computation."
-                  >
-                    <span>
-                      <Icon
-                        name="notifications-info"
-                        className="text-white"
-                        style={{
-                          width: '20px',
-                          height: '20px',
-                        }}
-                      />
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div
-              className="rounded-lg shadow-md"
-              style={{ backgroundColor: '#737678', width: '100%' }}
-            >
-              <div
-                className="py-2 text-left text-white"
-                style={{
-                  fontSize: '13px',
-                  paddingLeft: '10px',
-                  width: '100%',
-                  backgroundColor: 'black',
-                  borderTopLeftRadius: '8px',
-                  borderTopRightRadius: '8px',
-                }}
-              >
-                Training Info
-              </div>
-              <div className="flex flex-col p-1">
-                {/* Training Count */}
-                <div className="flex items-center justify-between">
-                  <span
-                    className="text-black-500 p-2 "
-                    style={{ fontSize: '13px' }}
-                  >
-                    Training Studies:
-                  </span>
-                  <span
-                    className=" text-black-500 p-2 "
-                    style={{ fontSize: '13px' }}
-                  >
-                    {trainCount}
-                  </span>
-                </div>
-
-                {/* Validation Count */}
-                <div className="flex items-center justify-between">
-                  <span
-                    className="text-black-500 p-2 "
-                    style={{ fontSize: '13px' }}
-                  >
-                    Validation Studies:
-                  </span>
-                  <span
-                    className="text-black-500 p-2 "
-                    style={{ fontSize: '13px' }}
-                  >
-                    {validationCount}
-                  </span>
-                </div>
-
-                {/* Training/Validation Ratio */}
-                <div className="w-100 flex items-center justify-between rounded-lg bg-gray-300 px-2 py-1">
-                  <span className="p-2  text-sm font-semibold text-gray-800">
-                    Train/Validation Ratio:
-                  </span>
-                  <span className="p-2 text-sm text-sm font-semibold text-gray-800">
-                    {`${trainCount} : ${validationCount}`}
-                  </span>
-                </div>
-              </div>
-              <div
-                className="mt-4 flex justify-center"
-                style={{ margin: '10px' }}
-              >
-                <LegacyButton
-                  onClick={() => {
-                    if (isTraining) {
-                      setIsTraining(false);
-                      console.log('Training stopped');
-                    } else {
-                      const { isValid } = validateLabels(labels);
-                      if (isValid) {
-                        setIsModalOpen(true);
-                      }
-                    }
-                  }}
-                  rounded="full"
-                  variant="contained"
-                  color="white"
-                  border="black"
-                  size="medium"
-                  style={{ backgroundColor: '#add8e6', marginBottom: '10px' }}
-                >
-                  {isTraining ? 'Stop' : 'Train'}
-                </LegacyButton>
-                <Modal
-                  isOpen={isModalOpen}
-                  onRequestClose={() => setIsModalOpen(false)}
-                  contentLabel="Training Summary"
-                  style={{
-                    overlay: {
-                      backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    },
-                    content: {
-                      width: '400px',
-                      padding: '20px',
-                      borderRadius: '10px',
-                      backgroundColor: 'white',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      textAlign: 'center',
-                    },
-                  }}
-                >
-                  <h2 className="mb-4 text-center text-xl font-bold">Training Summary</h2>
-                  <p>
-                    <strong>Model Type:</strong> {modelConfigDict[modelConfig]}
-                  </p>
-                  <p>
-                    <strong>Number of Folds:</strong> {numFolds}
-                  </p>
-                  <p>
-                    <strong>Labels:</strong>{' '}
-                    {Object.keys(labelsDictionary).length > 0
-                      ? Object.keys(labelsDictionary).join(', ')
-                      : 'No labels defined'}
-                  </p>
-                  <p>
-                    <strong>Total Number of Studies:</strong> {workflowStudies.length}
-                  </p>
-                  <div className="mt-4 flex w-full justify-between">
-                    {' '}
-                    <button
-                      onClick={() => setIsModalOpen(false)}
-                      className="rounded bg-gray-400 px-4 py-2 text-white hover:bg-gray-500"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => {
-                        setIsModalOpen(false);
-                        setIsTraining(true); // Training starts
-                        train();
-                        console.log('Training started');
-                      }}
-                      className="rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600"
-                    >
-                      Proceed
-                    </button>
-                  </div>
-                </Modal>
-              </div>
-            </div>
-            <div
-              className="rounded-lg shadow-md"
-              style={{ backgroundColor: '#737678', width: '100%' }}
-            >
-              <div
-                className="py-2 text-left text-white"
-                style={{
-                  fontSize: '13px',
-                  paddingLeft: '10px',
-                  width: '100%',
-                  backgroundColor: 'black',
-                  borderTopLeftRadius: '8px',
-                  borderTopRightRadius: '8px',
-                }}
-              >
-                Model Progress
-              </div>
-
-              {/* Progress Bars Container */}
-              <div className="space-y-4 p-4">
-                {/* Training Progress Bar */}
-                <div className="flex items-center space-x-4">
-                  {/* Label */}
-                  <span
-                    className="w-28  text-black"
-                    style={{ fontSize: '13px' }}
-                  >
-                    Training Progress
-                  </span>
-                  {/* Progress Bar */}
-                  <div className="relative h-3 w-full rounded-full bg-gray-300">
-                    <div
-                      className="absolute top-0 left-0 flex h-full items-center justify-center rounded-full text-sm text-black"
-                      style={{
-                        width: `${0}%`,
-                        background: `linear-gradient(to right, red, yellow ${0}%, green)`,
-                      }}
-                    ></div>
-                    <div className="absolute inset-0 flex items-center justify-center text-xs font-semibold text-black">
-                      {0}%
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-            </div>
-          </div>
+          <span className="bg-[#4a9eff]/10 text-[#4a9eff] border border-[#4a9eff]/30 rounded-full px-2.5 py-0.5 text-[10px] font-semibold tracking-wider uppercase">
+            Active
+          </span>
         </div>
       </div>
     </div>
-  );
+  </div>
+
+  {/* Main Content Layout */}
+  <div className="flex" style={{ height: 'calc(100vh - 56px)' }}>
+
+    {/* Left Panel - Studies Table */}
+    <div className="flex-1 overflow-y-auto bg-[#0d1526] p-5">
+      <div className="mb-5 flex items-center justify-between">
+        <Typography variant="h5" className="text-[13px] font-semibold text-[#c8d8f0]">
+          Studies
+        </Typography>
+        <div className="flex items-center gap-2">
+          <LegacyButton
+            rounded="full"
+            variant="outlined"
+            color="primaryActive"
+            border="primaryActive"
+            onClick={handleSelectAll}
+            className="text-[11px] border border-[#1e3058] text-[#4a9eff] bg-transparent hover:bg-[#4a9eff]/10 transition-all duration-200 px-3 py-1 rounded-full"
+          >
+            {selectAll ? 'Unselect All' : 'Select All'}
+          </LegacyButton>
+
+          <LegacyButton
+            rounded="full"
+            variant="outlined"
+            onClick={handleDeletion}
+            className="text-[11px] border border-[#e05a5a]/30 text-[#e05a5a] bg-[#e05a5a]/10 hover:bg-[#e05a5a]/20 transition-all duration-200 px-3 py-1 rounded-full"
+          >
+            {t('Delete')}
+          </LegacyButton>
+        </div>
+      </div>
+
+      <div className="max-h-full">
+        <TableHeader tableHeader={tableHeader} />
+        {hasStudies ? (
+          <StudyListTable
+            tableDataSource={tableDataSource}
+            numOfStudies={studiesTotal}
+            querying={querying}
+            filtersMeta={filtersMeta}
+          />
+        ) : (
+          <EmptyStudies />
+        )}
+      </div>
+    </div>
+
+    {/* Right Panel - Configuration */}
+    <div className="w-[320px] flex-shrink-0 h-full overflow-y-auto bg-[#0d1526] border-l border-[#1a2540] scrollbar-thin scrollbar-thumb-[#1e3058]">
+      <div className="p-3 space-y-3">
+
+        {/* Server Header */}
+        <div className="flex items-center justify-between p-3 bg-[#071020] rounded-lg border border-[#1a2540]">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[9px] font-bold text-[#3d6a9e] uppercase tracking-[0.12em]">
+              Server
+            </span>
+            <Typography variant="h6" className="text-[13px] font-semibold text-[#c8d8f0]">
+              Workflow
+            </Typography>
+          </div>
+          <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border ${isConnected ? 'bg-[#1a4a3a]/40 border-[#1e5a3a]' : 'bg-[#1a2540]/50 border-[#1e3058]'}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-[#34d399]' : 'bg-[#3d6a9e]'}`} />
+            <span className={`text-[10px] font-medium ${isConnected ? 'text-[#34d399]' : 'text-[#5a8ab8]'}`}>
+              {isConnected ? 'Connected' : 'Disconnected'}
+            </span>
+          </div>
+        </div>
+
+        {/* Model Settings Section */}
+        <div className="bg-[#071020] border border-[#1a2540] rounded-lg p-3 space-y-3">
+          <h3 className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#3d6a9e]">
+            Model
+          </h3>
+
+          {/* Labels Section */}
+          <div className="flex w-full items-center justify-between">
+            <label className="text-[11px] font-medium text-[#8ab4e0]">
+              Labels<span className="text-[#1e3058] ml-0.5">:</span>
+            </label>
+            <button
+              type="button"
+              onClick={addLabel}
+              aria-label="Add Label"
+              className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-[#1e3058] bg-transparent text-[11px] text-[#4a9eff] transition-all duration-200 hover:border-[#4a9eff]/50 hover:bg-[#4a9eff]/10 active:scale-90"
+            >
+              +
+            </button>
+          </div>
+
+          {/* Dynamic Labels */}
+          <div className="space-y-1.5">
+            {labels.map(labelObj => (
+              <div key={labelObj.id} className="group flex items-center gap-2">
+                <label className="min-w-[60px] whitespace-nowrap text-[10px] font-medium text-[#5a8ab8]">
+                  {labelObj.label}<span className="ml-0.5 text-[#1e3058]">:</span>
+                </label>
+                <input
+                  id={`input-${labelObj.id}`}
+                  type="text"
+                  placeholder="Enter value..."
+                  onBlur={e => handleLabelBlur(labelObj.id, e.target.value)}
+                  className="flex-1 rounded-[3px] border border-[#1e3058] bg-[#071020] px-1.5 py-0.5 text-[11px] text-[#c8d8f0] outline-none transition-all duration-200 placeholder:text-[#3d6a9e] focus:border-[#4a9eff]/50 focus:ring-1 focus:ring-[#4a9eff]/20"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleDeleteLabel(labelObj.id)}
+                  aria-label={`Delete ${labelObj.label}`}
+                  className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full text-[#1e3058] hover:text-[#e05a5a] hover:bg-[#e05a5a]/10 opacity-0 group-hover:opacity-100 transition-all duration-200 cursor-pointer"
+                >
+                  <Icon name="old-trash" size="10" className="text-current pointer-events-none" />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Model Type Dropdown */}
+          <div className="flex w-full items-center justify-between gap-2">
+            <label className="whitespace-nowrap text-[11px] font-medium text-[#8ab4e0]">
+              Model Type<span className="text-[#1e3058] ml-0.5">:</span>
+            </label>
+            <div className="relative max-w-[160px] flex-1">
+              <select
+                value={modelConfig}
+                onChange={e => setModelConfig(e.target.value)}
+                className="w-full cursor-pointer appearance-none rounded-[3px] border border-[#1e3058] bg-[#071020] py-1 pl-2 pr-7 text-[11px] text-[#c8d8f0] outline-none transition-all duration-200 focus:border-[#4a9eff]/50 focus:ring-1 focus:ring-[#4a9eff]/20"
+              >
+                <option value="2d" className="bg-[#071020] text-[#c8d8f0]">2D</option>
+                <option value="3d_lowres" className="bg-[#071020] text-[#c8d8f0]">3D</option>
+                <option value="3d_fullres" className="bg-[#071020] text-[#c8d8f0]">3D Full Resolution</option>
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+                <Icon name="chevron-down" size="11" className="text-[#3d6a9e]" />
+              </div>
+            </div>
+          </div>
+
+          {/* Number of Folds */}
+          <div className="flex items-center justify-between">
+            <label className="text-[11px] font-medium text-[#8ab4e0] whitespace-nowrap">
+              Number of Folds<span className="text-[#1e3058] ml-0.5">:</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="1"
+                max="5"
+                value={numFolds}
+                onChange={e => setNumFolds(Math.min(5, Math.max(1, Number(e.target.value))))}
+                className="w-12 bg-[#071020] border border-[#1e3058] rounded-[3px] py-1 text-[11px] text-[#c8d8f0] text-center outline-none cursor-pointer focus:border-[#4a9eff]/50 focus:ring-1 focus:ring-[#4a9eff]/20 transition-all duration-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <div className="relative group">
+                <div className="flex items-center justify-center w-4 h-4 rounded-full cursor-help text-[#3d6a9e] hover:text-[#4a9eff] transition-colors duration-200">
+                  <Icon name="notifications-info" size="13" className="text-current" />
+                </div>
+                <div className="pointer-events-none absolute right-0 bottom-full mb-2 w-48 p-2.5 rounded-lg bg-[#101c35] border border-[#1e3058] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                  <p className="text-[10px] text-[#8ab4e0] leading-relaxed">
+                    Used for <span className="text-[#4a9eff] font-medium">k-fold cross-validation</span>. Increasing folds improves generalization but takes more computation.
+                  </p>
+                  <div className="absolute right-3 -bottom-[5px] w-2 h-2 bg-[#101c35] border-b border-r border-[#1e3058] rotate-45 -z-10" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Training Info Section */}
+        <div className="bg-[#071020] border border-[#1a2540] rounded-lg p-3 space-y-2">
+          <h3 className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#3d6a9e] mb-2">
+            Training Info
+          </h3>
+
+          <div className="flex items-center justify-between py-0.5">
+            <span className="text-[11px] text-[#8ab4e0]">Training Studies:</span>
+            <span className="text-[11px] font-medium text-[#c8d8f0]">{trainCount}</span>
+          </div>
+
+          <div className="flex items-center justify-between py-0.5">
+            <span className="text-[11px] text-[#8ab4e0]">Validation Studies:</span>
+            <span className="text-[11px] font-medium text-[#c8d8f0]">{validationCount}</span>
+          </div>
+
+          <div className="flex items-center justify-between mt-1.5 bg-[#0d1526] border border-[#1e3058] rounded-[3px] px-2.5 py-1.5">
+            <span className="text-[11px] font-semibold text-[#8ab4e0]">Train/Validation Ratio:</span>
+            <span className="text-[11px] font-bold text-[#4a9eff]">{`${trainCount} : ${validationCount}`}</span>
+          </div>
+
+          {/* Train Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (isTraining) {
+                setIsTraining(false);
+              } else {
+                const { isValid } = validateLabels(labels);
+                if (isValid) setIsModalOpen(true);
+              }
+            }}
+            className={`w-full mt-3 py-2 rounded-[3px] font-semibold text-[11px] transition-all duration-200 active:scale-[0.98] cursor-pointer border-none ${
+              isTraining
+                ? 'bg-[#e05a5a]/20 text-[#e05a5a] border border-[#e05a5a]/30 hover:bg-[#e05a5a]/30'
+                : 'bg-[#1a4a8a] text-[#c8d8f0] hover:bg-[#1e5aaa]'
+            }`}
+          >
+            {isTraining ? 'Stop Training' : 'Train Model'}
+          </button>
+        </div>
+
+        {/* Model Progress Section */}
+        <div className="bg-[#071020] border border-[#1a2540] rounded-lg p-3 space-y-3">
+          <h3 className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#3d6a9e]">
+            Model Progress
+          </h3>
+
+          {/* Training Progress Bar */}
+          <div className="flex items-center gap-3">
+            <span className="w-24 text-[11px] text-[#8ab4e0] flex-shrink-0">Training Progress</span>
+            <div className="relative h-2 w-full rounded-full bg-[#0d1526] border border-[#1e3058] overflow-hidden">
+              <div
+                className="absolute top-0 left-0 h-full rounded-full transition-all duration-500"
+                style={{ width: `0%`, background: 'linear-gradient(to right, #f97316, #eab308)' }}
+              />
+              <div className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-[#c8d8f0]">
+                0%
+              </div>
+            </div>
+          </div>
+
+          {/* Dice Metric Progress Bar */}
+          <div className="flex items-center gap-3">
+            <span className="w-24 text-[11px] text-[#8ab4e0] flex-shrink-0">Dice Metric</span>
+            <div className="relative h-2 w-full rounded-full bg-[#0d1526] border border-[#1e3058] overflow-hidden">
+              <div
+                className="absolute top-0 left-0 h-full rounded-full transition-all duration-500"
+                style={{ width: `0%`, background: 'linear-gradient(to right, #e05a5a, #22c55e)' }}
+              />
+              <div className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-[#c8d8f0]">
+                0%
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  {/* Training Summary Modal */}
+  <Modal
+    isOpen={isModalOpen}
+    onRequestClose={() => setIsModalOpen(false)}
+    contentLabel="Training Summary"
+    style={{
+      overlay: {
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backdropFilter: 'blur(4px)',
+        zIndex: 50,
+      },
+      content: {
+        width: '380px',
+        padding: '20px',
+        borderRadius: '8px',
+        backgroundColor: '#0d1526',
+        border: '1px solid #1a2540',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        textAlign: 'center',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
+      },
+    }}
+  >
+    <h2 className="mb-5 text-[14px] font-bold text-[#c8d8f0]">Training Summary</h2>
+    <div className="w-full space-y-2 text-left mb-5">
+      <div className="flex justify-between px-1.5 py-1 border-b border-[#1a2540]">
+        <span className="text-[#5a8ab8] text-[11px]">Model Type:</span>
+        <span className="text-[#c8d8f0] text-[11px] font-medium">{modelConfigDict[modelConfig]}</span>
+      </div>
+      <div className="flex justify-between px-1.5 py-1 border-b border-[#1a2540]">
+        <span className="text-[#5a8ab8] text-[11px]">Number of Folds:</span>
+        <span className="text-[#c8d8f0] text-[11px] font-medium">{numFolds}</span>
+      </div>
+      <div className="flex justify-between px-1.5 py-1 border-b border-[#1a2540]">
+        <span className="text-[#5a8ab8] text-[11px]">Labels:</span>
+        <span className="text-[#c8d8f0] text-[11px] font-medium">
+          {Object.keys(labelsDictionary).length > 0 ? Object.keys(labelsDictionary).join(', ') : 'No labels defined'}
+        </span>
+      </div>
+      <div className="flex justify-between px-1.5 py-1">
+        <span className="text-[#5a8ab8] text-[11px]">Total Studies:</span>
+        <span className="text-[#c8d8f0] text-[11px] font-medium">{workflowStudies.length}</span>
+      </div>
+    </div>
+
+    <div className="flex w-full gap-2">
+      <button
+        onClick={() => setIsModalOpen(false)}
+        className="flex-1 py-2 rounded-[3px] bg-transparent border border-[#1e3058] text-[#5a8ab8] text-[11px] font-medium hover:border-[#4a9eff] hover:text-[#4a9eff] transition-colors cursor-pointer"
+      >
+        Cancel
+      </button>
+      <button
+        onClick={() => {
+          setIsModalOpen(false);
+          setIsTraining(true);
+          train();
+        }}
+        className="flex-1 py-2 rounded-[3px] bg-[#1a4a8a] text-[#c8d8f0] text-[11px] font-bold hover:bg-[#1e5aaa] transition-colors cursor-pointer"
+      >
+        Proceed
+      </button>
+    </div>
+  </Modal>
+</div>
+      );
 }
 
 export default WorkflowDetailPage;

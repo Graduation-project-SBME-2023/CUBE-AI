@@ -2,6 +2,7 @@ import React, { Component } from 'react';
 import PropTypes, { object } from 'prop-types';
 import { cache, triggerEvent, eventTarget } from '@cornerstonejs/core';
 import { Enums, segmentation } from '@cornerstonejs/tools';
+import { Icon, Typography, LegacyButton } from '@ohif/ui';
 import './MonaiLabelPanel.css';
 import SettingsTable from './SettingsTable';
 import AutoSegmentation from './actions/AutoSegmentation';
@@ -189,76 +190,8 @@ export default class MonaiLabelPanel extends Component {
       this.setState({ info: response.data });
       this.setState({ isDataReady: true });
 
-      // If we are editing an existing mask (session active), auto-load it!
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('session_id') && params.get('series_uid')) {
-        this.loadExistingLabel(params.get('series_uid'));
-      }
-
       // calc image embedding(if SAM model)
       // AutoSegmentation.calculateImageEmbeddings(true);
-    }
-  };
-
-  loadExistingLabel = async (seriesUid) => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const sessionId = urlParams.get('session_id');
-
-    if (!sessionId || !seriesUid) {
-      console.warn('loadExistingLabel: missing session_id or series_uid, skipping.');
-      return;
-    }
-
-    this.notification.show({
-      title: 'Agent System',
-      message: 'Loading existing mask for editing...',
-      type: 'info',
-      duration: 5000,
-    });
-
-    try {
-      // Fetch the mask from our agent backend (port 8150).
-      // The backend converts NIfTI → NRRD on-the-fly so parseNrrdData works unchanged.
-      const maskUrl = `http://localhost:8150/segmentation-review/mask/${sessionId}/${seriesUid}`;
-      const res = await fetch(maskUrl);
-
-      if (!res.ok) {
-        if (res.status === 404) {
-          this.notification.show({ title: 'Agent System', message: 'No existing mask found for this session.', type: 'warning', duration: 4000 });
-        } else {
-          throw new Error(`Mask endpoint returned HTTP ${res.status}`);
-        }
-        return;
-      }
-
-      const arrayBuffer = await res.arrayBuffer();
-
-      // Re-fetch label names from the MONAI info endpoint to stay in sync
-      const client = this.client();
-      const infoRes = await client.info();
-      const labels = infoRes?.data?.labels?.slice(1) ?? [];
-
-      // Give the viewport a moment to finish mounting before injecting the mask
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      // _update parses NRRD data and loads it into Cornerstone3D
-      const segmentationId = await this._update({ data: arrayBuffer, centroids: {} }, labels);
-      this.saveSegmentation('existing', segmentationId);
-
-      this.notification.show({
-        title: 'Agent System',
-        message: 'Existing mask loaded — you can now edit it!',
-        type: 'success',
-        duration: 5000,
-      });
-    } catch (e) {
-      console.error('loadExistingLabel error:', e);
-      this.notification.show({
-        title: 'Agent System',
-        message: 'Failed to load existing mask. Check the console for details.',
-        type: 'error',
-        duration: 5000,
-      });
     }
   };
 
@@ -311,27 +244,13 @@ export default class MonaiLabelPanel extends Component {
     const { image: buffer, header } = ret;
     const data = new Uint16Array(buffer);
 
-    // Reformat centroids.  Most models return an object keyed by label, while
-    // localization_vertebra returns an array of one-label objects.  Supporting
-    // both prevents a successful backend inference from failing before its mask
-    // is rendered in OHIF.
+    // Reformat centroids
     const centroidsIJK = new Map();
-    const centroids = response.centroids || {};
-    const centroidEntries = Array.isArray(centroids)
-      ? centroids.flatMap(entry => Object.entries(entry || {}))
-      : Object.entries(centroids);
-    for (const [, value] of centroidEntries) {
-      if (!Array.isArray(value) || value.length < 4) {
-        console.warn('Ignoring invalid centroid returned by MONAI Label:', value);
-        continue;
-      }
+    for (const [key, value] of Object.entries(response.centroids)) {
       const segmentIndex = parseInt(value[0], 10);
-      const image = value.slice(1, 4).map((v) => parseFloat(v));
-      if (Number.isFinite(segmentIndex) && image.every(Number.isFinite)) {
-        centroidsIJK.set(segmentIndex, { image: image, world: [] });
-      }
+      const image = value.slice(1).map((v) => parseFloat(v));
+      centroidsIJK.set(segmentIndex, { image: image, world: [] });
     }
-    console.log('centroidsIJK', centroidsIJK);
 
     // Get the active display set (each series = unique segmentation ID)
     const { displaySet } = this.getActiveViewportInfo();
@@ -581,7 +500,10 @@ export default class MonaiLabelPanel extends Component {
         const jsonText = new TextDecoder().decode(body);
         jsonData = JSON.parse(jsonText);
       } else if (headers.includes('Content-Type: application/octet-stream')) {
-        nrrdArrayBuffer = body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength);
+        nrrdArrayBuffer = body.buffer.slice(
+          body.byteOffset,
+          body.byteOffset + body.byteLength
+        );
       }
     }
 
@@ -591,7 +513,10 @@ export default class MonaiLabelPanel extends Component {
     return { data: nrrdArrayBuffer, centroids: jsonData.centroids };
   };
 
-  private splitMultipart(buffer: Uint8Array, boundary: Uint8Array): Uint8Array[] {
+  private splitMultipart(
+    buffer: Uint8Array,
+    boundary: Uint8Array
+  ): Uint8Array[] {
     const parts: Uint8Array[] = [];
     let start = 0;
 
@@ -609,7 +534,11 @@ export default class MonaiLabelPanel extends Component {
     return parts;
   }
 
-  private findSubarray(haystack: Uint8Array, needle: Uint8Array, start = 0): number {
+  private findSubarray(
+    haystack: Uint8Array,
+    needle: Uint8Array,
+    start = 0
+  ): number {
     outer: for (let i = start; i <= haystack.length - needle.length; i++) {
       for (let j = 0; j < needle.length; j++) {
         if (haystack[i + j] !== needle[j]) continue outer;
@@ -622,8 +551,10 @@ export default class MonaiLabelPanel extends Component {
   private findDoubleCRLF(buffer: Uint8Array): number {
     for (let i = 0; i < buffer.length - 3; i++) {
       if (
-        buffer[i] === 13 && buffer[i + 1] === 10 && // \r\n
-        buffer[i + 2] === 13 && buffer[i + 3] === 10 // \r\n
+        buffer[i] === 13 &&
+        buffer[i + 1] === 10 && // \r\n
+        buffer[i + 2] === 13 &&
+        buffer[i + 3] === 10 // \r\n
       ) {
         return i + 4; // position after \r\n\r\n
       }
@@ -717,146 +648,107 @@ export default class MonaiLabelPanel extends Component {
     });
   };
 
+  handleReturnButtonClick = () => {
+    // Navigate back to the previous page
+    window.history.back();
+  };
+
   render() {
     const { isDataReady } = this.state;
+    const isConnected = this.isMONAILabelConnected;
+
     return (
-      <div className="monaiLabelPanel">
-        <br style={{ margin: '3px' }} />
+     <div
+      className="monaiLabelPanel h-full w-[320px] flex-shrink-0 bg-[#0d1526] border-l border-[#1a2540] flex flex-col"
+      style={{ fontFamily: "'Segoe UI', system-ui, sans-serif", fontSize: '12px', color: '#c8d8f0' }}
+    >
 
-        <SettingsTable ref={this.settings} onInfo={this.onInfo} />
+  {/* HEADER */}
 
-        <hr className="separator" />
 
-        <p className="subtitle">{this.state.info.name}</p>
+  {/* SCROLLABLE BODY */}
+  <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-[#1e3058]">
 
-        {/* <button onClick={this._debug}> Read</button> */}
-        <div className="tabs scrollbar" id="style-3">
-          {/* <OptionTable
-            ref={this.actions['options']}
+    {/* SETTINGS */}
+    <div className="px-2.5 py-2 border-b border-[#1a2540] [&_input]:bg-[#071020] [&_input]:border [&_input]:border-[#1e3058] [&_input]:rounded-[3px] [&_input]:text-[#4a9eff] [&_input]:text-[11px] [&_input]:px-1.5 [&_input]:py-0.5 [&_input]:outline-none [&_select]:bg-[#071020] [&_select]:border [&_select]:border-[#1e3058] [&_select]:rounded-[3px] [&_select]:text-[#c8d8f0] [&_select]:text-[11px] [&_select]:px-1.5 [&_select]:py-0.5 [&_select]:outline-none [&_select]:appearance-none [&_button]:bg-[#101c35] [&_button]:border [&_button]:border-[#1e3058] [&_button]:rounded-[3px] [&_button]:text-[#4a9eff] [&_button]:text-[11px] [&_button]:px-1.5 [&_button]:py-0.5 [&_label]:text-[#5a8ab8] [&_label]:text-[10px]">
+      <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#3d6a9e] mb-1.5">Settings</p>
+      <SettingsTable ref={this.settings} onInfo={this.onInfo} />
+    </div>
+
+    {/* MODEL INFO LABEL */}
+    <div className="px-2.5 py-2 border-b border-[#1a2540]">
+      <p className="text-[11px] font-semibold text-[#7a9cc8]">{this.state.info.name}</p>
+      <p className="text-[9px] text-[#3d6a9e]">{this.state.info.description}</p>
+    </div>
+
+    {/* SEGMENTATION BLOCKS */}
+    {isDataReady && (
+      <>
+        {/* AUTO SEGMENTATION */}
+        <div className="px-2.5 py-2 border-b border-[#1a2540] [&_select]:bg-[#071020] [&_select]:border [&_select]:border-[#1e3058] [&_select]:rounded-[3px] [&_select]:text-[#c8d8f0] [&_select]:text-[11px] [&_select]:px-1.5 [&_select]:py-0.5 [&_select]:outline-none [&_select]:cursor-pointer [&_select]:appearance-none [&_select]:w-full [&_input]:bg-[#071020] [&_input]:border [&_input]:border-[#1e3058] [&_input]:rounded-[3px] [&_input]:text-[#c8d8f0] [&_input]:text-[11px] [&_input]:px-1.5 [&_input]:py-0.5 [&_input]:outline-none [&_input]:w-full [&_button.actionButton]:bg-[#1a4a8a] [&_button.actionButton]:border-none [&_button.actionButton]:rounded-[3px] [&_button.actionButton]:text-[#c8d8f0] [&_button.actionButton]:text-[11px] [&_button.actionButton]:font-semibold [&_button.actionButton]:px-2.5 [&_button.actionButton]:py-0.5 [&_button.actionButton]:cursor-pointer [&_button.actionButton]:whitespace-nowrap [&_label]:text-[#5a8ab8] [&_label]:text-[10px]">
+          <AutoSegmentation
+            ref={this.actions['segmentation']}
             tabIndex={1}
             info={this.state.info}
             viewConstants={{
               SeriesInstanceUID: this.SeriesInstanceUID,
               StudyInstanceUID: this.StudyInstanceUID,
             }}
+            servicesManager={this.props.servicesManager}
             client={this.client}
             notification={this.notification}
-            //updateView={this.updateView}
+            updateView={this.updateView}
             onSelectActionTab={this.onSelectActionTab}
-          /> */}
-
-          {/* {this.workflowName && (
-            <ActiveLearning
-              ref={this.actions['activelearning']}
-              tabIndex={2}
-              info={this.state.info}
-              viewConstants={{
-                SeriesInstanceUID: this.SeriesInstanceUID,
-                StudyInstanceUID: this.StudyInstanceUID,
-              }}
-              client={this.client}
-              notification={this.notification}
-              // updateView={this.updateView}
-              // onSelectActionTab={this.onSelectActionTab}
-              // onOptionsConfig={this.onOptionsConfig}
-              // additional function - delete scribbles before submit
-              // onDeleteSegmentByName={this.onDeleteSegmentByName}
-            />
-          )} */}
-
-          {isDataReady && (
-            <div className="tabs scrollbar" id="style-3">
-              <AutoSegmentation
-                ref={this.actions['segmentation']}
-                tabIndex={1}
-                info={this.state.info}
-                viewConstants={{
-                  SeriesInstanceUID: this.SeriesInstanceUID,
-                  StudyInstanceUID: this.StudyInstanceUID,
-                }}
-                servicesManager={this.props.servicesManager}
-                client={this.client}
-                notification={this.notification}
-                updateView={this.updateView}
-                onSelectActionTab={this.onSelectActionTab}
-                onOptionsConfig={this.onOptionsConfig}
-              />
-              <InteractiveSegmentation
-                ref={this.actions['InteractiveSegmentation']}
-                tabIndex={2}
-                info={this.state.info}
-                servicesManager={this.props.servicesManager}
-                client={this.client}
-                notification={this.notification}
-                updateView={this.updateView}
-                onSelectActionTab={this.onSelectActionTab}
-                onOptionsConfig={this.onOptionsConfig}
-                getActiveViewportInfo={this.getActiveViewportInfo}
-                commandsManager={this.props.commandsManager}
-              />
-
-
-              {/* <SmartEdit
-              ref={this.actions['smartedit']}
-              tabIndex={4}
-              servicesManager={this.props.servicesManager}
-              commandsManager={this.props.commandsManager}
-              info={this.state.info}
-              // Here we have to send element - In OHIF V2 - const element = cornerstone.getEnabledElements()[this.props.activeIndex].element;
-              viewConstants={{
-                SeriesInstanceUID: this.SeriesInstanceUID,
-                StudyInstanceUID: this.StudyInstanceUID,
-              }}
-              client={this.client}
-              notification={this.notification}
-              updateView={this.updateView}
-              onSelectActionTab={this.onSelectActionTab}
-              onOptionsConfig={this.onOptionsConfig}
-            /> */}
-            </div>
-          )}
+            onOptionsConfig={this.onOptionsConfig}
+          />
         </div>
 
-        {this.workflowName && (
-          <div style={{ marginTop: '10px', textAlign: 'center' }}>
-            <button
-              onClick={this.uploadLabels}
-              disabled={!this.isMONAILabelConnected} // Disable the button if not connected to MONAI
-              style={{
-                backgroundColor: '#2c3e50',
-                color: '#fff',
-                padding: '10px 20px',
-                borderRadius: '20px',
-                border: 'none',
-                cursor: 'pointer',
-                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-                transition: 'all 0.3s ease',
-                fontSize: '14px',
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.backgroundColor = '#16202b';
-                e.target.style.boxShadow = '0 6px 10px rgba(0, 0, 0, 0.2)';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.backgroundColor = '#2c3e50';
-                e.target.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
-              }}
-            >
-              Upload Labels
-            </button>
-          </div>
-        )}
-        {this.state.segmentations?.map((segmentation) => (
-          <>
-            <SegmentationToolbox servicesManager={this.props.servicesManager} />
-            {/* <MonaiSegmentation
-              servicesManager={this.props.servicesManager}
-              extensionManager={this.props.extensionManager}
-              commandsManager={this.props.commandsManager}
-            /> */}
-          </>
-        ))}
+        {/* INTERACTIVE SEGMENTATION */}
+        <div className="px-2.5 py-2 border-b border-[#1a2540] [&_select]:bg-[#071020] [&_select]:border [&_select]:border-[#1e3058] [&_select]:rounded-[3px] [&_select]:text-[#c8d8f0] [&_select]:text-[11px] [&_select]:px-1.5 [&_select]:py-0.5 [&_select]:outline-none [&_select]:cursor-pointer [&_select]:appearance-none [&_select]:w-full [&_input]:bg-[#071020] [&_input]:border [&_input]:border-[#1e3058] [&_input]:rounded-[3px] [&_input]:text-[#c8d8f0] [&_input]:text-[11px] [&_input]:px-1.5 [&_input]:py-0.5 [&_input]:outline-none [&_input]:w-full [&_button.actionButton]:bg-[#1a4a8a] [&_button.actionButton]:border-none [&_button.actionButton]:rounded-[3px] [&_button.actionButton]:text-[#c8d8f0] [&_button.actionButton]:text-[11px] [&_button.actionButton]:font-semibold [&_button.actionButton]:px-2.5 [&_button.actionButton]:py-0.5 [&_button.actionButton]:cursor-pointer [&_button.actionButton]:whitespace-nowrap [&_label]:text-[#5a8ab8] [&_label]:text-[10px]">
+          <InteractiveSegmentation
+            ref={this.actions['InteractiveSegmentation']}
+            tabIndex={2}
+            info={this.state.info}
+            servicesManager={this.props.servicesManager}
+            client={this.client}
+            notification={this.notification}
+            updateView={this.updateView}
+            onSelectActionTab={this.onSelectActionTab}
+            onOptionsConfig={this.onOptionsConfig}
+            getActiveViewportInfo={this.getActiveViewportInfo}
+            commandsManager={this.props.commandsManager}
+          />
+        </div>
+      </>
+    )}
+
+    {/* SEGMENTATION TOOLBOX */}
+    {this.state.segmentations?.map((segmentation) => (
+      <div
+        key={segmentation.id}
+        className="px-2.5 py-2 border-b border-[#1a2540] [&_select]:bg-[#071020] [&_select]:border [&_select]:border-[#1e3058] [&_select]:rounded-[3px] [&_select]:text-[#c8d8f0] [&_select]:text-[11px] [&_select]:px-1.5 [&_select]:py-0.5 [&_select]:outline-none [&_select]:appearance-none [&_input]:bg-[#071020] [&_input]:border [&_input]:border-[#1e3058] [&_input]:rounded-[3px] [&_input]:text-[#c8d8f0] [&_input]:text-[11px] [&_input]:px-1.5 [&_input]:py-0.5 [&_input]:outline-none [&_button.actionButton]:bg-[#1a4a8a] [&_button.actionButton]:border-none [&_button.actionButton]:rounded-[3px] [&_button.actionButton]:text-[#c8d8f0] [&_button.actionButton]:text-[11px] [&_button.actionButton]:font-semibold [&_button.actionButton]:px-2.5 [&_button.actionButton]:py-0.5 [&_label]:text-[#5a8ab8] [&_label]:text-[10px]"
+      >
+        <SegmentationToolbox servicesManager={this.props.servicesManager} />
       </div>
+    ))}
+{this.workflowName && (
+    <button
+      onClick={this.uploadLabels}
+      disabled={!this.isMONAILabelConnected}
+      className="w-[calc(100%-20px)] mx-2.5 my-2 py-2 bg-[#1a4a8a] border-none rounded-[4px] text-[#c8d8f0] text-[12px] font-bold tracking-wider cursor-pointer hover:bg-[#1e5aaa] transition-colors flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+    >
+      Upload Labels
+    </button>
+  )}
+
+    {/* RESET ALL */}
+   
+
+  </div>
+
+  {/* UPLOAD LABELS — sticky bottom */}
+  
+</div>
     );
   }
 }
