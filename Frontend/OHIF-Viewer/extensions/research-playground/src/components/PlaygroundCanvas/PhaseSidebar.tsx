@@ -11,6 +11,9 @@ interface PhaseSidebarProps {
     phases: any[];
     activePhase: string;
     updatedPhaseIds?: string[];
+
+    updateMessages?: Record<string, string>;
+    forceVisibleUpdatePhaseIds?: string[];
     onSelectPhase: (id: string) => void;
     isCollapsed: boolean;
     onToggleCollapse: () => void;
@@ -20,6 +23,8 @@ export default function PhaseSidebar({
     phases,
     activePhase,
     updatedPhaseIds = [],
+    updateMessages = {},
+    forceVisibleUpdatePhaseIds = [],
     onSelectPhase,
     isCollapsed,
     onToggleCollapse,
@@ -95,7 +100,10 @@ export default function PhaseSidebar({
                     const isActive = activePhase === phase.id;
                     const isCoreView = phase.id === 'planning' || phase.id === 'execution';
                     const PhaseIcon = (phase.icon as any) || PlusIcon;
-                    const hasUpdate = !isActive && updatedPhaseIds.includes(phase.id);
+                    const hasUpdate = updatedPhaseIds.includes(phase.id) && (
+                        !isActive || forceVisibleUpdatePhaseIds.includes(phase.id)
+                    );
+                    const updateMessage = updateMessages[phase.id] || 'New update received';
 
                     return (
                         <div key={phase.id} className="relative flex flex-col">
@@ -169,7 +177,7 @@ export default function PhaseSidebar({
                                         </span>
                                         {hasUpdate && (
                                             <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#5acce6]">
-                                                New update received
+                                                {updateMessage}
                                             </span>
                                         )}
                                     </div>
