@@ -35,10 +35,11 @@ export default function CanvasHeader({
   onToggleLabellingMode,
 }: CanvasHeaderProps) {
   // Single morphing badge label
-  const badgeLabel = mode === 'planning' ? 'Planning' : mode === 'executing' ? 'Executing' : 'Results';
+  const badgeLabel =
+    mode === 'planning' ? 'Planning' : mode === 'executing' ? 'Executing' : 'Results';
 
   return (
-    <div className="absolute left-1/2 top-6 z-40 flex -translate-x-1/2 items-center gap-4 rounded-lg border border-[#3c5d80] bg-[#151a1f]/90 p-2 shadow-2xl backdrop-blur-md">
+    <div className="absolute left-1/2 top-2 z-40 flex -translate-x-1/2 items-center gap-4 rounded-lg border border-[#3c5d80] bg-[#151a1f]/90 p-2 shadow-xl backdrop-blur-md">
       {/* ── Stage badge (morphs with mode) ── */}
       <div className="flex items-center gap-3 border-r border-[#3c5d80] pl-2 pr-4">
         <div
@@ -57,15 +58,12 @@ export default function CanvasHeader({
       <div className="flex items-center gap-2">
         {mode === 'planning' && (
           <button
-            onClick={onStart}
-            disabled={!canExecute}
-            className={`flex items-center gap-2 rounded px-6 py-1.5 text-[15px] font-bold text-black shadow-lg transition-colors ${
-              canExecute
-                ? 'cursor-pointer bg-[#5acce6] hover:bg-[#4ab8d4]'
-                : 'cursor-not-allowed bg-[#5acce6] opacity-50'
-            }`}
+   className="flex items-center gap-2 rounded-md bg-[#5e98ac] px-5 py-2 text-sm font-semibold text-black transition hover:bg-[#6aa7bc]"
           >
-            <Play size={16} fill="currentColor" />
+            <Play
+              size={16}
+              fill="currentColor"
+            />
             Execute
           </button>
         )}
@@ -75,7 +73,7 @@ export default function CanvasHeader({
             <button
               onClick={onTogglePause}
               disabled={isStopping || hasStopped}
-              className={`flex items-center gap-2 rounded border px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`flex items-center gap-1 rounded border px-1.5 py-1 text-[11px] font-medium transition-colors ${
                 isStopping || hasStopped
                   ? 'cursor-not-allowed border-[#3c5d80] bg-[#1d2a33] text-[#5c7a99] opacity-50'
                   : isPaused
@@ -83,7 +81,7 @@ export default function CanvasHeader({
                     : 'border-[#3c5d80] bg-[#151a1f] text-[#91b9cd] hover:border-[#91b9cd]'
               }`}
             >
-              {isPaused ? <Play size={14} /> : <Pause size={14} />}
+              {isPaused ? <Play size={12} /> : <Pause size={12} />}
               {isPaused ? 'Resume' : 'Pause'}
             </button>
             <button
@@ -91,11 +89,14 @@ export default function CanvasHeader({
               disabled={isStopping || hasStopped}
               className={`flex items-center gap-2 rounded border px-3 py-1.5 text-xs font-medium transition-colors ${
                 isStopping || hasStopped
-                  ? 'cursor-not-allowed border-[#7a1e1e] bg-[#3b1010] text-[#ff6b6b] opacity-80 animate-pulse'
+                  ? 'animate-pulse cursor-not-allowed border-[#7a1e1e] bg-[#3b1010] text-[#ff6b6b] opacity-80'
                   : 'border-[#3c5d80] bg-[#151a1f] text-[#91b9cd] hover:border-[#ff6b6b] hover:bg-[#2c1a1f] hover:text-[#ff6b6b]'
               }`}
             >
-              <Square size={12} fill="currentColor" />
+              <Square
+                size={12}
+                fill="currentColor"
+              />
               {hasStopped ? 'Stopped' : isStopping ? 'Stopping...' : 'Stop'}
             </button>
           </>
@@ -125,19 +126,21 @@ export default function CanvasHeader({
       <button
         onClick={onToggleLabellingMode}
         disabled={labellingModeLocked}
-        title={labellingModeLocked ? 'Labelling mode locked once agent starts' : 'Toggle cohort labelling method'}
-        className={`flex items-center gap-0 rounded border text-[10px] font-bold uppercase tracking-wider overflow-hidden transition-all ${
+        title={
           labellingModeLocked
-            ? 'cursor-not-allowed opacity-50 border-[#3c5d80]'
+            ? 'Labelling mode locked once agent starts'
+            : 'Toggle cohort labelling method'
+        }
+        className={`flex items-center gap-0 overflow-hidden rounded border text-[10px] font-bold uppercase tracking-wider transition-all ${
+          labellingModeLocked
+            ? 'cursor-not-allowed border-[#3c5d80] opacity-50'
             : 'cursor-pointer border-[#3c5d80] hover:border-[#5acce6]'
         }`}
       >
         {/* Manual side */}
         <span
           className={`flex items-center gap-1 px-2 py-1 transition-colors ${
-            labellingMode === 'manual'
-              ? 'bg-[#3c5d80] text-white'
-              : 'bg-[#0b1015] text-[#3c5d80]'
+            labellingMode === 'manual' ? 'bg-[#3c5d80] text-white' : 'bg-[#0b1015] text-[#3c5d80]'
           }`}
         >
           <Upload size={11} />
@@ -155,7 +158,6 @@ export default function CanvasHeader({
           Auto
         </span>
       </button>
-
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { MessageSquare, History, Plus, ChevronRight, Trash2, Send, Activity as ActivityIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -36,15 +36,30 @@ const ChatSidebar = ({
   const [maxSidebarWidth, setMaxSidebarWidth] = useState(() =>
     Math.max(340, Math.min(760, Math.floor(window.innerWidth * 0.55)))
   );
+  // B8: inline toast state (replaces all alert() calls)
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resizeStateRef = useRef({ startX: 0, startWidth: 420 });
   const messagesEndRef = useRef(null);
   const activeSessionIdRef = useRef(null);
   const isMountedRef = useRef(true);
+  // B2: prevent the initial message from being sent more than once
+  const initialMessageSentRef = useRef(false);
+  // B1: buffer WS messages that arrive before the session is ready
+  const earlyMessageBufferRef = useRef<any[]>([]);
 
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
+  }, []);
+
+  // B8: show a non-blocking inline toast that auto-dismisses after 5 s
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToastMessage(null), 5000);
   }, []);
 
   const MIN_WIDTH = 340;
@@ -91,12 +106,9 @@ const ChatSidebar = ({
       // Refresh just this session's metadata from the DB (title, summary, etc.)
       fetchChatSessions(String(externalSessionId));
     }
-    if (sendInitialMessage) {
-      // if (websocketService.isConnected()) {
-      //   websocketService.sendMessage({ type: 'user', payload: initialUserMessage });
-      // } else {
-      //   alert('WebSocket not connected. Message not sent to backend in real time.');
-      // }
+    // B2: guard against double-send — only fire once per component mount
+    if (sendInitialMessage && !initialMessageSentRef.current) {
+      initialMessageSentRef.current = true;
       console.log('[HypothesisFlow][ChatSidebar] Sending initial message to chat backend', {
         externalSessionId,
         preview: (initialUserMessage || '').slice(0, 120),
@@ -264,7 +276,8 @@ const ChatSidebar = ({
       );
     } catch (err) {}
   };
-  const createNewSession = async () => {
+  // B4: returns the new session ID directly so callers don't race on ref/state
+  const createNewSession = async (): Promise<string | null> => {
     try {
       const payload = { title: `Chat ${sessions.length + 1}` };
       const r = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/`, {
@@ -290,10 +303,11 @@ const ChatSidebar = ({
         summary: data.summary,
         last_activity: Date.now(),
       };
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current) return null;
       setSessions(s => [newSession, ...s]);
       setActiveSessionId(newSession.chat_id);
       setDrawerOpen(false);
+      return newSession.chat_id; // B4: return so sendMessage can use it immediately
     } catch (err) {
       // Fallback: create a local-only session if DB fails
       const fallbackId = makeLocalSessionId();
@@ -311,14 +325,13 @@ const ChatSidebar = ({
         summary: '',
         last_activity: Date.now(),
       };
-      if (!isMountedRef.current) return;
+      if (!isMountedRef.current) return null;
       setSessions(s => [newSession, ...s]);
       setActiveSessionId(newSession.chat_id);
       setDrawerOpen(false);
-      alert(
-        'Warning: Could not create chat session in the database. Using a local-only session.\n\nError: ' +
-          err
-      );
+      // B8: replaced alert() with inline toast
+      showToast('Could not create chat session in the database. Using a local-only session.');
+      return fallbackId; // B4: return fallback ID so caller is not left with null
     }
   };
   const deleteSession = async chat_id => {
@@ -338,13 +351,11 @@ const ChatSidebar = ({
       return;
     }
     let sessionId = activeSessionId;
-    // If no session, create one and wait for state update
+    // B4: use returned ID directly — avoids React state/ref race condition
     if (!sessionId) {
-      await createNewSession();
-      sessionId = activeSessionIdRef.current ?? sessions[0]?.chat_id;
-      if (!sessionId) {
-        return;
-      }
+      const newId = await createNewSession();
+      if (!newId) return;
+      sessionId = newId;
     }
     const userMsg = { id: makeId('u'), role: 'user', text: textToSend, ts: Date.now() };
     setSessions(prev =>
@@ -367,10 +378,8 @@ const ChatSidebar = ({
         });
       }
     } catch (e) {
-      alert(
-        'Warning: Could not save message to the database. This chat is now local-only.\n\nError: ' +
-          e
-      );
+      // B8: replaced alert() with inline toast
+      showToast('Could not save message to the database. This chat is now local-only.');
     }
     // Debug log outgoing message
     console.log('[ChatSidebar] Sending WS message:', { type: 'user', payload: userMsg.text });
@@ -381,121 +390,148 @@ const ChatSidebar = ({
         session_id: sessionId,
       });
     } else {
-      alert('WebSocket not connected. Message not sent to backend in real time.');
+      // B8: replaced alert() with inline toast
+      showToast('WebSocket not connected — message not sent to the AI backend.');
     }
   };
+  // B1: handleWS extracted to useCallback so it can be referenced by the flush effect
+  const handleWS = useCallback(async (data: any) => {
+    console.log('[ChatSidebar] WS received:', data);
+
+    // Handle echoed user messages from notification buttons
+    if (data.type === 'chat_echo') {
+      const currentSessionId = activeSessionIdRef.current;
+      if (!currentSessionId) return;
+      const incomingSessionId = String(data.session_id);
+      if (incomingSessionId && incomingSessionId !== String(currentSessionId)) return;
+      const userMsg = {
+        id: makeId('u'),
+        role: 'user',
+        text: data.payload?.text || data.payload || '',
+        ts: Date.now(),
+      };
+      setSessions(prev =>
+        prev.map(s =>
+          String(s.chat_id) === String(currentSessionId)
+            ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() }
+            : s
+        )
+      );
+      setIsTyping(true);
+      try {
+        if (isUuid(String(currentSessionId))) {
+          await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: 'user', text: userMsg.text }),
+          });
+        }
+      } catch (err) {}
+      return;
+    }
+
+    if (data.type !== 'msg') {
+      return;
+    }
+
+    const incomingSessionId = String(data.session_id);
+    if (incomingSessionId && activeSessionIdRef.current && incomingSessionId !== String(activeSessionIdRef.current)) {
+      return;
+    }
+
+    const currentSessionId = activeSessionIdRef.current;
+    // B1: if session not ready yet, buffer message and wait for flush effect
+    if (!currentSessionId) {
+      earlyMessageBufferRef.current.push(data);
+      return;
+    }
+
+    const textContent =
+      typeof data.payload === 'string'
+        ? data.payload
+        : data.payload.text || JSON.stringify(data.payload);
+
+    // B5: Don't silently drop plan JSON — show a friendly notification instead
+    const trimmed = textContent.trim();
+    if (trimmed.startsWith('{') && trimmed.includes('"steps"')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed.steps && Array.isArray(parsed.steps)) {
+          const planNotifMsg = {
+            id: makeId('a'),
+            role: 'assistant',
+            text: `✅ Pipeline plan received with **${parsed.steps.length} step${parsed.steps.length !== 1 ? 's' : ''}**. Review it in the canvas panel on the left.`,
+            ts: Date.now(),
+          };
+          setSessions(prev =>
+            prev.map(s =>
+              String(s.chat_id) === String(currentSessionId)
+                ? { ...s, messages: [...s.messages, planNotifMsg], last_activity: Date.now() }
+                : s
+            )
+          );
+          setIsTyping(false);
+          return;
+        }
+      } catch (_) { /* not valid JSON — fall through and show as normal message */ }
+    }
+
+    const assistantMsg = {
+      id: makeId('a'),
+      role: 'assistant',
+      text: textContent,
+      ts: Date.now(),
+    };
+    console.log(assistantMsg);
+    setSessions(prev => {
+      const match = prev.find(s => String(s.chat_id) === String(currentSessionId));
+      if (match) {
+        return prev.map(s =>
+          String(s.chat_id) === String(currentSessionId)
+            ? { ...s, messages: [...s.messages, assistantMsg], last_activity: Date.now() }
+            : s
+        );
+      }
+      // No session exists yet — create one with this message
+      return [{
+        chat_id: currentSessionId,
+        title: 'Research Session',
+        messages: [assistantMsg],
+        summary: '',
+        last_activity: Date.now(),
+      }, ...prev];
+    });
+    setIsTyping(false);
+    try {
+      if (isUuid(String(currentSessionId))) {
+        await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'assistant', text: assistantMsg.text }),
+        });
+      }
+    } catch (err) {}
+  }, [showToast]);
+
   // Only connect WebSocket once for the app session (not just when sidebar is open)
   useEffect(() => {
     websocketService.connect();
     // If scoped to a specific session, only fetch that session; otherwise load all
     fetchChatSessions(externalSessionId ? String(externalSessionId) : undefined);
-    const handleWS = async data => {
-      console.log('[ChatSidebar] WS received:', data);
-
-      // Handle echoed user messages from notification buttons
-      if (data.type === 'chat_echo') {
-        const currentSessionId = activeSessionIdRef.current;
-        if (!currentSessionId) return;
-        const incomingSessionId = String(data.session_id);
-        if (incomingSessionId && incomingSessionId !== String(currentSessionId)) return;
-        const userMsg = {
-          id: makeId('u'),
-          role: 'user',
-          text: data.payload?.text || data.payload || '',
-          ts: Date.now(),
-        };
-        setSessions(prev =>
-          prev.map(s =>
-            String(s.chat_id) === String(currentSessionId)
-              ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() }
-              : s
-          )
-        );
-        setIsTyping(true);
-        try {
-          if (isUuid(String(currentSessionId))) {
-            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ role: 'user', text: userMsg.text }),
-            });
-          }
-        } catch (err) {}
-        return;
-      }
-
-      if (data.type !== 'msg') {
-        return;
-      }
-
-      const incomingSessionId = String(data.session_id);
-      if (incomingSessionId && activeSessionIdRef.current && incomingSessionId !== String(activeSessionIdRef.current)) {
-        return;
-      }
-
-      // const currentSessionId = activeSessionIdRef.current ?? sessions[0]?.chat_id;
-      const currentSessionId = activeSessionIdRef.current;
-      console.log(currentSessionId);
-      if (!currentSessionId) {
-        return;
-      }
-      const textContent =
-        typeof data.payload === 'string'
-          ? data.payload
-          : data.payload.text || JSON.stringify(data.payload);
-
-      // Don't display raw plan JSON in chat — it belongs in the playground canvas
-      const trimmed = textContent.trim();
-      if (trimmed.startsWith('{') && trimmed.includes('"steps"')) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          if (parsed.steps && Array.isArray(parsed.steps)) {
-            return;
-          }
-        } catch (_) { /* not valid JSON, show as normal */ }
-      }
-
-      const assistantMsg = {
-        id: makeId('a'),
-        role: 'assistant',
-        text: textContent,
-        ts: Date.now(),
-      };
-      console.log(assistantMsg);
-      setSessions(prev => {
-        const match = prev.find(s => String(s.chat_id) === String(currentSessionId));
-        if (match) {
-          return prev.map(s =>
-            String(s.chat_id) === String(currentSessionId)
-              ? { ...s, messages: [...s.messages, assistantMsg], last_activity: Date.now() }
-              : s
-          );
-        }
-        // No session exists yet — create one with this message
-        return [{
-          chat_id: currentSessionId,
-          title: 'Research Session',
-          messages: [assistantMsg],
-          summary: '',
-          last_activity: Date.now(),
-        }, ...prev];
-      });
-      setIsTyping(false);
-      try {
-        if (isUuid(String(currentSessionId))) {
-            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role: 'assistant', text: assistantMsg.text }),
-          });
-        }
-      } catch (err) {}
-    };
     const unsubscribe = websocketService.subscribe(handleWS);
     return () => {
       unsubscribe();
     };
-  }, []);
+  }, [handleWS]);
+
+  // B1: flush buffered early messages once the session becomes available
+  useEffect(() => {
+    if (!activeSessionId || earlyMessageBufferRef.current.length === 0) return;
+    const buffered = [...earlyMessageBufferRef.current];
+    earlyMessageBufferRef.current = [];
+    console.log(`[ChatSidebar] Flushing ${buffered.length} buffered early message(s) for session`, activeSessionId);
+    buffered.forEach(data => handleWS(data));
+  }, [activeSessionId, handleWS]);
   useEffect(() => {
     console.log(activeSessionId);
     if (activeSessionId) {
@@ -589,6 +625,23 @@ const ChatSidebar = ({
         </div>
       )}
       <div className="flex flex-1 flex-col gap-5 overflow-y-auto bg-[#0f1923] p-6">
+        {/* B8: inline error/warning toast banner */}
+        {toastMessage && (
+          <div
+            role="alert"
+            className="flex items-start justify-between gap-3 rounded-lg border border-[#7a2020] bg-[#1a0d0d] px-4 py-2.5 text-[13px] text-[#ff8a8a]"
+          >
+            <span className="leading-snug">{toastMessage}</span>
+            <button
+              type="button"
+              aria-label="Dismiss notification"
+              onClick={() => setToastMessage(null)}
+              className="shrink-0 text-[#ff5555] transition-colors hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+        )}
         {messages.length === 0 && (
           <div className="mt-10 text-center text-[13px] text-[#3d5a72]">Start a new conversation...</div>
         )}
