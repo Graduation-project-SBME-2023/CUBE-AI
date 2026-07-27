@@ -58,7 +58,13 @@ export default function CanvasHeader({
       <div className="flex items-center gap-2">
         {mode === 'planning' && (
           <button
-   className="flex items-center gap-2 rounded-md bg-[#5e98ac] px-5 py-2 text-sm font-semibold text-black transition hover:bg-[#6aa7bc]"
+            onClick={onStart}
+            disabled={!canExecute || !isConnected}
+            className={`flex items-center gap-2 rounded-md px-5 py-2 text-sm font-semibold transition ${
+              !canExecute || !isConnected
+                ? 'cursor-not-allowed bg-[#3c5d80] text-gray-400 opacity-50'
+                : 'bg-[#5e98ac] text-black hover:bg-[#6aa7bc]'
+            }`}
           >
             <Play
               size={16}

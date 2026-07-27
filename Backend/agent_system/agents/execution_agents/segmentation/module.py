@@ -489,6 +489,22 @@ class SegmentationModule:
         # Server timeout is 3600 s; client timeout is 3610 s to guarantee the
         # server fires 408 before the client raises ReadTimeout.
         logger.info("Module paused: Waiting for human review via HTTP long-poll...")
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                await client.post(
+                    "http://localhost:8150/ws-broadcast",
+                    json={
+                        "type": "agent_waiting_for_user_input",
+                        "payload": {
+                            "agent": "segmentation_agent",
+                            "status": "WAITING_FOR_REVIEW",
+                        },
+                        "session_id": self.session_id,
+                    },
+                )
+        except httpx.HTTPError as exc:
+            # A notification failure must not prevent the doctor-review flow.
+            logger.warning("Could not publish segmentation review waiting state: %s", exc)
         async with httpx.AsyncClient(timeout=3610.0) as client:
                     while True:
                         try:

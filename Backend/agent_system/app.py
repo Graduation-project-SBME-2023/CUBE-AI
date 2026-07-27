@@ -894,6 +894,12 @@ async def upload_targets(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to write file: {str(e)}")
 
+    await ws_manager.send_ws_message(
+        "agent_waiting_resolved",
+        {"agent": "study_population_planner_agent"},
+        session_id=session_id,
+    )
+
     return {
         "message": "Targets saved successfully", 
         "session_id": session_id,
@@ -922,6 +928,12 @@ async def segmentation_review(data: dict):
         # Store in memory so the module can pick it up if it reconnects before restart.
         _review_futures[f"ready:{session_id}"] = review_payload  # plain dict, not future
         logger.info(f"[Review] No active poller for session={session_id}. Stored as ready:{session_id} for later pickup.")
+
+    await ws_manager.send_ws_message(
+        "agent_waiting_resolved",
+        {"agent": "segmentation_agent"},
+        session_id=session_id,
+    )
 
     return {"status": "ok"}
 

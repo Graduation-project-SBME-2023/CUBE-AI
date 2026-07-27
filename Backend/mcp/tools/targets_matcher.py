@@ -2,12 +2,14 @@ import os
 import csv
 import json
 import httpx
+import logging
 from . import mcp
 from tool_logging import ToolEvent, log_tool_state, TextPayload
 from .scratchpad import scratchpad_raise_flag, RaiseFlagInput
 import asyncio
 
 base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Shared: wait for doctor-uploaded targets.csv (manual mode)
@@ -27,6 +29,26 @@ async def _wait_for_manual_upload(csv_path: str, timeout_seconds: int = 300) -> 
         _IS_WAITING_FOR_LABELS = True
         payload = TextPayload(message=f'Waiting for doctor to upload labels in ... {csv_path}')
         log_tool_state(ToolEvent(event_type='tool_started', content_type='text', content=payload))
+        # This is a human-in-the-loop pause, not regular tool progress.  Send
+        # a dedicated UI state once, so the Data module can use its existing
+        # update-card indicator to ask for labels in manual mode.
+        session_id = os.environ.get("SESSION_ID")
+        if session_id:
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    await client.post(
+                        f'{os.environ.get("MAS_BASE_URL", "http://localhost:8150").rstrip("/")}/ws-broadcast',
+                        json={
+                            "type": "agent_waiting_for_user_input",
+                            "payload": {
+                                "agent": "study_population_planner_agent",
+                                "status": "WAITING_FOR_LABELS",
+                            },
+                            "session_id": session_id,
+                        },
+                    )
+            except Exception as exc:
+                logger.warning("Could not publish manual-label waiting state: %s", exc)
 
     poll_interval = 2
     elapsed = 0

@@ -25,12 +25,18 @@ const DEFAULT_PHASE = 'planning';
 // considered ready for a user-facing update only after its owning agent has
 // reported COMPLETED through pipeline_agent_status.
 const OUTPUT_EVENT_AGENTS: Record<string, { agent: string; phase: string }> = {
+  lit_review_output: { agent: 'literature_review_agent', phase: 'literature' },
   population_output: { agent: 'study_population_planner_agent', phase: 'data' },
   segmentation_output: { agent: 'segmentation_agent', phase: 'segmentation' },
   features_output: { agent: 'feature_extraction_agent', phase: 'features' },
   modeling_output: { agent: 'modeling_agent', phase: 'modeling' },
   report_output: { agent: 'result_reporter_agent', phase: 'reporting' },
   latex_output: { agent: 'latex_reporter_agent', phase: 'reporting' },
+};
+
+const WAITING_MESSAGES: Record<string, string> = {
+  WAITING_FOR_REVIEW: 'Agent is waiting for user review',
+  WAITING_FOR_LABELS: 'Waiting for user to upload labels',
 };
 
 /**
@@ -80,6 +86,8 @@ function ResearchPlaygroundInner() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isPhaseSidebarCollapsed, setIsPhaseSidebarCollapsed] = useState(false);
   const [updatedPhaseIds, setUpdatedPhaseIds] = useState<string[]>([]);
+  const [phaseUpdateMessages, setPhaseUpdateMessages] = useState<Record<string, string>>({});
+  const [waitingPhaseIds, setWaitingPhaseIds] = useState<string[]>([]);
   const [viewsReady, setViewsReady] = useState(false);
   const [restoredMode, setRestoredMode] = useState<'planning' | 'executing' | 'results'>('planning');
 
@@ -88,11 +96,15 @@ function ResearchPlaygroundInner() {
   const sessionId = routeState.sessionId || routeState.session_id || null;
   const sendInitialMessage = routeState.sendInitialMessage || false;
   const initialUserMessage = sendInitialMessage ? hypothesis : undefined;
-  // Dashboard/history navigation always sets sendInitialMessage to false.  It
-  // is a read-only visit, not a new result arriving in the current workflow.
-  const isHistoricalNavigation = Boolean(sessionId && !sendInitialMessage);
+  // Explicitly archived routes are always historical. Completed sessions are
+  // also marked historical after the status check below; do not infer history
+  // solely from sendInitialMessage because a running session can be reopened.
+  const isHistoricalNavigation = Boolean(
+    (routeState as any).isHistorical || (routeState as any).archived
+  );
   const activePhaseRef = useRef(activePhase);
   const viewedPhaseIdsRef = useRef<Set<string>>(new Set());
+  const waitingPhaseIdsRef = useRef<Set<string>>(new Set());
   const updateStateRef = useRef({
     sessionId: sessionId ? String(sessionId) : '',
     isHydrating: Boolean(sessionId),
@@ -130,6 +142,26 @@ function ResearchPlaygroundInner() {
     [viewedPhasesStorageKey]
   );
 
+  const showPhaseIndicator = useCallback((phaseId: string, message: string, isWaiting = false) => {
+    setUpdatedPhaseIds(prev => (prev.includes(phaseId) ? prev : [...prev, phaseId]));
+    setPhaseUpdateMessages(prev => (prev[phaseId] === message ? prev : { ...prev, [phaseId]: message }));
+    if (isWaiting) {
+      waitingPhaseIdsRef.current.add(phaseId);
+      setWaitingPhaseIds(prev => (prev.includes(phaseId) ? prev : [...prev, phaseId]));
+    }
+  }, []);
+
+  const clearPhaseIndicator = useCallback((phaseId: string) => {
+    waitingPhaseIdsRef.current.delete(phaseId);
+    setWaitingPhaseIds(prev => prev.filter(id => id !== phaseId));
+    setUpdatedPhaseIds(prev => prev.filter(id => id !== phaseId));
+    setPhaseUpdateMessages(prev => {
+      if (!(phaseId in prev)) return prev;
+      const { [phaseId]: _ignored, ...remaining } = prev;
+      return remaining;
+    });
+  }, []);
+
   const tryShowCompletedUpdate = useCallback((agentName: string) => {
     const state = updateStateRef.current;
     const output = Object.values(OUTPUT_EVENT_AGENTS).find(item => item.agent === agentName);
@@ -164,9 +196,9 @@ function ResearchPlaygroundInner() {
       ) {
         return;
       }
-      setUpdatedPhaseIds(prev => (prev.includes(output.phase) ? prev : [...prev, output.phase]));
+      showPhaseIndicator(output.phase, 'New update received');
     });
-  }, []);
+  }, [showPhaseIndicator]);
 
   useEffect(() => {
     activePhaseRef.current = activePhase;
@@ -182,6 +214,9 @@ function ResearchPlaygroundInner() {
     state.completedAgents.clear();
     state.notifiedRevisionByAgent.clear();
     viewedPhaseIdsRef.current = new Set();
+    waitingPhaseIdsRef.current = new Set();
+    setWaitingPhaseIds([]);
+    setPhaseUpdateMessages({});
 
     if (viewedPhasesStorageKey) {
       try {
@@ -210,6 +245,9 @@ function ResearchPlaygroundInner() {
       latexData: null,
     }));
     setUpdatedPhaseIds([]);
+    setPhaseUpdateMessages({});
+    waitingPhaseIdsRef.current = new Set();
+    setWaitingPhaseIds([]);
   }, [setData]);
   const sidebarPhases = useMemo(
     () => phases.filter(phase => phase.id !== 'planning' && phase.id !== 'execution'),
@@ -247,7 +285,9 @@ function ResearchPlaygroundInner() {
                     if (execRes.ok) {
                         const execData = await execRes.json();
                         if (Array.isArray(execData?.agents) && execData.agents.length > 0) {
-                            const allDone = execData.agents.every((a: any) => a.status === 'COMPLETED');
+                            const allDone = execData.agents.every(
+                              (a: any) => String(a.status || '').toUpperCase() === 'COMPLETED'
+                            );
                             if (allDone) updateStateRef.current.isHistorical = true;
                             setRestoredMode(allDone ? 'results' : 'executing');
 
@@ -308,7 +348,17 @@ function ResearchPlaygroundInner() {
   useEffect(() => {
     const unsubscribe = websocketService.subscribe((event: any) => {
       const { type, payload } = event;
+      const incomingSessionId = event?.session_id;
+      if (incomingSessionId && sessionId && String(incomingSessionId) !== String(sessionId)) {
+        return;
+      }
+
       switch (type) {
+        case 'lit_review_output':
+          // Keep the final literature payload in the same data store used by
+          // the Literature module before its completion notification appears.
+          setLiteratureOutput(payload);
+          break;
         case 'population_output':
           setPopulationData(payload);
           break;
@@ -345,6 +395,36 @@ function ResearchPlaygroundInner() {
         tryShowCompletedUpdate(output.agent);
       }
 
+      // Literature Review is a planning-stage agent, so it does not emit a
+      // pipeline_agent_status entry.  Its own done event is the authoritative
+      // completion signal and follows the same final-data-then-completed flow.
+      if (type === 'lit_review_done') {
+        updateStateRef.current.completedAgents.add('literature_review_agent');
+        tryShowCompletedUpdate('literature_review_agent');
+      }
+
+      if (type === 'agent_waiting_for_user_input') {
+        const agentName = String(payload?.agent || '');
+        const waitingStatus = String(payload?.status || '').toUpperCase();
+        const outputForAgent = Object.values(OUTPUT_EVENT_AGENTS).find(item => item.agent === agentName);
+        const message = WAITING_MESSAGES[waitingStatus];
+
+        if (
+          outputForAgent &&
+          message &&
+          !updateStateRef.current.isHydrating &&
+          !updateStateRef.current.isHistorical
+        ) {
+          showPhaseIndicator(outputForAgent.phase, message, true);
+        }
+      }
+
+      if (type === 'agent_waiting_resolved') {
+        const agentName = String(payload?.agent || '');
+        const outputForAgent = Object.values(OUTPUT_EVENT_AGENTS).find(item => item.agent === agentName);
+        if (outputForAgent) clearPhaseIndicator(outputForAgent.phase);
+      }
+
       if (type === 'pipeline_agent_status' || type === 'Pipeline_agent_status') {
         for (const agent of payload?.agents || []) {
           const agentName = String(agent?.name || '');
@@ -360,20 +440,33 @@ function ResearchPlaygroundInner() {
     setFeaturesData,
     setImportanceData,
     setLatexData,
+    setLiteratureOutput,
     setModelingData,
     setPopulationData,
     setReportData,
     setSegmentationData,
+    clearPhaseIndicator,
+    showPhaseIndicator,
     tryShowCompletedUpdate,
+    sessionId,
   ]);
 
   useEffect(() => {
-    setUpdatedPhaseIds(prev => prev.filter(id => id !== activePhase));
+    if (!waitingPhaseIdsRef.current.has(activePhase)) {
+      setUpdatedPhaseIds(prev => prev.filter(id => id !== activePhase));
+      setPhaseUpdateMessages(prev => {
+        if (!(activePhase in prev)) return prev;
+        const { [activePhase]: _ignored, ...remaining } = prev;
+        return remaining;
+      });
+    }
   }, [activePhase]);
 
   const selectPhase = (id: string) => {
     markPhaseViewed(id);
-    setUpdatedPhaseIds(prev => prev.filter(phaseId => phaseId !== id));
+    if (!waitingPhaseIdsRef.current.has(id)) {
+      clearPhaseIndicator(id);
+    }
     setActivePhase(id);
   };
 
@@ -494,6 +587,8 @@ function ResearchPlaygroundInner() {
           phases={sidebarPhases}
           activePhase={activePhase}
           updatedPhaseIds={updatedPhaseIds}
+          updateMessages={phaseUpdateMessages}
+          forceVisibleUpdatePhaseIds={waitingPhaseIds}
           onSelectPhase={selectPhase}
           isCollapsed={isPhaseSidebarCollapsed}
           onToggleCollapse={() => setIsPhaseSidebarCollapsed(prev => !prev)}
