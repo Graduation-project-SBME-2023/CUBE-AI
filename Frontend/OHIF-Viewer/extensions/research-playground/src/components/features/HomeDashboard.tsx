@@ -50,9 +50,9 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
 
   useEffect(() => {
     if (textareaRef.current) {
-      textareaRef.current.style.height = '56px';
+      textareaRef.current.style.height = '72px';
       const scrollHeight = textareaRef.current.scrollHeight;
-      textareaRef.current.style.height = `${Math.min(scrollHeight, 140)}px`;
+      textareaRef.current.style.height = `${Math.min(scrollHeight, 200)}px`;
     }
   }, [hypothesis]);
 
@@ -78,7 +78,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
       // Persist the Literature Review preference so it survives navigation away and back via history
       try {
         localStorage.setItem(`cube_session_prefs_${sessionId}`, JSON.stringify({ includeLitReview }));
-      } catch (_) {/* ignore storage errors */}
+      } catch (_) {/* ignore storage errors */ }
       navigate('/playground', {
         state: {
           hypothesis,
@@ -92,7 +92,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
       const fallbackId = makeFallbackSessionId();
       try {
         localStorage.setItem(`cube_session_prefs_${fallbackId}`, JSON.stringify({ includeLitReview }));
-      } catch (_) {/* ignore storage errors */}
+      } catch (_) {/* ignore storage errors */ }
       navigate('/playground', {
         state: {
           hypothesis,
@@ -117,7 +117,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
           includeLitReviewRestored = parsed.includeLitReview;
         }
       }
-    } catch (_) {/* ignore storage errors */}
+    } catch (_) {/* ignore storage errors */ }
 
     const state = {
       sessionId,
@@ -167,17 +167,17 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
             aria-label="Back to Startup"
           >
             <ArrowLeft size={20} />
-          
+
           </button>
 
-            <button
-                onClick={() => navigate('/worklist')}
-                className="mr-2 p-2 rounded-md transition-all hover:bg-[#0d1e2e] text-[#5a8aaa] hover:text-[#5acce6] border border-transparent hover:border-[#1e3248]"
-                title="Go to Worklist"
-                aria-label="Go to Worklist"
-            >
-              <List size={16} />
-            </button>
+          <button
+            onClick={() => navigate('/worklist')}
+            className="mr-2 p-2 rounded-md transition-all hover:bg-[#0d1e2e] text-[#5a8aaa] hover:text-[#5acce6] border border-transparent hover:border-[#1e3248]"
+            title="Go to Worklist"
+            aria-label="Go to Worklist"
+          >
+            <List size={16} />
+          </button>
 
         </div>
 
@@ -187,78 +187,62 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
         <p className="mx-auto max-w-4xl bg-gradient-to-r from-white to-[#91b9cd] bg-clip-text text-2xl font-medium leading-relaxed text-transparent md:text-3xl">
           Describe your research question or hypothesis, and CUBE will construct the workflow.
         </p>
-        <div className="rounded-3xl border border-[#2e445c] bg-[#10151a] p-3 shadow-2xl">
-        <div className="relative mx-auto w-full max-w-3xl pt-4">
-          <div className="group flex items-start gap-3">
-            {/* Search Area */}
-            <div className="relative flex-1">
-              <Search
-                className="absolute left-5 top-4 text-[#566a84] transition-colors group-focus-within:text-[#5acce6]"
-                size={24}
-              />
+        <div className="group relative mx-auto w-full max-w-4xl rounded-3xl border border-[#2e445c] bg-[#151a1f] p-2 shadow-2xl transition-all focus-within:border-[#5acce6] focus-within:shadow-[0_0_30px_rgba(90,204,230,0.15)]">
+          {/* Search Area */}
+          <div className="relative flex items-start">
+            <Search
+              className="absolute left-5 top-5 text-[#566a84] transition-colors group-focus-within:text-[#5acce6]"
+              size={24}
+            />
+            <textarea
+              ref={textareaRef}
+              className="min-h-[72px] max-h-[200px] w-full resize-none overflow-y-auto bg-transparent py-5 pl-14 pr-4 text-lg text-white placeholder-[#566a84] focus:outline-none"
+              placeholder="Enter your research question or hypothesis..."
+              value={hypothesis}
+              onChange={e => setHypothesis(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSearch();
+                }
+              }}
+              rows={1}
+            />
+          </div>
 
-              <textarea
-                ref={textareaRef}
-                className="min-h-[56px] max-h-[140px] w-full resize-none overflow-y-hidden rounded-2xl border border-[#3c5d80] bg-[#151a1f] py-4 pl-14 pr-4 text-lg text-white placeholder-[#566a84] shadow-2xl transition-all focus:border-[#5acce6] focus:outline-none focus:ring-1 focus:ring-[#5acce6]"
-                placeholder="Enter your research question or hypothesis..."
-                value={hypothesis}
-                onChange={e => setHypothesis(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSearch();
-                  }
-                }}
-                rows={1}
-              />
-            </div>
-
+          {/* Action Footer */}
+          <div className="flex items-center justify-between px-3 pb-2 pt-2 border-t border-[#1f2d40]">
             {/* Toggle */}
             <button
               type="button"
               onClick={() => setIncludeLitReview(!includeLitReview)}
-              className={`group relative flex h-[56px] shrink-0 items-center rounded-2xl border px-4 transition-all duration-200 ${
-                includeLitReview
-                  ? 'border-[#5acce6] bg-[#1d2a33] shadow-[0_0_20px_rgba(90,204,230,0.15)]'
-                  : 'border-[#3c5d80] bg-[#151a1f]'
-              }`}
+              className="flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-[#1f2d40]"
             >
-              {/* Toggle Circle */}
               <div
-                className={`relative h-6 w-11 rounded-full transition-colors duration-200 ${
-                  includeLitReview ? 'bg-[#5acce6]' : 'bg-[#2a3b4d]'
-                }`}
+                className={`relative h-6 w-11 rounded-full transition-colors duration-300 ${includeLitReview ? 'bg-[#5acce6] shadow-[0_0_10px_rgba(90,204,230,0.3)]' : 'bg-[#2a3b4d]'
+                  }`}
               >
                 <div
-                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-md transition-transform duration-200 ${
-                    includeLitReview ? 'translate-x-5' : 'translate-x-0.5'
-                  }`}
+                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-md transition-transform duration-300 ${includeLitReview ? 'translate-x-5' : 'translate-x-0.5'
+                    }`}
                 />
               </div>
-
-              {/* Label */}
               <span
-                className={`ml-3 whitespace-nowrap text-sm font-medium transition-colors ${
-                  includeLitReview ? 'text-white' : 'text-[#91b9cd]'
-                }`}
+                className={`text-sm font-medium transition-colors ${includeLitReview ? 'text-white' : 'text-[#566a84]'
+                  }`}
               >
                 Literature Review
               </span>
             </button>
-          </div>
-          <div className="relative flex-1 mt-4">
+
+            {/* Start Research Button */}
             <button
               onClick={handleSearch}
-              className="self-end rounded-xl bg-[#5acce6] px-6 py-3 font-bold text-black shadow-lg transition-colors hover:bg-[#4ab8d4]"
+              className="flex items-center gap-2 rounded-xl bg-[#5acce6] px-6 py-2.5 font-bold text-black shadow-lg transition-all duration-300 hover:bg-[#4ab8d4] disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-[0_0_20px_rgba(90,204,230,0.4)] hover:-translate-y-0.5 disabled:hover:translate-y-0 disabled:hover:shadow-lg"
               disabled={!hypothesis.trim()}
-              style={{
-                opacity: hypothesis.trim() ? 1 : 0.5,
-                cursor: hypothesis.trim() ? 'pointer' : 'not-allowed'
-              }}
             >
-              Start Research <ArrowRight size={16} className="inline" />
+              Start Research <ArrowRight size={18} className="transition-transform hover:translate-x-1" />
             </button>
-          </div>
           </div>
         </div>
       </div>
