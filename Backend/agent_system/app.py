@@ -715,7 +715,9 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_text()
-            await ws_manager.push_to_queue(data)
+            # NOTE: Do NOT push_to_queue here — that caused every message to be
+            # queued twice (once as raw text, once after JSON parsing).
+            # Only queue inside the typed message block below.
             logging.getLogger("HypothesisFlow").info(
                 "[HypothesisFlow][WS] Message received raw | size=%s",
                 len(data or ""),
@@ -725,6 +727,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 message = json.loads(data)
             except json.JSONDecodeError:
                 # Backward compatibility: plain text is treated as user input.
+                # Queued exactly ONCE here.
                 await ws_manager.push_to_queue(data)
                 continue
 
