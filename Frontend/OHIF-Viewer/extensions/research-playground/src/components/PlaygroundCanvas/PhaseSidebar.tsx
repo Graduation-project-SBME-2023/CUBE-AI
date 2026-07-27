@@ -106,7 +106,7 @@ export default function PhaseSidebar({
                                     isCollapsed ? 'justify-center px-1 py-3' : 'gap-2.5 px-2.5 py-2.5'
                                 } ${
                                     hasUpdate
-                                        ? 'border border-[#e3a230] bg-[#2a1d07] shadow-[0_0_0_1px_rgba(227,162,48,0.45),0_0_14px_rgba(227,162,48,0.22)]'
+                                        ? 'border border-[#2a82c8] bg-[#071a2a] shadow-[0_0_0_1px_rgba(42,130,200,0.45),0_0_14px_rgba(42,130,200,0.22)]'
                                         : isActive
                                         ? isCoreView
                                             ? 'bg-[linear-gradient(135deg,#23142f_0%,#3a1f4d_100%)] border border-[#8f53bf]'
@@ -124,7 +124,7 @@ export default function PhaseSidebar({
                                                 ? 'border-[#c98cff] bg-[#2d1b3a] text-[#d8adff] shadow-[0_0_12px_rgba(216,173,255,0.25),inset_0_0_8px_rgba(216,173,255,0.08)]'
                                             : 'border-[#5acce6] bg-[#0d2035] text-[#5acce6] shadow-[0_0_12px_rgba(90,204,230,0.25),inset_0_0_8px_rgba(90,204,230,0.08)]'
                                             : hasUpdate
-                                            ? 'border-[#e3a230] bg-[#3a260b] text-[#ffd487] shadow-[0_0_12px_rgba(227,162,48,0.22)]'
+                                            ? 'border-[#2a82c8] bg-[#0b2035] text-[#7ec8f0] shadow-[0_0_12px_rgba(42,130,200,0.22)]'
                                             : isCoreView
                                             ? 'border-[#5c3a78] bg-[#160f1d] text-[#8f6cab]'
                                             : 'border-[#1e3a54] bg-[#0b1015] text-[#3c5d80]'
@@ -140,7 +140,7 @@ export default function PhaseSidebar({
                                         <span
                                             className={`text-[12px] font-semibold truncate leading-snug ${
                                                 hasUpdate
-                                                    ? 'text-[#ffd487]'
+                                                    ? 'text-[#7ec8f0]'
                                                     : isActive
                                                     ? isCoreView
                                                         ? 'text-[#f0ddff]'
@@ -155,7 +155,7 @@ export default function PhaseSidebar({
                                         <span
                                             className={`text-[10px] truncate mt-0.5 leading-snug ${
                                                 hasUpdate
-                                                    ? 'text-[#dfaf59]'
+                                                    ? 'text-[#4d8cb0]'
                                                     : isActive
                                                     ? isCoreView
                                                         ? 'text-[#b791d6]'
@@ -168,7 +168,7 @@ export default function PhaseSidebar({
                                             {phase.short_desc}
                                         </span>
                                         {hasUpdate && (
-                                            <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#ffd487]">
+                                            <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#5acce6]">
                                                 New update received
                                             </span>
                                         )}

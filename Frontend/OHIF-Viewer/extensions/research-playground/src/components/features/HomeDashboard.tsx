@@ -199,7 +199,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
 
               <textarea
                 ref={textareaRef}
-                className="min-h-[56px] max-h-[140px] w-full resize-none overflow-y-auto rounded-2xl border border-[#3c5d80] bg-[#151a1f] py-4 pl-14 pr-4 text-lg text-white placeholder-[#566a84] shadow-2xl transition-all focus:border-[#5acce6] focus:outline-none focus:ring-1 focus:ring-[#5acce6]"
+                className="min-h-[56px] max-h-[140px] w-full resize-none overflow-y-hidden rounded-2xl border border-[#3c5d80] bg-[#151a1f] py-4 pl-14 pr-4 text-lg text-white placeholder-[#566a84] shadow-2xl transition-all focus:border-[#5acce6] focus:outline-none focus:ring-1 focus:ring-[#5acce6]"
                 placeholder="Enter your research question or hypothesis..."
                 value={hypothesis}
                 onChange={e => setHypothesis(e.target.value)}

@@ -7,7 +7,7 @@ import Icon from '../Icon';
 import Tooltip from '../Tooltip';
 
 const borderSize = 4;
-const expandedWidth = 248;
+const expandedWidth = 330;
 const collapsedWidth = 25;
 const closeIconWidth = 30;
 const gridHorizontalPadding = 10;
