@@ -1,6 +1,7 @@
 import logging
-from models.session import Session
+from models.session import Session, SessionState
 from clients.backend_client import BackendClient
+from .execution_state import infer_recovered_session_state
 
 logger = logging.getLogger(__name__)
 
@@ -135,4 +136,38 @@ class SessionStore:
             f"[{session_id}] Hydrated plan [id={plan.id}, steps={len(plan.steps)}]"
         )
 
+        try:
+            persisted_steps = await BackendClient.get_plan_steps(str(plan.id))
+        except Exception as e:
+            logger.error(
+                f"[{session_id}] Failed to fetch plan steps during hydration: {e}"
+            )
+            persisted_steps = []
+
+        if persisted_steps:
+            session.state = SessionState[
+                infer_recovered_session_state(persisted_steps)
+            ]
+            status_by_id = {
+                str(step.get("id")): step.get("status")
+                for step in persisted_steps
+                if step.get("id")
+            }
+            status_by_module = {
+                step.get("module"): step.get("status")
+                for step in persisted_steps
+                if step.get("module")
+            }
+            for plan_step in session.plan.steps:
+                persisted_status = status_by_id.get(str(plan_step.id))
+                if persisted_status is None and plan_step.module:
+                    persisted_status = status_by_module.get(plan_step.module)
+                if persisted_status is not None:
+                    plan_step.status = str(persisted_status)
+        elif plan.state.lower() == "confirmed":
+            session.state = SessionState.READY
+
+        logger.info(
+            f"[{session_id}] Hydrated safe session state: {session.state.name}"
+        )
         return session

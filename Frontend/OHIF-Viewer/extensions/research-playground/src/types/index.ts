@@ -19,6 +19,8 @@ export interface ResearchRouteState {
   session_id?: string; //why??
   includeLitReview?: boolean;
   sendInitialMessage?: boolean;
+  isHistorical?: boolean;
+  archived?: boolean;
   literatureReviewOutput?: any;
   literatureContext?: any;
 }

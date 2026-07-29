@@ -235,12 +235,25 @@ class PipelineMonitor:
         "latex_reporter_agent",
     ]
 
-    def __init__(self, session_service: "SessionService", session: "Session"):
+    def __init__(
+        self,
+        session_service: "SessionService",
+        session: "Session",
+        initial_statuses: Optional[dict[str, str]] = None,
+    ):
         self.session_service = session_service
         self.session = session
         self.agents: dict[str, AgentState] = {
             name: AgentState(name=name) for name in self.AGENT_ORDER
         }
+        for name, status in (initial_statuses or {}).items():
+            if name not in self.agents:
+                continue
+            normalized = str(status or "").strip().upper()
+            if normalized in {"COMPLETED", "DONE"}:
+                self.agents[name].status = AgentStatus.COMPLETED
+            elif normalized in {"FAILED", "ERROR"}:
+                self.agents[name].status = AgentStatus.FAILED
 
         self._last_active: Optional[str] = None
 

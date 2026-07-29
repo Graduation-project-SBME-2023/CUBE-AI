@@ -91,6 +91,7 @@ class BasicPipelineBuilder(DiGraphBuilder):
         task_messages: Optional[List[TaskMessage]] = None,
         model_client=None,
         session_id=None,
+        start_agent_id: Optional[str] = None,
     ):
         setup_logging()
 
@@ -113,6 +114,17 @@ class BasicPipelineBuilder(DiGraphBuilder):
                 "falling back to the default full pipeline."
             )
             planned_ids = list(DEFAULT_PIPELINE_ORDER)
+
+        if start_agent_id:
+            if start_agent_id not in planned_ids:
+                raise ValueError(
+                    f"Cannot resume from {start_agent_id!r}: agent is not in the "
+                    f"planned pipeline {planned_ids!r}"
+                )
+            planned_ids = planned_ids[planned_ids.index(start_agent_id):]
+            task_messages = [
+                tm for tm in (task_messages or []) if tm.agent_id in planned_ids
+            ]
 
         logger.info(
             "Dynamic pipeline will run %d agent(s): %s",
