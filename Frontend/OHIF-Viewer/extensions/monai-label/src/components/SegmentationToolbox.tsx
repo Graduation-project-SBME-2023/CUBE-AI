@@ -82,21 +82,28 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
     ];
 
     const unsubscriptions = [];
+    const syncToolsEnabled = () => {
+      const segmentations = segmentationService.getSegmentations();
+      const activeSegmentation = segmentations?.find((seg) => seg.isActive);
+      setToolsEnabled(
+        activeSegmentation?.segmentCount > 0 ||
+          activeSegmentation?.segments?.length > 0
+      );
+    };
 
-    events.forEach(event => {
-      const { unsubscribe } = segmentationService.subscribe(event, () => {
-        const segmentations = segmentationService.getSegmentations();
+    syncToolsEnabled();
 
-        const activeSegmentation = segmentations?.find(seg => seg.isActive);
-
-        setToolsEnabled(activeSegmentation?.segmentCount > 0);
-      });
+    events.forEach((event) => {
+      const { unsubscribe } = segmentationService.subscribe(
+        event,
+        syncToolsEnabled
+      );
 
       unsubscriptions.push(unsubscribe);
     });
 
     return () => {
-      unsubscriptions.forEach(unsubscribe => unsubscribe());
+      unsubscriptions.forEach((unsubscribe) => unsubscribe());
     };
   }, [activeViewportId, viewports, segmentationService]);
 
@@ -117,7 +124,7 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
   }, [toolbarService, updateActiveTool]);
 
   const setToolActive = useCallback(
-    toolName => {
+    (toolName) => {
       toolbarService.recordInteraction({
         groupId: 'SegmentationTools',
         itemId: 'Brush',
@@ -139,8 +146,12 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
 
   const updateBrushSize = useCallback(
     (toolName, brushSize) => {
-      toolGroupService.getToolGroupIds()?.forEach(toolGroupId => {
-        segmentationUtils.setBrushSizeForToolGroup(toolGroupId, brushSize, toolName);
+      toolGroupService.getToolGroupIds()?.forEach((toolGroupId) => {
+        segmentationUtils.setBrushSizeForToolGroup(
+          toolGroupId,
+          brushSize,
+          toolName
+        );
       });
     },
     [toolGroupService]
@@ -150,7 +161,7 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
     (valueAsStringOrNumber, toolCategory) => {
       const value = Number(valueAsStringOrNumber);
 
-      _getToolNamesFromCategory(toolCategory).forEach(toolName => {
+      _getToolNamesFromCategory(toolCategory).forEach((toolName) => {
         updateBrushSize(toolName, value);
       });
 
@@ -166,7 +177,7 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
   );
 
   const handleRangeChange = useCallback(
-    newRange => {
+    (newRange) => {
       if (
         newRange[0] === state.ThresholdBrush.thresholdRange[0] &&
         newRange[1] === state.ThresholdBrush.thresholdRange[1]
@@ -176,8 +187,8 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
 
       const toolNames = _getToolNamesFromCategory('ThresholdBrush');
 
-      toolNames.forEach(toolName => {
-        toolGroupService.getToolGroupIds()?.forEach(toolGroupId => {
+      toolNames.forEach((toolName) => {
+        toolGroupService.getToolGroupIds()?.forEach((toolGroupId) => {
           const toolGroup = toolGroupService.getToolGroup(toolGroupId);
           toolGroup.setToolConfiguration(toolName, {
             strategySpecificConfiguration: {
@@ -208,7 +219,9 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
           name: 'Brush',
           icon: 'icon-tool-brush',
           disabled: !toolsEnabled,
-          active: state.activeTool === 'CircularBrush' || state.activeTool === 'SphereBrush',
+          active:
+            state.activeTool === 'CircularBrush' ||
+            state.activeTool === 'SphereBrush',
           onClick: () => setToolActive('CircularBrush'),
           options: [
             {
@@ -219,7 +232,7 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
               max: 100,
               value: state.Brush.brushSize,
               step: 0.5,
-              onChange: value => onBrushSizeChange(value, 'Brush'),
+              onChange: (value) => onBrushSizeChange(value, 'Brush'),
             },
             {
               name: 'Mode',
@@ -230,7 +243,7 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
                 { value: 'CircularBrush', label: 'Circle' },
                 { value: 'SphereBrush', label: 'Sphere' },
               ],
-              onChange: value => setToolActive(value),
+              onChange: (value) => setToolActive(value),
             },
           ],
         },
@@ -238,7 +251,9 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
           name: 'Eraser',
           icon: 'icon-tool-eraser',
           disabled: !toolsEnabled,
-          active: state.activeTool === 'CircularEraser' || state.activeTool === 'SphereEraser',
+          active:
+            state.activeTool === 'CircularEraser' ||
+            state.activeTool === 'SphereEraser',
           onClick: () => setToolActive('CircularEraser'),
           options: [
             {
@@ -249,7 +264,7 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
               max: 100,
               value: state.Eraser.brushSize,
               step: 0.5,
-              onChange: value => onBrushSizeChange(value, 'Eraser'),
+              onChange: (value) => onBrushSizeChange(value, 'Eraser'),
             },
             {
               name: 'Mode',
@@ -260,7 +275,7 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
                 { value: 'CircularEraser', label: 'Circle' },
                 { value: 'SphereEraser', label: 'Sphere' },
               ],
-              onChange: value => setToolActive(value),
+              onChange: (value) => setToolActive(value),
             },
           ],
         },
@@ -284,7 +299,7 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
                 { value: 'RectangleScissor', label: 'Rectangle' },
                 { value: 'SphereScissor', label: 'Sphere' },
               ],
-              onChange: value => setToolActive(value),
+              onChange: (value) => setToolActive(value),
             },
           ],
         },
@@ -305,7 +320,7 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
               max: 100,
               value: state.ThresholdBrush.brushSize,
               step: 0.5,
-              onChange: value => onBrushSizeChange(value, 'ThresholdBrush'),
+              onChange: (value) => onBrushSizeChange(value, 'ThresholdBrush'),
             },
             {
               name: 'Mode',
@@ -316,7 +331,7 @@ function SegmentationToolbox({ servicesManager, extensionManager }) {
                 { value: 'ThresholdCircularBrush', label: 'Circle' },
                 { value: 'ThresholdSphereBrush', label: 'Sphere' },
               ],
-              onChange: value => setToolActive(value),
+              onChange: (value) => setToolActive(value),
             },
             {
               type: 'custom',

@@ -15,6 +15,7 @@ import SegmentationReader from '../utils/SegmentationReader';
 import MonaiSegmentation from './MonaiSegmentation';
 import SegmentationToolbox from './SegmentationToolbox';
 import AgentChat from './actions/AgentChat';
+import { getAgentsApiBaseUrl } from '../utils/runtimeUrls';
 
 import { createReportAsync } from '@ohif/extension-default';
 import { servicesManager } from 'platform/app/src/App';
@@ -40,13 +41,14 @@ export default class MonaiLabelPanel extends Component {
   SeriesInstanceUID: any;
   StudyInstanceUID: any;
   isMONAILabelConnected: boolean;
+  isEmbeddedReview: boolean;
+  initializationCancelled: boolean;
   Modality: any;
 
   constructor(props) {
     super(props);
 
-    const { uiNotificationService, viewportGridService, displaySetService } =
-      props.servicesManager.services;
+    const { uiNotificationService } = props.servicesManager.services;
 
     this.notification = uiNotificationService;
     this.settings = React.createRef();
@@ -66,6 +68,7 @@ export default class MonaiLabelPanel extends Component {
       isDataReady: false,
     };
     this.workflowName = null;
+    this.initializationCancelled = false;
     /////////////////////////////NEW CODE/////////////////////////////////////
     const params = new URLSearchParams(window.location.search);
     const paramsObject = {};
@@ -76,22 +79,7 @@ export default class MonaiLabelPanel extends Component {
     if (paramsObject.workflowName) {
       this.workflowName = paramsObject.workflowName;
     }
-
-    // Todo: fix this hack
-    setTimeout(() => {
-      const { viewports, activeViewportId } = viewportGridService.getState();
-      const viewport = viewports.get(activeViewportId);
-      const displaySet = displaySetService.getDisplaySetByUID(
-        viewport.displaySetInstanceUIDs[0]
-      );
-
-      this.SeriesInstanceUID = displaySet.SeriesInstanceUID;
-      this.StudyInstanceUID = displaySet.StudyInstanceUID;
-      this.Modality = displaySet.Modality;
-      this.FrameOfReferenceUID = displaySet.instances[0].FrameOfReferenceUID;
-      this.displaySetInstanceUID = displaySet.displaySetInstanceUID;
-      this.onInfo();
-    }, 3000);
+    this.isEmbeddedReview = paramsObject.embedded === '1';
   }
 
   async componentDidMount() {
@@ -117,12 +105,55 @@ export default class MonaiLabelPanel extends Component {
     this.unsubscribe = () => {
       subscriptions.forEach((unsubscribe) => unsubscribe());
     };
+
+    await this.initializeViewer();
   }
 
   // componentDidUnmount? Doesn't exist this method anymore in V3?
   async componentWillUnmount() {
+    this.initializationCancelled = true;
     this.unsubscribe();
   }
+
+  initializeViewer = async () => {
+    const { viewportGridService, displaySetService } =
+      this.props.servicesManager.services;
+
+    for (
+      let attempt = 0;
+      attempt < 60 && !this.initializationCancelled;
+      attempt++
+    ) {
+      const { viewports, activeViewportId } = viewportGridService.getState();
+      const viewport = viewports.get(activeViewportId);
+      const displaySetInstanceUID = viewport?.displaySetInstanceUIDs?.[0];
+      const displaySet = displaySetInstanceUID
+        ? displaySetService.getDisplaySetByUID(displaySetInstanceUID)
+        : null;
+
+      if (displaySet) {
+        this.SeriesInstanceUID = displaySet.SeriesInstanceUID;
+        this.StudyInstanceUID = displaySet.StudyInstanceUID;
+        this.Modality = displaySet.Modality;
+        this.FrameOfReferenceUID = displaySet.instances[0].FrameOfReferenceUID;
+        this.displaySetInstanceUID = displaySet.displaySetInstanceUID;
+        await this.onInfo();
+        return;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    if (!this.initializationCancelled) {
+      this.notification.show({
+        title: 'Interactive Segmentation',
+        message:
+          'The scan viewport did not become ready. Please close and try again.',
+        type: 'error',
+        duration: 6000,
+      });
+    }
+  };
 
   client = () => {
     const settings =
@@ -192,6 +223,54 @@ export default class MonaiLabelPanel extends Component {
 
       // calc image embedding(if SAM model)
       // AutoSegmentation.calculateImageEmbeddings(true);
+
+      if (this.isEmbeddedReview) {
+        await this.loadReviewMask();
+      }
+    }
+  };
+
+  loadReviewMask = async () => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session_id');
+    const seriesUid = params.get('series_uid') || this.SeriesInstanceUID;
+    const targetId = params.get('target_id');
+
+    if (!sessionId || !seriesUid) {
+      return;
+    }
+
+    const maskUrl = new URL(
+      `${getAgentsApiBaseUrl()}/segmentation-review/mask/${encodeURIComponent(
+        sessionId
+      )}/${encodeURIComponent(seriesUid)}`
+    );
+    if (targetId) {
+      maskUrl.searchParams.set('target_id', targetId);
+    }
+
+    try {
+      const response = await fetch(maskUrl.toString(), { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error(`Mask request failed with status ${response.status}`);
+      }
+
+      const data = await response.arrayBuffer();
+      await this._update({ data, centroids: {} }, []);
+      this.notification.show({
+        title: 'Interactive Segmentation',
+        message: 'Existing mask loaded and ready to edit.',
+        type: 'success',
+        duration: 2500,
+      });
+    } catch (error) {
+      console.error('Failed to load the review mask:', error);
+      this.notification.show({
+        title: 'Interactive Segmentation',
+        message: 'The existing mask could not be loaded.',
+        type: 'error',
+        duration: 6000,
+      });
     }
   };
 
@@ -246,7 +325,7 @@ export default class MonaiLabelPanel extends Component {
 
     // Reformat centroids
     const centroidsIJK = new Map();
-    for (const [key, value] of Object.entries(response.centroids)) {
+    for (const [key, value] of Object.entries(response.centroids || {})) {
       const segmentIndex = parseInt(value[0], 10);
       const image = value.slice(1).map((v) => parseFloat(v));
       centroidsIJK.set(segmentIndex, { image: image, world: [] });
@@ -653,102 +732,144 @@ export default class MonaiLabelPanel extends Component {
     window.history.back();
   };
 
+  handleEmbeddedCancel = () => {
+    if (window.parent !== window) {
+      window.parent.postMessage(
+        { type: 'cube:segmentation-cancel', version: 1 },
+        window.location.origin
+      );
+    }
+  };
+
+  handleEmbeddedSubmit = () => {
+    this.actions['InteractiveSegmentation'].current?.onClickSubmitToAgent();
+  };
+
   render() {
     const { isDataReady } = this.state;
     const isConnected = this.isMONAILabelConnected;
 
     return (
-     <div
-      className="monaiLabelPanel h-full w-[320px] flex-shrink-0 bg-[#0d1526] border-l border-[#1a2540] flex flex-col"
-      style={{ fontFamily: "'Segoe UI', system-ui, sans-serif", fontSize: '12px', color: '#c8d8f0' }}
-    >
-
-  {/* HEADER */}
-
-
-  {/* SCROLLABLE BODY */}
-  <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-[#1e3058]">
-
-    {/* SETTINGS */}
-    <div className="px-2.5 py-2 border-b border-[#1a2540] [&_input]:bg-[#071020] [&_input]:border [&_input]:border-[#1e3058] [&_input]:rounded-[3px] [&_input]:text-[#4a9eff] [&_input]:text-[11px] [&_input]:px-1.5 [&_input]:py-0.5 [&_input]:outline-none [&_select]:bg-[#071020] [&_select]:border [&_select]:border-[#1e3058] [&_select]:rounded-[3px] [&_select]:text-[#c8d8f0] [&_select]:text-[11px] [&_select]:px-1.5 [&_select]:py-0.5 [&_select]:outline-none [&_select]:appearance-none [&_button]:bg-[#101c35] [&_button]:border [&_button]:border-[#1e3058] [&_button]:rounded-[3px] [&_button]:text-[#4a9eff] [&_button]:text-[11px] [&_button]:px-1.5 [&_button]:py-0.5 [&_label]:text-[#5a8ab8] [&_label]:text-[10px]">
-      <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#3d6a9e] mb-1.5">Settings</p>
-      <SettingsTable ref={this.settings} onInfo={this.onInfo} />
-    </div>
-
-    {/* MODEL INFO LABEL */}
-    <div className="px-2.5 py-2 border-b border-[#1a2540]">
-      <p className="text-[11px] font-semibold text-[#7a9cc8]">{this.state.info.name}</p>
-      <p className="text-[9px] text-[#3d6a9e]">{this.state.info.description}</p>
-    </div>
-
-    {/* SEGMENTATION BLOCKS */}
-    {isDataReady && (
-      <>
-        {/* AUTO SEGMENTATION */}
-        <div className="px-2.5 py-2 border-b border-[#1a2540] [&_select]:bg-[#071020] [&_select]:border [&_select]:border-[#1e3058] [&_select]:rounded-[3px] [&_select]:text-[#c8d8f0] [&_select]:text-[11px] [&_select]:px-1.5 [&_select]:py-0.5 [&_select]:outline-none [&_select]:cursor-pointer [&_select]:appearance-none [&_select]:w-full [&_input]:bg-[#071020] [&_input]:border [&_input]:border-[#1e3058] [&_input]:rounded-[3px] [&_input]:text-[#c8d8f0] [&_input]:text-[11px] [&_input]:px-1.5 [&_input]:py-0.5 [&_input]:outline-none [&_input]:w-full [&_button.actionButton]:bg-[#1a4a8a] [&_button.actionButton]:border-none [&_button.actionButton]:rounded-[3px] [&_button.actionButton]:text-[#c8d8f0] [&_button.actionButton]:text-[11px] [&_button.actionButton]:font-semibold [&_button.actionButton]:px-2.5 [&_button.actionButton]:py-0.5 [&_button.actionButton]:cursor-pointer [&_button.actionButton]:whitespace-nowrap [&_label]:text-[#5a8ab8] [&_label]:text-[10px]">
-          <AutoSegmentation
-            ref={this.actions['segmentation']}
-            tabIndex={1}
-            info={this.state.info}
-            viewConstants={{
-              SeriesInstanceUID: this.SeriesInstanceUID,
-              StudyInstanceUID: this.StudyInstanceUID,
-            }}
-            servicesManager={this.props.servicesManager}
-            client={this.client}
-            notification={this.notification}
-            updateView={this.updateView}
-            onSelectActionTab={this.onSelectActionTab}
-            onOptionsConfig={this.onOptionsConfig}
-          />
-        </div>
-
-        {/* INTERACTIVE SEGMENTATION */}
-        <div className="px-2.5 py-2 border-b border-[#1a2540] [&_select]:bg-[#071020] [&_select]:border [&_select]:border-[#1e3058] [&_select]:rounded-[3px] [&_select]:text-[#c8d8f0] [&_select]:text-[11px] [&_select]:px-1.5 [&_select]:py-0.5 [&_select]:outline-none [&_select]:cursor-pointer [&_select]:appearance-none [&_select]:w-full [&_input]:bg-[#071020] [&_input]:border [&_input]:border-[#1e3058] [&_input]:rounded-[3px] [&_input]:text-[#c8d8f0] [&_input]:text-[11px] [&_input]:px-1.5 [&_input]:py-0.5 [&_input]:outline-none [&_input]:w-full [&_button.actionButton]:bg-[#1a4a8a] [&_button.actionButton]:border-none [&_button.actionButton]:rounded-[3px] [&_button.actionButton]:text-[#c8d8f0] [&_button.actionButton]:text-[11px] [&_button.actionButton]:font-semibold [&_button.actionButton]:px-2.5 [&_button.actionButton]:py-0.5 [&_button.actionButton]:cursor-pointer [&_button.actionButton]:whitespace-nowrap [&_label]:text-[#5a8ab8] [&_label]:text-[10px]">
-          <InteractiveSegmentation
-            ref={this.actions['InteractiveSegmentation']}
-            tabIndex={2}
-            info={this.state.info}
-            servicesManager={this.props.servicesManager}
-            client={this.client}
-            notification={this.notification}
-            updateView={this.updateView}
-            onSelectActionTab={this.onSelectActionTab}
-            onOptionsConfig={this.onOptionsConfig}
-            getActiveViewportInfo={this.getActiveViewportInfo}
-            commandsManager={this.props.commandsManager}
-          />
-        </div>
-      </>
-    )}
-
-    {/* SEGMENTATION TOOLBOX */}
-    {this.state.segmentations?.map((segmentation) => (
       <div
-        key={segmentation.id}
-        className="px-2.5 py-2 border-b border-[#1a2540] [&_select]:bg-[#071020] [&_select]:border [&_select]:border-[#1e3058] [&_select]:rounded-[3px] [&_select]:text-[#c8d8f0] [&_select]:text-[11px] [&_select]:px-1.5 [&_select]:py-0.5 [&_select]:outline-none [&_select]:appearance-none [&_input]:bg-[#071020] [&_input]:border [&_input]:border-[#1e3058] [&_input]:rounded-[3px] [&_input]:text-[#c8d8f0] [&_input]:text-[11px] [&_input]:px-1.5 [&_input]:py-0.5 [&_input]:outline-none [&_button.actionButton]:bg-[#1a4a8a] [&_button.actionButton]:border-none [&_button.actionButton]:rounded-[3px] [&_button.actionButton]:text-[#c8d8f0] [&_button.actionButton]:text-[11px] [&_button.actionButton]:font-semibold [&_button.actionButton]:px-2.5 [&_button.actionButton]:py-0.5 [&_label]:text-[#5a8ab8] [&_label]:text-[10px]"
+        className="monaiLabelPanel min-h-0 w-[320px] flex-1 bg-[#0d1526] border-l border-[#1a2540] flex flex-col"
+        style={{
+          fontFamily: "'Segoe UI', system-ui, sans-serif",
+          fontSize: '12px',
+          color: '#c8d8f0',
+        }}
       >
-        <SegmentationToolbox servicesManager={this.props.servicesManager} />
+        {/* HEADER */}
+
+        {/* SCROLLABLE BODY */}
+        <div className="monaiLabelPanel__content min-h-0 flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-[#1e3058]">
+          {/* SETTINGS */}
+          <div className="px-2.5 py-2 border-b border-[#1a2540] [&_input]:bg-[#071020] [&_input]:border [&_input]:border-[#1e3058] [&_input]:rounded-[3px] [&_input]:text-[#4a9eff] [&_input]:text-[11px] [&_input]:px-1.5 [&_input]:py-0.5 [&_input]:outline-none [&_select]:bg-[#071020] [&_select]:border [&_select]:border-[#1e3058] [&_select]:rounded-[3px] [&_select]:text-[#c8d8f0] [&_select]:text-[11px] [&_select]:px-1.5 [&_select]:py-0.5 [&_select]:outline-none [&_select]:appearance-none [&_button]:bg-[#101c35] [&_button]:border [&_button]:border-[#1e3058] [&_button]:rounded-[3px] [&_button]:text-[#4a9eff] [&_button]:text-[11px] [&_button]:px-1.5 [&_button]:py-0.5 [&_label]:text-[#5a8ab8] [&_label]:text-[10px]">
+            <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#3d6a9e] mb-1.5">
+              Settings
+            </p>
+            <SettingsTable ref={this.settings} onInfo={this.onInfo} />
+          </div>
+
+          {/* MODEL INFO LABEL */}
+          <div className="px-2.5 py-2 border-b border-[#1a2540]">
+            <p className="text-[11px] font-semibold text-[#7a9cc8]">
+              {this.state.info.name}
+            </p>
+            <p className="text-[9px] text-[#3d6a9e]">
+              {this.state.info.description}
+            </p>
+          </div>
+
+          {/* SEGMENTATION BLOCKS */}
+          {isDataReady && (
+            <>
+              {/* AUTO SEGMENTATION */}
+              {!this.isEmbeddedReview && (
+                <div className="px-2.5 py-2 border-b border-[#1a2540] [&_select]:bg-[#071020] [&_select]:border [&_select]:border-[#1e3058] [&_select]:rounded-[3px] [&_select]:text-[#c8d8f0] [&_select]:text-[11px] [&_select]:px-1.5 [&_select]:py-0.5 [&_select]:outline-none [&_select]:cursor-pointer [&_select]:appearance-none [&_select]:w-full [&_input]:bg-[#071020] [&_input]:border [&_input]:border-[#1e3058] [&_input]:rounded-[3px] [&_input]:text-[#c8d8f0] [&_input]:text-[11px] [&_input]:px-1.5 [&_input]:py-0.5 [&_input]:outline-none [&_input]:w-full [&_button.actionButton]:bg-[#1a4a8a] [&_button.actionButton]:border-none [&_button.actionButton]:rounded-[3px] [&_button.actionButton]:text-[#c8d8f0] [&_button.actionButton]:text-[11px] [&_button.actionButton]:font-semibold [&_button.actionButton]:px-2.5 [&_button.actionButton]:py-0.5 [&_button.actionButton]:cursor-pointer [&_button.actionButton]:whitespace-nowrap [&_label]:text-[#5a8ab8] [&_label]:text-[10px]">
+                  <AutoSegmentation
+                    ref={this.actions['segmentation']}
+                    tabIndex={1}
+                    info={this.state.info}
+                    viewConstants={{
+                      SeriesInstanceUID: this.SeriesInstanceUID,
+                      StudyInstanceUID: this.StudyInstanceUID,
+                    }}
+                    servicesManager={this.props.servicesManager}
+                    client={this.client}
+                    notification={this.notification}
+                    updateView={this.updateView}
+                    onSelectActionTab={this.onSelectActionTab}
+                    onOptionsConfig={this.onOptionsConfig}
+                  />
+                </div>
+              )}
+
+              {/* INTERACTIVE SEGMENTATION */}
+              <div className="px-2.5 py-2 border-b border-[#1a2540] [&_select]:bg-[#071020] [&_select]:border [&_select]:border-[#1e3058] [&_select]:rounded-[3px] [&_select]:text-[#c8d8f0] [&_select]:text-[11px] [&_select]:px-1.5 [&_select]:py-0.5 [&_select]:outline-none [&_select]:cursor-pointer [&_select]:appearance-none [&_select]:w-full [&_input]:bg-[#071020] [&_input]:border [&_input]:border-[#1e3058] [&_input]:rounded-[3px] [&_input]:text-[#c8d8f0] [&_input]:text-[11px] [&_input]:px-1.5 [&_input]:py-0.5 [&_input]:outline-none [&_input]:w-full [&_button.actionButton]:bg-[#1a4a8a] [&_button.actionButton]:border-none [&_button.actionButton]:rounded-[3px] [&_button.actionButton]:text-[#c8d8f0] [&_button.actionButton]:text-[11px] [&_button.actionButton]:font-semibold [&_button.actionButton]:px-2.5 [&_button.actionButton]:py-0.5 [&_button.actionButton]:cursor-pointer [&_button.actionButton]:whitespace-nowrap [&_label]:text-[#5a8ab8] [&_label]:text-[10px]">
+                <InteractiveSegmentation
+                  ref={this.actions['InteractiveSegmentation']}
+                  tabIndex={2}
+                  info={this.state.info}
+                  servicesManager={this.props.servicesManager}
+                  client={this.client}
+                  notification={this.notification}
+                  updateView={this.updateView}
+                  onSelectActionTab={this.onSelectActionTab}
+                  onOptionsConfig={this.onOptionsConfig}
+                  getActiveViewportInfo={this.getActiveViewportInfo}
+                  commandsManager={this.props.commandsManager}
+                />
+              </div>
+            </>
+          )}
+
+          {/* SEGMENTATION TOOLBOX */}
+          {this.isEmbeddedReview &&
+            this.state.segmentations?.map((segmentation) => (
+              <div
+                key={segmentation.id}
+                className="px-2.5 py-2 border-b border-[#1a2540] [&_select]:bg-[#071020] [&_select]:border [&_select]:border-[#1e3058] [&_select]:rounded-[3px] [&_select]:text-[#c8d8f0] [&_select]:text-[11px] [&_select]:px-1.5 [&_select]:py-0.5 [&_select]:outline-none [&_select]:appearance-none [&_input]:bg-[#071020] [&_input]:border [&_input]:border-[#1e3058] [&_input]:rounded-[3px] [&_input]:text-[#c8d8f0] [&_input]:text-[11px] [&_input]:px-1.5 [&_input]:py-0.5 [&_input]:outline-none [&_button.actionButton]:bg-[#1a4a8a] [&_button.actionButton]:border-none [&_button.actionButton]:rounded-[3px] [&_button.actionButton]:text-[#c8d8f0] [&_button.actionButton]:text-[11px] [&_button.actionButton]:font-semibold [&_button.actionButton]:px-2.5 [&_button.actionButton]:py-0.5 [&_label]:text-[#5a8ab8] [&_label]:text-[10px]"
+              >
+                <SegmentationToolbox
+                  servicesManager={this.props.servicesManager}
+                />
+              </div>
+            ))}
+          {this.workflowName && (
+            <button
+              onClick={this.uploadLabels}
+              disabled={!this.isMONAILabelConnected}
+              className="w-[calc(100%-20px)] mx-2.5 my-2 py-2 bg-[#1a4a8a] border-none rounded-[4px] text-[#c8d8f0] text-[12px] font-bold tracking-wider cursor-pointer hover:bg-[#1e5aaa] transition-colors flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Upload Labels
+            </button>
+          )}
+
+          {/* RESET ALL */}
+        </div>
+
+        {/* UPLOAD LABELS — sticky bottom */}
+
+        {this.isEmbeddedReview && (
+          <div className="monaiLabelPanel__actions flex shrink-0 gap-2 border-t border-[#1a2540] bg-[#09111f] px-2.5 pt-2.5">
+            <button
+              type="button"
+              onClick={this.handleEmbeddedCancel}
+              className="flex-1 rounded-[4px] border border-[#30425e] bg-[#111b2d] px-3 py-2 text-[12px] font-semibold text-[#c8d8f0] transition-colors hover:bg-[#182640]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={this.handleEmbeddedSubmit}
+              disabled={!isDataReady || !this.state.segmentations?.length}
+              className="flex-[2] rounded-[4px] border-none bg-[#4a9eff] px-3 py-2 text-[12px] font-bold text-[#04101e] transition-colors hover:bg-[#65b0ff] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Submit Updated Mask
+            </button>
+          </div>
+        )}
       </div>
-    ))}
-{this.workflowName && (
-    <button
-      onClick={this.uploadLabels}
-      disabled={!this.isMONAILabelConnected}
-      className="w-[calc(100%-20px)] mx-2.5 my-2 py-2 bg-[#1a4a8a] border-none rounded-[4px] text-[#c8d8f0] text-[12px] font-bold tracking-wider cursor-pointer hover:bg-[#1e5aaa] transition-colors flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-    >
-      Upload Labels
-    </button>
-  )}
-
-    {/* RESET ALL */}
-   
-
-  </div>
-
-  {/* UPLOAD LABELS — sticky bottom */}
-  
-</div>
     );
   }
 }

@@ -6,7 +6,14 @@ import ModelBasedRendering from '../../tools/ModelBasedRendering';
 import getActiveViewportEnabledElement from '../../../../cornerstone/src/utils/getActiveViewportEnabledElement';
 import { getEnabledElement } from '@cornerstonejs/core';
 import { getEnabledElement as OHIFgetEnabledElement } from '../../../../cornerstone/src/state';
-import { getRenderingEngines, utilities as csUtils, cache } from '@cornerstonejs/core';
+import {
+  getRenderingEngines,
+  utilities as csUtils,
+  cache,
+} from '@cornerstonejs/core';
+import { getAgentsApiBaseUrl } from '../../utils/runtimeUrls';
+
+const SEGMENTATION_SUBMITTED_MESSAGE = 'cube:segmentation-submitted';
 
 export default class InteractiveSegmentation extends BaseTab {
   modelSelector: any;
@@ -21,7 +28,8 @@ export default class InteractiveSegmentation extends BaseTab {
       currentModel: models.length > 0 ? models[0] : null, // null brings so much errors
       currentObject: 1,
       clickPoints: new Map(),
-      flagNninteractive: { positive: false, negative: false }
+      flagNninteractive: { positive: false, negative: false },
+      isSubmitting: false,
 
       // availableOrgans: models.length > 0 ? this.getModelLabels(models[0]) : {},
     };
@@ -30,31 +38,28 @@ export default class InteractiveSegmentation extends BaseTab {
 
     this.viewportGridService = viewportGridService;
     this.prompts = {};
-    this.AuxillaryBox ={};
+    this.AuxillaryBox = {};
     this.AuxillaryID = null;
     this.sam2dstate = null;
     this.currentSlice = null;
     this.resetnnInteractiveAll = false;
-    
   }
   // to remove active listner later
   activeListeners = [];
 
-
-
-
-  initPromptObject = (objectId) => {                 //[[{POINTS:[[[25,10]],[1]], BOXES:[]}],[],]
+  initPromptObject = (objectId) => {
+    //[[{POINTS:[[[25,10]],[1]], BOXES:[]}],[],]
     if (!this.prompts[objectId]) {
       this.prompts[objectId] = {
-        points: [[], []],  // [coords[], labels[]]
-        boxes: []
+        points: [[], []], // [coords[], labels[]]
+        boxes: [],
       };
     }
   };
   getLastAnnotations = (worldToIndex) => {
     const manager = cornerstoneTools.annotation.state.getAnnotationManager();
     const saved = manager.saveAnnotations();
-    console.log("iam inside get last annotations", saved);
+    console.log('iam inside get last annotations', saved);
 
     const frameOfReferenceUID = Object.keys(saved)[0];
     if (!frameOfReferenceUID) return null;
@@ -72,12 +77,13 @@ export default class InteractiveSegmentation extends BaseTab {
     if (posKeys.length > 0) {
       const lastKey = posKeys[posKeys.length - 1];
       const pt = positive_annotations[lastKey].data.handles.points[0];
-      console.log("the last positive point", pt);
-    result.positive_points.push([
-      ...this.correct_xy_format(worldToIndex(pt)).map((value, i) =>
-        i === 2 ? Math.round(value) : value
-      ),
-      2]);
+      console.log('the last positive point', pt);
+      result.positive_points.push([
+        ...this.correct_xy_format(worldToIndex(pt)).map((value, i) =>
+          i === 2 ? Math.round(value) : value
+        ),
+        2,
+      ]);
     }
 
     // last negative
@@ -86,10 +92,11 @@ export default class InteractiveSegmentation extends BaseTab {
       const lastKey = negKeys[negKeys.length - 1];
       const pt = negative_annotations[lastKey].data.handles.points[0];
       result.negative_points.push([
-      ...this.correct_xy_format(worldToIndex(pt)).map((value, i) =>
-        i === 2 ? Math.round(value) : value
-      ),
-      2]);
+        ...this.correct_xy_format(worldToIndex(pt)).map((value, i) =>
+          i === 2 ? Math.round(value) : value
+        ),
+        2,
+      ]);
     }
 
     // last box
@@ -99,119 +106,129 @@ export default class InteractiveSegmentation extends BaseTab {
       const pt1 = box_annotations[lastKey].data.handles.points[0];
       const pt2 = box_annotations[lastKey].data.handles.points[3];
       result.boxes.push([
-        this.correct_xy_format(worldToIndex(pt1)).map((value, i) => i === 2 ? Math.round(value) : value),
-        this.correct_xy_format(worldToIndex(pt2)).map((value, i) => i === 2 ? Math.round(value) : value),
+        this.correct_xy_format(worldToIndex(pt1)).map((value, i) =>
+          i === 2 ? Math.round(value) : value
+        ),
+        this.correct_xy_format(worldToIndex(pt2)).map((value, i) =>
+          i === 2 ? Math.round(value) : value
+        ),
       ]);
     }
 
     return result;
   };
-  
+
   cleanupViewportListeners = () => {
     this.activeListeners.forEach(({ element, type, handler }) => {
       element.removeEventListener(type, handler);
     });
     this.activeListeners = [];
-    console.log("cleaned and removed old viewport listeners");
+    console.log('cleaned and removed old viewport listeners');
   };
 
-  handleUpdatePrompts = (mode)=>{
-    //todo: instead of timeout , use event listner as the cornerstone creation take time not reliable ! 
+  handleUpdatePrompts = (mode) => {
+    //todo: instead of timeout , use event listner as the cornerstone creation take time not reliable !
     setTimeout(() => {
-    const { cornerstoneViewportService } = this.props.servicesManager.services;
-    const { viewport, displaySet } = this.props.getActiveViewportInfo();
-    const viewportInfo = cornerstoneViewportService.getViewportInfo(viewport.viewportId);
-    const currentViewPort = viewportInfo.viewportId
-    const { worldToIndex } = viewportInfo.viewportData.data[0].volume.imageData;
-    const { currentModel, currentObject, clickPoints } = this.state;
-    console.log("the current object is ", currentObject);
-    const result = this.getLastAnnotations(worldToIndex);
-    console.log("the results getted from the function is ", result);
-    this.initPromptObject(currentObject);
+      const { cornerstoneViewportService } =
+        this.props.servicesManager.services;
+      const { viewport, displaySet } = this.props.getActiveViewportInfo();
+      const viewportInfo = cornerstoneViewportService.getViewportInfo(
+        viewport.viewportId
+      );
+      const currentViewPort = viewportInfo.viewportId;
+      const { worldToIndex } =
+        viewportInfo.viewportData.data[0].volume.imageData;
+      const { currentModel, currentObject, clickPoints } = this.state;
+      console.log('the current object is ', currentObject);
+      const result = this.getLastAnnotations(worldToIndex);
+      console.log('the results getted from the function is ', result);
+      this.initPromptObject(currentObject);
 
-      if ((mode === 'positive' || mode === 'negative') && currentViewPort !== 'mpr-axial') {
-      const nid = this.notification.show({
-        title: 'MONAI Label',
-        message: 'Positive/Negative point prompts are supported only in Axial view. Please switch to axial.',
-        type: 'warning',
-        duration: 8000,
-      });
-      return; // stop execution, don’t call sam2d
-    }
-
-    if (mode === 'positive' && result?.positive_points.length > 0) {
-      const pt = result.positive_points[0];
-      console.log("Positive point added", pt);
-
-      this.prompts[currentObject].points[0].push(pt);  // coords
-      this.prompts[currentObject].points[1].push(1);   // label
-      this.sam2dstate = '2d';
-      this.currentSlice = pt[2];
-      console.log("the current slice is ", this.currentSlice);
-    }
-
-    if (mode === 'negative' && result?.negative_points.length > 0) {
-      const pt = result.negative_points[0];
-      console.log("Negative point added", pt);
-
-      this.prompts[currentObject].points[0].push(pt);  // coords
-      this.prompts[currentObject].points[1].push(0);   // label
-      this.sam2dstate = '2d';
-      this.currentSlice = pt[2];
-      
-    }
-    if (mode === 'box' && result?.boxes.length > 0) {
-      const [[x1, y1, z1], [x2, y2, z2]] = result.boxes[0];
-
-      console.log("the z1 is", z1, "the z2 is", z2);
-      console.log("the x1", x1, "the x2 is", x2, "the y1", y1, "the y2", y2);
-
-      if (currentViewPort === 'mpr-axial') {
-        const xmin = Math.min(x1, x2);
-        const xmax = Math.max(x1, x2);
-        const ymin = Math.min(y1, y2);
-        const ymax = Math.max(y1, y2);
-        const slice_index = z1;
-        this.currentSlice = slice_index;
-
-        const boxEntry = [[xmin, ymin, xmax, ymax], slice_index, 2];
-        console.log("the boxentry is ", boxEntry);
-        this.prompts[currentObject].boxes.push(boxEntry);
-        this.sam2dstate = '2d';
-      } 
-      else {
-        let xmin, xmax, ymin, ymax, slice_index, planeIndex;
-
-        if (currentViewPort === 'mpr-sagittal') {
-          xmin = Math.min(z1, z2);
-          xmax = Math.max(z1, z2);
-          ymin = Math.min(y1, y2);
-          ymax = Math.max(y1, y2);
-          slice_index = x1;
-          planeIndex = 0;
-        } else { // coronal
-          xmin = Math.min(z1, z2);
-          xmax = Math.max(z1, z2);
-          ymin = Math.min(x1, x2);
-          ymax = Math.max(x1, x2);
-          slice_index = y1+1;
-          planeIndex = 1;
-        }
-
-        this.currentSlice = slice_index;
-        const boxEntry = [[xmin, ymin, xmax, ymax], slice_index, planeIndex];
-
-        console.log("the box entry for Aux ", boxEntry);
-        this.AuxillaryBox = boxEntry;
-        this.sam2dstate = 'Auxillary_Box';
-        this.AuxillaryID = currentObject;
+      if (
+        (mode === 'positive' || mode === 'negative') &&
+        currentViewPort !== 'mpr-axial'
+      ) {
+        const nid = this.notification.show({
+          title: 'MONAI Label',
+          message:
+            'Positive/Negative point prompts are supported only in Axial view. Please switch to axial.',
+          type: 'warning',
+          duration: 8000,
+        });
+        return; // stop execution, don’t call sam2d
       }
-    }
-    console.log("the prompts is ,", this.prompts);
-    this.onsam2d(this.sam2dstate);
-  }, 500); 
- 
-  }
+
+      if (mode === 'positive' && result?.positive_points.length > 0) {
+        const pt = result.positive_points[0];
+        console.log('Positive point added', pt);
+
+        this.prompts[currentObject].points[0].push(pt); // coords
+        this.prompts[currentObject].points[1].push(1); // label
+        this.sam2dstate = '2d';
+        this.currentSlice = pt[2];
+        console.log('the current slice is ', this.currentSlice);
+      }
+
+      if (mode === 'negative' && result?.negative_points.length > 0) {
+        const pt = result.negative_points[0];
+        console.log('Negative point added', pt);
+
+        this.prompts[currentObject].points[0].push(pt); // coords
+        this.prompts[currentObject].points[1].push(0); // label
+        this.sam2dstate = '2d';
+        this.currentSlice = pt[2];
+      }
+      if (mode === 'box' && result?.boxes.length > 0) {
+        const [[x1, y1, z1], [x2, y2, z2]] = result.boxes[0];
+
+        console.log('the z1 is', z1, 'the z2 is', z2);
+        console.log('the x1', x1, 'the x2 is', x2, 'the y1', y1, 'the y2', y2);
+
+        if (currentViewPort === 'mpr-axial') {
+          const xmin = Math.min(x1, x2);
+          const xmax = Math.max(x1, x2);
+          const ymin = Math.min(y1, y2);
+          const ymax = Math.max(y1, y2);
+          const slice_index = z1;
+          this.currentSlice = slice_index;
+
+          const boxEntry = [[xmin, ymin, xmax, ymax], slice_index, 2];
+          console.log('the boxentry is ', boxEntry);
+          this.prompts[currentObject].boxes.push(boxEntry);
+          this.sam2dstate = '2d';
+        } else {
+          let xmin, xmax, ymin, ymax, slice_index, planeIndex;
+
+          if (currentViewPort === 'mpr-sagittal') {
+            xmin = Math.min(z1, z2);
+            xmax = Math.max(z1, z2);
+            ymin = Math.min(y1, y2);
+            ymax = Math.max(y1, y2);
+            slice_index = x1;
+            planeIndex = 0;
+          } else {
+            // coronal
+            xmin = Math.min(z1, z2);
+            xmax = Math.max(z1, z2);
+            ymin = Math.min(x1, x2);
+            ymax = Math.max(x1, x2);
+            slice_index = y1 + 1;
+            planeIndex = 1;
+          }
+
+          this.currentSlice = slice_index;
+          const boxEntry = [[xmin, ymin, xmax, ymax], slice_index, planeIndex];
+
+          console.log('the box entry for Aux ', boxEntry);
+          this.AuxillaryBox = boxEntry;
+          this.sam2dstate = 'Auxillary_Box';
+          this.AuxillaryID = currentObject;
+        }
+      }
+      console.log('the prompts is ,', this.prompts);
+      this.onsam2d(this.sam2dstate);
+    }, 500);
+  };
 
   configureViewportInteraction = (mode: 'positive' | 'negative') => {
     if (!this.viewportGridService) return;
@@ -222,54 +239,59 @@ export default class InteractiveSegmentation extends BaseTab {
     const renderingEngines = getRenderingEngines();
 
     const handleClick = (evt) => {
-      console.log("point clicked in mode", mode);
+      console.log('point clicked in mode', mode);
 
       if (this.state.currentModel === 'sam') {
         this.handleUpdatePrompts(mode);
       } else if (this.state.currentModel === 'nninteractive') {
-
         if (mode === 'positive' && !this.state.flagNninteractive.positive) {
-          const { toolGroupService, viewportGridService } = this.props.servicesManager.services;
-          const { viewports, activeViewportId } = viewportGridService.getState();
+          const { toolGroupService, viewportGridService } =
+            this.props.servicesManager.services;
+          const { viewports, activeViewportId } =
+            viewportGridService.getState();
           const viewport = viewports.get(activeViewportId);
           const { viewportOptions } = viewport;
           const toolGroupId = viewportOptions.toolGroupId;
 
           // Use setToolPassive instead of setToolDisabled
 
-          
-          this.setState(prevState => ({
+          this.setState((prevState) => ({
             flagNninteractive: {
               ...prevState.flagNninteractive,
-              positive: true
-            }
+              positive: true,
+            },
           }));
-            setTimeout(() => {toolGroupService
-            .getToolGroup(toolGroupId)
-            .setToolPassive('ProbeMONAILabelPos');},500);
-          
-        } else if (mode === 'negative' && !this.state.flagNninteractive.negative) {
-          const { toolGroupService, viewportGridService } = this.props.servicesManager.services;
-          const { viewports, activeViewportId } = viewportGridService.getState();
+          setTimeout(() => {
+            toolGroupService
+              .getToolGroup(toolGroupId)
+              .setToolPassive('ProbeMONAILabelPos');
+          }, 500);
+        } else if (
+          mode === 'negative' &&
+          !this.state.flagNninteractive.negative
+        ) {
+          const { toolGroupService, viewportGridService } =
+            this.props.servicesManager.services;
+          const { viewports, activeViewportId } =
+            viewportGridService.getState();
           const viewport = viewports.get(activeViewportId);
           const { viewportOptions } = viewport;
           const toolGroupId = viewportOptions.toolGroupId;
 
-
-          
-          this.setState(prevState => ({
+          this.setState((prevState) => ({
             flagNninteractive: {
               ...prevState.flagNninteractive,
-              negative: true
-            }
+              negative: true,
+            },
           }));
-            setTimeout(() => {toolGroupService
-            .getToolGroup(toolGroupId)
-            .setToolPassive('ProbeMONAILabelNeg');},500);
+          setTimeout(() => {
+            toolGroupService
+              .getToolGroup(toolGroupId)
+              .setToolPassive('ProbeMONAILabelNeg');
+          }, 500);
         }
       }
     };
-
 
     viewports.forEach((vpConfig) => {
       const viewport = renderingEngines[0].getViewport(vpConfig.viewportId);
@@ -286,12 +308,10 @@ export default class InteractiveSegmentation extends BaseTab {
     console.log(`Viewport listeners configured for ${mode} points`);
   };
 
-
-
-  configureViewportBoxInteraction = () => { 
+  configureViewportBoxInteraction = () => {
     if (!this.viewportGridService) return;
 
-    this.cleanupViewportListeners(); 
+    this.cleanupViewportListeners();
 
     const viewports = this.viewportGridService.getState().viewports;
     const renderingEngines = getRenderingEngines();
@@ -299,15 +319,15 @@ export default class InteractiveSegmentation extends BaseTab {
     const holdBoxStartMap = new Map();
     const clickBoxStartMap = new Map();
     // apply threshold to prevent detection twice of the box
-    const movementThreshold = 5;  // px to detect drag 
-    const clickDistanceThreshold = 20; // px distance for 2-click mode 
+    const movementThreshold = 5; // px to detect drag
+    const clickDistanceThreshold = 20; // px distance for 2-click mode
 
     // option one for press hold and release
     const handleDown = (evt) => {
-      holdBoxStartMap.set(evt.currentTarget, { 
-        x: evt.offsetX, 
-        y: evt.offsetY, 
-        moved: false 
+      holdBoxStartMap.set(evt.currentTarget, {
+        x: evt.offsetX,
+        y: evt.offsetY,
+        moved: false,
       });
     };
 
@@ -316,7 +336,10 @@ export default class InteractiveSegmentation extends BaseTab {
         const start = holdBoxStartMap.get(evt.currentTarget);
         const dx = evt.offsetX - start.x;
         const dy = evt.offsetY - start.y;
-        if (Math.abs(dx) > movementThreshold || Math.abs(dy) > movementThreshold) {
+        if (
+          Math.abs(dx) > movementThreshold ||
+          Math.abs(dy) > movementThreshold
+        ) {
           start.moved = true; // mark as drag
           console.log(
             `Hold Box still from (${start.x}, ${start.y}) → (${evt.offsetX}, ${evt.offsetY})`
@@ -333,14 +356,12 @@ export default class InteractiveSegmentation extends BaseTab {
           console.log(
             `Hold Box finished from (${start.x}, ${start.y}) → (${end.x}, ${end.y})`
           );
-        if (this.state.currentModel ==='sam'){
-        this.handleUpdatePrompts('box');}      
-      }
+          if (this.state.currentModel === 'sam') {
+            this.handleUpdatePrompts('box');
+          }
+        }
         holdBoxStartMap.delete(evt.currentTarget);
       }
-
-
-
     };
 
     // option two for two clicks
@@ -348,9 +369,8 @@ export default class InteractiveSegmentation extends BaseTab {
       const element = evt.currentTarget;
 
       if (!clickBoxStartMap.has(element)) {
-      
         clickBoxStartMap.set(element, { x: evt.offsetX, y: evt.offsetY });
-        console.log("Click Box start", evt.offsetX, evt.offsetY);
+        console.log('Click Box start', evt.offsetX, evt.offsetY);
       } else {
         // only if far enough
         const start = clickBoxStartMap.get(element);
@@ -362,10 +382,11 @@ export default class InteractiveSegmentation extends BaseTab {
           console.log(
             ` Click Box completed from (${start.x}, ${start.y}) → (${evt.offsetX}, ${evt.offsetY})`
           );
-        if (this.state.currentModel ==='sam'){
-        this.handleUpdatePrompts('box');}
+          if (this.state.currentModel === 'sam') {
+            this.handleUpdatePrompts('box');
+          }
         } else {
-          console.log("not a complete box ");
+          console.log('not a complete box ');
         }
 
         clickBoxStartMap.delete(element);
@@ -376,27 +397,43 @@ export default class InteractiveSegmentation extends BaseTab {
       const viewport = renderingEngines[0].getViewport(vpConfig.viewportId);
       if (!viewport?.element) return;
 
-      viewport.element.addEventListener("mousedown", handleDown);
-      viewport.element.addEventListener("mousemove", handleMove);
-      viewport.element.addEventListener("mouseup", handleUp);
-      viewport.element.addEventListener("click", handleClick);
+      viewport.element.addEventListener('mousedown', handleDown);
+      viewport.element.addEventListener('mousemove', handleMove);
+      viewport.element.addEventListener('mouseup', handleUp);
+      viewport.element.addEventListener('click', handleClick);
 
-      this.activeListeners.push({ element: viewport.element, type: "mousedown", handler: handleDown });
-      this.activeListeners.push({ element: viewport.element, type: "mousemove", handler: handleMove });
-      this.activeListeners.push({ element: viewport.element, type: "mouseup", handler: handleUp });
-      this.activeListeners.push({ element: viewport.element, type: "click", handler: handleClick });
+      this.activeListeners.push({
+        element: viewport.element,
+        type: 'mousedown',
+        handler: handleDown,
+      });
+      this.activeListeners.push({
+        element: viewport.element,
+        type: 'mousemove',
+        handler: handleMove,
+      });
+      this.activeListeners.push({
+        element: viewport.element,
+        type: 'mouseup',
+        handler: handleUp,
+      });
+      this.activeListeners.push({
+        element: viewport.element,
+        type: 'click',
+        handler: handleClick,
+      });
     });
   };
 
-  resetProps = ()=>{
+  resetProps = () => {
     this.prompts = {};
-    this.AuxillaryBox ={};
+    this.AuxillaryBox = {};
     this.AuxillaryID = null;
     this.sam2dstate = null;
     this.currentSlice = null;
     this.resetnnInteractiveAll = false;
     this.voxtellTextPrompt = '';
-  }
+  };
 
   onSelectModel = (model) => {
     // console.log('Selecting  (Point) Interaction Model...');
@@ -407,8 +444,7 @@ export default class InteractiveSegmentation extends BaseTab {
       currentObject: currentObject,
       clickPoints: clickPoints,
       // availableOrgans: this.getModelLabels(model),
-      flagNninteractive: { positive: false, negative: false }
-
+      flagNninteractive: { positive: false, negative: false },
     });
     this.resetProps();
     this.clearAllPoints();
@@ -426,8 +462,6 @@ export default class InteractiveSegmentation extends BaseTab {
       toolName: 'ProbeMONAILabelPos',
     });
     console.info('Here we activate the probe');
-
-   
   };
 
   onLeaveActionTab = () => {
@@ -440,7 +474,6 @@ export default class InteractiveSegmentation extends BaseTab {
     const viewport = viewports.get(activeViewportId);
     const { viewportOptions } = viewport;
     const toolGroupId = viewportOptions.toolGroupId;
-    
 
     toolGroupService
       .getToolGroup(toolGroupId)
@@ -456,15 +489,13 @@ export default class InteractiveSegmentation extends BaseTab {
 
     console.info('Here we deactivate the probe');
   };
- 
 
   enablePositiveProbe = (objectId) => {
     console.log('Enable Positive Probe for Object', objectId);
     this.props.commandsManager.runCommand('setToolActive', {
       toolName: 'ProbeMONAILabelPos',
     });
-      this.configureViewportInteraction('positive');
-
+    this.configureViewportInteraction('positive');
   };
 
   enableNegativeProbe = (objectId) => {
@@ -472,8 +503,7 @@ export default class InteractiveSegmentation extends BaseTab {
     this.props.commandsManager.runCommand('setToolActive', {
       toolName: 'ProbeMONAILabelNeg',
     });
-      this.configureViewportInteraction('negative');
-
+    this.configureViewportInteraction('negative');
   };
 
   enableBoxTool = (objectId) => {
@@ -481,8 +511,7 @@ export default class InteractiveSegmentation extends BaseTab {
     this.props.commandsManager.runCommand('setToolActive', {
       toolName: 'RecROIToolMONAILabel',
     });
-      this.configureViewportBoxInteraction();
-
+    this.configureViewportBoxInteraction();
   };
   clearPoints = (objectId) => {
     console.log('Clearing points for Object', objectId);
@@ -492,39 +521,37 @@ export default class InteractiveSegmentation extends BaseTab {
     this.props.servicesManager.services.cornerstoneViewportService
       .getRenderingEngine()
       .render();
-      this.setState({ flagNninteractive: { positive: false, negative: false } });
-
+    this.setState({ flagNninteractive: { positive: false, negative: false } });
   };
-  onsam2d = async(state) =>{
-    console.log("iam inside onsame2d function");
+  onsam2d = async (state) => {
+    console.log('iam inside onsame2d function');
     const nid = this.notification.show({
       title: 'MONAI Label',
-      message: 'Running 2d SAM Segmentation... For 3d segmentation press Propagate button',
+      message:
+        'Running 2d SAM Segmentation... For 3d segmentation press Propagate button',
       type: 'info',
       duration: 10000,
     });
-    const { info} = this.props;
+    const { info } = this.props;
     const { viewport, displaySet } = this.props.getActiveViewportInfo();
     const config = this.props.onOptionsConfig();
     const params =
       config && config.infer && config.infer[model] ? config.infer[model] : {};
     params['restore_label_idx'] = false;
-    params['result_compress']= false;
+    params['result_compress'] = false;
     params['result_dtype'] = 'uint16';
     params['result_extension'] = '.nrrd';
     params['sam2config'] = this.prompts;
     params['SliceIndex'] = this.currentSlice;
-    if (state ==='2d'){
-      params['State'] = "2d";
-    }
-    else if (state === 'Auxillary_Box'){
+    if (state === '2d') {
+      params['State'] = '2d';
+    } else if (state === 'Auxillary_Box') {
       params['Auxillary_Box'] = this.AuxillaryBox;
       params['Auxillary_Id'] = this.AuxillaryID;
-      params['State'] = "Auxillary_Box";
+      params['State'] = 'Auxillary_Box';
     }
-    console.log("the parameters are ",params);
+    console.log('the parameters are ', params);
 
-    
     const response = await this.props
       .client()
       .infer('sam', displaySet.SeriesInstanceUID, params);
@@ -554,11 +581,11 @@ export default class InteractiveSegmentation extends BaseTab {
     }
 
     this.props.updateView(response, labels, 'sam');
-  }
+  };
 
   correct_xy_format = (point) => {
     return [point[1], point[0], point[2]];
-  }
+  };
 
   getNnInteractivePrompts = (worldToIndex) => {
     const manager = cornerstoneTools.annotation.state.getAnnotationManager();
@@ -567,9 +594,11 @@ export default class InteractiveSegmentation extends BaseTab {
     const annotations = frameOfReferenceUID ? saved[frameOfReferenceUID] : {};
 
     const toIndex = (annotation) =>
-      worldToIndex(annotation.data.handles.points[0]).map(value => Math.round(value));
+      worldToIndex(annotation.data.handles.points[0]).map((value) =>
+        Math.round(value)
+      );
     const pointsForTool = (toolName, label) =>
-      Object.values(annotations?.[toolName] || {}).map(annotation => ({
+      Object.values(annotations?.[toolName] || {}).map((annotation) => ({
         point: toIndex(annotation),
         label,
       }));
@@ -578,11 +607,12 @@ export default class InteractiveSegmentation extends BaseTab {
       ...pointsForTool('ProbeMONAILabelPos', 1),
       ...pointsForTool('ProbeMONAILabelNeg', 0),
     ];
-  }
+  };
 
   onRunInference = async () => {
     console.log(' run inference start');
-    const { currentModel, currentObject, clickPoints, flagNninteractive } = this.state;
+    const { currentModel, currentObject, clickPoints, flagNninteractive } =
+      this.state;
     const { info } = this.props;
     const { viewport, displaySet } = this.props.getActiveViewportInfo();
 
@@ -628,7 +658,7 @@ export default class InteractiveSegmentation extends BaseTab {
     // const negative_points = {};
     // const boxes = {};
     // const object_ids = [];
-    // const framOfReferenceUID = Object.keys(clickPoints[currentObject])[0]; 
+    // const framOfReferenceUID = Object.keys(clickPoints[currentObject])[0];
     // for (const object_id in clickPoints) {
     //   const negative_annotations =
     //     clickPoints[object_id][framOfReferenceUID]['ProbeMONAILabelNeg'];
@@ -662,14 +692,14 @@ export default class InteractiveSegmentation extends BaseTab {
     //   }
     //   object_ids.push(object_id);
     // }
-    // // debuging 
+    // // debuging
     // console.log('positive points: ', positive_points);
     // const points = positive_points[1];
     // const lastPoint = points?.[points.length - 1];  // safe access
     // console.log("Last point for object", 0, "is", lastPoint);
     // console.log('negative points: ', negative_points);
     // console.log('boxes: ', boxes);
-    
+
     // =====================================================================
     const config = this.props.onOptionsConfig();
     const params =
@@ -679,7 +709,7 @@ export default class InteractiveSegmentation extends BaseTab {
         points: [
           ...(positive_points[currentObject] || []),
           ...(negative_points[currentObject] || []),
-        ].map(([x, y, z]) => [x, y, Math.round(z)]), 
+        ].map(([x, y, z]) => [x, y, Math.round(z)]),
         labels: [
           ...(positive_points[currentObject]
             ? new Array(positive_points[currentObject].length).fill(1)
@@ -693,8 +723,7 @@ export default class InteractiveSegmentation extends BaseTab {
       params['Class'] = 133;
     } else if (model === 'sam') {
       params['sam2config'] = this.prompts;
-      params['State'] = "3d";
-
+      params['State'] = '3d';
     } else if (model === 'nninteractive') {
       // nnInteractive consumes the volume IJK coordinates directly.  The
       // previous implementation referenced disabled variables
@@ -733,8 +762,7 @@ export default class InteractiveSegmentation extends BaseTab {
       .infer(model, displaySet.SeriesInstanceUID, params);
     const labels = info.models[model].labels;
     // console.log(response);
-    console.log("the parameters for model interactive run", params);
-
+    console.log('the parameters for model interactive run', params);
 
     if (response.status !== 200) {
       this.notification.show({
@@ -781,9 +809,9 @@ export default class InteractiveSegmentation extends BaseTab {
   //     manager.restoreAnnotations(annotations);
   //   }
   // };
-  onRestAllClick =()=>{
-      this.resetnnInteractiveAll = !this.resetnnInteractiveAll; 
-  }
+  onRestAllClick = () => {
+    this.resetnnInteractiveAll = !this.resetnnInteractiveAll;
+  };
   clearAllPoints = () => {
     const clickPoints = new Map();
     this.setState({ clickPoints: clickPoints });
@@ -797,7 +825,7 @@ export default class InteractiveSegmentation extends BaseTab {
 
   onChangeObject = (id) => {
     const { currentObject } = this.state;
-    console.log("the id is ", id, "the current object is ", currentObject);
+    console.log('the id is ', id, 'the current object is ', currentObject);
     if (id === currentObject) {
       console.log('Both new and prev are same');
       return;
@@ -811,8 +839,8 @@ export default class InteractiveSegmentation extends BaseTab {
     //   console.log('Saving Prev annotations...', this.state.clickPoints[prev]);
     //   this.clearPoints();
     // }
-    console.log("the id selected is ", id);
-    this.setState({ currentObject: id});
+    console.log('the id selected is ', id);
+    this.setState({ currentObject: id });
     // this.initPoints();
   };
 
@@ -841,7 +869,7 @@ export default class InteractiveSegmentation extends BaseTab {
 
   getModels() {
     const { info } = this.props;
-    const allowed = ['vista', 'sam', 'nninteractive','voxtell'];
+    const allowed = ['vista', 'sam', 'nninteractive', 'voxtell'];
     console.log(info.models);
     const models = Object.keys(info.models).filter((key) =>
       allowed.includes(key)
@@ -884,10 +912,8 @@ export default class InteractiveSegmentation extends BaseTab {
     manager.removeAllAnnotations();
     const { cornerstoneViewportService } = this.props.servicesManager.services;
     cornerstoneViewportService.getRenderingEngine().render();
-    console.log("the annotations removed");
-    }
-
-
+    console.log('the annotations removed');
+  }
 
   render() {
     const models = this.getModels();
@@ -920,8 +946,14 @@ export default class InteractiveSegmentation extends BaseTab {
             usage={
               <ModelBasedRendering
                 mode={this.state.currentModel}
-                positiveDisabled={this.state.currentModel === 'nninteractive' && this.state.flagNninteractive.positive}
-                negativeDisabled={this.state.currentModel === 'nninteractive' && this.state.flagNninteractive.negative}
+                positiveDisabled={
+                  this.state.currentModel === 'nninteractive' &&
+                  this.state.flagNninteractive.positive
+                }
+                negativeDisabled={
+                  this.state.currentModel === 'nninteractive' &&
+                  this.state.flagNninteractive.negative
+                }
                 onBoxClick={(id) => this.enableBoxTool(id)}
                 onPositiveClick={(id) => this.enablePositiveProbe(id)}
                 onNegativeClick={(id) => this.enableNegativeProbe(id)}
@@ -931,66 +963,78 @@ export default class InteractiveSegmentation extends BaseTab {
                 onColorChange={this.onColorChange}
                 onAddObjectClick={this.onAddObject}
                 onRowSelect={this.onChangeObject}
-                onTextPromptChange={(text) => this.voxtellTextPrompt = text}
+                onTextPromptChange={(text) => (this.voxtellTextPrompt = text)}
               />
             }
           />
-          <br/>
-          {new URLSearchParams(window.location.search).get('session_id') && (
-            <button
-              className="actionInput"
-              style={{
-                backgroundColor: '#010839',
-                color: '#7bcfe9',
-                fontWeight: 'bold',
-                fontSize: '14px',
-                width: '100%',
-                padding: '8px 14px',
-                borderRadius: '6px',
-                border: '2px solid #010839',
-                cursor: 'pointer',
-                marginTop: '10px',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                transition: 'all 0.2s ease-in-out'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgb(72, 193, 230)';
-                e.currentTarget.style.color = 'rgb(255, 255, 255)';
-                e.currentTarget.style.borderColor = 'rgb(72, 193, 230)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = '#010839';
-                e.currentTarget.style.color = '#7bcfe9';
-                e.currentTarget.style.borderColor = '#010839';
-              }}
-              onClick={this.onClickSubmitToAgent}
-            >
-              Submit Modifications to Agent
-            </button>
-          )}
+          <br />
+          {new URLSearchParams(window.location.search).get('session_id') &&
+            new URLSearchParams(window.location.search).get('embedded') !==
+              '1' && (
+              <button
+                className="actionInput"
+                style={{
+                  backgroundColor: '#010839',
+                  color: '#7bcfe9',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                  width: '100%',
+                  padding: '8px 14px',
+                  borderRadius: '6px',
+                  border: '2px solid #010839',
+                  cursor: 'pointer',
+                  marginTop: '10px',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  transition: 'all 0.2s ease-in-out',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'rgb(72, 193, 230)';
+                  e.currentTarget.style.color = 'rgb(255, 255, 255)';
+                  e.currentTarget.style.borderColor = 'rgb(72, 193, 230)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '#010839';
+                  e.currentTarget.style.color = '#7bcfe9';
+                  e.currentTarget.style.borderColor = '#010839';
+                }}
+                onClick={this.onClickSubmitToAgent}
+                disabled={this.state.isSubmitting}
+              >
+                {this.state.isSubmitting
+                  ? 'Submitting…'
+                  : 'Submit Updated Mask'}
+              </button>
+            )}
         </div>
       </div>
     );
   }
 
   onClickSubmitToAgent = async () => {
+    if (this.state.isSubmitting) {
+      return;
+    }
+
+    this.setState({ isSubmitting: true });
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const sessionId = urlParams.get('session_id');
-      const seriesUid = urlParams.get('series_uid') || this.props.viewConstants.SeriesInstanceUID;
+      const seriesUid =
+        urlParams.get('series_uid') ||
+        this.props.viewConstants.SeriesInstanceUID;
       const targetId = urlParams.get('target_id');
       const pairId = urlParams.get('pair_id') || seriesUid;
 
       if (!sessionId) {
-        alert("No session ID found.");
+        alert('No session ID found.');
         return;
       }
 
       const { viewportGridService } = this.props.servicesManager.services;
       const { activeViewportId } = viewportGridService.getState();
-      
+
       let labelVolume = null;
 
       // 1. Try to get it from cornerstoneTools segmentation state
@@ -999,7 +1043,11 @@ export default class InteractiveSegmentation extends BaseTab {
         if (segs && segs.length > 0) {
           const seg = segs[0];
           // In OHIF v3 / Cornerstone3D, volumeId is often under representationData
-          const volId = (seg.representationData && seg.representationData.LABELMAP && seg.representationData.LABELMAP.volumeId) || seg.volumeId;
+          const volId =
+            (seg.representationData &&
+              seg.representationData.LABELMAP &&
+              seg.representationData.LABELMAP.volumeId) ||
+            seg.volumeId;
           if (volId) {
             labelVolume = cache.getVolume(volId);
           }
@@ -1023,13 +1071,23 @@ export default class InteractiveSegmentation extends BaseTab {
       }
 
       if (!labelVolume) {
-        this.notification.show({ title: 'MONAI Label', message: 'No labelmap found to submit.', type: 'warning', duration: 4000 });
+        this.notification.show({
+          title: 'MONAI Label',
+          message: 'No labelmap found to submit.',
+          type: 'warning',
+          duration: 4000,
+        });
         return;
       }
 
-      this.notification.show({ title: 'Agent System', message: 'Uploading modified mask...', type: 'info', duration: 4000 });
+      this.notification.show({
+        title: 'Agent System',
+        message: 'Uploading modified mask...',
+        type: 'info',
+        duration: 4000,
+      });
 
-      // If scalarData is backed by a SharedArrayBuffer, we must copy it to a normal ArrayBuffer 
+      // If scalarData is backed by a SharedArrayBuffer, we must copy it to a normal ArrayBuffer
       // before constructing a Blob. We can do this by creating a new typed array of the same type.
       let safeData = labelVolume.scalarData;
       if (safeData.buffer && safeData.buffer instanceof SharedArrayBuffer) {
@@ -1037,8 +1095,10 @@ export default class InteractiveSegmentation extends BaseTab {
         safeData = new safeData.constructor(safeData);
       }
 
-      const labelBlob = new Blob([safeData], { type: 'application/octet-stream' });
-      
+      const labelBlob = new Blob([safeData], {
+        type: 'application/octet-stream',
+      });
+
       const formData = new FormData();
       formData.append('session_id', sessionId);
       formData.append('series_instance_uid', seriesUid);
@@ -1048,38 +1108,60 @@ export default class InteractiveSegmentation extends BaseTab {
       formData.append('dimensions', JSON.stringify(labelVolume.dimensions));
       formData.append('file', labelBlob, 'label.nii.gz');
 
-      const response = await fetch('http://localhost:8150/segmentation-review/upload-mask', {
-        method: 'POST',
-        body: formData,
-      });
+      const response = await fetch(
+        `${getAgentsApiBaseUrl()}/segmentation-review/upload-mask`,
+        {
+          method: 'POST',
+          body: formData,
+        }
+      );
 
       if (!response.ok) {
         throw new Error(`Upload failed: ${response.status}`);
       }
 
-      // Now tell the agent "review is done" so it unblocks from the long-poll
-      // and processes the modified mask (regenerates GIFs, etc.)
-      const triageResponse = await fetch('http://localhost:8150/segmentation-review', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: sessionId,
-          accepted: [],
-          rejected: [],
-          modified: [pairId],
-        }),
+      const result = await response.json();
+
+      this.notification.show({
+        title: 'Agent System',
+        message: 'Modified mask saved successfully.',
+        type: 'success',
+        duration: 3000,
       });
 
-      if (!triageResponse.ok) {
-        console.warn(`Triage POST returned ${triageResponse.status}, agent may not update GIFs.`);
+      const message = {
+        type: SEGMENTATION_SUBMITTED_MESSAGE,
+        version: 1,
+        payload: {
+          sessionId,
+          seriesInstanceUid: seriesUid,
+          pairId,
+          targetId,
+          status: 'saved',
+          mask: {
+            byteLength: safeData.byteLength,
+            dimensions: labelVolume.dimensions,
+          },
+          overlay: result.overlay,
+        },
+      };
+
+      if (window.parent !== window) {
+        window.parent.postMessage(message, window.location.origin);
+      } else if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(message, window.location.origin);
       }
-      
-      this.notification.show({ title: 'Agent System', message: 'Modified mask successfully sent to agent! GIFs will update shortly.', type: 'success', duration: 5000 });
-      // The user requested to NOT close the tab automatically.
     } catch (e) {
       console.error(e);
       alert(`Error submitting to agent: ${e.message}`);
-      this.notification.show({ title: 'Agent System', message: 'Failed to upload mask.', type: 'error', duration: 5000 });
+      this.notification.show({
+        title: 'Agent System',
+        message: 'Failed to upload mask.',
+        type: 'error',
+        duration: 5000,
+      });
+    } finally {
+      this.setState({ isSubmitting: false });
     }
   };
 }

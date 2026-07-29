@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { useLocation } from 'react-router';
 
 import {
   ErrorBoundary,
@@ -18,45 +17,11 @@ import Toolbar from '../Toolbar/Toolbar';
 
 const { availableLanguages, defaultLanguage, currentLanguage } = i18n;
 
-function ViewerHeader({ hotkeysManager, extensionManager, servicesManager }) {
+function ViewerHeader({ hotkeysManager, servicesManager }) {
   const [appConfig] = useAppConfig();
   const navigate = useNavigate();
-  const location = useLocation();
-
-  const onClickReturnButton = () => {
-    const { pathname } = location;
-    const dataSourceIdx = pathname.indexOf('/', 1);
-    const query = new URLSearchParams(window.location.search);
-    const configUrl = query.get('configUrl');
-
-    const workflowName = query.get('workflowName');
-    // If workflowName exists, return to workflow page
-    if (workflowName) {
-      const workflowPath = `/workflow/${workflowName}`;
-      navigate({
-        pathname: workflowPath,
-        search: configUrl ? `?configUrl=${encodeURIComponent(configUrl)}` : '',
-      });
-      return;
-    }
-
-    const dataSourceName = pathname.substring(dataSourceIdx + 1);
-    const existingDataSource = extensionManager.getDataSources(dataSourceName);
-
-    const searchQuery = new URLSearchParams();
-    if (dataSourceIdx !== -1 && existingDataSource) {
-      searchQuery.append('datasources', pathname.substring(dataSourceIdx + 1));
-    }
-
-    if (configUrl) {
-      searchQuery.append('configUrl', configUrl);
-    }
-
-    navigate({
-      pathname: '/worklist',
-      search: decodeURIComponent(searchQuery.toString()),
-    });
-  };
+  const isEmbeddedEditMask =
+    new URLSearchParams(window.location.search).get('embedded') === '1';
 
   const getConfigUrlSearch = () => {
     const query = new URLSearchParams(window.location.search);
@@ -141,29 +106,43 @@ function ViewerHeader({ hotkeysManager, extensionManager, servicesManager }) {
   return (
     <Header
       menuOptions={menuOptions}
-      isReturnEnabled={!!appConfig.showStudyList}
-      onClickReturnButton={onClickReturnButton}
       WhiteLabeling={appConfig.whiteLabeling}
     >
       <ErrorBoundary context="Primary Toolbar">
-        <div className="relative flex items-center justify-center gap-3">
-          <button
-            type="button"
-            data-cy="header-worklist-icon"
-            className="inline-flex items-center justify-center p-2 text-[#5acce6] transition duration-300 ease-in-out hover:bg-primary-light hover:text-black"
-            onClick={onClickWorklistButton}
-          >
-            <Icon name="list-bullets" className="h-5 w-5" />
-          </button>
+        <div
+          className={
+            isEmbeddedEditMask
+              ? 'absolute left-1/2 top-1/2 z-10 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center'
+              : 'relative flex items-center justify-center gap-3'
+          }
+        >
+          {!isEmbeddedEditMask && (
+            <>
+              <button
+                type="button"
+                data-cy="header-worklist-icon"
+                className="inline-flex items-center justify-center p-2 text-[#5acce6] transition duration-300 ease-in-out hover:bg-primary-light hover:text-black"
+                onClick={onClickWorklistButton}
+              >
+                <Icon
+                  name="list-bullets"
+                  className="h-5 w-5"
+                />
+              </button>
 
-          <button
-            type="button"
-            data-cy="header-agentic-home-icon"
-            className="inline-flex items-center justify-center p-2 text-[#5acce6] transition duration-300 ease-in-out hover:bg-primary-light hover:text-black"
-            onClick={onClickAgenticHomeButton}
-          >
-            <Icon name="profile" className="h-5 w-5" />
-          </button>
+              <button
+                type="button"
+                data-cy="header-agentic-home-icon"
+                className="inline-flex items-center justify-center p-2 text-[#5acce6] transition duration-300 ease-in-out hover:bg-primary-light hover:text-black"
+                onClick={onClickAgenticHomeButton}
+              >
+                <Icon
+                  name="profile"
+                  className="h-5 w-5"
+                />
+              </button>
+            </>
+          )}
 
           <Toolbar servicesManager={servicesManager} />
         </div>

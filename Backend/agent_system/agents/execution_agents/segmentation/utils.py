@@ -541,7 +541,8 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
 
     Args:
         workspace_dir: path to the session workspace.
-        uids: list of SeriesInstanceUIDs to process.
+        uids: list of SeriesInstanceUIDs or dictionaries to process. Dictionary
+              entries may provide mask_path to render an uploaded modification.
         on_gif_ready: optional sync callable(volume_entry: dict) called immediately
                       after each GIF is saved, so callers can stream results
                       to the frontend one-by-one instead of waiting for the full batch.
@@ -558,18 +559,48 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
             uid = str(item.get("volume_uid") or item.get("seriesInstanceUid") or "")
             target_id = str(item.get("target_id") or item.get("targetId") or "")
             target_label = item.get("canonical_label") or item.get("targetLabel")
+            mask_path_override = str(item.get("mask_path") or "")
         else:
             uid = str(item)
             target_id = ""
             target_label = None
+            mask_path_override = ""
         pair_id = f"{uid}__{target_id}" if target_id else uid
         vol_path = os.path.join(volumes_dir, f"{uid}.nii.gz")
-        mask_path = os.path.join(masks_dir, f"{pair_id}.nii.gz")
+        default_mask_path = os.path.join(masks_dir, f"{pair_id}.nii.gz")
+        if mask_path_override:
+            mask_path = (
+                mask_path_override
+                if os.path.isabs(mask_path_override)
+                else os.path.join(workspace_dir, mask_path_override)
+            )
+            # Older manifests may contain a stale relative path. Prefer the
+            # canonical pair path when it exists so preview generation remains
+            # backwards-compatible.
+            if not os.path.exists(mask_path) and os.path.exists(default_mask_path):
+                logger.warning(
+                    "Configured mask path does not exist for %s: %s. "
+                    "Falling back to %s.",
+                    pair_id,
+                    mask_path,
+                    default_mask_path,
+                )
+                mask_path = default_mask_path
+        else:
+            mask_path = default_mask_path
         gif_filename = f"{pair_id}.gif"
         gif_path = os.path.join(output_dir, gif_filename)
 
         if not os.path.exists(vol_path) or not os.path.exists(mask_path):
-            logger.warning(f"Missing files for {uid}. Skipping GIF generation.")
+            logger.warning(
+                "Missing files for %s. volume=%s (exists=%s), mask=%s "
+                "(exists=%s). Skipping GIF generation.",
+                pair_id,
+                vol_path,
+                os.path.exists(vol_path),
+                mask_path,
+                os.path.exists(mask_path),
+            )
             continue
 
         try:
