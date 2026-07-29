@@ -86,6 +86,8 @@ class TaskManager:
             session.state = SessionState.FAILED
         finally:
             session.execution_task = None
+            session.resume_from_agent = None
+            session.resume_agent_statuses = {}
 
     def pause(self, session: Session) -> None:
         session.pause_event.clear()

@@ -7,6 +7,7 @@ import CanvasHeader from './CanvasHeader';
 import FlowEngineWrapper from './FlowEngineWrapper';
 import { registerAllLogRenderers } from './logs/registerRenderers';
 import { getAgentsApiBaseUrl } from '../../utils/apiBase';
+import { resumeSessionPipeline } from '../../services/api';
 
 interface PlaygroundCanvasProps {
   initialHypothesis?: string;
@@ -17,6 +18,12 @@ interface PlaygroundCanvasProps {
   initialMode?: 'planning' | 'executing' | 'results';
   /** Called when execution starts or restarts — parent should clear all tab data */
   onClearTabData?: () => void;
+  /** Only true for a newly-created chat whose initial hypothesis should start planning. */
+  autoStartPlanning?: boolean;
+  /** Initial toolbar state restored from a live or hydrated paused session. */
+  initialPaused?: boolean;
+  /** True when Resume must perform safe interrupted-node recovery. */
+  manualResumeRequired?: boolean;
 }
 
 export default function PlaygroundCanvas({
@@ -26,6 +33,9 @@ export default function PlaygroundCanvas({
   onLiteratureOutput,
   initialMode = 'planning',
   onClearTabData,
+  autoStartPlanning = false,
+  initialPaused = false,
+  manualResumeRequired = false,
 }: PlaygroundCanvasProps) {
   const normalizeKey = useCallback(
     (value?: string | null) =>
@@ -40,7 +50,9 @@ export default function PlaygroundCanvas({
   const [mode, setMode] = useState<'planning' | 'executing' | 'results'>(initialMode);
   const [nodes, setNodes] = useState<FlowNode[]>(() => createInitialNodes(initialHypothesis));
   const [edges, setEdges] = useState<FlowEdge[]>(INITIAL_EDGES);
-  const [isPaused, setIsPaused] = useState(false);
+  const [isPaused, setIsPaused] = useState(initialPaused || manualResumeRequired);
+  const [requiresRecoveryResume, setRequiresRecoveryResume] = useState(manualResumeRequired);
+  const [isResuming, setIsResuming] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [hasStopped, setHasStopped] = useState(false);
   const [isConnected, setIsConnected] = useState(websocketService.isConnected());
@@ -50,6 +62,7 @@ export default function PlaygroundCanvas({
   const [labellingMode, setLabellingMode] = useState<'manual' | 'automatic'>('automatic');
   const [labellingModeLocked, setLabellingModeLocked] = useState(initialMode !== 'planning');
   const hasInitiatedPlan = useRef(false);
+  const restartRequestedRef = useRef(initialMode === 'results');
   const modeRef = useRef<'planning' | 'executing' | 'results'>(initialMode);
   const nodesRef = useRef<FlowNode[]>([]);
   const sessionIdRef = useRef<string | undefined>(session_id);
@@ -85,6 +98,11 @@ export default function PlaygroundCanvas({
   useEffect(() => {
     literatureOutputRef.current = onLiteratureOutput;
   }, [onLiteratureOutput]);
+
+  useEffect(() => {
+    setRequiresRecoveryResume(manualResumeRequired);
+    setIsPaused(initialPaused || manualResumeRequired);
+  }, [initialPaused, manualResumeRequired, session_id]);
 
   const updateNodeData = useCallback((id: string, patch: any) => {
     setNodes(prev => prev.map(n => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
@@ -170,9 +188,9 @@ export default function PlaygroundCanvas({
 
         const backendStatus = String(agent?.status || '').toUpperCase();
         const status =
-          backendStatus === 'RUNNING'
+          backendStatus === 'RUNNING' || backendStatus.startsWith('WAITING')
             ? 'active'
-            : backendStatus === 'COMPLETED'
+            : backendStatus === 'COMPLETED' || backendStatus === 'DONE'
               ? 'completed'
               : backendStatus === 'FAILED'
                 ? 'failed'
@@ -530,7 +548,7 @@ export default function PlaygroundCanvas({
   }, [appendToolEventToNode, applyBackendPlan, updateCurrentAgent, updateNodeData, updatePipelineAgentStatuses]);
 
   useEffect(() => {
-    if (initialHypothesis && !hasInitiatedPlan.current) {
+    if (autoStartPlanning && initialHypothesis && session_id && !hasInitiatedPlan.current) {
       hasInitiatedPlan.current = true;
       const startPlanning = async () => {
         try {
@@ -554,7 +572,7 @@ export default function PlaygroundCanvas({
       };
       startPlanning();
     }
-  }, [includeLitReview, initialHypothesis, session_id]);
+  }, [autoStartPlanning, includeLitReview, initialHypothesis, session_id]);
 
   const sendPlanToBackend = useCallback(
     (nodesData: FlowNode[], edgesData: FlowEdge[]) => {
@@ -585,23 +603,54 @@ export default function PlaygroundCanvas({
     onClearTabData?.();
     setMode('executing');
     setIsPaused(false);
+    setRequiresRecoveryResume(false);
     setNodes(resetNodeLogs);
     setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
-    await fetch(`${getAgentsApiBaseUrl()}/run/`, {
+    const response = await fetch(`${getAgentsApiBaseUrl()}/run/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: String(session_id) }),
+      body: JSON.stringify({
+        session_id: String(session_id),
+        restart: restartRequestedRef.current || hasStopped,
+      }),
     });
+    if (response.ok) {
+      restartRequestedRef.current = false;
+    } else {
+      console.error('[PlaygroundCanvas] Execution request rejected:', response.status);
+    }
   };
 
   const togglePause = async () => {
+    if (isResuming) return;
+
+    if (requiresRecoveryResume) {
+      setIsResuming(true);
+      try {
+        await resumeSessionPipeline(String(session_id));
+        setRequiresRecoveryResume(false);
+        setIsPaused(false);
+        setHasStopped(false);
+      } catch (error) {
+        console.error('[PlaygroundCanvas] Safe pipeline resume failed:', error);
+        setIsPaused(true);
+      } finally {
+        setIsResuming(false);
+      }
+      return;
+    }
+
     const next = !isPaused;
-    setIsPaused(next);
-    await fetch(`${getAgentsApiBaseUrl()}/${next ? 'pause' : 'resume'}`, {
+    const response = await fetch(`${getAgentsApiBaseUrl()}/${next ? 'pause' : 'resume'}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: String(session_id) }),
     });
+    if (response.ok) {
+      setIsPaused(next);
+    } else {
+      console.error('[PlaygroundCanvas] Pause/resume request rejected:', response.status);
+    }
   };
 
 
@@ -620,8 +669,10 @@ export default function PlaygroundCanvas({
   };
 
   const resetWorkflow = () => {
+    restartRequestedRef.current = true;
     setMode('planning');
     setIsPaused(false);
+    setRequiresRecoveryResume(false);
     setNodes(createInitialNodes(initialHypothesis));
     setEdges(INITIAL_EDGES);
     if (websocketService.isConnected()) {
@@ -686,6 +737,7 @@ export default function PlaygroundCanvas({
         canExecute={canExecute}
         isPaused={isPaused}
         isStopping={isStopping}
+        isResuming={isResuming}
         hasStopped={hasStopped}
         isConnected={isConnected}
         labellingMode={labellingMode}

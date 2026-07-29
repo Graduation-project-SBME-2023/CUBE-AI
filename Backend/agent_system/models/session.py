@@ -1,8 +1,10 @@
 from dataclasses import dataclass, field
 import asyncio
 from enum import Enum, auto
-from typing import Optional, Dict, Any
-from services.pipeline_monitor import PipelineMonitor
+from typing import Optional, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from services.pipeline_monitor import PipelineMonitor
 
 from models.plans import ClinicalHypothesis, StudyPlan
 
@@ -27,7 +29,7 @@ class Session:
 
     state: SessionState = field(default=SessionState.IDLE)
 
-    execution_monitor: PipelineMonitor | None = field(init=False, default=None)
+    execution_monitor: "PipelineMonitor | None" = field(init=False, default=None)
 
     # Don't use default_factory for asyncio primitives
     pause_event: asyncio.Event = field(default=None)
@@ -38,6 +40,8 @@ class Session:
     agent_status: Dict[str, Any] = field(default_factory=dict)
     last_error: Optional[str] = None
     interrupted: bool = False
+    resume_from_agent: Optional[str] = None
+    resume_agent_statuses: Dict[str, str] = field(default_factory=dict)
 
     hypothesis: ClinicalHypothesis | None = None
     plan: StudyPlan | None = None

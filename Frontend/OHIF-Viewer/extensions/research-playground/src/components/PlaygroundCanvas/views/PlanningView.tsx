@@ -11,9 +11,12 @@ interface PlanningViewProps {
     onLiteratureOutput?: (data: any) => void;
     initialMode?: 'planning' | 'executing' | 'results';
     onRestart?: () => void;
+    autoStartPlanning?: boolean;
+    initialPaused?: boolean;
+    manualResumeRequired?: boolean;
 }
 
-export default function PlanningView({ initialHypothesis, sessionId, includeLitReview = true, onLiteratureOutput, initialMode, onRestart }: PlanningViewProps) {
+export default function PlanningView({ initialHypothesis, sessionId, includeLitReview = true, onLiteratureOutput, initialMode, onRestart, autoStartPlanning = false, initialPaused = false, manualResumeRequired = false }: PlanningViewProps) {
     const [isRegistryOpen, setIsRegistryOpen] = useState(true);
 
     useEffect(() => {
@@ -32,7 +35,7 @@ export default function PlanningView({ initialHypothesis, sessionId, includeLitR
                 <p className="text-[11px] uppercase tracking-widest text-[#5a8aaa] font-semibold">Planning Canvas</p>
             </div>
             {/* Reuse your existing Graph Engine */}
-            <PlaygroundCanvas initialHypothesis={initialHypothesis} session_id={sessionId as any} includeLitReview={includeLitReview} onLiteratureOutput={onLiteratureOutput} initialMode={initialMode} onClearTabData={onRestart} />
+            <PlaygroundCanvas initialHypothesis={initialHypothesis} session_id={sessionId as any} includeLitReview={includeLitReview} onLiteratureOutput={onLiteratureOutput} initialMode={initialMode} onClearTabData={onRestart} autoStartPlanning={autoStartPlanning} initialPaused={initialPaused} manualResumeRequired={manualResumeRequired} />
             
             {/* Reuse your existing Registry
             <AgentRegistry 

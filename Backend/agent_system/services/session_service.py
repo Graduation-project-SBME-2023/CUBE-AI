@@ -1,14 +1,29 @@
 import asyncio
 import logging
-from typing import Dict, Any, List
+from typing import Awaitable, Callable, Dict, Any, List
 
 from models.session import Session, SessionState
 from models.plans import ClinicalHypothesis, StudyPlan, StudyStep, TaskMessage
 from .session_store import SessionStore
 from task_manager.task_manager import TaskManager
 from clients.backend_client import BackendClient
+from .execution_state import (
+    execution_start_allowed,
+    find_first_incomplete_step,
+    normalize_step_status,
+    planning_start_allowed,
+)
+from .resume_recovery import reset_interrupted_agent
 
 logger = logging.getLogger(__name__)
+
+
+class SessionExecutionConflict(RuntimeError):
+    """Raised when a non-explicit start would overwrite persisted progress."""
+
+
+class SessionPlanningConflict(RuntimeError):
+    """Raised when a non-explicit planning request targets existing work."""
 
 
 class SessionService:
@@ -39,6 +54,7 @@ class SessionService:
         self.store = SessionStore()
         self.tasks = TaskManager()
         self.ws = ws_manager
+        self._resume_locks: dict[str, asyncio.Lock] = {}
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -58,15 +74,209 @@ class SessionService:
     # Task lifecycle — routes call these
     # ------------------------------------------------------------------
 
-    def start_planning(self, session_id: str, message: str, planner) -> None:
+    async def start_planning(
+        self,
+        session_id: str,
+        message: str,
+        planner,
+        *,
+        restart: bool = False,
+    ) -> None:
         logger.info(f"[{session_id}] Starting planning")
-        session = self.store.get_or_create(session_id)
+        session = await self.store.get_or_create_async(session_id)
+        if session.planning_task and not session.planning_task.done():
+            raise SessionPlanningConflict(
+                f"Planning already running for session {session_id}"
+            )
+        if session.execution_task and not session.execution_task.done():
+            raise SessionPlanningConflict(
+                f"Execution already running for session {session_id}"
+            )
+        if not planning_start_allowed(
+            has_persisted_state=(
+                session.hypothesis is not None or session.plan is not None
+            ),
+            restart=restart,
+        ):
+            raise SessionPlanningConflict(
+                f"Session {session_id} already contains persisted planning state"
+            )
         self.tasks.start_planning(session, message, planner)
 
-    async def start_execution(self, session_id: str, executor) -> None:
+    async def start_execution(
+        self,
+        session_id: str,
+        executor,
+        *,
+        restart: bool = False,
+    ) -> None:
         logger.info(f"[{session_id}] Starting execution")
-        session = self.store.get_or_create(session_id)
-        await self.tasks.start_execution(session, executor)
+        session = await self.store.get_or_create_async(session_id)
+
+        if session.execution_task and not session.execution_task.done():
+            raise SessionExecutionConflict(
+                f"Execution already running for session {session_id}"
+            )
+
+        persisted_steps = []
+        if session.plan is not None and session.plan.id:
+            persisted_steps = await BackendClient.get_plan_steps(str(session.plan.id))
+            if not persisted_steps and session.plan.steps:
+                persisted_steps = [
+                    {"status": plan_step.status}
+                    for plan_step in session.plan.steps
+                ]
+            elif not persisted_steps and not restart:
+                raise SessionExecutionConflict(
+                    f"Session {session_id} has a persisted plan whose execution "
+                    "state could not be verified"
+                )
+
+        if not execution_start_allowed(persisted_steps, restart=restart):
+            raise SessionExecutionConflict(
+                f"Session {session_id} already has persisted execution progress; "
+                "an explicit restart is required"
+            )
+
+        # /run is a full start/restart. Manual suffix recovery is configured
+        # only by resume_pipeline().
+        session.resume_from_agent = None
+        session.resume_agent_statuses = {}
+        if restart:
+            await self.tasks.restart_execution(session, executor)
+        else:
+            await self.tasks.start_execution(session, executor)
+
+    async def resume_pipeline(
+        self,
+        session_id: str,
+        executor,
+        *,
+        workspace_root: str,
+        reset_runtime_state: (
+            Callable[[str, str], Awaitable[None]] | None
+        ) = None,
+    ) -> dict:
+        """
+        Safely restart a hydrated pipeline from its first incomplete step.
+
+        This is intentionally separate from resume(), which only releases the
+        pause event of an already-live execution task.
+        """
+        lock = self._resume_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            session = await self.store.get_or_create_async(session_id)
+            if session.execution_task and not session.execution_task.done():
+                raise SessionExecutionConflict(
+                    f"Execution already running for session {session_id}"
+                )
+            if session.plan is None or not session.plan.id:
+                raise SessionExecutionConflict(
+                    f"Session {session_id} has no persisted plan to resume"
+                )
+
+            steps = await BackendClient.get_plan_steps(str(session.plan.id))
+            if not steps:
+                raise SessionExecutionConflict(
+                    f"Persisted execution state for session {session_id} "
+                    "could not be verified"
+                )
+
+            interrupted_step = find_first_incomplete_step(steps)
+            if interrupted_step is None:
+                raise SessionExecutionConflict(
+                    f"Session {session_id} is already fully completed"
+                )
+
+            interrupted_agent = str(interrupted_step.get("module") or "").strip()
+            interrupted_step_id = str(interrupted_step.get("id") or "").strip()
+            if not interrupted_agent or not interrupted_step_id:
+                raise SessionExecutionConflict(
+                    "The first incomplete plan step has no executable module or ID"
+                )
+
+            try:
+                if reset_runtime_state is not None:
+                    await reset_runtime_state(session_id, interrupted_agent)
+                cleared_artifacts = await asyncio.to_thread(
+                    reset_interrupted_agent,
+                    workspace_root,
+                    session_id,
+                    interrupted_agent,
+                )
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise SessionExecutionConflict(
+                    f"Could not safely clear interrupted artifacts for "
+                    f"{interrupted_agent}: {exc}"
+                ) from exc
+
+            persisted = await BackendClient.update_plan_step(
+                interrupted_step_id,
+                {"status": "PENDING"},
+            )
+            if persisted is None:
+                raise SessionExecutionConflict(
+                    f"Could not persist the reset of {interrupted_agent}; "
+                    "execution was not started"
+                )
+
+            initial_statuses: dict[str, str] = {}
+            agents: list[dict] = []
+            for step in steps:
+                agent_name = str(step.get("module") or "").strip()
+                if not agent_name:
+                    continue
+                status = (
+                    "PENDING"
+                    if str(step.get("id") or "") == interrupted_step_id
+                    else normalize_step_status(step.get("status"))
+                )
+                initial_statuses[agent_name] = status
+                agents.append(
+                    {
+                        "name": agent_name,
+                        "status": status,
+                        "started_at": None,
+                        "finished_at": None,
+                        "error": None,
+                    }
+                )
+
+            for plan_step in session.plan.steps:
+                if str(plan_step.id) == interrupted_step_id:
+                    plan_step.status = "PENDING"
+
+            session.resume_from_agent = interrupted_agent
+            session.resume_agent_statuses = initial_statuses
+            session.last_error = None
+
+            await self._ws_send(
+                "pipeline_agent_status",
+                {"agents": agents},
+                session_id=session_id,
+            )
+            await self._ws_send(
+                "pipeline_resume_prepared",
+                {
+                    "interrupted_agent": interrupted_agent,
+                    "cleared_artifacts": cleared_artifacts,
+                },
+                session_id=session_id,
+            )
+
+            await self.tasks.restart_execution(session, executor)
+            await self.update_state(session, SessionState.RUNNING)
+            logger.info(
+                "[%s] Manually resumed pipeline from %s",
+                session_id,
+                interrupted_agent,
+            )
+            return {
+                "session_id": session_id,
+                "status": "resume_started",
+                "interrupted_agent": interrupted_agent,
+                "cleared_artifacts": cleared_artifacts,
+            }
 
     def pause(self, session_id: str) -> None:
         logger.info(f"[{session_id}] Pausing")
@@ -494,6 +704,37 @@ class SessionService:
         }
 
         await BackendClient.update_plan_step(step_id, body)
+
+    async def persist_agent_status(
+        self,
+        session_id: str,
+        agent_name: str,
+        status: str,
+    ) -> None:
+        """Persist a human-in-the-loop waiting/resolved state for hydration."""
+        session = await self.store.get_async(session_id)
+        if session is None or session.plan is None:
+            logger.warning(
+                f"[{session_id}] Cannot persist {agent_name}={status}: no hydrated plan"
+            )
+            return
+
+        step = next(
+            (
+                plan_step
+                for plan_step in session.plan.steps
+                if plan_step.module == agent_name
+            ),
+            None,
+        )
+        if step is None or not step.id:
+            logger.warning(
+                f"[{session_id}] Cannot persist {agent_name}={status}: plan step not found"
+            )
+            return
+
+        await BackendClient.update_plan_step(str(step.id), {"status": status})
+        step.status = status
 
     async def recover_execution_state(self, session_id: str) -> dict | None:
         """

@@ -54,7 +54,11 @@ from client_config import (
 from models.tool_logging import ToolEvent
 from models.requests import PlanningRequest, SessionControlRequest
 from tool_logging import receive_tool_event
-from services.session_service import SessionService
+from services.session_service import (
+    SessionExecutionConflict,
+    SessionPlanningConflict,
+    SessionService,
+)
 from services.pipeline_monitor import PipelineMonitor
 from clients.backend_client import BackendClient
 
@@ -183,6 +187,8 @@ async def run_pipeline(session: Session) -> None:
     # On restart, session.workspace_folder is set to a new retry folder.
     # On first run it is None, so we fall back to the original.
     workspace_folder = getattr(session, "workspace_folder", None) or original_workspace
+    resume_from_agent = session.resume_from_agent
+    resume_agent_statuses = dict(session.resume_agent_statuses)
     os.makedirs(workspace_folder, exist_ok=True)
     pipeline_logger = logging.getLogger("Execution Pipeline")
 
@@ -255,6 +261,7 @@ async def run_pipeline(session: Session) -> None:
         task_messages=task_messages,
         model_client=make_pausable(create_model_client_from_config()),
         session_id=session.session_id,
+        start_agent_id=resume_from_agent,
     )
 
     graph_flow = GraphFlow(
@@ -266,12 +273,20 @@ async def run_pipeline(session: Session) -> None:
     # Build the pipeline prompt: use structured task messages if available,
     # otherwise fall back to the raw hypothesis string
     # task_prompt = graph_builder.get_pipeline_prompt(fallback_hypothesis=hypothesis)
-    task_prompt = hypothesis
+    task_prompt = (
+        graph_builder.get_pipeline_prompt(fallback_hypothesis=hypothesis)
+        if resume_from_agent
+        else hypothesis
+    )
     pipeline_logger.info(f"Pipeline prompt length: {len(task_prompt)} chars")
 
     pipeline_logger.info("Starting execution...")
 
-    session.execution_monitor = PipelineMonitor(session_service, session)
+    session.execution_monitor = PipelineMonitor(
+        session_service,
+        session,
+        initial_statuses=resume_agent_statuses,
+    )
 
     await session.execution_monitor._broadcast()
 
@@ -357,13 +372,28 @@ async def run_pipeline(session: Session) -> None:
 async def start_planning(request: PlanningRequest):
     from functools import partial
     bound_planner = partial(run_planner, do_lit_review=request.do_lit_review)
-    session_service.start_planning(request.session_id, request.message, bound_planner)
+    try:
+        await session_service.start_planning(
+            request.session_id,
+            request.message,
+            bound_planner,
+            restart=request.restart,
+        )
+    except SessionPlanningConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return {"session_id": request.session_id, "status": "planning_started"}
 
 
 @app.post("/run")
 async def start_execution(request: SessionControlRequest):
-    await session_service.start_execution(request.session_id, run_pipeline)
+    try:
+        await session_service.start_execution(
+            request.session_id,
+            run_pipeline,
+            restart=request.restart,
+        )
+    except SessionExecutionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return {"session_id": request.session_id, "status": "execution_started"}
 
 
@@ -383,6 +413,29 @@ async def resume_execution(request: SessionControlRequest):
         return {"session_id": request.session_id, "status": "running"}
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
+
+
+@app.post("/session/{session_id}/resume-pipeline")
+async def resume_hydrated_pipeline(session_id: str):
+    async def reset_runtime_state(
+        target_session_id: str,
+        interrupted_agent: str,
+    ) -> None:
+        if interrupted_agent != "segmentation_agent":
+            return
+        _review_futures.pop(target_session_id, None)
+        _review_futures.pop(f"ready:{target_session_id}", None)
+        _review_events.pop(target_session_id, None)
+
+    try:
+        return await session_service.resume_pipeline(
+            session_id,
+            run_pipeline,
+            workspace_root=os.environ.get("AGENTS_WORKSPACE_DIR", current_dir),
+            reset_runtime_state=reset_runtime_state,
+        )
+    except SessionExecutionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @app.post("/stop")
@@ -410,8 +463,11 @@ async def get_status(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     return {
         "session_id": session_id,
-        "state": session.state.value,
+        "state": session.state.name,
         "last_error": session.last_error,
+        "execution_active": bool(
+            session.execution_task and not session.execution_task.done()
+        ),
     }
 
 
@@ -766,6 +822,17 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.post("/ws-broadcast")
 async def ws_broadcast(data: dict):
+    if data.get("type") == "agent_waiting_for_user_input":
+        payload = data.get("payload") or {}
+        session_id = data.get("session_id")
+        agent_name = payload.get("agent")
+        waiting_status = payload.get("status")
+        if session_id and agent_name and waiting_status:
+            await session_service.persist_agent_status(
+                str(session_id),
+                str(agent_name),
+                str(waiting_status),
+            )
     await ws_manager.send_ws_message(
         data["type"], data["payload"], session_id=data.get("session_id")
     )
@@ -894,6 +961,17 @@ async def upload_targets(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to write file: {str(e)}")
 
+    active_session = session_service.get_session(session_id)
+    if (
+        active_session
+        and active_session.execution_task
+        and not active_session.execution_task.done()
+    ):
+        await session_service.persist_agent_status(
+            session_id,
+            "study_population_planner_agent",
+            "RUNNING",
+        )
     await ws_manager.send_ws_message(
         "agent_waiting_resolved",
         {"agent": "study_population_planner_agent"},
@@ -929,6 +1007,17 @@ async def segmentation_review(data: dict):
         _review_futures[f"ready:{session_id}"] = review_payload  # plain dict, not future
         logger.info(f"[Review] No active poller for session={session_id}. Stored as ready:{session_id} for later pickup.")
 
+    active_session = session_service.get_session(session_id)
+    if (
+        active_session
+        and active_session.execution_task
+        and not active_session.execution_task.done()
+    ):
+        await session_service.persist_agent_status(
+            session_id,
+            "segmentation_agent",
+            "RUNNING",
+        )
     await ws_manager.send_ws_message(
         "agent_waiting_resolved",
         {"agent": "segmentation_agent"},
@@ -1228,40 +1317,43 @@ async def wait_for_review(session_id: str, timeout: int = 3600):
 
 
 @app.post("/session/{session_id}/recover")
-async def recover_session(session_id: str):
+async def recover_session(session_id: str, restart: bool = False):
     """
-    Re-create the in-memory Session and restart the execution pipeline after
-    a container restart.
+    Re-create an in-memory Session from persisted state after a process restart.
 
-    Call this when:
-    - GET /status/{session_id} returns 404 (session lost from memory), AND
-    - GET /session/{session_id}/execution-state shows RUNNING agents in the DB
-      (pipeline was mid-flight when the server died).
-
-    The endpoint is idempotent: if the session is already active in memory it
-    returns immediately without spawning a second task.
+    Hydration is read-only by default. A new pipeline is created only when the
+    caller explicitly passes ``restart=true``.
     """
     existing = session_service.get_session(session_id)
     if existing and existing.execution_task and not existing.execution_task.done():
-        logger.info(f"[Recover] Session {session_id} is already running — skipping recovery.")
-        return {"session_id": session_id, "status": "already_running"}
+        logger.info(
+            f"[Recover] Session {session_id} is already running - skipping recovery."
+        )
+        return {
+            "session_id": session_id,
+            "status": "already_running",
+            "state": existing.state.name,
+        }
 
-    logger.info(f"[Recover] Recovering session {session_id} after restart.")
+    session = await session_service.store.get_or_create_async(session_id)
+    execution_state = await session_service.recover_execution_state(session_id)
+    if execution_state is None:
+        raise HTTPException(status_code=404, detail="No persisted session state found")
 
-    # Re-create the session in the store (get_or_create is safe here).
-    session = session_service.store.get_or_create(session_id)
+    if not restart:
+        logger.info(
+            f"[Recover] Hydrated session {session_id} as {session.state.name}; "
+            "execution was not started."
+        )
+        return {
+            "session_id": session_id,
+            "status": "hydrated",
+            "state": session.state.name,
+            "execution_state": execution_state,
+        }
 
-    # Broadcast RUNNING state so the frontend toolbar updates.
-    asyncio.create_task(
-        session_service._ws_send("state_update", {"state": "RUNNING"}, session_id=session_id)
-    )
-
-    # Re-run the full pipeline — the segmentation module will call
-    # /segmentation-review/wait, hit the fast-path (disk result present), and
-    # continue without blocking for another human review.
-    await session_service.start_execution(session_id, run_pipeline)
-
-    return {"session_id": session_id, "status": "recovery_started"}
+    await session_service.start_execution(session_id, run_pipeline, restart=True)
+    return {"session_id": session_id, "status": "restart_started"}
 
 
 # ----------------------------------------------------------------------

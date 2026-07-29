@@ -7,6 +7,7 @@ interface CanvasHeaderProps {
   canExecute: boolean;
   isPaused: boolean;
   isStopping: boolean;
+  isResuming: boolean;
   hasStopped: boolean;
   isConnected: boolean;
   labellingMode: 'manual' | 'automatic';
@@ -24,6 +25,7 @@ export default function CanvasHeader({
   canExecute,
   isPaused,
   isStopping,
+  isResuming,
   hasStopped,
   isConnected,
   labellingMode,
@@ -78,9 +80,9 @@ export default function CanvasHeader({
           <>
             <button
               onClick={onTogglePause}
-              disabled={isStopping || hasStopped}
+              disabled={isStopping || isResuming || hasStopped}
               className={`flex items-center gap-1 rounded border px-1.5 py-1 text-[11px] font-medium transition-colors ${
-                isStopping || hasStopped
+                isStopping || isResuming || hasStopped
                   ? 'cursor-not-allowed border-[#3c5d80] bg-[#1d2a33] text-[#5c7a99] opacity-50'
                   : isPaused
                     ? 'border-[#ffc107] bg-[#332b00] text-[#ffc107] hover:bg-[#4d4000]'
@@ -88,7 +90,7 @@ export default function CanvasHeader({
               }`}
             >
               {isPaused ? <Play size={12} /> : <Pause size={12} />}
-              {isPaused ? 'Resume' : 'Pause'}
+              {isResuming ? 'Resuming...' : isPaused ? 'Resume' : 'Pause'}
             </button>
             <button
               onClick={onStop}

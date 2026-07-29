@@ -14,6 +14,31 @@ export async function fetchSessionExecutionState(sessionId: string) {
   return res.json();
 }
 
+export async function fetchSessionStatus(sessionId: string) {
+  const res = await fetch(`${API_BASE}/status/${sessionId}`);
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function hydrateSession(sessionId: string) {
+  const res = await fetch(`${API_BASE}/session/${sessionId}/recover`, {
+    method: 'POST',
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function resumeSessionPipeline(sessionId: string) {
+  const res = await fetch(`${API_BASE}/session/${sessionId}/resume-pipeline`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const error = await res.json().catch(() => null);
+    throw new Error(error?.detail || `Resume request failed with status ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function replaySessionLogs(sessionId: string) {
   const res = await fetch(`${API_BASE}/session/${sessionId}/replay-logs`);
   return res.ok;

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, FlaskConical, List, MessageSquare, PlayCircle, Rocket, Settings } from 'lucide-react';
+import { ArrowLeft, List, MessageSquare, PlayCircle, Rocket, Settings } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import PhaseSidebar from './PlaygroundCanvas/PhaseSidebar';
 import PlanningView from './PlaygroundCanvas/views/PlanningView';
@@ -16,7 +16,12 @@ import { RESEARCH_PHASES } from '../constants/researchPhases';
 import { ResearchProvider } from '../context/ResearchContext';
 import { useResearchData } from '../hooks/useResearchData';
 import websocketService from '../services/websocket';
-import { fetchSessionExecutionState, fetchSessionPlanState, replaySessionLogs } from '../services/api';
+import {
+  fetchSessionExecutionState,
+  fetchSessionStatus,
+  hydrateSession,
+  replaySessionLogs,
+} from '../services/api';
 import { ResearchRouteState } from '../types';
 
 const DEFAULT_PHASE = 'planning';
@@ -36,7 +41,9 @@ const OUTPUT_EVENT_AGENTS: Record<string, { agent: string; phase: string }> = {
 
 const WAITING_MESSAGES: Record<string, string> = {
   WAITING_FOR_REVIEW: 'Agent is waiting for user review',
+  WAITING_FOR_USER_REVIEW: 'Agent is waiting for user review',
   WAITING_FOR_LABELS: 'Waiting for user to upload labels',
+  WAITING_FOR_USER_INPUT: 'Agent is waiting for user input',
 };
 
 /**
@@ -90,6 +97,9 @@ function ResearchPlaygroundInner() {
   const [waitingPhaseIds, setWaitingPhaseIds] = useState<string[]>([]);
   const [viewsReady, setViewsReady] = useState(false);
   const [restoredMode, setRestoredMode] = useState<'planning' | 'executing' | 'results'>('planning');
+  const [hydratedExecutionState, setHydratedExecutionState] = useState<any>(null);
+  const [manualResumeRequired, setManualResumeRequired] = useState(false);
+  const [restoredPaused, setRestoredPaused] = useState(false);
 
   // Derive sessionId first so it can be used in useState initialisers below
   const hypothesis = routeState.hypothesis || 'No active hypothesis defined.';
@@ -99,9 +109,7 @@ function ResearchPlaygroundInner() {
   // Explicitly archived routes are always historical. Completed sessions are
   // also marked historical after the status check below; do not infer history
   // solely from sendInitialMessage because a running session can be reopened.
-  const isHistoricalNavigation = Boolean(
-    (routeState as any).isHistorical || (routeState as any).archived
-  );
+  const isHistoricalNavigation = Boolean(routeState.isHistorical || routeState.archived);
   const activePhaseRef = useRef(activePhase);
   const viewedPhaseIdsRef = useRef<Set<string>>(new Set());
   const waitingPhaseIdsRef = useRef<Set<string>>(new Set());
@@ -262,64 +270,77 @@ function ResearchPlaygroundInner() {
         }
     }, [phaseId, isValidPhase, navigate, location.state]);
 
-    // Load state from endpoints when session_id is provided
-    // Effect 1: non-replay session state — also derives the initial canvas mode
+    // Load the persisted snapshot before mounting the canvas. This effect only
+    // hydrates state; opening a session must never create an execution task.
     useEffect(() => {
         const loadSessionState = async () => {
             if (!sessionId) return;
             try {
-                // Check the live session status to determine initial canvas mode
-                const statusRes = await fetch(`http://localhost:8150/status/${sessionId}`);
-                if (statusRes.ok) {
-                    const { state } = await statusRes.json();
-                    const upperState = state?.toUpperCase();
-                    if (upperState === 'COMPLETED') {
-                        updateStateRef.current.isHistorical = true;
-                        setRestoredMode('results');
-                    } else if (['RUNNING', 'PAUSED', 'FAILED'].includes(upperState)) {
-                        setRestoredMode('executing');
-                    }
-                } else {
-                    // Backend has no in-memory session (e.g. after Docker restart) — check execution-state
-                    const execRes = await fetch(`http://localhost:8150/session/${sessionId}/execution-state`);
-                    if (execRes.ok) {
-                        const execData = await execRes.json();
-                        if (Array.isArray(execData?.agents) && execData.agents.length > 0) {
-                            const allDone = execData.agents.every(
-                              (a: any) => String(a.status || '').toUpperCase() === 'COMPLETED'
-                            );
-                            if (allDone) updateStateRef.current.isHistorical = true;
-                            setRestoredMode(allDone ? 'results' : 'executing');
+                const sessionKey = String(sessionId);
+                const [liveStatus, execData] = await Promise.all([
+                    fetchSessionStatus(sessionKey),
+                    fetchSessionExecutionState(sessionKey),
+                ]);
+                setHydratedExecutionState(execData);
 
-                            // Fix 3: If the pipeline was mid-flight when the server restarted,
-                            // trigger server-side recovery so the session re-enters memory and
-                            // picks up any persisted review result automatically.
-                            const hasRunningAgents = execData.agents.some(
-                                (a: any) => a.status === 'RUNNING' || a.status === 'PENDING'
-                            );
-                            if (hasRunningAgents && !allDone) {
-                                console.log('[ResearchPlayground] Triggering session recovery after restart...');
-                                try {
-                                    await fetch(`http://localhost:8150/session/${sessionId}/recover`, {
-                                        method: 'POST',
-                                    });
-                                    console.log('[ResearchPlayground] Session recovery triggered successfully.');
-                                } catch (recoverErr) {
-                                    console.error('[ResearchPlayground] Session recovery failed:', recoverErr);
-                                }
-                            }
-                        }
+                const agents = Array.isArray(execData?.agents) ? execData.agents : [];
+                const statuses = agents.map((agent: any) =>
+                    String(agent?.status || '').trim().toUpperCase()
+                );
+                agents.forEach((agent: any) => {
+                    const agentName = String(agent?.name || '');
+                    const waitingStatus = String(agent?.status || '').trim().toUpperCase();
+                    const outputForAgent = Object.values(OUTPUT_EVENT_AGENTS).find(
+                        item => item.agent === agentName
+                    );
+                    const waitingMessage = WAITING_MESSAGES[waitingStatus];
+                    if (outputForAgent && waitingMessage) {
+                        showPhaseIndicator(outputForAgent.phase, waitingMessage, true);
+                        setActivePhase(outputForAgent.phase);
                     }
+                });
+                const allDone =
+                    statuses.length > 0 &&
+                    statuses.every(status => ['COMPLETED', 'DONE'].includes(status));
+                const hasProgress = statuses.some(
+                    status => status && !['PENDING', 'NOT_CONFIRMED', 'READY'].includes(status)
+                );
+                const liveState = String(liveStatus?.state || '').toUpperCase();
+                const executionActive = Boolean(liveStatus?.execution_active);
+                const requiresManualResume =
+                    !sendInitialMessage &&
+                    statuses.length > 0 &&
+                    !allDone &&
+                    !executionActive;
+                setManualResumeRequired(requiresManualResume);
+                setRestoredPaused(requiresManualResume || liveState === 'PAUSED');
+
+                if (allDone || liveState === 'COMPLETED') {
+                    updateStateRef.current.isHistorical = true;
+                    setRestoredMode('results');
+                } else if (
+                    requiresManualResume ||
+                    hasProgress ||
+                    ['RUNNING', 'PAUSED', 'FAILED', 'CANCELLED'].includes(liveState)
+                ) {
+                    setRestoredMode('executing');
+                } else {
+                    setRestoredMode('planning');
+                }
+
+                // Rebuild the in-memory shell after a backend restart. The
+                // endpoint is hydration-only unless restart=true is explicit.
+                if (!liveStatus && execData) {
+                    await hydrateSession(sessionKey);
                 }
             } catch (err) {
-                console.error('[ResearchPlayground] Failed to load session state:', err);
+                console.error('[ResearchPlayground] Failed to hydrate session state:', err);
             } finally {
-                // Always mark ready — even on error we fall back to 'planning'
                 setRestoredModeReady(true);
             }
         };
         loadSessionState();
-    }, [sessionId]);
+    }, [sendInitialMessage, sessionId, showPhaseIndicator]);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setViewsReady(true));
@@ -333,6 +354,16 @@ function ResearchPlaygroundInner() {
       websocketService.startReplayCapture();
       try {
         await replaySessionLogs(sessionId);
+        // Log history can contain older status broadcasts. Apply the current
+        // persisted snapshot last so replay cannot roll the UI backwards.
+        if (Array.isArray(hydratedExecutionState?.agents)) {
+          websocketService.dispatchLocal({
+            type: 'pipeline_agent_status',
+            payload: hydratedExecutionState,
+            session_id: sessionId,
+            replaying: true,
+          });
+        }
       } catch (err) {
         console.error('[ResearchPlayground] Failed to replay logs:', err);
       } finally {
@@ -343,7 +374,7 @@ function ResearchPlaygroundInner() {
       }
     };
     replay();
-  }, [sessionId, viewsReady, restoredModeReady]);
+  }, [hydratedExecutionState, sessionId, viewsReady, restoredModeReady]);
 
   useEffect(() => {
     const unsubscribe = websocketService.subscribe((event: any) => {
@@ -409,13 +440,15 @@ function ResearchPlaygroundInner() {
         const outputForAgent = Object.values(OUTPUT_EVENT_AGENTS).find(item => item.agent === agentName);
         const message = WAITING_MESSAGES[waitingStatus];
 
-        if (
-          outputForAgent &&
-          message &&
-          !updateStateRef.current.isHydrating &&
-          !updateStateRef.current.isHistorical
-        ) {
-          showPhaseIndicator(outputForAgent.phase, message, true);
+        if (outputForAgent && message) {
+          if (updateStateRef.current.isHydrating) {
+            // A replayed waiting event is durable workflow state, not a new
+            // notification. Restore the paused module without restarting it.
+            showPhaseIndicator(outputForAgent.phase, message, true);
+            setActivePhase(outputForAgent.phase);
+          } else if (!updateStateRef.current.isHistorical) {
+            showPhaseIndicator(outputForAgent.phase, message, true);
+          }
         }
       }
 
@@ -428,8 +461,16 @@ function ResearchPlaygroundInner() {
       if (type === 'pipeline_agent_status' || type === 'Pipeline_agent_status') {
         for (const agent of payload?.agents || []) {
           const agentName = String(agent?.name || '');
-          if (String(agent?.status || '').toUpperCase() === 'COMPLETED') {
+          if (
+            ['COMPLETED', 'DONE'].includes(
+              String(agent?.status || '').toUpperCase()
+            )
+          ) {
             updateStateRef.current.completedAgents.add(agentName);
+            const outputForAgent = Object.values(OUTPUT_EVENT_AGENTS).find(
+              item => item.agent === agentName
+            );
+            if (outputForAgent) clearPhaseIndicator(outputForAgent.phase);
             tryShowCompletedUpdate(agentName);
           }
         }
@@ -477,7 +518,7 @@ function ResearchPlaygroundInner() {
         // Only render once the restored mode is known — prevents PlaygroundCanvas
         // from mounting with mode='planning' then receiving plan_approval during replay.
         node: restoredModeReady
-          ? <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} includeLitReview={includeLitReview} onLiteratureOutput={setLiteratureOutput} initialMode={restoredMode} onRestart={clearAllTabData} />
+          ? <PlanningView initialHypothesis={hypothesis} sessionId={sessionId} includeLitReview={includeLitReview} onLiteratureOutput={setLiteratureOutput} initialMode={restoredMode} onRestart={clearAllTabData} autoStartPlanning={sendInitialMessage} initialPaused={restoredPaused} manualResumeRequired={manualResumeRequired} />
           : null,
       },
       { id: 'execution', node: <ExecutionView sessionId={sessionId} /> },
@@ -507,7 +548,7 @@ function ResearchPlaygroundInner() {
       { id: 'modeling', node: <ModelingView modelingData={data.modelingData as any} /> },
       { id: 'reporting', node: <ReportingView reportData={data.reportData} latexData={data.latexData} sessionId={sessionId || undefined} /> },
     ],
-    [data, hypothesis, includeLitReview, restoredMode, restoredModeReady, routeState.literatureContext, routeState.literatureReviewOutput, sessionId, setLiteratureOutput]
+    [clearAllTabData, data, hypothesis, includeLitReview, manualResumeRequired, restoredMode, restoredModeReady, restoredPaused, routeState.literatureContext, routeState.literatureReviewOutput, sendInitialMessage, sessionId, setLiteratureOutput]
   );
 
   return (
