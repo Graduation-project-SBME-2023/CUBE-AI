@@ -1,34 +1,34 @@
-import asyncio
-import json
 import logging
 import os
 import httpx
-import websockets
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = os.environ.get("MAS_BASE_URL", "http://localhost:8150")
 
 
-async def send_ws_message_remote(msg_type: str, payload: dict, session_id=None):
-    async with httpx.AsyncClient() as client:
-        await client.post(
-            f"{BASE_URL}/ws-broadcast",
+async def send_ws_message_remote(
+    msg_type: str,
+    payload: dict,
+    session_id=None,
+    *,
+    client: httpx.AsyncClient | None = None,
+    base_url: str | None = None,
+    timeout: float = 60.0,
+):
+    request_client = client or httpx.AsyncClient()
+    try:
+        response = await request_client.post(
+            f"{(base_url or BASE_URL).rstrip('/')}/ws-broadcast",
             json={
                 "type": msg_type,
                 "payload": payload,
-                "session_id": session_id
-            }
+                "session_id": session_id,
+            },
+            timeout=timeout,
         )
-    logger.info(f"[ws_client] sent '{msg_type}' via HTTP broadcast")
-
-
-async def wait_for_user_message_remote(session_id=None, timeout=600.0):
-    ws_url = os.environ.get("MAS_WS_URL", "ws://localhost:8150/ws")
-    logger.info(f"[ws_client] waiting for user reply...")
-
-    async with websockets.connect(ws_url) as ws:
-        raw = await asyncio.wait_for(ws.recv(), timeout=timeout)
-
-    logger.info(f"[ws_client] received user reply")
-    return raw
+        response.raise_for_status()
+    finally:
+        if client is None:
+            await request_client.aclose()
+    logger.info("[ws_client] sent %r via HTTP broadcast", msg_type)

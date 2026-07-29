@@ -21,6 +21,7 @@ AGENT_ARTIFACTS: dict[str, tuple[str, ...]] = {
         "overlays",
         "temp_segmentations",
         "review_result.json",
+        "segmentation_manifest.json",
         "outputs/segmentation_agent_output.json",
     ),
     "feature_extraction_agent": (
@@ -122,6 +123,29 @@ def _reset_population_config(workspace: Path) -> bool:
     return True
 
 
+def _has_resumable_segmentation_checkpoint(workspace: Path) -> bool:
+    """Return true when review can resume without rerunning inference."""
+    manifest_path = workspace / "segmentation_manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if (
+            manifest.get("schema_version") != 2
+            or manifest.get("stage") not in {"awaiting_review", "reviewed"}
+            or not isinstance(manifest.get("pairs"), list)
+        ):
+            return False
+        for item in manifest["pairs"]:
+            if not isinstance(item, dict) or item.get("status") != "ready":
+                continue
+            volume_path = workspace / "volumes" / f"{item['volume_uid']}.nii.gz"
+            mask_path = workspace / str(item.get("mask_path") or "")
+            if not volume_path.is_file() or not mask_path.is_file():
+                return False
+        return bool(manifest["pairs"])
+    except (KeyError, OSError, ValueError, json.JSONDecodeError):
+        return False
+
+
 def reset_interrupted_agent(
     workspace_root: str | Path,
     session_id: str,
@@ -139,8 +163,19 @@ def reset_interrupted_agent(
     workspace = _validated_workspace(workspace_root, session_id)
     workspace.mkdir(parents=True, exist_ok=True)
 
+    artifacts = AGENT_ARTIFACTS[agent_id]
+    if (
+        agent_id == "segmentation_agent"
+        and _has_resumable_segmentation_checkpoint(workspace)
+    ):
+        artifacts = ("outputs/segmentation_agent_output.json",)
+        logger.info(
+            "[%s] Preserving resumable segmentation review checkpoint",
+            session_id,
+        )
+
     removed: list[str] = []
-    for relative in AGENT_ARTIFACTS[agent_id]:
+    for relative in artifacts:
         target = (workspace / relative).resolve()
         try:
             target.relative_to(workspace)

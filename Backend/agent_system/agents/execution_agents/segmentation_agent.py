@@ -21,24 +21,49 @@ from autogen_core.tools import FunctionTool
 
 from agent_system.clients.ollamaClient import OllamaClient
 
-from .segmentation.module import SegmentationModule
+from .segmentation.module import SegmentationModule, resolve_mcp_server_path
 
 
-async def segmentation_tool(workspace_folder: str | None = None):
+def _validated_runtime_context(
+    workspace_folder: str | None,
+    session_id: str | None,
+) -> tuple[str, str]:
+    if not workspace_folder:
+        raise ValueError("workspace_folder is required")
+    workspace = Path(workspace_folder).resolve()
+    if not workspace.is_dir():
+        raise ValueError(f"Workspace folder does not exist: {workspace}")
+
+    clean_session_id = str(session_id or "").strip()
+    if (
+        not clean_session_id
+        or clean_session_id in {".", ".."}
+        or "/" in clean_session_id
+        or "\\" in clean_session_id
+    ):
+        raise ValueError("A valid active session_id is required")
+    return str(workspace), clean_session_id
+
+
+async def segmentation_tool(
+    workspace_folder: str | None = None,
+    session_id: str | None = None,
+):
     """The main segmentation tool, containing all the needed logic
     :arg workspace_folder: The workspace folder to save outputs to.
     """
     try:
-        if workspace_folder is None:
-            raise ValueError("Please specify a workspace folder")
-
-        folder_name = Path(workspace_folder).name
-        session_id = folder_name.removeprefix("workspace_")
+        workspace_folder, session_id = _validated_runtime_context(
+            workspace_folder,
+            session_id,
+        )
         agent = SegmentationModule(session_id=session_id)
-        await agent.initialize()
-
-        config_path = os.path.join(workspace_folder, "config.json")
-        result = await agent.run(config_path, workspace_folder)
+        try:
+            await agent.initialize()
+            config_path = os.path.join(workspace_folder, "config.json")
+            result = await agent.run(config_path, workspace_folder)
+        finally:
+            await agent.close()
 
         outputs_dir = os.path.join(workspace_folder, "outputs")
         os.makedirs(outputs_dir, exist_ok=True)
@@ -55,6 +80,7 @@ async def segmentation_tool(workspace_folder: str | None = None):
                     "masks_dir": str(Path(workspace_folder) / "masks"),
                 },
                 "metrics": {
+                    "segmentation_method": result.get("segmentation_method"),
                     "targets": result.get("targets", []),
                     "pair_count": result.get("pair_count", 0),
                     "accepted_count": result.get("accepted_count", 0),
@@ -110,10 +136,12 @@ class SegmentationAgent(AssistantAgent):
     @classmethod
     async def create(cls, model_client=None, workspace_folder=None, session_id=None):
         model_client = OllamaClient() if not model_client else model_client
-        mcp_server_path = os.path.abspath(
-            os.path.join(current_dir, "..", "..", "..", "mcp", "server.py")
+        workspace_folder, session_id = _validated_runtime_context(
+            workspace_folder,
+            session_id,
         )
-        if not os.path.exists(mcp_server_path):
+        mcp_server_path = resolve_mcp_server_path()
+        if not mcp_server_path.exists():
             raise FileNotFoundError(f"MCP server not found at: {mcp_server_path}")
         env = os.environ.copy()
         env.update({
@@ -123,7 +151,7 @@ class SegmentationAgent(AssistantAgent):
         })
         mcp_server = StdioServerParams(
             command=sys.executable,
-            args=[mcp_server_path],
+            args=[str(mcp_server_path)],
             env=env,
             read_timeout_seconds=2000,
         )
@@ -140,7 +168,6 @@ class SegmentationAgent(AssistantAgent):
             "scratchpad_write_summary",
             "scratchpad_set_status",
             "scratchpad_raise_flag",
-            "write_agent_output"
         ]
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
         logger.info(f"Creating segmentation agent")
@@ -161,7 +188,8 @@ You are the segmentation agent. The workspace folder is: {workspace_folder}
 Follow these steps in order:
 1. Call read_agent_task_context to get your instructions.
 2. Call scratchpad_register_agent(agent_id="segmentation_agent", role="roi_segmentation") to announce yourself.
-3. Run the segmentation_tool with workspace_folder="{workspace_folder}".
+3. Run segmentation_tool with workspace_folder="{workspace_folder}" and
+   session_id="{session_id}".
 4. After the tool completes, call scratchpad_write_summary to describe:
    - Segmentation method used
    - Number of volumes segmented
@@ -183,27 +211,8 @@ When segmentation is complete:
    - Mention if any mask was user-modified
 2. Call scratchpad_set_status(agent_id="segmentation_agent", status="done")
 
-=== STRUCTURED OUTPUT INSTRUCTIONS ===
-After completing segmentation, you MUST call write_agent_output with:
-  - agent_id: "segmentation_agent"
-  - agent_role: "roi_segmentation"
-  - status: "completed" (or "failed"/"partial")
-  - inputs: {{"workspace_folder": "{workspace_folder}"}}
-  - output_files: {{
-      "manifest": "segmentation_manifest.json",
-      "volumes_dir": "volumes/",
-      "masks_dir": "masks/"
-    }}
-  - output_metrics: {{
-      "segmentation_method": "<method used, e.g. VoxTell text-prompt segmentation>",
-      "targets": ["<canonical target labels>"],
-      "pair_count": <number of volume-target pairs>,
-      "accepted_count": <number accepted or modified>,
-      "reused_count": <number of existing masks reused>,
-      "generated_count": <number of masks newly generated>
-    }}
-  - output_summary: "<concise summary of segmentation results>"
-  - warnings: [<any quality warnings, including any volumes that failed segmentation>]
+The segmentation tool writes the authoritative structured output itself.
+Do not call another output writer or reconstruct its metrics.
 """
         return cls(
             name=name,
@@ -211,7 +220,7 @@ After completing segmentation, you MUST call write_agent_output with:
             tools=tools,
             description=description,
             system_message=system_message,
-            max_tool_iterations=8,  # 6 steps required + buffer
+            max_tool_iterations=7,
         )
 
     @staticmethod

@@ -3,6 +3,9 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 
+REUSE_CONFIDENCE_THRESHOLD = 0.6
+
+
 class ClinicalTargetIntent(BaseModel):
     target_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_]{0,63}$")
     canonical_label: str = Field(min_length=1, max_length=200)
@@ -34,6 +37,8 @@ class ClinicalTargetIntentPlan(BaseModel):
         target_ids = [target.target_id for target in self.targets]
         if len(target_ids) != len(set(target_ids)):
             raise ValueError("target_id values must be unique")
+        if any("__" in target_id for target_id in target_ids):
+            raise ValueError("target_id values cannot contain the reserved '__' delimiter")
         return self
 
 
@@ -81,7 +86,7 @@ class TargetCandidateDecision(BaseModel):
             set(self.accepted_mask_candidate_ids)
         ):
             raise ValueError("accepted_mask_candidate_ids must be unique")
-        if self.confidence < 0.8:
+        if self.confidence < REUSE_CONFIDENCE_THRESHOLD:
             if self.accepted_mask_candidate_ids:
                 raise ValueError(
                     "Low-confidence candidate decisions cannot reuse masks"
@@ -135,7 +140,7 @@ class ResolvedTarget(BaseModel):
         self.canonical_label = self.canonical_label.strip()
         if self.pathology:
             self.pathology = self.pathology.strip()
-        if self.confidence < 0.8:
+        if self.confidence < REUSE_CONFIDENCE_THRESHOLD:
             if self.accepted_mask_candidate_ids:
                 raise ValueError(
                     "Low-confidence targets cannot reuse existing masks"
@@ -171,17 +176,27 @@ class TargetResolutionPlan(BaseModel):
 
 class ClinicalPlanAudit(BaseModel):
     approved: bool
+    clinical_identity_invalid: bool = False
     issues: list[str] = Field(default_factory=list)
     corrected_plan: TargetResolutionPlan | None = None
 
     @model_validator(mode="after")
     def validate_audit_decision(self):
-        if self.approved and self.corrected_plan is not None:
-            raise ValueError("An approved audit must not return corrected_plan")
+        if self.approved:
+            if self.clinical_identity_invalid:
+                raise ValueError(
+                    "An approved audit cannot mark clinical identity invalid"
+                )
+            if self.corrected_plan is not None:
+                raise ValueError("An approved audit must not return corrected_plan")
         if not self.approved:
             if not self.issues:
                 raise ValueError("A rejected audit must explain at least one issue")
-            if self.corrected_plan is None:
+            if self.clinical_identity_invalid and self.corrected_plan is not None:
+                raise ValueError(
+                    "An invalid locked clinical identity must not be silently replaced"
+                )
+            if not self.clinical_identity_invalid and self.corrected_plan is None:
                 raise ValueError("A rejected audit must return corrected_plan")
         return self
 
@@ -264,4 +279,44 @@ def validate_candidate_decision_references(
                     f"label for target {decision.target_id!r}"
                 )
             decision.voxtell_prompt.prompt = canonical
+    return plan
+
+
+def validate_audited_plan_identity(
+    plan: TargetResolutionPlan,
+    intent_plan: ClinicalTargetIntentPlan,
+) -> TargetResolutionPlan:
+    """Prevent the audit stage from rewriting the locked clinical target."""
+    expected = {target.target_id: target for target in intent_plan.targets}
+    returned = {target.target_id: target for target in plan.targets}
+    if returned.keys() != expected.keys():
+        raise ValueError(
+            "An audited correction must preserve the locked target IDs exactly"
+        )
+
+    for target_id, intent in expected.items():
+        resolved = returned[target_id]
+        identity_fields = {
+            "canonical_label": (
+                resolved.canonical_label.casefold(),
+                intent.canonical_label.casefold(),
+            ),
+            "anatomy": (resolved.anatomy.casefold(), intent.anatomy.casefold()),
+            "pathology": (
+                (resolved.pathology or "").casefold(),
+                (intent.pathology or "").casefold(),
+            ),
+            "laterality": (resolved.laterality, intent.laterality),
+        }
+        changed = [
+            field
+            for field, (actual, locked) in identity_fields.items()
+            if actual != locked
+        ]
+        if changed:
+            raise ValueError(
+                f"Audited correction changed locked clinical identity for "
+                f"{target_id!r}: {changed}. Clinical intent issues must fail "
+                "safely instead of being rewritten in the candidate audit."
+            )
     return plan

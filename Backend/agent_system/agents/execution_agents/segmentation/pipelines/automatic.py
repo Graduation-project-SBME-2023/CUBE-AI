@@ -2,7 +2,11 @@ import logging
 
 from agent_system.models.tool_logging import ProgressPayload, TextPayload
 from ..logging_config import emit_tool_event, emit_tool_events
-from .common import raise_for_segmentation_error, run_with_progress_heartbeat
+from .common import (
+    SegmentationPipelineError,
+    raise_for_segmentation_error,
+    run_with_progress_heartbeat,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +47,8 @@ async def run_automatic_pipeline(
         session_id=session_id,
     )
 
-    failures = []
+    failures: list[dict] = []
+    completed_results: list[dict] = []
     for index, volume_uid in enumerate(volumes, start=1):
         logger.info("[%s/%s] Running segmentation for volume: %s", index, len(volumes), volume_uid)
         # Emit in-progress step (current = index - 0.5) so progress bar animates between index-1 and index
@@ -79,6 +84,13 @@ async def run_automatic_pipeline(
                     volume_uid=volume_uid,
                 )
                 raise_for_segmentation_error(result, volume_uid, label)
+                completed_results.append(
+                    {
+                        "volume_uid": volume_uid,
+                        "label": label,
+                        "result": result,
+                    }
+                )
             logger.info("Completed segmentation for volume: %s", volume_uid)
             # Emit completed progress step (current = index)
             await emit_tool_event(
@@ -91,8 +103,28 @@ async def run_automatic_pipeline(
                 content_type="progress",
                 session_id=session_id,
             )
+        except SegmentationPipelineError as exc:
+            failures.append(exc.as_dict())
+            logger.exception("Segmentation failed for %s", volume_uid)
+            await emit_tool_event(
+                event_type="tool_progress",
+                content=ProgressPayload(
+                    current=index,
+                    total=len(volumes),
+                    label="Segmenting volumes"
+                ),
+                content_type="progress",
+                session_id=session_id,
+            )
         except Exception as exc:
-            failures.append((volume_uid, str(exc)))
+            failures.append(
+                {
+                    "volume_uid": volume_uid,
+                    "label": label if "label" in locals() else "",
+                    "stage": "pipeline_exception",
+                    "message": str(exc),
+                }
+            )
             logger.exception("Segmentation failed for %s", volume_uid)
             await emit_tool_event(
                 event_type="tool_progress",
@@ -108,12 +140,22 @@ async def run_automatic_pipeline(
     if failures:
         # Log failures as warnings but do NOT raise — partial success is still useful.
         # A single OOM-killed volume (exit 137) must not abort the entire pipeline.
-        failed_uids = ", ".join(uid for uid, _ in failures)
+        failed_uids = ", ".join(failure["volume_uid"] for failure in failures)
         logger.warning(
             "Automatic segmentation partially failed: %d/%d volumes could not be processed. "
             "Failed UIDs: %s. Downstream download/GIF steps will proceed for successful volumes.",
             len(failures), len(volumes), failed_uids,
         )
-        return {"partial_failure": True, "failed_uids": [uid for uid, _ in failures]}
+        return {
+            "partial_failure": True,
+            "failed_uids": [failure["volume_uid"] for failure in failures],
+            "failures": failures,
+            "results": completed_results,
+        }
 
-    return {"partial_failure": False, "failed_uids": []}
+    return {
+        "partial_failure": False,
+        "failed_uids": [],
+        "failures": [],
+        "results": completed_results,
+    }

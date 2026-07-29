@@ -9,12 +9,57 @@ from ..logging_config import emit_tool_event
 logger = logging.getLogger(__name__)
 
 
+class SegmentationPipelineError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        volume_uid: str,
+        label: str,
+        stage: str,
+        message: str,
+        details: dict | None = None,
+    ):
+        self.volume_uid = volume_uid
+        self.label = label
+        self.stage = stage
+        self.detail = message
+        self.details = details or {}
+        super().__init__(
+            f"Segmentation failed for volume {volume_uid}, label {label}, "
+            f"stage {stage}: {message}"
+        )
+
+    def as_dict(self) -> dict:
+        result = {
+            "volume_uid": self.volume_uid,
+            "label": self.label,
+            "stage": self.stage,
+            "message": self.detail,
+        }
+        result.update(self.details)
+        return result
+
+
 def raise_for_segmentation_error(result, volume_uid: str, label: str) -> None:
     if isinstance(result, dict) and (result.get("error") or result.get("upload_error")):
         stage = result.get("stage") or "upload"
         message = result.get("message") or result.get("upload_response") or "Unknown segmentation error"
-        raise RuntimeError(
-            f"Segmentation failed for volume {volume_uid}, label {label}, stage {stage}: {message}"
+        raise SegmentationPipelineError(
+            volume_uid=volume_uid,
+            label=label,
+            stage=str(stage),
+            message=str(message),
+            details={
+                key: result[key]
+                for key in (
+                    "model",
+                    "prompt",
+                    "retry_count",
+                    "status_code",
+                    "upload_status_code",
+                )
+                if result.get(key) is not None
+            },
         )
 
 

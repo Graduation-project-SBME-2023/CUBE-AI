@@ -1,6 +1,4 @@
-import re
 import gzip
-import io
 import os
 import json
 import shutil
@@ -10,26 +8,37 @@ from pathlib import Path
 import nrrd
 import numpy as np
 import tempfile
-import requests
 import httpx
-import highdicom as hd
-from typing import Dict, Any, Tuple
-from pydicom.uid import generate_uid
 import nibabel as nib
+import SimpleITK as sitk
 import logging
+from email import policy
+from email.parser import BytesParser
+
 logger = logging.getLogger(__name__)
 from PIL import Image
 
 MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
 REQUEST_TIMEOUT_SECONDS = 10.0
-async def check_having_mask(volume_uid):
+async def check_having_mask(
+    volume_uid,
+    *,
+    client: httpx.AsyncClient | None = None,
+):
     """
     Checks if a segmentation mask exists for the given volume SeriesInstanceUID (volume_uid).
     Calls the endpoint /segmentations/by-volume/{volume_uid} and returns the list of segmentations.
     """
     url = f"{MONAI_URL}/segmentations/by-volume/{volume_uid}"
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-        response = await client.get(url)
+    request_client = client or httpx.AsyncClient()
+    try:
+        response = await request_client.get(
+            url,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    finally:
+        if client is None:
+            await request_client.aclose()
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, list):
@@ -47,36 +56,32 @@ def parse_multipart_response(headers, body):
     Returns:
         (nrrd_bytes: bytes, centroids: dict)
     """
-    content_type = headers.get('content-type', '')
-    boundary_match = re.search(r'boundary=([^;]+)', content_type, re.IGNORECASE)
-    if not boundary_match:
-        raise ValueError("No boundary found in Content-Type header")
-
-    boundary = boundary_match.group(1).strip()
-    boundary_bytes = f"--{boundary}".encode('ascii')
-
-    parts = split_multipart(body, boundary_bytes)
+    content_type = str(headers.get("content-type") or "")
+    try:
+        message = BytesParser(policy=policy.default).parsebytes(
+            b"MIME-Version: 1.0\r\nContent-Type: "
+            + content_type.encode("ascii")
+            + b"\r\n\r\n"
+            + body
+        )
+    except (UnicodeEncodeError, ValueError) as exc:
+        raise ValueError(f"Invalid multipart Content-Type: {exc}") from exc
+    if not message.is_multipart():
+        raise ValueError("Response is not a valid multipart body")
 
     json_data = None
     nrrd_bytes = None
-
-    for part in parts:
-        header_end = find_double_crlf(part)
-        if header_end == -1:
-            continue
-
-        headers_part = part[:header_end].decode('ascii', errors='replace')
-        body_part = part[header_end:]
-
-        if 'application/json' in headers_part:
+    for part in message.iter_parts():
+        payload = part.get_payload(decode=True)
+        if payload is None:
+            raise ValueError("Multipart part has no decodable payload")
+        if part.get_content_type() == "application/json":
             try:
-                json_text = body_part.decode('utf-8')
-                json_data = json.loads(json_text)
-            except Exception as e:
-                raise ValueError(f"Failed to parse JSON part: {e}")
-
-        elif 'application/octet-stream' in headers_part:
-            nrrd_bytes = body_part
+                json_data = json.loads(payload.decode(part.get_content_charset() or "utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError(f"Failed to parse JSON part: {exc}") from exc
+        elif part.get_content_type() == "application/octet-stream":
+            nrrd_bytes = payload
 
     if json_data is None or nrrd_bytes is None:
         raise ValueError(
@@ -84,70 +89,9 @@ def parse_multipart_response(headers, body):
             "need application/json and application/octet-stream"
         )
 
-    # Return in same order as original TS: data first, then centroids.
+    if not isinstance(json_data, dict):
+        raise ValueError("Multipart JSON part must contain an object")
     return nrrd_bytes, json_data.get('centroids', {})
-
-def split_multipart(buffer, boundary):
-    """
-    Splits the buffer into parts using the boundary.
-    Skips the boundary line itself and trailing \r\n.
-    """
-    parts = []
-    start = 0
-    while start < len(buffer):
-        boundary_index = find_subarray(buffer, boundary, start)
-        if boundary_index == -1:
-            break
-
-        # start of actual part content = after boundary + \r\n
-        part_start = boundary_index + len(boundary) + 2
-
-        # check for closing boundary (ends with --)
-        if buffer[part_start:part_start+2] == b'--':
-            break
-
-        next_boundary = find_subarray(buffer, boundary, part_start)
-        part_end = next_boundary if next_boundary != -1 else len(buffer)
-
-        # exclude trailing \r\n before next boundary
-        part = buffer[part_start:part_end - 2]
-        parts.append(part)
-        start = part_end  
-
-    return parts  
-
-def find_subarray(haystack, needle, start=0):
-    """
-    Returns the starting index of the first occurrence of needle in haystack[start:],
-    or -1 if not found.
-    """
-    n_h = len(haystack)
-    n_n = len(needle)
-
-    for i in range(start, n_h - n_n + 1):
-        match = True
-        for j in range(n_n):
-            if haystack[i + j] != needle[j]:
-                match = False
-                break
-        if match:
-            return i
-
-    return -1
-
-def find_double_crlf(buffer):
-    """      
-    Finds the position right after the first \r\n\r\n occurrence.
-    Returns -1 if not found.
-    """
-    for i in range(len(buffer) - 3):
-        if (buffer[i]     == 13 and   # \r
-            buffer[i + 1] == 10 and   # \n
-            buffer[i + 2] == 13 and   # \r
-            buffer[i + 3] == 10):     # \n
-            return i + 4              # position after second \r\n
-
-    return -1
 
 
 # ===============================
@@ -170,6 +114,7 @@ def parse_nrrd_data(nrrd_bytes):
         finally:
             os.remove(tmp_path)
         
+        data_array = _validated_nrrd_array(data_array)
         if data_array.dtype != np.uint16:
             logger.warning("NRRD data type is %s; converting to uint16", data_array.dtype)
             data_array = data_array.astype(np.uint16)
@@ -188,49 +133,41 @@ def parse_nrrd_data(nrrd_bytes):
                     data_array, header = nrrd.read(tmp_path)
                 finally:
                     os.remove(tmp_path)
-                return data_array.astype(np.uint16), header
+                return _validated_nrrd_array(data_array).astype(np.uint16), header
             else:
                 raise
         except Exception as inner_e:
             raise ValueError(f"Failed to parse NRRD data: {inner_e}") from inner_e
 
 
-# ===============================
-# DICOM SEG CREATION
-# ===============================
+def _validated_nrrd_array(data_array: np.ndarray) -> np.ndarray:
+    if not np.issubdtype(data_array.dtype, np.number):
+        raise ValueError(f"NRRD mask dtype must be numeric, received {data_array.dtype}")
+    if data_array.size == 0:
+        raise ValueError("NRRD mask is empty")
+    if np.issubdtype(data_array.dtype, np.floating):
+        raise ValueError(
+            f"NRRD mask dtype must be an integer type, received {data_array.dtype}"
+        )
+    if not np.all(np.isfinite(data_array)):
+        raise ValueError("NRRD mask contains NaN or infinite values")
+    min_value = float(np.min(data_array))
+    max_value = float(np.max(data_array))
+    if min_value < 0 or max_value > np.iinfo(np.uint16).max:
+        raise ValueError(
+            f"NRRD mask values must be in [0, 65535], received [{min_value}, {max_value}]"
+        )
+    unique_values = set(np.unique(data_array).tolist())
+    if not unique_values <= {0, 1, 255} or ({1, 255} <= unique_values):
+        raise ValueError(
+            "VoxTell NRRD output must be binary with values {0,1} or {0,255}; "
+            f"received {sorted(unique_values)[:20]}"
+        )
+    return data_array
 
-def rgb_to_dicom_cielab(rgb):
-    """
-    Convert RGB [0-1] to DICOM CIELab 
-    """
-    import numpy as np
-    
-    rgb = np.asarray(rgb)  # shape (3,)
-    # Simple sRGB to XYZ (D65 white point)
-    xyz = np.dot(rgb, np.array([
-        [0.4124, 0.3576, 0.1805],
-        [0.2126, 0.7152, 0.0722],
-        [0.0193, 0.1192, 0.9505]
-    ]).T)
-    
-    xyz /= np.array([0.95047, 1.0, 1.08883])  # D65 normalize
-    
-    # XYZ to Lab
-    xyz = np.where(xyz > 0.008856, xyz ** (1/3), (7.787 * xyz) + (16/116))
-    L = (116 * xyz[1]) - 16
-    a = 500 * (xyz[0] - xyz[1])
-    b = 200 * (xyz[1] - xyz[2])
-    
-    # DICOM scales Lab to 0-255 range (approx)
-    L = np.clip((L + 16) * (255 / 116), 0, 255)
-    a = np.clip((a + 128) * (255 / 256), 0, 255)
-    b = np.clip((b + 128) * (255 / 256), 0, 255)
-    
-    return [int(round(v)) for v in [L, a, b]]
 
 def ensure_required_patient_tags(datasets):
 
-    new_for_uid = generate_uid()
     for ds in datasets:
         # ds.FrameOfReferenceUID = new_for_uid # generate it to avoid conflicts
         ds.setdefault("PatientName", "Anonymous")
@@ -251,11 +188,76 @@ def ensure_required_patient_tags(datasets):
 #  Download Data
 #  ================================
 
+def _geometry_matches(
+    image: sitk.Image,
+    reference: sitk.Image,
+    *,
+    tolerance: float = 1e-5,
+) -> bool:
+    return (
+        image.GetDimension() == reference.GetDimension()
+        and image.GetSize() == reference.GetSize()
+        and np.allclose(image.GetSpacing(), reference.GetSpacing(), atol=tolerance)
+        and np.allclose(image.GetOrigin(), reference.GetOrigin(), atol=tolerance)
+        and np.allclose(image.GetDirection(), reference.GetDirection(), atol=tolerance)
+    )
+
+
+def align_and_binarize_mask(
+    mask_path: str,
+    reference_volume_path: str,
+    output_path: str,
+) -> dict:
+    """Align a mask to the reference grid using nearest-neighbor resampling."""
+    reference = sitk.ReadImage(reference_volume_path)
+    mask = sitk.ReadImage(mask_path)
+    original_geometry = {
+        "size": list(mask.GetSize()),
+        "spacing": list(mask.GetSpacing()),
+        "origin": list(mask.GetOrigin()),
+        "direction": list(mask.GetDirection()),
+    }
+    geometry_adjusted = not _geometry_matches(mask, reference)
+    if geometry_adjusted:
+        resample = sitk.ResampleImageFilter()
+        resample.SetReferenceImage(reference)
+        resample.SetInterpolator(sitk.sitkNearestNeighbor)
+        resample.SetTransform(sitk.Transform())
+        resample.SetDefaultPixelValue(0)
+        mask = resample.Execute(mask)
+        logger.warning(
+            "Resampled mask %s to reference geometry from size=%s to size=%s",
+            mask_path,
+            original_geometry["size"],
+            list(reference.GetSize()),
+        )
+
+    data = sitk.GetArrayFromImage(mask)
+    if not np.all(np.isfinite(data)):
+        raise ValueError(f"Mask contains NaN or infinite values: {mask_path}")
+    binary = sitk.GetImageFromArray((data > 0).astype(np.uint8))
+    binary.CopyInformation(reference)
+    sitk.WriteImage(binary, output_path)
+    return {
+        "path": output_path,
+        "geometry_adjusted": geometry_adjusted,
+        "original_geometry": original_geometry,
+        "final_geometry": {
+            "size": list(reference.GetSize()),
+            "spacing": list(reference.GetSpacing()),
+            "origin": list(reference.GetOrigin()),
+            "direction": list(reference.GetDirection()),
+        },
+    }
+
+
 async def download_and_pair_volumes(
     workspace_dir,
     resolved_pairs,
     download_volumes=True,
     task_name="segmentation_task",
+    *,
+    client: httpx.AsyncClient | None = None,
 ):
     DOWNLOAD_IMAGES_URL  = f"{MONAI_URL}/datastore/images"
     DOWNLOAD_LABELS_URL  = f"{MONAI_URL}/datastore/labels"
@@ -275,20 +277,29 @@ async def download_and_pair_volumes(
     # ------------------------------------------------------------------ #
     # Helper functions remain exactly the same
     # ------------------------------------------------------------------ #
-    def trigger_download(url, task_name, uids_list):
+    async def trigger_download(url, task_name, uids_list):
         if not uids_list:
-            return False
+            return True
         logger.info(f"POST {url} | task={task_name} | uids={uids_list}")
+        request_client = client or httpx.AsyncClient()
         try:
-            r = requests.post(url, params={"task_name": task_name}, json=uids_list, timeout=60)
-            logger.info("Trigger response: %s", r.status_code)
-            if r.status_code != 200:
-                logger.error("Trigger failed: %s", r.text[:300])
+            response = await request_client.post(
+                url,
+                params={"task_name": task_name},
+                json=uids_list,
+                timeout=60,
+            )
+            logger.info("Trigger response: %s", response.status_code)
+            if response.status_code != 200:
+                logger.error("Trigger failed: %s", response.text[:300])
                 return False
             return True
-        except Exception:
-            logger.exception("Trigger exception")
+        except httpx.HTTPError:
+            logger.exception("Download trigger failed")
             return False
+        finally:
+            if client is None:
+                await request_client.aclose()
 
     async def wait_and_find(search_dir, uid_to_search_key, timeout_s=120, poll_interval=3.0):
         """
@@ -322,17 +333,25 @@ async def download_and_pair_volumes(
                 await asyncio.sleep(poll_interval)
                 continue
 
-            for root, _, files in os.walk(search_dir):
-                for fname in files:
-                    if not fname.lower().endswith(".nii.gz"):
-                        continue
-                    for key in list(remaining_keys):
-                        search_substr = uid_to_search_key[key]
-                        if search_substr in fname:
-                            full_path = os.path.join(root, fname)
-                            found[key] = full_path
-                            remaining_keys.discard(key)
-                            logger.info("Found [%s] -> %s", key, full_path)
+            def scan_exact_files():
+                matches = {}
+                expected_by_name = {
+                    f"{str(search_key)}.nii.gz".casefold(): key
+                    for key, search_key in uid_to_search_key.items()
+                    if key in remaining_keys
+                }
+                for root, _, files in os.walk(search_dir):
+                    for fname in files:
+                        key = expected_by_name.get(fname.casefold())
+                        if key is not None:
+                            matches[key] = os.path.join(root, fname)
+                return matches
+
+            matches = await asyncio.to_thread(scan_exact_files)
+            for key, full_path in matches.items():
+                found[key] = full_path
+                remaining_keys.discard(key)
+                logger.info("Found [%s] -> %s", key, full_path)
 
             if remaining_keys:
                 elapsed = timeout_s - (deadline - time.time())
@@ -354,14 +373,14 @@ async def download_and_pair_volumes(
         logger.info("Copied volume -> %s (%.2f MB)", dst, size_mb)
         return dst
 
-    def copy_and_normalize_label(src_path, volume_uid, dest_dir, target_id=None):
-        """
-        Normalize a segmentation label NIfTI and save it as a binary {0,1} mask.
-
-        Handles two formats:
-          1. Binary {0, 255}  – simple threshold to {0,1}.
-          2. Binary {0, 1}    – already correct, save as-is.
-        """
+    def copy_and_normalize_label(
+        src_path,
+        reference_volume_path,
+        volume_uid,
+        dest_dir,
+        target_id=None,
+    ):
+        """Align the label to its reference volume and save a binary mask."""
         filename = (
             f"{volume_uid}__{target_id}.nii.gz"
             if target_id
@@ -369,38 +388,11 @@ async def download_and_pair_volumes(
         )
         dst = os.path.join(dest_dir, filename)
         try:
-            nii  = nib.load(src_path)
-            
-            # --- VOLUME SIZE LOGGING ---
-            total_voxels = np.prod(nii.shape)
-            estimated_ram_bytes = total_voxels * 8
-            estimated_ram_gb = estimated_ram_bytes / (1024**3)
-            logger.info(
-                "Label %s estimated RAM: %.2f GB (no limit enforced).",
-                volume_uid,
-                estimated_ram_gb,
+            return align_and_binarize_mask(
+                src_path,
+                reference_volume_path,
+                dst,
             )
-            # ---------------------------
-
-            data = nii.get_fdata()
-            unique_vals = np.unique(data)
-            logger.info(f"Label unique values before normalize: {unique_vals}")
-
-            max_val = float(np.max(data))
-
-            if max_val == 255.0:
-                # Binary DICOM-style mask: {0, 255} → {0, 1}
-                data = (data > 0).astype(np.uint8)
-                logger.info("Converted {0,255} -> {0,1}")
-            else:
-                # Already binary {0, 1} or any other value — binarize with >0
-                data = (data > 0).astype(np.uint8)
-                logger.info("Label binarized with >0; keeping as-is.")
-
-            nib.save(nib.Nifti1Image(data, nii.affine, nii.header), dst)
-            size_mb = os.path.getsize(dst) / 1_048_576
-            logger.info("Saved normalized label -> %s (%.2f MB)", dst, size_mb)
-            return dst
         except Exception:
             logger.exception("Error normalizing label %s", src_path)
             return None
@@ -433,14 +425,30 @@ async def download_and_pair_volumes(
     #  2. trigger downloads (POST; MONAI saves to its local dirs)        #
     # ------------------------------------------------------------------ #
     if download_volumes:
-        trigger_download(
+        images_triggered = await trigger_download(
             DOWNLOAD_IMAGES_URL,
             TASK_NAME,
             list(dict.fromkeys(volumes_to_process)),
         )
+        if not images_triggered:
+            logger.error("Volume export request failed; aborting without polling")
+            return [], [
+                {"volume_uid": uid, "target_id": target_id}
+                for uid, target_id in zip(volumes_to_process, target_ids_to_process)
+            ]
     
-    valid_labels = [uid for uid in labels_to_process if uid is not None]
-    trigger_download(DOWNLOAD_LABELS_URL, TASK_NAME, valid_labels)
+    valid_labels = list(dict.fromkeys(uid for uid in labels_to_process if uid))
+    labels_triggered = await trigger_download(
+        DOWNLOAD_LABELS_URL,
+        TASK_NAME,
+        valid_labels,
+    )
+    if not labels_triggered:
+        logger.error("Mask export request failed; aborting without polling")
+        return [], [
+            {"volume_uid": uid, "target_id": target_id}
+            for uid, target_id in zip(volumes_to_process, target_ids_to_process)
+        ]
 
     # ------------------------------------------------------------------ #
     #  3. wait for files to appear in MONAI's local dirs                 #
@@ -492,6 +500,7 @@ async def download_and_pair_volumes(
 
     successful = []
     skipped_oom = []
+    copied_volumes: dict[str, str] = {}
     for vol_uid, label_uid, target_id in zip(
         volumes_to_process, labels_to_process, target_ids_to_process
     ):
@@ -503,17 +512,30 @@ async def download_and_pair_volumes(
             )
             continue
 
-        vol_result = True  # Default to True if we aren't downloading volumes
+        volume_path = os.path.join(FINAL_DIR_IMG, f"{vol_uid}.nii.gz")
+        vol_result = volume_path
         if download_volumes:
             vol_src = found_volumes.get(vol_uid)
             if not vol_src:
                 logger.error("Volume file never appeared for %s; skipping pair", vol_uid)
                 continue
-            vol_result = copy_volume(vol_src, vol_uid, FINAL_DIR_IMG)
+            if vol_uid not in copied_volumes:
+                copied_volumes[vol_uid] = await asyncio.to_thread(
+                    copy_volume,
+                    vol_src,
+                    vol_uid,
+                    FINAL_DIR_IMG,
+                )
+            vol_result = copied_volumes[vol_uid]
 
         if label_src:
-            label_result = copy_and_normalize_label(
-                label_src, vol_uid, FINAL_DIR_LABEL, target_id=target_id,
+            label_result = await asyncio.to_thread(
+                copy_and_normalize_label,
+                label_src,
+                vol_result,
+                vol_uid,
+                FINAL_DIR_LABEL,
+                target_id,
             )
         else:
             label_result = True # No label to process for interactive manual
@@ -523,7 +545,25 @@ async def download_and_pair_volumes(
             continue
 
         if vol_result and label_result:
-            successful.append({"volume_uid": vol_uid, "target_id": target_id})
+            successful.append(
+                {
+                    "volume_uid": vol_uid,
+                    "target_id": target_id,
+                    "geometry_adjusted": (
+                        bool(label_result.get("geometry_adjusted"))
+                        if isinstance(label_result, dict)
+                        else False
+                    ),
+                    "geometry": (
+                        {
+                            "original": label_result.get("original_geometry"),
+                            "final": label_result.get("final_geometry"),
+                        }
+                        if isinstance(label_result, dict)
+                        else None
+                    ),
+                }
+            )
         else:
             logger.error("Failed to copy vol/label for %s", vol_uid)
 
@@ -604,16 +644,19 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
             continue
 
         try:
+            volume_image = sitk.ReadImage(vol_path)
+            mask_image = sitk.ReadImage(mask_path)
+            if not _geometry_matches(mask_image, volume_image):
+                align_and_binarize_mask(mask_path, vol_path, mask_path)
             vol_data = nib.load(vol_path).get_fdata()
             mask_data = nib.load(mask_path).get_fdata()
 
-            # Some models return masks for a subset of slices; cap Z to the common range.
             if vol_data.shape != mask_data.shape:
-                logger.warning(
-                    f"Shape mismatch for {uid}: vol={vol_data.shape}, mask={mask_data.shape}. "
-                    f"Capping Z to min of both."
+                raise ValueError(
+                    f"Mask alignment did not produce the reference shape for {uid}: "
+                    f"volume={vol_data.shape}, mask={mask_data.shape}"
                 )
-            max_z = min(vol_data.shape[2], mask_data.shape[2])
+            max_z = vol_data.shape[2]
 
             # Diagnostic: compare full-mask signal vs. capped-Z signal
             full_mask_unique = np.unique(mask_data)
@@ -696,7 +739,10 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
                     "pairId": pair_id,
                     "targetId": target_id or None,
                     "targetLabel": target_label,
-                    "gifUrl": f"http://localhost:8150/files/{workspace_folder_name}/overlays/{gif_filename}",
+                    "gifUrl": (
+                        f"{os.environ.get('MAS_BASE_URL', 'http://localhost:8150').rstrip('/')}"
+                        f"/files/{workspace_folder_name}/overlays/{gif_filename}"
+                    ),
                     "isEmptyMask": is_empty_mask
                 }
                 if is_empty_mask:

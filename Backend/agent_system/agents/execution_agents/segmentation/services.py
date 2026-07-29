@@ -4,15 +4,15 @@ import logging
 import json
 import asyncio
 from datetime import datetime
-from typing import Annotated, Any, Dict
+from functools import partial
+from typing import Annotated, Any, Dict, NotRequired, TypedDict
 from pydantic import Field
 import highdicom as hd
 from pydicom.sr.codedict import codes
 import numpy as np
-from pathlib import Path
 import io
 import pydicom
-import tempfile
+from scipy import ndimage
 
 from .utils import (
     parse_multipart_response,
@@ -31,12 +31,49 @@ _MAX_INFERENCE_RETRIES = 3
 _RETRY_BACKOFF_SECONDS = [5, 15, 30]   # wait before each retry attempt
 
 
+class InferenceResult(TypedDict):
+    error: bool
+    stage: str
+    message: str
+    volume_uid: str
+    model: str
+    prompt: str | None
+    status_code: NotRequired[int]
+    inference_duration_seconds: NotRequired[float]
+    segmentation_series_uid: NotRequired[str]
+    orthanc_instance_id: NotRequired[str]
+    sync_succeeded: NotRequired[bool]
+    geometry_adjusted: NotRequired[bool]
+    original_mask_shape: NotRequired[list[int]]
+    final_mask_shape: NotRequired[list[int]]
+    elapsed_seconds: NotRequired[float]
+    endpoint: NotRequired[str]
+    query_params: NotRequired[dict[str, Any]]
+    sent_params: NotRequired[dict[str, Any]]
+    server_response: NotRequired[str]
+    upload_error: NotRequired[bool]
+    upload_status_code: NotRequired[int]
+    upload_response: NotRequired[str]
+    retry_count: NotRequired[int]
+
+
 class SegmentationService:
 
-    def __init__(self, monai_url: str | None = None, orthanc_url: str | None = None):
+    def __init__(
+        self,
+        monai_url: str | None = None,
+        orthanc_url: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ):
 
         self.monai_url = monai_url or os.environ.get("MONAI_URL", "http://localhost:8000")
         self.orthanc_url = orthanc_url or os.environ.get("ORTHANC_URL", "http://localhost:8043")
+        self.client = client or httpx.AsyncClient()
+        self._owns_client = client is None
+
+    async def close(self) -> None:
+        if self._owns_client:
+            await self.client.aclose()
 
 
     async def run_segmentation(
@@ -57,35 +94,40 @@ class SegmentationService:
             Dict[str, Any] | None,
             Field(description="Optional inference parameters")
         ] = None,
-    ):
+    ) -> InferenceResult:
+        try:
+            return await self._run_segmentation(
+                model=model,
+                series_instance_uid=series_instance_uid,
+                label_info=label_info,
+                params=params,
+            )
+        except Exception as exc:
+            logger.exception(
+                "Segmentation processing failed for volume=%s model=%s",
+                series_instance_uid,
+                model,
+            )
+            return {
+                "error": True,
+                "stage": "processing_exception",
+                "message": str(exc),
+                "volume_uid": series_instance_uid,
+                "model": model.strip().rstrip(","),
+                "prompt": self._first_text_prompt(params or {}),
+            }
+
+    async def _run_segmentation(
+        self,
+        model: str,
+        series_instance_uid: str,
+        label_info: str,
+        params: Dict[str, Any] | None = None,
+    ) -> InferenceResult:
         start_time = datetime.now()
         clean_model = model.strip().rstrip(",")
 
-        frame_of_reference_uid = None
-        study_instance_uid = None
         organ_list = self._normalize_label_info(label_info)
-
-        # =========== get the study from the series UID ===========
-        get_study_url = f"{self.monai_url}/volumes/{series_instance_uid}/study"
-        async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
-            try:
-                study_response = await client.get(get_study_url)
-                if study_response.status_code == 200:
-                    study_info = study_response.json()
-                    study_instance_uid = study_info.get('study_uid')
-                    logger.info(
-                        "Retrieved StudyInstanceUID %s for SeriesInstanceUID %s",
-                        study_instance_uid,
-                        series_instance_uid,
-                    )
-                else:
-                    logger.warning(
-                        "Failed to retrieve study info for SeriesInstanceUID %s; status=%s",
-                        series_instance_uid,
-                        study_response.status_code,
-                    )
-            except Exception:
-                logger.exception("Error retrieving study info for SeriesInstanceUID %s", series_instance_uid)
 
         # ====the inference using monai label=====
 
@@ -116,8 +158,12 @@ class SegmentationService:
 
         for attempt in range(1, _MAX_INFERENCE_RETRIES + 1):
             try:
-                async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
-                    response = await client.post(infer_url, params=query_params, files=files)
+                response = await self.client.post(
+                    infer_url,
+                    params=query_params,
+                    files=files,
+                    timeout=INFERENCE_TIMEOUT,
+                )
                 inference_duration = (datetime.now() - inference_start).total_seconds()
                 logger.info(
                     "Inference completed in %.1fs with status %s (attempt %s/%s)",
@@ -135,8 +181,15 @@ class SegmentationService:
                 return {
                     "error": True,
                     "stage": "inference_timeout",
-                    "message": f"Inference exceeded timeout after {elapsed:.1f}s. Try with smaller volume or different model.",
+                    "message": (
+                        f"Inference exceeded timeout after {elapsed:.1f}s. "
+                        "Try with smaller volume or different model."
+                    ),
                     "elapsed_seconds": elapsed,
+                    "volume_uid": series_instance_uid,
+                    "model": clean_model,
+                    "prompt": self._first_text_prompt(inference_params),
+                    "retry_count": attempt,
                 }
             except (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadError) as e:
                 last_exc = e
@@ -162,23 +215,48 @@ class SegmentationService:
                     )
             except Exception as e:
                 logger.exception("Inference request failed (attempt %s/%s)", attempt, _MAX_INFERENCE_RETRIES)
-                return {"error": True, "stage": "inference_request", "message": str(e)}
+                return {
+                    "error": True,
+                    "stage": "inference_request",
+                    "message": str(e),
+                    "volume_uid": series_instance_uid,
+                    "model": clean_model,
+                    "prompt": self._first_text_prompt(inference_params),
+                    "retry_count": attempt,
+                }
 
         if last_exc is not None:
             # All retries exhausted for a transient connection error
             logger.exception("Inference request failed after all retries", exc_info=last_exc)
-            return {"error": True, "stage": "inference_request", "message": str(last_exc)}
+            return {
+                "error": True,
+                "stage": "inference_request",
+                "message": str(last_exc),
+                "volume_uid": series_instance_uid,
+                "model": clean_model,
+                "prompt": self._first_text_prompt(inference_params),
+                "retry_count": _MAX_INFERENCE_RETRIES,
+            }
 
-        result = {
+        result: InferenceResult = {
+            "error": False,
+            "stage": "completed",
+            "message": "Segmentation completed",
+            "volume_uid": series_instance_uid,
+            "model": clean_model,
+            "prompt": self._first_text_prompt(inference_params),
             "endpoint": infer_url,
             "query_params": query_params,
             "sent_params": inference_params,
             "status_code": response.status_code,
-            "inference_duration_seconds": inference_duration
+            "inference_duration_seconds": inference_duration,
+            "retry_count": attempt,
         }
 
         if response.status_code != 200:
             result["error"] = True
+            result["stage"] = "inference_response"
+            result["message"] = f"MONAI inference returned HTTP {response.status_code}"
             result["server_response"] = response.text[:500]
             logger.error("Inference failed with status %s: %s", response.status_code, response.text[:200])
             return result
@@ -197,7 +275,7 @@ class SegmentationService:
         # ==== parse the nrrd and extract centroids ijk =====
 
         # parse the nrrd data into numpy array and header
-        image, header = parse_nrrd_data(nrrd_data)
+        image, header = await asyncio.to_thread(parse_nrrd_data, nrrd_data)
         raw_unique = np.unique(image)
         raw_max = float(image.max())
         raw_foreground = int((image > 0).sum())
@@ -232,57 +310,6 @@ class SegmentationService:
             image.dtype,
             list(header.keys()),
         )
-        labels = []
-        async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
-            try:
-                response_info = await client.get(f"{self.monai_url}/info/")
-                if response_info.status_code == 200:
-                    labels = response_info.json().get("labels", [])
-                else:
-                    logger.warning("MONAI Label /info/ returned %s", response_info.status_code)
-
-            except Exception:
-                logger.exception("Error fetching MONAI Label info")
-
-        logger.info("Available labels in MONAI Label: %s", labels)
-
-        # the centroid world and image coordinates
-
-        centroids_ijk = {}
-
-        for key, value in centroids.items():
-            segment_index = int(value[0])           # same as parseInt(..., 10)
-            image_coords = [float(v) for v in value[1:]]
-            centroids_ijk[segment_index] = {
-                "image": image_coords,
-                "world": []
-            }
-        # ==== create the segmentation object =====
-
-        segmentation_object = {
-            "id": series_instance_uid,
-            "label": f"Segmentation_{series_instance_uid}",
-            "segments": [
-                {
-                    "segmentIndex": idx,
-                    "label": label,
-                    "isActive": True,
-                    "isVisible": True
-                }
-                for idx, label in enumerate(labels, start=1)
-            ],
-            "isActive": True,
-            "activeSegmentIndex": 1,
-            "scalarData": image,
-            "FrameOfReferenceUID": frame_of_reference_uid,
-            "centroidsIJK": centroids_ijk
-        }
-
-        logger.info(
-            "Constructed segmentation object with %s segments",
-            len(segmentation_object["segments"]),
-        )
-
         # ========== create pydicom datasets for the original series ============
         dicom_datasets = await self.fetch_source_datasets_from_orthanc(
             series_instance_uid=series_instance_uid
@@ -301,8 +328,7 @@ class SegmentationService:
                 family=codes.cid7162.ArtificialIntelligence
             )
         # =========== create segmentation description =================
-        labelmap_np: np.ndarray = segmentation_object["scalarData"]
-        labelmap_np = labelmap_np.astype(np.uint8)
+        labelmap_np = image.astype(np.uint8)
         # MONAI returns (1, X, Y, Z); squeeze the leading dim to get (X, Y, Z).
         if labelmap_np.ndim == 4 and labelmap_np.shape[0] == 1:
             labelmap_np = labelmap_np.squeeze(0)
@@ -311,6 +337,31 @@ class SegmentationService:
 
         # VoxTell always returns binary masks — binarize with >0
         labelmap_np = (labelmap_np > 0).astype(np.uint8)
+        expected_shape = (num_slices, int(rows), int(cols))
+        original_shape = tuple(int(value) for value in labelmap_np.shape)
+        geometry_adjusted = original_shape != expected_shape
+        if geometry_adjusted:
+            zoom = tuple(
+                target / source
+                for source, target in zip(original_shape, expected_shape)
+            )
+            labelmap_np = await asyncio.to_thread(
+                ndimage.zoom,
+                labelmap_np,
+                zoom,
+                order=0,
+                prefilter=False,
+            )
+            labelmap_np = (labelmap_np > 0).astype(np.uint8)
+            logger.warning(
+                "Resampled mask with nearest-neighbor interpolation from %s "
+                "to source DICOM shape %s",
+                original_shape,
+                expected_shape,
+            )
+        result["geometry_adjusted"] = geometry_adjusted
+        result["original_mask_shape"] = list(original_shape)
+        result["final_mask_shape"] = list(labelmap_np.shape)
 
         logger.info(
             "After binarisation: unique=%s foreground_voxels=%s",
@@ -337,7 +388,9 @@ class SegmentationService:
             labelmap_np.shape,
         )
 
-        seg = hd.seg.Segmentation(
+        seg = await asyncio.to_thread(
+            partial(
+                hd.seg.Segmentation,
                 source_images=dicom_datasets,  # references + geometry
                 pixel_array=labelmap_np,
                 segmentation_type=hd.seg.SegmentationTypeValues.BINARY,
@@ -356,6 +409,7 @@ class SegmentationService:
                 device_serial_number='XYZ',
                 omit_empty_frames=False,
             )
+        )
         referenced_frames = (
             len(seg.PerFrameFunctionalGroupsSequence)
             if hasattr(seg, "PerFrameFunctionalGroupsSequence")
@@ -371,71 +425,96 @@ class SegmentationService:
 
         # ========== saving to orthanc ====================
 
+        seg_uid = str(seg.SeriesInstanceUID)
+        result["segmentation_series_uid"] = seg_uid
         seg_bytes_io = io.BytesIO()
-        seg.save_as(seg_bytes_io)
+        await asyncio.to_thread(seg.save_as, seg_bytes_io)
         seg_bytes_io.seek(0)
-        async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT) as client:
-            headers = {"Content-Type": "application/dicom"}
-            response = await client.post(f"{self.orthanc_url}/instances", headers=headers, content=seg_bytes_io.read())
+        headers = {"Content-Type": "application/dicom"}
+        response = await self.client.post(
+            f"{self.orthanc_url}/instances",
+            headers=headers,
+            content=seg_bytes_io.read(),
+            timeout=INFERENCE_TIMEOUT,
+        )
 
-            if response.status_code in (200, 201):
-                instance_id = response.json()["ID"]
-                logger.info(f"DICOM-SEG successfully uploaded to Orthanc. InstanceID: {instance_id}")
-                await self._sync_uploaded_segmentation_series(instance_id, seg.SeriesInstanceUID)
-            else:
-                logger.error("Failed to upload DICOM-SEG: %s %s", response.status_code, response.text)
-                result["upload_error"] = True
-                result["upload_status_code"] = response.status_code
-                result["upload_response"] = response.text[:500]
+        if response.status_code in (200, 201):
+            instance_id = response.json()["ID"]
+            result["orthanc_instance_id"] = instance_id
+            logger.info(
+                "DICOM-SEG successfully uploaded to Orthanc. InstanceID: %s",
+                instance_id,
+            )
+            result["sync_succeeded"] = await self._sync_uploaded_segmentation_series(
+                instance_id,
+                seg_uid,
+            )
+        else:
+            logger.error("Failed to upload DICOM-SEG: %s %s", response.status_code, response.text)
+            result["error"] = True
+            result["stage"] = "orthanc_upload"
+            result["message"] = f"Orthanc upload returned HTTP {response.status_code}"
+            result["upload_error"] = True
+            result["upload_status_code"] = response.status_code
+            result["upload_response"] = response.text[:500]
 
         return result
 
-    async def _sync_uploaded_segmentation_series(self, instance_id: str, dicom_series_uid: str) -> None:
+    async def _sync_uploaded_segmentation_series(
+        self,
+        instance_id: str,
+        dicom_series_uid: str,
+    ) -> bool:
         """
         Proactively sync the newly uploaded SEG instead of waiting for Orthanc's
         Lua stable-series webhook. The Lua hook can be delayed or time out when
         MONAI is busy with the next large inference.
         """
         try:
-            async with httpx.AsyncClient(timeout=QUICK_TIMEOUT) as client:
-                instance_response = await client.get(f"{self.orthanc_url}/instances/{instance_id}")
-                if instance_response.status_code != 200:
-                    logger.warning(
-                        "Could not resolve uploaded SEG instance %s for direct sync: status=%s",
-                        instance_id,
-                        instance_response.status_code,
-                    )
-                    return
-
-                orthanc_series_id = instance_response.json().get("ParentSeries")
-                if not orthanc_series_id:
-                    logger.warning("Uploaded SEG instance %s has no ParentSeries.", instance_id)
-                    return
-
-                sync_response = await client.post(
-                    f"{self.monai_url}/sync/orthanc-webhook",
-                    json={
-                        "change_type": "stable_series",
-                        "resource_id": orthanc_series_id,
-                        "level": "series",
-                        "modality": "SEG",
-                        "series_uid": str(dicom_series_uid),
-                    },
+            instance_response = await self.client.get(
+                f"{self.orthanc_url}/instances/{instance_id}",
+                timeout=QUICK_TIMEOUT,
+            )
+            if instance_response.status_code != 200:
+                logger.warning(
+                    "Could not resolve uploaded SEG instance %s for direct sync: status=%s",
+                    instance_id,
+                    instance_response.status_code,
                 )
-                if sync_response.status_code == 200:
-                    logger.info(
-                        "Direct Orthanc sync accepted for uploaded SEG series: orthanc_series_id=%s",
-                        orthanc_series_id,
-                    )
-                else:
-                    logger.warning(
-                        "Direct Orthanc sync failed for uploaded SEG series %s: status=%s body=%s",
-                        orthanc_series_id,
-                        sync_response.status_code,
-                        sync_response.text[:200],
-                    )
+                return False
+
+            orthanc_series_id = instance_response.json().get("ParentSeries")
+            if not orthanc_series_id:
+                logger.warning("Uploaded SEG instance %s has no ParentSeries.", instance_id)
+                return False
+
+            sync_response = await self.client.post(
+                f"{self.monai_url}/sync/orthanc-webhook",
+                json={
+                    "change_type": "stable_series",
+                    "resource_id": orthanc_series_id,
+                    "level": "series",
+                    "modality": "SEG",
+                    "series_uid": str(dicom_series_uid),
+                },
+                timeout=QUICK_TIMEOUT,
+            )
+            if sync_response.status_code == 200:
+                logger.info(
+                    "Direct Orthanc sync accepted for uploaded SEG series: orthanc_series_id=%s",
+                    orthanc_series_id,
+                )
+                return True
+            logger.warning(
+                "Direct Orthanc sync failed for uploaded SEG series %s: status=%s body=%s",
+                orthanc_series_id,
+                sync_response.status_code,
+                sync_response.text[:200],
+            )
+            return False
         except Exception as exc:
             logger.warning("Direct Orthanc sync failed for uploaded SEG instance %s: %s", instance_id, exc)
+            return False
 
     @staticmethod
     def _normalize_label_info(label_info) -> list[str]:
@@ -444,6 +523,90 @@ class SegmentationService:
         if isinstance(label_info, str):
             return [label.strip().lower() for label in label_info.split(",") if label.strip()]
         return ["segmentation"]
+
+    @staticmethod
+    def _first_text_prompt(params: dict[str, Any]) -> str | None:
+        prompts = params.get("text_prompts")
+        if isinstance(prompts, list) and prompts:
+            return str(prompts[0])
+        if isinstance(prompts, str):
+            return prompts
+        return None
+
+    @staticmethod
+    def _physical_slice_position(dataset: pydicom.Dataset) -> float | None:
+        try:
+            orientation = np.asarray(dataset.ImageOrientationPatient, dtype=float)
+            position = np.asarray(dataset.ImagePositionPatient, dtype=float)
+            if orientation.size != 6 or position.size != 3:
+                return None
+            normal = np.cross(orientation[:3], orientation[3:])
+            if np.linalg.norm(normal) == 0:
+                return None
+            return float(np.dot(position, normal))
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _sort_source_datasets(
+        cls,
+        datasets: list[pydicom.Dataset],
+    ) -> list[pydicom.Dataset]:
+        if not datasets:
+            raise ValueError("Cannot sort an empty DICOM series")
+        expected_rows = int(datasets[0].Rows)
+        expected_columns = int(datasets[0].Columns)
+        for dataset in datasets:
+            if (
+                int(dataset.Rows) != expected_rows
+                or int(dataset.Columns) != expected_columns
+            ):
+                raise ValueError("DICOM source frames have inconsistent dimensions")
+
+        physical_positions = [cls._physical_slice_position(ds) for ds in datasets]
+        if all(value is not None for value in physical_positions):
+            reference_orientation = np.asarray(
+                datasets[0].ImageOrientationPatient,
+                dtype=float,
+            )
+            for dataset in datasets[1:]:
+                orientation = np.asarray(
+                    dataset.ImageOrientationPatient,
+                    dtype=float,
+                )
+                if not np.allclose(
+                    orientation,
+                    reference_orientation,
+                    rtol=1e-5,
+                    atol=1e-5,
+                ):
+                    raise ValueError(
+                        "DICOM source frames have inconsistent orientations"
+                    )
+            paired = sorted(
+                zip(physical_positions, datasets),
+                key=lambda item: float(item[0]),
+            )
+            sorted_positions = [float(item[0]) for item in paired]
+            if len(sorted_positions) > 1:
+                spacing = np.diff(sorted_positions)
+                if np.any(spacing <= 0):
+                    raise ValueError("DICOM slices have duplicate physical positions")
+                if not np.allclose(spacing, np.median(spacing), rtol=0.05, atol=1e-3):
+                    logger.warning(
+                        "Source DICOM slice spacing is non-uniform: %s",
+                        spacing.tolist(),
+                    )
+            return [dataset for _, dataset in paired]
+
+        logger.warning(
+            "ImagePositionPatient/ImageOrientationPatient unavailable; "
+            "falling back to InstanceNumber ordering"
+        )
+        return sorted(
+            datasets,
+            key=lambda ds: int(getattr(ds, "InstanceNumber", 0) or 0),
+        )
 
     async def fetch_source_datasets_from_orthanc(
         self,
@@ -455,68 +618,55 @@ class SegmentationService:
         Returns list of pydicom.Dataset objects.
         """
         timeout_config = httpx.Timeout(timeout)
+        logger.info("Searching series by SeriesInstanceUID: %s", series_instance_uid)
 
-        async with httpx.AsyncClient(timeout=timeout_config) as client:
-            logger.info("Searching series by SeriesInstanceUID: %s", series_instance_uid)
+        find_payload = {
+            "Level": "Series",
+            "Query": {"SeriesInstanceUID": series_instance_uid},
+        }
+        response = await self.client.post(
+            f"{self.orthanc_url}/tools/find",
+            json=find_payload,
+            timeout=timeout_config,
+        )
+        response.raise_for_status()
+        results = response.json()
+        if not results:
+            raise ValueError(
+                f"Series with SeriesInstanceUID {series_instance_uid} not found in Orthanc"
+            )
 
-            # find the internal series id
-            find_payload = {
-                "Level": "Series",
-                "Query": {"SeriesInstanceUID": series_instance_uid}
-            }
-            response = await client.post(f"{self.orthanc_url}/tools/find", json=find_payload)
-            response.raise_for_status()
-            results = response.json()
+        series_id = results[0]
+        series_response = await self.client.get(
+            f"{self.orthanc_url}/series/{series_id}",
+            timeout=timeout_config,
+        )
+        series_response.raise_for_status()
+        instance_ids = series_response.json().get("Instances", [])
+        if not instance_ids:
+            raise ValueError(f"No instances found in series {series_instance_uid}")
 
-            if not results:
-                raise ValueError(f"Series with SeriesInstanceUID {series_instance_uid} not found in Orthanc")
-
-            series_id = results[0]
-            logger.info("Resolved Orthanc series_id: %s", series_id)
-
-            # get list of Instance IDs
-            series_response = await client.get(f"{self.orthanc_url}/series/{series_id}")
-            series_response.raise_for_status()
-            series_data = series_response.json()
-            instance_ids = series_data.get("Instances", [])
-
-            if not instance_ids:
-                raise ValueError(f"No instances found in series {series_instance_uid}")
-
-            logger.info("Found %s instances in series %s", len(instance_ids), series_instance_uid)
-
-            # download each instance file and parse to pydicom.Dataset
-            dicom_paths = []
-            with tempfile.TemporaryDirectory(prefix="orthanc-dicom-") as temp_dir_name:
-                temp_dir = Path(temp_dir_name)
-                for i, inst_id in enumerate(instance_ids):
-                    file_url = f"{self.orthanc_url}/instances/{inst_id}/file"
-                    file_response = await client.get(file_url)
-                    file_response.raise_for_status()
-
-                    # save to tmp
-                    temp_path = temp_dir / f"instance_{i:06d}.dcm"
-                    temp_path.write_bytes(file_response.content)
-
-                    # Load with pydicom to get InstanceNumber for sorting
-                    try:
-                        ds = pydicom.dcmread(str(temp_path))
-                        dicom_paths.append((ds, temp_path))
-                        logger.debug("Saved and read %s -> %s", inst_id, temp_path)
-                    except Exception as e:
-                        logger.warning("Failed pydicom read for %s: %s", inst_id, e)
-                        temp_path.unlink(missing_ok=True)
-                        continue
-
-                if not dicom_paths:
-                    raise ValueError("No valid DICOM files loaded")
-
-                # sort by InstanceNumber (0020,0013), default to 0 if missing
-                dicoms_sorted = sorted(
-                    dicom_paths,
-                    key=lambda x: int(x[0].get((0x0020, 0x0013), pydicom.DataElement((0x0020, 0x0013), 'IS', '0')).value or 0)
+        datasets: list[pydicom.Dataset] = []
+        for instance_id in instance_ids:
+            file_response = await self.client.get(
+                f"{self.orthanc_url}/instances/{instance_id}/file",
+                timeout=timeout_config,
+            )
+            file_response.raise_for_status()
+            try:
+                dataset = await asyncio.to_thread(
+                    pydicom.dcmread,
+                    io.BytesIO(file_response.content),
                 )
+                datasets.append(dataset)
+            except Exception as exc:
+                logger.warning("Failed pydicom read for %s: %s", instance_id, exc)
 
-                source_images = [ds for ds, _ in dicoms_sorted]
-                logger.info("Loaded and sorted %s pydicom datasets", len(source_images))
-                return source_images
+        if not datasets:
+            raise ValueError("No valid DICOM files loaded")
+        source_images = self._sort_source_datasets(datasets)
+        logger.info(
+            "Loaded and physically sorted %s pydicom datasets",
+            len(source_images),
+        )
+        return source_images
