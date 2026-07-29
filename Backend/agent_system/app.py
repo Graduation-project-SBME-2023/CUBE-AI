@@ -1208,18 +1208,50 @@ async def get_segmentation_mask(
             nifti_path = path
             break
 
+    # Failed or rejected segmentations may still be advertised in the QC grid
+    # even though cleanup removed their mask file. Keep those entries editable
+    # by initializing an empty mask from the source volume geometry.
+    is_empty_fallback = False
     if not nifti_path:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No mask found for series '{series_uid}' in session '{session_id}'"
+        volume_path = os.path.join(
+            workspace_folder, "volumes", f"{series_uid}.nii.gz"
         )
+        if target_id and os.path.isfile(volume_path):
+            nifti_path = volume_path
+            is_empty_fallback = True
+            logger.warning(
+                "Mask missing for session=%s, pair=%s; serving an empty editable "
+                "mask using source volume geometry: %s",
+                session_id,
+                pair_id,
+                volume_path,
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"No mask or source volume found for series '{series_uid}' "
+                    f"in session '{session_id}'"
+                ),
+            )
 
-    logger.info(f"Serving mask (as NRRD) for session={session_id}, series={series_uid}: {nifti_path}")
+    logger.info(
+        "Serving %smask (as NRRD) for session=%s, series=%s, target=%s: %s",
+        "empty editable " if is_empty_fallback else "",
+        session_id,
+        series_uid,
+        target_id or "",
+        nifti_path,
+    )
 
     try:
         # Load NIfTI and convert to uint16 (matches what the frontend Uint16Array expects)
         nii = nib.load(nifti_path)
-        data = nii.get_fdata().astype(np.uint16)
+        data = (
+            np.zeros(nii.shape[:3], dtype=np.uint16)
+            if is_empty_fallback
+            else nii.get_fdata().astype(np.uint16)
+        )
 
         # Build NRRD header from NIfTI metadata to preserve orientation
         affine = nii.affine.copy()
@@ -1253,7 +1285,13 @@ async def get_segmentation_mask(
         return Response(
             content=nrrd_bytes,
             media_type="application/octet-stream",
-            headers={"Content-Disposition": f"attachment; filename={series_uid}.nrrd"},
+            headers={
+                "Content-Disposition": f"attachment; filename={pair_id}.nrrd",
+                "Cache-Control": "no-store",
+                "X-Segmentation-Empty-Fallback": (
+                    "true" if is_empty_fallback else "false"
+                ),
+            },
         )
 
     except Exception as e:
