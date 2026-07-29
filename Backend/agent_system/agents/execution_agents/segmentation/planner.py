@@ -13,12 +13,14 @@ from .contracts import (
     ClinicalPlanAudit,
     ClinicalTargetIntentPlan,
     MaskLabelCandidate,
+    REUSE_CONFIDENCE_THRESHOLD,
     ResolvedTarget,
     TargetCandidateDecisionPlan,
     TargetResolutionOutcome,
     TargetResolutionPlan,
     validate_candidate_decision_references,
     validate_candidate_references,
+    validate_audited_plan_identity,
 )
 from .model_catalog import get_enabled_segmentation_model_paths
 
@@ -95,7 +97,8 @@ ID:
 - choose an available segmentation model and automatic or interactive path;
 - call the model discovery tool and select only a model it returns;
 - never invent, infer, or rename a model;
-- if confidence is below 0.80, reuse no mask/cache candidate.
+- if candidate-equivalence confidence is below
+  {REUSE_CONFIDENCE_THRESHOLD:.2f}, reuse no mask/cache candidate.
 
 Return one JSON object only:
 {{
@@ -148,6 +151,7 @@ Critical decisions:
 Return JSON only:
 {{
   "approved": true,
+  "clinical_identity_invalid": false,
   "issues": [],
   "corrected_plan": null
 }}
@@ -155,7 +159,11 @@ Return JSON only:
 If any issue exists, return approved=false, list the issues, and return a
 complete corrected TargetResolutionPlan in corrected_plan. Use only supplied
 candidate IDs. If candidate equivalence is uncertain, reuse nothing and
-generate the exact corrected canonical prompt.
+generate the exact locked canonical prompt. A corrected plan may change
+candidate reuse or execution choices, but it MUST preserve every locked target
+ID, canonical label, anatomy, pathology, and laterality. If the locked clinical
+identity itself is wrong, set clinical_identity_invalid=true, reject it in
+issues, and return corrected_plan=null without inventing a replacement.
 """
 
 
@@ -469,6 +477,10 @@ ACTUAL CANDIDATES:
             audit.corrected_plan = _enforce_resolution_execution(
                 audit.corrected_plan
             )
+            validate_audited_plan_identity(
+                audit.corrected_plan,
+                intent_plan,
+            )
             validate_candidate_references(
                 audit.corrected_plan,
                 mask_candidates,
@@ -482,6 +494,11 @@ ACTUAL CANDIDATES:
         validate_audit,
         "Independent target auditor",
     )
+    if audit.clinical_identity_invalid:
+        raise RuntimeError(
+            "Independent target auditor rejected the locked clinical identity: "
+            + "; ".join(audit.issues)
+        )
     plan = proposed_plan if audit.approved else audit.corrected_plan
     if plan is None:
         raise RuntimeError("Independent target auditor returned no final plan")

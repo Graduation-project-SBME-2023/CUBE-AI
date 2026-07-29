@@ -80,13 +80,15 @@ async def fetch_mask_inventory(
 async def fetch_cache_candidates(
     monai_url: str,
     timeout_seconds: float = 10.0,
+    *,
+    client=None,
 ) -> tuple[list[CachePromptCandidate], str | None]:
     import httpx
 
     url = f"{monai_url.rstrip('/')}/voxtell/cache-prompts"
+    request_client = client or httpx.AsyncClient()
     try:
-        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-            response = await client.get(url)
+        response = await request_client.get(url, timeout=timeout_seconds)
         response.raise_for_status()
         payload = response.json()
         if not payload.get("available"):
@@ -108,6 +110,9 @@ async def fetch_cache_candidates(
             exc,
         )
         return [], None
+    finally:
+        if client is None:
+            await request_client.aclose()
 
 
 def resolve_voxtell_prompt(
@@ -151,28 +156,6 @@ def select_newest_matching_mask(
         if candidate_id in accepted:
             matching.append(record)
 
-    if not matching:
-        return None
-    return max(
-        matching,
-        key=lambda record: (
-            _created_at_sort_value(record),
-            str(record.get("label_series_instance_uid") or ""),
-        ),
-    )
-
-
-def select_newest_exact_target_mask(
-    records: list[dict[str, Any]],
-    canonical_label: str,
-) -> dict[str, Any] | None:
-    """Select a newly-created mask using structured exact label metadata only."""
-    expected = canonical_label.strip().casefold()
-    matching = [
-        record
-        for record in records
-        if str(record.get("target_label") or "").strip().casefold() == expected
-    ]
     if not matching:
         return None
     return max(

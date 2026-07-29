@@ -4,7 +4,11 @@ from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
 from agent_system.models.tool_logging import ProgressPayload, TextPayload
 
 from ..logging_config import emit_tool_event, emit_tool_events
-from .common import raise_for_segmentation_error, run_with_progress_heartbeat
+from .common import (
+    SegmentationPipelineError,
+    raise_for_segmentation_error,
+    run_with_progress_heartbeat,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +70,8 @@ async def run_interactive_pipeline(
         session_id=session_id,
     )
 
-    failures = []
+    failures: list[dict] = []
+    completed_results: list[dict] = []
     for index, volume_uid in enumerate(volumes, start=1):
         logger.info(
             "[%s/%s] Guiding user through interactive segmentation for volume: %s",
@@ -107,6 +112,13 @@ async def run_interactive_pipeline(
                     volume_uid=volume_uid,
                 )
                 raise_for_segmentation_error(result, volume_uid, canonical_label)
+                completed_results.append(
+                    {
+                        "volume_uid": volume_uid,
+                        "label": canonical_label,
+                        "result": result,
+                    }
+                )
                 logger.info(
                     "Completed interactive segmentation for volume %s with label %s",
                     volume_uid,
@@ -123,8 +135,32 @@ async def run_interactive_pipeline(
                 content_type="progress",
                 session_id=session_id,
             )
+        except SegmentationPipelineError as exc:
+            failures.append(exc.as_dict())
+            logger.exception("Interactive segmentation failed for %s", volume_uid)
+            await emit_tool_event(
+                event_type="tool_progress",
+                content=ProgressPayload(
+                    current=index,
+                    total=len(volumes),
+                    label="Segmenting volumes"
+                ),
+                content_type="progress",
+                session_id=session_id,
+            )
         except Exception as exc:
-            failures.append((volume_uid, str(exc)))
+            failures.append(
+                {
+                    "volume_uid": volume_uid,
+                    "label": (
+                        canonical_label
+                        if "canonical_label" in locals()
+                        else ""
+                    ),
+                    "stage": "pipeline_exception",
+                    "message": str(exc),
+                }
+            )
             logger.exception("Interactive segmentation failed for %s", volume_uid)
             await emit_tool_event(
                 event_type="tool_progress",
@@ -137,4 +173,9 @@ async def run_interactive_pipeline(
                 session_id=session_id,
             )
 
-    return selected_model, failures
+    return {
+        "selected_model": selected_model,
+        "failed_uids": [failure["volume_uid"] for failure in failures],
+        "failures": failures,
+        "results": completed_results,
+    }

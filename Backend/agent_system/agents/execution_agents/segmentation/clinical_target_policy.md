@@ -33,7 +33,7 @@ used by runtime code to match labels.
   identity.
 - If equivalence is uncertain, select no mask/cache candidate and generate the
   exact canonical prompt.
-- Confidence below 0.6 is uncertain and forbids reuse.
+- Candidate-equivalence confidence below 0.6 is uncertain and forbids reuse.
 
 ## Decision examples
 
