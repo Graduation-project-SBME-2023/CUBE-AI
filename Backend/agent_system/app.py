@@ -942,6 +942,7 @@ async def segmentation_review(data: dict):
 async def upload_modified_mask(
     session_id: str = Form(...),
     series_instance_uid: str = Form(...),
+    target_id: str | None = Form(None),
     file: UploadFile = File(...)
 ):
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -954,11 +955,16 @@ async def upload_modified_mask(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create directories: {str(e)}")
     
-    file_path = os.path.join(output_dir, f"seg_{series_instance_uid}_modified.nii.gz")
+    pair_id = (
+        f"{series_instance_uid}__{target_id}"
+        if target_id
+        else series_instance_uid
+    )
+    file_path = os.path.join(output_dir, f"seg_{pair_id}_modified.nii.gz")
     # The frontend mask matches the full DICOM volume space.
     # The workspace stores volumes in 'volumes/' and masks in 'masks/'.
     base_volume_path = os.path.join(workspace_folder, "volumes", f"{series_instance_uid}.nii.gz")
-    original_mask_path = os.path.join(workspace_folder, "masks", f"{series_instance_uid}.nii.gz")
+    original_mask_path = os.path.join(workspace_folder, "masks", f"{pair_id}.nii.gz")
     
     try:
         import nibabel as nib
@@ -1043,7 +1049,11 @@ async def upload_modified_mask(
 
 
 @app.get("/segmentation-review/mask/{session_id}/{series_uid}")
-async def get_segmentation_mask(session_id: str, series_uid: str):
+async def get_segmentation_mask(
+    session_id: str,
+    series_uid: str,
+    target_id: str | None = Query(None),
+):
     """
     Serve the agent-generated mask for a given session and series UID as an NRRD file.
     The mask is converted from NIfTI (.nii.gz) to NRRD on-the-fly so the existing
@@ -1066,9 +1076,10 @@ async def get_segmentation_mask(session_id: str, series_uid: str):
     workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
 
     # Search locations in priority order
+    pair_id = f"{series_uid}__{target_id}" if target_id else series_uid
     candidates = [
-        os.path.join(workspace_folder, "temp_segmentations", f"seg_{series_uid}_modified.nii.gz"),
-        os.path.join(workspace_folder, "masks", f"{series_uid}.nii.gz"),
+        os.path.join(workspace_folder, "temp_segmentations", f"seg_{pair_id}_modified.nii.gz"),
+        os.path.join(workspace_folder, "masks", f"{pair_id}.nii.gz"),
     ]
 
     nifti_path = None

@@ -45,16 +45,38 @@ async def segmentation_tool(workspace_folder: str | None = None):
         output_data = {
             "agent_id": "segmentation_agent",
             "agent_role": "roi_segmentation",
-            "status": "completed",
+            "status": result.get("status", "failed"),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "inputs": {"workspace_folder": workspace_folder},
             "outputs": {
-                "files": {},
-                "metrics": {},
-                "summary": "Segmentation completed."
+                "files": {
+                    "manifest": result.get("manifest_path"),
+                    "volumes_dir": str(Path(workspace_folder) / "volumes"),
+                    "masks_dir": str(Path(workspace_folder) / "masks"),
+                },
+                "metrics": {
+                    "targets": result.get("targets", []),
+                    "pair_count": result.get("pair_count", 0),
+                    "accepted_count": result.get("accepted_count", 0),
+                    "reused_count": result.get("reused_count", 0),
+                    "generated_count": result.get("generated_count", 0),
+                },
+                "summary": (
+                    f"Segmentation {result.get('status', 'failed')} with "
+                    f"{result.get('accepted_count', 0)}/"
+                    f"{result.get('pair_count', 0)} accepted volume-target pairs."
+                )
             },
-            "errors": [],
-            "warnings": []
+            "errors": (
+                result.get("failures", [])
+                if result.get("status") == "failed"
+                else []
+            ),
+            "warnings": (
+                result.get("failures", [])
+                if result.get("status") == "partial"
+                else []
+            )
         }
         output_path = Path(outputs_dir) / "segmentation_agent_output.json"
         output_path.write_text(json.dumps(output_data, indent=2), encoding="utf-8")
@@ -168,14 +190,17 @@ After completing segmentation, you MUST call write_agent_output with:
   - status: "completed" (or "failed"/"partial")
   - inputs: {{"workspace_folder": "{workspace_folder}"}}
   - output_files: {{
-      "labels_dir": "labels_data/",
+      "manifest": "segmentation_manifest.json",
       "volumes_dir": "volumes/",
       "masks_dir": "masks/"
     }}
   - output_metrics: {{
       "segmentation_method": "<method used, e.g. VoxTell text-prompt segmentation>",
-      "volumes_segmented": <number>,
-      "roi_description": "<what was segmented>"
+      "targets": ["<canonical target labels>"],
+      "pair_count": <number of volume-target pairs>,
+      "accepted_count": <number accepted or modified>,
+      "reused_count": <number of existing masks reused>,
+      "generated_count": <number of masks newly generated>
     }}
   - output_summary: "<concise summary of segmentation results>"
   - warnings: [<any quality warnings, including any volumes that failed segmentation>]

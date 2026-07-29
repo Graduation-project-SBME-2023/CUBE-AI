@@ -980,6 +980,8 @@ export default class InteractiveSegmentation extends BaseTab {
       const urlParams = new URLSearchParams(window.location.search);
       const sessionId = urlParams.get('session_id');
       const seriesUid = urlParams.get('series_uid') || this.props.viewConstants.SeriesInstanceUID;
+      const targetId = urlParams.get('target_id');
+      const pairId = urlParams.get('pair_id') || seriesUid;
 
       if (!sessionId) {
         alert("No session ID found.");
@@ -1040,6 +1042,9 @@ export default class InteractiveSegmentation extends BaseTab {
       const formData = new FormData();
       formData.append('session_id', sessionId);
       formData.append('series_instance_uid', seriesUid);
+      if (targetId) {
+        formData.append('target_id', targetId);
+      }
       formData.append('dimensions', JSON.stringify(labelVolume.dimensions));
       formData.append('file', labelBlob, 'label.nii.gz');
 
@@ -1061,7 +1066,7 @@ export default class InteractiveSegmentation extends BaseTab {
           session_id: sessionId,
           accepted: [],
           rejected: [],
-          modified: [seriesUid],
+          modified: [pairId],
         }),
       });
 

@@ -20,8 +20,10 @@ async def run_automatic_pipeline(
     labels,
     selected_auto_models,
     segmentation_service,
-    session_id
+    session_id,
+    inference_prompts=None,
 ):
+    inference_prompts = inference_prompts or {}
     payload = TextPayload(message=f"Starting automatic segmentation on {len(volumes)} volumes.")
     await emit_tool_events(
         event_types=["tool_started", "tool_progress"],
@@ -64,6 +66,11 @@ async def run_automatic_pipeline(
                         model=model,
                         series_instance_uid=volume_uid,
                         label_info=label,
+                        params={
+                            "text_prompts": [
+                                inference_prompts.get(label, label)
+                            ]
+                        },
                     ),
                     session_id=session_id,
                     current=index - 0.5,

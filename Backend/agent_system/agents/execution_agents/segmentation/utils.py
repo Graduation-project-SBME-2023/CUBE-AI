@@ -22,147 +22,6 @@ from PIL import Image
 
 MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
 REQUEST_TIMEOUT_SECONDS = 10.0
-KNOWN_SEGMENTATION_MODELS = {
-    "voxtell", 
-    "vista", 
-    "segmentation_spleen", 
-    "nnunet", 
-    "deepedit", 
-    "deepgrow_2d", 
-    "deepgrow_3d", 
-    "localization_vertebra", 
-    "nninteractive", 
-    "sam"
-}
-# ===============================
-# MASK HELPERS
-# ===============================
-
-def extract_organ_label(segmentation_type: str) -> str:
-    """
-    Extracts the organ/label portion from a segmentation_type string.
-
-    The stored format is:  '{organ label}-{model}-{timestamp}-...'
-    e.g. 'liver lesion-voxtell-01:48:31 PM-g'
-
-    Strategy: split on '-' and consume tokens that look like the organ name
-    (i.e., stop at the first token that matches a known model name or looks
-    like a time HH:MM, or is a single letter suffix).  If no separator is
-    found return the whole string normalised.
-    """
-    if not segmentation_type:
-        return ""
-
-    parts = str(segmentation_type).split("-")
-    organ_parts = []
-    for part in parts:
-        p = _normalize_model_name(part)
-        # Stop if we hit a known model name or a timestamp token (HH:MM)
-        if p in KNOWN_SEGMENTATION_MODELS or re.match(r'^\d{1,2}:\d{2}', part.strip()) or (len(p) == 1 and p.isalpha()):
-            break
-        organ_parts.append(part.strip())
-    if organ_parts:
-        return " ".join(organ_parts).lower().strip()
-    return str(segmentation_type).lower().strip()
-
-
-def matches_label(segmentation_type: str, label: str) -> bool:
-    """
-    Returns True only when *label* is a semantic match for the organ portion
-    of *segmentation_type*, considering synonyms like 'splenic' == 'spleen'.
-
-    The segmentation_type format is '{organ label}-{model}-{timestamp}-...'
-    We extract just the organ part and compare it semantically to the target label.
-    """
-    from .medical_vocabulary import FLAT_MEDICAL_SYNONYMS
-    
-    def get_semantic_concepts(l: str) -> set:
-        words = str(l or "").replace("_", " ").lower().strip().split()
-        return set(FLAT_MEDICAL_SYNONYMS.get(w, w) for w in words)
-
-    organ = extract_organ_label(segmentation_type)
-    return get_semantic_concepts(organ) == get_semantic_concepts(label)
-
-def _normalize_model_name(model_name: str) -> str:
-    return str(model_name).lower().strip().replace(" ", "_")
-
-
-def segmentation_model_matches(segmentation_type: str, model_name: str) -> bool:
-    if not segmentation_type or not model_name:
-        return False
-
-    expected = _normalize_model_name(model_name)
-    return any(_normalize_model_name(part) == expected for part in str(segmentation_type).split("-"))
-
-
-def label_record_matches_model(label_record: dict, model_name: str) -> bool:
-    if not model_name:
-        return True
-
-    for key in ("name", "model_name"):
-        if _normalize_model_name(label_record.get(key, "")) == _normalize_model_name(model_name):
-            return True
-
-    return segmentation_model_matches(label_record.get("segmentation_type", ""), model_name)
-
-async def exclude_existing_masks(volumes, labels, model_name=None):
-    """
-    Returns the subset of volumes that still need segmentation.
-
-    A volume is EXCLUDED (i.e., skipped) only when it already has a mask that
-    matches BOTH the target organ AND the selected model.  If only the organ
-    matches but a different model was used, the volume stays eligible so the
-    pipeline can produce a mask with the correct model.
-
-    Parameters
-    ----------
-    volumes    : list of volume SeriesInstanceUIDs
-    labels     : list of target organ labels, e.g. ["liver"]
-    model_name : name of the selected automatic model, e.g. "voxtell".
-                 When provided, a volume is only excluded if its existing mask
-                 was produced by THIS model.  When None, any matching-organ mask
-                 is sufficient to exclude the volume (original behaviour).
-    """
-    eligible = []
-
-    for volume_uid in volumes:
-        has_mask = False
-        logger.info(f"Checking masks: volume={volume_uid}, labels={labels}")
-
-        try:
-            segmentations = await check_having_mask(volume_uid)
-
-            if not segmentations:
-                has_mask = False
-            else:
-                for seg in segmentations:
-                    seg_type = seg.get("segmentation_type", "")
-                    for label in labels:
-                        organ_ok = matches_label(seg_type, label)
-                        model_ok = label_record_matches_model(seg, model_name)
-                        if organ_ok and model_ok:
-                            has_mask = True
-                            logger.info(
-                                f"Match found: volume={volume_uid}, "
-                                f"label={label}, model={model_name}, "
-                                f"segmentation_type={seg_type}"
-                            )
-                            break
-                    if has_mask:
-                        break
-
-        except Exception:
-            logger.exception("Error checking mask for volume %s", volume_uid)
-            has_mask = False
-
-        if not has_mask:
-            eligible.append(volume_uid)
-            logger.info(f"Volume {volume_uid} added to eligible list")
-        else:
-            logger.info(f"Volume {volume_uid} excluded (matching mask exists for model='{model_name}', labels={labels})")
-
-    return eligible
-
 async def check_having_mask(volume_uid):
     """
     Checks if a segmentation mask exists for the given volume SeriesInstanceUID (volume_uid).
@@ -171,10 +30,14 @@ async def check_having_mask(volume_uid):
     url = f"{MONAI_URL}/segmentations/by-volume/{volume_uid}"
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
         response = await client.get(url)
-    if response.status_code == 200:
-        return response.json()
-    logger.warning("GET %s returned %s", url, response.status_code)
-    return []
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        raise ValueError(
+            f"Expected a segmentation list for volume {volume_uid}, "
+            f"received {type(payload).__name__}"
+        )
+    return payload
 
 def parse_multipart_response(headers, body):
     """
@@ -390,17 +253,13 @@ def ensure_required_patient_tags(datasets):
 
 async def download_and_pair_volumes(
     workspace_dir,
-    datasetlist,
-    chosen_path,
-    selected_auto_model_for_volume,
+    resolved_pairs,
     download_volumes=True,
-    target_label=None,
+    task_name="segmentation_task",
 ):
-    VOLUMES = datasetlist
-    LABELS_BY_VOLUME_URL = f"{MONAI_URL}/segmentations/by-volume/"
     DOWNLOAD_IMAGES_URL  = f"{MONAI_URL}/datastore/images"
     DOWNLOAD_LABELS_URL  = f"{MONAI_URL}/datastore/labels"
-    TASK_NAME  = f"{selected_auto_model_for_volume}_segmentation_task" if selected_auto_model_for_volume else "segmentation_task"
+    TASK_NAME = task_name
 
     # where MONAI actually saves files after the POST trigger
     MONAI_BASE_DIR = Path("/app/Backend/apps")
@@ -416,119 +275,6 @@ async def download_and_pair_volumes(
     # ------------------------------------------------------------------ #
     # Helper functions remain exactly the same
     # ------------------------------------------------------------------ #
-    def fetch_labels_for_volume(volume_uid):
-        url = LABELS_BY_VOLUME_URL + volume_uid
-        try:
-            r = requests.get(url, timeout=10)
-            if r.status_code != 200:
-                logger.warning(f"GET {url} returned {r.status_code}")
-                return []
-            return r.json()
-        except Exception:
-            logger.exception("Error fetching labels for %s", volume_uid)
-            return []
-
-    def pick_latest_or_auto(labels, chosen_path="interactive", selected_auto_model=None, target_label=None):
-        if not labels:
-            return None
-
-        # --- Automatic path ---
-        if chosen_path == "automatic" and selected_auto_model:
-            if not target_label:
-                logger.warning(
-                    "Automatic mask selection requires target_label when model='%s'; skipping.",
-                    selected_auto_model,
-                )
-                return None
-
-            # Mask selection is intentionally strict: model and organ must both match.
-            for label in labels:
-                seg_type = label.get("segmentation_type", "")
-                model_matches = label_record_matches_model(label, selected_auto_model)
-                organ_matches = matches_label(seg_type, target_label)
-                if model_matches and organ_matches:
-                    logger.info(
-                        "Selected exact mask: model='%s', organ='%s', segmentation_type='%s', UID=%s",
-                        selected_auto_model,
-                        target_label,
-                        seg_type,
-                        label.get("label_series_instance_uid"),
-                    )
-                    return label
-                elif model_matches and not organ_matches:
-                    logger.warning(
-                        "Model '%s' matched but organ did not: segmentation_type='%s', expected='%s'; skipping.",
-                        selected_auto_model,
-                        seg_type,
-                        target_label,
-                    )
-
-            logger.warning(
-                "No exact mask matched model='%s' and organ='%s'; skipping this volume.",
-                selected_auto_model,
-                target_label,
-            )
-            return None
-
-        # --- Interactive / VoxTell path ---
-        # Interactive labels may not always preserve model metadata, so prefer
-        # model+organ and then allow organ-only. Never fall back across organs.
-        if chosen_path == "interactive":
-            if target_label:
-                for label in labels:
-                    seg_type = label.get("segmentation_type", "")
-                    if selected_auto_model and label_record_matches_model(label, selected_auto_model) and matches_label(seg_type, target_label):
-                        logger.info(
-                            "Interactive exact model+organ match: model='%s', organ='%s', UID=%s",
-                            selected_auto_model,
-                            target_label,
-                            label.get("label_series_instance_uid"),
-                        )
-                        return label
-
-                for label in labels:
-                    seg_type = label.get("segmentation_type", "")
-                    if matches_label(seg_type, target_label):
-                        logger.info(
-                            "Interactive organ-only match: organ='%s', segmentation_type='%s', UID=%s",
-                            target_label,
-                            seg_type,
-                            label.get("label_series_instance_uid"),
-                        )
-                        return label
-
-                logger.warning(
-                    "Interactive path found no label matching organ='%s'; skipping this volume.",
-                    target_label,
-                )
-                return None
-
-            if selected_auto_model:
-                for label in labels:
-                    if label_record_matches_model(label, selected_auto_model):
-                        logger.info(
-                            "Interactive model-only match for '%s' without target_label: UID=%s",
-                            selected_auto_model,
-                            label.get("label_series_instance_uid"),
-                        )
-                        return label
-                logger.warning(
-                    "Interactive path had model='%s' but no target_label and no model match; skipping.",
-                    selected_auto_model,
-                )
-                return None
-
-            logger.warning(
-                "Interactive path has no model or target_label; skipping instead of selecting the newest label."
-            )
-            return None
-
-        logger.warning(
-            "Unknown segmentation path '%s'; skipping instead of selecting the newest label.",
-            chosen_path,
-        )
-        return None
-
     def trigger_download(url, task_name, uids_list):
         if not uids_list:
             return False
@@ -608,7 +354,7 @@ async def download_and_pair_volumes(
         logger.info("Copied volume -> %s (%.2f MB)", dst, size_mb)
         return dst
 
-    def copy_and_normalize_label(src_path, volume_uid, dest_dir):
+    def copy_and_normalize_label(src_path, volume_uid, dest_dir, target_id=None):
         """
         Normalize a segmentation label NIfTI and save it as a binary {0,1} mask.
 
@@ -616,7 +362,12 @@ async def download_and_pair_volumes(
           1. Binary {0, 255}  – simple threshold to {0,1}.
           2. Binary {0, 1}    – already correct, save as-is.
         """
-        dst = os.path.join(dest_dir, f"{volume_uid}.nii.gz")
+        filename = (
+            f"{volume_uid}__{target_id}.nii.gz"
+            if target_id
+            else f"{volume_uid}.nii.gz"
+        )
+        dst = os.path.join(dest_dir, filename)
         try:
             nii  = nib.load(src_path)
             
@@ -658,41 +409,19 @@ async def download_and_pair_volumes(
     #  1. pair volumes and labels                                        #
     # ------------------------------------------------------------------ #
     volumes_to_process = []
-    labels_to_process  = []
+    labels_to_process = []
+    target_ids_to_process = []
 
-    logger.info(f"Processing {len(VOLUMES)} volumes...")
-    for idx, vol_uid in enumerate(VOLUMES, 1):
-        logger.info(f"[{idx}/{len(VOLUMES)}] Volume: {vol_uid}")
-        labels = fetch_labels_for_volume(vol_uid)
-        if not labels:
-            logger.warning(f"No labels for {vol_uid}, skipping")
+    for pair in resolved_pairs:
+        volume_uid = str(pair.get("volume_uid") or "").strip()
+        label_uid = str(pair.get("label_uid") or "").strip()
+        target_id = str(pair.get("target_id") or "").strip()
+        if not volume_uid or not label_uid or not target_id:
+            logger.error("Invalid resolved segmentation pair: %s", pair)
             continue
-        # Pass the model name for BOTH automatic and interactive paths so that
-        # pick_latest_or_auto can do an exact model-name match instead of
-        # falling back to the latest timestamp (which could be a mask for a
-        # different organ from a previous experiment).
-        selected_model = selected_auto_model_for_volume
-        latest = pick_latest_or_auto(labels, chosen_path=chosen_path, selected_auto_model=selected_model, target_label=target_label)
-        
-        if not latest:
-            if chosen_path == "interactive":
-                logger.info(f"No existing label found for {vol_uid}, but keeping volume for interactive manual segmentation.")
-                volumes_to_process.append(vol_uid)
-                labels_to_process.append(None)
-            continue
-            
-        label_uid = latest.get("label_series_instance_uid")
-        if not label_uid:
-            if chosen_path == "interactive":
-                logger.info(f"Empty label UID for {vol_uid}, but keeping volume for interactive manual segmentation.")
-                volumes_to_process.append(vol_uid)
-                labels_to_process.append(None)
-            continue
-            
-        vol_uid_confirmed = latest.get("volume_series_instance_uid") or vol_uid
-        logger.info(f"Paired: volume={vol_uid_confirmed}  label={label_uid}")
-        volumes_to_process.append(vol_uid_confirmed)
+        volumes_to_process.append(volume_uid)
         labels_to_process.append(label_uid)
+        target_ids_to_process.append(target_id)
 
     if not volumes_to_process:
         logger.error("Nothing to process; aborting.")
@@ -704,7 +433,11 @@ async def download_and_pair_volumes(
     #  2. trigger downloads (POST; MONAI saves to its local dirs)        #
     # ------------------------------------------------------------------ #
     if download_volumes:
-        trigger_download(DOWNLOAD_IMAGES_URL, TASK_NAME, volumes_to_process)
+        trigger_download(
+            DOWNLOAD_IMAGES_URL,
+            TASK_NAME,
+            list(dict.fromkeys(volumes_to_process)),
+        )
     
     valid_labels = [uid for uid in labels_to_process if uid is not None]
     trigger_download(DOWNLOAD_LABELS_URL, TASK_NAME, valid_labels)
@@ -759,7 +492,9 @@ async def download_and_pair_volumes(
 
     successful = []
     skipped_oom = []
-    for vol_uid, label_uid in zip(volumes_to_process, labels_to_process):
+    for vol_uid, label_uid, target_id in zip(
+        volumes_to_process, labels_to_process, target_ids_to_process
+    ):
         label_src = found_labels.get(label_uid) if label_uid else None
         if not label_src and label_uid:
             logger.error(
@@ -767,12 +502,6 @@ async def download_and_pair_volumes(
                 f"(label_uid={label_uid}); skipping pair"
             )
             continue
-        elif not label_src and not label_uid:
-            if chosen_path == "interactive":
-                logger.info(f"Interactive manual volume {vol_uid} has no label, proceeding with volume only.")
-            else:
-                logger.error(f"No label UID for volume={vol_uid} and path is not interactive; skipping pair")
-                continue
 
         vol_result = True  # Default to True if we aren't downloading volumes
         if download_volumes:
@@ -784,17 +513,17 @@ async def download_and_pair_volumes(
 
         if label_src:
             label_result = copy_and_normalize_label(
-                label_src, vol_uid, FINAL_DIR_LABEL,
+                label_src, vol_uid, FINAL_DIR_LABEL, target_id=target_id,
             )
         else:
             label_result = True # No label to process for interactive manual
 
         if label_result == "SKIPPED_OOM":
-            skipped_oom.append(vol_uid)
+            skipped_oom.append({"volume_uid": vol_uid, "target_id": target_id})
             continue
 
         if vol_result and label_result:
-            successful.append(vol_uid)
+            successful.append({"volume_uid": vol_uid, "target_id": target_id})
         else:
             logger.error("Failed to copy vol/label for %s", vol_uid)
 
@@ -824,10 +553,19 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
     os.makedirs(output_dir, exist_ok=True)
     generated_volumes = []
 
-    for uid in uids:
+    for item in uids:
+        if isinstance(item, dict):
+            uid = str(item.get("volume_uid") or item.get("seriesInstanceUid") or "")
+            target_id = str(item.get("target_id") or item.get("targetId") or "")
+            target_label = item.get("canonical_label") or item.get("targetLabel")
+        else:
+            uid = str(item)
+            target_id = ""
+            target_label = None
+        pair_id = f"{uid}__{target_id}" if target_id else uid
         vol_path = os.path.join(volumes_dir, f"{uid}.nii.gz")
-        mask_path = os.path.join(masks_dir, f"{uid}.nii.gz")
-        gif_filename = f"{uid}.gif"
+        mask_path = os.path.join(masks_dir, f"{pair_id}.nii.gz")
+        gif_filename = f"{pair_id}.gif"
         gif_path = os.path.join(output_dir, gif_filename)
 
         if not os.path.exists(vol_path) or not os.path.exists(mask_path):
@@ -924,6 +662,9 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
 
                 volume_entry = {
                     "seriesInstanceUid": uid,
+                    "pairId": pair_id,
+                    "targetId": target_id or None,
+                    "targetLabel": target_label,
                     "gifUrl": f"http://localhost:8150/files/{workspace_folder_name}/overlays/{gif_filename}",
                     "isEmptyMask": is_empty_mask
                 }
@@ -977,7 +718,12 @@ def cleanup_discarded(workspace_dir, accepted_uids, modified_uids):
     masks_dir = os.path.join(workspace_dir, "masks")
     
     # we want to keep the NIfTI volume files for both accepted and modified
-    uids_to_keep_volumes = set(accepted_uids) | set(modified_uids)
+    accepted_keys = set(accepted_uids)
+    modified_keys = set(modified_uids)
+    pair_keys_to_keep = accepted_keys | modified_keys
+    uids_to_keep_volumes = {
+        key.split("__", 1)[0] for key in pair_keys_to_keep
+    }
     
     # cleanup volumes
     if os.path.exists(volumes_dir):
@@ -989,11 +735,12 @@ def cleanup_discarded(workspace_dir, accepted_uids, modified_uids):
                     logger.info(f"Removed discarded volume: {fname}")
 
     # cleanup masks (labels) — keep for both accepted AND modified
-    uids_to_keep_masks = set(accepted_uids) | set(modified_uids)
     if os.path.exists(masks_dir):
         for fname in os.listdir(masks_dir):
             if fname.lower().endswith(".nii.gz"):
-                uid = fname.replace(".nii.gz", "")
-                if uid not in uids_to_keep_masks:
+                pair_key = fname.replace(".nii.gz", "")
+                volume_uid = pair_key.split("__", 1)[0]
+                keep = pair_key in pair_keys_to_keep or volume_uid in pair_keys_to_keep
+                if not keep:
                     os.remove(os.path.join(masks_dir, fname))
                     logger.info(f"Removed mask (discarded): {fname}")

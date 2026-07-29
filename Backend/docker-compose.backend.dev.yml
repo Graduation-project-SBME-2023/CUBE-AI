@@ -1,4 +1,3 @@
-
 name: CUBE.AI
 services:
   monailabel:
@@ -15,9 +14,10 @@ services:
       NNUNET_DIR: /NN_Unet
       GENERAL_DATA_DIR: /General_Data
     command: >-
-      sh -c "alembic -c /alembic/alembic.ini upgrade head &&
-      if [ ! -f /models/voxtell_v1.1/text_embeddings_cache.pkl ]; then python /apps/radiology/caching_generator.py; fi &&
+      sh -c " pip install  'torch==2.5.1' --no-deps --index-url https://download.pytorch.org/whl/cu124 &&
+      pip install  'torchvision==0.20.1' --no-deps --index-url https://download.pytorch.org/whl/cu124 &&
+      alembic -c /alembic/alembic.ini upgrade head &&
+      if [ ! -f /models/voxtell_v1.1/text_embeddings_cache.pkl ]; then python /apps/radiology/voxtell_cache_builder.py; fi &&
       python /monailabel/server_start.py"
     env_file:
       - .env
-

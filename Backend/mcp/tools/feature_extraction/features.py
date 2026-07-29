@@ -425,19 +425,59 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
 
         images_dict = {_extract_id(f): f for f in image_files}
         masks_dict  = {_extract_id(f): f for f in mask_files}
-        pairs = {
-            sid: {"image": images_dict[sid], "mask": masks_dict[sid]}
-            for sid in images_dict if sid in masks_dict
-        }
+
+        manifest_path = base_on_workspace_dir("segmentation_manifest.json")
+        pairs: dict[str, dict[str, str]] = {}
+        if manifest_path and os.path.isfile(manifest_path):
+            with open(manifest_path, "r", encoding="utf-8") as stream:
+                segmentation_manifest = json.load(stream)
+            for pair in segmentation_manifest.get("pairs", []):
+                if pair.get("status") != "ready":
+                    continue
+                if pair.get("review_status") not in ("accepted", "modified"):
+                    continue
+                subject_id = str(pair.get("volume_uid") or "")
+                target_id = str(pair.get("target_id") or "")
+                pair_id = str(pair.get("pair_id") or "")
+                mask_rel = str(pair.get("mask_path") or "")
+                image_path = images_dict.get(subject_id)
+                mask_path = base_on_workspace_dir(mask_rel) if mask_rel else None
+                if subject_id and target_id and pair_id and image_path and mask_path:
+                    if os.path.isfile(mask_path):
+                        pairs[pair_id] = {
+                            "image": image_path,
+                            "mask": mask_path,
+                            "subject_id": subject_id,
+                            "target_id": target_id,
+                        }
+            logger.info(
+                "Loaded %d reviewed volume-target pair(s) from %s",
+                len(pairs),
+                manifest_path,
+            )
+        else:
+            pairs = {
+                sid: {
+                    "image": images_dict[sid],
+                    "mask": masks_dict[sid],
+                    "subject_id": sid,
+                    "target_id": "roi",
+                }
+                for sid in images_dict if sid in masks_dict
+            }
 
         if not pairs:
             raise ValueError("No matching image-mask pairs found.")
 
-        paired_subject_count = len(pairs)
-        unlabeled_subject_ids = [sid for sid in pairs if _normalise_id(sid) not in target_dict]
+        paired_subject_count = len({files["subject_id"] for files in pairs.values()})
+        unlabeled_subject_ids = sorted({
+            files["subject_id"]
+            for files in pairs.values()
+            if _normalise_id(files["subject_id"]) not in target_dict
+        })
         pairs = {
-            sid: files for sid, files in pairs.items()
-            if _normalise_id(sid) in target_dict
+            pair_id: files for pair_id, files in pairs.items()
+            if _normalise_id(files["subject_id"]) in target_dict
         }
         if not pairs:
             return json.dumps({
@@ -453,7 +493,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
 
         if mask_labels_raw is None:
             found: set = set()
-            for mf in list(masks_dict.values())[:10]:
+            for mf in [files["mask"] for files in list(pairs.values())[:10]]:
                 try:
                     arr = sitk.GetArrayFromImage(sitk.ReadImage(mf))
                     for lbl in np.unique(arr):
@@ -463,7 +503,8 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                     pass
             mask_labels_raw = sorted(found) or [1]
 
-        all_features_by_label: dict = {lbl: [] for lbl in mask_labels_raw}
+        all_features_by_target: dict[str, list[dict[str, Any]]] = {}
+        features_by_subject: dict[str, dict[str, Any]] = {}
         temp_dir = tempfile.mkdtemp(dir=output_dir)
         start = time.time()
 
@@ -471,8 +512,16 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         log_tool_state(ToolEvent("tool_started", "text", payload))
 
 
-        for idx, (subject_id, files) in enumerate(pairs.items(), 1):
-            logger.info(f"Processing {subject_id} ({idx}/{len(pairs)})")
+        for idx, (pair_id, files) in enumerate(pairs.items(), 1):
+            subject_id = files["subject_id"]
+            target_id = files["target_id"]
+            logger.info(
+                "Processing %s target=%s (%d/%d)",
+                subject_id,
+                target_id,
+                idx,
+                len(pairs),
+            )
             payload = ProgressPayload(
                 current=idx,
                 total=len(pairs),
@@ -501,9 +550,32 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                             future = executor.submit(_run_extractor, files["image"], tmp_mask_path, params_file)
                             features = future.result(timeout=600)
 
-                        features["subject_id"] = subject_id
-                        features["target"] = target_dict[_normalise_id(subject_id)]
-                        all_features_by_label[lbl].append(features)
+                        target_value = target_dict[_normalise_id(subject_id)]
+                        target_row = {
+                            "subject_id": subject_id,
+                            "target": target_value,
+                            **features,
+                        }
+                        all_features_by_target.setdefault(target_id, []).append(
+                            target_row
+                        )
+
+                        wide_row = features_by_subject.setdefault(
+                            subject_id,
+                            {
+                                "subject_id": subject_id,
+                                "target": target_value,
+                            },
+                        )
+                        feature_prefix = (
+                            target_id
+                            if len(mask_labels_raw) == 1
+                            else f"{target_id}_label_{lbl}"
+                        )
+                        for feature_name, feature_value in features.items():
+                            wide_row[
+                                f"{feature_prefix}__{feature_name}"
+                            ] = feature_value
                     except concurrent.futures.TimeoutError:
                         logger.error(f"  {subject_id} label {lbl}: extraction timed out after 10 minutes — skipping")
                     except concurrent.futures.process.BrokenProcessPool:
@@ -522,9 +594,8 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
 
         csv_paths: dict = {}
         num_features: dict = {}
-        default_feature_table = None
 
-        for lbl, rows in all_features_by_label.items():
+        for target_id, rows in all_features_by_target.items():
             if not rows:
                 continue
             df = pd.DataFrame(rows)
@@ -532,19 +603,14 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
             tgt_cols = [c for c in df.columns if c.lower() in ("target", "label", "outcome")]
             feat_cols = sorted([c for c in df.columns if c not in id_cols + tgt_cols])
             df = df[id_cols + tgt_cols + feat_cols]
-            csv_path = os.path.join(output_dir, f"radiomic_features_label_{lbl}.csv")
+            csv_path = os.path.join(
+                output_dir, f"radiomic_features_target_{target_id}.csv"
+            )
             df.to_csv(csv_path, index=False)
-            csv_paths[f"label_{lbl}"] = csv_path
-            num_features[lbl] = len(feat_cols)
+            csv_paths[f"target_{target_id}"] = csv_path
+            num_features[target_id] = len(feat_cols)
 
-            # The downstream modeling agent expects exactly one row per
-            # subject. With multiple ROIs, use the first successfully
-            # extracted requested label rather than overwriting the alias
-            # with whichever label happened to be processed last.
-            if default_feature_table is None:
-                default_feature_table = df
-
-        if default_feature_table is None:
+        if not features_by_subject:
             return json.dumps({
                 "status": "error",
                 "error_message": "No radiomic features were extracted from any matched image-mask pair.",
@@ -553,13 +619,26 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
             }, indent=2)
 
         default_csv_path = os.path.join(output_dir, "radiomics_features.csv")
+        default_feature_table = pd.DataFrame(features_by_subject.values())
+        id_cols = [
+            column
+            for column in ("subject_id", "target")
+            if column in default_feature_table.columns
+        ]
+        feature_cols = sorted(
+            column
+            for column in default_feature_table.columns
+            if column not in id_cols
+        )
+        default_feature_table = default_feature_table[id_cols + feature_cols]
         default_feature_table.to_csv(default_csv_path, index=False)
         csv_paths["radiomics_features"] = default_csv_path
 
         return json.dumps({
             "status": "success",
             "csv_paths": csv_paths,
-            "num_subjects": len(pairs),
+            "num_subjects": len(features_by_subject),
+            "num_volume_target_pairs": len(pairs),
             "paired_subjects": paired_subject_count,
             "unlabeled_subject_ids": unlabeled_subject_ids,
             "num_features": num_features,

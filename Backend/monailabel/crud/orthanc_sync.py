@@ -217,6 +217,7 @@ async def _get_or_create_segmentation(
     orthanc_series_id: str,
     volume_uid: str,
     segmentation_type: str,
+    target_label: str | None,
     method: str,
     created_at: datetime = None,
 ) -> Segmentation | None:
@@ -235,6 +236,9 @@ async def _get_or_create_segmentation(
             updated = True
         if segmentation_type and not seg.segmentation_type:
             seg.segmentation_type = segmentation_type
+            updated = True
+        if target_label and not seg.target_label:
+            seg.target_label = target_label
             updated = True
         if method and not seg.method:
             seg.method = method
@@ -259,6 +263,7 @@ async def _get_or_create_segmentation(
         orthanc_series_id=orthanc_series_id,
         volume_series_instance_uid=volume_uid,
         segmentation_type=segmentation_type,
+        target_label=target_label,
         method=method,
         name=None,
         created_at=created_at,
@@ -299,6 +304,42 @@ async def _extract_referenced_series_uid(
     except Exception as e:
         logger.error("Failed extracting referenced UID: %s", e)
     return None
+
+
+async def _extract_segment_label(
+    session: aiohttp.ClientSession, series_info: dict
+) -> str | None:
+    """Return the first DICOM SegmentLabel (0062,0005) for a SEG series.
+
+    The application writes one target per DICOM-SEG series.  A missing value is
+    intentionally returned as ``None`` so legacy records remain distinguishable
+    from records with structured label metadata.
+    """
+    try:
+        instances = series_info.get("Instances", [])
+        if not instances:
+            return None
+        async with session.get(f"{ORTHANC_URL}/instances/{instances[0]}/tags") as resp:
+            if resp.status != 200:
+                return None
+            tags = await resp.json()
+
+        segment_sequence = tags.get("0062,0002")
+        if not segment_sequence or segment_sequence.get("Type") != "Sequence":
+            return None
+        sequence_items = segment_sequence.get("Value", [])
+        if not sequence_items:
+            return None
+        segment_label = sequence_items[0].get("0062,0005")
+        if isinstance(segment_label, dict):
+            value = segment_label.get("Value")
+        else:
+            value = segment_label
+        value = str(value or "").strip()
+        return value or None
+    except Exception as exc:
+        logger.warning("Failed extracting SegmentLabel: %s", exc)
+        return None
 
 
 # ----------------------------------------------------------------------
@@ -422,12 +463,14 @@ async def sync_series_to_db(
 
         if modality == "SEG":
             volume_uid = await _extract_referenced_series_uid(session, series_info)
+            target_label = await _extract_segment_label(session, series_info)
             await _get_or_create_segmentation(
                 db=db,
                 label_uid=dicom_series_uid,
                 orthanc_series_id=orthanc_series_id,
                 volume_uid=volume_uid,
                 segmentation_type=desc or "Unknown",
+                target_label=target_label,
                 method="manual" if "MANUAL" in (desc or "").upper() else "auto",
                 created_at=series_datetime,
             )

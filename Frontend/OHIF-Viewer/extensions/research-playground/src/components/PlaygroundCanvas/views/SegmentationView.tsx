@@ -34,10 +34,11 @@ function ReviewView({
             const next = { ...prev };
             let changed = false;
             volumes.forEach(v => {
+                const reviewKey = v.pairId || v.seriesInstanceUid;
                 // Default to 'accepted' if this volume hasn't been seen yet.
                 // This prevents resetting user choices when new GIFs progressively load in.
-                if (!next[v.seriesInstanceUid]) {
-                    next[v.seriesInstanceUid] = 'accepted';
+                if (!next[reviewKey]) {
+                    next[reviewKey] = 'accepted';
                     changed = true;
                 }
             });
@@ -50,20 +51,22 @@ function ReviewView({
 
     const handleAcceptAll = useCallback(() => {
         const s: Record<string, ReviewStatus> = {};
-        volumes.forEach(v => { s[v.seriesInstanceUid] = 'accepted'; });
+        volumes.forEach(v => { s[v.pairId || v.seriesInstanceUid] = 'accepted'; });
         setReviewStatus(s);
     }, [volumes]);
 
     const handleRejectAll = useCallback(() => {
         const s: Record<string, ReviewStatus> = {};
-        volumes.forEach(v => { s[v.seriesInstanceUid] = 'rejected'; });
+        volumes.forEach(v => { s[v.pairId || v.seriesInstanceUid] = 'rejected'; });
         setReviewStatus(s);
     }, [volumes]);
 
-    const handleModify = async (uid: string) => {
+    const handleModify = async (volume: VolumeGif) => {
+        const uid = volume.seriesInstanceUid;
+        const reviewKey = volume.pairId || uid;
         try {
             // Optimistically set status to modified (Yellow) so it's ready when the user returns
-            handleToggle(uid, 'modified');
+            handleToggle(reviewKey, 'modified');
 
             const data = await handleModifyAction(uid);
             
@@ -72,7 +75,9 @@ function ReviewView({
                 const params = new URLSearchParams({
                     StudyInstanceUIDs: data.study_uid,
                     session_id: sessionId || '',
-                    series_uid: uid
+                    series_uid: uid,
+                    target_id: volume.targetId || '',
+                    pair_id: reviewKey,
                 });
                 window.open(`${window.location.origin}/monai-label?${params.toString()}`, '_blank');
             } else {
@@ -162,14 +167,15 @@ function ReviewView({
                     <div className="flex-1 overflow-y-auto pr-1">
                         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 pb-4">
                             {volumes.map(volume => {
-                                const status     = reviewStatus[volume.seriesInstanceUid];
+                                const reviewKey = volume.pairId || volume.seriesInstanceUid;
+                                const status     = reviewStatus[reviewKey];
                                 const isAccepted = status === 'accepted';
                                 const isRejected = status === 'rejected';
                                 const isModified = status === 'modified';
 
                                 return (
                                     <div
-                                        key={volume.seriesInstanceUid}
+                                        key={reviewKey}
                                         style={{
                                             height: '220px',
                                             display: 'flex',
@@ -190,22 +196,23 @@ function ReviewView({
                                             borderBottom: '1px solid rgba(31,45,64,0.5)',
                                         }}>
                                             <span style={{ fontSize: '10px', color: '#d1d5db', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '60%' }}>
-                                                {volume.seriesInstanceUid.slice(-8)}
+                                                 {volume.seriesInstanceUid.slice(-8)}
+                                                 {volume.targetLabel ? ` · ${volume.targetLabel}` : ''}
                                             </span>
                                             <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
                                                 <button
-                                                    onClick={() => handleModify(volume.seriesInstanceUid)}
+                                                    onClick={() => handleModify(volume)}
                                                     disabled={!isFinished}
                                                     style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: isFinished ? 'pointer' : 'not-allowed', background: isModified ? '#eab308' : 'transparent', color: isModified ? '#000' : '#9ca3af', opacity: isFinished ? 1 : 0.5 }}
                                                     title="Modify Interactively"
                                                 ><Edit size={14} /></button>
                                                 <button
-                                                    onClick={() => handleToggle(volume.seriesInstanceUid, 'rejected')}
+                                                    onClick={() => handleToggle(reviewKey, 'rejected')}
                                                     disabled={!isFinished}
                                                     style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: isFinished ? 'pointer' : 'not-allowed', background: isRejected ? '#ef4444' : 'transparent', color: isRejected ? '#fff' : '#9ca3af', opacity: isFinished ? 1 : 0.5 }}
                                                 ><X size={14} /></button>
                                                 <button
-                                                    onClick={() => handleToggle(volume.seriesInstanceUid, 'accepted')}
+                                                    onClick={() => handleToggle(reviewKey, 'accepted')}
                                                     disabled={!isFinished}
                                                     style={{ padding: '3px', borderRadius: '4px', border: 'none', cursor: isFinished ? 'pointer' : 'not-allowed', background: isAccepted ? '#6fe5b8' : 'transparent', color: isAccepted ? '#000' : '#9ca3af', opacity: isFinished ? 1 : 0.5 }}
                                                 ><Check size={14} strokeWidth={3} /></button>
@@ -245,7 +252,7 @@ function ReviewView({
                                 </div>
                                 <div className="space-y-1 font-mono text-[10px] text-red-200/80">
                                     {failedVolumes.map(volume => (
-                                        <div key={volume.seriesInstanceUid} className="flex gap-2">
+                                        <div key={volume.pairId || volume.seriesInstanceUid} className="flex gap-2">
                                             <span>{volume.seriesInstanceUid.slice(-8)}</span>
                                             <span className="font-sans text-red-200/60">
                                                 {volume.reason || 'Volume mask is empty.'}

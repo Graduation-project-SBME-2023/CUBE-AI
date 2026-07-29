@@ -44,6 +44,7 @@ async def run_interactive_pipeline(
     labels,
     segmentation_service,
     session_id,
+    inference_prompts=None,
 ):
     payload = TextPayload(message=f"Starting interactive segmentation on {len(volumes)} volumes.")
     await emit_tool_events(
@@ -88,12 +89,16 @@ async def run_interactive_pipeline(
         try:
             for canonical_label in labels:
                 selected_model = "voxtell"
+                inference_prompt = (
+                    (inference_prompts or {}).get(canonical_label)
+                    or canonical_label
+                )
                 result = await run_with_progress_heartbeat(
                     segmentation_service.run_segmentation(
                         model=selected_model,
                         series_instance_uid=volume_uid,
                         label_info=canonical_label,
-                        params={"text_prompts": [canonical_label]},
+                        params={"text_prompts": [inference_prompt]},
                     ),
                     session_id=session_id,
                     current=index - 0.5,
