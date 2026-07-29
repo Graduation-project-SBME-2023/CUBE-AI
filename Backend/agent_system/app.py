@@ -940,6 +940,7 @@ async def segmentation_review(data: dict):
 
 @app.post("/segmentation-review/upload-mask")
 async def upload_modified_mask(
+    request: Request,
     session_id: str = Form(...),
     series_instance_uid: str = Form(...),
     target_id: str | None = Form(None),
@@ -1041,10 +1042,40 @@ async def upload_modified_mask(
         logger.error(f"Failed to process and save modified mask: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to process mask: {str(e)}")
     
+    from agents.execution_agents.segmentation.utils import generate_gif_overlays
+
+    overlay_results = await asyncio.to_thread(
+        generate_gif_overlays,
+        workspace_folder,
+        [
+            {
+                "volume_uid": series_instance_uid,
+                "target_id": target_id or "",
+                "mask_path": file_path,
+            }
+        ],
+    )
+    if not overlay_results:
+        raise HTTPException(
+            status_code=500,
+            detail="Modified mask was saved, but its preview could not be regenerated.",
+        )
+
+    overlay = overlay_results[0]
+    overlay["gifUrl"] = (
+        f"{str(request.base_url).rstrip('/')}/files/"
+        f"{os.path.basename(workspace_folder)}/overlays/{pair_id}.gif"
+    )
+    overlay["updatedAt"] = os.stat(
+        os.path.join(workspace_folder, "overlays", f"{pair_id}.gif")
+    ).st_mtime_ns
+
     return {
         "message": "Modified mask saved successfully", 
         "session_id": session_id,
-        "path": os.path.abspath(file_path)
+        "path": os.path.abspath(file_path),
+        "status": "saved",
+        "overlay": overlay,
     }
 
 

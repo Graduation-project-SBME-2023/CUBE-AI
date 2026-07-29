@@ -12,7 +12,7 @@ const ohif = {
 
 const monailabel = {
   monaiLabel: '@ohif/extension-monai-label.panelModule.monailabel',
-}
+};
 
 const cornerstone = {
   viewport: '@ohif/extension-cornerstone.viewportModule.cornerstone',
@@ -161,12 +161,15 @@ function modeFactory({ modeConfiguration }) {
       {
         path: 'monai-label',
         layoutTemplate: ({ location, servicesManager }) => {
+          const isEmbeddedReview =
+            new URLSearchParams(location.search).get('embedded') === '1';
+
           return {
             id: ohif.layout,
             props: {
               rightPanelDefaultClosed: false,
-              /* leftPanelDefaultClosed: true, */
-              leftPanels: [ohif.leftPanel],
+              leftPanelDefaultClosed: isEmbeddedReview,
+              leftPanels: isEmbeddedReview ? [] : [ohif.leftPanel],
               rightPanels: [monailabel.monaiLabel],
               viewports: [
                 {
