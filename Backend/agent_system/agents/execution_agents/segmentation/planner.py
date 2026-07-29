@@ -20,6 +20,7 @@ from .contracts import (
     validate_candidate_decision_references,
     validate_candidate_references,
 )
+from .model_catalog import get_enabled_segmentation_model_paths
 
 logger = logging.getLogger(__name__)
 ValidatedPlan = TypeVar("ValidatedPlan")
@@ -92,6 +93,8 @@ ID:
 - select a cache candidate only when its prompt is clinically equivalent;
 - otherwise generate the exact locked canonical label;
 - choose an available segmentation model and automatic or interactive path;
+- call the model discovery tool and select only a model it returns;
+- never invent, infer, or rename a model;
 - if confidence is below 0.80, reuse no mask/cache candidate.
 
 Return one JSON object only:
@@ -139,6 +142,8 @@ Critical decisions:
 - "segment splenic lesion" requires a lesion target;
 - "segment spleen in patients with cancer" requests the whole spleen;
 - "segment the whole cancerous spleen" requests the whole spleen.
+- Model names must come from the supplied execution plan and model discovery
+  results. Never invent or rename a model.
 
 Return JSON only:
 {{
@@ -257,6 +262,110 @@ def _compose_resolution_plan(
     )
 
 
+def _enforce_candidate_execution(
+    plan: TargetCandidateDecisionPlan,
+) -> TargetCandidateDecisionPlan:
+    enabled = get_enabled_segmentation_model_paths()
+    if not enabled:
+        raise ValueError("No segmentation models are enabled")
+
+    # With one deployed model there is no routing decision for the LLM to make.
+    # Normalize deterministically so a hallucinated name can never reach MONAI.
+    if len(enabled) == 1:
+        model_name, execution_path = next(iter(enabled.items()))
+        returned_models = [decision.selected_model for decision in plan.decisions]
+        if (
+            plan.chosen_path != execution_path
+            or any(
+                name.casefold() != model_name.casefold()
+                for name in returned_models
+            )
+        ):
+            logger.warning(
+                "Normalized candidate execution from path=%s models=%s to "
+                "path=%s model=%s",
+                plan.chosen_path,
+                returned_models,
+                execution_path,
+                model_name,
+            )
+        plan.chosen_path = execution_path
+        for decision in plan.decisions:
+            decision.selected_model = model_name
+        return plan
+
+    enabled_by_key = {
+        name.casefold(): (name, execution_path)
+        for name, execution_path in enabled.items()
+    }
+    for decision in plan.decisions:
+        selected = enabled_by_key.get(decision.selected_model.casefold())
+        if selected is None:
+            raise ValueError(
+                f"Unknown segmentation model {decision.selected_model!r}; "
+                f"available models are {sorted(enabled)}"
+            )
+        canonical_name, execution_path = selected
+        if plan.chosen_path != execution_path:
+            raise ValueError(
+                f"Model {canonical_name!r} requires execution path "
+                f"{execution_path!r}, not {plan.chosen_path!r}"
+            )
+        decision.selected_model = canonical_name
+    return plan
+
+
+def _enforce_resolution_execution(
+    plan: TargetResolutionPlan,
+) -> TargetResolutionPlan:
+    enabled = get_enabled_segmentation_model_paths()
+    if not enabled:
+        raise ValueError("No segmentation models are enabled")
+
+    if len(enabled) == 1:
+        model_name, execution_path = next(iter(enabled.items()))
+        if (
+            plan.chosen_path != execution_path
+            or any(
+                name.casefold() != model_name.casefold()
+                for name in plan.selected_models
+            )
+        ):
+            logger.warning(
+                "Normalized audited execution from path=%s models=%s to "
+                "path=%s model=%s",
+                plan.chosen_path,
+                plan.selected_models,
+                execution_path,
+                model_name,
+            )
+        plan.chosen_path = execution_path
+        plan.selected_models = [model_name]
+        return plan
+
+    enabled_by_key = {
+        name.casefold(): (name, execution_path)
+        for name, execution_path in enabled.items()
+    }
+    canonical_models: list[str] = []
+    for model_name in plan.selected_models:
+        selected = enabled_by_key.get(model_name.casefold())
+        if selected is None:
+            raise ValueError(
+                f"Unknown segmentation model {model_name!r}; "
+                f"available models are {sorted(enabled)}"
+            )
+        canonical_name, execution_path = selected
+        if plan.chosen_path != execution_path:
+            raise ValueError(
+                f"Model {canonical_name!r} requires execution path "
+                f"{execution_path!r}, not {plan.chosen_path!r}"
+            )
+        canonical_models.append(canonical_name)
+    plan.selected_models = canonical_models
+    return plan
+
+
 def _candidate_catalog(
     mask_candidates: list[MaskLabelCandidate],
     cache_candidates: list[CachePromptCandidate],
@@ -317,12 +426,13 @@ inventory is unavailable; generate each exact locked canonical prompt.
 
     def validate_candidate_plan(raw: dict) -> TargetCandidateDecisionPlan:
         candidate_plan = TargetCandidateDecisionPlan.model_validate(raw)
-        return validate_candidate_decision_references(
+        candidate_plan = validate_candidate_decision_references(
             candidate_plan,
             intent_plan,
             mask_candidates,
             cache_candidates,
         )
+        return _enforce_candidate_execution(candidate_plan)
 
     candidate_plan = await _run_validated_stage(
         candidate_agent,
@@ -356,6 +466,9 @@ ACTUAL CANDIDATES:
     def validate_audit(raw: dict) -> ClinicalPlanAudit:
         audit = ClinicalPlanAudit.model_validate(raw)
         if audit.corrected_plan is not None:
+            audit.corrected_plan = _enforce_resolution_execution(
+                audit.corrected_plan
+            )
             validate_candidate_references(
                 audit.corrected_plan,
                 mask_candidates,

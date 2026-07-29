@@ -443,12 +443,39 @@ class SegmentationModule:
                     }
                 )
 
+        target_count = len(plan.targets)
+        volume_count = len(datasetlist)
+        target_summary = (
+            "Single target label"
+            if target_count == 1
+            else f"Multiple target labels ({target_count})"
+        )
+        volume_summary = (
+            "1 volume"
+            if volume_count == 1
+            else f"{volume_count} volumes"
+        )
         await emit_tool_event(
-            event_type="tool_progress",
+            event_type="tool_finished",
+            content=TextPayload(
+                message=f"{target_summary} for {volume_summary}."
+            ),
+            session_id=self.session_id,
+        )
+
+        existing_mask_volume_count = len(
+            {
+                item["volume_uid"]
+                for item in work_items
+                if item["reused"]
+            }
+        )
+        await emit_tool_events(
+            event_types=["tool_started", "tool_finished"],
             content=TextPayload(
                 message=(
-                    f"Resolved {len(plan.targets)} target(s) across "
-                    f"{len(datasetlist)} volume(s)."
+                    "Found existing masks for "
+                    f"{existing_mask_volume_count} volumes"
                 )
             ),
             session_id=self.session_id,
