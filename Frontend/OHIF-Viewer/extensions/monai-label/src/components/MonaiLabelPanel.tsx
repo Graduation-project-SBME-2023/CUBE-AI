@@ -255,11 +255,15 @@ export default class MonaiLabelPanel extends Component {
         throw new Error(`Mask request failed with status ${response.status}`);
       }
 
+      const isEmptyFallback =
+        response.headers.get('X-Segmentation-Empty-Fallback') === 'true';
       const data = await response.arrayBuffer();
       await this._update({ data, centroids: {} }, []);
       this.notification.show({
         title: 'Interactive Segmentation',
-        message: 'Existing mask loaded and ready to edit.',
+        message: isEmptyFallback
+          ? 'No saved mask was available. An empty mask is ready for manual editing.'
+          : 'Existing mask loaded and ready to edit.',
         type: 'success',
         duration: 2500,
       });

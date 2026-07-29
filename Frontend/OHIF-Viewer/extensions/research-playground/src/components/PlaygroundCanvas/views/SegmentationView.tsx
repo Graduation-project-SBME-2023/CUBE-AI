@@ -101,6 +101,7 @@ function ReviewView({
       if (data.study_uid) {
         const params = new URLSearchParams({
           StudyInstanceUIDs: data.study_uid,
+          SeriesInstanceUID: uid,
           session_id: sessionId,
           series_uid: uid,
           target_id: volume.targetId || '',
