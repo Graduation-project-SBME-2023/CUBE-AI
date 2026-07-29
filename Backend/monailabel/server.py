@@ -23,6 +23,7 @@ from endpoints import (
     steps,
     study,
     sync,
+    voxtell_cache_inventory,
     volume,
     workflow,
 )
@@ -51,6 +52,7 @@ for router in (
     contextaugmentation.router,
     Wslog.router,
     populations.router,
+    voxtell_cache_inventory.router,
 ):
     monai_server_app.include_router(router)
 

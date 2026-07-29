@@ -1,5 +1,8 @@
 export interface VolumeGif {
     seriesInstanceUid: string;
+    pairId?: string;
+    targetId?: string;
+    targetLabel?: string;
     gifUrl: string;
     isEmptyMask?: boolean;
     warning?: string;
@@ -7,6 +10,8 @@ export interface VolumeGif {
 
 export interface FailedVolume {
     seriesInstanceUid: string;
+    pairId?: string;
+    targetId?: string;
     reason?: string;
 }
 

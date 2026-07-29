@@ -25,8 +25,13 @@ Runs ROI segmentation workflow and prepares mask outputs for feature extraction.
   - `write_agent_output`
 
 ## Expected functional outputs
-- Segmentation masks in workspace mask or labels directories.
-- Segmentation module returns completion status.
+- One binary mask per successful volume-target pair at
+  `masks/{volume_uid}__{target_id}.nii.gz`.
+- `segmentation_manifest.json` is the authoritative downstream handoff. It
+  records canonical target labels, mask paths, reuse/provenance, review state,
+  and pair-level errors.
+- The segmentation module returns the real `completed`, `partial`, or `failed`
+  status and pair-level metrics.
 
 ## Mandatory structured output call
 Call `write_agent_output` with:
@@ -34,16 +39,21 @@ Call `write_agent_output` with:
 - `agent_role`: `roi_segmentation`
 - `status`: `completed` or `partial` or `failed`
 - `inputs`: workspace folder and segmentation context
-- `output_files`: at least labels or masks directory
-- `output_metrics`: method, volume count, ROI description
+- `output_files`: manifest plus actual volume and mask paths
+- `output_metrics`: volume-target pair count, target labels, mask count,
+  reused/generated counts, and pair failures
 - `output_summary`
 - `warnings` when quality issues exist
 
 ## Handoff to next agent
 - Team graph forwards to `feature_extraction_agent`.
-- Downstream must be able to find masks and volume-mask pairing in workspace.
+- Feature extraction reads `segmentation_manifest.json`, emits one subject row
+  per volume, and prefixes radiomic columns with the target ID.
 
 ## Failure conditions to flag
 - No eligible volumes for segmentation.
 - Missing or invalid config in workspace.
+- Existing-mask discovery or target-plan validation fails during preflight.
 - Interactive review not completed.
+- Any failed or rejected volume-target pair is reported without preventing
+  unaffected pairs from completing.

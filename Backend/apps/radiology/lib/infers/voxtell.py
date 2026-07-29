@@ -9,7 +9,6 @@
 # # # See the License for the specific language governing permissions and
 # # # limitations under the License.
 import os
-import sys
 import gc
 import time
 import pickle
@@ -17,6 +16,9 @@ import ctypes
 import threading
 import platform
 import logging
+import tempfile
+
+from contextlib import contextmanager
 
 os.environ["TORCH_CUDA_ARCH_LIST"] = "8.0;8.6;8.9;9.0"
 os.environ["QUANTO_DISABLE_CUDA"] = "1"
@@ -42,15 +44,6 @@ from monailabel.interfaces.tasks.infer_v2 import InferType
 from monailabel.tasks.infer.basic_infer import BasicInferTask
 
 # Medical vocabulary is maintained centrally — do not duplicate synonyms here.
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../agent_system/agents/execution_agents/segmentation")))
-try:
-    from medical_vocabulary import VOXTELL_PROMPT_ALIASES, FLAT_MEDICAL_SYNONYMS
-except ImportError:
-    # Fallback if run outside the agent_system context (e.g. standalone MONAI)
-    VOXTELL_PROMPT_ALIASES = {}
-    FLAT_MEDICAL_SYNONYMS = {}
-
-
 logger = logging.getLogger(__name__)
 
 # ── Module-level predictor singleton ──────────────────────────────────────────
@@ -60,7 +53,37 @@ logger = logging.getLogger(__name__)
 # and reused across all subsequent requests, preventing CUDA OOM errors.
 _PREDICTOR_SINGLETON: "MyVoxTellPredictor | None" = None
 _PREDICTOR_LOCK = threading.Lock()
+_CACHE_LOCK = threading.RLock()
 # ──────────────────────────────────────────────────────────────────────────────
+
+
+@contextmanager
+def _exclusive_cache_process_lock(cache_path: str):
+    """Serialize cache writes across workers using a sidecar lock file."""
+    lock_path = f"{cache_path}.lock"
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    with open(lock_path, "a+b") as lock_stream:
+        if os.name == "nt":
+            import msvcrt
+
+            lock_stream.seek(0, os.SEEK_END)
+            if lock_stream.tell() == 0:
+                lock_stream.write(b"\0")
+                lock_stream.flush()
+            lock_stream.seek(0)
+            msvcrt.locking(lock_stream.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_stream.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                lock_stream.seek(0)
+                msvcrt.locking(lock_stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock_stream.fileno(), fcntl.LOCK_UN)
 
 
 def check_memory(step_name: str, device: torch.device):
@@ -152,11 +175,6 @@ class MyVoxTellPredictor(VoxTellPredictor):
         torch.cuda.empty_cache()
         check_memory("After INIT (VoxTell loaded, NO text model in RAM)", torch.device("cuda"))
 
-    # Prompt alias map — imported from medical_vocabulary.py (single source of truth).
-    # Every value is a label that actually exists in VOXTELL_SUPPORTED_LABELS.
-    # Edit medical_vocabulary.VOXTELL_PROMPT_ALIASES to add new remappings.
-    FALLBACK_PROMPT_MAP = VOXTELL_PROMPT_ALIASES
-
     def generate_text_embedding(self, prompt: str) -> torch.Tensor:
         """Lazily loads the text model onto the CPU to generate missing embeddings."""
         if self.tokenizer is None or self.text_backbone is None:
@@ -190,6 +208,31 @@ class MyVoxTellPredictor(VoxTellPredictor):
 
         return embedding.float().view(1, 1, -1)
 
+    def _save_cache_atomically(self) -> None:
+        cache_dir = os.path.dirname(self.cache_output_path)
+        os.makedirs(cache_dir, exist_ok=True)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=cache_dir,
+                prefix=".voxtell-cache-",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temp_path = stream.name
+                pickle.dump(self.embeddings_cache, stream)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp_path, self.cache_output_path)
+            logger.info(
+                "Updated VoxTell cache atomically at %s",
+                self.cache_output_path,
+            )
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
+
     def embed_text_prompts(
         self,
         text_prompts: Union[List[str], str]
@@ -199,50 +242,44 @@ class MyVoxTellPredictor(VoxTellPredictor):
             text_prompts = [text_prompts]
 
         embeddings_list = []
-        cache_updated = False
 
         for prompt in text_prompts:
             key = prompt.lower().strip()
+            if not key:
+                raise ValueError("VoxTell prompt cannot be empty")
 
-            # Helper to get semantic concepts for matching
-            def get_semantic_concepts(l: str) -> set:
-                import re
-                norm = re.sub(r"\s+", " ", str(l or "").replace("_", " ")).lower().strip()
-                return set(FLAT_MEDICAL_SYNONYMS.get(w, w) for w in norm.split())
-
-            target_concepts = get_semantic_concepts(key)
-            match_found = False
-
-            # 1. Check if semantically equivalent prompt already exists in cache
-            for cached_key in self.embeddings_cache:
-                if get_semantic_concepts(cached_key) == target_concepts:
-                    logger.info(f"Using semantically equivalent cached key '{cached_key}' for prompt '{key}'")
-                    embeddings_list.append(self.embeddings_cache[cached_key])
-                    match_found = True
-                    break
-
-            if not match_found:
-                if key in self.FALLBACK_PROMPT_MAP:
-                    fallback_key = self.FALLBACK_PROMPT_MAP[key]
-                    logger.info(f"Using fallback '{fallback_key}' for prompt '{key}'")
-                    embeddings_list.append(self.embeddings_cache[fallback_key])
+            # PlannerAgent owns semantic equivalence. Runtime cache lookup is
+            # exact, preventing insertion order or synonym tables from changing
+            # the selected embedding.
+            with _CACHE_LOCK:
+                if key in self.embeddings_cache:
+                    logger.info("Using exact VoxTell cache key '%s'", key)
+                    embedding = self.embeddings_cache[key]
                 else:
-                    logger.warning(f"Prompt '{key}' not found. Generating dynamically...")
-                    # Generate on CPU
-                    new_embedding = self.generate_text_embedding(key)
-                    # Save to cache dictionary
-                    self.embeddings_cache[key] = new_embedding.cpu()
-                    embeddings_list.append(self.embeddings_cache[key])
-                    cache_updated = True
+                    with _exclusive_cache_process_lock(self.cache_output_path):
+                        # Another worker may have persisted this key while this
+                        # process waited. Reload before deciding to generate.
+                        if os.path.exists(self.cache_output_path):
+                            with open(self.cache_output_path, "rb") as stream:
+                                persisted_cache = pickle.load(stream)
+                            if isinstance(persisted_cache, dict):
+                                self.embeddings_cache.update(persisted_cache)
 
-        # Save cache back to disk if new items were added
-        if cache_updated:
-            try:
-                with open(self.cache_output_path, "wb") as f:
-                    pickle.dump(self.embeddings_cache, f)
-                logger.info(f"Updated text embedding cache saved to {self.cache_output_path}")
-            except Exception as e:
-                logger.error(f"Failed to save updated cache: {e}")
+                        if key in self.embeddings_cache:
+                            logger.info(
+                                "Using exact VoxTell cache key '%s' after reload",
+                                key,
+                            )
+                            embedding = self.embeddings_cache[key]
+                        else:
+                            logger.info(
+                                "Exact VoxTell cache miss for '%s'; generating embedding",
+                                key,
+                            )
+                            embedding = self.generate_text_embedding(key).cpu()
+                            self.embeddings_cache[key] = embedding
+                            self._save_cache_atomically()
+                embeddings_list.append(embedding)
 
         # Combine into a single tensor and push to GPU for inference
         embeddings = torch.cat(embeddings_list, dim=1)

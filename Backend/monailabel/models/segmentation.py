@@ -9,6 +9,9 @@ class Segmentation(Base):
 
     volume_series_instance_uid = Column(String, nullable=False)
     segmentation_type = Column(String, nullable=False)
+    # Exact clinical target stored in the DICOM SegmentLabel.  Historical
+    # records may be null until Orthanc is re-synchronised.
+    target_label = Column(String, nullable=True, index=True)
     method = Column(String, nullable=True)
 
     name = Column(String, ForeignKey('models.name'), nullable=True)

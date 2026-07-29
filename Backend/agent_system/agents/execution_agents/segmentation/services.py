@@ -296,8 +296,8 @@ class SegmentationService:
         ensure_required_patient_tags(dicom_datasets)
         # ============== create Algorithm description=================
         algorithm_identification = hd.AlgorithmIdentificationSequence(
-                name='Automatic Segmentation',
-                version='0.0',
+                name=clean_model,
+                version='unknown',
                 family=codes.cid7162.ArtificialIntelligence
             )
         # =========== create segmentation description =================
@@ -327,8 +327,7 @@ class SegmentationService:
             tracking_uid=hd.UID(),
             tracking_id='Test Segmentation'
         )
-        now = datetime.now()
-        series_time = now.strftime("%I:%M:%S %p")
+        target_label = organ_list[0] if organ_list else "Segment"
 
         logger.info(
             "DICOM-SEG input: source_type=%s is_dataset=%s ct_slices=%s mask_shape=%s",
@@ -346,7 +345,10 @@ class SegmentationService:
                 series_instance_uid=hd.UID(),
                 series_number=1001,
                 sop_instance_uid=hd.UID(),
-                series_description=f"{organ_list[0] if organ_list else 'Segment'}-{clean_model}-{series_time}-g",
+                # Target identity lives in SegmentLabel/target_label. Keep the
+                # human-readable SeriesDescription free of encoded model/time
+                # fields so no runtime code is tempted to parse provenance.
+                series_description=f"Segmentation: {target_label}",
                 instance_number=1,
                 manufacturer='Manufacturer Name',
                 manufacturer_model_name='MONAI Label Backend',
