@@ -379,13 +379,15 @@ async def download_and_pair_volumes(
         volume_uid,
         dest_dir,
         target_id=None,
+        artifact_key=None,
     ):
         """Align the label to its reference volume and save a binary mask."""
-        filename = (
-            f"{volume_uid}__{target_id}.nii.gz"
-            if target_id
-            else f"{volume_uid}.nii.gz"
-        )
+        if artifact_key:
+            filename = f"{artifact_key}.nii.gz"
+        elif target_id:
+            filename = f"{volume_uid}__{target_id}.nii.gz"
+        else:
+            filename = f"{volume_uid}.nii.gz"
         dst = os.path.join(dest_dir, filename)
         try:
             return align_and_binarize_mask(
@@ -403,17 +405,23 @@ async def download_and_pair_volumes(
     volumes_to_process = []
     labels_to_process = []
     target_ids_to_process = []
+    pair_ids_to_process = []
+    artifact_keys_to_process = []
 
     for pair in resolved_pairs:
         volume_uid = str(pair.get("volume_uid") or "").strip()
         label_uid = str(pair.get("label_uid") or "").strip()
         target_id = str(pair.get("target_id") or "").strip()
+        pair_id = str(pair.get("pair_id") or f"{volume_uid}__{target_id}").strip()
+        artifact_key = str(pair.get("artifact_key") or pair_id).strip()
         if not volume_uid or not label_uid or not target_id:
             logger.error("Invalid resolved segmentation pair: %s", pair)
             continue
         volumes_to_process.append(volume_uid)
         labels_to_process.append(label_uid)
         target_ids_to_process.append(target_id)
+        pair_ids_to_process.append(pair_id)
+        artifact_keys_to_process.append(artifact_key)
 
     if not volumes_to_process:
         logger.error("Nothing to process; aborting.")
@@ -501,8 +509,12 @@ async def download_and_pair_volumes(
     successful = []
     skipped_oom = []
     copied_volumes: dict[str, str] = {}
-    for vol_uid, label_uid, target_id in zip(
-        volumes_to_process, labels_to_process, target_ids_to_process
+    for vol_uid, label_uid, target_id, pair_id, artifact_key in zip(
+        volumes_to_process,
+        labels_to_process,
+        target_ids_to_process,
+        pair_ids_to_process,
+        artifact_keys_to_process,
     ):
         label_src = found_labels.get(label_uid) if label_uid else None
         if not label_src and label_uid:
@@ -536,17 +548,27 @@ async def download_and_pair_volumes(
                 vol_uid,
                 FINAL_DIR_LABEL,
                 target_id,
+                artifact_key,
             )
         else:
             label_result = True # No label to process for interactive manual
 
         if label_result == "SKIPPED_OOM":
-            skipped_oom.append({"volume_uid": vol_uid, "target_id": target_id})
+            skipped_oom.append(
+                {
+                    "pair_id": pair_id,
+                    "artifact_key": artifact_key,
+                    "volume_uid": vol_uid,
+                    "target_id": target_id,
+                }
+            )
             continue
 
         if vol_result and label_result:
             successful.append(
                 {
+                    "pair_id": pair_id,
+                    "artifact_key": artifact_key,
                     "volume_uid": vol_uid,
                     "target_id": target_id,
                     "geometry_adjusted": (
@@ -566,6 +588,15 @@ async def download_and_pair_volumes(
             )
         else:
             logger.error("Failed to copy vol/label for %s", vol_uid)
+            skipped_oom.append(
+                {
+                    "pair_id": pair_id,
+                    "artifact_key": artifact_key,
+                    "volume_uid": vol_uid,
+                    "target_id": target_id,
+                    "reason": "normalization_failed",
+                }
+            )
 
     logger.info("=" * 60)
     logger.info(f"DONE: {len(successful)}/{len(volumes_to_process)} pairs ready in workspace")
@@ -600,14 +631,31 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
             target_id = str(item.get("target_id") or item.get("targetId") or "")
             target_label = item.get("canonical_label") or item.get("targetLabel")
             mask_path_override = str(item.get("mask_path") or "")
+            pair_id = str(
+                item.get("pair_id")
+                or item.get("pairId")
+                or (f"{uid}__{target_id}" if target_id else uid)
+            )
+            artifact_key = str(item.get("artifact_key") or pair_id)
         else:
             uid = str(item)
             target_id = ""
             target_label = None
             mask_path_override = ""
-        pair_id = f"{uid}__{target_id}" if target_id else uid
+            pair_id = uid
+            artifact_key = pair_id
         vol_path = os.path.join(volumes_dir, f"{uid}.nii.gz")
-        default_mask_path = os.path.join(masks_dir, f"{pair_id}.nii.gz")
+        default_mask_path = os.path.join(masks_dir, f"{artifact_key}.nii.gz")
+        legacy_name_is_safe = (
+            os.path.basename(pair_id) == pair_id
+            and "/" not in pair_id
+            and "\\" not in pair_id
+        )
+        legacy_mask_path = (
+            os.path.join(masks_dir, f"{pair_id}.nii.gz")
+            if legacy_name_is_safe
+            else ""
+        )
         if mask_path_override:
             mask_path = (
                 mask_path_override
@@ -626,9 +674,19 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
                     default_mask_path,
                 )
                 mask_path = default_mask_path
+            elif (
+                not os.path.exists(mask_path)
+                and legacy_mask_path
+                and os.path.exists(legacy_mask_path)
+            ):
+                mask_path = legacy_mask_path
         else:
-            mask_path = default_mask_path
-        gif_filename = f"{pair_id}.gif"
+            mask_path = (
+                default_mask_path
+                if os.path.exists(default_mask_path)
+                else legacy_mask_path or default_mask_path
+            )
+        gif_filename = f"{artifact_key}.gif"
         gif_path = os.path.join(output_dir, gif_filename)
 
         if not os.path.exists(vol_path) or not os.path.exists(mask_path):
@@ -743,6 +801,7 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
                         f"{os.environ.get('MAS_BASE_URL', 'http://localhost:8150').rstrip('/')}"
                         f"/files/{workspace_folder_name}/overlays/{gif_filename}"
                     ),
+                    "gifPath": f"overlays/{gif_filename}",
                     "isEmptyMask": is_empty_mask
                 }
                 if is_empty_mask:
@@ -785,7 +844,12 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
 # =================================
 #  remove volumes and labels from working space that was discarded by user
 # =================================
-def cleanup_discarded(workspace_dir, accepted_uids, modified_uids):
+def cleanup_discarded(
+    workspace_dir,
+    accepted_uids,
+    modified_uids,
+    artifact_keys_by_pair=None,
+):
     """
     Removes discarded volumes and masks.
     - Keeps volumes for BOTH accepted and modified UIDs.
@@ -798,6 +862,12 @@ def cleanup_discarded(workspace_dir, accepted_uids, modified_uids):
     accepted_keys = set(accepted_uids)
     modified_keys = set(modified_uids)
     pair_keys_to_keep = accepted_keys | modified_keys
+    artifact_keys_by_pair = artifact_keys_by_pair or {}
+    mask_keys_to_keep = pair_keys_to_keep | {
+        artifact_keys_by_pair[key]
+        for key in pair_keys_to_keep
+        if key in artifact_keys_by_pair
+    }
     uids_to_keep_volumes = {
         key.split("__", 1)[0] for key in pair_keys_to_keep
     }
@@ -817,7 +887,7 @@ def cleanup_discarded(workspace_dir, accepted_uids, modified_uids):
             if fname.lower().endswith(".nii.gz"):
                 pair_key = fname.replace(".nii.gz", "")
                 volume_uid = pair_key.split("__", 1)[0]
-                keep = pair_key in pair_keys_to_keep or volume_uid in pair_keys_to_keep
+                keep = pair_key in mask_keys_to_keep or volume_uid in pair_keys_to_keep
                 if not keep:
                     os.remove(os.path.join(masks_dir, fname))
                     logger.info(f"Removed mask (discarded): {fname}")

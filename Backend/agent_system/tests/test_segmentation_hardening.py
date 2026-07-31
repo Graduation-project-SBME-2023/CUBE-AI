@@ -312,6 +312,36 @@ class SegmentationRecoveryTests(unittest.TestCase):
             self.assertTrue(mask_path.exists())
             self.assertTrue(volume_path.exists())
 
+    def test_processing_checkpoint_preserves_persisted_inference_uid(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workspace = root / "workspace_session"
+            manifest_path = workspace / "segmentation_manifest.json"
+            output_path = workspace / "outputs" / "segmentation_agent_output.json"
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"test")
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "stage": "processing",
+                        "pairs": [
+                            {
+                                "pair_id": "volume__liver",
+                                "status": "inference_succeeded",
+                                "volume_uid": "volume",
+                                "source_segmentation_uid": "segmentation-uid",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            removed = reset_interrupted_agent(root, "session", "segmentation_agent")
+
+            self.assertEqual(removed, ["outputs/segmentation_agent_output.json"])
+            self.assertTrue(manifest_path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -246,9 +246,9 @@ function ReviewView({
                     className="animate-spin text-[#5acce6]"
                   />
                 </div>
-                <h3 className="mb-2 text-xl font-bold text-white">Awaiting Segmentation</h3>
+                <h3 className="mb-2 text-xl font-bold text-white">Preparing Segmentation</h3>
                 <p className="text-sm leading-relaxed text-[#566a84]">
-                  Please wait until the segmentation agent finishes and sends the results.
+                  Existing and newly generated previews will appear here one pair at a time.
                 </p>
               </div>
             </div>
@@ -479,7 +479,7 @@ function ReviewView({
               size={16}
               className="animate-spin"
             />{' '}
-            Loading GIFs...
+            Processing segmentation pairs...
           </span>
         )}
         {volumes.length > 0 && isFinished && (
