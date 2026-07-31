@@ -16,6 +16,7 @@ from .contracts import (
     ClinicalTargetIntentPlan,
     MaskLabelCandidate,
     REUSE_CONFIDENCE_THRESHOLD,
+    RESOLVED_REASON_MAX_LENGTH,
     ResolvedTarget,
     TargetCandidateDecisionPlan,
     TargetResolutionOutcome,
@@ -241,9 +242,9 @@ def _compose_resolution_plan(
                 accepted_mask_candidate_ids=decision.accepted_mask_candidate_ids,
                 voxtell_prompt=decision.voxtell_prompt,
                 confidence=min(intent.confidence, decision.confidence),
-                reason=(
-                    f"Clinical intent: {intent.rationale} "
-                    f"Candidate resolution: {decision.rationale}"
+                reason=_compose_resolution_reason(
+                    intent.rationale,
+                    decision.rationale,
                 ),
             )
         )
@@ -253,6 +254,53 @@ def _compose_resolution_plan(
         chosen_path=candidate_plan.chosen_path,
         selected_models=selected_models,
         targets=targets,
+    )
+
+
+def _truncate_reason_part(value: str, budget: int) -> str:
+    value = value.strip()
+    if len(value) <= budget:
+        return value
+    if budget <= 3:
+        return "." * budget
+    return value[: budget - 3].rstrip() + "..."
+
+
+def _compose_resolution_reason(
+    intent_rationale: str,
+    candidate_rationale: str,
+) -> str:
+    """Combine both rationales without violating ResolvedTarget's contract."""
+    intent_prefix = "Clinical intent: "
+    candidate_prefix = "Candidate resolution: "
+    separator = " "
+    intent_rationale = intent_rationale.strip()
+    candidate_rationale = candidate_rationale.strip()
+    complete = (
+        f"{intent_prefix}{intent_rationale}{separator}"
+        f"{candidate_prefix}{candidate_rationale}"
+    )
+    if len(complete) <= RESOLVED_REASON_MAX_LENGTH:
+        return complete
+
+    available = RESOLVED_REASON_MAX_LENGTH - len(intent_prefix) - len(
+        candidate_prefix
+    ) - len(separator)
+    intent_budget = available // 2
+    candidate_budget = available - intent_budget
+
+    if len(intent_rationale) < intent_budget:
+        candidate_budget += intent_budget - len(intent_rationale)
+        intent_budget = len(intent_rationale)
+    if len(candidate_rationale) < candidate_budget:
+        intent_budget += candidate_budget - len(candidate_rationale)
+        candidate_budget = len(candidate_rationale)
+
+    return (
+        f"{intent_prefix}"
+        f"{_truncate_reason_part(intent_rationale, intent_budget)}"
+        f"{separator}{candidate_prefix}"
+        f"{_truncate_reason_part(candidate_rationale, candidate_budget)}"
     )
 
 

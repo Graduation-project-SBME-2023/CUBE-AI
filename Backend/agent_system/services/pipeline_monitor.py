@@ -23,6 +23,26 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+CRITICAL_PIPELINE_TOOLS = {
+    ("segmentation_agent", "segmentation_tool"),
+}
+
+
+def is_fatal_tool_failure(source: str, tool_name: str, failed: bool) -> bool:
+    return failed and (source, tool_name) in CRITICAL_PIPELINE_TOOLS
+
+
+def raise_for_fatal_tool_failure(
+    source: str,
+    tool_name: str,
+    failed: bool,
+    content: str,
+) -> None:
+    if is_fatal_tool_failure(source, tool_name, failed):
+        raise RuntimeError(
+            f"{source}.{tool_name} failed: {str(content)[:500]}"
+        )
+
 # ── Agent-to-view mapping for tool result emission ────────────────────────────
 
 def _parse_tool_content(content: Any) -> Dict[str, Any]:
@@ -273,14 +293,22 @@ class PipelineMonitor:
             self._last_active = source
             await self._broadcast()
 
-    async def on_tool_result(self, source: str, tool_name: str, content: str, workspace_folder) -> None:
-        """Inspect tool result for error signals, and broadcast logs if necessary."""
+    async def on_tool_result(
+        self,
+        source: str,
+        tool_name: str,
+        content: str,
+        workspace_folder,
+        *,
+        execution_error: bool = False,
+    ) -> bool:
+        """Inspect a tool result and return whether it represents a failure."""
         if source not in self.agents:
-            return
+            return bool(execution_error)
 
         # Only flag as error if the JSON status field is actually "error" or "failed",
         # not just because those words appear anywhere in the (potentially large) content.
-        is_error = False
+        is_error = bool(execution_error)
         try:
             parsed_check = json.loads(content) if content else {}
             if isinstance(parsed_check, list) and parsed_check:
@@ -292,7 +320,7 @@ class PipelineMonitor:
                     pass
             if isinstance(parsed_check, dict):
                 status_val = str(parsed_check.get("status", "")).lower()
-                is_error = status_val in ("error", "failed")
+                is_error = is_error or status_val in ("error", "failed")
         except Exception:
             pass
 
@@ -309,10 +337,14 @@ class PipelineMonitor:
             self.session.session_id, workspace_folder
         )
 
-        await self.on_agent_active(source)
+        # A later request from this agent may demonstrate recovery. The failed
+        # result itself must not immediately reset the state to RUNNING.
+        if not is_error:
+            await self.on_agent_active(source)
         # Only persist/broadcast to frontend when there is meaningful data to emit
         if msg_type is not None and data is not None:
             await self.session_service.update_tool_views(self.session, source, msg_type, data)
+        return is_error
 
     async def on_pipeline_complete(self):
         """Mark the last running agent and pipeline as done."""

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 REUSE_CONFIDENCE_THRESHOLD = 0.6
+RESOLVED_REASON_MAX_LENGTH = 2048
 
 
 class ClinicalTargetIntent(BaseModel):
@@ -125,7 +126,7 @@ class ResolvedTarget(BaseModel):
     accepted_mask_candidate_ids: list[str] = Field(default_factory=list)
     voxtell_prompt: VoxTellPromptDecision
     confidence: float = Field(ge=0.0, le=1.0)
-    reason: str = Field(min_length=1, max_length=1000)
+    reason: str = Field(min_length=1, max_length=RESOLVED_REASON_MAX_LENGTH)
 
     @model_validator(mode="after")
     def generated_prompt_is_canonical(self):

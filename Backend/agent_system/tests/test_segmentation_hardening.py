@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import SimpleITK as sitk
@@ -12,11 +13,17 @@ from agent_system.agents.execution_agents.segmentation.contracts import (
     ClinicalPlanAudit,
     ClinicalTargetIntent,
     ClinicalTargetIntentPlan,
+    RESOLVED_REASON_MAX_LENGTH,
     ResolvedTarget,
     TargetCandidateDecision,
+    TargetCandidateDecisionPlan,
     TargetResolutionPlan,
     VoxTellPromptDecision,
     validate_audited_plan_identity,
+)
+from agent_system.agents.execution_agents.segmentation.planner import (
+    _compose_resolution_reason,
+    _compose_resolution_plan,
 )
 from agent_system.agents.execution_agents.segmentation.module import SegmentationModule
 from agent_system.agents.execution_agents.segmentation.pipelines.common import (
@@ -32,9 +39,83 @@ from agent_system.agents.execution_agents.segmentation.utils import (
     parse_multipart_response,
 )
 from agent_system.services.resume_recovery import reset_interrupted_agent
+from agent_system.services.pipeline_monitor import (
+    PipelineMonitor,
+    raise_for_fatal_tool_failure,
+)
+from agent_system.models.execution import AgentStatus
 
 
 class SegmentationContractTests(unittest.TestCase):
+    @staticmethod
+    def _resolution_inputs(intent_rationale: str, candidate_rationale: str):
+        intent_plan = ClinicalTargetIntentPlan(
+            targets=[
+                ClinicalTargetIntent(
+                    target_id="renal_tumor",
+                    canonical_label="renal tumor",
+                    anatomy="kidney",
+                    pathology="tumor",
+                    confidence=1.0,
+                    rationale=intent_rationale,
+                )
+            ]
+        )
+        candidate_plan = TargetCandidateDecisionPlan(
+            chosen_path="interactive",
+            decisions=[
+                TargetCandidateDecision(
+                    target_id="renal_tumor",
+                    voxtell_prompt=VoxTellPromptDecision(
+                        mode="generate",
+                        prompt="renal tumor",
+                    ),
+                    selected_model="voxtell",
+                    confidence=0.99,
+                    rationale=candidate_rationale,
+                )
+            ],
+        )
+        return intent_plan, candidate_plan
+
+    def test_resolution_reason_preserves_short_rationales(self):
+        intent_plan, candidate_plan = self._resolution_inputs(
+            "Renal pathology is the requested ROI.",
+            "The generated prompt is clinically equivalent.",
+        )
+
+        plan = _compose_resolution_plan(intent_plan, candidate_plan)
+
+        self.assertEqual(
+            plan.targets[0].reason,
+            "Clinical intent: Renal pathology is the requested ROI. "
+            "Candidate resolution: The generated prompt is clinically equivalent.",
+        )
+
+    def test_resolution_reason_preserves_two_maximum_length_rationales(self):
+        intent_plan, candidate_plan = self._resolution_inputs(
+            "I" * 1000,
+            "C" * 1000,
+        )
+
+        plan = _compose_resolution_plan(intent_plan, candidate_plan)
+        reason = plan.targets[0].reason
+        expected = (
+            f"Clinical intent: {'I' * 1000} "
+            f"Candidate resolution: {'C' * 1000}"
+        )
+
+        self.assertLessEqual(len(reason), RESOLVED_REASON_MAX_LENGTH)
+        self.assertEqual(reason, expected)
+
+    def test_resolution_reason_bounds_unexpected_future_overflow(self):
+        reason = _compose_resolution_reason("I" * 2048, "C" * 2048)
+
+        self.assertLessEqual(len(reason), RESOLVED_REASON_MAX_LENGTH)
+        self.assertTrue(reason.startswith("Clinical intent: "))
+        self.assertIn(" Candidate resolution: ", reason)
+        self.assertEqual(reason.count("..."), 2)
+
     def test_reuse_requires_confidence_of_at_least_point_six(self):
         prompt = VoxTellPromptDecision(mode="generate", prompt="liver")
         with self.assertRaises(ValidationError):
@@ -263,6 +344,97 @@ class SegmentationUtilityTests(unittest.TestCase):
             self.assertTrue(np.array_equal(aligned_array, mask_array > 0))
             self.assertEqual(aligned.GetOrigin(), reference.GetOrigin())
             self.assertEqual(aligned.GetDirection(), reference.GetDirection())
+
+
+class PipelineFailureTests(unittest.IsolatedAsyncioTestCase):
+    class _SessionService:
+        def __init__(self):
+            self.broadcasts = []
+
+        async def handle_pipeline_update(self, _session, agents):
+            self.broadcasts.append(agents)
+
+        async def update_tool_views(self, *_args, **_kwargs):
+            return None
+
+    @staticmethod
+    def _monitor():
+        service = PipelineFailureTests._SessionService()
+        session = SimpleNamespace(session_id="test-session")
+        return PipelineMonitor(service, session), service
+
+    async def test_plain_execution_error_marks_segmentation_failed(self):
+        monitor, _service = self._monitor()
+        await monitor.on_agent_active("segmentation_agent")
+
+        failed = await monitor.on_tool_result(
+            "segmentation_agent",
+            "segmentation_tool",
+            "ResolvedTarget validation failed",
+            "/tmp/workspace",
+            execution_error=True,
+        )
+
+        self.assertTrue(failed)
+        self.assertEqual(
+            monitor.agents["segmentation_agent"].status,
+            AgentStatus.FAILED,
+        )
+
+    async def test_structured_failure_is_fatal_but_partial_is_not(self):
+        failed_monitor, _service = self._monitor()
+        await failed_monitor.on_agent_active("segmentation_agent")
+        failed = await failed_monitor.on_tool_result(
+            "segmentation_agent",
+            "segmentation_tool",
+            json.dumps({"status": "failed"}),
+            "/tmp/workspace",
+        )
+
+        partial_monitor, _service = self._monitor()
+        await partial_monitor.on_agent_active("segmentation_agent")
+        partial = await partial_monitor.on_tool_result(
+            "segmentation_agent",
+            "segmentation_tool",
+            json.dumps({"status": "partial"}),
+            "/tmp/workspace",
+        )
+
+        self.assertTrue(failed)
+        self.assertFalse(partial)
+        self.assertEqual(
+            partial_monitor.agents["segmentation_agent"].status,
+            AgentStatus.RUNNING,
+        )
+
+    def test_failed_segmentation_stops_before_feature_event(self):
+        events = [
+            (
+                "segmentation_agent",
+                "segmentation_tool",
+                True,
+                "planner validation failed",
+            ),
+            (
+                "feature_extraction_agent",
+                "radiomics_extract_features",
+                False,
+                "{}",
+            ),
+        ]
+        processed = []
+
+        with self.assertRaisesRegex(RuntimeError, "segmentation_tool failed"):
+            for source, tool_name, failed, content in events:
+                processed.append(source)
+                raise_for_fatal_tool_failure(
+                    source,
+                    tool_name,
+                    failed,
+                    content,
+                )
+
+        self.assertEqual(processed, ["segmentation_agent"])
 
 
 class SegmentationIdentityTests(unittest.IsolatedAsyncioTestCase):
