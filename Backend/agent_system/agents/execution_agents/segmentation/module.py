@@ -423,40 +423,29 @@ class SegmentationModule:
             return False
 
         if preview.get("isEmptyMask"):
-            if allow_reuse_fallback:
-                item.update(
-                    {
-                        "reused": False,
-                        "source_segmentation_uid": None,
-                        "status": "pending",
-                        "mask_path": None,
-                        "gif_path": None,
-                        "error_stage": None,
-                        "error": None,
-                        "error_details": None,
-                    }
-                )
-                self._persist_processing_state(
-                    workspace_dir, resolution_outcome, work_items, run_id
-                )
-                return False
-            await self._fail_pair(
-                item,
-                stage="empty_mask",
-                message="Generated segmentation mask is empty",
-                details=None,
-                workspace_dir=workspace_dir,
-                resolution_outcome=resolution_outcome,
-                work_items=work_items,
-                run_id=run_id,
-                publisher=publisher,
+            item.update(
+                {
+                    "status": "ready",
+                    "gif_path": preview.get("gifPath") or f"overlays/{artifact_key}.gif",
+                    "is_empty_mask": True,
+                    "warning": "Volume mask is empty; modify it before saving if needed",
+                    "error_stage": None,
+                    "error": None,
+                    "error_details": None,
+                }
             )
-            return False
+            self._persist_processing_state(
+                workspace_dir, resolution_outcome, work_items, run_id
+            )
+            await publisher.publish_ready()
+            return True
 
         item.update(
             {
                 "status": "ready",
                 "gif_path": preview.get("gifPath") or f"overlays/{artifact_key}.gif",
+                "is_empty_mask": False,
+                "warning": None,
                 "error_stage": None,
                 "error": None,
                 "error_details": None,
@@ -933,6 +922,8 @@ class SegmentationModule:
                     )
                     if temp_path.exists():
                         shutil.copy2(temp_path, target_path)
+                    item["is_empty_mask"] = False
+                    item["warning"] = None
                     item["review_status"] = "modified"
                 elif pair_id in review["accepted"]:
                     item["review_status"] = "accepted"
@@ -1122,6 +1113,8 @@ class SegmentationModule:
                         "review_status": "pending",
                         "mask_path": None,
                         "gif_path": None,
+                        "is_empty_mask": False,
+                        "warning": None,
                         "geometry_adjusted": False,
                         "geometry": None,
                         "error_stage": None,

@@ -207,8 +207,17 @@ def align_and_binarize_mask(
     mask_path: str,
     reference_volume_path: str,
     output_path: str,
+    *,
+    preserve_index_order_if_same_size: bool = False,
 ) -> dict:
-    """Align a mask to the reference grid using nearest-neighbor resampling."""
+    """Binarize a mask and align it to the reference volume geometry.
+
+    MONAI Label outputs are derived directly from the input volume voxel array,
+    but their exported NIfTI header can describe the Z axis in the opposite
+    direction.  When those arrays have the same size, physical resampling would
+    reverse the already-aligned slice order.  Callers handling those outputs can
+    therefore preserve index order and replace only the geometry metadata.
+    """
     reference = sitk.ReadImage(reference_volume_path)
     mask = sitk.ReadImage(mask_path)
     original_geometry = {
@@ -218,7 +227,21 @@ def align_and_binarize_mask(
         "direction": list(mask.GetDirection()),
     }
     geometry_adjusted = not _geometry_matches(mask, reference)
-    if geometry_adjusted:
+    same_size = (
+        mask.GetDimension() == reference.GetDimension()
+        and mask.GetSize() == reference.GetSize()
+    )
+    alignment_mode = "unchanged"
+    if geometry_adjusted and preserve_index_order_if_same_size and same_size:
+        alignment_mode = "reference_geometry_only"
+        logger.warning(
+            "Preserving mask voxel order for %s and copying reference geometry; "
+            "mask and reference sizes are identical (%s)",
+            mask_path,
+            list(reference.GetSize()),
+        )
+    elif geometry_adjusted:
+        alignment_mode = "physical_resample"
         resample = sitk.ResampleImageFilter()
         resample.SetReferenceImage(reference)
         resample.SetInterpolator(sitk.sitkNearestNeighbor)
@@ -241,6 +264,7 @@ def align_and_binarize_mask(
     return {
         "path": output_path,
         "geometry_adjusted": geometry_adjusted,
+        "alignment_mode": alignment_mode,
         "original_geometry": original_geometry,
         "final_geometry": {
             "size": list(reference.GetSize()),
@@ -394,6 +418,7 @@ async def download_and_pair_volumes(
                 src_path,
                 reference_volume_path,
                 dst,
+                preserve_index_order_if_same_size=True,
             )
         except Exception:
             logger.exception("Error normalizing label %s", src_path)
