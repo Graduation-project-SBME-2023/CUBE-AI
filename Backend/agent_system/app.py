@@ -59,7 +59,7 @@ from services.session_service import (
     SessionPlanningConflict,
     SessionService,
 )
-from services.pipeline_monitor import PipelineMonitor
+from services.pipeline_monitor import PipelineMonitor, raise_for_fatal_tool_failure
 from clients.backend_client import BackendClient
 from agents.execution_agents.segmentation.progressive import (
     artifact_key_for_pair,
@@ -323,11 +323,21 @@ async def run_pipeline(session: Session) -> None:
                 case ToolCallExecutionEvent(source=src, content=content):
                     pipeline_logger.info(f"🔧 [{src}] TOOL CALL RESULT")
                     for result in content:
-                        await session.execution_monitor.on_tool_result(
-                            src, result.name, result.content, workspace_folder
+                        failed = await session.execution_monitor.on_tool_result(
+                            src,
+                            result.name,
+                            result.content,
+                            workspace_folder,
+                            execution_error=bool(result.is_error),
                         )
                         pipeline_logger.info(
                             f"     Tool: {result.name}  Result: {result.content}"
+                        )
+                        raise_for_fatal_tool_failure(
+                            src,
+                            result.name,
+                            failed,
+                            result.content,
                         )
 
                 case MemoryQueryEvent(source=src, content=content):
@@ -363,6 +373,7 @@ async def run_pipeline(session: Session) -> None:
         logger.error(f"here, {e} occured, check in this method")
         logger.error(e)
         await session.execution_monitor.on_pipeline_error(e)
+        raise
     finally:
         cancel_task.cancel()
 
