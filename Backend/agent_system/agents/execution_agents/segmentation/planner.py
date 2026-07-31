@@ -1,13 +1,15 @@
-import hashlib
 import json
 import logging
 import re
-from pathlib import Path
 from typing import Callable, TypeVar
 
 from autogen_agentchat.agents import AssistantAgent
 from pydantic import ValidationError
 
+from .clinical_target_policy import (
+    CLINICAL_TARGET_POLICY,
+    CLINICAL_TARGET_POLICY_FINGERPRINT,
+)
 from .contracts import (
     CachePromptCandidate,
     ClinicalPlanAudit,
@@ -26,22 +28,6 @@ from .model_catalog import get_enabled_segmentation_model_paths
 
 logger = logging.getLogger(__name__)
 ValidatedPlan = TypeVar("ValidatedPlan")
-
-
-def _load_clinical_target_policy() -> str:
-    policy_path = Path(__file__).with_name("clinical_target_policy.md")
-    try:
-        return policy_path.read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        raise RuntimeError(
-            f"Clinical target policy is unavailable at {policy_path}"
-        ) from exc
-
-
-CLINICAL_TARGET_POLICY = _load_clinical_target_policy()
-CLINICAL_TARGET_POLICY_FINGERPRINT = hashlib.sha256(
-    CLINICAL_TARGET_POLICY.encode("utf-8")
-).hexdigest()
 
 INTENT_SYSTEM_MESSAGE = f"""
 You are ClinicalTargetIntentAgent. Determine the clinical ROI identity requested

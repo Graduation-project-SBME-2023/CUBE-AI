@@ -129,8 +129,7 @@ def _has_resumable_segmentation_checkpoint(workspace: Path) -> bool:
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if (
-            manifest.get("schema_version") != 2
-            or manifest.get("stage") not in {"awaiting_review", "reviewed"}
+            manifest.get("stage") not in {"awaiting_review", "reviewed"}
             or not isinstance(manifest.get("pairs"), list)
         ):
             return False

@@ -292,7 +292,6 @@ class SegmentationRecoveryTests(unittest.TestCase):
             manifest_path.write_text(
                 json.dumps(
                     {
-                        "schema_version": 2,
                         "stage": "awaiting_review",
                         "pairs": [
                             {

@@ -1,4 +1,9 @@
-# Clinical Target Resolution Policy
+"""Clinical target resolution policy used by the segmentation agents."""
+
+import hashlib
+
+
+CLINICAL_TARGET_POLICY = """# Clinical Target Resolution Policy
 
 This policy guides agent judgment. It is not a synonym table and must never be
 used by runtime code to match labels.
@@ -49,4 +54,8 @@ used by runtime code to match labels.
   `left kidney lesion`; preserve left laterality.
 
 Before approving a plan, independently verify that no requested disease,
-anatomy, target scope, or laterality was lost.
+anatomy, target scope, or laterality was lost."""
+
+CLINICAL_TARGET_POLICY_FINGERPRINT = hashlib.sha256(
+    CLINICAL_TARGET_POLICY.encode("utf-8")
+).hexdigest()
