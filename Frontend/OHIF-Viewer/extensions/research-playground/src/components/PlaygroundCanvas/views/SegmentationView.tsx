@@ -32,7 +32,11 @@ function ReviewView({
   volumes: VolumeGif[];
   failedVolumes: FailedVolume[];
   progress?: SegmentationProgress;
-  onSave: (results: { accepted: string[]; rejected: string[]; modified: string[] }) => void;
+  onSave: (results: {
+    accepted: string[];
+    rejected: string[];
+    modified: string[];
+  }) => Promise<boolean>;
   isLoading: boolean;
   isFinished: boolean;
   sessionId?: string;
@@ -41,6 +45,7 @@ function ReviewView({
   const [reviewStatus, setReviewStatus] = useState<Record<string, ReviewStatus>>({});
   const [openingPairId, setOpeningPairId] = useState<string | null>(null);
   const [previewRefresh, setPreviewRefresh] = useState<Record<string, 'loading' | 'error'>>({});
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'submitted'>('idle');
   const [editor, setEditor] = useState<{
     volume: VolumeGif;
     reviewKey: string;
@@ -63,6 +68,18 @@ function ReviewView({
       return changed ? next : prev;
     });
   }, [volumes]);
+
+  useEffect(() => {
+    setSaveState('idle');
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!isFinished) {
+      setSaveState('idle');
+    }
+  }, [isFinished]);
+
+  const isReviewLocked = !isFinished || saveState !== 'idle';
 
   const handleToggle = useCallback(
     (uid: string, status: 'accepted' | 'rejected' | 'modified') =>
@@ -180,11 +197,16 @@ function ReviewView({
     [onVolumeUpdated]
   );
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (isReviewLocked) {
+      return;
+    }
     const accepted = Object.keys(reviewStatus).filter(uid => reviewStatus[uid] === 'accepted');
     const rejected = Object.keys(reviewStatus).filter(uid => reviewStatus[uid] === 'rejected');
     const modified = Object.keys(reviewStatus).filter(uid => reviewStatus[uid] === 'modified');
-    onSave({ accepted, rejected, modified });
+    setSaveState('saving');
+    const saved = await onSave({ accepted, rejected, modified });
+    setSaveState(saved ? 'submitted' : 'idle');
   };
 
   const acceptedCount = Object.values(reviewStatus).filter(s => s === 'accepted').length;
@@ -204,14 +226,14 @@ function ReviewView({
           <div className="mb-4 flex shrink-0 items-center gap-3 border-b border-[#1f2d40]/50 pb-4">
             <button
               onClick={handleRejectAll}
-              disabled={volumes.length === 0 || isLoading || !isFinished}
+              disabled={volumes.length === 0 || isLoading || isReviewLocked}
               className="flex items-center gap-2 rounded-lg border border-red-900/50 bg-[#1a1515] px-4 py-2 text-sm text-red-400 transition-colors hover:bg-red-900/20 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <XSquare size={15} /> Reject All
             </button>
             <button
               onClick={handleAcceptAll}
-              disabled={volumes.length === 0 || isLoading || !isFinished}
+              disabled={volumes.length === 0 || isLoading || isReviewLocked}
               className="flex items-center gap-2 rounded-lg border border-[#6fe5b8]/30 bg-[#151f1a] px-4 py-2 text-sm text-[#6fe5b8] transition-colors hover:bg-[#6fe5b8]/10 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <CheckSquare size={15} /> Accept All
@@ -308,16 +330,18 @@ function ReviewView({
                       <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
                         <button
                           onClick={() => handleModify(volume)}
-                          disabled={!isFinished || openingPairId === reviewKey}
+                          disabled={isReviewLocked || openingPairId === reviewKey}
                           style={{
                             padding: '3px',
                             borderRadius: '4px',
                             border: 'none',
                             cursor:
-                              isFinished && openingPairId !== reviewKey ? 'pointer' : 'not-allowed',
+                              !isReviewLocked && openingPairId !== reviewKey
+                                ? 'pointer'
+                                : 'not-allowed',
                             background: isModified ? '#eab308' : 'transparent',
                             color: isModified ? '#000' : '#9ca3af',
-                            opacity: isFinished ? 1 : 0.5,
+                            opacity: isReviewLocked ? 0.5 : 1,
                           }}
                           title="Modify Interactively"
                         >
@@ -332,30 +356,30 @@ function ReviewView({
                         </button>
                         <button
                           onClick={() => handleToggle(reviewKey, 'rejected')}
-                          disabled={!isFinished}
+                          disabled={isReviewLocked}
                           style={{
                             padding: '3px',
                             borderRadius: '4px',
                             border: 'none',
-                            cursor: isFinished ? 'pointer' : 'not-allowed',
+                            cursor: isReviewLocked ? 'not-allowed' : 'pointer',
                             background: isRejected ? '#ef4444' : 'transparent',
                             color: isRejected ? '#fff' : '#9ca3af',
-                            opacity: isFinished ? 1 : 0.5,
+                            opacity: isReviewLocked ? 0.5 : 1,
                           }}
                         >
                           <X size={14} />
                         </button>
                         <button
                           onClick={() => handleToggle(reviewKey, 'accepted')}
-                          disabled={!isFinished}
+                          disabled={isReviewLocked}
                           style={{
                             padding: '3px',
                             borderRadius: '4px',
                             border: 'none',
-                            cursor: isFinished ? 'pointer' : 'not-allowed',
+                            cursor: isReviewLocked ? 'not-allowed' : 'pointer',
                             background: isAccepted ? '#6fe5b8' : 'transparent',
                             color: isAccepted ? '#000' : '#9ca3af',
-                            opacity: isFinished ? 1 : 0.5,
+                            opacity: isReviewLocked ? 0.5 : 1,
                           }}
                         >
                           <Check
@@ -493,10 +517,22 @@ function ReviewView({
         )}
         <button
           onClick={handleSave}
-          disabled={isLoading || volumes.length === 0 || !isFinished}
+          disabled={isLoading || volumes.length === 0 || isReviewLocked}
           className="flex items-center gap-2 rounded-full bg-[#5acce6] px-12 py-3 font-bold text-black shadow-[0_0_20px_rgba(90,204,230,0.2)] transition-colors hover:bg-[#4ab5cc] disabled:cursor-not-allowed disabled:bg-[#1f2d40] disabled:text-[#3c5d80]"
         >
-          <Save size={18} /> Save Review Results
+          {saveState === 'saving' ? (
+            <Loader2
+              size={18}
+              className="animate-spin"
+            />
+          ) : (
+            <Save size={18} />
+          )}
+          {saveState === 'saving'
+            ? 'Saving Review...'
+            : saveState === 'submitted'
+              ? 'Review Saved'
+              : 'Save Review Results'}
         </button>
       </div>
 
@@ -572,7 +608,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
   }) => {
     if (!data.sessionId) {
       alert('Session ID is missing. Unable to send review results.');
-      return;
+      return false;
     }
     console.log('the session id in front is', data.sessionId);
 
@@ -580,9 +616,11 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
       await saveSegmentationReview(data.sessionId, results);
       alert('Review saved! The AI module will now resume.');
       console.log('Review results sent successfully:', results);
+      return true;
     } catch (error) {
       console.error('Failed to send review results:', error);
       alert('Failed to send review results to the backend. Please try again.');
+      return false;
     }
   };
 

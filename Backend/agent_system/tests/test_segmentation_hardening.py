@@ -230,6 +230,40 @@ class SegmentationUtilityTests(unittest.TestCase):
             self.assertEqual(aligned.GetSpacing(), reference.GetSpacing())
             self.assertLessEqual(values, {0, 1})
 
+    def test_same_size_monai_mask_keeps_voxel_order_when_header_z_is_reversed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            reference_path = temp / "volume.nii.gz"
+            mask_path = temp / "mask.nii.gz"
+            output_path = temp / "aligned.nii.gz"
+
+            reference = sitk.Image([4, 3, 5], sitk.sitkInt16)
+            reference.SetOrigin((0.0, 0.0, 0.0))
+            reference.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+            sitk.WriteImage(reference, str(reference_path))
+
+            mask_array = np.zeros((5, 3, 4), dtype=np.uint8)
+            mask_array[4, 1, 2] = 255
+            mask = sitk.GetImageFromArray(mask_array)
+            mask.SetOrigin((0.0, 0.0, 4.0))
+            mask.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0))
+            sitk.WriteImage(mask, str(mask_path))
+
+            result = align_and_binarize_mask(
+                str(mask_path),
+                str(reference_path),
+                str(output_path),
+                preserve_index_order_if_same_size=True,
+            )
+            aligned = sitk.ReadImage(str(output_path))
+            aligned_array = sitk.GetArrayFromImage(aligned)
+
+            self.assertTrue(result["geometry_adjusted"])
+            self.assertEqual(result["alignment_mode"], "reference_geometry_only")
+            self.assertTrue(np.array_equal(aligned_array, mask_array > 0))
+            self.assertEqual(aligned.GetOrigin(), reference.GetOrigin())
+            self.assertEqual(aligned.GetDirection(), reference.GetDirection())
+
 
 class SegmentationIdentityTests(unittest.IsolatedAsyncioTestCase):
     async def test_exact_generated_uid_is_selected(self):

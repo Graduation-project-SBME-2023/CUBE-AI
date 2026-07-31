@@ -213,6 +213,44 @@ class ProgressiveSnapshotTests(unittest.TestCase):
                 ["volume__tumor"],
             )
 
+    def test_empty_mask_remains_a_repairable_ready_preview(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir) / "workspace_session"
+            overlays = workspace / "overlays"
+            overlays.mkdir(parents=True)
+            pair_id = "volume__tumor"
+            artifact_key = artifact_key_for_pair(pair_id)
+            (overlays / f"{artifact_key}.gif").write_bytes(b"GIF89a")
+            item = {
+                "pair_id": pair_id,
+                "artifact_key": artifact_key,
+                "sequence_index": 0,
+                "volume_uid": "volume",
+                "target_id": "tumor",
+                "canonical_label": "tumor",
+                "status": "ready",
+                "gif_path": f"overlays/{artifact_key}.gif",
+                "is_empty_mask": True,
+                "warning": "Volume mask is empty; modify it before saving if needed",
+            }
+            plan = SimpleNamespace(
+                target_labels=["tumor"],
+                selected_models=["model"],
+                targets=[SimpleNamespace(target_id="tumor", canonical_label="tumor")],
+            )
+
+            snapshot = build_segmentation_snapshot(
+                plan=plan,
+                work_items=[item],
+                workspace_dir=workspace,
+                base_url="http://localhost:8150",
+                is_finished=True,
+            )
+
+            self.assertEqual(snapshot["progress"], {"total": 1, "generated": 1, "failed": 0})
+            self.assertTrue(snapshot["volumes"][0]["isEmptyMask"])
+            self.assertEqual(snapshot["failedVolumes"], [])
+
     def test_artifact_key_is_filesystem_safe_and_deterministic(self):
         pair_id = "1.2.3__left_kidney_tumor"
         first = artifact_key_for_pair(pair_id)

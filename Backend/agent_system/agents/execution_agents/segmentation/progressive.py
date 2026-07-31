@@ -93,7 +93,8 @@ def preview_from_item(
             f"{base_url.rstrip('/')}/files/{workspace_name}/"
             f"{Path(gif_path).as_posix()}"
         ),
-        "isEmptyMask": False,
+        "isEmptyMask": bool(item.get("is_empty_mask")),
+        "warning": item.get("warning"),
     }
 
 
