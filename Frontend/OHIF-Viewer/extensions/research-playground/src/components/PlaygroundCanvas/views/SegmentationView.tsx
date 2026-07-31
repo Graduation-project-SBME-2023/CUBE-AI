@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Check, X, CheckSquare, XSquare, Save, Loader2, Edit } from 'lucide-react';
+import { useSnackbar } from '@ohif/ui';
 import {
   FailedVolume,
   SegmentationProgress,
@@ -32,11 +33,7 @@ function ReviewView({
   volumes: VolumeGif[];
   failedVolumes: FailedVolume[];
   progress?: SegmentationProgress;
-  onSave: (results: {
-    accepted: string[];
-    rejected: string[];
-    modified: string[];
-  }) => Promise<boolean>;
+  onSave: (results: { accepted: string[]; rejected: string[]; modified: string[] }) => Promise<boolean>;
   isLoading: boolean;
   isFinished: boolean;
   sessionId?: string;
@@ -51,6 +48,8 @@ function ReviewView({
     reviewKey: string;
     viewerUrl: string;
   } | null>(null);
+
+  const snackbar = useSnackbar();
 
   useEffect(() => {
     setReviewStatus(prev => {
@@ -107,7 +106,12 @@ function ReviewView({
     const uid = volume.seriesInstanceUid;
     const reviewKey = volume.pairId || uid;
     if (!sessionId) {
-      alert('Session ID is missing. Unable to open the segmentation editor.');
+      snackbar.show({
+        title: 'Session Error',
+        message: 'Session ID is missing. Unable to open the segmentation editor.',
+        type: 'error',
+        duration: 5000,
+      });
       return;
     }
 
@@ -133,11 +137,21 @@ function ReviewView({
         });
       } else {
         console.error('study_uid not found in the response body', data);
-        alert('Study UID missing from the server response.');
+        snackbar.show({
+          title: 'Error',
+          message: 'Study UID missing from the server response.',
+          type: 'error',
+          duration: 5000,
+        });
       }
     } catch (error) {
       console.error('Error retrieving study uid:', error);
-      alert('Failed to connect to the backend to retrieve the Study UID.');
+      snackbar.show({
+        title: 'Connection Error',
+        message: 'Failed to connect to the backend to retrieve the Study UID.',
+        type: 'error',
+        duration: 5000,
+      });
     } finally {
       setOpeningPairId(null);
     }
@@ -569,6 +583,8 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
 
   const [isLoading, setIsLoading] = useState(true);
 
+  const snackbar = useSnackbar();
+
   useEffect(() => {
     if (
       segmentationData?.volumes?.length ||
@@ -607,19 +623,34 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
     modified: string[];
   }) => {
     if (!data.sessionId) {
-      alert('Session ID is missing. Unable to send review results.');
+      snackbar.show({
+        title: 'Session Error',
+        message: 'Session ID is missing. Unable to send review results.',
+        type: 'error',
+        duration: 5000,
+      });
       return false;
     }
     console.log('the session id in front is', data.sessionId);
 
     try {
       await saveSegmentationReview(data.sessionId, results);
-      alert('Review saved! The AI module will now resume.');
+      snackbar.show({
+        title: 'Reviews Saved',
+        message: 'Done! Reviews saved — the AI module will now resume.',
+        type: 'success',
+        duration: 5000,
+      });
       console.log('Review results sent successfully:', results);
       return true;
     } catch (error) {
       console.error('Failed to send review results:', error);
-      alert('Failed to send review results to the backend. Please try again.');
+      snackbar.show({
+        title: 'Save Failed',
+        message: 'Failed to send review results to the backend. Please try again.',
+        type: 'error',
+        duration: 5000,
+      });
       return false;
     }
   };
