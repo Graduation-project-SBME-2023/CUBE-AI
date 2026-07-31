@@ -124,12 +124,12 @@ def _reset_population_config(workspace: Path) -> bool:
 
 
 def _has_resumable_segmentation_checkpoint(workspace: Path) -> bool:
-    """Return true when review can resume without rerunning inference."""
+    """Return true when pair processing or review can resume safely."""
     manifest_path = workspace / "segmentation_manifest.json"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if (
-            manifest.get("stage") not in {"awaiting_review", "reviewed"}
+            manifest.get("stage") not in {"processing", "awaiting_review", "reviewed"}
             or not isinstance(manifest.get("pairs"), list)
         ):
             return False
@@ -137,7 +137,8 @@ def _has_resumable_segmentation_checkpoint(workspace: Path) -> bool:
             if not isinstance(item, dict) or item.get("status") != "ready":
                 continue
             volume_path = workspace / "volumes" / f"{item['volume_uid']}.nii.gz"
-            mask_path = workspace / str(item.get("mask_path") or "")
+            mask_path = (workspace / str(item.get("mask_path") or "")).resolve()
+            mask_path.relative_to(workspace)
             if not volume_path.is_file() or not mask_path.is_file():
                 return False
         return bool(manifest["pairs"])

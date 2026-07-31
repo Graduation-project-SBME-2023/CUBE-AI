@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Union
 from uuid import uuid4
 
 import httpx
+import SimpleITK as sitk
 from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
 
 from agent_system.models.tool_logging import TextPayload
@@ -29,6 +30,12 @@ from .planner import (
     create_target_auditor_agent,
     create_target_intent_agent,
     run_planner,
+)
+from .progressive import (
+    ProgressivePreviewPublisher,
+    artifact_key_for_pair,
+    ensure_artifact_key,
+    preview_from_item,
 )
 from .resolution import (
     fetch_cache_candidates,
@@ -247,70 +254,439 @@ class SegmentationModule:
         temporary_path.replace(manifest_path)
         return manifest_path
 
-    async def _broadcast_review(
+    def _create_publisher(
         self,
         plan,
         work_items: list[dict[str, Any]],
         workspace_dir: str,
-    ) -> list[dict[str, Any]]:
-        downloadable = [
-            item
-            for item in work_items
-            if item.get("status") == "ready" and item.get("mask_path")
-        ]
+    ) -> ProgressivePreviewPublisher:
+        return ProgressivePreviewPublisher(
+            plan=plan,
+            work_items=work_items,
+            workspace_dir=workspace_dir,
+            session_id=self.session_id,
+            client=self.http_client,
+            base_url=self.agent_base_url,
+        )
+
+    def _persist_processing_state(
+        self,
+        workspace_dir: str,
+        resolution_outcome: TargetResolutionOutcome,
+        work_items: list[dict[str, Any]],
+        run_id: str,
+    ) -> Path:
+        return self._write_manifest(
+            workspace_dir,
+            resolution_outcome,
+            work_items,
+            stage="processing",
+            run_id=run_id,
+        )
+
+    async def _fail_pair(
+        self,
+        item: dict[str, Any],
+        *,
+        stage: str,
+        message: str,
+        details: dict[str, Any] | None,
+        workspace_dir: str,
+        resolution_outcome: TargetResolutionOutcome,
+        work_items: list[dict[str, Any]],
+        run_id: str,
+        publisher: ProgressivePreviewPublisher,
+    ) -> None:
+        item.update(
+            {
+                "status": "failed",
+                "error_stage": stage,
+                "error": message,
+                "error_details": details,
+                "gif_path": None,
+            }
+        )
+        self._persist_processing_state(
+            workspace_dir, resolution_outcome, work_items, run_id
+        )
+        await publisher.publish_failure()
+
+    @staticmethod
+    def _workspace_volume_is_valid(workspace_dir: str, volume_uid: str) -> bool:
+        path = Path(workspace_dir) / "volumes" / f"{volume_uid}.nii.gz"
+        if not path.is_file() or path.stat().st_size <= 0:
+            return False
+        try:
+            image = sitk.ReadImage(str(path))
+            return image.GetDimension() == 3 and all(size > 0 for size in image.GetSize())
+        except Exception:
+            logger.warning("Invalid cached workspace volume: %s", path, exc_info=True)
+            return False
+
+    async def _prepare_pair_preview(
+        self,
+        item: dict[str, Any],
+        *,
+        workspace_dir: str,
+        resolution_outcome: TargetResolutionOutcome,
+        work_items: list[dict[str, Any]],
+        run_id: str,
+        publisher: ProgressivePreviewPublisher,
+        allow_reuse_fallback: bool = False,
+    ) -> bool:
+        item["status"] = "preparing"
+        self._persist_processing_state(
+            workspace_dir, resolution_outcome, work_items, run_id
+        )
+        artifact_key = ensure_artifact_key(item)
+        successful, skipped = await download_and_pair_volumes(
+            workspace_dir,
+            [
+                {
+                    "pair_id": item["pair_id"],
+                    "artifact_key": artifact_key,
+                    "volume_uid": item["volume_uid"],
+                    "target_id": item["target_id"],
+                    "label_uid": item["source_segmentation_uid"],
+                }
+            ],
+            download_volumes=not self._workspace_volume_is_valid(
+                workspace_dir, item["volume_uid"]
+            ),
+            task_name=f"{item['model']}_segmentation_task",
+            client=self.http_client,
+        )
+        pair_result = next(
+            (result for result in successful if result.get("pair_id") == item["pair_id"]),
+            None,
+        )
+        if pair_result is None:
+            can_fallback = allow_reuse_fallback and any(
+                skipped_item.get("reason") == "normalization_failed"
+                for skipped_item in skipped
+            )
+            if can_fallback:
+                item.update(
+                    {
+                        "reused": False,
+                        "source_segmentation_uid": None,
+                        "status": "pending",
+                        "mask_path": None,
+                        "gif_path": None,
+                        "error_stage": None,
+                        "error": None,
+                        "error_details": None,
+                    }
+                )
+                self._persist_processing_state(
+                    workspace_dir, resolution_outcome, work_items, run_id
+                )
+                return False
+            await self._fail_pair(
+                item,
+                stage="mask_export",
+                message="Mask download or normalization failed",
+                details={"skipped": skipped},
+                workspace_dir=workspace_dir,
+                resolution_outcome=resolution_outcome,
+                work_items=work_items,
+                run_id=run_id,
+                publisher=publisher,
+            )
+            return False
+
+        item["mask_path"] = f"masks/{artifact_key}.nii.gz"
+        item["geometry_adjusted"] = bool(
+            (item.get("inference_result") or {}).get("geometry_adjusted")
+            or pair_result.get("geometry_adjusted")
+        )
+        item["geometry"] = pair_result.get("geometry")
+
         previews = await asyncio.to_thread(
             generate_gif_overlays,
             workspace_dir,
-            downloadable,
+            [item],
         )
-        preview_by_pair = {entry.get("pairId"): entry for entry in previews}
-        for item in downloadable:
-            preview = preview_by_pair.get(item["pair_id"])
-            if preview and preview.get("isEmptyMask"):
-                item["warning"] = "Volume mask is empty"
-
-        frontend_data = {
-            "targetRoi": ", ".join(plan.target_labels),
-            "targets": [
-                {
-                    "targetId": target.target_id,
-                    "canonicalLabel": target.canonical_label,
-                }
-                for target in plan.targets
-            ],
-            "selectedModel": ", ".join(plan.selected_models),
-            "volumes": previews,
-            "failedVolumes": [
-                {
-                    "seriesInstanceUid": item["volume_uid"],
-                    "pairId": item["pair_id"],
-                    "targetId": item["target_id"],
-                    "reason": item.get("error") or item.get("warning"),
-                }
-                for item in work_items
-                if item.get("status") == "failed" or item.get("warning")
-            ],
-            "progress": {
-                "total": len(work_items),
-                "generated": len(previews),
-                "failed": sum(
-                    item.get("status") == "failed" for item in work_items
-                ),
-            },
-            "isFinished": True,
-        }
-        try:
-            await send_ws_message_remote(
-                "segmentation_output",
-                frontend_data,
-                self.session_id,
-                client=self.http_client,
-                base_url=self.agent_base_url,
-                timeout=60.0,
+        preview = previews[0] if previews else None
+        if preview is None:
+            await self._fail_pair(
+                item,
+                stage="gif_generation",
+                message="Mask was prepared but its GIF preview could not be generated",
+                details=None,
+                workspace_dir=workspace_dir,
+                resolution_outcome=resolution_outcome,
+                work_items=work_items,
+                run_id=run_id,
+                publisher=publisher,
             )
-        except httpx.HTTPError as exc:
-            logger.warning("Could not broadcast segmentation review: %s", exc)
-        return previews
+            return False
+
+        if preview.get("isEmptyMask"):
+            if allow_reuse_fallback:
+                item.update(
+                    {
+                        "reused": False,
+                        "source_segmentation_uid": None,
+                        "status": "pending",
+                        "mask_path": None,
+                        "gif_path": None,
+                        "error_stage": None,
+                        "error": None,
+                        "error_details": None,
+                    }
+                )
+                self._persist_processing_state(
+                    workspace_dir, resolution_outcome, work_items, run_id
+                )
+                return False
+            await self._fail_pair(
+                item,
+                stage="empty_mask",
+                message="Generated segmentation mask is empty",
+                details=None,
+                workspace_dir=workspace_dir,
+                resolution_outcome=resolution_outcome,
+                work_items=work_items,
+                run_id=run_id,
+                publisher=publisher,
+            )
+            return False
+
+        item.update(
+            {
+                "status": "ready",
+                "gif_path": preview.get("gifPath") or f"overlays/{artifact_key}.gif",
+                "error_stage": None,
+                "error": None,
+                "error_details": None,
+            }
+        )
+        self._persist_processing_state(
+            workspace_dir, resolution_outcome, work_items, run_id
+        )
+        await publisher.publish_ready()
+        return True
+
+    async def _execute_work_items(
+        self,
+        workspace_dir: str,
+        resolution_outcome: TargetResolutionOutcome,
+        work_items: list[dict[str, Any]],
+        run_id: str,
+        publisher: ProgressivePreviewPublisher,
+    ) -> None:
+        plan = resolution_outcome.plan
+        ordered = sorted(work_items, key=lambda item: int(item["sequence_index"]))
+        item_by_pair = {item["pair_id"]: item for item in ordered}
+
+        for item in ordered:
+            if item.get("status") != "ready":
+                continue
+            if preview_from_item(item, workspace_dir, self.agent_base_url) is None:
+                item["status"] = (
+                    "preparing" if item.get("source_segmentation_uid") else "failed"
+                )
+                if item["status"] == "failed":
+                    item["error_stage"] = "checkpoint_artifacts"
+                    item["error"] = "Ready checkpoint is missing its preview artifacts"
+
+        # Reused masks are made visible before any new inference begins.
+        for item in ordered:
+            if not item.get("reused") or item.get("status") in {"ready", "failed"}:
+                continue
+            item["status"] = "reusing"
+            self._persist_processing_state(
+                workspace_dir, resolution_outcome, work_items, run_id
+            )
+            await self._prepare_pair_preview(
+                item,
+                workspace_dir=workspace_dir,
+                resolution_outcome=resolution_outcome,
+                work_items=work_items,
+                run_id=run_id,
+                publisher=publisher,
+                allow_reuse_fallback=True,
+            )
+
+        # Resume pairs whose inference UID was persisted before interruption.
+        for item in ordered:
+            if item.get("status") not in {"inference_succeeded", "preparing"}:
+                continue
+            if not item.get("source_segmentation_uid"):
+                item["status"] = "pending"
+                continue
+            await self._prepare_pair_preview(
+                item,
+                workspace_dir=workspace_dir,
+                resolution_outcome=resolution_outcome,
+                work_items=work_items,
+                run_id=run_id,
+                publisher=publisher,
+            )
+
+        for item in ordered:
+            if item.get("status") == "inferencing":
+                item["status"] = "pending"
+        self._persist_processing_state(
+            workspace_dir, resolution_outcome, work_items, run_id
+        )
+
+        if any(item.get("status") == "ready" for item in ordered):
+            await publisher.publish_ready()
+
+        pending = [item for item in ordered if item.get("status") == "pending"]
+
+        async def on_pair_started(event: dict[str, Any]) -> None:
+            item = item_by_pair[event["pair_id"]]
+            item["status"] = "inferencing"
+            self._persist_processing_state(
+                workspace_dir, resolution_outcome, work_items, run_id
+            )
+
+        async def on_pair_completed(outcome: dict[str, Any]) -> None:
+            item = item_by_pair[outcome["pair_id"]]
+            try:
+                if outcome["status"] == "failed":
+                    failure = outcome.get("failure") or {}
+                    await self._fail_pair(
+                        item,
+                        stage=str(failure.get("stage") or "inference"),
+                        message=str(failure.get("message") or "Segmentation inference failed"),
+                        details={
+                            key: value
+                            for key, value in failure.items()
+                            if key not in {"pair_id", "stage", "message"}
+                        }
+                        or None,
+                        workspace_dir=workspace_dir,
+                        resolution_outcome=resolution_outcome,
+                        work_items=work_items,
+                        run_id=run_id,
+                        publisher=publisher,
+                    )
+                    return
+
+                inference_result = outcome.get("inference_result") or {}
+                segmentation_uid = str(
+                    inference_result.get("segmentation_series_uid") or ""
+                )
+                if not segmentation_uid:
+                    await self._fail_pair(
+                        item,
+                        stage="inference_result",
+                        message="Inference returned no segmentation SeriesInstanceUID",
+                        details={"model": item["model"], "prompt": item["inference_prompt"]},
+                        workspace_dir=workspace_dir,
+                        resolution_outcome=resolution_outcome,
+                        work_items=work_items,
+                        run_id=run_id,
+                        publisher=publisher,
+                    )
+                    return
+
+                item["inference_result"] = {
+                    key: inference_result.get(key)
+                    for key in (
+                        "segmentation_series_uid",
+                        "orthanc_instance_id",
+                        "sync_succeeded",
+                        "retry_count",
+                        "status_code",
+                        "geometry_adjusted",
+                        "original_mask_shape",
+                        "final_mask_shape",
+                    )
+                }
+                item["source_segmentation_uid"] = segmentation_uid
+                item["status"] = "inference_succeeded"
+                self._persist_processing_state(
+                    workspace_dir, resolution_outcome, work_items, run_id
+                )
+
+                record = await self._wait_for_exact_mask(
+                    item["volume_uid"], segmentation_uid
+                )
+                if not record:
+                    await self._fail_pair(
+                        item,
+                        stage="segmentation_sync",
+                        message=(
+                            "Timed out waiting for exact generated segmentation UID "
+                            f"{segmentation_uid}"
+                        ),
+                        details={"segmentation_series_uid": segmentation_uid},
+                        workspace_dir=workspace_dir,
+                        resolution_outcome=resolution_outcome,
+                        work_items=work_items,
+                        run_id=run_id,
+                        publisher=publisher,
+                    )
+                    return
+
+                item["source_method"] = record.get("method")
+                item["source_model"] = (
+                    record.get("name") or record.get("model_name") or item["model"]
+                )
+                item["source_description"] = record.get("segmentation_type")
+                await self._prepare_pair_preview(
+                    item,
+                    workspace_dir=workspace_dir,
+                    resolution_outcome=resolution_outcome,
+                    work_items=work_items,
+                    run_id=run_id,
+                    publisher=publisher,
+                )
+            except Exception as exc:
+                logger.exception("Pair completion failed for %s", item["pair_id"])
+                await self._fail_pair(
+                    item,
+                    stage="preview_callback",
+                    message=str(exc),
+                    details={"exception_type": type(exc).__name__},
+                    workspace_dir=workspace_dir,
+                    resolution_outcome=resolution_outcome,
+                    work_items=work_items,
+                    run_id=run_id,
+                    publisher=publisher,
+                )
+
+        if pending:
+            if plan.chosen_path == "automatic":
+                await run_automatic_pipeline(
+                    pending,
+                    self.segmentation_service,
+                    self.session_id,
+                    on_pair_started=on_pair_started,
+                    on_pair_completed=on_pair_completed,
+                )
+            else:
+                await run_interactive_pipeline(
+                    self.UserFallbackAgent,
+                    self.UserProxyAgent,
+                    pending,
+                    self.segmentation_service,
+                    self.session_id,
+                    on_pair_started=on_pair_started,
+                    on_pair_completed=on_pair_completed,
+                )
+
+        for item in ordered:
+            if item.get("status") in {"ready", "failed"}:
+                continue
+            await self._fail_pair(
+                item,
+                stage="pair_state",
+                message=(
+                    "Segmentation pair did not reach a terminal ready or failed state"
+                ),
+                details={"last_status": item.get("status")},
+                workspace_dir=workspace_dir,
+                resolution_outcome=resolution_outcome,
+                work_items=work_items,
+                run_id=run_id,
+                publisher=publisher,
+            )
 
     async def _wait_for_review(self) -> dict[str, list[str]]:
         try:
@@ -374,7 +750,7 @@ class SegmentationModule:
         }
 
     @staticmethod
-    def _load_review_checkpoint(
+    def _load_checkpoint(
         workspace_dir: str,
         datasetlist: list[str],
     ) -> tuple[
@@ -390,6 +766,7 @@ class SegmentationModule:
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
             stage = str(payload.get("stage") or "")
             if stage not in {
+                "processing",
                 "awaiting_review",
                 "reviewed",
             }:
@@ -402,19 +779,33 @@ class SegmentationModule:
             ):
                 return None
 
-            workspace = Path(workspace_dir)
-            for item in work_items:
-                if item.get("status") != "ready":
-                    continue
-                volume_path = workspace / "volumes" / f"{item['volume_uid']}.nii.gz"
-                mask_path = workspace / str(item.get("mask_path") or "")
-                if not volume_path.exists() or not mask_path.exists():
-                    logger.warning(
-                        "Ignoring incomplete segmentation checkpoint; missing %s or %s",
-                        volume_path,
-                        mask_path,
+            seen_pair_ids: set[str] = set()
+            seen_sequence_indexes: set[int] = set()
+            workspace = Path(workspace_dir).resolve()
+            for fallback_index, item in enumerate(work_items):
+                pair_id = str(item.get("pair_id") or "")
+                if not pair_id or pair_id in seen_pair_ids:
+                    raise ValueError(f"Invalid or duplicate pair_id: {pair_id!r}")
+                seen_pair_ids.add(pair_id)
+                item.setdefault("artifact_key", artifact_key_for_pair(pair_id))
+                sequence_index = int(item.get("sequence_index", fallback_index))
+                if sequence_index in seen_sequence_indexes:
+                    raise ValueError(
+                        f"Duplicate segmentation sequence_index: {sequence_index}"
                     )
-                    return None
+                seen_sequence_indexes.add(sequence_index)
+                item["sequence_index"] = sequence_index
+                item.setdefault("inference_result", None)
+                item.setdefault("gif_path", None)
+                item.setdefault("reuse_candidate_uid", None)
+                if item.get("mask_path"):
+                    mask_path = (workspace / str(item["mask_path"])).resolve()
+                    mask_path.relative_to(workspace)
+                if item.get("gif_path"):
+                    gif_path = (workspace / str(item["gif_path"])).resolve()
+                    gif_path.relative_to(workspace)
+                if item.get("status") == "resolved":
+                    item["status"] = "reusing" if item.get("reused") else "preparing"
 
             resolution = payload["resolution"]
             outcome = TargetResolutionOutcome.model_validate(
@@ -488,8 +879,12 @@ class SegmentationModule:
         resolution_outcome: TargetResolutionOutcome,
         work_items: list[dict[str, Any]],
         run_id: str,
+        publisher: ProgressivePreviewPublisher | None = None,
     ) -> dict[str, Any]:
         plan = resolution_outcome.plan
+        publisher = publisher or self._create_publisher(
+            plan, work_items, workspace_dir
+        )
         manifest_path = self._write_manifest(
             workspace_dir,
             resolution_outcome,
@@ -498,8 +893,8 @@ class SegmentationModule:
             run_id=run_id,
         )
         ready_items = [item for item in work_items if item["status"] == "ready"]
+        await publisher.publish_final()
         if ready_items:
-            await self._broadcast_review(plan, work_items, workspace_dir)
             raw_review = await self._wait_for_review()
             review = self._normalise_review_keys(
                 raw_review,
@@ -519,16 +914,23 @@ class SegmentationModule:
                 workspace_dir,
                 list(review["accepted"]),
                 list(review["modified"]),
+                {
+                    item["pair_id"]: ensure_artifact_key(item)
+                    for item in work_items
+                },
             )
             for item in work_items:
                 pair_id = item["pair_id"]
+                artifact_key = ensure_artifact_key(item)
                 if pair_id in review["modified"]:
                     temp_path = (
                         Path(workspace_dir)
                         / "temp_segmentations"
-                        / f"seg_{pair_id}_modified.nii.gz"
+                        / f"seg_{artifact_key}_modified.nii.gz"
                     )
-                    target_path = Path(workspace_dir) / "masks" / f"{pair_id}.nii.gz"
+                    target_path = (
+                        Path(workspace_dir) / "masks" / f"{artifact_key}.nii.gz"
+                    )
                     if temp_path.exists():
                         shutil.copy2(temp_path, target_path)
                     item["review_status"] = "modified"
@@ -581,7 +983,19 @@ class SegmentationModule:
                 "The datasetlist is empty. The population planner did not "
                 "provide eligible volumes."
             )
-        checkpoint = self._load_review_checkpoint(workspace_dir, datasetlist)
+        unsafe_volume_uids = [
+            str(uid)
+            for uid in datasetlist
+            if not str(uid)
+            or any(character in str(uid) for character in '/\\<>:"|?*')
+            or any(ord(character) < 32 for character in str(uid))
+        ]
+        if unsafe_volume_uids:
+            raise ValueError(
+                "Dataset contains unsafe SeriesInstanceUID values: "
+                f"{unsafe_volume_uids}"
+            )
+        checkpoint = self._load_checkpoint(workspace_dir, datasetlist)
         if checkpoint is not None:
             (
                 resolution_outcome,
@@ -597,12 +1011,26 @@ class SegmentationModule:
                     resolution_outcome.plan,
                     work_items,
                 )
-            logger.info("Resuming segmentation from awaiting-review checkpoint")
+            publisher = self._create_publisher(
+                resolution_outcome.plan, work_items, workspace_dir
+            )
+            if checkpoint_stage == "processing":
+                logger.info("Resuming progressive segmentation processing checkpoint")
+            else:
+                logger.info("Resuming segmentation from awaiting-review checkpoint")
+            await self._execute_work_items(
+                workspace_dir,
+                resolution_outcome,
+                work_items,
+                run_id,
+                publisher,
+            )
             return await self._complete_review(
                 workspace_dir,
                 resolution_outcome,
                 work_items,
                 run_id,
+                publisher,
             )
 
         instructions = self._build_instruction(state)
@@ -652,12 +1080,15 @@ class SegmentationModule:
             model = self._model_for_target(plan, target_index)
             for volume_uid in datasetlist:
                 pair_id = f"{volume_uid}__{target.target_id}"
+                artifact_key = artifact_key_for_pair(pair_id)
                 existing = select_newest_matching_mask(
                     volume_uid, target, mask_inventory
                 )
                 work_items.append(
                     {
                         "pair_id": pair_id,
+                        "artifact_key": artifact_key,
+                        "sequence_index": -1,
                         "run_id": run_id,
                         "correlation_id": f"{run_id}:{pair_id}",
                         "volume_uid": volume_uid,
@@ -666,6 +1097,11 @@ class SegmentationModule:
                         "inference_prompt": prompt,
                         "cache_hit": cache_hit,
                         "model": model,
+                        "reuse_candidate_uid": (
+                            existing.get("label_series_instance_uid")
+                            if existing
+                            else None
+                        ),
                         "source_segmentation_uid": (
                             existing.get("label_series_instance_uid")
                             if existing
@@ -681,9 +1117,11 @@ class SegmentationModule:
                             existing.get("segmentation_type") if existing else None
                         ),
                         "reused": bool(existing),
-                        "status": "resolved" if existing else "pending",
+                        "status": "reusing" if existing else "pending",
+                        "inference_result": None,
                         "review_status": "pending",
                         "mask_path": None,
+                        "gif_path": None,
                         "geometry_adjusted": False,
                         "geometry": None,
                         "error_stage": None,
@@ -691,6 +1129,19 @@ class SegmentationModule:
                         "error_details": None,
                     }
                 )
+
+        work_items = [
+            *[item for item in work_items if item["reused"]],
+            *[item for item in work_items if not item["reused"]],
+        ]
+        for sequence_index, item in enumerate(work_items):
+            item["sequence_index"] = sequence_index
+        if len({item["pair_id"] for item in work_items}) != len(work_items):
+            raise ValueError("Segmentation work items contain duplicate pair_id values")
+        self._persist_processing_state(
+            workspace_dir, resolution_outcome, work_items, run_id
+        )
+        publisher = self._create_publisher(plan, work_items, workspace_dir)
 
         target_count = len(plan.targets)
         volume_count = len(datasetlist)
@@ -712,215 +1163,29 @@ class SegmentationModule:
             session_id=self.session_id,
         )
 
-        existing_mask_volume_count = len(
-            {
-                item["volume_uid"]
-                for item in work_items
-                if item["reused"]
-            }
-        )
+        existing_mask_pair_count = sum(bool(item["reused"]) for item in work_items)
         await emit_tool_events(
             event_types=["tool_started", "tool_finished"],
             content=TextPayload(
                 message=(
                     "Found existing masks for "
-                    f"{existing_mask_volume_count} volumes"
+                    f"{existing_mask_pair_count} volume-target pairs"
                 )
             ),
             session_id=self.session_id,
         )
 
-        for target_index, target in enumerate(plan.targets):
-            pending = [
-                item
-                for item in work_items
-                if item["target_id"] == target.target_id
-                and item["status"] == "pending"
-            ]
-            if not pending:
-                continue
-            volumes = [item["volume_uid"] for item in pending]
-            failed_uids: set[str] = set()
-            failures_by_uid: dict[str, dict[str, Any]] = {}
-            inference_by_uid: dict[str, dict[str, Any]] = {}
-            model = self._model_for_target(plan, target_index)
-
-            try:
-                if plan.chosen_path == "automatic":
-                    result = await run_automatic_pipeline(
-                        volumes,
-                        [target.canonical_label],
-                        [model],
-                        self.segmentation_service,
-                        self.session_id,
-                        inference_prompts={
-                            target.canonical_label: pending[0]["inference_prompt"]
-                        },
-                    )
-                    pipeline_result = result
-                else:
-                    pipeline_result = await run_interactive_pipeline(
-                        self.UserFallbackAgent,
-                        self.UserProxyAgent,
-                        volumes,
-                        [target.canonical_label],
-                        self.segmentation_service,
-                        self.session_id,
-                        inference_prompts={
-                            target.canonical_label: pending[0]["inference_prompt"]
-                        },
-                    )
-                failed_uids.update(pipeline_result.get("failed_uids", []))
-                failures_by_uid = {
-                    failure["volume_uid"]: failure
-                    for failure in pipeline_result.get("failures", [])
-                }
-                inference_by_uid = {
-                    entry["volume_uid"]: entry["result"]
-                    for entry in pipeline_result.get("results", [])
-                }
-            except Exception as exc:
-                logger.exception(
-                    "Target pipeline failed for %s", target.target_id
-                )
-                failed_uids.update(volumes)
-                for item in pending:
-                    item["error_stage"] = "target_pipeline"
-                    item["error"] = str(exc)
-                    item["error_details"] = {
-                        "exception_type": type(exc).__name__,
-                    }
-
-            for item in pending:
-                if item["volume_uid"] in failed_uids:
-                    failure = failures_by_uid.get(item["volume_uid"], {})
-                    item["status"] = "failed"
-                    item["error_stage"] = (
-                        item["error_stage"]
-                        or failure.get("stage")
-                        or "inference"
-                    )
-                    item["error"] = (
-                        item["error"]
-                        or failure.get("message")
-                        or "Segmentation inference failed"
-                    )
-                    item["error_details"] = {
-                        key: value
-                        for key, value in failure.items()
-                        if key
-                        not in {"volume_uid", "label", "stage", "message"}
-                    } or None
-                    continue
-                inference_result = inference_by_uid.get(item["volume_uid"])
-                segmentation_uid = str(
-                    (inference_result or {}).get("segmentation_series_uid") or ""
-                )
-                if not segmentation_uid:
-                    item["status"] = "failed"
-                    item["error_stage"] = "inference_result"
-                    item["error"] = "Inference returned no segmentation SeriesInstanceUID"
-                    item["error_details"] = {
-                        "model": item["model"],
-                        "prompt": item["inference_prompt"],
-                    }
-                    continue
-                item["inference_result"] = {
-                    "segmentation_series_uid": segmentation_uid,
-                    "orthanc_instance_id": inference_result.get(
-                        "orthanc_instance_id"
-                    ),
-                    "sync_succeeded": inference_result.get("sync_succeeded"),
-                    "retry_count": inference_result.get("retry_count"),
-                    "status_code": inference_result.get("status_code"),
-                    "geometry_adjusted": inference_result.get(
-                        "geometry_adjusted", False
-                    ),
-                    "original_mask_shape": inference_result.get(
-                        "original_mask_shape"
-                    ),
-                    "final_mask_shape": inference_result.get("final_mask_shape"),
-                }
-                record = await self._wait_for_exact_mask(
-                    item["volume_uid"],
-                    segmentation_uid,
-                )
-                if not record:
-                    item["status"] = "failed"
-                    item["error_stage"] = "segmentation_sync"
-                    item["error"] = (
-                        "Timed out waiting for exact generated segmentation UID "
-                        f"{segmentation_uid}"
-                    )
-                    item["error_details"] = {
-                        "segmentation_series_uid": segmentation_uid,
-                        "model": item["model"],
-                        "prompt": item["inference_prompt"],
-                    }
-                    continue
-                item["source_segmentation_uid"] = record.get(
-                    "label_series_instance_uid"
-                )
-                item["source_method"] = record.get("method")
-                item["source_model"] = (
-                    record.get("name")
-                    or record.get("model_name")
-                    or item["model"]
-                )
-                item["source_description"] = record.get("segmentation_type")
-                item["status"] = "resolved"
-
-        resolved_pairs = [
-            {
-                "volume_uid": item["volume_uid"],
-                "target_id": item["target_id"],
-                "label_uid": item["source_segmentation_uid"],
-            }
-            for item in work_items
-            if item["status"] == "resolved" and item["source_segmentation_uid"]
-        ]
-        successful_pairs, skipped_pairs = await download_and_pair_volumes(
+        await self._execute_work_items(
             workspace_dir,
-            resolved_pairs,
-            task_name=(
-                f"{plan.selected_models[0]}_segmentation_task"
-                if plan.selected_models
-                else "segmentation_task"
-            ),
-            client=self.http_client,
+            resolution_outcome,
+            work_items,
+            run_id,
+            publisher,
         )
-        successful_pair_ids = {
-            f"{pair['volume_uid']}__{pair['target_id']}"
-            for pair in successful_pairs
-        }
-        skipped_pair_ids = {
-            f"{pair['volume_uid']}__{pair['target_id']}"
-            for pair in skipped_pairs
-        }
-        successful_by_pair_id = {
-            f"{pair['volume_uid']}__{pair['target_id']}": pair
-            for pair in successful_pairs
-        }
-        for item in work_items:
-            if item["pair_id"] in successful_pair_ids:
-                pair_result = successful_by_pair_id[item["pair_id"]]
-                item["status"] = "ready"
-                item["mask_path"] = (
-                    f"masks/{item['pair_id']}.nii.gz"
-                )
-                item["geometry_adjusted"] = bool(
-                    item.get("inference_result", {}).get("geometry_adjusted")
-                    or pair_result.get("geometry_adjusted")
-                )
-                item["geometry"] = pair_result.get("geometry")
-            elif item["pair_id"] in skipped_pair_ids or item["status"] == "resolved":
-                item["status"] = "failed"
-                item["error_stage"] = item["error_stage"] or "mask_export"
-                item["error"] = item["error"] or "Mask download or normalization failed"
-
         return await self._complete_review(
             workspace_dir,
             resolution_outcome,
             work_items,
             run_id,
+            publisher,
         )

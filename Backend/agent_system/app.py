@@ -61,6 +61,10 @@ from services.session_service import (
 )
 from services.pipeline_monitor import PipelineMonitor
 from clients.backend_client import BackendClient
+from agents.execution_agents.segmentation.progressive import (
+    artifact_key_for_pair,
+    build_snapshot_from_manifest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -568,6 +572,37 @@ async def replay_logs(session_id: str):
         if log.msg_type in ('msg'): continue
         await ws_manager.send_ws_message(log.msg_type, log.payload, log.session_id, replaying=True)
 
+    workspace_root = os.environ.get(
+        "AGENTS_WORKSPACE_DIR",
+        os.path.abspath(os.path.join(current_dir, "..", "agents_workspace")),
+    )
+    workspace = os.path.join(workspace_root, f"workspace_{session_id}")
+    manifest_path = os.path.join(workspace, "segmentation_manifest.json")
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as stream:
+            manifest = json.load(stream)
+        if manifest.get("stage") == "awaiting_review":
+            snapshot = build_snapshot_from_manifest(
+                manifest,
+                workspace,
+                os.environ.get("MAS_BASE_URL", "http://localhost:8150"),
+            )
+            if snapshot:
+                await ws_manager.send_ws_message(
+                    "segmentation_output",
+                    snapshot,
+                    session_id,
+                    replaying=True,
+                )
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError, json.JSONDecodeError):
+        logger.warning(
+            "Could not reconstruct segmentation snapshot for session %s",
+            session_id,
+            exc_info=True,
+        )
+
 
 
 @app.get("/session/{session_id}/config")
@@ -1050,11 +1085,19 @@ async def upload_modified_mask(
         if target_id
         else series_instance_uid
     )
-    file_path = os.path.join(output_dir, f"seg_{pair_id}_modified.nii.gz")
+    artifact_key = artifact_key_for_pair(pair_id)
+    file_path = os.path.join(output_dir, f"seg_{artifact_key}_modified.nii.gz")
     # The frontend mask matches the full DICOM volume space.
     # The workspace stores volumes in 'volumes/' and masks in 'masks/'.
     base_volume_path = os.path.join(workspace_folder, "volumes", f"{series_instance_uid}.nii.gz")
-    original_mask_path = os.path.join(workspace_folder, "masks", f"{pair_id}.nii.gz")
+    original_mask_path = os.path.join(
+        workspace_folder, "masks", f"{artifact_key}.nii.gz"
+    )
+    legacy_pair_name_is_safe = "/" not in pair_id and "\\" not in pair_id
+    if not os.path.exists(original_mask_path) and legacy_pair_name_is_safe:
+        original_mask_path = os.path.join(
+            workspace_folder, "masks", f"{pair_id}.nii.gz"
+        )
     
     try:
         import nibabel as nib
@@ -1138,6 +1181,8 @@ async def upload_modified_mask(
         workspace_folder,
         [
             {
+                "pair_id": pair_id,
+                "artifact_key": artifact_key,
                 "volume_uid": series_instance_uid,
                 "target_id": target_id or "",
                 "mask_path": file_path,
@@ -1151,12 +1196,13 @@ async def upload_modified_mask(
         )
 
     overlay = overlay_results[0]
+    gif_path = str(overlay.get("gifPath") or f"overlays/{artifact_key}.gif")
     overlay["gifUrl"] = (
         f"{str(request.base_url).rstrip('/')}/files/"
-        f"{os.path.basename(workspace_folder)}/overlays/{pair_id}.gif"
+        f"{os.path.basename(workspace_folder)}/{gif_path}"
     )
     overlay["updatedAt"] = os.stat(
-        os.path.join(workspace_folder, "overlays", f"{pair_id}.gif")
+        os.path.join(workspace_folder, *gif_path.split("/"))
     ).st_mtime_ns
 
     return {
@@ -1197,10 +1243,22 @@ async def get_segmentation_mask(
 
     # Search locations in priority order
     pair_id = f"{series_uid}__{target_id}" if target_id else series_uid
+    artifact_key = artifact_key_for_pair(pair_id)
     candidates = [
-        os.path.join(workspace_folder, "temp_segmentations", f"seg_{pair_id}_modified.nii.gz"),
-        os.path.join(workspace_folder, "masks", f"{pair_id}.nii.gz"),
+        os.path.join(workspace_folder, "temp_segmentations", f"seg_{artifact_key}_modified.nii.gz"),
+        os.path.join(workspace_folder, "masks", f"{artifact_key}.nii.gz"),
     ]
+    if "/" not in pair_id and "\\" not in pair_id:
+        candidates.extend(
+            [
+                os.path.join(
+                    workspace_folder,
+                    "temp_segmentations",
+                    f"seg_{pair_id}_modified.nii.gz",
+                ),
+                os.path.join(workspace_folder, "masks", f"{pair_id}.nii.gz"),
+            ]
+        )
 
     nifti_path = None
     for path in candidates:

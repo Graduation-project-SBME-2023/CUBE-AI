@@ -1,6 +1,9 @@
 import logging
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from agent_system.models.tool_logging import ProgressPayload, TextPayload
+
 from ..logging_config import emit_tool_event, emit_tool_events
 from .common import (
     SegmentationPipelineError,
@@ -10,152 +13,158 @@ from .common import (
 
 logger = logging.getLogger(__name__)
 
+PairHook = Callable[[dict[str, Any]], Awaitable[None]]
 
-def _model_for_label(selected_models, label_index: int, label: str) -> str:
-    if label_index < len(selected_models):
-        return selected_models[label_index]
-    if len(selected_models) == 1:
-        return selected_models[0]
-    raise ValueError(f"No automatic segmentation model selected for label '{label}'.")
+
+async def _notify_pair_hook(
+    hook: PairHook | None,
+    payload: dict[str, Any],
+    work_item: dict[str, Any],
+    *,
+    hook_name: str,
+) -> None:
+    if hook is None:
+        return
+    try:
+        await hook(payload)
+    except Exception as exc:
+        pair_id = str(work_item.get("pair_id") or "unknown")
+        logger.exception("%s failed for pair %s", hook_name, pair_id)
+        work_item.update(
+            {
+                "status": "failed",
+                "error_stage": "preview_callback",
+                "error": str(exc),
+                "error_details": {"exception_type": type(exc).__name__},
+            }
+        )
 
 
 async def run_automatic_pipeline(
-    volumes,
-    labels,
-    selected_auto_models,
+    pending_work_items: list[dict[str, Any]],
     segmentation_service,
     session_id,
-    inference_prompts=None,
+    *,
+    on_pair_started: PairHook | None = None,
+    on_pair_completed: PairHook | None = None,
 ):
-    inference_prompts = inference_prompts or {}
-    payload = TextPayload(message=f"Starting automatic segmentation on {len(volumes)} volumes.")
+    """Run automatic inference once per volume-target pair.
+
+    Model, clinical label, and prompt are read from each work item so multiple
+    targets for the same volume cannot be collapsed or positionally mismatched.
+    """
+    total = len(pending_work_items)
+    payload = TextPayload(message=f"Starting automatic segmentation on {total} pairs.")
     await emit_tool_events(
         event_types=["tool_started", "tool_progress"],
         content=payload,
         session_id=session_id,
     )
-    logger.info("Starting automatic segmentation on %s volumes", len(volumes))
+    logger.info("Starting automatic segmentation on %s pairs", total)
 
-    if not selected_auto_models:
-        raise ValueError("Automatic segmentation requested without a selected model.")
-
-    # Emit initial progress (0 completed) before any volume segmentation starts
     await emit_tool_event(
         event_type="tool_progress",
-        content=ProgressPayload(current=0, total=len(volumes), label="Segmenting volumes"),
+        content=ProgressPayload(current=0, total=total, label="Segmenting pairs"),
         content_type="progress",
         session_id=session_id,
     )
 
-    failures: list[dict] = []
-    completed_results: list[dict] = []
-    for index, volume_uid in enumerate(volumes, start=1):
-        logger.info("[%s/%s] Running segmentation for volume: %s", index, len(volumes), volume_uid)
-        # Emit in-progress step (current = index - 0.5) so progress bar animates between index-1 and index
+    outcomes: list[dict[str, Any]] = []
+    for index, item in enumerate(pending_work_items, start=1):
+        pair_id = str(item["pair_id"])
+        volume_uid = str(item["volume_uid"])
+        label = str(item["canonical_label"])
+        model = str(item["model"])
+        prompt = str(item.get("inference_prompt") or label)
+
+        await _notify_pair_hook(
+            on_pair_started,
+            {"pair_id": pair_id, "status": "inferencing"},
+            item,
+            hook_name="Pair-start callback",
+        )
         await emit_tool_event(
             event_type="tool_progress",
             content=ProgressPayload(
                 current=index - 0.5,
-                total=len(volumes),
-                label="Segmenting volumes"
+                total=total,
+                label="Segmenting pairs",
             ),
             content_type="progress",
             session_id=session_id,
         )
 
         try:
-            for label_index, label in enumerate(labels):
-                model = _model_for_label(selected_auto_models, label_index, label)
-                result = await run_with_progress_heartbeat(
-                    segmentation_service.run_segmentation(
-                        model=model,
-                        series_instance_uid=volume_uid,
-                        label_info=label,
-                        params={
-                            "text_prompts": [
-                                inference_prompts.get(label, label)
-                            ]
-                        },
-                    ),
-                    session_id=session_id,
-                    current=index - 0.5,
-                    total=len(volumes),
-                    label=f"Segmenting volume {index} of {len(volumes)}",
-                    volume_uid=volume_uid,
-                )
-                raise_for_segmentation_error(result, volume_uid, label)
-                completed_results.append(
-                    {
-                        "volume_uid": volume_uid,
-                        "label": label,
-                        "result": result,
-                    }
-                )
-            logger.info("Completed segmentation for volume: %s", volume_uid)
-            # Emit completed progress step (current = index)
-            await emit_tool_event(
-                event_type="tool_progress",
-                content=ProgressPayload(
-                    current=index,
-                    total=len(volumes),
-                    label="Segmenting volumes"
+            result = await run_with_progress_heartbeat(
+                segmentation_service.run_segmentation(
+                    model=model,
+                    series_instance_uid=volume_uid,
+                    label_info=label,
+                    params={"text_prompts": [prompt]},
                 ),
-                content_type="progress",
                 session_id=session_id,
+                current=index - 0.5,
+                total=total,
+                label=f"Segmenting pair {index} of {total}",
+                volume_uid=volume_uid,
             )
+            raise_for_segmentation_error(result, volume_uid, label)
+            outcome = {
+                "pair_id": pair_id,
+                "status": "succeeded",
+                "inference_result": result,
+            }
         except SegmentationPipelineError as exc:
-            failures.append(exc.as_dict())
-            logger.exception("Segmentation failed for %s", volume_uid)
-            await emit_tool_event(
-                event_type="tool_progress",
-                content=ProgressPayload(
-                    current=index,
-                    total=len(volumes),
-                    label="Segmenting volumes"
-                ),
-                content_type="progress",
-                session_id=session_id,
-            )
+            logger.exception("Segmentation failed for pair %s", pair_id)
+            failure = exc.as_dict()
+            failure["pair_id"] = pair_id
+            outcome = {
+                "pair_id": pair_id,
+                "status": "failed",
+                "failure": failure,
+            }
         except Exception as exc:
-            failures.append(
-                {
+            logger.exception("Segmentation failed for pair %s", pair_id)
+            outcome = {
+                "pair_id": pair_id,
+                "status": "failed",
+                "failure": {
+                    "pair_id": pair_id,
                     "volume_uid": volume_uid,
-                    "label": label if "label" in locals() else "",
+                    "label": label,
                     "stage": "pipeline_exception",
                     "message": str(exc),
-                }
-            )
-            logger.exception("Segmentation failed for %s", volume_uid)
-            await emit_tool_event(
-                event_type="tool_progress",
-                content=ProgressPayload(
-                    current=index,
-                    total=len(volumes),
-                    label="Segmenting volumes"
-                ),
-                content_type="progress",
-                session_id=session_id,
-            )
+                    "exception_type": type(exc).__name__,
+                },
+            }
 
-    if failures:
-        # Log failures as warnings but do NOT raise — partial success is still useful.
-        # A single OOM-killed volume (exit 137) must not abort the entire pipeline.
-        failed_uids = ", ".join(failure["volume_uid"] for failure in failures)
-        logger.warning(
-            "Automatic segmentation partially failed: %d/%d volumes could not be processed. "
-            "Failed UIDs: %s. Downstream download/GIF steps will proceed for successful volumes.",
-            len(failures), len(volumes), failed_uids,
+        outcomes.append(outcome)
+        await _notify_pair_hook(
+            on_pair_completed,
+            outcome,
+            item,
+            hook_name="Pair-completion callback",
         )
-        return {
-            "partial_failure": True,
-            "failed_uids": [failure["volume_uid"] for failure in failures],
-            "failures": failures,
-            "results": completed_results,
-        }
+        await emit_tool_event(
+            event_type="tool_progress",
+            content=ProgressPayload(current=index, total=total, label="Segmenting pairs"),
+            content_type="progress",
+            session_id=session_id,
+        )
 
+    failures = [outcome["failure"] for outcome in outcomes if outcome["status"] == "failed"]
+    results = [
+        {
+            "pair_id": outcome["pair_id"],
+            "result": outcome["inference_result"],
+        }
+        for outcome in outcomes
+        if outcome["status"] == "succeeded"
+    ]
     return {
-        "partial_failure": False,
-        "failed_uids": [],
-        "failures": [],
-        "results": completed_results,
+        "partial_failure": bool(failures),
+        "failed_pair_ids": [failure["pair_id"] for failure in failures],
+        "failures": failures,
+        "results": results,
+        "outcomes": outcomes,
     }
