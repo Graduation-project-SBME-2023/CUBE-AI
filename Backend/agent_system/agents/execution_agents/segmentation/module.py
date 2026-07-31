@@ -199,7 +199,6 @@ class SegmentationModule:
     def _write_manifest(
         workspace_dir: str,
         resolution_outcome,
-        cache_version: str | None,
         work_items: list[dict[str, Any]],
         *,
         stage: str,
@@ -217,12 +216,10 @@ class SegmentationModule:
                 existing_created_at = None
         now = datetime.now(timezone.utc).isoformat()
         payload = {
-            "schema_version": 2,
             "run_id": run_id,
             "stage": stage,
             "created_at": existing_created_at or now,
             "updated_at": now,
-            "cache_version": cache_version,
             "chosen_path": plan.chosen_path,
             "resolution": {
                 "policy_fingerprint": resolution_outcome.policy_fingerprint,
@@ -382,7 +379,6 @@ class SegmentationModule:
         datasetlist: list[str],
     ) -> tuple[
         TargetResolutionOutcome,
-        str | None,
         list[dict[str, Any]],
         str,
         str,
@@ -393,7 +389,7 @@ class SegmentationModule:
         try:
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
             stage = str(payload.get("stage") or "")
-            if payload.get("schema_version") != 2 or stage not in {
+            if stage not in {
                 "awaiting_review",
                 "reviewed",
             }:
@@ -432,7 +428,6 @@ class SegmentationModule:
             )
             return (
                 outcome,
-                payload.get("cache_version"),
                 work_items,
                 str(payload["run_id"]),
                 stage,
@@ -491,7 +486,6 @@ class SegmentationModule:
         self,
         workspace_dir: str,
         resolution_outcome: TargetResolutionOutcome,
-        cache_version: str | None,
         work_items: list[dict[str, Any]],
         run_id: str,
     ) -> dict[str, Any]:
@@ -499,7 +493,6 @@ class SegmentationModule:
         manifest_path = self._write_manifest(
             workspace_dir,
             resolution_outcome,
-            cache_version,
             work_items,
             stage="awaiting_review",
             run_id=run_id,
@@ -551,7 +544,6 @@ class SegmentationModule:
         self._write_manifest(
             workspace_dir,
             resolution_outcome,
-            cache_version,
             work_items,
             stage="reviewed",
             run_id=run_id,
@@ -593,7 +585,6 @@ class SegmentationModule:
         if checkpoint is not None:
             (
                 resolution_outcome,
-                cache_version,
                 work_items,
                 run_id,
                 checkpoint_stage,
@@ -610,7 +601,6 @@ class SegmentationModule:
             return await self._complete_review(
                 workspace_dir,
                 resolution_outcome,
-                cache_version,
                 work_items,
                 run_id,
             )
@@ -629,13 +619,13 @@ class SegmentationModule:
         mask_inventory = await fetch_mask_inventory(
             datasetlist, self._check_having_mask
         )
-        cache_candidates, cache_version = await fetch_cache_candidates(
+        cache_candidates = await fetch_cache_candidates(
             MONAI_URL,
             client=self.http_client,
         )
 
-        # Construct fresh stage agents for every run. This AutoGen version does
-        # not expose AssistantAgent.reset(), and fresh instances guarantee that
+        # Construct fresh stage agents for every run. AssistantAgent does not
+        # expose reset(), and fresh instances guarantee that
         # neither earlier runs nor another stage's conversation can influence
         # the current clinical target decision.
         intent_agent = create_target_intent_agent(self.model_client)
@@ -931,7 +921,6 @@ class SegmentationModule:
         return await self._complete_review(
             workspace_dir,
             resolution_outcome,
-            cache_version,
             work_items,
             run_id,
         )

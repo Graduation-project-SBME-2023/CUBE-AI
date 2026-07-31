@@ -82,7 +82,7 @@ async def fetch_cache_candidates(
     timeout_seconds: float = 10.0,
     *,
     client=None,
-) -> tuple[list[CachePromptCandidate], str | None]:
+) -> list[CachePromptCandidate]:
     import httpx
 
     url = f"{monai_url.rstrip('/')}/voxtell/cache-prompts"
@@ -93,7 +93,7 @@ async def fetch_cache_candidates(
         payload = response.json()
         if not payload.get("available"):
             logger.warning("VoxTell cache inventory unavailable: %s", payload.get("message"))
-            return [], None
+            return []
         keys = payload.get("keys") or []
         candidates = [
             CachePromptCandidate(
@@ -102,14 +102,14 @@ async def fetch_cache_candidates(
             )
             for key in keys
         ]
-        return candidates, payload.get("version")
+        return candidates
     except Exception as exc:
         logger.warning(
             "VoxTell cache inventory request failed; exact prompt generation will "
             "be used: %s",
             exc,
         )
-        return [], None
+        return []
     finally:
         if client is None:
             await request_client.aclose()
