@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Users, Filter, Database, AlertTriangle, Check, Activity, Layers, Download, Upload } from 'lucide-react';
+import { useSnackbar } from '@ohif/ui';
 // --- FIXED HELPER COMPONENT ---
 const PausableGif = ({ uid, isHovered }: { uid: string; isHovered: boolean }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -109,6 +110,7 @@ interface DataCohortViewProps {
 }
 
 export default function DataCohortView({ populationData, segmentationData, sessionId }: DataCohortViewProps) {
+    const { show } = useSnackbar();
 
     const [accumulatedPop, setAccumulatedPop] = useState({
         count: null as number | null,
@@ -235,7 +237,12 @@ export default function DataCohortView({ populationData, segmentationData, sessi
         const activeSessionId = sessionStorage.getItem('active_cube_session');
 
         if (!activeSessionId) {
-            alert('Error: No active session found. Please start planning first.');
+            show({
+                title: 'Error',
+                message: 'No active session found. Please start planning first.',
+                type: 'error',
+                duration: 5000,
+            });
             if (fileInputRef.current) fileInputRef.current.value = '';
             return;
         }
@@ -252,13 +259,28 @@ export default function DataCohortView({ populationData, segmentationData, sessi
             });
 
             if (response.ok) {
-                alert('Labels uploaded successfully! The agent will now continue.');
+                show({
+                    title: 'Upload Successful',
+                    message: 'Labels uploaded successfully! The agent will now continue.',
+                    type: 'success',
+                    duration: 5000,
+                });
             } else {
-                alert('Failed to upload labels.');
+                show({
+                    title: 'Upload Failed',
+                    message: 'Failed to upload labels.',
+                    type: 'error',
+                    duration: 5000,
+                });
             }
         } catch (error) {
             console.error("Error uploading file", error);
-            alert("Upload failed.");
+            show({
+                title: 'Upload Failed',
+                message: 'Upload failed.',
+                type: 'error',
+                duration: 5000,
+            });
         } finally {
             setIsUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = '';

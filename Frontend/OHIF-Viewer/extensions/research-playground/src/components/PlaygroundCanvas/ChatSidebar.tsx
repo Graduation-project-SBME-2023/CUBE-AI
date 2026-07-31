@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useSnackbar } from '@ohif/ui';
 import { MessageSquare, History, Plus, ChevronRight, Trash2, Send, Activity as ActivityIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -36,9 +37,8 @@ const ChatSidebar = ({
   const [maxSidebarWidth, setMaxSidebarWidth] = useState(() =>
     Math.max(340, Math.min(760, Math.floor(window.innerWidth * 0.55)))
   );
-  // B8: inline toast state (replaces all alert() calls)
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const snackbar = useSnackbar();
+
   const resizeStateRef = useRef({ startX: 0, startWidth: 420 });
   const messagesEndRef = useRef(null);
   const activeSessionIdRef = useRef(null);
@@ -51,15 +51,7 @@ const ChatSidebar = ({
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
-      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
-  }, []);
-
-  // B8: show a non-blocking inline toast that auto-dismisses after 5 s
-  const showToast = useCallback((msg: string) => {
-    setToastMessage(msg);
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToastMessage(null), 5000);
   }, []);
 
   const MIN_WIDTH = 340;
@@ -329,8 +321,13 @@ const ChatSidebar = ({
       setSessions(s => [newSession, ...s]);
       setActiveSessionId(newSession.chat_id);
       setDrawerOpen(false);
-      // B8: replaced alert() with inline toast
-      showToast('Could not create chat session in the database. Using a local-only session.');
+      // B8: replaced alert() with snackbar
+      snackbar.show({
+        title: 'Session Warning',
+        message: 'Could not create chat session in the database. Using a local-only session.',
+        type: 'warning',
+        duration: 5000,
+      });
       return fallbackId; // B4: return fallback ID so caller is not left with null
     }
   };
@@ -378,8 +375,13 @@ const ChatSidebar = ({
         });
       }
     } catch (e) {
-      // B8: replaced alert() with inline toast
-      showToast('Could not save message to the database. This chat is now local-only.');
+      // B8: replaced alert() with snackbar
+      snackbar.show({
+        title: 'Message Warning',
+        message: 'Could not save message to the database. This chat is now local-only.',
+        type: 'warning',
+        duration: 5000,
+      });
     }
     // Debug log outgoing message
     console.log('[ChatSidebar] Sending WS message:', { type: 'user', payload: userMsg.text });
@@ -390,8 +392,13 @@ const ChatSidebar = ({
         session_id: sessionId,
       });
     } else {
-      // B8: replaced alert() with inline toast
-      showToast('WebSocket not connected — message not sent to the AI backend.');
+      // B8: replaced alert() with snackbar
+      snackbar.show({
+        title: 'Connection Error',
+        message: 'WebSocket not connected — message not sent to the AI backend.',
+        type: 'error',
+        duration: 5000,
+      });
     }
   };
   // B1: handleWS extracted to useCallback so it can be referenced by the flush effect
@@ -427,6 +434,64 @@ const ChatSidebar = ({
           });
         }
       } catch (err) {}
+      return;
+    }
+
+    if (data.type === 'run_finished') {
+      const currentSessionId = activeSessionIdRef.current;
+      if (!currentSessionId) return;
+      const completionMsg = {
+        id: makeId('a'),
+        role: 'assistant',
+        text: '🎉 **Pipeline complete!** All research agents have finished successfully. You can now review the results in each phase tab.',
+        ts: Date.now(),
+      };
+      setSessions(prev =>
+        prev.map(s =>
+          String(s.chat_id) === String(currentSessionId)
+            ? { ...s, messages: [...s.messages, completionMsg], last_activity: Date.now() }
+            : s
+        )
+      );
+      setIsTyping(false);
+      try {
+        if (isUuid(String(currentSessionId))) {
+          await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: 'assistant', text: completionMsg.text }),
+          });
+        }
+      } catch (_) {}
+      return;
+    }
+
+    if (data.type === 'run_stopped') {
+      const currentSessionId = activeSessionIdRef.current;
+      if (!currentSessionId) return;
+      const stoppedMsg = {
+        id: makeId('a'),
+        role: 'assistant',
+        text: '⚠️ **Pipeline stopped.** The execution was cancelled. You can restart the pipeline from the canvas when ready.',
+        ts: Date.now(),
+      };
+      setSessions(prev =>
+        prev.map(s =>
+          String(s.chat_id) === String(currentSessionId)
+            ? { ...s, messages: [...s.messages, stoppedMsg], last_activity: Date.now() }
+            : s
+        )
+      );
+      setIsTyping(false);
+      try {
+        if (isUuid(String(currentSessionId))) {
+          await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: 'assistant', text: stoppedMsg.text }),
+          });
+        }
+      } catch (_) {}
       return;
     }
 
@@ -511,7 +576,7 @@ const ChatSidebar = ({
         });
       }
     } catch (err) {}
-  }, [showToast]);
+  }, [snackbar]);
 
   // Only connect WebSocket once for the app session (not just when sidebar is open)
   useEffect(() => {
@@ -574,7 +639,7 @@ const ChatSidebar = ({
           {renderIcon(MessageSquare, 16)} Assistant
         </div>
         <div className="flex items-center gap-1.5">
-          <button
+          {/* (<button
             onClick={() => setDrawerOpen(!drawerOpen)}
             title="History"
             className="inline-flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-transparent text-[#b0d4ea] transition-all hover:border-[#1e3248] hover:bg-[#0d1e2e] hover:text-[#e0f0ff]"
@@ -587,7 +652,7 @@ const ChatSidebar = ({
             className="inline-flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-transparent text-[#b0d4ea] transition-all hover:border-[#1e3248] hover:bg-[#0d1e2e] hover:text-[#e0f0ff]"
           >
             {renderIcon(Plus, 16)}
-          </button>
+          </button> */}
           <button
             onClick={onClose}
             className="ml-2 inline-flex h-[30px] w-[30px] items-center justify-center rounded-lg border border-transparent text-[#b0d4ea] transition-all hover:border-[#1e3248] hover:bg-[#0d1e2e] hover:text-[#e0f0ff]"
@@ -625,23 +690,6 @@ const ChatSidebar = ({
         </div>
       )}
       <div className="flex flex-1 flex-col gap-5 overflow-y-auto bg-[#0f1923] p-6">
-        {/* B8: inline error/warning toast banner */}
-        {toastMessage && (
-          <div
-            role="alert"
-            className="flex items-start justify-between gap-3 rounded-lg border border-[#7a2020] bg-[#1a0d0d] px-4 py-2.5 text-[13px] text-[#ff8a8a]"
-          >
-            <span className="leading-snug">{toastMessage}</span>
-            <button
-              type="button"
-              aria-label="Dismiss notification"
-              onClick={() => setToastMessage(null)}
-              className="shrink-0 text-[#ff5555] transition-colors hover:text-white"
-            >
-              ✕
-            </button>
-          </div>
-        )}
         {messages.length === 0 && (
           <div className="mt-10 text-center text-[13px] text-[#3d5a72]">Start a new conversation...</div>
         )}
