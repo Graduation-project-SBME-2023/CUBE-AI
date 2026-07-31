@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Bot, Box, Clock, List, Search } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bot, Box, Clock, List, Search, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../ui/Card';
 import { getBackendApiBaseUrl } from '../../utils/apiBase';
@@ -22,6 +22,8 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
   const [history, setHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [showAllHistory, setShowAllHistory] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const navigate = useNavigate();
 
@@ -131,6 +133,38 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
       return;
     }
     navigate('/playground', { state });
+  };
+
+  const handleDeleteClick = (e: React.MouseEvent, project: any) => {
+    e.stopPropagation();
+    setItemToDelete(project);
+  };
+
+  const confirmDelete = async () => {
+    if (!itemToDelete) return;
+    setIsDeleting(true);
+    try {
+      // Deleting the chat session cascades and cleans up the hypothesis better
+      // Also fallback to hypotheses endpoint if chat_id is missing
+      const endpoint = itemToDelete.chat_id
+        ? `${getBackendApiBaseUrl()}/chat_sessions/${itemToDelete.chat_id}`
+        : `${getBackendApiBaseUrl()}/hypotheses/${itemToDelete.id}`;
+      const response = await fetch(endpoint, {
+        method: 'DELETE',
+      });
+      if (response.ok) {
+        setHistory(prev => prev.filter(item => item.id !== itemToDelete.id));
+      } else {
+        console.error('Failed to delete hypothesis:', await response.text());
+        // Still remove it locally to allow user to bypass ghost entries
+        setHistory(prev => prev.filter(item => item.id !== itemToDelete.id));
+      }
+    } catch (err) {
+      console.error('Error deleting hypothesis:', err);
+    } finally {
+      setIsDeleting(false);
+      setItemToDelete(null);
+    }
   };
 
   const formatDate = (dateStr?: string) => {
@@ -268,20 +302,55 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
             <div className="text-[#566a84]">No recent hypotheses</div>
           ) : (
             history.map(project => (
-              <div key={project.id} onClick={() => handleProjectClick(project)}>
+              <div key={project.id} className="relative group">
                 <Card
                   title={project.title}
                   description={`Edited ${formatDate(project.date ?? project.updated_at ?? project.created_at)}`}
                   icon={<Bot size={24} className="text-[#5acce6] opacity-80" />}
                   ctaText={project.status}
                   onClick={() => handleProjectClick(project)}
-                  className="group"
                 />
+                <button
+                  onClick={(e) => handleDeleteClick(e, project)}
+                  className="absolute top-4 right-4 z-20 rounded-md p-2 text-[#3c5d80] opacity-0 transition-all group-hover:opacity-100 hover:bg-red-500/10 hover:text-red-400"
+                  aria-label="Delete hypothesis"
+                  title="Delete hypothesis"
+                >
+                  <Trash2 size={18} />
+                </button>
               </div>
             ))
           )}
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-xl border border-[#2e445c] bg-[#10151a] p-6 shadow-2xl">
+            <h3 className="mb-2 text-lg font-bold text-white">Delete Hypothesis?</h3>
+            <p className="mb-6 text-sm text-[#91b9cd]">
+              Are you sure you want to delete <span className="font-semibold text-white">"{itemToDelete.title}"</span>? This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setItemToDelete(null)}
+                disabled={isDeleting}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-[#566a84] transition-colors hover:bg-[#1a2535] hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={isDeleting}
+                className="flex items-center gap-2 rounded-lg bg-red-500/10 px-4 py-2 text-sm font-medium text-red-500 transition-colors hover:bg-red-500/20 disabled:opacity-50"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

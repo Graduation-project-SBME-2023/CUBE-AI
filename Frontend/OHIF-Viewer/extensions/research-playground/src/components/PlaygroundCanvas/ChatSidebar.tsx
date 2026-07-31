@@ -34,6 +34,8 @@ const ChatSidebar = ({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(420);
   const [isResizing, setIsResizing] = useState(false);
+  const [sessionToDelete, setSessionToDelete] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [maxSidebarWidth, setMaxSidebarWidth] = useState(() =>
     Math.max(340, Math.min(760, Math.floor(window.innerWidth * 0.55)))
   );
@@ -331,15 +333,23 @@ const ChatSidebar = ({
       return fallbackId; // B4: return fallback ID so caller is not left with null
     }
   };
-  const deleteSession = async chat_id => {
-    if (isUuid(String(chat_id))) {
-      try {
+  const confirmDeleteSession = async () => {
+    if (!sessionToDelete) return;
+    setIsDeleting(true);
+    const chat_id = sessionToDelete.chat_id;
+    try {
+      if (isUuid(String(chat_id))) {
         await fetch(`${getBackendApiBaseUrl()}/chat_sessions/${chat_id}`, { method: 'DELETE' });
-      } catch (err) {}
-    }
-    setSessions(s => s.filter(x => x.chat_id !== chat_id));
-    if (activeSessionId === chat_id) {
-      setActiveSessionId(null);
+      }
+      setSessions(s => s.filter(x => x.chat_id !== chat_id));
+      if (activeSessionId === chat_id) {
+        setActiveSessionId(null);
+      }
+    } catch (err) {
+      console.error('Error deleting session', err);
+    } finally {
+      setIsDeleting(false);
+      setSessionToDelete(null);
     }
   };
   const sendMessage = async (messageText?: string) => {
@@ -662,7 +672,7 @@ const ChatSidebar = ({
         </div>
       </div>
       {drawerOpen && (
-        <div className="absolute inset-0 top-14 z-20 overflow-y-auto border-l border-[#1a2a3a] bg-[#0a1520]/95 backdrop-blur">
+        <div className="absolute inset-0 top-14 z-20 overflow-y-auto ohif-scrollbar border-l border-[#1a2a3a] bg-[#0a1520]/95 backdrop-blur">
           <div className="p-4">
             <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[#3d5a72]">Chat History</div>
             {sessions.map(s => (
@@ -675,21 +685,23 @@ const ChatSidebar = ({
                 className={`group mb-1.5 flex cursor-pointer items-center justify-between rounded-[10px] border p-2.5 transition-all ${s.chat_id === activeSessionId ? 'border-[#2a5a8a] bg-[rgba(26,74,122,0.2)]' : 'border-transparent hover:border-[#1e3248] hover:bg-[#0d1e2e]'}`}
               >
                 <span className="truncate text-sm text-[#dadada]">{s.title}</span>
-                <button
-                  onClick={e => {
-                    e.stopPropagation();
-                    deleteSession(s.chat_id);
-                  }}
-                  className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-md text-[#ef4444] opacity-0 transition-all group-hover:opacity-100"
-                >
-                  {renderIcon(Trash2, 12)}
-                </button>
+                {s.chat_id !== activeSessionId && (
+                  <button
+                    onClick={e => {
+                      e.stopPropagation();
+                      setSessionToDelete(s);
+                    }}
+                    className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-md text-[#ef4444] opacity-0 transition-all group-hover:opacity-100 hover:bg-[#ef4444]/20"
+                  >
+                    {renderIcon(Trash2, 12)}
+                  </button>
+                )}
               </div>
             ))}
           </div>
         </div>
       )}
-      <div className="flex flex-1 flex-col gap-5 overflow-y-auto bg-[#0f1923] p-6">
+      <div className="flex flex-1 flex-col gap-5 overflow-y-auto ohif-scrollbar bg-[#0f1923] p-6">
         {messages.length === 0 && (
           <div className="mt-10 text-center text-[13px] text-[#3d5a72]">Start a new conversation...</div>
         )}
@@ -735,6 +747,34 @@ const ChatSidebar = ({
           </button>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal for ChatSidebar */}
+      {sessionToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-[320px] rounded-xl border border-[#1e3248] bg-[#0f1923] p-5 shadow-2xl">
+            <h3 className="mb-2 text-base font-semibold text-white">Delete Chat?</h3>
+            <p className="mb-5 text-sm text-[#8ab8cc]">
+              Are you sure you want to delete <span className="text-white">"{sessionToDelete.title}"</span>?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setSessionToDelete(null)}
+                disabled={isDeleting}
+                className="rounded-lg px-3 py-1.5 text-sm font-medium text-[#8ab8cc] hover:bg-[#1a2a3a] hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDeleteSession}
+                disabled={isDeleting}
+                className="rounded-lg bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-500 hover:bg-red-500/20 disabled:opacity-50"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
