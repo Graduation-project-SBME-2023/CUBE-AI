@@ -36,5 +36,5 @@ class Hypothesis(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    plan = relationship("Plan", back_populates="hypothesis", uselist=False)
+    plan = relationship("Plan", back_populates="hypothesis", uselist=False, cascade="all, delete-orphan")
     chat_session = relationship("ChatSession", back_populates="hypothesis")

@@ -29,7 +29,7 @@ class ChatSession(Base):
     )
     messages = relationship("ChatMessage", back_populates="chat_session", lazy="selectin",cascade="all, delete-orphan")
 
-    hypothesis = relationship("Hypothesis", back_populates="chat_session", uselist=False)
+    hypothesis = relationship("Hypothesis", back_populates="chat_session", uselist=False, cascade="all, delete-orphan")
     ws_logs = relationship(
     "WSLog",
     back_populates="chat_session",
