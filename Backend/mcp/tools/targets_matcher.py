@@ -15,23 +15,39 @@ logger = logging.getLogger(__name__)
 # Shared: wait for doctor-uploaded targets.csv (manual mode)
 # ---------------------------------------------------------------------------
 
-# Global flag so we only emit the "waiting" log once per call chain
-_IS_WAITING_FOR_LABELS = False
+# ---------------------------------------------------------------------------
+# Shared: wait for explicit human cohort approval (HITL Gate)
+# ---------------------------------------------------------------------------
+
+_IS_WAITING_FOR_APPROVAL = False
 
 
-async def _wait_for_manual_upload(csv_path: str, timeout_seconds: int = 300) -> str:
+async def _wait_for_cohort_approval(workspace_dir: str, config_path: str, csv_path: str, timeout_seconds: int = 120) -> str:
     """
-    Polls until the doctor uploads targets.csv or times-out.
-    Returns the csv_path on success, or "SILENT_RETRY" on timeout.
+    Polls until config.json contains 'cohort_approved': True (set when the user clicks
+    'Approve & Lock Cohort' on Subpage 4 of the Population UI).
+    Returns csv_path on success, or 'SILENT_RETRY' on timeout.
     """
-    global _IS_WAITING_FOR_LABELS
-    if not _IS_WAITING_FOR_LABELS:
-        _IS_WAITING_FOR_LABELS = True
-        payload = TextPayload(message=f'Waiting for doctor to upload labels in ... {csv_path}')
+    global _IS_WAITING_FOR_APPROVAL
+
+    def is_approved() -> bool:
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, mode="r", encoding="utf-8") as f:
+                    c = json.load(f)
+                    return c.get("cohort_approved", False) is True
+            except Exception:
+                return False
+        return False
+
+    if is_approved():
+        _IS_WAITING_FOR_APPROVAL = False
+        return csv_path
+
+    if not _IS_WAITING_FOR_APPROVAL:
+        _IS_WAITING_FOR_APPROVAL = True
+        payload = TextPayload(message="Waiting for doctor to review and approve final cohort in UI...")
         log_tool_state(ToolEvent(event_type='tool_started', content_type='text', content=payload))
-        # This is a human-in-the-loop pause, not regular tool progress.  Send
-        # a dedicated UI state once, so the Data module can use its existing
-        # update-card indicator to ask for labels in manual mode.
         session_id = os.environ.get("SESSION_ID")
         if session_id:
             try:
@@ -42,36 +58,37 @@ async def _wait_for_manual_upload(csv_path: str, timeout_seconds: int = 300) -> 
                             "type": "agent_waiting_for_user_input",
                             "payload": {
                                 "agent": "study_population_planner_agent",
-                                "status": "WAITING_FOR_LABELS",
+                                "status": "WAITING_FOR_REVIEW",
                             },
                             "session_id": session_id,
                         },
                     )
             except Exception as exc:
-                logger.warning("Could not publish manual-label waiting state: %s", exc)
+                logger.warning("Could not publish cohort-approval waiting state: %s", exc)
 
     poll_interval = 2
     elapsed = 0
 
-    while not os.path.exists(csv_path):
+    while not is_approved():
         await asyncio.sleep(poll_interval)
         elapsed += poll_interval
         if elapsed >= timeout_seconds:
             return "SILENT_RETRY"
 
-    _IS_WAITING_FOR_LABELS = False
+    _IS_WAITING_FOR_APPROVAL = False
     return csv_path
 
 
 # ---------------------------------------------------------------------------
-# Shared: join cohort_labels.csv + datasetlist → targets.csv
+# Shared: join cohort_labels.csv + datasetlist → draft targets.csv
 # ---------------------------------------------------------------------------
 
 async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, config: dict, csv_path: str) -> str:
     """
-    Reads cohort_labels.csv and resolves patient IDs via Orthanc to produce targets.csv.
+    Reads cohort_labels.csv and resolves patient IDs via Orthanc to produce an initial targets.csv.
     If cohort_labels.csv is missing in automatic mode, runs extract_cohort_labels first.
-    Returns the csv_path on success, or a JSON error string.
+    Does NOT modify datasetlist in config.json so that unlabeled/orphan volumes stay accessible in the UI.
+    Returns csv_path on success, or a JSON error string.
     """
     from .population.cohort_labels import extract_cohort_labels
 
@@ -79,18 +96,15 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
     if not os.path.exists(cohort_labels_path):
         print("[generate_targets] cohort_labels.csv not found — running extract_cohort_labels automatically...")
         extraction_result = await extract_cohort_labels()
-        # If extraction itself failed, surface the error clearly
         if isinstance(extraction_result, dict) and extraction_result.get("status") == "error":
             err_msg = f"extract_cohort_labels failed: {extraction_result.get('message', 'unknown error')}"
             await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
             return json.dumps({"status": "error", "message": err_msg})
-        # Re-check after extraction
         if not os.path.exists(cohort_labels_path):
             err_msg = "cohort_labels.csv still missing after extract_cohort_labels ran."
             await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
             return json.dumps({"status": "error", "message": err_msg})
 
-    # Load labels into dict: patient_id -> row
     labels_dict: dict = {}
     with open(cohort_labels_path, mode="r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -104,31 +118,24 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
     async with httpx.AsyncClient() as client:
         for uid in datasetlist:
             try:
-                # 1. Fetch study
                 study_res = await client.get(f"{base_url}/volumes/{uid}/study")
                 study_res.raise_for_status()
                 patient_uuid = study_res.json().get("patient_id")
 
-                # 2. Fetch patient details
                 patient_res = await client.get(f"{base_url}/patients/{patient_uuid}")
                 patient_res.raise_for_status()
                 patient_data = patient_res.json()
                 orthanc_pid = patient_data.get("orthanc_patient_id", "")
                 clinical_pid = patient_data.get("name", "")
 
-                # 3. Determine primary case_id
                 case_id = clinical_pid if clinical_pid else orthanc_pid
 
-                # 4. Build optional KiTS fallback ID
                 kits_case_id = None
                 if clinical_pid and clinical_pid.startswith("KiTS-"):
                     kits_case_id = clinical_pid.replace("KiTS-", "case_")
                 elif orthanc_pid and orthanc_pid.startswith("KiTS-"):
                     kits_case_id = orthanc_pid.replace("KiTS-", "case_")
 
-                # 5. 5-way lookup in labels_dict
-                # The last fallback (uid) handles the case where cohort_labels.csv was
-                # keyed by volume UID (generated by the DICOM-metadata positional fallback).
                 label_info = (
                     labels_dict.get(case_id)
                     or labels_dict.get(clinical_pid)
@@ -138,45 +145,26 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
                 )
 
                 if not label_info:
-                    dropped_patients.append(f"{clinical_pid} (No medical report found)")
+                    dropped_patients.append(f"{case_id} (No matching label row)")
                     continue
 
                 if label_info.get("confidence") == "low":
-                    # Retain but flag — do NOT drop
                     low_confidence_patients.append(orthanc_pid)
 
-                is_target = str(label_info.get("has_target_disease")).lower() == "true"
+                htd = str(label_info.get("has_target_disease", "")).strip().lower()
+                if htd not in ("true", "false"):
+                    # Unlabeled / pending user decision in UI
+                    continue
+
+                is_target = htd == "true"
                 target_val = 1 if is_target else 0
                 valid_targets.append((uid, case_id, target_val))
 
             except Exception as e:
                 dropped_patients.append(f"{uid} (API error: {e})")
 
-    valid_uids = [uid for uid, _, _ in valid_targets]
-
-    if not valid_uids:
-        err_msg = "No matching targets found. All volumes were dropped because they lack clinical labels."
-        await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
-        return json.dumps({"status": "error", "message": err_msg})
-
-    # Update config.json to only contain validated UIDs
-    config_json_path = os.path.join(workspace_dir, "config.json")
-    config["datasetlist"] = valid_uids
-    with open(config_json_path, mode="w", encoding="utf-8") as f:
-        json.dump(config, f, indent=4)
-
     if dropped_patients:
-        msg = (
-            f"Dropped {len(dropped_patients)} volumes because no medical report exists for them. "
-            f"Continuing with {len(valid_targets)} valid patients."
-        )
-        await scratchpad_raise_flag(RaiseFlagInput(level="warning", message=msg))
-
-    if low_confidence_patients:
-        msg = (
-            f"Included {len(low_confidence_patients)} patients with low LLM confidence "
-            f"(retained as per policy). See metadata for details."
-        )
+        msg = f"{len(dropped_patients)} volumes currently have no valid labels or medical reports. Awaiting user review in UI."
         await scratchpad_raise_flag(RaiseFlagInput(level="warning", message=msg))
 
     with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
@@ -195,24 +183,16 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
 @mcp.tool()
 async def generate_targets() -> str:
     """
-    Generates the targets.csv file that maps each volume in the study cohort
-    to a binary class label (0 / 1).
+    Generates the targets.csv file mapping study cohort volumes to class labels (0/1)
+    and acts as the Human-in-the-Loop approval gate before segmentation.
 
-    Behaviour is controlled by the 'labelling_mode' key in the session's
-    config.json (written by the frontend toggle):
-
-    • "automatic" (default when set by the UI):
-        Calls the LLM Clinical Adjudicator internally via extract_cohort_labels,
-        then joins the resulting cohort_labels.csv with the volume list to
-        produce targets.csv. No human interaction is required.
-
-    • "manual" (legacy / default when key is absent):
-        Waits for the doctor to upload a pre-filled targets.csv through the
-        frontend. If the file is not present within 5 minutes it returns
-        "SILENT_RETRY" so the agent can loop silently.
+    In both 'automatic' and 'manual' labelling modes, after preparing initial candidate
+    labels (or skeleton records), this tool waits for explicit human review and cohort
+    approval via the interactive frontend UI. When unapproved, returns 'SILENT_RETRY'
+    so the agent loops silently until the doctor signs off.
     """
     log_tool_state(ToolEvent(event_type='tool_started', content_type='text',
-                             content=TextPayload(message='assigning labels')))
+                             content=TextPayload(message='preparing targets & awaiting cohort approval')))
 
     workspace_dir = os.environ.get("WORKSPACE_DIR")
     if not workspace_dir:
@@ -222,11 +202,10 @@ async def generate_targets() -> str:
     os.makedirs(output_dir, exist_ok=True)
     csv_path = os.path.join(output_dir, "targets.csv")
 
-    # ── Read config ──────────────────────────────────────────────────────────────
     config_json_path = os.path.join(workspace_dir, "config.json")
     config: dict = {}
     datasetlist: list = []
-    labelling_mode = "automatic"   # safe default
+    labelling_mode = "automatic"
 
     if os.path.exists(config_json_path):
         try:
@@ -237,57 +216,45 @@ async def generate_targets() -> str:
         except (json.JSONDecodeError, OSError):
             pass
 
-    # ── Route ────────────────────────────────────────────────────────────────────
+    if not datasetlist:
+        err_msg = (
+            "generate_targets called before volume search: datasetlist is empty in config.json. "
+            "You MUST call search_volumes_by_description first to populate the volume list, "
+            "then call generate_targets."
+        )
+        await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
+        return json.dumps({"status": "error", "message": err_msg})
+
     if labelling_mode == "automatic":
-        # ── AUTO MODE: join existing labels ─────────────────────────────
-        # GUARD: refuse to run if no volumes have been searched yet.
-        # This prevents the race condition where the LLM calls generate_targets
-        # before calling search_volumes_by_description.
-        if not datasetlist:
-            err_msg = (
-                "generate_targets called before volume search: datasetlist is empty in config.json. "
-                "You MUST call search_volumes_by_description first to populate the volume list, "
-                "then call generate_targets."
-            )
-            await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
-            return json.dumps({"status": "error", "message": err_msg})
-
-        print(f"[generate_targets] Automatic mode — joining previously generated cohort labels for {len(datasetlist)} volumes...")
-        result = await _build_targets_from_labels(workspace_dir, datasetlist, config, csv_path)
-
+        print(f"[generate_targets] Automatic mode — building candidate targets for {len(datasetlist)} volumes...")
+        res = await _build_targets_from_labels(workspace_dir, datasetlist, config, csv_path)
+        if res.startswith("{") and "error" in res:
+            return res
     else:
-        # ── MANUAL MODE: poll for doctor-uploaded file ────────────────────────────
-        print(f"[generate_targets] Manual mode — polling for uploaded targets.csv...")
-        result = await _wait_for_manual_upload(csv_path)
+        print(f"[generate_targets] Manual mode — checking/initializing manual label workspace...")
+        cohort_labels_path = os.path.join(workspace_dir, "populations", "cohort_labels.csv")
+        if not os.path.exists(cohort_labels_path):
+            os.makedirs(os.path.join(workspace_dir, "populations"), exist_ok=True)
+            with open(cohort_labels_path, mode="w", newline="", encoding="utf-8") as f:
+                fieldnames = ["patient_id", "has_target_disease", "confidence", "requires_manual_review", "source_evidence"]
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                for uid in datasetlist:
+                    writer.writerow({
+                        "patient_id": uid,
+                        "has_target_disease": "",
+                        "confidence": "unlabeled",
+                        "requires_manual_review": "True",
+                        "source_evidence": "Manual mode — awaiting user selection in UI"
+                    })
+        # Build initial targets (likely empty until user saves labels in UI)
+        await _build_targets_from_labels(workspace_dir, datasetlist, config, csv_path)
 
-        if result == "SILENT_RETRY":
-            return "SILENT_RETRY"
+    # HITL Approval Gate: wait for doctor to sign off on Subpage 4
+    result = await _wait_for_cohort_approval(workspace_dir, config_json_path, csv_path)
 
-        # Auto-fill any empty target cells if the doctor uploaded the blank template.
-        # Uses binary 0/1 labels (not strings like "Male"/"Female") so the ML
-        # pipeline receives numeric targets compatible with sklearn classifiers.
-        try:
-            import pandas as pd
-            import random
-            df = pd.read_csv(csv_path)
-            if "target" in df.columns:
-                empty_mask = df["target"].isnull() | (df["target"].astype(str).str.strip() == "")
-                num_empty = int(empty_mask.sum())
-                if num_empty > 0:
-                    # Alternate 0 and 1 to avoid all-one-class issues, then shuffle
-                    fill_values = [i % 2 for i in range(num_empty)]
-                    random.shuffle(fill_values)
-                    df.loc[empty_mask, "target"] = fill_values
-                    df.to_csv(csv_path, index=False)
-                    
-                    log_tool_state(ToolEvent(
-                        event_type='tool_progress', 
-                        content_type='text',
-                        content=TextPayload(message=f"⚠️ WARNING: You uploaded the targets.csv template without filling the target column for {num_empty} records. The system has automatically filled them with random 0/1 values to continue the pipeline.")
-                    ))
-        except Exception as e:
-            print(f"[generate_targets] Failed to auto-fill dummy labels: {e}")
-
-    log_tool_state(ToolEvent(event_type='tool_finished', content_type='text',
-                             content=TextPayload(message="Labels Successfully Fetched!")))
+    if result != "SILENT_RETRY":
+        log_tool_state(ToolEvent(event_type='tool_finished', content_type='text',
+                                 content=TextPayload(message="Cohort Approved & Targets Locked!")))
     return result
+

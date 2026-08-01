@@ -588,13 +588,11 @@ Step 5: Extract Clinical Labels (Automatic mode only)
 - If extract_cohort_labels is NOT in your tool list, skip this step — the doctor will
   upload the labels manually.
 
-Step 6: Use the generate_targets Tool
-- This function MUST be used to assign the targets to the cases.
+Step 6: Use the generate_targets Tool (HITL Approval Gate)
+- This function MUST be used to assign targets to the cases and initiate the Human-in-the-Loop approval checkpoint before segmentation.
 - You MUST call this even if the cohort size is smaller than expected. Do not stop early.
-- In manual mode: if generate_targets returns exactly "SILENT_RETRY", the doctor has not
-  uploaded the file yet. Call generate_targets again immediately. Do NOT output any
-  conversational text or apologies — stay completely silent and keep calling until you
-  receive a file path.
+- In BOTH automatic and manual modes: after processing initial labels, generate_targets pauses execution to let the doctor interactively edit the cohort, assign labels, and explicitly approve the final list in the UI.
+- If generate_targets returns exactly "SILENT_RETRY", the doctor has not signed off on the final cohort yet. Call generate_targets again immediately. Do NOT output any conversational text or apologies — stay completely silent and keep calling until you receive a file path.
 
 Step 7: Finalize and Summarize
 - Call scratchpad_write_summary with a summary covering:
