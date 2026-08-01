@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import logging
 import os
+import json
+from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel
@@ -51,10 +53,29 @@ class ClientConfig(BaseModel):
 
 # ── Global Store ─────────────────────────────────────────────────────────────
 
-_current_config = ClientConfig(
+CONFIG_FILE = Path.home() / ".cube" / "client_config.json"
+
+def load_config_from_disk() -> ClientConfig | None:
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return ClientConfig(**data)
+        except Exception as e:
+            logger.error("Failed to load client config from disk: %s", e)
+    return None
+
+def save_config_to_disk(config: ClientConfig) -> None:
+    try:
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config.model_dump(), f, indent=2)
+    except Exception as e:
+        logger.error("Failed to save client config to disk: %s", e)
+
+_current_config = load_config_from_disk() or ClientConfig(
     api_key=os.getenv("OLLAMA_API_KEY"),
 )
-
 
 def get_client_config() -> ClientConfig:
     """Return the current global client configuration."""
