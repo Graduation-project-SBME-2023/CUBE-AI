@@ -260,119 +260,133 @@ async def run_pipeline(session: Session) -> None:
         client.create_stream = wrapped_create_stream
         return client
 
-    graph_builder = await BasicPipelineBuilder.create(
-        workspace_folder=workspace_folder,
-        task_messages=task_messages,
-        model_client=make_pausable(create_model_client_from_config()),
-        session_id=session.session_id,
-        start_agent_id=resume_from_agent,
-    )
-
-    graph_flow = GraphFlow(
-        participants=graph_builder.get_participants(),
-        graph=graph_builder.build(),
-    )
-
-
-    # Build the pipeline prompt: use structured task messages if available,
-    # otherwise fall back to the raw hypothesis string
-    # task_prompt = graph_builder.get_pipeline_prompt(fallback_hypothesis=hypothesis)
-    task_prompt = (
-        graph_builder.get_pipeline_prompt(fallback_hypothesis=hypothesis)
-        if resume_from_agent
-        else hypothesis
-    )
-    pipeline_logger.info(f"Pipeline prompt length: {len(task_prompt)} chars")
-
-    pipeline_logger.info("Starting execution...")
-
-    session.execution_monitor = PipelineMonitor(
-        session_service,
-        session,
-        initial_statuses=resume_agent_statuses,
-    )
-
-    await session.execution_monitor._broadcast()
-
     try:
-        async for event in graph_flow.run_stream(task=task_prompt, cancellation_token=cancellation_token):
-            if session.cancel_event.is_set():
-                raise asyncio.CancelledError()
-            await session.pause_event.wait()
-
-            match event:
-                case TaskResult(messages=msgs):
-                    pipeline_logger.info("━" * 60)
-                    pipeline_logger.info("✅ TASK COMPLETE")
-                    for msg in msgs:
-                        pipeline_logger.info(f"  [{msg.source}] {msg.content}")
-                    pipeline_logger.info("━" * 60)
-                    await session.execution_monitor.on_pipeline_complete()
-                    await ws_manager.send_ws_message(
-                        "run_finished", "run_finished", session_id=session.session_id
-                    )
-
-                case ToolCallRequestEvent(source=src, content=content):
-                    pipeline_logger.info(f"🔧 [{src}] TOOL CALL REQUEST")
-                    await session.execution_monitor.on_agent_active(src)
-                    for call in content:
-                        pipeline_logger.info(
-                            f"     Tool: {call.name}  Args: {call.arguments}"
-                        )
-
-                case ToolCallExecutionEvent(source=src, content=content):
-                    pipeline_logger.info(f"🔧 [{src}] TOOL CALL RESULT")
-                    for result in content:
-                        failed = await session.execution_monitor.on_tool_result(
-                            src,
-                            result.name,
-                            result.content,
-                            workspace_folder,
-                            execution_error=bool(result.is_error),
-                        )
-                        pipeline_logger.info(
-                            f"     Tool: {result.name}  Result: {result.content}"
-                        )
-                        raise_for_fatal_tool_failure(
-                            src,
-                            result.name,
-                            failed,
-                            result.content,
-                        )
-
-                case MemoryQueryEvent(source=src, content=content):
-                    pipeline_logger.info(f"🧠 [{src}] MEMORY QUERY: {content}")
-                    await session.execution_monitor.on_agent_active(src)
-
-                case UserInputRequestedEvent(source=src):
-                    pipeline_logger.info(f"⏳ [{src}] WAITING FOR USER INPUT")
-
-                case ThoughtEvent(source=src, content=content):
-                    pipeline_logger.info(f"💭 [{src}] THOUGHT: {content}")
-                    await session.execution_monitor.on_agent_active(src)
-
-                case BaseChatMessage(source=src):
-                    logger.info("━" * 60)
-                    pipeline_logger.info(
-                        f"💬 [{src}] ({type(event).__name__}): {event.content}"
-                    )
-                    await session.execution_monitor.on_agent_active(src)
-
-                case BaseAgentEvent(source=src):
-                    pipeline_logger.info(f"⚙️  [{src}] ({type(event).__name__})")
-                    if hasattr(event, "content") and event.content:
-                        pipeline_logger.info(f"   {event.content}")
-                    await session.execution_monitor.on_agent_active(src)
-
-    except asyncio.CancelledError:
-        await session.execution_monitor.on_pipeline_error(
-            Exception("Pipeline Cancelled")
+        graph_builder = await BasicPipelineBuilder.create(
+            workspace_folder=workspace_folder,
+            task_messages=task_messages,
+            model_client=make_pausable(create_model_client_from_config()),
+            session_id=session.session_id,
+            start_agent_id=resume_from_agent,
         )
-        raise
-    except Exception as e:
-        logger.error(f"here, {e} occured, check in this method")
-        logger.error(e)
-        await session.execution_monitor.on_pipeline_error(e)
+
+        graph_flow = GraphFlow(
+            participants=graph_builder.get_participants(),
+            graph=graph_builder.build(),
+        )
+
+
+        # Build the pipeline prompt: use structured task messages if available,
+        # otherwise fall back to the raw hypothesis string
+        # task_prompt = graph_builder.get_pipeline_prompt(fallback_hypothesis=hypothesis)
+        task_prompt = (
+            graph_builder.get_pipeline_prompt(fallback_hypothesis=hypothesis)
+            if resume_from_agent
+            else hypothesis
+        )
+        pipeline_logger.info(f"Pipeline prompt length: {len(task_prompt)} chars")
+
+        pipeline_logger.info("Starting execution...")
+
+        session.execution_monitor = PipelineMonitor(
+            session_service,
+            session,
+            initial_statuses=resume_agent_statuses,
+        )
+
+        await session.execution_monitor._broadcast()
+
+        try:
+            async for event in graph_flow.run_stream(task=task_prompt, cancellation_token=cancellation_token):
+                if session.cancel_event.is_set():
+                    raise asyncio.CancelledError()
+                await session.pause_event.wait()
+
+                match event:
+                    case TaskResult(messages=msgs):
+                        pipeline_logger.info("━" * 60)
+                        pipeline_logger.info("✅ TASK COMPLETE")
+                        for msg in msgs:
+                            pipeline_logger.info(f"  [{msg.source}] {msg.content}")
+                        pipeline_logger.info("━" * 60)
+                        await session.execution_monitor.on_pipeline_complete()
+                        await ws_manager.send_ws_message(
+                            "run_finished", "run_finished", session_id=session.session_id
+                        )
+
+                    case ToolCallRequestEvent(source=src, content=content):
+                        pipeline_logger.info(f"🔧 [{src}] TOOL CALL REQUEST")
+                        await session.execution_monitor.on_agent_active(src)
+                        for call in content:
+                            pipeline_logger.info(
+                                f"     Tool: {call.name}  Args: {call.arguments}"
+                            )
+
+                    case ToolCallExecutionEvent(source=src, content=content):
+                        pipeline_logger.info(f"🔧 [{src}] TOOL CALL RESULT")
+                        for result in content:
+                            failed = await session.execution_monitor.on_tool_result(
+                                src,
+                                result.name,
+                                result.content,
+                                workspace_folder,
+                                execution_error=bool(result.is_error),
+                            )
+                            pipeline_logger.info(
+                                f"     Tool: {result.name}  Result: {result.content}"
+                            )
+                            raise_for_fatal_tool_failure(
+                                src,
+                                result.name,
+                                failed,
+                                result.content,
+                            )
+
+                    case MemoryQueryEvent(source=src, content=content):
+                        pipeline_logger.info(f"🧠 [{src}] MEMORY QUERY: {content}")
+                        await session.execution_monitor.on_agent_active(src)
+
+                    case UserInputRequestedEvent(source=src):
+                        pipeline_logger.info(f"⏳ [{src}] WAITING FOR USER INPUT")
+
+                    case ThoughtEvent(source=src, content=content):
+                        pipeline_logger.info(f"💭 [{src}] THOUGHT: {content}")
+                        await session.execution_monitor.on_agent_active(src)
+
+                    case BaseChatMessage(source=src):
+                        logger.info("━" * 60)
+                        pipeline_logger.info(
+                            f"💬 [{src}] ({type(event).__name__}): {event.content}"
+                        )
+                        await session.execution_monitor.on_agent_active(src)
+
+                    case BaseAgentEvent(source=src):
+                        pipeline_logger.info(f"⚙️  [{src}] ({type(event).__name__})")
+                        if hasattr(event, "content") and event.content:
+                            pipeline_logger.info(f"   {event.content}")
+                        await session.execution_monitor.on_agent_active(src)
+
+        except asyncio.CancelledError:
+            await session.execution_monitor.on_pipeline_error(
+                Exception("Pipeline Cancelled")
+            )
+            raise
+        except Exception as e:
+            logger.error(f"here, {e} occured, check in this method")
+            logger.error(e)
+            await session.execution_monitor.on_pipeline_error(e)
+            raise
+
+    except (asyncio.CancelledError, Exception) as _top_exc:
+        # If the crash happened before execution_monitor was initialised (e.g. during
+        # BasicPipelineBuilder.create()), there is nothing to notify via the monitor.
+        # Broadcast run_stopped directly so the frontend knows execution ended.
+        if not hasattr(session, 'execution_monitor') or session.execution_monitor is None:
+            logger.error(f"Pipeline crashed before monitor init: {_top_exc}")
+            await ws_manager.send_ws_message(
+                "run_stopped",
+                {"reason": "init_failure", "error": str(_top_exc)},
+                session_id=session.session_id,
+            )
         raise
     finally:
         cancel_task.cancel()
@@ -383,8 +397,37 @@ async def run_pipeline(session: Session) -> None:
 # ----------------------------------------------------------------------
 
 
+def _clean_workspace_population_state(session_id: str) -> None:
+    try:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+        workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+        if not os.path.exists(workspace_folder):
+            return
+        config_path = os.path.join(workspace_folder, "config.json")
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                data.pop("datasetlist", None)
+                data["cohort_approved"] = False
+                with open(config_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=4)
+            except Exception:
+                pass
+        labels_path = os.path.join(workspace_folder, "populations", "cohort_labels.csv")
+        if os.path.exists(labels_path):
+            os.remove(labels_path)
+        targets_path = os.path.join(workspace_folder, "populations", "targets", "targets.csv")
+        if os.path.exists(targets_path):
+            os.remove(targets_path)
+    except Exception as e:
+        logger.warning(f"Failed to clean workspace population state for session {session_id}: {e}")
+
+
 @app.post("/plan")
 async def start_planning(request: PlanningRequest):
+    _clean_workspace_population_state(request.session_id)
     from functools import partial
     bound_planner = partial(run_planner, do_lit_review=request.do_lit_review)
     try:
@@ -409,6 +452,13 @@ async def start_execution(request: SessionControlRequest):
         )
     except SessionExecutionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+    # Immediately tell the UI that execution has started so tabs unlock
+    # without waiting for the first pipeline_agent_status message.
+    await ws_manager.send_ws_message(
+        "run_status",
+        {"state": "RUNNING", "current_agent": None},
+        session_id=request.session_id,
+    )
     return {"session_id": request.session_id, "status": "execution_started"}
 
 
@@ -1067,16 +1117,16 @@ async def update_cohort_list(
 
     # Broadcast the update so the Overview subpage refreshes
     try:
-        await ws_manager.broadcast({
-            "type": "population_output",
-            "payload": {
+        await ws_manager.send_ws_message(
+            "population_output",
+            {
                 "tool": "search_volumes_by_description",
                 "status": "completed",
                 "count": len(new_datasetlist),
                 "uid_list": new_datasetlist,
             },
-            "session_id": session_id,
-        })
+            session_id=session_id,
+        )
     except Exception as e:
         logger.warning(f"Failed to broadcast cohort list update: {e}")
 
@@ -1228,15 +1278,15 @@ async def approve_cohort(data: dict):
 
     # Broadcast approval so the pipeline can proceed
     try:
-        await ws_manager.broadcast({
-            "type": "cohort_approval_status",
-            "payload": {
+        await ws_manager.send_ws_message(
+            "cohort_approval_status",
+            {
                 "status": "approved",
                 "labeled_count": labeled_count,
                 "total_count": len(datasetlist),
             },
-            "session_id": session_id,
-        })
+            session_id=session_id,
+        )
     except Exception as e:
         logger.warning(f"Failed to broadcast cohort approval: {e}")
 

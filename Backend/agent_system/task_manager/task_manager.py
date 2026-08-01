@@ -99,6 +99,7 @@ class TaskManager:
 
     def stop(self, session: Session) -> None:
         session.cancel_event.set()
+        session.state = SessionState.CANCELLED
         if session.planning_task and not session.planning_task.done():
             session.planning_task.cancel()
         if session.execution_task and not session.execution_task.done():
