@@ -8,6 +8,7 @@ from agent_system.models.tool_logging import ProgressPayload, TextPayload
 from ..logging_config import emit_tool_event, emit_tool_events
 from .common import (
     SegmentationPipelineError,
+    check_session_cancelled,
     raise_for_segmentation_error,
     run_with_progress_heartbeat,
 )
@@ -97,6 +98,7 @@ async def run_interactive_pipeline(
 
     outcomes: list[dict[str, Any]] = []
     for index, item in enumerate(pending_work_items, start=1):
+        check_session_cancelled(session_id)
         pair_id = str(item["pair_id"])
         volume_uid = str(item["volume_uid"])
         label = str(item["canonical_label"])
