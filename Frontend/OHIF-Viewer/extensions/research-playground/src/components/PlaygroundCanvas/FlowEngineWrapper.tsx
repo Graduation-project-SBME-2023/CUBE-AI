@@ -76,9 +76,7 @@ export default function FlowEngineWrapper({
                 <span className="flex-1 text-xs font-bold text-white">
                   {pendingPrompt.type === 'hypothesis_approval'
                     ? 'Approve Hypothesis?'
-                    : pendingPrompt.type === 'plan_approval'
-                      ? 'Approve Pipeline Plan?'
-                      : 'Run Literature Review?'}
+                    : 'Run Literature Review?'}
                 </span>
               </button>
 
@@ -86,7 +84,7 @@ export default function FlowEngineWrapper({
                 <div className="space-y-3 border-t border-[#3c5d80]/50 px-3 pb-3 pt-2">
                   {pendingPrompt.message && <p className="text-[11px] leading-relaxed text-[#91b9cd]">{pendingPrompt.message}</p>}
                   <div className="flex gap-2">
-                    {pendingPrompt.type === 'hypothesis_approval' || pendingPrompt.type === 'plan_approval' ? (
+                    {pendingPrompt.type === 'hypothesis_approval' ? (
                       <>
                         <button
                           onClick={() => {
@@ -101,7 +99,7 @@ export default function FlowEngineWrapper({
                           onClick={() => {
                             const feedback = window.prompt('Describe your changes:');
                             if (feedback) {
-                              onPromptSubmit(feedback);
+                               onPromptSubmit(feedback);
                             }
                             onPromptClose();
                           }}

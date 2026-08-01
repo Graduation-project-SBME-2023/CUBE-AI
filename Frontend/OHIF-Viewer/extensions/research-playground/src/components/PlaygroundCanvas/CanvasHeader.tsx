@@ -2,7 +2,7 @@ import React from 'react';
 import { Pause, Play, RotateCcw, BookOpen, Bot, Upload, Square } from 'lucide-react';
 
 interface CanvasHeaderProps {
-  mode: 'planning' | 'executing' | 'results';
+  mode: 'planning' | 'generated' | 'manual' | 'executing' | 'results';
   literatureEnabled: boolean;
   canExecute: boolean;
   isPaused: boolean;
@@ -37,42 +37,34 @@ export default function CanvasHeader({
   onToggleLabellingMode,
 }: CanvasHeaderProps) {
   // Single morphing badge label
+  const isPlanningPhase = mode === 'planning' || mode === 'generated' || mode === 'manual';
   const badgeLabel =
-    mode === 'planning' ? 'Planning' : mode === 'executing' ? 'Executing' : 'Results';
+    isPlanningPhase ? 'Planning' : mode === 'executing' ? 'Executing' : 'Results';
 
   return (
-    <div className="absolute left-1/2 top-2 z-40 flex -translate-x-1/2 items-center gap-4 rounded-lg border border-[#3c5d80] bg-[#151a1f]/90 p-2 shadow-xl backdrop-blur-md">
-      {/* ── Stage badge (morphs with mode) ── */}
-      <div className="flex items-center gap-3 border-r border-[#3c5d80] pl-2 pr-4">
-        <div
-          className={`rounded border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider transition-all ${
-            mode === 'planning'
-              ? 'border-[#3c5d80] bg-[#1f2d40] text-[#91b9cd]'
-              : mode === 'executing'
-                ? 'border-[#005f7d] bg-[#003f5c] text-[#5acce6] shadow-[0_0_10px_rgba(90,204,230,0.2)]'
-                : 'border-[#085a3c] bg-[#06422d] text-[#6fe5b8] shadow-[0_0_10px_rgba(111,229,184,0.2)]'
-          }`}
-        >
-          {badgeLabel}
-        </div>
-      </div>
+    <div className="absolute top-5 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 rounded-md border border-[#33485d] bg-[#151a1f]/95 px-4 py-2 shadow-lg backdrop-blur-md">
+      {/* ── Stage Text ── */}
+      <span className="text-xs font-semibold text-gray-200 uppercase tracking-wider">
+        {badgeLabel}
+      </span>
+      
+      {/* Separator */}
+      <span className="text-[#33485d] text-xs font-bold px-1">•</span>
 
+      {/* ── Main Actions ── */}
       <div className="flex items-center gap-2">
-        {mode === 'planning' && (
+        {isPlanningPhase && (
           <button
             onClick={onStart}
             disabled={!canExecute || !isConnected}
-            className={`flex items-center gap-2 rounded-md px-5 py-2 text-sm font-semibold transition ${
+            className={`flex items-center gap-2 rounded px-3 py-1 text-xs transition ${
               !canExecute || !isConnected
-                ? 'cursor-not-allowed bg-[#3c5d80] text-gray-400 opacity-50'
-                : 'bg-[#5e98ac] text-black hover:bg-[#6aa7bc]'
+                ? 'cursor-not-allowed border border-[#33485d] text-gray-500 opacity-50'
+                : 'bg-[#5e98ac] font-medium text-black hover:bg-[#72adc2]'
             }`}
           >
-            <Play
-              size={16}
-              fill="currentColor"
-            />
-            Execute
+            <Play size={10} fill="currentColor" />
+            Excute
           </button>
         )}
 
@@ -81,12 +73,12 @@ export default function CanvasHeader({
             <button
               onClick={onTogglePause}
               disabled={isStopping || isResuming || hasStopped}
-              className={`flex items-center gap-1 rounded border px-1.5 py-1 text-[11px] font-medium transition-colors ${
+              className={`flex items-center gap-1 rounded border px-3 py-1 text-xs transition-colors ${
                 isStopping || isResuming || hasStopped
-                  ? 'cursor-not-allowed border-[#3c5d80] bg-[#1d2a33] text-[#5c7a99] opacity-50'
+                  ? 'cursor-not-allowed border-[#33485d] text-gray-500 opacity-50'
                   : isPaused
-                    ? 'border-[#ffc107] bg-[#332b00] text-[#ffc107] hover:bg-[#4d4000]'
-                    : 'border-[#3c5d80] bg-[#151a1f] text-[#91b9cd] hover:border-[#91b9cd]'
+                    ? 'border-[#ffc107] text-[#ffc107] hover:bg-[#332b00]'
+                    : 'border-[#3c5d80] text-gray-300 hover:bg-[#243242] hover:text-white'
               }`}
             >
               {isPaused ? <Play size={12} /> : <Pause size={12} />}
@@ -95,16 +87,13 @@ export default function CanvasHeader({
             <button
               onClick={onStop}
               disabled={isStopping || hasStopped}
-              className={`flex items-center gap-2 rounded border px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`flex items-center gap-2 rounded border px-3 py-1 text-xs transition-colors ${
                 isStopping || hasStopped
-                  ? 'animate-pulse cursor-not-allowed border-[#7a1e1e] bg-[#3b1010] text-[#ff6b6b] opacity-80'
-                  : 'border-[#3c5d80] bg-[#151a1f] text-[#91b9cd] hover:border-[#ff6b6b] hover:bg-[#2c1a1f] hover:text-[#ff6b6b]'
+                  ? 'cursor-not-allowed border-[#7a1e1e] text-[#ff6b6b] opacity-80'
+                  : 'border-[#3c5d80] text-gray-300 hover:border-[#ff6b6b] hover:text-[#ff6b6b]'
               }`}
             >
-              <Square
-                size={12}
-                fill="currentColor"
-              />
+              <Square size={10} fill="currentColor" />
               {hasStopped ? 'Stopped' : isStopping ? 'Stopping...' : 'Stop'}
             </button>
           </>
@@ -113,57 +102,47 @@ export default function CanvasHeader({
         {mode === 'results' && (
           <button
             onClick={onReset}
-            className="flex items-center gap-2 rounded bg-[#6fe5b8] px-4 py-1.5 text-xs font-medium text-black transition-colors hover:bg-[#91eac8]"
+            className="flex items-center gap-2 rounded bg-[#5e98ac] px-3 py-1 text-xs font-medium text-black transition-colors hover:bg-[#72adc2]"
           >
-            <RotateCcw size={14} /> Reset
+            <RotateCcw size={12} /> Reset
           </button>
         )}
       </div>
-      {/* ── Literature Review badge ── */}
+
+      {/* ── Literature Text ── */}
       {literatureEnabled && (
-        <div
-          className="flex items-center gap-1 rounded border border-[#5acce6] bg-[#1d2a33] px-2 py-1 text-[10px] font-medium text-[#5acce6]"
-          title="Literature Review Enabled"
-        >
-          <BookOpen size={15} />
-          <span className="hidden sm:inline">Literature</span>
-        </div>
+        <>
+          <span className="text-[#33485d] text-xs font-bold px-1">•</span>
+          <span className="flex items-center gap-1 text-xs font-medium text-[#7ec8e3]">
+            <BookOpen size={12} />
+            Literature
+          </span>
+        </>
       )}
 
       {/* ── Labelling Mode Toggle ── */}
+      <span className="text-[#33485d] text-xs font-bold px-1">•</span>
       <button
         onClick={onToggleLabellingMode}
         disabled={labellingModeLocked}
-        title={
-          labellingModeLocked
-            ? 'Labelling mode locked once agent starts'
-            : 'Toggle cohort labelling method'
-        }
-        className={`flex items-center gap-0 overflow-hidden rounded border text-[10px] font-bold uppercase tracking-wider transition-all ${
-          labellingModeLocked
-            ? 'cursor-not-allowed border-[#3c5d80] opacity-50'
-            : 'cursor-pointer border-[#3c5d80] hover:border-[#5acce6]'
+        title={labellingModeLocked ? 'Labelling mode locked' : 'Toggle labelling method'}
+        className={`flex items-center rounded border border-[#3c5d80] text-[10px] uppercase transition-all ${
+          labellingModeLocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:border-[#7ec8e3]'
         }`}
       >
-        {/* Manual side */}
         <span
           className={`flex items-center gap-1 px-2 py-1 transition-colors ${
-            labellingMode === 'manual' ? 'bg-[#3c5d80] text-white' : 'bg-[#0b1015] text-[#3c5d80]'
+            labellingMode === 'manual' ? 'bg-[#3c5d80] text-white' : 'text-gray-400'
           }`}
         >
-          <Upload size={11} />
-          Manual
+          <Upload size={10} /> Manual
         </span>
-        {/* Auto side */}
         <span
           className={`flex items-center gap-1 px-2 py-1 transition-colors ${
-            labellingMode === 'automatic'
-              ? 'bg-[#005f7d] text-[#5acce6]'
-              : 'bg-[#0b1015] text-[#3c5d80]'
+            labellingMode === 'automatic' ? 'bg-[#3c5d80] text-white' : 'text-gray-400'
           }`}
         >
-          <Bot size={11} />
-          Auto
+          <Bot size={10} /> Auto
         </span>
       </button>
     </div>

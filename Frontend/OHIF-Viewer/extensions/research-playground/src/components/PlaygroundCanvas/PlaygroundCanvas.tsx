@@ -47,7 +47,7 @@ export default function PlaygroundCanvas({
 
   // initialMode is resolved BEFORE render (passed from ResearchPlayground after checking
   // execution-state), so both the state and ref start correct — no race with WS replay.
-  const [mode, setMode] = useState<'planning' | 'executing' | 'results'>(initialMode);
+  const [mode, setMode] = useState<'planning' | 'generated' | 'manual' | 'executing' | 'results'>(initialMode);
   const [nodes, setNodes] = useState<FlowNode[]>(() => createInitialNodes(initialHypothesis));
   const [edges, setEdges] = useState<FlowEdge[]>(INITIAL_EDGES);
   const [isPaused, setIsPaused] = useState(initialPaused || manualResumeRequired);
@@ -61,9 +61,10 @@ export default function PlaygroundCanvas({
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
   const [labellingMode, setLabellingMode] = useState<'manual' | 'automatic'>('automatic');
   const [labellingModeLocked, setLabellingModeLocked] = useState(initialMode !== 'planning');
+  const [countdown, setCountdown] = useState<number | null>(null);
   const hasInitiatedPlan = useRef(false);
   const restartRequestedRef = useRef(initialMode === 'results');
-  const modeRef = useRef<'planning' | 'executing' | 'results'>(initialMode);
+  const modeRef = useRef<'planning' | 'generated' | 'manual' | 'executing' | 'results'>(initialMode);
   const nodesRef = useRef<FlowNode[]>([]);
   const sessionIdRef = useRef<string | undefined>(session_id);
   const literatureOutputRef = useRef<typeof onLiteratureOutput>(onLiteratureOutput);
@@ -74,12 +75,12 @@ export default function PlaygroundCanvas({
 
   useEffect(() => {
     modeRef.current = mode;
-    
+
     // Clear any lingering prompts when no longer in planning mode
     if (mode !== 'planning') {
       setPendingPrompt(null);
     }
-    
+
     // Lock labelling mode once execution begins so the agent sees a stable config
     if (mode === 'executing') {
       setLabellingModeLocked(true);
@@ -98,6 +99,19 @@ export default function PlaygroundCanvas({
   useEffect(() => {
     literatureOutputRef.current = onLiteratureOutput;
   }, [onLiteratureOutput]);
+
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown <= 0) {
+      setCountdown(null);
+      startExecution();
+      return;
+    }
+    const timer = setInterval(() => {
+      setCountdown(prev => (prev !== null ? prev - 1 : null));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [countdown]);
 
   useEffect(() => {
     setRequiresRecoveryResume(manualResumeRequired);
@@ -330,14 +344,14 @@ export default function PlaygroundCanvas({
           existingStart
             ? { ...existingStart, position: { x: layout.startX, y: layout.startY } }
             : {
-                id: 'start',
-                type: 'start',
-                position: { x: layout.startX, y: layout.startY },
-                data: {
-                  title: 'Research Hypothesis',
-                  description: planPayload.study_goal || initialHypothesis || 'Study workflow',
-                },
-              }
+              id: 'start',
+              type: 'start',
+              position: { x: layout.startX, y: layout.startY },
+              data: {
+                title: 'Research Hypothesis',
+                description: planPayload.study_goal || initialHypothesis || 'Study workflow',
+              },
+            }
         );
 
         let nextX = layout.startX + START_W + layout.gap;
@@ -401,33 +415,47 @@ export default function PlaygroundCanvas({
           prev.map(n =>
             n.type === 'start'
               ? {
-                  ...n,
-                  data: {
-                    ...n.data,
-                    title: payload?.title || 'Research Hypothesis',
-                    description: payload?.hypothesis || payload?.title || n.data.description,
-                    population: payload?.population,
-                    intervention: payload?.intervention,
-                    comparison: payload?.comparison,
-                    outcome: payload?.outcome,
-                    hypothesis: payload?.hypothesis,
-                    question: payload?.question,
-                    clinical_context: payload?.clinical_context,
-                    state: payload?.state,
-                  },
-                }
+                ...n,
+                data: {
+                  ...n.data,
+                  title: payload?.title || 'Research Hypothesis',
+                  description: payload?.hypothesis || payload?.title || n.data.description,
+                  population: payload?.population,
+                  intervention: payload?.intervention,
+                  comparison: payload?.comparison,
+                  outcome: payload?.outcome,
+                  hypothesis: payload?.hypothesis,
+                  question: payload?.question,
+                  clinical_context: payload?.clinical_context,
+                  state: payload?.state,
+                },
+              }
               : n
           )
         );
         return;
       }
 
-      if (type === 'hypothesis_approval' || type === 'lit_review_choice' || type === 'plan_approval') {
+      if (type === 'hypothesis_approval' || type === 'lit_review_choice') {
         // Suppress approval prompts when we are already past the planning stage
         if (modeRef.current !== 'planning') {
           return;
         }
         setPendingPrompt({ type, message: payload?.message || payload?.text || '' });
+        return;
+      }
+
+      if (type === 'planning_complete') {
+        if (modeRef.current === 'planning' || modeRef.current === 'generated') {
+          setMode('generated');
+          modeRef.current = 'generated';
+          setCountdown(8);
+        } else if (modeRef.current === 'manual') {
+          // If manual (cancelled autorun), don't restart autorun
+          setMode('manual');
+          // Maybe show a snackbar notification here "Pipeline updated"
+        }
+        setCanExecute(true);
         return;
       }
 
@@ -470,8 +498,7 @@ export default function PlaygroundCanvas({
         return;
       }
 
-      if (type === 'plan' || type === 'PLAN_UPDATE') {
-        setCanExecute(true);
+      if (type === 'pipeline_update' || type === 'plan' || type === 'PLAN_UPDATE') {
         applyBackendPlan(payload || data.data || data);
         return;
       }
@@ -590,12 +617,18 @@ export default function PlaygroundCanvas({
 
   const handleNodesChange = useCallback(
     (updatedNodes: FlowNode[]) => {
+      const isUserStructuralEdit = updatedNodes.length !== nodes.length; // rough heuristic, ideally check for actual structural changes
+      if (mode === 'generated' && isUserStructuralEdit) {
+        setMode('manual');
+        modeRef.current = 'manual';
+        setCountdown(null);
+      }
       setNodes(updatedNodes);
-      if (mode === 'planning') {
+      if (mode === 'planning' || mode === 'generated' || mode === 'manual') {
         sendPlanToBackend(updatedNodes, edges);
       }
     },
-    [mode, edges, sendPlanToBackend]
+    [mode, edges, sendPlanToBackend, nodes.length]
   );
 
   const startExecution = async () => {
@@ -606,6 +639,14 @@ export default function PlaygroundCanvas({
     setRequiresRecoveryResume(false);
     setNodes(resetNodeLogs);
     setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
+    
+    // Notify the user in the chat that execution is starting
+    websocketService.dispatchLocal({
+      type: 'msg',
+      payload: 'Pipeline execution has started. You can track the progress of each agent on the canvas.',
+      session_id: session_id,
+    });
+
     const response = await fetch(`${getAgentsApiBaseUrl()}/run/`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -750,7 +791,7 @@ export default function PlaygroundCanvas({
       />
 
       <FlowEngineWrapper
-        mode={mode}
+        mode={mode === 'generated' || mode === 'manual' ? 'planning' : mode}
         nodes={nodes}
         edges={edges}
         fitViewTrigger={fitViewTrigger}
@@ -762,6 +803,37 @@ export default function PlaygroundCanvas({
         onPromptClose={() => setPendingPrompt(null)}
         onReset={resetWorkflow}
       />
+
+      {/* Floating Countdown Banner */}
+      {countdown !== null && (
+        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-md border border-[#33485d] bg-[#151a1f]/95 px-4 py-2 shadow-lg backdrop-blur-md">
+          <span className="text-xs text-gray-200 whitespace-nowrap">
+            Pipeline ready • Auto-running in{" "}
+            <span className="font-semibold text-[#7ec8e3]">{countdown}s</span>
+          </span>
+
+          <button
+            onClick={() => {
+              setCountdown(null);
+              startExecution();
+            }}
+            className="rounded bg-[#5e98ac] px-3 py-1 text-xs font-medium text-black transition hover:bg-[#72adc2]"
+          >
+            Run Now
+          </button>
+
+          <button
+            onClick={() => {
+              setCountdown(null);
+              setMode("manual");
+              modeRef.current = "manual";
+            }}
+            className="rounded border border-[#3c5d80] px-3 py-1 text-xs text-gray-300 transition hover:bg-[#243242] hover:text-white"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   );
 }

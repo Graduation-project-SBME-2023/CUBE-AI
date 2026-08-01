@@ -4,6 +4,21 @@ import { useNavigate } from 'react-router-dom';
 import Card from '../ui/Card';
 import { getBackendApiBaseUrl } from '../../utils/apiBase';
 
+const EXAMPLE_HYPOTHESES = [
+  {
+    label: "Lung Cancer Prognosis",
+    text: "In patients with non-small cell lung cancer (Stage III) undergoing chemoradiotherapy, does pre-treatment CT radiomic texture features compared to standard clinical parameters improve prediction of 2-year progression-free survival?"
+  },
+  {
+    label: "Brain Tumor Classification",
+    text: "In adult patients with newly diagnosed glioblastoma, does multiparametric MRI radiomics compared to conventional MRI distinguish between true progression and pseudoprogression?"
+  },
+  {
+    label: "Breast Cancer Response",
+    text: "In women with HER2-positive breast cancer receiving neoadjuvant therapy, does DCE-MRI radiomic kinetics compared to RECIST 1.1 criteria better predict pathological complete response?"
+  }
+];
+
 const makeFallbackSessionId = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -182,7 +197,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
   };
 
   return (
-    <div className="relative flex h-screen w-full flex-col overflow-y-auto bg-black font-sans text-white">
+    <div className="relative flex h-screen w-full flex-col overflow-y-auto ohif-scrollbar bg-black font-sans text-white">
       <div
         className="pointer-events-none absolute inset-0 opacity-20"
         style={{ backgroundImage: 'radial-gradient(#44626f 1px, transparent 1px)', backgroundSize: '30px 30px' }}
@@ -242,6 +257,25 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
               }}
               rows={1}
             />
+          </div>
+          
+          {/* Example Hypotheses */}
+          <div className="px-4 pb-4">
+            <p className="text-sm text-[#566a84] mb-2 text-left">💡 Not sure how to start? Click an example to auto-fill:</p>
+            <div className="flex flex-wrap gap-2">
+              {EXAMPLE_HYPOTHESES.map((example, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => {
+                    setHypothesis(example.text);
+                    if (textareaRef.current) textareaRef.current.focus();
+                  }}
+                  className="px-3 py-1.5 text-xs bg-[#1a2535] hover:bg-[#1f2d40] text-[#91b9cd] border border-[#2e445c] rounded-full transition-colors"
+                >
+                  {example.label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Action Footer */}
