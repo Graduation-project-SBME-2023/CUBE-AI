@@ -160,6 +160,53 @@ class ClinicalPlanner:
         # ── Initialize Logging ──────────────────────────────────────────
         self._initialize_logging()
 
+    async def _validate_hypothesis(self, user_input: str, cancellation_token=None) -> dict:
+        """
+        Validates if the user input is a complete PICO hypothesis.
+        Returns a dict with keys:
+          - "valid": bool
+          - "feedback": str (user-friendly explanation if invalid)
+          - "extracted": dict or None (PICO components if valid)
+        """
+        prompt = f"""
+You are a clinical research validator. Analyze the following user input:
+"{user_input}"
+
+Determine if it constitutes a complete PICO hypothesis for a radiomics study.
+A valid hypothesis MUST explicitly contain:
+- Population (P): e.g., patients with lung cancer, age group, stage.
+- Intervention (I): e.g., CT radiomics, MRI texture analysis.
+- Comparison (C): e.g., compared to standard staging, vs. histopathology.
+- Outcome (O): e.g., overall survival, treatment response, recurrence.
+
+If ALL four components are present (even implicitly), set "valid": true.
+If missing ANY component, set "valid": false.
+If invalid, provide concise, actionable feedback in "feedback" specifying which
+components are missing and a brief suggestion on how to fix it.
+
+Output ONLY valid JSON in the following format:
+{{"valid": true/false, "feedback": "your feedback here", "extracted": {{}} or null}}
+"""
+        try:
+            hypothesis_architect = self.agents["hypothesis_architect"]
+            response = await self._call_agent_with_retry(
+                hypothesis_architect,
+                prompt,
+                cancellation_token=cancellation_token,
+            )
+            data = await self._parse_llm_json(response.chat_message.content, log_prefix="[Validator]")
+            
+            if not data or "valid" not in data or "feedback" not in data:
+                raise ValueError("Missing required keys")
+            return data
+        except Exception as e:
+            logger.error("Validation error: %s", e)
+            return {
+                "valid": False,
+                "feedback": "System error validating your input. Please rephrase clearly with Population, Intervention, Comparison, and Outcome.",
+                "extracted": None
+            }
+
     # ══════════════════════════════════════════════════════════════════════
     # INTERNAL HELPERS
     # ══════════════════════════════════════════════════════════════════════
@@ -574,6 +621,16 @@ class ClinicalPlanner:
                 for s in self.state.plan.steps
             ]
             await self._send(
+                "pipeline_update",
+                {
+                    "study_goal": (
+                        self.state.plan.study_goal or self.state.hypothesis.title
+                    ),
+                    "steps": ui_steps,
+                },
+            )
+            # Also emit old "plan" for backwards compatibility if needed
+            await self._send(
                 "plan",
                 {
                     "study_goal": (
@@ -854,45 +911,67 @@ class ClinicalPlanner:
             # ══════════════════════════════════════════════════════════════
 
             hypothesis_architect = self.agents["hypothesis_architect"]
+            
+            # --- Phase 1: Hypothesis Validation with retry ---
+            max_retries = 3
+            retry_count = 0
+            hypothesis_valid = False
 
-            # Determine initial user input
-            if start_query and not self.state.hypothesis.title:
-                user_input = start_query
-            else:
-                await self._send(
-                    "msg",
-                    "Please enter your clinical observation or research idea.",
-                )
-                user_input = await self.input_provider()
+            while not hypothesis_valid and retry_count < max_retries:
+                # Determine user input
+                if start_query and not self.state.hypothesis.title:
+                    user_input = start_query
+                    start_query = None # Clear it so next retry asks user
+                else:
+                    await self._send(
+                        "msg",
+                        "Please enter your clinical observation or research idea.",
+                    )
+                    user_input = await self.input_provider()
 
-            # Generate initial PICO hypothesis
-            prompt = (
-                f"User's clinical observation: {user_input}\n\n"
-                "Structure this into a full PICO hypothesis. "
-                "Return JSON with 'hypothesis' and 'message' fields."
-            )
+                # Run validation
+                validation_result = await self._validate_hypothesis(user_input, cancellation_token=cancellation_token)
 
-            response = await self._call_agent_with_retry(
-                hypothesis_architect,
-                prompt,
-                cancellation_token=cancellation_token,
-            )
-            logger.info(
-                "HypothesisArchitect response: %s",
-                response.chat_message.content[:200],
-            )
-            await self._process_hypothesis_response(response.chat_message.content)
-
-            # Mark hypothesis as confirmed
-            self.state.hypothesis.state = "confirmed"
-            await self.session_service.confirm_hypothesis(self.session)
-
-            # Cache the hypothesis dump to avoid redundant serialization
-            hypothesis_dump = self.state.hypothesis.model_dump()
-            await self._send("hypothesis", hypothesis_dump)
-            await self._save_state()
-            # NOTE: Removed redundant _load_state() after _save_state()
-            # The in-memory state is authoritative after saving.
+                if validation_result["valid"]:
+                    # We have a valid hypothesis. Now we can formally extract and persist it using the architect.
+                    # Or if extracted is full, we can just process it.
+                    # The user's code suggests updating self.hypothesis, but we need to persist it.
+                    prompt = (
+                        f"User's clinical observation: {user_input}\n\n"
+                        "Structure this into a full PICO hypothesis. "
+                        "Return JSON with 'hypothesis' and 'message' fields."
+                    )
+                    response = await self._call_agent_with_retry(
+                        hypothesis_architect,
+                        prompt,
+                        cancellation_token=cancellation_token,
+                    )
+                    logger.info("HypothesisArchitect response: %s", response.chat_message.content[:200])
+                    await self._process_hypothesis_response(response.chat_message.content)
+                    
+                    self.state.hypothesis.state = "confirmed"
+                    await self.session_service.confirm_hypothesis(self.session)
+                    
+                    hypothesis_dump = self.state.hypothesis.model_dump()
+                    await self._send("hypothesis", hypothesis_dump)
+                    await self._save_state()
+                    
+                    hypothesis_valid = True
+                    break
+                else:
+                    retry_count += 1
+                    feedback = validation_result["feedback"]
+                    if retry_count >= max_retries:
+                        error_msg = (
+                            f"❌ I've asked {max_retries} times, but the input is still not a valid PICO hypothesis. "
+                            f"Please restart the research process with a clear hypothesis.\n"
+                            f"Last feedback: {feedback}"
+                        )
+                        await self._send("msg", error_msg)
+                        return
+                    else:
+                        feedback_msg = f"⚠️ Invalid hypothesis: {feedback}\nPlease try again. ({retry_count}/{max_retries})"
+                        await self._send("msg", feedback_msg)
 
             # ══════════════════════════════════════════════════════════════
             # PHASE 2: LITERATURE REVIEW & KNOWLEDGE BUILDING
@@ -1067,37 +1146,57 @@ class ClinicalPlanner:
             )
             await self._process_pipeline_response(response.chat_message.content)
 
-            # ── Pipeline Refinement Loop (Bounded with Timeout) ──────────
-            refinement_count = 0
-            while refinement_count < MAX_REFINEMENT_ITERATIONS:
-                await self._send(
-                    "plan_approval",
-                    {
-                        "message": (
-                            "Review the pipeline plan. Approve it or describe changes."
-                        ),
-                    },
-                )
-
+            # ── Pipeline Revision Loop (Infinite) ──────────
+            while True:
+                # ══════════════════════════════════════════════════════════════
+                # FINALIZE: Compile task messages with context augmentation
+                # ══════════════════════════════════════════════════════════════
                 try:
-                    user_feedback = await asyncio.wait_for(
-                        self.input_provider(),
-                        timeout=REFINEMENT_TIMEOUT_SECONDS,
+                    task_messages = compile_task_messages(
+                        hypothesis=self.state.hypothesis,
+                        plan=self.state.plan,
+                        knowledge_sections=knowledge_sections,
+                        sources_guide=sources_guide,
+                        pipeline_instructions=self._pipeline_instructions,
                     )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "Plan refinement timed out after %ds — using current plan",
-                        REFINEMENT_TIMEOUT_SECONDS,
+                    await self.session_service.confirm_plan(self.session)
+                    await self.session_service.save_task_messages_for_plan(
+                        self.session,
+                        task_messages,
                     )
-                    await self._send(
-                        "msg",
-                        "Plan refinement timed out. The current plan will be used.",
-                    )
+                    task_summaries = [
+                        {
+                            "task_id": tm.task_id,
+                            "phase": tm.phase,
+                            "agent_id": tm.agent_id,
+                            "agent_title": tm.agent_title,
+                            "has_knowledge": bool(tm.context_augmentation.knowledge_summary),
+                            "has_literature": bool(tm.context_augmentation.literature_findings),
+                            "has_methodology": bool(tm.context_augmentation.methodology_guidance),
+                            "instructions_preview": (
+                                tm.instructions[:150] + "..."
+                                if len(tm.instructions) > 150
+                                else tm.instructions
+                            ),
+                        }
+                        for tm in task_messages
+                    ]
+                    await self._send("task_messages", task_summaries)
+                except Exception as e:
+                    logger.error("Task message compilation failed (non-fatal): %s", e, exc_info=True)
+
+                await self._save_state()
+                await self._send("planning_complete", True)
+                await self._send("modules_matched", True)
+                
+                try:
+                    # Wait indefinitely for chat-based revisions
+                    user_feedback = await self.input_provider()
+                except Exception as e:
+                    logger.info("Input provider stopped, ending planner task: %s", e)
                     break
 
-                if "APPROVE" in user_feedback.upper():
-                    break
-
+                # Process user chat feedback
                 refinement_prompt = (
                     f"User Feedback: {user_feedback}\n\n"
                     "Update the pipeline plan based on their feedback. "
@@ -1108,93 +1207,15 @@ class ClinicalPlanner:
                     "'rationale', and 'message'."
                 )
 
-                response = await self._call_agent_with_retry(
-                    pipeline_architect,
-                    refinement_prompt,
-                    cancellation_token=cancellation_token,
-                )
-                await self._process_pipeline_response(response.chat_message.content)
-
-                refinement_count += 1
-
-            if refinement_count >= MAX_REFINEMENT_ITERATIONS:
-                logger.warning(
-                    "Max refinement iterations (%d) reached — using current plan",
-                    MAX_REFINEMENT_ITERATIONS,
-                )
-                await self._send(
-                    "msg",
-                    f"Maximum refinement iterations ({MAX_REFINEMENT_ITERATIONS}) "
-                    "reached. The current plan will be used.",
-                )
-
-            # ══════════════════════════════════════════════════════════════
-            # FINALIZE: Compile task messages with context augmentation
-            # ══════════════════════════════════════════════════════════════
-
-            await self._save_state()
-            await self.session_service.confirm_plan(self.session)
-            await self._send(
-                "msg",
-                "Research plan confirmed. You can execute the agents now...",
-            )
-
-            try:
-                # Compile structured task messages with pre-structured knowledge sections
-                task_messages = compile_task_messages(
-                    hypothesis=self.state.hypothesis,
-                    plan=self.state.plan,
-                    knowledge_sections=knowledge_sections,
-                    sources_guide=sources_guide,
-                    pipeline_instructions=self._pipeline_instructions,
-                )
-                await self._save_state()
-                await self.session_service.confirm_plan(self.session)
-
-                # Persist task messages to database
-                persisted_messages = (
-                    await self.session_service.save_task_messages_for_plan(
-                        self.session,
-                        task_messages,
+                try:
+                    response = await self._call_agent_with_retry(
+                        pipeline_architect,
+                        refinement_prompt,
+                        cancellation_token=cancellation_token,
                     )
-                )
-
-                # Send task message summaries to UI
-                task_summaries = [
-                    {
-                        "task_id": tm.task_id,
-                        "phase": tm.phase,
-                        "agent_id": tm.agent_id,
-                        "agent_title": tm.agent_title,
-                        "has_knowledge": bool(
-                            tm.context_augmentation.knowledge_summary
-                        ),
-                        "has_literature": bool(
-                            tm.context_augmentation.literature_findings
-                        ),
-                        "has_methodology": bool(
-                            tm.context_augmentation.methodology_guidance
-                        ),
-                        "instructions_preview": (
-                            tm.instructions[:150] + "..."
-                            if len(tm.instructions) > 150
-                            else tm.instructions
-                        ),
-                    }
-                    for tm in task_messages
-                ]
-                await self._send("task_messages", task_summaries)
-
-            except Exception as e:
-                logger.error(
-                    "Task message compilation failed (non-fatal): %s",
-                    e,
-                    exc_info=True,
-                )
-                await self._send(
-                    "msg",
-                    f"Warning: Task message compilation failed ({e}). "
-                    "Pipeline will proceed with basic instructions.",
-                )
-
-            await self._send("modules_matched", True)
+                    await self._process_pipeline_response(response.chat_message.content)
+                except Exception as e:
+                    logger.error("Error generating revised pipeline: %s", e)
+                    await self._send("msg", f"Sorry, an error occurred while revising the pipeline: {e}")
+                    await self._send("planning_failed", str(e))
+                    continue # Try again on next input
