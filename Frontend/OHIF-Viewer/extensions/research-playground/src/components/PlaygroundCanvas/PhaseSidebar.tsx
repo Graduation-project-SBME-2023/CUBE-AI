@@ -100,10 +100,11 @@ export default function PhaseSidebar({
                     const isActive = activePhase === phase.id;
                     const isCoreView = phase.id === 'planning' || phase.id === 'execution';
                     const PhaseIcon = (phase.icon as any) || PlusIcon;
+                    const isWaiting = forceVisibleUpdatePhaseIds.includes(phase.id);
                     const hasUpdate = updatedPhaseIds.includes(phase.id) && (
-                        !isActive || forceVisibleUpdatePhaseIds.includes(phase.id)
+                        !isActive || isWaiting
                     );
-                    const updateMessage = updateMessages[phase.id] || 'New update received';
+                    const updateMessage = updateMessages[phase.id] || (isWaiting ? 'Waiting for user input' : 'New update received');
 
                     return (
                         <div key={phase.id} className="relative flex flex-col">

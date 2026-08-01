@@ -100,6 +100,8 @@ function ResearchPlaygroundInner() {
   const [hydratedExecutionState, setHydratedExecutionState] = useState<any>(null);
   const [manualResumeRequired, setManualResumeRequired] = useState(false);
   const [restoredPaused, setRestoredPaused] = useState(false);
+  // Gates the Data & Population tab: stays false until plan is approved and execution begins
+  const [isPlanApproved, setIsPlanApproved] = useState(false);
 
   // Derive sessionId first so it can be used in useState initialisers below
   const hypothesis = routeState.hypothesis || 'No active hypothesis defined.';
@@ -256,6 +258,8 @@ function ResearchPlaygroundInner() {
     setPhaseUpdateMessages({});
     waitingPhaseIdsRef.current = new Set();
     setWaitingPhaseIds([]);
+    // Reset approval gate when execution restarts
+    setIsPlanApproved(false);
   }, [setData]);
   const sidebarPhases = useMemo(
     () => phases.filter(phase => phase.id !== 'planning' && phase.id !== 'execution'),
@@ -293,7 +297,7 @@ function ResearchPlaygroundInner() {
                     const outputForAgent = Object.values(OUTPUT_EVENT_AGENTS).find(
                         item => item.agent === agentName
                     );
-                    const waitingMessage = WAITING_MESSAGES[waitingStatus];
+                    const waitingMessage = WAITING_MESSAGES[waitingStatus] || (waitingStatus.startsWith('WAITING') ? 'Agent is waiting for user input' : undefined);
                     if (outputForAgent && waitingMessage) {
                         showPhaseIndicator(outputForAgent.phase, waitingMessage, true);
                         setActivePhase(outputForAgent.phase);
@@ -341,6 +345,19 @@ function ResearchPlaygroundInner() {
         };
         loadSessionState();
     }, [sendInitialMessage, sessionId, showPhaseIndicator]);
+
+  // Once we know the restored mode, sync isPlanApproved:
+  // - Restored executing/results sessions are already approved
+  // - Fresh new sessions always start locked
+  useEffect(() => {
+    if (!restoredModeReady) return;
+    if (restoredMode === 'executing' || restoredMode === 'results') {
+      setIsPlanApproved(true);
+    } else {
+      // New session or planning-only restore — keep locked until WS confirms execution
+      setIsPlanApproved(false);
+    }
+  }, [restoredModeReady, restoredMode]);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setViewsReady(true));
@@ -435,10 +452,12 @@ function ResearchPlaygroundInner() {
       }
 
       if (type === 'agent_waiting_for_user_input') {
+        // If the population agent is already waiting for input, plan is approved
+        setIsPlanApproved(true);
         const agentName = String(payload?.agent || '');
         const waitingStatus = String(payload?.status || '').toUpperCase();
         const outputForAgent = Object.values(OUTPUT_EVENT_AGENTS).find(item => item.agent === agentName);
-        const message = WAITING_MESSAGES[waitingStatus];
+        const message = WAITING_MESSAGES[waitingStatus] || (waitingStatus.startsWith('WAITING') ? 'Agent is waiting for user input' : undefined);
 
         if (outputForAgent && message) {
           if (updateStateRef.current.isHydrating) {
@@ -459,6 +478,8 @@ function ResearchPlaygroundInner() {
       }
 
       if (type === 'pipeline_agent_status' || type === 'Pipeline_agent_status') {
+        // Execution has started — unlock the Data & Population tab
+        setIsPlanApproved(true);
         for (const agent of payload?.agents || []) {
           const agentName = String(agent?.name || '');
           if (
@@ -538,7 +559,7 @@ function ResearchPlaygroundInner() {
         : []),
       {
         id: 'data',
-        node: <DataCohortView populationData={data.populationData} segmentationData={data.segmentationData} />,
+        node: <DataCohortView populationData={data.populationData} segmentationData={data.segmentationData} isPlanApproved={isPlanApproved} />,
       },
       { id: 'segmentation', node: <SegmentationView segmentationData={data.segmentationData as any} /> },
       {
