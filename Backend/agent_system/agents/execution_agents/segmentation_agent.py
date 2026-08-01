@@ -171,9 +171,29 @@ class SegmentationAgent(AssistantAgent):
         ]
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
         logger.info(f"Creating segmentation agent")
+        _execute_segmentation_tool = segmentation_tool
+
+        async def run_segmentation_with_guard(
+            workspace_folder: str | None = None,
+            session_id: str | None = None,
+        ):
+            """The main segmentation tool, containing all the needed logic
+            :arg workspace_folder: The workspace folder to save outputs to.
+            :arg session_id: The active session ID.
+            """
+            clean_folder = workspace_folder if workspace_folder and str(workspace_folder).strip() not in {"...", ".", ".."} else None
+            if clean_folder and not Path(clean_folder).exists():
+                clean_folder = None
+            effective_folder = clean_folder or env["WORKSPACE_DIR"]
+
+            clean_id = session_id if session_id and str(session_id).strip() not in {"...", ".", ".."} else None
+            effective_id = clean_id or env["SESSION_ID"]
+
+            return await _execute_segmentation_tool(workspace_folder=effective_folder, session_id=effective_id)
+
         function_tools = [
             FunctionTool(
-                segmentation_tool,
+                run_segmentation_with_guard,
                 description="The main segmentation tool",
             )
         ]
