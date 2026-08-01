@@ -975,6 +975,278 @@ async def set_labelling_mode(
     return {"status": "success", "mode": mode}
 
 
+
+
+
+# ----------------------------------------------------------------------
+# Cohort Management Endpoints (Interactive Subpages)
+# ----------------------------------------------------------------------
+
+@app.get("/populations/cohort-state")
+async def get_cohort_state(
+    session_id: str = Query(..., description="The ID of the current session"),
+):
+    """
+    Returns the current cohort state for the interactive Population subpages:
+    - datasetlist from config.json
+    - labels from cohort_labels.csv
+    - cohort_approved flag
+    - labelling_mode
+    """
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+    config_path = os.path.join(workspace_folder, "config.json")
+
+    config_data = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+        except Exception:
+            pass
+
+    # Load cohort labels if available
+    import csv as csv_mod
+    labels = []
+    labels_path = os.path.join(workspace_folder, "populations", "cohort_labels.csv")
+    if os.path.exists(labels_path):
+        try:
+            with open(labels_path, "r", encoding="utf-8") as f:
+                reader = csv_mod.DictReader(f)
+                for row in reader:
+                    labels.append(dict(row))
+        except Exception:
+            pass
+
+    return {
+        "datasetlist": config_data.get("datasetlist", []),
+        "labelling_mode": config_data.get("labelling_mode", "automatic"),
+        "cohort_approved": config_data.get("cohort_approved", False),
+        "inclusion_criteria": config_data.get("inclusion_criteria", []),
+        "exclusion_criteria": config_data.get("exclusion_criteria", []),
+        "labels": labels,
+    }
+
+
+@app.post("/populations/update-cohort-list")
+async def update_cohort_list(
+    data: dict,
+):
+    """
+    Updates the datasetlist in config.json with the user's include/exclude
+    selections from the Data Browser subpage.
+    Expects: { "session_id": "...", "datasetlist": ["uid1", "uid2", ...] }
+    """
+    session_id = data.get("session_id")
+    new_datasetlist = data.get("datasetlist", [])
+
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+    config_path = os.path.join(workspace_folder, "config.json")
+
+    config_data = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+        except Exception:
+            pass
+
+    config_data["datasetlist"] = new_datasetlist
+    # Reset approval when the cohort list changes
+    config_data["cohort_approved"] = False
+
+    os.makedirs(workspace_folder, exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=4)
+
+    # Broadcast the update so the Overview subpage refreshes
+    try:
+        await ws_manager.broadcast({
+            "type": "population_output",
+            "payload": {
+                "tool": "search_volumes_by_description",
+                "status": "completed",
+                "count": len(new_datasetlist),
+                "uid_list": new_datasetlist,
+            },
+            "session_id": session_id,
+        })
+    except Exception as e:
+        logger.warning(f"Failed to broadcast cohort list update: {e}")
+
+    return {"status": "success", "count": len(new_datasetlist)}
+
+
+@app.post("/populations/save-labels")
+async def save_labels(data: dict):
+    """
+    Saves user label assignments from the Patient Labeling subpage.
+    Expects: {
+        "session_id": "...",
+        "labels": [
+            {"patient_id": "...", "has_target_disease": "true"/"false"/"",
+             "confidence": "...", "source_evidence": "..."},
+            ...
+        ]
+    }
+    """
+    import csv as csv_mod
+
+    session_id = data.get("session_id")
+    labels_list = data.get("labels", [])
+
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+    populations_dir = os.path.join(workspace_folder, "populations")
+    os.makedirs(populations_dir, exist_ok=True)
+    labels_path = os.path.join(populations_dir, "cohort_labels.csv")
+
+    # Reset approval when labels change
+    config_path = os.path.join(workspace_folder, "config.json")
+    config_data = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+        except Exception:
+            pass
+    config_data["cohort_approved"] = False
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=4)
+
+    fieldnames = [
+        "patient_id", "has_target_disease", "confidence",
+        "requires_manual_review", "source_evidence"
+    ]
+    with open(labels_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv_mod.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for label in labels_list:
+            writer.writerow({
+                "patient_id": label.get("patient_id", ""),
+                "has_target_disease": label.get("has_target_disease", ""),
+                "confidence": label.get("confidence", ""),
+                "requires_manual_review": label.get("requires_manual_review", "False"),
+                "source_evidence": label.get("source_evidence", ""),
+            })
+
+    return {"status": "success", "saved_count": len(labels_list)}
+
+
+@app.post("/populations/approve-cohort")
+async def approve_cohort(data: dict):
+    """
+    Validates and approves the final cohort. The pipeline will only proceed
+    to segmentation after this endpoint succeeds.
+    Expects: { "session_id": "..." }
+    Validates: At least one volume in the datasetlist has a valid label.
+    """
+    import csv as csv_mod
+
+    session_id = data.get("session_id")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
+    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+    config_path = os.path.join(workspace_folder, "config.json")
+
+    config_data = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+        except Exception:
+            pass
+
+    datasetlist = config_data.get("datasetlist", [])
+    if not datasetlist:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot approve: no volumes in the cohort. The population agent must discover volumes first."
+        )
+
+    # Load labels and check that at least one volume has a valid label
+    labels_path = os.path.join(workspace_folder, "populations", "cohort_labels.csv")
+    labels_dict = {}
+    if os.path.exists(labels_path):
+        try:
+            with open(labels_path, "r", encoding="utf-8") as f:
+                reader = csv_mod.DictReader(f)
+                for row in reader:
+                    labels_dict[row.get("patient_id", "")] = row
+        except Exception:
+            pass
+
+    # Count volumes with valid labels (has_target_disease is "true" or "false", not empty)
+    labeled_count = 0
+    valid_targets = []
+    for uid in datasetlist:
+        label_info = labels_dict.get(uid)
+        if label_info:
+            htd = str(label_info.get("has_target_disease", "")).strip().lower()
+            if htd in ("true", "false"):
+                labeled_count += 1
+                target_val = 1 if htd == "true" else 0
+                valid_targets.append((uid, label_info.get("patient_id", uid), target_val))
+
+    if labeled_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot approve: no volumes have valid labels. Please label at least one volume in the Patient Labeling tab."
+        )
+
+    # Generate the sealed targets.csv
+    targets_dir = os.path.join(workspace_folder, "populations", "targets")
+    os.makedirs(targets_dir, exist_ok=True)
+    targets_path = os.path.join(targets_dir, "targets.csv")
+
+    with open(targets_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv_mod.writer(f)
+        writer.writerow(["id", "name", "target"])
+        for uid, name, target in valid_targets:
+            writer.writerow([uid, name, target])
+
+    # Update config: only labeled UIDs in the final datasetlist, mark approved
+    config_data["datasetlist"] = [uid for uid, _, _ in valid_targets]
+    config_data["cohort_approved"] = True
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(config_data, f, indent=4)
+
+    logger.info(f"[CohortApproval] Session {session_id}: approved {labeled_count} labeled volumes out of {len(datasetlist)} total.")
+
+    # Broadcast approval so the pipeline can proceed
+    try:
+        await ws_manager.broadcast({
+            "type": "cohort_approval_status",
+            "payload": {
+                "status": "approved",
+                "labeled_count": labeled_count,
+                "total_count": len(datasetlist),
+            },
+            "session_id": session_id,
+        })
+    except Exception as e:
+        logger.warning(f"Failed to broadcast cohort approval: {e}")
+
+    return {
+        "status": "success",
+        "labeled_count": labeled_count,
+        "targets_path": targets_path,
+    }
+
+
 @app.post("/populations/upload-targets")
 async def upload_targets(
     session_id: str = Query(..., description="The ID of the current session"),
