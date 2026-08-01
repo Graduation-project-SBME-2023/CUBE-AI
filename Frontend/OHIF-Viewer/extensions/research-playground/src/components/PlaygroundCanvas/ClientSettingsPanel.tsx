@@ -57,17 +57,21 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
     const [saving, setSaving] = useState(false);
     const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null);
     const [showKey, setShowKey] = useState(false);
+    const [dirtyFields, setDirtyFields] = useState<Set<string>>(new Set());
+    const [isTesting, setIsTesting] = useState(false);
+    const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
     // Load current config on mount
     const loadConfig = useCallback(async () => {
         try {
             const res = await fetch(`${API_BASE}/client-config`);
             if (!res.ok) return;
-            const data = await res.json();
+            const resData = await res.json();
+            const data = resData.config || resData; // Support both old and new format temporarily if needed
             setForm({
                 provider: data.provider || 'ollama',
                 model: data.model || '',
-                api_key: '', // never pre-fill from masked value
+                api_key: data._masked ? '***' : '', // Show *** if masked, empty otherwise
                 base_url: data.base_url || '',
                 azure_endpoint: data.azure_endpoint || '',
                 azure_deployment: data.azure_deployment || '',
@@ -80,6 +84,7 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
                 max_tokens: data.max_tokens != null ? String(data.max_tokens) : '',
                 top_p: data.top_p != null ? String(data.top_p) : '',
             });
+            setDirtyFields(new Set());
         } catch {
             // backend not reachable
         }
@@ -89,35 +94,53 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
         if (isOpen) loadConfig();
     }, [isOpen, loadConfig]);
 
+    const buildPayload = () => {
+        const payload: any = {};
+        dirtyFields.forEach(field => {
+            let value = form[field as keyof FormState];
+            
+            if (field === 'api_key') {
+                if (value && value !== '***') {
+                    payload.api_key = value;
+                } else if (value === '') {
+                    payload.api_key = null;
+                }
+                return;
+            }
+
+            if (['temperature', 'top_p'].includes(field)) {
+                payload[field] = value !== '' ? parseFloat(value as string) : null;
+            } else if (field === 'max_tokens') {
+                payload[field] = value !== '' ? parseInt(value as string, 10) : null;
+            } else if (value === '' || value === null || value === undefined) {
+                payload[field] = null;
+            } else {
+                payload[field] = value;
+            }
+        });
+        return payload;
+    };
+
     const handleSave = async () => {
+        const payload = buildPayload();
+        if (Object.keys(payload).length === 0) {
+            setStatus({ ok: true, msg: 'No changes to save.' });
+            return;
+        }
+
         setSaving(true);
         setStatus(null);
         try {
-            const body: Record<string, any> = {
-                provider: form.provider,
-                model: form.model,
-                vision: form.vision,
-                function_calling: form.function_calling,
-                json_output: form.json_output,
-                structured_output: form.structured_output,
-            };
-            if (form.api_key) body.api_key = form.api_key;
-            if (form.base_url) body.base_url = form.base_url;
-            if (form.azure_endpoint) body.azure_endpoint = form.azure_endpoint;
-            if (form.azure_deployment) body.azure_deployment = form.azure_deployment;
-            if (form.api_version) body.api_version = form.api_version;
-            if (form.temperature) body.temperature = parseFloat(form.temperature);
-            if (form.max_tokens) body.max_tokens = parseInt(form.max_tokens, 10);
-            if (form.top_p) body.top_p = parseFloat(form.top_p);
-
             const res = await fetch(`${API_BASE}/client-config`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
+                body: JSON.stringify(payload),
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            setStatus({ ok: true, msg: `Saved: ${data.provider} / ${data.model}` });
+            const config = data.config || data;
+            setStatus({ ok: true, msg: `Saved: ${config.provider} / ${config.model}` });
+            setDirtyFields(new Set());
         } catch (e: any) {
             setStatus({ ok: false, msg: e.message || 'Failed to save' });
         } finally {
@@ -125,14 +148,39 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
         }
     };
 
-    const update = (key: keyof FormState, val: any) =>
+    const handleTestConnection = async () => {
+        setIsTesting(true);
+        setTestResult(null);
+        const payload = buildPayload();
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/test-client-config`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const result = await response.json();
+            setTestResult({
+                success: response.ok,
+                message: result.message || (response.ok ? '✅ Connection successful!' : '❌ Connection failed.'),
+            });
+        } catch (error) {
+            setTestResult({ success: false, message: '❌ Network error. Please try again.' });
+        } finally {
+            setIsTesting(false);
+        }
+    };
+
+    const update = (key: keyof FormState, val: any) => {
         setForm(prev => ({ ...prev, [key]: val }));
+        setDirtyFields(prev => new Set(prev).add(key));
+    };
 
     if (!isOpen) return null;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="bg-[#0b1015] border border-[#3c5d80] rounded-2xl w-[520px] max-h-[85vh] flex flex-col shadow-2xl">
+            <div className="bg-[#0b1015] border border-[#3c5d80] rounded-2xl w-[520px] max-h-[95vh] flex flex-col shadow-2xl">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-[#1f2d40]">
                     <div className="flex items-center gap-3">
@@ -145,7 +193,7 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
                 </div>
 
                 {/* Body */}
-                <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+                <div className="flex-1 overflow-y-auto ohif-scrollbar px-6 py-4 space-y-3.5">
                     {/* Provider */}
                     <div>
                         <label className="block text-[10px] text-gray-500 uppercase tracking-wider mb-1.5 font-bold">Provider</label>
@@ -213,8 +261,8 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
                     )}
 
                     {/* Divider */}
-                    <div className="border-t border-[#1f2d40] pt-4">
-                        <h4 className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-3">Generation Parameters</h4>
+                    <div className="border-t border-[#1f2d40] pt-3">
+                        <h4 className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-2">Generation Parameters</h4>
                         <div className="grid grid-cols-3 gap-3">
                             <Field label="Temperature" placeholder="0.7" value={form.temperature} onChange={v => update('temperature', v)} small />
                             <Field label="Max Tokens" placeholder="4096" value={form.max_tokens} onChange={v => update('max_tokens', v)} small />
@@ -223,8 +271,8 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
                     </div>
 
                     {/* Capabilities */}
-                    <div className="border-t border-[#1f2d40] pt-4">
-                        <h4 className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-3">Model Capabilities</h4>
+                    <div className="border-t border-[#1f2d40] pt-3">
+                        <h4 className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-2">Model Capabilities</h4>
                         <div className="grid grid-cols-2 gap-2">
                             <Toggle label="Function Calling" checked={form.function_calling} onChange={v => update('function_calling', v)} />
                             <Toggle label="JSON Output" checked={form.json_output} onChange={v => update('json_output', v)} />
@@ -235,28 +283,42 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
                 </div>
 
                 {/* Footer */}
-                <div className="px-6 py-4 border-t border-[#1f2d40] flex items-center justify-between">
-                    {status && (
-                        <span className={`text-xs ${status.ok ? 'text-[#6fe5b8]' : 'text-[#ff6b6b]'}`}>
-                            {status.msg}
-                        </span>
-                    )}
-                    {!status && <span />}
-                    <div className="flex gap-2">
-                        <button
-                            onClick={loadConfig}
-                            className="px-3 py-1.5 bg-[#151a1f] text-gray-400 border border-[#3c5d80]/40 rounded-lg text-xs hover:text-white transition-colors flex items-center gap-1.5"
-                        >
-                            <RefreshCwIcon size={12} /> Reset
-                        </button>
-                        <button
-                            onClick={handleSave}
-                            disabled={saving || !form.model}
-                            className="px-4 py-1.5 bg-[#5acce6] text-black rounded-lg text-xs font-bold hover:bg-[#7dd8ed] transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                            <SaveIcon size={12} /> {saving ? 'Saving...' : 'Save'}
-                        </button>
+                <div className="px-6 py-4 border-t border-[#1f2d40] flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                        {status && (
+                            <span className={`text-xs ${status.ok ? 'text-[#6fe5b8]' : 'text-[#ff6b6b]'}`}>
+                                {status.msg}
+                            </span>
+                        )}
+                        {!status && <span />}
+                        <div className="flex gap-2">
+                            <button
+                                onClick={loadConfig}
+                                className="px-3 py-1.5 bg-[#151a1f] text-gray-400 border border-[#3c5d80]/40 rounded-lg text-xs hover:text-white transition-colors flex items-center gap-1.5"
+                            >
+                                <RefreshCwIcon size={12} /> Reset
+                            </button>
+                            <button
+                                onClick={handleTestConnection}
+                                disabled={isTesting}
+                                className="px-3 py-1.5 bg-[#3c5d80] text-white rounded-lg text-xs font-bold hover:bg-[#4a729c] transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                {isTesting ? 'Testing...' : 'Test Connection'}
+                            </button>
+                            <button
+                                onClick={handleSave}
+                                disabled={saving || !form.model}
+                                className="px-4 py-1.5 bg-[#5acce6] text-black rounded-lg text-xs font-bold hover:bg-[#7dd8ed] transition-colors flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                <SaveIcon size={12} /> {saving ? 'Saving...' : 'Save'}
+                            </button>
+                        </div>
                     </div>
+                    {testResult && (
+                        <div className={`text-xs mt-1 ${testResult.success ? 'text-green-400' : 'text-red-400'}`}>
+                            {testResult.message}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

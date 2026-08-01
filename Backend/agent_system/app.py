@@ -49,6 +49,7 @@ from client_config import (
     get_client_config,
     set_client_config,
     create_model_client_from_config,
+    save_config_to_disk,
 )
 
 from models.tool_logging import ToolEvent
@@ -67,6 +68,16 @@ from agents.execution_agents.segmentation.progressive import (
 )
 
 logger = logging.getLogger(__name__)
+
+class RedactApiKeyFilter(logging.Filter):
+    def filter(self, record):
+        if hasattr(record, 'msg') and isinstance(record.msg, str):
+            import re
+            record.msg = re.sub(r'\'api_key\': \'[^\']*\'', "'api_key': '***'", record.msg)
+            record.msg = re.sub(r'"api_key": "[^"]*"', '"api_key": "***"', record.msg)
+        return True
+
+logging.getLogger().addFilter(RedactApiKeyFilter())
 
 logging.getLogger("watchfiles").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -518,17 +529,69 @@ async def get_config():
     data = cfg.model_dump()
     # Mask the API key for security
     if data.get("api_key"):
-        data["api_key"] = (
-            data["api_key"][:8] + "..." if len(data["api_key"]) > 8 else "***"
-        )
-    return data
+        data["api_key"] = "***"
+        data["_masked"] = True
+    else:
+        data["_masked"] = False
+    return {"status": "ok", "config": data}
 
 
 @app.post("/client-config")
-async def update_config(config: ClientConfig):
-    """Update the global LLM client configuration."""
-    set_client_config(config)
-    return {"status": "ok", "provider": config.provider, "model": config.model}
+async def update_config(payload: dict):
+    """Update the global LLM client configuration with partial merge."""
+    try:
+        current_dict = get_client_config().model_dump()
+        
+        for key, value in payload.items():
+            if key == "api_key" and value is None:
+                current_dict["api_key"] = None
+            elif key == "api_key" and (value == "" or value == "***"):
+                continue
+            else:
+                current_dict[key] = value
+                
+        validated = ClientConfig(**current_dict)
+        set_client_config(validated)
+        save_config_to_disk(validated)
+        
+        masked = validated.model_dump()
+        if masked.get("api_key"):
+            masked["api_key"] = "***"
+            masked["_masked"] = True
+        else:
+            masked["_masked"] = False
+        return {"status": "ok", "config": masked}
+    except Exception as e:
+        logger.error(f"Error updating config: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/test-client-config")
+async def test_client_config(payload: dict = None):
+    try:
+        if payload:
+            current = get_client_config().model_dump()
+            for key, value in payload.items():
+                if key == "api_key" and (value == "" or value == "***"):
+                    continue
+                if value is not None:
+                    current[key] = value
+            config = ClientConfig(**current)
+        else:
+            config = get_client_config()
+            
+        if not config.provider or not config.model:
+            raise ValueError("Model configuration incomplete. Please set provider and model.")
+            
+        client = create_model_client_from_config(config)
+        # We need an async block to test connection.
+        from autogen_core.models import UserMessage
+        # Send a simple test message
+        response = await client.create(messages=[UserMessage(content="Respond with exactly the word OK.", source="user")])
+        
+        return {"status": "ok", "message": "✅ Connection successful! Model is ready."}
+    except Exception as e:
+        logger.error(f"Error testing client config: {e}")
+        return JSONResponse(status_code=400, content={"status": "error", "message": f"❌ Connection failed: {str(e)}"})
 
 
 @app.get("/client-config/providers")
