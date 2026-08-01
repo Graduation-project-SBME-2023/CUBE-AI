@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
     Users, Filter, Database, AlertTriangle, Check, Activity, Layers, 
     Table, Tag, CheckCircle2, Save, ShieldCheck, Search, Info, RefreshCw, Lock, AlertCircle 
@@ -121,6 +121,8 @@ interface DataCohortViewProps {
     populationData?: PopulationData | null;
     segmentationData?: SegmentationData | null;
     sessionId?: string | null;
+    /** Blocks all rendering and data fetching until the study plan has been approved by the user. */
+    isPlanApproved?: boolean;
 }
 
 interface OrthancVolume {
@@ -141,7 +143,7 @@ interface LabelRecord {
     source_evidence?: string;
 }
 
-export default function DataCohortView({ populationData, segmentationData, sessionId }: DataCohortViewProps) {
+export default function DataCohortView({ populationData, segmentationData, sessionId, isPlanApproved = false }: DataCohortViewProps) {
     const { show } = useSnackbar();
 
     // Active Subpage State
@@ -172,6 +174,21 @@ export default function DataCohortView({ populationData, segmentationData, sessi
     const [labels, setLabels] = useState<LabelRecord[]>([]);
     const [isSavingLabels, setIsSavingLabels] = useState<boolean>(false);
     const [isApproving, setIsApproving] = useState<boolean>(false);
+
+    // Reset all local cohort state whenever the plan becomes freshly approved (new run)
+    // or whenever the session changes — guarantees a clean slate.
+    const prevIsPlanApprovedRef = useRef(isPlanApproved);
+    useEffect(() => {
+        const wasApproved = prevIsPlanApprovedRef.current;
+        prevIsPlanApprovedRef.current = isPlanApproved;
+        // Only reset when transitioning from not-approved → approved (new execution starting)
+        if (!wasApproved && isPlanApproved) {
+            setAccumulatedPop({ count: null, uids: [], inclusion: [], exclusion: [], modality: 'Awaiting...', summary: '', matchRate: null });
+            setLabels([]);
+            setCohortApproved(false);
+            setSubpage('overview');
+        }
+    }, [isPlanApproved]);
 
     // Handle WebSocket / agent broadcast data updates
     useEffect(() => {
@@ -226,8 +243,11 @@ export default function DataCohortView({ populationData, segmentationData, sessi
     const hasPopData = populationData && populationData.status !== undefined;
     const hasSegData = segmentationData && segmentationData.status !== undefined;
 
-    // Fetch session config and cohort state
-    const fetchCohortState = async () => {
+    // Fetch session config and cohort state — only allowed after plan is approved
+    const fetchCohortState = useCallback(async () => {
+        // ⛔ Hard gate: never load old cohort data before the plan is approved
+        if (!isPlanApproved) return;
+
         const activeSessionId = sessionStorage.getItem('active_cube_session') || sessionId;
         if (!activeSessionId) return;
 
@@ -262,9 +282,12 @@ export default function DataCohortView({ populationData, segmentationData, sessi
         } catch (err) {
             console.error('Failed to fetch cohort state:', err);
         }
-    };
+    }, [isPlanApproved, sessionId]);
 
     useEffect(() => {
+        // ⛔ Do not load any cohort data until plan is approved
+        if (!isPlanApproved) return;
+
         fetchCohortState();
 
         const handleModeChange = (e: any) => {
@@ -273,10 +296,11 @@ export default function DataCohortView({ populationData, segmentationData, sessi
         };
         window.addEventListener('labellingModeChanged', handleModeChange);
         return () => window.removeEventListener('labellingModeChanged', handleModeChange);
-    }, [populationData, subpage]);
+    }, [isPlanApproved, populationData, subpage, fetchCohortState]);
 
-    // Fetch all Orthanc volumes when opening Data Browser
+    // Fetch all Orthanc volumes when opening Data Browser — only after plan approval
     const fetchAllVolumes = async () => {
+        if (!isPlanApproved) return;
         setIsLoadingVolumes(true);
         try {
             const res = await fetch(`${getBackendApiBaseUrl()}/volumes/?limit=1000`);
@@ -294,10 +318,10 @@ export default function DataCohortView({ populationData, segmentationData, sessi
     };
 
     useEffect(() => {
-        if (subpage === 'browser') {
+        if (subpage === 'browser' && isPlanApproved) {
             fetchAllVolumes();
         }
-    }, [subpage]);
+    }, [subpage, isPlanApproved]);
 
     // Ensure label record exists in local state for every selected volume UID
     const unifiedLabels = useMemo(() => {
@@ -466,6 +490,40 @@ export default function DataCohortView({ populationData, segmentationData, sessi
     }).length;
     const negCount = finalLabeledCohort.length - posCount;
     const canApprove = accumulatedPop.uids.length > 0 && finalLabeledCohort.length > 0;
+
+    // ⛔ PLAN APPROVAL GATE — show nothing until the user approves the study plan
+    if (!isPlanApproved) {
+        return (
+            <div className="w-full h-full flex flex-col items-center justify-center gap-6 bg-[#000000] text-white select-none">
+                {/* Spinner */}
+                <div className="relative flex items-center justify-center">
+                    <div className="absolute w-20 h-20 rounded-full border-2 border-[#1a2a3a] opacity-40" />
+                    <div
+                        className="w-20 h-20 rounded-full border-2 border-transparent"
+                        style={{
+                            borderTopColor: '#5acce6',
+                            borderRightColor: '#3c5d8040',
+                            animation: 'spin 1.1s linear infinite',
+                        }}
+                    />
+                    <Database size={22} className="absolute text-[#3c6d8a]" />
+                </div>
+
+                {/* Label */}
+                <div className="flex flex-col items-center gap-2">
+                    <p className="text-[15px] font-semibold text-[#91b9cd] tracking-wide">
+                        Awaiting Plan Approval
+                    </p>
+                    <p className="text-xs text-[#4a6a80] max-w-[280px] text-center leading-relaxed">
+                        The Data &amp; Population tab will be available once you review and approve
+                        the generated study plan.
+                    </p>
+                </div>
+
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            </div>
+        );
+    }
 
     return (
         <div className="p-6 w-full h-full flex flex-col gap-6 bg-[#000000] overflow-hidden text-white">
@@ -995,54 +1053,6 @@ export default function DataCohortView({ populationData, segmentationData, sessi
             {/* ── SUBPAGE 4: FINAL COHORT & APPROVAL GATE ── */}
             {subpage === 'approval' && (
                 <div className="flex-1 bg-[#151a1f] rounded-xl border border-[#3c5d80] p-6 flex flex-col min-h-0 gap-6">
-                    {/* Header Banner */}
-                    <div className="bg-[#152433]/60 border border-[#3c5d80] rounded-xl p-5 flex flex-wrap justify-between items-center gap-4">
-                        <div className="max-w-2xl">
-                            <h2 className="text-xl font-bold text-[#5acce6] flex items-center gap-2">
-                                <ShieldCheckIcon size={22} /> Human-in-the-Loop Cohort Approval Gate
-                            </h2>
-                            <p className="text-xs text-gray-300 mt-2 leading-relaxed">
-                                Please review the validated study cohort below. Only candidates with **valid labels** (Positive or Negative) from the Patient Labeling tab are included here; unlabeled or unattended orphan volumes are automatically excluded from final execution.
-                            </p>
-                        </div>
-
-                        {/* Approval Button Gate with disabled rule */}
-                        <div className="flex flex-col items-end gap-2">
-                            <button
-                                onClick={handleApproveCohort}
-                                disabled={!canApprove || isApproving}
-                                title={!canApprove ? 'You must label at least one volume in the Patient Labeling tab before approving.' : 'Approve cohort and resume segmentation pipeline'}
-                                className={`flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all border shadow-xl ${
-                                    !canApprove
-                                        ? 'bg-[#151a1f] text-gray-500 border-gray-700 cursor-not-allowed opacity-60'
-                                        : cohortApproved
-                                            ? 'bg-[#152e2e] text-[#5ce6b0] border-[#234d4d] cursor-default shadow-[0_0_20px_rgba(92,230,176,0.3)]'
-                                            : 'bg-[#5acce6] hover:bg-[#43b2cc] text-black border-white/20 shadow-[0_0_20px_rgba(92,204,230,0.4)] cursor-pointer'
-                                }`}
-                            >
-                                {cohortApproved ? (
-                                    <>
-                                        <CheckCircleIcon size={18} /> Cohort Approved & Locked
-                                    </>
-                                ) : isApproving ? (
-                                    <>
-                                        <RefreshCwIcon size={18} className="animate-spin" /> Locking Cohort...
-                                    </>
-                                ) : (
-                                    <>
-                                        <LockIcon size={18} /> Approve & Lock Cohort
-                                    </>
-                                )}
-                            </button>
-
-                            {!canApprove && (
-                                <span className="text-[11px] text-[#ff6b6b] flex items-center gap-1 font-mono">
-                                    <AlertCircleIcon size={12} /> Button disabled: No valid labeled volumes in cohort.
-                                </span>
-                            )}
-                        </div>
-                    </div>
-
                     {/* Summary statistics bar */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div className="bg-[#0b1015] p-4 rounded-lg border border-[#1f2d40]">
@@ -1104,6 +1114,36 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                                 No labeled volumes ready. Please go to the Patient Labeling tab to review and assign labels to your candidates.
                             </div>
                         )}
+                    </div>
+
+                    {/* Bottom Approval Button Gate */}
+                    <div className="flex flex-col items-end gap-2 pt-2 border-t border-[#1f2d40]">
+                        <button
+                            onClick={handleApproveCohort}
+                            disabled={!canApprove || isApproving}
+                            title={!canApprove ? 'You must label at least one volume in the Patient Labeling tab before approving.' : 'Approve cohort and resume segmentation pipeline'}
+                            className={`flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all border shadow-xl ${
+                                !canApprove
+                                    ? 'bg-[#151a1f] text-gray-500 border-gray-700 cursor-not-allowed opacity-60'
+                                    : cohortApproved
+                                        ? 'bg-[#152e2e] text-[#5ce6b0] border-[#234d4d] cursor-default shadow-[0_0_20px_rgba(92,230,176,0.3)]'
+                                        : 'bg-[#5acce6] hover:bg-[#43b2cc] text-black border-white/20 shadow-[0_0_20px_rgba(92,204,230,0.4)] cursor-pointer'
+                            }`}
+                        >
+                            {cohortApproved ? (
+                                <>
+                                    <CheckCircleIcon size={18} /> Cohort Approved & Locked
+                                </>
+                            ) : isApproving ? (
+                                <>
+                                    <RefreshCwIcon size={18} className="animate-spin" /> Locking Cohort...
+                                </>
+                            ) : (
+                                <>
+                                    <LockIcon size={18} /> Approve & Lock Cohort
+                                </>
+                            )}
+                        </button>
                     </div>
                 </div>
             )}
