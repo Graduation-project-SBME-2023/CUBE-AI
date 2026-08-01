@@ -22,11 +22,11 @@ logger = logging.getLogger(__name__)
 _IS_WAITING_FOR_APPROVAL = False
 
 
-async def _wait_for_cohort_approval(workspace_dir: str, config_path: str, csv_path: str, timeout_seconds: int = 120) -> str:
+async def _wait_for_cohort_approval(workspace_dir: str, config_path: str, csv_path: str, timeout_seconds: int = 3600) -> str:
     """
     Polls until config.json contains 'cohort_approved': True (set when the user clicks
     'Approve & Lock Cohort' on Subpage 4 of the Population UI).
-    Returns csv_path on success, or 'SILENT_RETRY' on timeout.
+    Raises an exception on timeout to prevent Autogen from silently continuing to downstream agents.
     """
     global _IS_WAITING_FOR_APPROVAL
 
@@ -73,21 +73,21 @@ async def _wait_for_cohort_approval(workspace_dir: str, config_path: str, csv_pa
         await asyncio.sleep(poll_interval)
         elapsed += poll_interval
         if elapsed >= timeout_seconds:
-            return "SILENT_RETRY"
+            _IS_WAITING_FOR_APPROVAL = False
+            raise RuntimeError("Execution stopped: Cohort approval timed out waiting for user review in UI. Pipeline cannot continue without approval.")
 
     _IS_WAITING_FOR_APPROVAL = False
     return csv_path
 
 
 # ---------------------------------------------------------------------------
-# Shared: join cohort_labels.csv + datasetlist → draft targets.csv
+# Shared: join cohort_labels.csv + datasetlist → targets.csv
 # ---------------------------------------------------------------------------
 
 async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, config: dict, csv_path: str) -> str:
     """
-    Reads cohort_labels.csv and resolves patient IDs via Orthanc to produce an initial targets.csv.
+    Reads cohort_labels.csv and resolves patient IDs via Orthanc to produce targets.csv.
     If cohort_labels.csv is missing in automatic mode, runs extract_cohort_labels first.
-    Does NOT modify datasetlist in config.json so that unlabeled/orphan volumes stay accessible in the UI.
     Returns csv_path on success, or a JSON error string.
     """
     from .population.cohort_labels import extract_cohort_labels
@@ -136,6 +136,7 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
                 elif orthanc_pid and orthanc_pid.startswith("KiTS-"):
                     kits_case_id = orthanc_pid.replace("KiTS-", "case_")
 
+                # 5-way lookup in labels_dict
                 label_info = (
                     labels_dict.get(case_id)
                     or labels_dict.get(clinical_pid)
@@ -145,26 +146,44 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
                 )
 
                 if not label_info:
-                    dropped_patients.append(f"{case_id} (No matching label row)")
+                    dropped_patients.append(f"{clinical_pid or orthanc_pid} (No medical report found)")
                     continue
 
                 if label_info.get("confidence") == "low":
                     low_confidence_patients.append(orthanc_pid)
 
-                htd = str(label_info.get("has_target_disease", "")).strip().lower()
-                if htd not in ("true", "false"):
-                    # Unlabeled / pending user decision in UI
-                    continue
-
-                is_target = htd == "true"
+                is_target = str(label_info.get("has_target_disease")).lower() == "true"
                 target_val = 1 if is_target else 0
                 valid_targets.append((uid, case_id, target_val))
 
             except Exception as e:
                 dropped_patients.append(f"{uid} (API error: {e})")
 
+    valid_uids = [uid for uid, _, _ in valid_targets]
+
+    if not valid_uids:
+        err_msg = "No matching targets found. All volumes were dropped because they lack clinical labels."
+        await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
+        return json.dumps({"status": "error", "message": err_msg})
+
+    # Update config.json to only contain validated UIDs
+    config_json_path = os.path.join(workspace_dir, "config.json")
+    config["datasetlist"] = valid_uids
+    with open(config_json_path, mode="w", encoding="utf-8") as f:
+        json.dump(config, f, indent=4)
+
     if dropped_patients:
-        msg = f"{len(dropped_patients)} volumes currently have no valid labels or medical reports. Awaiting user review in UI."
+        msg = (
+            f"Dropped {len(dropped_patients)} volumes because no medical report exists for them. "
+            f"Continuing with {len(valid_targets)} valid patients."
+        )
+        await scratchpad_raise_flag(RaiseFlagInput(level="warning", message=msg))
+
+    if low_confidence_patients:
+        msg = (
+            f"Included {len(low_confidence_patients)} patients with low LLM confidence "
+            f"(retained as per policy). See metadata for details."
+        )
         await scratchpad_raise_flag(RaiseFlagInput(level="warning", message=msg))
 
     with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
@@ -187,9 +206,8 @@ async def generate_targets() -> str:
     and acts as the Human-in-the-Loop approval gate before segmentation.
 
     In both 'automatic' and 'manual' labelling modes, after preparing initial candidate
-    labels (or skeleton records), this tool waits for explicit human review and cohort
-    approval via the interactive frontend UI. When unapproved, returns 'SILENT_RETRY'
-    so the agent loops silently until the doctor signs off.
+    labels, this tool waits for explicit human review and cohort approval via the
+    interactive frontend UI before proceeding.
     """
     log_tool_state(ToolEvent(event_type='tool_started', content_type='text',
                              content=TextPayload(message='preparing targets & awaiting cohort approval')))
@@ -247,14 +265,13 @@ async def generate_targets() -> str:
                         "requires_manual_review": "True",
                         "source_evidence": "Manual mode — awaiting user selection in UI"
                     })
-        # Build initial targets (likely empty until user saves labels in UI)
         await _build_targets_from_labels(workspace_dir, datasetlist, config, csv_path)
 
     # HITL Approval Gate: wait for doctor to sign off on Subpage 4
-    result = await _wait_for_cohort_approval(workspace_dir, config_json_path, csv_path)
+    result = await _wait_for_cohort_approval(workspace_dir, config_json_path, csv_path, timeout_seconds=3600)
 
-    if result != "SILENT_RETRY":
-        log_tool_state(ToolEvent(event_type='tool_finished', content_type='text',
-                                 content=TextPayload(message="Cohort Approved & Targets Locked!")))
+    log_tool_state(ToolEvent(event_type='tool_finished', content_type='text',
+                             content=TextPayload(message="Cohort Approved & Targets Locked!")))
     return result
+
 

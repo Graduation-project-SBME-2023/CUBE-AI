@@ -9,6 +9,27 @@ from pydantic import Field
 from .. import mcp
 
 
+def _normalize_patient_ids(pid: str | None) -> set[str]:
+    if not pid:
+        return set()
+    cleaned = str(pid).strip()
+    results = {cleaned, cleaned.lower()}
+    lower = cleaned.lower()
+    for prefix in ("kits-", "kits23-", "kits23_", "case-", "case_"):
+        if lower.startswith(prefix):
+            suffix = lower[len(prefix):]
+            results.add(f"case_{suffix}")
+            results.add(f"KiTS_{suffix}")
+            results.add(f"KiTS-{suffix}")
+            results.add(f"KITS-{suffix}")
+            results.add(suffix)
+    if cleaned.isdigit():
+        results.add(f"case_{cleaned}")
+        results.add(f"KiTS-{cleaned}")
+        results.add(f"KITS-{cleaned}")
+    return results
+
+
 async def _extract_with_llm(client, model_name: str, flattened_text: str, context_prompt: str) -> dict:
     """
     Independent LLM call for a single patient record.
@@ -174,10 +195,7 @@ async def extract_cohort_labels() -> dict:
 
                         for pid in (orthanc_pid, clinical_pid):
                             if pid:
-                                available_cases.add(pid)
-                                # Also add the KiTS-style canonical case_id
-                                if pid.startswith("KiTS-"):
-                                    available_cases.add(pid.replace("KiTS-", "case_"))
+                                available_cases.update(_normalize_patient_ids(pid))
                     except Exception as inner_e:
                         print(f"Error fetching patient for volume {uid}: {inner_e}")
         except Exception as e:
@@ -232,7 +250,7 @@ async def extract_cohort_labels() -> dict:
                         patient_id = item.get("case_id") or item.get("patient_id")
                         if not patient_id:
                             continue
-                        if available_cases and patient_id not in available_cases:
+                        if available_cases and not _normalize_patient_ids(patient_id).intersection(available_cases):
                             continue
                         flattened = " | ".join(
                             f"{k}: {v}" for k, v in item.items()
@@ -243,7 +261,7 @@ async def extract_cohort_labels() -> dict:
                     for k, v in data.items():
                         if not k:
                             continue
-                        if available_cases and k not in available_cases:
+                        if available_cases and not _normalize_patient_ids(k).intersection(available_cases):
                             continue
                         flattened = (
                             " | ".join(f"{vk}: {vv}" for vk, vv in v.items())
@@ -261,7 +279,7 @@ async def extract_cohort_labels() -> dict:
                 patient_id = row.get("case_id") or row.get("patient_id")
                 if not patient_id:
                     continue
-                if available_cases and patient_id not in available_cases:
+                if available_cases and not _normalize_patient_ids(patient_id).intersection(available_cases):
                     continue
                 flattened = " | ".join(
                     f"{k}: {v}" for k, v in row.items()
@@ -391,22 +409,24 @@ async def extract_cohort_labels() -> dict:
     # them, we emit them as unlabeled entries so the user can manually label them
     # in the Patient Labeling UI.
     processed_patient_ids = {r.get("patient_id") for r in results}
+    normalized_processed = set()
+    for p in processed_patient_ids:
+        normalized_processed.update(_normalize_patient_ids(p))
     if volume_patient_meta:
         for uid, meta in volume_patient_meta.items():
-            # Check if this volume's patient was already processed under any ID
-            candidate_ids = {uid, meta.get("orthanc_pid", ""), meta.get("clinical_pid", "")}
-            clinical_pid = meta.get("clinical_pid", "")
-            if clinical_pid and clinical_pid.startswith("KiTS-"):
-                candidate_ids.add(clinical_pid.replace("KiTS-", "case_"))
-            if not candidate_ids.intersection(processed_patient_ids):
+            candidate_ids = {uid}
+            candidate_ids.update(_normalize_patient_ids(meta.get("orthanc_pid", "")))
+            candidate_ids.update(_normalize_patient_ids(meta.get("clinical_pid", "")))
+            if not candidate_ids.intersection(normalized_processed):
+                best_pid = meta.get("clinical_pid") or meta.get("orthanc_pid") or uid
                 results.append({
-                    "patient_id": uid,
+                    "patient_id": best_pid,
                     "has_target_disease": "",
                     "confidence": "unlabeled",
                     "requires_manual_review": True,
                     "source_evidence": "No medical report found in clinical dataset. Requires manual evaluation by user in Patient Labeling tab."
                 })
-                print(f"[extract_cohort_labels] Orphan volume {uid} (patient: {meta.get('clinical_pid', meta.get('orthanc_pid', '?'))}) — added as unlabeled entry.")
+                print(f"[extract_cohort_labels] Orphan volume {uid} (patient: {best_pid}) — added as unlabeled entry.")
 
     # ── 7. Write cohort_labels.csv ───────────────────────────────────────────────
     populations_dir = os.path.join(workspace_dir, "populations")
@@ -421,8 +441,16 @@ async def extract_cohort_labels() -> dict:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for res in results:
+            raw_pid = str(res.get("patient_id", ""))
+            matched_uid = raw_pid
+            norm_res = _normalize_patient_ids(raw_pid)
+            for vol_uid, meta in volume_patient_meta.items():
+                if vol_uid == raw_pid or norm_res.intersection(_normalize_patient_ids(meta.get("orthanc_pid"))) or norm_res.intersection(_normalize_patient_ids(meta.get("clinical_pid"))):
+                    matched_uid = vol_uid
+                    break
+
             writer.writerow({
-                "patient_id": res.get("patient_id"),
+                "patient_id": matched_uid,
                 "has_target_disease": res.get("has_target_disease"),
                 "confidence": res.get("confidence", "low"),
                 "requires_manual_review": res.get("requires_manual_review", False),
@@ -451,44 +479,6 @@ async def extract_cohort_labels() -> dict:
                 )
         except Exception as e:
             print(f"Warning: Failed to broadcast cohort_labels_output WS message: {e}")
-
-        # b) Human-readable agent note with download link
-        try:
-            workspace_name = os.path.basename(workspace_dir)
-            download_url = (
-                f"http://localhost:8150/files/{workspace_name}/populations/cohort_labels.csv"
-            )
-            if llm_unavailable:
-                note_content = (
-                    f"⚠️ **LLM Adjudicator Unavailable.** Network or API error occurred. "
-                    f"All **{len(results)}** records were marked with low confidence and require manual review.\n\n"
-                    f"<a href='{download_url}' target='_blank' download='cohort_labels.csv'>"
-                    f"📥 Download cohort_labels.csv</a>"
-                )
-            else:
-                note_content = (
-                    f"✅ LLM Adjudicator successfully evaluated **{len(results)}** records "
-                    f"against the study criteria.\n\n"
-                    f"<a href='{download_url}' target='_blank' download='cohort_labels.csv'>"
-                    f"📥 Download cohort_labels.csv</a>"
-                )
-
-            async with httpx.AsyncClient() as ws_client:
-                await ws_client.post(
-                    "http://localhost:8150/ws-broadcast",
-                    json={
-                        "type": "agent_note",
-                        "payload": {
-                            "agent_id": os.environ.get("AGENT_ID", "study_population_planner_agent"),
-                            "role": "population_planner",
-                            "content": note_content,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        },
-                        "session_id": session_id
-                    }
-                )
-        except Exception as e:
-            print(f"Warning: Failed to broadcast agent_note WS message: {e}")
 
     return {
         "status": "success",
