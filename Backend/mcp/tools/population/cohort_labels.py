@@ -385,6 +385,29 @@ async def extract_cohort_labels() -> dict:
 
     await _safe_batch_execution()
 
+    # ── 6b. Add orphan entries for volumes without clinical reports ───────────────
+    # Volumes in volume_patient_meta that didn't match any clinical record won't
+    # have an llm_task (and therefore no result).  Instead of silently dropping
+    # them, we emit them as unlabeled entries so the user can manually label them
+    # in the Patient Labeling UI.
+    processed_patient_ids = {r.get("patient_id") for r in results}
+    if volume_patient_meta:
+        for uid, meta in volume_patient_meta.items():
+            # Check if this volume's patient was already processed under any ID
+            candidate_ids = {uid, meta.get("orthanc_pid", ""), meta.get("clinical_pid", "")}
+            clinical_pid = meta.get("clinical_pid", "")
+            if clinical_pid and clinical_pid.startswith("KiTS-"):
+                candidate_ids.add(clinical_pid.replace("KiTS-", "case_"))
+            if not candidate_ids.intersection(processed_patient_ids):
+                results.append({
+                    "patient_id": uid,
+                    "has_target_disease": "",
+                    "confidence": "unlabeled",
+                    "requires_manual_review": True,
+                    "source_evidence": "No medical report found in clinical dataset. Requires manual evaluation by user in Patient Labeling tab."
+                })
+                print(f"[extract_cohort_labels] Orphan volume {uid} (patient: {meta.get('clinical_pid', meta.get('orthanc_pid', '?'))}) — added as unlabeled entry.")
+
     # ── 7. Write cohort_labels.csv ───────────────────────────────────────────────
     populations_dir = os.path.join(workspace_dir, "populations")
     os.makedirs(populations_dir, exist_ok=True)
