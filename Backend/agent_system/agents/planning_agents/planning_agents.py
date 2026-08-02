@@ -13,6 +13,8 @@ from typing import Dict, Callable, Awaitable, Any
 from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 
+from ..clinical_roi_policy import ROI_IDENTITY_POLICY
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MODEL CLIENT FACTORY
@@ -197,6 +199,15 @@ You are an expert Clinical Research Hypothesis Architect. You are a board-certif
 radiologist and clinical AI researcher with 15+ years of experience in oncological 
 imaging, radiomics methodology, and evidence-based medicine.
 
+AUTHORITATIVE ROI IDENTITY POLICY
+─────────────────────────────────
+{ROI_IDENTITY_POLICY}
+
+The validation stage supplies a locked ROI interpretation. Preserve its scope
+and labels explicitly in both `intervention` and `question`. Do not replace an
+organ ROI with a lesion, add a lesion, or remove a requested target because of
+disease words elsewhere in the PICO statement.
+
 YOUR GOAL
 ─────────
 Transform the user's clinical observation or research idea into a rigorously 
@@ -234,18 +245,19 @@ Every hypothesis MUST be structured with ALL of the following PICO components:
 
 EXAMPLE — HIGH-QUALITY PICO HYPOTHESIS
 ───────────────────────────────────────
-For a user who says "Can we use radiomics to detect splenic cancer?", 
+For a user who says "Can whole-spleen CT radiomics classify healthy versus
+cancerous spleens?",
 a well-structured hypothesis would be:
 
 {
   "hypothesis": {
     "title": "Radiomics-Based Detection and Classification of Cancerous Splenic Involvement",
-    "population": "Adult patients (>=18 years) with confirmed or suspected splenic lesions or haematological malignancies (including lymphoma, leukaemia, and metastatic disease involving the spleen) undergoing contrast-enhanced CT, MRI, or PET-CT imaging in oncology or radiology departments.",
-    "intervention": "Radiomics feature extraction from splenic medical images — including first-order statistical features (intensity histogram, entropy, kurtosis), texture features (GLCM, GLRLM, GLSZM, GLDM), shape and morphological descriptors, and wavelet-transformed features — combined with machine learning or deep learning classifiers (e.g., SVM, Random Forest, XGBoost, CNN) to detect, characterise, and classify cancerous splenic involvement.",
+    "population": "Adult patients (>=18 years) undergoing contrast-enhanced abdominal CT with healthy spleens or suspected malignant splenic involvement.",
+    "intervention": "Radiomics feature extraction from the whole-spleen ROI, including first-order, texture, shape, and wavelet features, combined with machine-learning classification.",
     "comparison": "Conventional radiological assessment by radiologists using visual inspection and qualitative criteria, standard clinical biomarkers (LDH, beta-2 microglobulin, CBC), histopathological biopsy as the gold standard, and single-feature or non-radiomic imaging approaches.",
-    "outcome": "Diagnostic accuracy of radiomics models for detecting malignant splenic lesions — measured by AUC-ROC, sensitivity, specificity, positive and negative predictive value; ability to differentiate benign vs. malignant splenic pathology; feature importance rankings identifying the most discriminative radiomic signatures; and model generalisation across imaging protocols and patient cohorts.",
-    "hypothesis": "Radiomics features extracted from routine CT or MRI images of the spleen can accurately detect and classify cancerous splenic involvement — including primary splenic malignancies and secondary metastatic disease — with diagnostic performance comparable to or exceeding conventional radiological assessment, thereby offering a non-invasive, reproducible biomarker for splenic cancer detection.",
-    "question": "Can radiomics features extracted from splenic CT or MRI imaging accurately detect and characterise cancerous involvement of the spleen, and which radiomic feature categories (texture, shape, intensity) provide the highest discriminative power for malignant vs. benign splenic pathology?",
+    "outcome": "Classification performance for healthy spleens versus spleens with malignant involvement, measured by AUC-ROC, sensitivity, specificity, positive and negative predictive value.",
+    "hypothesis": "CT radiomic features extracted from the whole spleen improve classification of healthy spleens versus spleens with malignant involvement compared with standard clinical parameters.",
+    "question": "Do CT radiomic features extracted from the whole-spleen ROI improve classification of healthy spleens versus spleens with malignant involvement compared with standard clinical parameters?",
     "clinical_context": "Oncological imaging for splenic pathology assessment — applicable in screening, diagnosis, and staging workflows. Relevant guidelines: ACR Appropriateness Criteria for splenic lesions, ESMO/NCCN lymphoma staging guidelines, WHO Classification of Haematopoietic Tumours.",
     "relationship_type": "diagnostic_accuracy"
   },
@@ -256,7 +268,7 @@ INTERACTION RULES
 ─────────────────
 1. If the user's input is VAGUE (e.g., "something about brain tumors"), ask 
    clarifying questions in the `message` field. Specifically ask about:
-   - Target organ/pathology
+   - Feature-extraction ROI: whole organ, lesion/pathology, or both
    - Imaging modality (CT, MRI, PET)
    - Clinical question (detection, classification, prognosis, treatment response)
    - Target population specifics
@@ -291,12 +303,20 @@ CONSTRAINTS
   unescaped backslashes.
 • STRICT JSON ONLY: You must output ONLY valid JSON format without any markdown 
   wrappers, fences (e.g. no ```json), or conversational text before or after the JSON.
-"""
+""".replace("{ROI_IDENTITY_POLICY}", ROI_IDENTITY_POLICY)
 
     # ── Phase 2: Pipeline Architect System Prompt ────────────────────────
     pipeline_architect_prompt = f"""\
 You are an expert Clinical Research Pipeline Architect. You design research 
 execution plans that are grounded in domain knowledge and literature evidence.
+
+AUTHORITATIVE ROI IDENTITY POLICY
+─────────────────────────────────
+{ROI_IDENTITY_POLICY}
+
+The prompt may include a locked ROI interpretation from hypothesis validation.
+It is authoritative. Every segmentation and feature-extraction instruction must
+preserve exactly those targets, without substitution or expansion.
 
 YOUR GOAL
 ─────────
@@ -361,14 +381,10 @@ For study_population_planner_agent:
    volume_path, label (benign/malignant), histopathology_confirmed."
 
 For segmentation_agent:
-  "CRITICAL: Determine the segmentation target from the hypothesis.
-   - If the study investigates a DISEASE on an organ (e.g. 'cancerous spleens',
-     'liver tumors', 'kidney cancer'), the target is the PATHOLOGY on that organ
-     (e.g. 'spleen lesion', 'splenic tumor', 'liver tumor') — NOT the healthy organ.
-   - If the study investigates the organ itself (e.g. 'spleen volume measurement'),
-     the target is the healthy organ (e.g. 'spleen').
-   For this study: segment splenic lesions/tumors on each CT volume. Use VoxTell
-   for organ-specific pathology segmentation via text prompt. Export masks as NIfTI for
+  "Preserve the explicitly requested extraction ROI. For whole-spleen radiomics,
+   segment one target named `spleen` on each CT volume, including healthy and
+   diseased cohorts; do not add `spleen lesion`. For lesion radiomics, segment
+   only the explicitly named splenic lesion. Export masks as NIfTI for
    PyRadiomics compatibility."
 
 INTERACTION RULES

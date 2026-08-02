@@ -39,6 +39,10 @@ from .context_compiler import (
     summarize_knowledge_for_planning,
     _build_hypothesis_summary,
 )
+from ..clinical_roi_policy import (
+    HypothesisValidationResult,
+    ROI_IDENTITY_POLICY,
+)
 
 from agents.literature_review_agent.knowledge_builder import build_knowledge_base
 from agents.literature_review_agent.literature_review_agent import run_literature_review
@@ -167,6 +171,7 @@ class ClinicalPlanner:
           - "valid": bool
           - "feedback": str (user-friendly explanation if invalid)
           - "extracted": dict or None (PICO components if valid)
+          - "roi_interpretation": locked internal ROI scope and labels, or None
         """
         prompt = f"""
 You are a clinical research validator. Analyze the following user input:
@@ -179,13 +184,32 @@ A valid hypothesis MUST explicitly contain:
 - Comparison (C): e.g., compared to standard staging, vs. histopathology.
 - Outcome (O): e.g., overall survival, treatment response, recurrence.
 
-If ALL four components are present (even implicitly), set "valid": true.
-If missing ANY component, set "valid": false.
+Also determine and lock the feature-extraction/segmentation ROI using this
+authoritative policy:
+
+{ROI_IDENTITY_POLICY}
+
+For a radiomics study, `valid` MUST be false when the text does not specify
+whether features are extracted from the whole organ, a lesion/pathology, or
+both. In that case, ask this specific clarification in `feedback`.
+
+Set "valid": true only when all four PICO components are present (even
+implicitly) and the ROI interpretation is unambiguous. If any PICO component or
+the ROI scope is missing, set "valid": false.
 If invalid, provide concise, actionable feedback in "feedback" specifying which
 components are missing and a brief suggestion on how to fix it.
 
 Output ONLY valid JSON in the following format:
-{{"valid": true/false, "feedback": "your feedback here", "extracted": {{}} or null}}
+{{
+  "valid": true/false,
+  "feedback": "empty when valid; actionable clarification when invalid",
+  "extracted": {{"population": "...", "intervention": "...", "comparison": "...", "outcome": "..."}} or null,
+  "roi_interpretation": {{
+    "scope": "whole_organ" | "pathology" | "both",
+    "labels": ["canonical ROI label"],
+    "rationale": "explicit wording that determines the ROI"
+  }} or null
+}}
 """
         try:
             hypothesis_architect = self.agents["hypothesis_architect"]
@@ -196,15 +220,21 @@ Output ONLY valid JSON in the following format:
             )
             data = await self._parse_llm_json(response.chat_message.content, log_prefix="[Validator]")
             
-            if not data or "valid" not in data or "feedback" not in data:
-                raise ValueError("Missing required keys")
-            return data
+            if not data:
+                raise ValueError("Empty validation response")
+            return HypothesisValidationResult.model_validate(data).model_dump()
         except Exception as e:
             logger.error("Validation error: %s", e)
             return {
                 "valid": False,
-                "feedback": "System error validating your input. Please rephrase clearly with Population, Intervention, Comparison, and Outcome.",
-                "extracted": None
+                "feedback": (
+                    "System error validating your input. Please rephrase clearly "
+                    "with Population, Intervention, Comparison, Outcome, and "
+                    "whether radiomic features come from the whole organ, a "
+                    "lesion/pathology, or both."
+                ),
+                "extracted": None,
+                "roi_interpretation": None,
             }
 
     # ══════════════════════════════════════════════════════════════════════
@@ -916,6 +946,7 @@ Output ONLY valid JSON in the following format:
             max_retries = 3
             retry_count = 0
             hypothesis_valid = False
+            locked_roi = None
 
             while not hypothesis_valid and retry_count < max_retries:
                 # Determine user input
@@ -933,11 +964,15 @@ Output ONLY valid JSON in the following format:
                 validation_result = await self._validate_hypothesis(user_input, cancellation_token=cancellation_token)
 
                 if validation_result["valid"]:
+                    locked_roi = validation_result["roi_interpretation"]
                     # We have a valid hypothesis. Now we can formally extract and persist it using the architect.
                     # Or if extracted is full, we can just process it.
                     # The user's code suggests updating self.hypothesis, but we need to persist it.
                     prompt = (
                         f"User's clinical observation: {user_input}\n\n"
+                        "LOCKED ROI INTERPRETATION (authoritative; preserve its "
+                        "scope and labels):\n"
+                        f"{json.dumps(locked_roi, ensure_ascii=False, indent=2)}\n\n"
                         "Structure this into a full PICO hypothesis. "
                         "Return JSON with 'hypothesis' and 'message' fields."
                     )
@@ -1124,6 +1159,8 @@ Output ONLY valid JSON in the following format:
             pipeline_prompt = (
                 "CONFIRMED HYPOTHESIS (JSON):\n"
                 f"{json.dumps(hypothesis_dump, ensure_ascii=False, indent=2)}\n\n"
+                "LOCKED ROI INTERPRETATION (authoritative):\n"
+                f"{json.dumps(locked_roi, ensure_ascii=False, indent=2)}\n\n"
                 f"SUMMARIZED DOMAIN KNOWLEDGE (from literature review):\n"
                 f"{kb_summary}\n\n"
                 "Use the confirmed hypothesis as the primary source of study intent. "
@@ -1158,6 +1195,7 @@ Output ONLY valid JSON in the following format:
                         knowledge_sections=knowledge_sections,
                         sources_guide=sources_guide,
                         pipeline_instructions=self._pipeline_instructions,
+                        locked_roi_interpretation=locked_roi,
                     )
                     await self.session_service.confirm_plan(self.session)
                     await self.session_service.save_task_messages_for_plan(
