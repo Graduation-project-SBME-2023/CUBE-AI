@@ -4,6 +4,10 @@ from models.session import Session, SessionState
 
 logger = logging.getLogger(__name__)
 
+UNEXPECTED_EXECUTION_CANCELLATION = (
+    "Execution task was cancelled without an explicit stop request."
+)
+
 
 class TaskManager:
     """
@@ -79,7 +83,23 @@ class TaskManager:
             await executor(session)
             session.state = SessionState.COMPLETED
         except asyncio.CancelledError:
-            session.state = SessionState.CANCELLED
+            if session.cancel_event.is_set():
+                session.state = SessionState.CANCELLED
+                logger.info(
+                    "Execution %s cancelled by an explicit stop request",
+                    session.session_id,
+                )
+            else:
+                # asyncio.CancelledError can also escape from an internal
+                # dependency (for example, an agent/team task).  That is an
+                # execution failure, not evidence that the user pressed Stop.
+                session.last_error = UNEXPECTED_EXECUTION_CANCELLATION
+                session.state = SessionState.FAILED
+                logger.exception(
+                    "Execution %s was cancelled internally without an "
+                    "explicit stop request",
+                    session.session_id,
+                )
         except Exception as e:
             session.last_error = str(e)
             logger.exception(f'Execution {session.session_id} failed, error: {e}')
@@ -98,6 +118,10 @@ class TaskManager:
         session.state = SessionState.RUNNING
 
     def stop(self, session: Session) -> None:
+        logger.info(
+            "Explicit stop requested for session %s",
+            session.session_id,
+        )
         session.cancel_event.set()
         session.state = SessionState.CANCELLED
         if session.planning_task and not session.planning_task.done():
