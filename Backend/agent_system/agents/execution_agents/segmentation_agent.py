@@ -90,7 +90,7 @@ async def segmentation_tool(
                 "summary": (
                     f"Segmentation {result.get('status', 'failed')} with "
                     f"{result.get('accepted_count', 0)}/"
-                    f"{result.get('pair_count', 0)} accepted volume-target pairs."
+                    f"{result.get('pair_count', 0)} accepted segmentation masks."
                 )
             },
             "errors": (
