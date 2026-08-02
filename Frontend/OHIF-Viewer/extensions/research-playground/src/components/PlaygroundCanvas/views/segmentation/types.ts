@@ -6,6 +6,7 @@ export interface VolumeGif {
     gifUrl: string;
     isEmptyMask?: boolean;
     warning?: string;
+    reviewStatus?: ReviewStatus;
 }
 
 export interface FailedVolume {

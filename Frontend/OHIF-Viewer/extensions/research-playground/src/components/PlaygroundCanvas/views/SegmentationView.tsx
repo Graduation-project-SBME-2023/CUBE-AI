@@ -57,8 +57,21 @@ function ReviewView({
       let changed = false;
       volumes.forEach(v => {
         const reviewKey = v.pairId || v.seriesInstanceUid;
-        // Default to 'accepted' if this volume hasn't been seen yet.
-        // This prevents resetting user choices when new GIFs progressively load in.
+        const persistedStatus = v.reviewStatus;
+
+        // A completed review is authoritative when a session is replayed.
+        // Progressive snapshots are still pending, so preserve any local
+        // choice and retain the existing opt-out default for new masks.
+        if (
+          persistedStatus &&
+          persistedStatus !== 'pending' &&
+          next[reviewKey] !== persistedStatus
+        ) {
+          next[reviewKey] = persistedStatus;
+          changed = true;
+          return;
+        }
+
         if (!next[reviewKey]) {
           next[reviewKey] = 'accepted';
           changed = true;
@@ -666,6 +679,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
 
   return (
     <ReviewView
+      key={data.sessionId || 'no-session'}
       targetRoi={data.targetRoi}
       selectedModel={data.selectedModel}
       volumes={data.volumes}

@@ -705,7 +705,7 @@ async def replay_logs(session_id: str):
     try:
         with open(manifest_path, "r", encoding="utf-8") as stream:
             manifest = json.load(stream)
-        if manifest.get("stage") == "awaiting_review":
+        if manifest.get("stage") in {"awaiting_review", "reviewed"}:
             snapshot = build_snapshot_from_manifest(
                 manifest,
                 workspace,

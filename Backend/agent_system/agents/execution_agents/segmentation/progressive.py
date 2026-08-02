@@ -64,7 +64,10 @@ def preview_from_item(
     workspace_dir: str | Path,
     base_url: str,
 ) -> dict[str, Any] | None:
-    if item.get("status") != "ready":
+    # A rejected pair still belongs in a historical QC snapshot. Its source
+    # mask may have been discarded, but the generated overlay and the user's
+    # decision must remain visible when the session is reopened.
+    if item.get("status") not in {"ready", "rejected"}:
         return None
     gif_path = str(item.get("gif_path") or "")
     if not gif_path:
@@ -95,6 +98,7 @@ def preview_from_item(
         ),
         "isEmptyMask": bool(item.get("is_empty_mask")),
         "warning": item.get("warning"),
+        "reviewStatus": item.get("review_status", "pending"),
     }
 
 

@@ -251,6 +251,66 @@ class ProgressiveSnapshotTests(unittest.TestCase):
             self.assertTrue(snapshot["volumes"][0]["isEmptyMask"])
             self.assertEqual(snapshot["failedVolumes"], [])
 
+    def test_reviewed_snapshot_restores_rejected_and_modified_decisions(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir) / "workspace_session"
+            overlays = workspace / "overlays"
+            overlays.mkdir(parents=True)
+            items = []
+            for index, (pair_id, status, review_status) in enumerate(
+                [
+                    ("volume-a__liver", "rejected", "rejected"),
+                    ("volume-b__tumor", "ready", "modified"),
+                ]
+            ):
+                artifact_key = artifact_key_for_pair(pair_id)
+                (overlays / f"{artifact_key}.gif").write_bytes(b"GIF89a")
+                items.append(
+                    {
+                        "pair_id": pair_id,
+                        "artifact_key": artifact_key,
+                        "sequence_index": index,
+                        "volume_uid": pair_id.split("__", 1)[0],
+                        "target_id": pair_id.split("__", 1)[1],
+                        "canonical_label": pair_id.split("__", 1)[1],
+                        "status": status,
+                        "review_status": review_status,
+                        "gif_path": f"overlays/{artifact_key}.gif",
+                    }
+                )
+            plan = SimpleNamespace(
+                target_labels=["liver", "tumor"],
+                selected_models=["model"],
+                targets=[
+                    SimpleNamespace(target_id="liver", canonical_label="liver"),
+                    SimpleNamespace(target_id="tumor", canonical_label="tumor"),
+                ],
+            )
+
+            snapshot = build_segmentation_snapshot(
+                plan=plan,
+                work_items=items,
+                workspace_dir=workspace,
+                base_url="http://localhost:8150",
+                is_finished=True,
+            )
+
+            self.assertEqual(snapshot["failedVolumes"], [])
+            self.assertEqual(
+                {
+                    entry["pairId"]: entry["reviewStatus"]
+                    for entry in snapshot["volumes"]
+                },
+                {
+                    "volume-a__liver": "rejected",
+                    "volume-b__tumor": "modified",
+                },
+            )
+            self.assertEqual(
+                snapshot["progress"],
+                {"total": 2, "generated": 2, "failed": 0},
+            )
+
     def test_artifact_key_is_filesystem_safe_and_deterministic(self):
         pair_id = "1.2.3__left_kidney_tumor"
         first = artifact_key_for_pair(pair_id)
