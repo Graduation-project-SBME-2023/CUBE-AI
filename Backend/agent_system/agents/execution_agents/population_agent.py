@@ -133,7 +133,12 @@ async def main():
     # Now you can use the agent normally
     print(f"Agent initialized with {len(agent._tools)} tools.")
     await Console(
-        agent.run_stream(task="A radiomics-derived imaging signature from CT imaging can predict weather spleen cancerous or not ",
+        agent.run_stream(task=(
+            "In adult patients undergoing contrast-enhanced abdominal CT, do "
+            "radiomic features extracted from the whole-spleen ROI improve "
+            "classification of healthy spleens versus spleens with malignant "
+            "involvement compared with standard clinical parameters?"
+        ),
                          cancellation_token=CancellationToken())
         )
 if __name__ == "__main__":

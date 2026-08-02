@@ -251,7 +251,7 @@ a well-structured hypothesis would be:
 
 {
   "hypothesis": {
-    "title": "Radiomics-Based Detection and Classification of Cancerous Splenic Involvement",
+    "title": "Whole-Spleen Radiomics for Malignant Involvement Classification",
     "population": "Adult patients (>=18 years) undergoing contrast-enhanced abdominal CT with healthy spleens or suspected malignant splenic involvement.",
     "intervention": "Radiomics feature extraction from the whole-spleen ROI, including first-order, texture, shape, and wavelet features, combined with machine-learning classification.",
     "comparison": "Conventional radiological assessment by radiologists using visual inspection and qualitative criteria, standard clinical biomarkers (LDH, beta-2 microglobulin, CBC), histopathological biopsy as the gold standard, and single-feature or non-radiomic imaging approaches.",
@@ -261,7 +261,7 @@ a well-structured hypothesis would be:
     "clinical_context": "Oncological imaging for splenic pathology assessment — applicable in screening, diagnosis, and staging workflows. Relevant guidelines: ACR Appropriateness Criteria for splenic lesions, ESMO/NCCN lymphoma staging guidelines, WHO Classification of Haematopoietic Tumours.",
     "relationship_type": "diagnostic_accuracy"
   },
-  "message": "I've structured your hypothesis using the PICO framework. This hypothesis targets splenic cancer detection using radiomics on CT/MRI. Please review each component and let me know if you'd like to adjust the population criteria, imaging modalities, or outcome metrics."
+  "message": "I've structured your hypothesis using the PICO framework with one explicit whole-spleen ROI on contrast-enhanced CT. No splenic-lesion ROI is requested. Please review the population criteria, comparison, and outcome metrics."
 }
 
 INTERACTION RULES

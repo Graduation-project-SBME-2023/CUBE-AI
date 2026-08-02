@@ -88,9 +88,12 @@ Navigate to the OHIF worklist and open a study (or select multiple studies for a
 
 In the Chat Sidebar, type your research question:
 
-> *"Can we predict patient sex from spleen radiomic features in CT scans?"*
+> *"In adult patients undergoing abdominal CT, do radiomic features extracted from the whole-spleen ROI improve prediction of patient sex compared with standard demographic parameters?"*
 
-> *"Analyze whether tumor volume correlates with recurrence risk in this brain MRI cohort."*
+> *"In adults with treated glioblastoma undergoing brain MRI, does tumor volume measured from the enhancing-tumor ROI correlate with recurrence risk compared with standard clinical parameters?"*
+
+Always state whether imaging features should be extracted from a whole-organ
+ROI, a lesion/pathology ROI, or both.
 
 ### Step 3 — Review the Pipeline Plan
 
