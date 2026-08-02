@@ -39,12 +39,10 @@ Apply this clinician-reviewable policy:
 
 {CLINICAL_TARGET_POLICY}
 
-Distinguish the ROI from the study outcome. If radiomics/features are intended
-to classify a diseased or cancerous organ and no explicit whole-organ boundary
-is requested, the ROI is pathological tissue in that organ, not the healthy
-organ label. Explicit "whole", "entire", or "organ mask" language requests the
-whole organ. Disease that only describes the patient cohort does not change an
-explicit organ ROI.
+Distinguish the ROI from the study cohort, class label, and outcome. Explicit
+feature-extraction or segmentation wording controls the target. Never infer a
+lesion solely from a disease or cancer label, and never add an unrequested
+second target.
 
 Return one JSON object only:
 {{
@@ -127,11 +125,13 @@ used only as cohort/outcome/background context, anatomy, laterality, mask/cache
 equivalence, prompt precision, execution path, and selected model.
 
 Critical decisions:
-- "classify cancerous spleens" requires a pathological spleen target and must
-  not resolve to canonical_label "spleen";
+- "features extracted from the spleen classify cancerous spleens" requires the
+  single whole-organ target "spleen" with pathology null;
 - "segment splenic lesion" requires a lesion target;
 - "segment spleen in patients with cancer" requests the whole spleen;
 - "segment the whole cancerous spleen" requests the whole spleen.
+- A whole-organ target and lesion target may coexist only when both are
+  explicitly requested.
 - Model names must come from the supplied execution plan and model discovery
   results. Never invent or rename a model.
 

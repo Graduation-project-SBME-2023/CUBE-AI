@@ -17,9 +17,10 @@ Pipeline:
 This implements the "AOT Context Compiler" from arch.html.
 """
 
+import json
 import uuid
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import Any, List, Dict, Optional, Tuple
 
 from models.plans import (
     ClinicalHypothesis,
@@ -27,6 +28,7 @@ from models.plans import (
     TaskMessage,
     ContextAugmentation,
 )
+from ..clinical_roi_policy import ROI_IDENTITY_POLICY
 
 logger = logging.getLogger(__name__)
 
@@ -210,29 +212,16 @@ def _build_segmentation_context(
         sources_guide="",  # Not needed for segmentation
     )
 
-    # Build a rich hypothesis context block so the PlannerAgent can
-    # distinguish between healthy-organ vs. pathology-on-organ requests.
-    hyp_context_parts = [f"Study title: {hypothesis.title}"]
-    if hypothesis.hypothesis:
-        hyp_context_parts.append(f"Hypothesis: {hypothesis.hypothesis}")
-    if hypothesis.population:
-        pop = hypothesis.population
-        if isinstance(pop, dict):
-            pop = ", ".join(f"{k}: {v}" for k, v in pop.items())
-        hyp_context_parts.append(f"Population: {pop}")
-    if hypothesis.clinical_context:
-        hyp_context_parts.append(f"Clinical context: {hypothesis.clinical_context}")
-    hyp_block = "\n".join(hyp_context_parts)
+    # Include every PICO field because the explicit extraction ROI is commonly
+    # stated in the intervention or research question rather than the title.
+    hyp_block = _build_hypothesis_summary(hypothesis)
 
     instructions = (
         f"Perform ROI segmentation for the following study:\n"
         f"{hyp_block}\n\n"
-        "CRITICAL — Read the hypothesis carefully to determine the segmentation target:\n"
-        "- If the hypothesis studies a DISEASE or PATHOLOGY of an organ (e.g., 'cancerous spleens',\n"
-        "  'liver tumors', 'lung nodules'), the segmentation target is the PATHOLOGY on that organ\n"
-        "  (e.g., 'spleen lesion', 'liver tumor', 'lung nodule'), NOT the healthy organ alone.\n"
-        "- If the hypothesis studies the organ itself with no disease mentioned (e.g., 'spleen volume',\n"
-        "  'liver morphology'), the segmentation target is the healthy organ.\n\n"
+        "Apply the authoritative ROI identity policy below. It overrides any\n"
+        "contradictory target suggestion in generated study instructions:\n\n"
+        f"{ROI_IDENTITY_POLICY}\n"
         "Use the domain knowledge in your context to:\n"
         "- Identify the correct anatomical regions to segment based on the hypothesis and clinical literature\n"
         "- Follow evidence-based segmentation protocols mentioned in recent studies\n"
@@ -417,6 +406,7 @@ def compile_task_messages(
     knowledge_sections: Dict[str, str],
     sources_guide: str,
     pipeline_instructions: Optional[Dict[str, str]] = None,
+    locked_roi_interpretation: Optional[Dict[str, Any]] = None,
 ) -> List[TaskMessage]:
     """
     Compile structured task messages for every step in the study plan.
@@ -430,9 +420,10 @@ def compile_task_messages(
         - Hypothesis summary for shared context
 
     The instructions are layered in priority order:
-        1. Pipeline Architect's study-specific instructions (highest priority)
-        2. Planner's step description
-        3. Domain-informed guidance from knowledge base
+        1. Locked ROI interpretation and identity policy (segmentation only)
+        2. Pipeline Architect's study-specific instructions
+        3. Planner's step description
+        4. Domain-informed guidance from knowledge base
 
     Args:
         hypothesis:            The confirmed clinical hypothesis with PICO fields.
@@ -444,6 +435,8 @@ def compile_task_messages(
         sources_guide:         Sources guide text from knowledge_builder.
         pipeline_instructions: Dict mapping agent_id → detailed instructions
                                from the Pipeline Architect (Phase 3).
+        locked_roi_interpretation:
+                               Validated, non-persisted ROI scope and labels.
 
     Returns:
         List of TaskMessage objects, one per plan step, ordered by pipeline phase.
@@ -481,20 +474,32 @@ def compile_task_messages(
         # Build layered instructions in priority order
         instruction_parts = []
 
-        # Layer 1: Pipeline Architect's study-specific instructions (highest priority)
+        if agent_id == "segmentation_agent":
+            instruction_parts.append(
+                "## Authoritative ROI Identity Policy\n"
+                f"{ROI_IDENTITY_POLICY}"
+            )
+            if locked_roi_interpretation:
+                instruction_parts.append(
+                    "## Locked ROI Interpretation\n"
+                    f"{json.dumps(locked_roi_interpretation, ensure_ascii=False, indent=2)}\n"
+                    "Preserve exactly this ROI scope and these labels."
+                )
+
+        # Layer 2: Pipeline Architect's study-specific instructions
         planner_instr = pipeline_instructions.get(agent_id, "")
         if planner_instr:
             instruction_parts.append(
                 f"## Study-Specific Instructions\n{planner_instr}"
             )
 
-        # Layer 2: Planner's step description
+        # Layer 3: Planner's step description
         if step.description:
             instruction_parts.append(
                 f"## Step Description\n{step.description}"
             )
 
-        # Layer 3: Domain-informed guidance from knowledge base
+        # Layer 4: Domain-informed guidance from knowledge base
         if domain_guidance:
             instruction_parts.append(
                 f"## Domain-Informed Guidance\n{domain_guidance}"

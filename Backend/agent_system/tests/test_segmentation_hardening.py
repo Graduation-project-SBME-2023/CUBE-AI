@@ -9,6 +9,10 @@ import SimpleITK as sitk
 from pydicom.dataset import Dataset
 from pydantic import ValidationError
 
+from agent_system.agents.clinical_roi_policy import (
+    HypothesisValidationResult,
+    ROI_IDENTITY_POLICY,
+)
 from agent_system.agents.execution_agents.segmentation.contracts import (
     ClinicalPlanAudit,
     ClinicalTargetIntent,
@@ -22,6 +26,8 @@ from agent_system.agents.execution_agents.segmentation.contracts import (
     validate_audited_plan_identity,
 )
 from agent_system.agents.execution_agents.segmentation.planner import (
+    AUDITOR_SYSTEM_MESSAGE,
+    INTENT_SYSTEM_MESSAGE,
     _compose_resolution_reason,
     _compose_resolution_plan,
 )
@@ -33,6 +39,11 @@ from agent_system.agents.execution_agents.segmentation.pipelines.common import (
 from agent_system.agents.execution_agents.segmentation.services import (
     SegmentationService,
 )
+from agent_system.agents.planning_agents.context_compiler import (
+    _build_segmentation_context,
+    compile_task_messages,
+)
+from agent_system.models.plans import ClinicalHypothesis, StudyPlan, StudyStep
 from agent_system.agents.execution_agents.segmentation.utils import (
     _validated_nrrd_array,
     align_and_binarize_mask,
@@ -44,6 +55,222 @@ from agent_system.services.pipeline_monitor import (
     raise_for_fatal_tool_failure,
 )
 from agent_system.models.execution import AgentStatus
+
+
+class ClinicalRoiPolicyTests(unittest.TestCase):
+    def test_valid_hypothesis_requires_locked_roi_interpretation(self):
+        with self.assertRaisesRegex(ValidationError, "locked ROI interpretation"):
+            HypothesisValidationResult(
+                valid=True,
+                feedback="",
+                extracted={"population": "Adults"},
+            )
+
+    def test_ambiguous_hypothesis_can_request_roi_clarification(self):
+        result = HypothesisValidationResult(
+            valid=False,
+            feedback=(
+                "Specify whether features come from the whole organ, a lesion, "
+                "or both."
+            ),
+            extracted=None,
+            roi_interpretation=None,
+        )
+        self.assertFalse(result.valid)
+        self.assertIsNone(result.roi_interpretation)
+
+    def test_whole_organ_lesion_and_both_scopes_are_representable(self):
+        cases = [
+            ("whole_organ", ["spleen"]),
+            ("pathology", ["spleen lesion"]),
+            ("both", ["spleen", "spleen lesion"]),
+        ]
+        for scope, labels in cases:
+            with self.subTest(scope=scope):
+                result = HypothesisValidationResult(
+                    valid=True,
+                    feedback="",
+                    extracted={
+                        "population": "Adults",
+                        "intervention": "CT radiomics",
+                        "comparison": "Clinical parameters",
+                        "outcome": "Classification",
+                    },
+                    roi_interpretation={
+                        "scope": scope,
+                        "labels": labels,
+                        "rationale": "Explicit feature-extraction wording.",
+                    },
+                )
+                self.assertEqual(result.roi_interpretation.labels, labels)
+
+    def test_both_scope_requires_multiple_distinct_targets(self):
+        with self.assertRaises(ValidationError):
+            HypothesisValidationResult(
+                valid=True,
+                feedback="",
+                extracted={"population": "Adults"},
+                roi_interpretation={
+                    "scope": "both",
+                    "labels": ["spleen"],
+                    "rationale": "Both were requested.",
+                },
+            )
+
+    def test_shared_policy_is_authoritative_in_intent_and_audit_prompts(self):
+        self.assertIn(ROI_IDENTITY_POLICY, INTENT_SYSTEM_MESSAGE)
+        self.assertIn(ROI_IDENTITY_POLICY, AUDITOR_SYSTEM_MESSAGE)
+        self.assertNotIn(
+            "requires a pathological spleen target",
+            AUDITOR_SYSTEM_MESSAGE,
+        )
+        self.assertIn(
+            'single whole-organ target "spleen" with pathology null',
+            AUDITOR_SYSTEM_MESSAGE,
+        )
+
+    def test_supplied_whole_spleen_hypotheses_keep_explicit_roi_context(self):
+        questions = [
+            (
+                "In adult patients undergoing contrast-enhanced abdominal CT "
+                "for suspected splenic pathology, do CT radiomic features "
+                "extracted from the spleen improve classification of healthy "
+                "versus diseased spleens compared with clinical parameters?"
+            ),
+            (
+                "In adult patients undergoing contrast-enhanced abdominal CT "
+                "for cancerous splenic pathology, do CT radiomic features "
+                "extracted from the spleen improve classification of healthy "
+                "versus diseased spleens compared with clinical parameters?"
+            ),
+        ]
+        for question in questions:
+            with self.subTest(question=question):
+                hypothesis = ClinicalHypothesis(
+                    title="Whole-spleen radiomics",
+                    population="Adult CT patients",
+                    intervention="CT radiomic features extracted from the spleen",
+                    comparison="Standard clinical parameters",
+                    outcome="Healthy versus diseased spleen classification",
+                    hypothesis=question,
+                    question=question,
+                )
+                _context, instructions = _build_segmentation_context(
+                    {},
+                    "",
+                    hypothesis,
+                )
+                self.assertIn(
+                    "CT radiomic features extracted from the spleen",
+                    instructions,
+                )
+                self.assertIn(ROI_IDENTITY_POLICY, instructions)
+                self.assertNotIn(
+                    "the segmentation target is the PATHOLOGY",
+                    instructions,
+                )
+
+    def test_locked_roi_is_embedded_ahead_of_generated_pipeline_instructions(self):
+        hypothesis = ClinicalHypothesis(
+            title="Whole-spleen radiomics",
+            intervention="Features extracted from the spleen",
+            outcome="Healthy versus diseased classification",
+        )
+        plan = StudyPlan(
+            steps=[
+                StudyStep(
+                    title="Segment ROI",
+                    description="Prepare the radiomics ROI.",
+                    module="segmentation_agent",
+                )
+            ]
+        )
+        task = compile_task_messages(
+            hypothesis,
+            plan,
+            {},
+            "",
+            pipeline_instructions={
+                "segmentation_agent": "Incorrectly add a spleen lesion."
+            },
+            locked_roi_interpretation={
+                "scope": "whole_organ",
+                "labels": ["spleen"],
+                "rationale": "Features are explicitly extracted from the spleen.",
+            },
+        )[0]
+        locked_index = task.instructions.index("## Locked ROI Interpretation")
+        generated_index = task.instructions.index("## Study-Specific Instructions")
+        self.assertLess(locked_index, generated_index)
+        self.assertIn('"scope": "whole_organ"', task.instructions)
+        self.assertIn('"spleen"', task.instructions)
+
+    def test_auditor_cannot_turn_whole_spleen_into_lesion_or_add_lesion(self):
+        intent = ClinicalTargetIntentPlan(
+            targets=[
+                ClinicalTargetIntent(
+                    target_id="spleen",
+                    canonical_label="spleen",
+                    anatomy="spleen",
+                    pathology=None,
+                    confidence=1.0,
+                    rationale="Features are explicitly extracted from the spleen.",
+                )
+            ]
+        )
+        lesion_rewrite = TargetResolutionPlan(
+            chosen_path="interactive",
+            selected_models=["voxtell"],
+            targets=[
+                ResolvedTarget(
+                    target_id="spleen",
+                    canonical_label="spleen lesion",
+                    anatomy="spleen",
+                    pathology="lesion",
+                    voxtell_prompt=VoxTellPromptDecision(
+                        mode="generate",
+                        prompt="spleen lesion",
+                    ),
+                    confidence=1.0,
+                    reason="Incorrect disease-keyword rewrite.",
+                )
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, "locked clinical identity"):
+            validate_audited_plan_identity(lesion_rewrite, intent)
+
+        added_lesion = TargetResolutionPlan(
+            chosen_path="interactive",
+            selected_models=["voxtell"],
+            targets=[
+                ResolvedTarget(
+                    target_id="spleen",
+                    canonical_label="spleen",
+                    anatomy="spleen",
+                    pathology=None,
+                    voxtell_prompt=VoxTellPromptDecision(
+                        mode="generate",
+                        prompt="spleen",
+                    ),
+                    confidence=1.0,
+                    reason="Correct whole-organ target.",
+                ),
+                ResolvedTarget(
+                    target_id="spleen_lesion",
+                    canonical_label="spleen lesion",
+                    anatomy="spleen",
+                    pathology="lesion",
+                    voxtell_prompt=VoxTellPromptDecision(
+                        mode="generate",
+                        prompt="spleen lesion",
+                    ),
+                    confidence=1.0,
+                    reason="Unrequested extra target.",
+                ),
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, "target IDs exactly"):
+            validate_audited_plan_identity(added_lesion, intent)
 
 
 class SegmentationContractTests(unittest.TestCase):
