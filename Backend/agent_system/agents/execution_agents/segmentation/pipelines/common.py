@@ -40,6 +40,10 @@ class SegmentationPipelineError(RuntimeError):
         return result
 
 
+class SessionExecutionStateError(RuntimeError):
+    """Raised when segmentation outlives a failed orchestration task."""
+
+
 def raise_for_segmentation_error(result, volume_uid: str, label: str) -> None:
     if isinstance(result, dict) and (result.get("error") or result.get("upload_error")):
         stage = result.get("stage") or "upload"
@@ -70,9 +74,41 @@ def check_session_cancelled(session_id: str | None) -> None:
         from app import session_service
         from models.session import SessionState
         session = session_service.store.get(session_id)
-        if session and (session.cancel_event.is_set() or session.state in (SessionState.CANCELLED, SessionState.FAILED)):
-            logger.warning("Session %s is %s; halting segmentation pipeline.", session_id, session.state.name)
-            raise asyncio.CancelledError(f"Session {session_id} execution halted ({session.state.name}).")
+        if not session:
+            return
+
+        if session.cancel_event.is_set():
+            logger.info(
+                "Session %s received an explicit stop signal; halting "
+                "segmentation pipeline.",
+                session_id,
+            )
+            raise asyncio.CancelledError(
+                f"Session {session_id} execution stopped by explicit request."
+            )
+
+        if session.state == SessionState.FAILED:
+            detail = session.last_error or "The parent execution task failed."
+            logger.error(
+                "Session %s failed while segmentation was active: %s",
+                session_id,
+                detail,
+            )
+            raise SessionExecutionStateError(
+                f"Session {session_id} failed while segmentation was active: "
+                f"{detail}"
+            )
+
+        if session.state == SessionState.CANCELLED:
+            # CANCELLED without cancel_event is inconsistent state.  Do not
+            # report it as a user cancellation; surface it as an internal
+            # orchestration failure so the original problem can be diagnosed.
+            message = (
+                f"Session {session_id} is CANCELLED without an explicit "
+                "stop signal."
+            )
+            logger.error(message)
+            raise SessionExecutionStateError(message)
     except (KeyError, ImportError):
         pass
 
