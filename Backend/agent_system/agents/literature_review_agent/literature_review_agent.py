@@ -1621,18 +1621,16 @@ PICO JSON (for programmatic use):
 # ── Edit this PICO block to change the research question ─────────────────────
 EXAMPLE_PICO: Dict[str, str] = {
     "population": (
-        "Adult patients (>=18 years) with confirmed or suspected splenic lesions "
-        "or haematological malignancies (including lymphoma, leukaemia, and "
-        "metastatic disease involving the spleen) undergoing contrast-enhanced "
-        "CT, MRI, or PET-CT imaging in oncology or radiology departments."
+        "Adult patients (>=18 years) undergoing contrast-enhanced abdominal CT "
+        "with healthy spleens or suspected malignant splenic involvement."
     ),
     "intervention": (
-        "Radiomics feature extraction from splenic medical images — including "
+        "Radiomics feature extraction from the whole-spleen ROI — including "
         "first-order statistical features (intensity histogram, entropy, kurtosis), "
         "texture features (GLCM, GLRLM, GLSZM, GLDM), shape and morphological "
         "descriptors, and wavelet-transformed features — combined with machine "
-        "learning or deep learning classifiers (e.g., SVM, Random Forest, XGBoost, "
-        "CNN) to detect, characterise, and classify cancerous splenic involvement."
+        "learning classifiers to distinguish healthy spleens from spleens with "
+        "malignant involvement."
     ),
     "comparison": (
         "Conventional radiological assessment by radiologists using visual "
@@ -1641,27 +1639,19 @@ EXAMPLE_PICO: Dict[str, str] = {
         "gold standard, and single-feature or non-radiomic imaging approaches."
     ),
     "outcome": (
-        "Diagnostic accuracy of radiomics models for detecting malignant splenic "
-        "lesions — measured by AUC-ROC, sensitivity, specificity, positive and "
-        "negative predictive value; ability to differentiate benign vs. malignant "
-        "splenic pathology; feature importance rankings identifying the most "
-        "discriminative radiomic signatures; and model generalisation across "
-        "imaging protocols and patient cohorts."
+        "Classification performance for healthy spleens versus spleens with "
+        "malignant involvement, measured by AUC-ROC, sensitivity, specificity, "
+        "positive and negative predictive value."
     ),
     "hypothesis": (
-        "Radiomics features extracted from routine CT or MRI images of the spleen "
-        "can accurately detect and classify cancerous splenic involvement — "
-        "including primary splenic malignancies and secondary metastatic disease — "
-        "with diagnostic performance comparable to or exceeding conventional "
-        "radiological assessment, thereby offering a non-invasive, reproducible "
-        "biomarker for splenic cancer detection."
+        "CT radiomic features extracted from the whole-spleen ROI improve "
+        "classification of healthy spleens versus spleens with malignant "
+        "involvement compared with standard clinical parameters."
     ),
     "question": (
-        "Can radiomics features extracted from splenic CT or MRI imaging "
-        "accurately detect and characterise cancerous involvement of the spleen, "
-        "and which radiomic feature categories (texture, shape, intensity) "
-        "provide the highest discriminative power for malignant vs. benign "
-        "splenic pathology?"
+        "Do CT radiomic features extracted from the whole-spleen ROI improve "
+        "classification of healthy spleens versus spleens with malignant "
+        "involvement compared with standard clinical parameters?"
     ),
 }
 

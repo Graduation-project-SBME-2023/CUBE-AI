@@ -7,16 +7,16 @@ import ClientSettingsPanel from '../PlaygroundCanvas/ClientSettingsPanel';
 
 const EXAMPLE_HYPOTHESES = [
   {
-    label: "Lung Cancer Prognosis",
-    text: "In patients with non-small cell lung cancer (Stage III) undergoing chemoradiotherapy, does pre-treatment CT radiomic texture features compared to standard clinical parameters improve prediction of 2-year progression-free survival?"
+    label: "Whole Spleen ROI",
+    text: "In adult patients (≥18 years) undergoing contrast-enhanced abdominal CT, do radiomic features extracted from the whole-spleen ROI improve classification of healthy spleens versus spleens with malignant involvement compared with standard clinical parameters?"
   },
   {
-    label: "Brain Tumor Classification",
-    text: "In adult patients with newly diagnosed glioblastoma, does multiparametric MRI radiomics compared to conventional MRI distinguish between true progression and pseudoprogression?"
+    label: "Brain Tumor ROI",
+    text: "In adult patients with treated glioblastoma and suspected progression undergoing multiparametric MRI, do radiomic features extracted from the enhancing tumor ROI improve classification of true progression versus pseudoprogression compared with conventional MRI assessment?"
   },
   {
-    label: "Breast Cancer Response",
-    text: "In women with HER2-positive breast cancer receiving neoadjuvant therapy, does DCE-MRI radiomic kinetics compared to RECIST 1.1 criteria better predict pathological complete response?"
+    label: "Liver + Tumor ROIs",
+    text: "In adults with hepatocellular carcinoma undergoing transarterial chemoembolization and contrast-enhanced CT, do combined radiomic features extracted separately from the whole-liver ROI and the hepatocellular carcinoma lesion ROI improve prediction of objective treatment response compared with standard clinical parameters and mRECIST?"
   }
 ];
 
@@ -366,6 +366,9 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
             </button>
             
             <div className={`overflow-hidden transition-all duration-300 ease-in-out ${showOptions ? 'max-h-[200px] opacity-100 mb-2' : 'max-h-0 opacity-0'}`}>
+               <p className="pb-2 text-left text-xs text-[#7189a3]">
+                 Each example explicitly names the feature-extraction ROI: whole organ, lesion, or both.
+               </p>
                <div className="flex flex-wrap gap-2 pt-1 pb-2">
                  {EXAMPLE_HYPOTHESES.map((example, idx) => (
                    <button

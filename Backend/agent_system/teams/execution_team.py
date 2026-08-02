@@ -279,7 +279,10 @@ async def main() -> None:
     )
 
     task_prompt = """
-    run the pipeline, this is the hypothesis (The radiomics features can detect weather the spleen is cancerous is not.)
+    Run the pipeline for this hypothesis: In adult patients undergoing
+    contrast-enhanced abdominal CT, do radiomic features extracted from the
+    whole-spleen ROI improve classification of healthy spleens versus spleens
+    with malignant involvement compared with standard clinical parameters?
     please use all the volumes that are abdomen, abdpel, venous arterial, ABA
     """
 
