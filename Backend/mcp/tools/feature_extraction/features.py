@@ -451,7 +451,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                             "target_id": target_id,
                         }
             logger.info(
-                "Loaded %d reviewed volume-target pair(s) from %s",
+                "Loaded %d reviewed segmentation mask(s) from %s",
                 len(pairs),
                 manifest_path,
             )

@@ -948,7 +948,7 @@ class SegmentationModule:
                 message=(
                     f"Segmentation {result['status']}: "
                     f"{result['accepted_count']}/{result['pair_count']} "
-                    "volume-target pairs accepted."
+                    "segmentation masks accepted."
                 )
             ),
             session_id=self.session_id,
@@ -1161,8 +1161,7 @@ class SegmentationModule:
             event_types=["tool_started", "tool_finished"],
             content=TextPayload(
                 message=(
-                    "Found existing masks for "
-                    f"{existing_mask_pair_count} volume-target pairs"
+                    f"Found {existing_mask_pair_count} existing segmentation masks"
                 )
             ),
             session_id=self.session_id,
