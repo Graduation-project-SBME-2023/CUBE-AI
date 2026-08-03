@@ -106,7 +106,23 @@ function ResearchPlaygroundInner() {
   const [manualResumeRequired, setManualResumeRequired] = useState(false);
   const [restoredPaused, setRestoredPaused] = useState(false);
   // Gates the Data & Population tab: stays false until plan is approved and execution begins
-  const [isPlanApproved, setIsPlanApproved] = useState(false);
+  // Initialized from localStorage so it survives re-navigation within the same session
+  const [isPlanApproved, setIsPlanApproved] = useState<boolean>(() => {
+    const sid = routeState.sessionId || routeState.session_id || null;
+    if (!sid) return false;
+    try {
+      return localStorage.getItem(`cube_plan_approved_${sid}`) === 'true';
+    } catch (_) { return false; }
+  });
+  // True while agents are actively running — locks chat input to prevent noise during execution
+  // Initialized from localStorage so lock persists across re-navigation
+  const [isAgentExecuting, setIsAgentExecuting] = useState<boolean>(() => {
+    const sid = routeState.sessionId || routeState.session_id || null;
+    if (!sid) return false;
+    try {
+      return localStorage.getItem(`cube_agent_executing_${sid}`) === 'true';
+    } catch (_) { return false; }
+  });
 
   // Derive sessionId first so it can be used in useState initialisers below
   const hypothesis = routeState.hypothesis || 'No active hypothesis defined.';
@@ -263,9 +279,17 @@ function ResearchPlaygroundInner() {
     setPhaseUpdateMessages({});
     waitingPhaseIdsRef.current = new Set();
     setWaitingPhaseIds([]);
-    // Reset approval gate when execution restarts
+    // Reset approval and execution gates when execution restarts
     setIsPlanApproved(false);
-  }, [setData]);
+    setIsAgentExecuting(false);
+    // Also clear persisted state so a hard restart begins fresh
+    if (sessionId) {
+      try {
+        localStorage.removeItem(`cube_plan_approved_${sessionId}`);
+        localStorage.removeItem(`cube_agent_executing_${sessionId}`);
+      } catch (_) {}
+    }
+  }, [setData, sessionId]);
   const sidebarPhases = useMemo(
     () => phases.filter(phase => phase.id !== 'planning' && phase.id !== 'execution'),
     [phases]
@@ -358,11 +382,25 @@ function ResearchPlaygroundInner() {
     if (!restoredModeReady) return;
     if (restoredMode === 'executing' || restoredMode === 'results') {
       setIsPlanApproved(true);
-    } else {
-      // New session or planning-only restore — keep locked until WS confirms execution
-      setIsPlanApproved(false);
     }
+    // Note: do NOT reset to false here — if sessionStorage already has it true (user re-navigated
+    // to a live session), we must keep it. Only the explicit clearAllTabData() resets it.
   }, [restoredModeReady, restoredMode]);
+
+  // Persist isPlanApproved and isAgentExecuting to localStorage so they survive re-navigation
+  useEffect(() => {
+    if (!sessionId) return;
+    try {
+      localStorage.setItem(`cube_plan_approved_${sessionId}`, String(isPlanApproved));
+    } catch (_) {}
+  }, [sessionId, isPlanApproved]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    try {
+      localStorage.setItem(`cube_agent_executing_${sessionId}`, String(isAgentExecuting));
+    } catch (_) {}
+  }, [sessionId, isAgentExecuting]);
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => setViewsReady(true));
@@ -459,6 +497,8 @@ function ResearchPlaygroundInner() {
       if (type === 'agent_waiting_for_user_input') {
         // If the population agent is already waiting for input, plan is approved
         setIsPlanApproved(true);
+        // Agents are paused waiting for user — unlock chat
+        setIsAgentExecuting(false);
         const agentName = String(payload?.agent || '');
         const waitingStatus = String(payload?.status || '').toUpperCase();
         const outputForAgent = Object.values(OUTPUT_EVENT_AGENTS).find(item => item.agent === agentName);
@@ -485,7 +525,18 @@ function ResearchPlaygroundInner() {
       if (type === 'pipeline_agent_status' || type === 'Pipeline_agent_status') {
         // Execution has started — unlock the Data & Population tab
         setIsPlanApproved(true);
-        for (const agent of payload?.agents || []) {
+        const agents = payload?.agents || [];
+        const allDone = agents.length > 0 && agents.every((a: any) =>
+          ['COMPLETED', 'DONE'].includes(String(a?.status || '').toUpperCase())
+        );
+        const anyWaiting = agents.some((a: any) =>
+          String(a?.status || '').toUpperCase().startsWith('WAITING')
+        );
+        // Lock chat while actively running; unlock when all done or paused for input
+        if (!updateStateRef.current.isHydrating && !updateStateRef.current.isHistorical) {
+          setIsAgentExecuting(!allDone && !anyWaiting);
+        }
+        for (const agent of agents) {
           const agentName = String(agent?.name || '');
           if (
             ['COMPLETED', 'DONE'].includes(
@@ -682,6 +733,7 @@ function ResearchPlaygroundInner() {
             externalSessionId={sessionId}
             sendInitialMessage={sendInitialMessage}
             onPlanApprovalNeeded={() => setActivePhase('planning')}
+            isChatLocked={isAgentExecuting}
           />
         </div>
       </div>

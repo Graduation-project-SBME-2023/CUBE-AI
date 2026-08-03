@@ -66,6 +66,7 @@ export default function PlaygroundCanvas({
   const restartRequestedRef = useRef(initialMode === 'results');
   const modeRef = useRef<'planning' | 'generated' | 'manual' | 'executing' | 'results'>(initialMode);
   const nodesRef = useRef<FlowNode[]>([]);
+  const hasExecutablePlanRef = useRef(initialMode !== 'planning');
   const sessionIdRef = useRef<string | undefined>(session_id);
   const literatureOutputRef = useRef<typeof onLiteratureOutput>(onLiteratureOutput);
 
@@ -323,6 +324,9 @@ export default function PlaygroundCanvas({
   const applyBackendPlan = useCallback(
     (planPayload: any) => {
       if (planPayload.nodes) {
+        hasExecutablePlanRef.current = planPayload.nodes.some(
+          (node: FlowNode) => node.type === 'agent' && node.id !== 'literature_review'
+        );
         setNodes(planPayload.nodes);
         if (planPayload.edges) setEdges(planPayload.edges);
         if (planPayload.mode) setMode(planPayload.mode);
@@ -330,7 +334,15 @@ export default function PlaygroundCanvas({
         return;
       }
 
-      if (!planPayload.steps) return;
+      if (!Array.isArray(planPayload.steps)) return;
+      if (planPayload.steps.length === 0) {
+        hasExecutablePlanRef.current = false;
+        setCountdown(null);
+        setCanExecute(false);
+        return;
+      }
+
+      hasExecutablePlanRef.current = true;
 
       let newNodes: FlowNode[] = [];
       setNodes(prev => {
@@ -372,7 +384,7 @@ export default function PlaygroundCanvas({
               status: step.status || 'pending',
               logs: [],
               isExpanded: false,
-              matched_module: step.matched_module,
+              matched_module: step.matched_module || step.module || step.id,
             },
           });
         });
@@ -446,6 +458,14 @@ export default function PlaygroundCanvas({
       }
 
       if (type === 'planning_complete') {
+        const backendHasPipeline =
+          payload === true ||
+          (payload?.has_pipeline === true && Number(payload?.step_count) > 0);
+        if (!backendHasPipeline || !hasExecutablePlanRef.current) {
+          setCountdown(null);
+          setCanExecute(false);
+          return;
+        }
         if (modeRef.current === 'planning' || modeRef.current === 'generated') {
           setMode('generated');
           modeRef.current = 'generated';
@@ -456,6 +476,16 @@ export default function PlaygroundCanvas({
           // Maybe show a snackbar notification here "Pipeline updated"
         }
         setCanExecute(true);
+        return;
+      }
+
+      if (type === 'planning_failed') {
+        setCountdown(null);
+        setCanExecute(false);
+        if (modeRef.current === 'generated') {
+          setMode('planning');
+          modeRef.current = 'planning';
+        }
         return;
       }
 
@@ -632,33 +662,64 @@ export default function PlaygroundCanvas({
   );
 
   const startExecution = async () => {
-    // Clear old tab results immediately so stale data isn't shown while new run begins
-    onClearTabData?.();
-    setMode('executing');
-    setIsPaused(false);
-    setRequiresRecoveryResume(false);
-    setNodes(resetNodeLogs);
-    setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
-    
-    // Notify the user in the chat that execution is starting
-    websocketService.dispatchLocal({
-      type: 'msg',
-      payload: 'Pipeline execution has started. You can track the progress of each agent on the canvas.',
-      session_id: session_id,
-    });
+    setCountdown(null);
+    if (!hasExecutablePlanRef.current) {
+      setCanExecute(false);
+      websocketService.dispatchLocal({
+        type: 'msg',
+        payload: 'Execution was not started because no valid pipeline plan exists. Please regenerate or revise the plan.',
+        session_id: session_id,
+      });
+      return;
+    }
 
-    const response = await fetch(`${getAgentsApiBaseUrl()}/run/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        session_id: String(session_id),
-        restart: restartRequestedRef.current || hasStopped,
-      }),
-    });
-    if (response.ok) {
+    try {
+      const response = await fetch(`${getAgentsApiBaseUrl()}/run/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: String(session_id),
+          restart: restartRequestedRef.current || hasStopped,
+        }),
+      });
+      if (!response.ok) {
+        let message = 'The execution request was rejected.';
+        try {
+          const body = await response.json();
+          if (body?.detail) message = body.detail;
+        } catch (_) {
+          // Keep the generic message when the server did not return JSON.
+        }
+        console.error('[PlaygroundCanvas] Execution request rejected:', response.status, message);
+        websocketService.dispatchLocal({
+          type: 'msg',
+          payload: `Execution was not started: ${message}`,
+          session_id: session_id,
+        });
+        return;
+      }
+
       restartRequestedRef.current = false;
-    } else {
-      console.error('[PlaygroundCanvas] Execution request rejected:', response.status);
+      onClearTabData?.();
+      setMode('executing');
+      modeRef.current = 'executing';
+      setIsPaused(false);
+      setRequiresRecoveryResume(false);
+      setNodes(resetNodeLogs);
+      setEdges(prev => prev.map(e => ({ ...e, data: { animated: false } })));
+
+      websocketService.dispatchLocal({
+        type: 'msg',
+        payload: 'Pipeline execution has started. You can track the progress of each agent on the canvas.',
+        session_id: session_id,
+      });
+    } catch (error) {
+      console.error('[PlaygroundCanvas] Execution request failed:', error);
+      websocketService.dispatchLocal({
+        type: 'msg',
+        payload: 'Execution was not started because the server could not be reached.',
+        session_id: session_id,
+      });
     }
   };
 

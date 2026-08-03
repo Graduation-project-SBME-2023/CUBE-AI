@@ -26,6 +26,7 @@ const ChatSidebar = ({
   externalSessionId,
   sendInitialMessage = false,
   onPlanApprovalNeeded,
+  isChatLocked = false,
 }) => {
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
@@ -732,16 +733,17 @@ const ChatSidebar = ({
         <div className="flex items-end rounded-xl border border-[#1e3248] bg-[#0d1e2e] px-3 py-2">
           <input
             type="text"
-            className="flex-1 bg-transparent py-1 text-[14.5px] text-[#e0f0ff] outline-none placeholder:text-[#3d5a72]"
-            placeholder="Type a message..."
+            className="flex-1 bg-transparent py-1 text-[14.5px] text-[#e0f0ff] outline-none placeholder:text-[#3d5a72] disabled:opacity-50"
+            placeholder={isChatLocked ? "Chat is locked during execution/results" : "Type a message..."}
             value={input}
             onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && sendMessage()}
+            onKeyDown={e => e.key === 'Enter' && !isChatLocked && sendMessage()}
+            disabled={isChatLocked}
           />
           <button
             onClick={() => sendMessage()}
             className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-[10px] border border-[#2a5a8a] bg-[linear-gradient(135deg,#1a4a7a_0%,#0d3560_100%)] text-[#5acce6] transition-all hover:border-[#5acce6] hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
-            disabled={!input.trim() || isTyping}
+            disabled={!input.trim() || isTyping || isChatLocked}
           >
             {renderIcon(Send, 16)}
           </button>
