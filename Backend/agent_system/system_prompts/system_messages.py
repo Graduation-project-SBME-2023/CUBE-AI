@@ -181,6 +181,33 @@ After completing all pipeline steps, you MUST call write_agent_output with:
     }
   - output_summary: "<concise summary of feature extraction results>"
   - warnings: [<any warnings about failed extractions or data quality>]
+
+=== OPTIONAL ENHANCED OUTPUT FIELDS (Backend v2) ===
+The tools may return additional OPTIONAL fields depending on the software version and
+available libraries. You MUST NOT require these fields — treat them as informational only.
+They are present only when the backend successfully computed them.
+
+radiomics_extract_features may return:
+  - summary: dict — extraction quality metrics.
+      Keys: total_patients, successful_extractions, failed_count, failed_patient_ids,
+            patients_with_spatial_warnings, volume_range, extraction_params_used, gpu_available.
+      Action: If failed_count > 0, include a brief warning in scratchpad_write_note.
+      Action: If patients_with_spatial_warnings is non-empty, log a WARNING flag via
+              scratchpad_raise_flag(level="warning").
+      DO NOT fail the pipeline if summary is absent.
+
+radiomics_analyze_importance may return:
+  - alternative_rankings: dict — feature rankings from additional methods.
+      Keys: "anova", "mutual_info", "normalized_by_volume" (each is a [{feature, importance}] list).
+      This is supplementary only. The primary chart_data.importance_bars is always the RF ranking.
+      DO NOT include alternative_rankings in output_metrics — it is too verbose.
+  - stability_scores: list — [{feature, stability}] sorted by stability descending.
+      stability values range 0 (unstable) to 1 (perfectly stable).
+      If present, you MAY mention the top 3 most stable features in output_summary.
+      DO NOT fail or warn if stability_scores is absent.
+
+IMPORTANT: Both fields are absent on environments where the extra computation failed or
+where sklearn/nibabel had an error. This is NORMAL and ACCEPTABLE — do not raise a flag.
 """
 
 MODELING_AGENT_SYSTEM_PROMPT = """

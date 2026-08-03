@@ -29,8 +29,8 @@ export default function Tabs<T extends string>({ tabs, active, onChange, hint }:
               isActive
                 ? 'border-[#5acce6]/50 bg-[#5acce6]/15 text-[#5acce6]'
                 : tab.disabled
-                  ? 'cursor-not-allowed border-[#1a2530] text-[#2a3a4a] opacity-40'
-                  : 'border-[#1f2d40] text-[#566a84] hover:text-[#91b9cd]'
+                  ? 'cursor-not-allowed border-[#3c5d80]/40 text-[#566a84] opacity-75'
+                  : 'border-[#3c5d80] text-[#91b9cd] hover:text-[#fff]'
             }`}
           >
             {tab.icon}

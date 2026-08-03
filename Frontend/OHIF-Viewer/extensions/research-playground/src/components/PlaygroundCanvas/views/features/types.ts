@@ -2,10 +2,17 @@ export interface FeaturesData {
   status: string;
   csv_paths?: Record<string, string>;
   num_subjects?: number;
+  /** Patients that actually had at least one feature extracted (subset of num_subjects). */
+  num_subjects_with_features?: number;
+  /** Total patient-organ pairs that could not be extracted (audit count). */
+  missing_patient_organs?: number;
+  /** Subject IDs that were found in images/masks but had no matching target label. */
+  unlabeled_subject_ids?: string[];
   num_features?: Record<string, number>;
   mask_labels?: number[];
   processing_time_seconds?: number;
 }
+
 
 export interface ImportanceBar {
   feature: string;

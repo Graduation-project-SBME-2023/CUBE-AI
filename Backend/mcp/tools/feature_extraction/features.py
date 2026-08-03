@@ -37,6 +37,16 @@ from .consolidation import (
 
 from tool_logging import ToolEvent, log_tool_state, TextPayload, ProgressPayload
 
+# ADDED FOR UI ENHANCEMENT — Import helper modules for Tasks 2, 3, 4.
+# Wrapped in try/except so a missing file (e.g. first-run before deploy) never
+# crashes the import of the whole features module.
+try:
+    from .cache_utils import get_cache_key, load_from_cache, save_to_cache
+    from .validation_utils import check_mask_voxels, check_spatial_alignment
+    _HELPERS_AVAILABLE = True
+except ImportError:
+    _HELPERS_AVAILABLE = False
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -118,6 +128,37 @@ def _safe(v) -> Optional[float]:
         return None if (np.isnan(f) or np.isinf(f)) else round(f, 6)
     except Exception:
         return None
+
+
+# ADDED FOR UI ENHANCEMENT — Task 8: Recursive JSON sanitizer.
+# Standard json.dumps() raises ValueError on np.nan / np.inf and TypeError on
+# numpy scalar types (np.float32, np.int64).  React's JSON.parse also rejects
+# JavaScript NaN literals.  Apply _json_serializable() to any nested structure
+# before serialising so the frontend never receives invalid JSON.
+def _json_serializable(obj):
+    """Recursively convert numpy scalars and NaN/inf/±∞ to JSON-safe Python types."""
+    if isinstance(obj, dict):
+        return {k: _json_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_serializable(v) for v in obj]
+    if isinstance(obj, float):
+        if obj != obj or obj == float("inf") or obj == float("-inf"):
+            return None
+        return obj
+    if isinstance(obj, bool):
+        return obj
+    # Handle numpy scalar types (np.float32, np.float64, np.int32, np.int64, etc.)
+    try:
+        if hasattr(obj, "item"):
+            val = obj.item()  # converts numpy scalar → native Python
+            if isinstance(val, float) and (
+                val != val or val in (float("inf"), float("-inf"))
+            ):
+                return None
+            return val
+    except Exception:
+        pass
+    return obj
 
 
 # ── Input Models ───────────────────────────────────────────────────────────────
@@ -316,6 +357,52 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         if feature_classes is None and specific_features is None:
             feature_classes = ["firstorder", "shape", "glcm", "glrlm", "glszm", "gldm", "ngtdm"]
 
+        # ADDED FOR UI ENHANCEMENT — Task 1: Dynamic bin_width tuning.
+        # Samples up to 5 NIfTI headers from image_dir to detect the acquisition
+        # modality (MRI vs CT) and pick an appropriate intensity histogram bin width.
+        # CT uses standardised Hounsfield Units so the default 25.0 HU is correct.
+        # MRI has an arbitrary intensity scale — using 25.0 would over-bin most images.
+        # Safety: any nibabel / glob error → falls back to params.bin_width unchanged.
+        current_bin_width: float = params.bin_width
+        try:
+            import nibabel as _nib
+            _bw_samples = sorted(_glob.glob(os.path.join(image_dir, params.image_pattern)))[:5]
+            _intensities_min: list = []
+            _intensities_max: list = []
+            for _sf in _bw_samples:
+                try:
+                    _arr = _nib.load(_sf).get_fdata(dtype="float32")
+                    _intensities_min.append(float(_arr.min()))
+                    _intensities_max.append(float(_arr.max()))
+                except Exception:
+                    pass
+            if _intensities_min and _intensities_max:
+                _global_min = min(_intensities_min)
+                _global_max = max(_intensities_max)
+                _intensity_range = _global_max - _global_min
+                # Heuristic: CT HU range typically spans >3000 units;
+                # MRI intensities are narrower and do not include large negatives.
+                if abs(_global_min) < 1500 and _global_max < 5000 and _intensity_range < 3000:
+                    # MRI-like: derive bin_width from actual intensity range / 128 bins
+                    _adaptive_bw = max(0.5, _intensity_range / 128.0)
+                    current_bin_width = round(_adaptive_bw, 2)
+                    logger.info(
+                        "[Task 1] MRI-like intensity range detected "
+                        f"({_global_min:.1f}\u2013{_global_max:.1f}). "
+                        f"Using adaptive bin_width={current_bin_width} (was {params.bin_width})."
+                    )
+                else:
+                    # CT-like: keep user-supplied bin_width (default 25.0 HU)
+                    logger.info(
+                        "[Task 1] CT-like intensity range detected "
+                        f"({_global_min:.1f}\u2013{_global_max:.1f}). "
+                        f"Keeping bin_width={current_bin_width}."
+                    )
+        except ImportError:
+            logger.info("[Task 1] nibabel not installed \u2014 using default bin_width.")
+        except Exception as _bw_exc:
+            logger.warning(f"[Task 1] bin_width auto-detect failed: {_bw_exc} \u2014 using default.")
+
         pyrad_params: dict = {
             "imageType": {},
             "featureClass": {},
@@ -323,7 +410,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 "force2D": params.force_2d,
                 "normalize": params.normalize,
                 "normalizeScale": 100,
-                "binWidth": params.bin_width,
+                "binWidth": current_bin_width,   # TASK 1: was params.bin_width
                 "interpolator": "sitkBSpline",
                 "correctMask": True,
                 "padDistance": 10,
@@ -572,10 +659,37 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         temp_dir = tempfile.mkdtemp(dir=output_dir)
         start = time.time()
 
+        # ADDED FOR UI ENHANCEMENT — Task 5: GPU detection (informational).
+        # PyRadiomics runs on SimpleITK which has no native CUDA path, so the
+        # ProcessPoolExecutor below is always used regardless of GPU presence.
+        # GPU availability is logged and reported in the summary dict (Task 7)
+        # for observability. Zero change to the extraction executor.
+        gpu_available: bool = False
+        try:
+            import torch as _torch
+            gpu_available = bool(_torch.cuda.is_available())
+            if gpu_available:
+                _gpu_name = _torch.cuda.get_device_name(0)
+                logger.info(
+                    f"[Task 5] GPU detected: {_gpu_name}. "
+                    "Note: PyRadiomics/SimpleITK does not use CUDA for radiomic feature "
+                    "computation. ProcessPoolExecutor (CPU) is used. GPU reported in "
+                    "summary for observability."
+                )
+            else:
+                logger.info("[Task 5] No CUDA GPU detected. Using CPU ProcessPoolExecutor.")
+        except ImportError:
+            logger.debug("[Task 5] torch not installed \u2014 GPU detection skipped.")
+        except Exception as _gpu_exc:
+            logger.debug(f"[Task 5] GPU detection error: {_gpu_exc}")
+
+        # ADDED FOR UI ENHANCEMENT — Tasks 2 & 3: Accumulator for per-subject
+        # spatial warnings and mask-too-small reasons. Merged into the audit CSV
+        # after the extraction loop completes.
+        spatial_warnings: dict[str, str] = {}
+
         payload = TextPayload(message=f"Extracting features for {len(pairs)} masks...")
         log_tool_state(ToolEvent("tool_started", "text", payload))
-
-
         for idx, (pair_id, files) in enumerate(pairs.items(), 1):
             subject_id = files["subject_id"]
             cohort_subject_id = files["cohort_subject_id"]
@@ -598,10 +712,43 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 orig_mask  = sitk.ReadImage(files["mask"])
                 mask_array = sitk.GetArrayFromImage(orig_mask)
 
+                # ADDED FOR UI ENHANCEMENT — Task 3: Spatial alignment check.
+                # Compares affine matrices of volume and mask using nibabel.
+                # Mismatch is recorded in spatial_warnings and later written to
+                # the audit CSV. Extraction always proceeds regardless.
+                if _HELPERS_AVAILABLE:
+                    try:
+                        _aligned, _sw_msg = check_spatial_alignment(files["image"], files["mask"])
+                        if not _aligned and _sw_msg:
+                            spatial_warnings[cohort_subject_id] = _sw_msg
+                            logger.warning(f"  [Task 3] {subject_id}: {_sw_msg}")
+                    except Exception as _sa_exc:
+                        logger.debug(f"  [Task 3] Spatial check error for {subject_id}: {_sa_exc}")
+
+                # ADDED FOR UI ENHANCEMENT — Task 4: Cache directory.
+                _cache_dir = os.path.join(output_dir, ".cache")
+
                 for lbl in mask_labels_raw:
                     binary = (mask_array == lbl).astype(np.uint8)
                     if binary.sum() == 0:
                         continue
+
+                    # ADDED FOR UI ENHANCEMENT — Task 2: Mask voxel count guard.
+                    # PyRadiomics produces NaN-only rows or crashes when the segmented
+                    # region is degenerate (< 10 voxels). Skip and audit the reason.
+                    if _HELPERS_AVAILABLE:
+                        _mask_valid, _voxel_count = check_mask_voxels(binary)
+                    else:
+                        _voxel_count = int(binary.sum())
+                        _mask_valid  = _voxel_count >= 10
+                    if not _mask_valid:
+                        _reason = f"Mask_too_small (label {lbl}, {_voxel_count} voxels < 10)"
+                        logger.warning(f"  [Task 2] {subject_id}: {_reason} — skipping extraction.")
+                        # Record in spatial_warnings so it appears in the audit CSV.
+                        # Only set if no stronger spatial warning already exists.
+                        spatial_warnings.setdefault(cohort_subject_id, _reason)
+                        continue
+
                     bin_img = sitk.GetImageFromArray(binary)
                     bin_img.CopyInformation(orig_mask)
                     tmp_mask_path = os.path.join(temp_dir, f"{subject_id}_lbl{lbl}.nii.gz")
@@ -609,11 +756,41 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                     try:
                         import concurrent.futures
                         import multiprocessing
-                        ctx = multiprocessing.get_context('spawn')
-                        _n_workers = max(1, min(params.n_workers, os.cpu_count() or 1))
-                        with concurrent.futures.ProcessPoolExecutor(max_workers=_n_workers, mp_context=ctx) as executor:
-                            future = executor.submit(_run_extractor, files["image"], tmp_mask_path, params_file)
-                            features = future.result(timeout=600)
+
+                        # ADDED FOR UI ENHANCEMENT — Task 4: Cache lookup.
+                        # If we have already extracted features for this exact
+                        # image+mask+bin_width combination, load from disk instead
+                        # of re-running the expensive subprocess.
+                        _features: Optional[dict] = None
+                        _cache_key: str = ""
+                        if _HELPERS_AVAILABLE:
+                            _cache_key = get_cache_key(
+                                files["image"], tmp_mask_path, current_bin_width
+                            )
+                            _features = load_from_cache(_cache_dir, _cache_key)
+                            if _features is not None:
+                                logger.info(
+                                    f"  [Task 4] Cache HIT: {subject_id} label {lbl} "
+                                    f"(key {_cache_key[:8]}…)"
+                                )
+
+                        if _features is None:
+                            # ── Full extraction via isolated subprocess (original logic) ──
+                            ctx = multiprocessing.get_context('spawn')
+                            _n_workers = max(1, min(params.n_workers, os.cpu_count() or 1))
+                            with concurrent.futures.ProcessPoolExecutor(
+                                max_workers=_n_workers, mp_context=ctx
+                            ) as executor:
+                                future = executor.submit(
+                                    _run_extractor, files["image"], tmp_mask_path, params_file
+                                )
+                                _features = future.result(timeout=600)
+
+                            # ADDED FOR UI ENHANCEMENT — Task 4: Cache save.
+                            if _HELPERS_AVAILABLE and _cache_key:
+                                save_to_cache(_cache_dir, _cache_key, _features)
+
+                        features = _features  # alias used by existing downstream code
 
                         target_value = target_dict[_normalise_id(subject_id)]
                         target_row = {
@@ -712,6 +889,20 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         )
         audit.loc[failed_mask, "status"] = "extraction_failed_or_empty"
         audit.loc[(audit["present"] == 0) & ~failed_mask, "status"] = "segmentation_missing"
+
+        # ADDED FOR UI ENHANCEMENT — Tasks 2 & 3: Write spatial_warning column.
+        # Maps each subject's warning message into the audit table as a new
+        # optional column.  Subjects with no warning get an empty string.
+        # This is additive — existing columns and row count are unchanged.
+        if spatial_warnings:
+            audit["spatial_warning"] = (
+                audit["subject_id"].map(spatial_warnings).fillna("")
+            )
+            logger.info(
+                f"[Tasks 2/3] Wrote spatial_warning column for "
+                f"{len(spatial_warnings)} subject(s)."
+            )
+
         audit_path = os.path.join(output_dir, "organ_availability_audit.csv")
         audit.to_csv(audit_path, index=False)
         csv_paths["organ_availability_audit"] = audit_path
@@ -752,6 +943,41 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 "labeled_subjects": len(pairs),
             }, indent=2)
 
+        # ADDED FOR UI ENHANCEMENT — Task 7: Build health summary dict.
+        # Purely additive — existing keys are preserved exactly. The summary
+        # block gives the UI instant quality metrics without CSV parsing.
+        _audit_failed = audit[audit["present"] == 0]
+        _vol_col = next(
+            (c for c in default_feature_table.columns if "voxelvolume" in c.lower()),
+            None,
+        )
+        _vol_range: list = []
+        if _vol_col:
+            try:
+                _vols = default_feature_table[_vol_col].dropna()
+                if not _vols.empty:
+                    _vol_range = [
+                        round(float(_vols.min()), 2),
+                        round(float(_vols.max()), 2),
+                    ]
+            except Exception:
+                pass
+
+        summary: dict = {
+            "total_patients": len(default_feature_table),
+            "successful_extractions": len(features_by_subject),
+            "failed_count": int(len(_audit_failed)),
+            "failed_patient_ids": _audit_failed["subject_id"].tolist()[:50],
+            "patients_with_spatial_warnings": list(spatial_warnings.keys()),
+            "volume_range": _vol_range,
+            "extraction_params_used": {
+                "bin_width": current_bin_width,
+                "image_types": image_types,
+                "feature_classes": feature_classes or [],
+            },
+            "gpu_available": gpu_available,
+        }
+
         return json.dumps({
             "status": "success",
             "csv_paths": csv_paths,
@@ -767,6 +993,8 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
             "mask_labels": mask_labels_raw,
             "params_file": params_file,
             "processing_time_seconds": round(processing_time, 2),
+            # ADDED FOR UI ENHANCEMENT — Task 7: optional summary block
+            "summary": summary,
         }, indent=2)
 
     except Exception as exc:
@@ -965,14 +1193,119 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         importance_df = pd.DataFrame({"feature": X.columns, "importance": scores})
         importance_df = importance_df.sort_values("importance", ascending=False).reset_index(drop=True)
 
-        importance_path = os.path.join(output_dir, "feature_importance.csv")
-        importance_df.to_csv(importance_path, index=False)
-
         payload = ProgressPayload(current=2, total=TOTAL_STAGES, label=f"Computing importance ({params.method}, {task_type})")
         log_tool_state(ToolEvent("tool_progress", "progress", payload))
 
+        # ADDED FOR UI ENHANCEMENT — Task 6: Alternative importance rankings.
+        # Compute ANOVA F-test and Mutual Information rankings in addition to the
+        # primary method. These live in a separate top-level key (alternative_rankings)
+        # so chart_data.importance_bars is NEVER modified — zero UI breaking change.
+        # If any sub-computation fails the exception is caught and that ranking is
+        # simply omitted from the response.
+        alternative_rankings: dict = {}
+        stability_scores: list = []
+        try:
+            if X.shape[0] >= 5 and X.shape[1] >= 2:
+                # ── ANOVA (F-test) ────────────────────────────────────────────────
+                try:
+                    _fn_anova = f_classif if task_type == "classification" else f_regression
+                    _anova_scores = SelectKBest(_fn_anova, k="all").fit(X, y).scores_
+                    _anova_df = (
+                        pd.DataFrame({"feature": X.columns, "importance": _anova_scores})
+                        .sort_values("importance", ascending=False)
+                        .reset_index(drop=True)
+                    )
+                    alternative_rankings["anova"] = [
+                        {"feature": str(r["feature"]), "importance": _safe(r["importance"])}
+                        for _, r in _anova_df.head(min(params.top_n_plot, len(_anova_df))).iterrows()
+                    ]
+                    logger.info("[Task 6] ANOVA rankings computed.")
+                except Exception as _anova_exc:
+                    logger.warning(f"[Task 6] ANOVA ranking failed: {_anova_exc}")
+
+                # ── Mutual Information ────────────────────────────────────────────
+                try:
+                    _fn_mi = mutual_info_classif if task_type == "classification" else mutual_info_regression
+                    _mi_scores = SelectKBest(_fn_mi, k="all").fit(X, y).scores_
+                    _mi_df = (
+                        pd.DataFrame({"feature": X.columns, "importance": _mi_scores})
+                        .sort_values("importance", ascending=False)
+                        .reset_index(drop=True)
+                    )
+                    alternative_rankings["mutual_info"] = [
+                        {"feature": str(r["feature"]), "importance": _safe(r["importance"])}
+                        for _, r in _mi_df.head(min(params.top_n_plot, len(_mi_df))).iterrows()
+                    ]
+                    logger.info("[Task 6] Mutual Info rankings computed.")
+                except Exception as _mi_exc:
+                    logger.warning(f"[Task 6] Mutual Info ranking failed: {_mi_exc}")
+
+                # ── Feature Stability: CV proxy (lightweight alternative to ICC) ──
+                # Coefficient of Variation (σ / |μ|) per feature.
+                # Lower CV = more stable across patients. stability = 1 / (1 + CV).
+                try:
+                    _cv = (X.std() / (X.mean().abs() + 1e-9)).abs()
+                    _stab_df = (
+                        pd.DataFrame({"feature": X.columns, "cv": _cv})
+                        .assign(stability=lambda d: 1.0 / (1.0 + d["cv"]))
+                        .sort_values("stability", ascending=False)
+                        .reset_index(drop=True)
+                    )
+                    stability_scores = [
+                        {
+                            "feature": str(r["feature"]),
+                            "stability": round(float(r["stability"]), 4),
+                        }
+                        for _, r in _stab_df.head(min(params.top_n_plot, len(_stab_df))).iterrows()
+                    ]
+                    logger.info("[Task 6] Stability scores (CV proxy) computed.")
+                except Exception as _cv_exc:
+                    logger.warning(f"[Task 6] Stability scores failed: {_cv_exc}")
+
+                # ── Volume-normalised importance ──────────────────────────────────
+                # Re-rank features after regressing out shape_VoxelVolume, revealing
+                # biologically-significant features beyond lesion size alone.
+                try:
+                    _vol_cols = [c for c in X.columns if "voxelvolume" in c.lower()]
+                    if _vol_cols:
+                        from sklearn.linear_model import LinearRegression as _LR
+                        _vol_arr = X[_vol_cols].values
+                        X_resid = X.copy()
+                        for _col in X.columns:
+                            try:
+                                _lr = _LR().fit(_vol_arr, X[_col].values)
+                                X_resid[_col] = X[_col].values - _lr.predict(_vol_arr)
+                            except Exception:
+                                pass  # keep original values for this column
+                        _clf_vol = (
+                            RandomForestClassifier if task_type == "classification"
+                            else RandomForestRegressor
+                        )(n_estimators=50, random_state=42)
+                        _clf_vol.fit(X_resid, y)
+                        _vol_imp_df = (
+                            pd.DataFrame({"feature": X.columns, "importance": _clf_vol.feature_importances_})
+                            .sort_values("importance", ascending=False)
+                            .reset_index(drop=True)
+                        )
+                        alternative_rankings["normalized_by_volume"] = [
+                            {"feature": str(r["feature"]), "importance": _safe(r["importance"])}
+                            for _, r in _vol_imp_df.head(min(params.top_n_plot, len(_vol_imp_df))).iterrows()
+                        ]
+                        logger.info("[Task 6] Volume-normalised importance computed.")
+                except Exception as _vol_exc:
+                    logger.warning(f"[Task 6] Volume-normalised importance failed: {_vol_exc}")
+
+        except Exception as _alt_exc:
+            logger.warning(f"[Task 6] Alternative rankings outer error: {_alt_exc}")
+            alternative_rankings = {}
+            stability_scores = []
+
         # ── Build chart_data ────────────────────────────────────────────────
         chart_data: dict = {"task_type": task_type, "method": params.method}
+        # importance_df already sorted descending above; no re-sort needed here.
+
+        importance_path = os.path.join(output_dir, "feature_importance.csv")
+        importance_df.to_csv(importance_path, index=False)
 
         # ── Stage 3: Importance bars + cumulative curve ─────────────────────
         top_plot = importance_df.head(min(params.top_n_plot, len(importance_df)))
@@ -1130,6 +1463,11 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             out_df.to_csv(out_path, index=False)
             selected_files[str(n)] = out_path
 
+        # ADDED FOR UI ENHANCEMENT — Task 8: Sanitize chart_data before serialisation.
+        # Recursively converts NaN/Infinity/numpy scalars to JSON-safe Python types.
+        # React's JSON.parse crashes on NaN literals; this prevents that silently.
+        chart_data_safe = _json_serializable(chart_data)
+
         payload = ProgressPayload(current=8, total=TOTAL_STAGES, label="Exporting top-N feature CSVs")
         log_tool_state(ToolEvent("tool_progress", "progress", payload))
 
@@ -1149,8 +1487,19 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
                 "importance": importance_path,
                 "selected_features": selected_files,
             },
-            # ── NEW: chart data for frontend rendering ──────────────────────
-            "chart_data": chart_data,
+            # ADDED FOR UI ENHANCEMENT - Task 8: chart_data sanitised via _json_serializable.
+            # NaN/inf/numpy scalars are replaced with None so React never sees invalid JSON.
+            "chart_data": chart_data_safe,
+            # ADDED FOR UI ENHANCEMENT - Task 6: Alternative rankings (optional).
+            # Keys absent when computation failed. UI must treat them as undefined.
+            **(
+                {
+                    "alternative_rankings": _json_serializable(alternative_rankings),
+                    "stability_scores": _json_serializable(stability_scores),
+                }
+                if (alternative_rankings or stability_scores)
+                else {}
+            ),
         }, indent=2)
 
     except Exception as exc:
