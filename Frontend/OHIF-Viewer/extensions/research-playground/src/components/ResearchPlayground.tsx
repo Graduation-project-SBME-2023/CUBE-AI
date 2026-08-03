@@ -497,8 +497,7 @@ function ResearchPlaygroundInner() {
       if (type === 'agent_waiting_for_user_input') {
         // If the population agent is already waiting for input, plan is approved
         setIsPlanApproved(true);
-        // Agents are paused waiting for user — unlock chat
-        setIsAgentExecuting(false);
+        // Note: do NOT touch isAgentExecuting here — chat stays locked via isPlanApproved
         const agentName = String(payload?.agent || '');
         const waitingStatus = String(payload?.status || '').toUpperCase();
         const outputForAgent = Object.values(OUTPUT_EVENT_AGENTS).find(item => item.agent === agentName);
@@ -506,8 +505,6 @@ function ResearchPlaygroundInner() {
 
         if (outputForAgent && message) {
           if (updateStateRef.current.isHydrating) {
-            // A replayed waiting event is durable workflow state, not a new
-            // notification. Restore the paused module without restarting it.
             showPhaseIndicator(outputForAgent.phase, message, true);
             setActivePhase(outputForAgent.phase);
           } else if (!updateStateRef.current.isHistorical) {
@@ -733,7 +730,7 @@ function ResearchPlaygroundInner() {
             externalSessionId={sessionId}
             sendInitialMessage={sendInitialMessage}
             onPlanApprovalNeeded={() => setActivePhase('planning')}
-            isChatLocked={isAgentExecuting}
+            isChatLocked={isPlanApproved}
           />
         </div>
       </div>
