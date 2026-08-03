@@ -29,6 +29,29 @@ export const saveSegmentationReview = async (
   return response;
 };
 
+export const saveSegmentationReviewDraft = async (
+  sessionId: string,
+  runId: string | undefined,
+  decisions: Record<string, 'accepted' | 'rejected' | 'modified'>
+) => {
+  const response = await fetch(`${getAgentsApiBaseUrl()}/segmentation-review/draft`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      session_id: sessionId,
+      run_id: runId,
+      decisions,
+    }),
+    keepalive: true,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Server responded with status ${response.status}`);
+  }
+};
+
 export const addCacheBuster = (url: string, version: number | string = Date.now()) => {
   const parsedUrl = new URL(url, window.location.href);
   parsedUrl.searchParams.set('maskVersion', String(version));
