@@ -1208,7 +1208,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                                 !canApprove
                                     ? 'bg-[#151a1f] text-gray-500 border-gray-700 cursor-not-allowed opacity-60'
                                     : cohortApproved
-                                        ? 'bg-[#152e2e] text-[#5ce6b0] border-[#234d4d] cursor-not-allowed pointer-events-none select-none shadow-[0_0_20px_rgba(92,230,176,0.3)]'
+                                        ? 'bg-[#1f2d40] text-[#3c5d80] border-transparent cursor-not-allowed pointer-events-none select-none shadow-none'
                                         : 'bg-[#5acce6] hover:bg-[#43b2cc] text-black border-white/20 shadow-[0_0_20px_rgba(92,204,230,0.4)] cursor-pointer'
                             }`}
                         >
