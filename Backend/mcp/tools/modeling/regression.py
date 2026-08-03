@@ -20,6 +20,8 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import mcp  # same import pattern as scratchpad
+from ..helpers.target_columns import load_feature_schema, resolve_target_column
+from ..helpers.workspace import WorkspacePath, base_on_workspace_dir
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -50,25 +52,100 @@ def _csv_list(value: Optional[str]) -> Optional[list]:
     return None
 
 
+def _safe_float(value) -> Optional[float]:
+    try:
+        converted = float(value)
+        return round(converted, 6) if np.isfinite(converted) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _df_to_records(frame: pd.DataFrame) -> list[dict]:
+    records = []
+    for _, row in frame.iterrows():
+        records.append({
+            str(column): (
+                int(value) if isinstance(value, np.integer)
+                else _safe_float(value) if isinstance(value, (float, np.floating))
+                else value
+            )
+            for column, value in row.items()
+        })
+    return records
+
+
+def _regression_holdout_metrics(predictions: pd.DataFrame, y_true: pd.Series) -> dict:
+    from sklearn.metrics import (
+        explained_variance_score,
+        mean_absolute_error,
+        mean_squared_error,
+        median_absolute_error,
+        r2_score,
+    )
+
+    prediction_column = next(
+        (
+            column for column in ("prediction_label", "Label", "predicted_y", "Prediction")
+            if column in predictions.columns
+        ),
+        predictions.columns[-1],
+    )
+    actual = np.asarray(y_true, dtype=float)
+    predicted = np.asarray(predictions[prediction_column], dtype=float)
+    if len(actual) != len(predicted):
+        raise ValueError(
+            f"Holdout target/prediction length mismatch: {len(actual)} != {len(predicted)}"
+        )
+    mse = mean_squared_error(actual, predicted)
+    has_variation = (
+        len(actual) > 1
+        and not np.isclose(np.std(actual), 0.0)
+        and not np.isclose(np.std(predicted), 0.0)
+    )
+    pearson = np.corrcoef(actual, predicted)[0, 1] if has_variation else np.nan
+    metrics = {
+        "MAE": _safe_float(mean_absolute_error(actual, predicted)),
+        "MSE": _safe_float(mse),
+        "RMSE": _safe_float(np.sqrt(mse)),
+        "R2": _safe_float(r2_score(actual, predicted)),
+        "MedianAE": _safe_float(median_absolute_error(actual, predicted)),
+        "ExplainedVariance": _safe_float(explained_variance_score(actual, predicted)),
+        "Pearson": _safe_float(pearson),
+    }
+    indices = np.arange(len(actual))
+    if len(indices) > 500:
+        indices = np.linspace(0, len(indices) - 1, 500, dtype=int)
+    points = [
+        {
+            "actual": round(float(actual[index]), 6),
+            "predicted": round(float(predicted[index]), 6),
+            "residual": round(float(actual[index] - predicted[index]), 6),
+        }
+        for index in indices
+    ]
+    return {"metrics": metrics, "prediction_points": points}
+
+
 # ── Input Models ───────────────────────────────────────────────────────────────
 
 class TrainRegressorInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    input_path: str = Field(
+    input_path: WorkspacePath = Field(
         ..., description="Path to input CSV file with training data."
     )
-    # output_dir: str = Field(
-    #     ..., description="Directory where model artefacts and results will be saved."
-    # )
-    # target_column: str = Field(
-    #     ..., description="Name of the target column for regression."
-    # )
+    target_column: Optional[str] = Field(
+        default=None,
+        description=(
+            "Continuous outcome column. Omit to resolve target/y/label/outcome or "
+            "feature_schema.json automatically."
+        ),
+    )
     experiment_name: Optional[str] = Field(
         default=None, description="Experiment label. Auto-generated from timestamp if omitted."
     )
     fold: int = Field(
-        default=10, description="Number of cross-validation folds."
+        default=5, description="Number of cross-validation folds."
     )
     session_id: Optional[int] = Field(
         default=None, description="Random seed for reproducibility. Randomly chosen if omitted."
@@ -99,7 +176,7 @@ class TrainRegressorInput(BaseModel):
         default=None, description="Comma-separated list of columns to treat as dates."
     )
     n_select: int = Field(
-        default=3, description="Number of top models to select for tuning and blending."
+        default=8, description="Number of top models to select for tuning and blending."
     )
     normalize: bool = Field(
         default=True,
@@ -117,7 +194,11 @@ class TrainRegressorInput(BaseModel):
         description="PCA components: float 0–1 for variance ratio, int > 1 for exact count.",
     )
     include_models: Optional[str] = Field(
-        default=None, description="Comma-separated PyCaret model IDs to include in comparison."
+        default="lr,ridge,lasso,knn,svm,dt,rf,gbr",
+        description=(
+            "Comma-separated PyCaret model IDs. Defaults to OLS, Ridge, Lasso, KNN, "
+            "SVR, Decision Tree, Random Forest, and Gradient Boosting."
+        ),
     )
     exclude_models: Optional[str] = Field(
         default=None, description="Comma-separated PyCaret model IDs to exclude from comparison."
@@ -200,8 +281,7 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
     try:
         import random
 
-        output_dir = os.path.join(WORKSPACE_DIR, 'modeling')
-        target_column = 'target'
+        output_dir = base_on_workspace_dir('modeling') or os.path.join(WORKSPACE_DIR, 'modeling')
 
         os.makedirs(output_dir, exist_ok=True)
         log_file = os.path.join(output_dir, "pycaret_regression.log")
@@ -210,13 +290,11 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
         experiment_name = params.experiment_name or f"regression_exp_{time.strftime('%Y%m%d_%H%M%S')}"
         session_id = params.session_id if params.session_id is not None else random.randint(1, 10_000)
 
-        logging.info(f"Experiment: {experiment_name} | input: {params.input_path} | target: {target_column}")
-
         # ── Import PyCaret ──────────────────────────────────────────────────
         try:
             from pycaret.regression import (
                 blend_models, compare_models, interpret_model,
-                plot_model, predict_model, pull, save_model, setup, tune_model,
+                get_config, plot_model, predict_model, pull, save_model, setup, tune_model,
             )
             import pycaret
             logging.info(f"PyCaret {getattr(pycaret, '__version__', 'unknown')} imported")
@@ -226,8 +304,27 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
         # ── Load data ───────────────────────────────────────────────────────
         data = pd.read_csv(params.input_path)
         logging.info(f"Data loaded: {data.shape[0]} rows × {data.shape[1]} cols")
-        if target_column not in data.columns:
-            raise ValueError(f"Target column '{target_column}' not found in data.")
+        target_column, target_resolution = resolve_target_column(
+            data.columns,
+            requested=params.target_column,
+            schema=load_feature_schema(params.input_path),
+        )
+        logging.info(
+            "Experiment: %s | input: %s | target: %s (%s)",
+            experiment_name, params.input_path, target_column, target_resolution,
+        )
+        if data[target_column].isna().any():
+            raise ValueError("The regression target contains missing values.")
+        numeric_target = pd.to_numeric(data[target_column], errors="coerce")
+        if numeric_target.isna().any():
+            raise ValueError(
+                f"Regression target '{target_column}' must contain only numeric values."
+            )
+        data[target_column] = numeric_target
+        if data.shape[0] < 4:
+            raise ValueError("Regression requires at least four labeled rows.")
+        estimated_train_rows = max(2, int(np.floor(data.shape[0] * 0.7)))
+        effective_fold = min(max(2, params.fold), estimated_train_rows)
 
         # ── GPU guard ───────────────────────────────────────────────────────
         use_gpu = params.use_gpu
@@ -247,7 +344,7 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
             target=target_column,
             session_id=session_id,
             experiment_name=experiment_name,
-            fold=params.fold,
+            fold=effective_fold,
             use_gpu=use_gpu,
             preprocess=params.preprocess,
             data_split_stratify=params.data_split_stratify,
@@ -280,12 +377,22 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
                     return setup(**kwargs)
                 raise
             except Exception:
-                minimal = {"data": data, "target": target_column, "session_id": session_id}
+                minimal = {
+                    "data": data,
+                    "target": target_column,
+                    "session_id": session_id,
+                    "fold": effective_fold,
+                }
                 logging.warning("Setup failed – retrying with minimal params.")
                 return setup(**minimal)
 
         _try_setup(setup_kwargs)
         logging.info("PyCaret setup complete.")
+        try:
+            y_holdout = get_config("y_test")
+        except Exception as exc:
+            logging.warning("Could not read holdout targets: %s", exc)
+            y_holdout = None
 
         # ── Compare models ──────────────────────────────────────────────────
         compare_kwargs: dict = {"n_select": params.n_select}
@@ -306,8 +413,12 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
 
         created_files: list = []
 
+        compare_df = pull()
+        comparison_table = _df_to_records(
+            compare_df.reset_index().rename(columns={"index": "Model"})
+        )
         compare_path = os.path.join(output_dir, "model_comparison_results.csv")
-        pull().to_csv(compare_path, index=True)
+        compare_df.to_csv(compare_path, index=True)
         created_files.append(("Model Comparison Results", compare_path))
 
         # ── Inner helpers ───────────────────────────────────────────────────
@@ -352,23 +463,29 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
                 os.chdir(original_dir)
             return results
 
-        def _eval_on_holdout(model, output_path: str, name: str) -> Optional[str]:
+        def _eval_on_holdout(model, output_path: str, name: str):
             try:
                 preds = predict_model(model)
                 preds.to_csv(output_path, index=False)
                 logging.info(f"Holdout predictions for '{name}' → {output_path}")
-                return output_path
+                chart_info = (
+                    _regression_holdout_metrics(preds, y_holdout)
+                    if y_holdout is not None else None
+                )
+                return output_path, chart_info
             except Exception as exc:
                 logging.error(f"Holdout eval failed for '{name}': {exc}")
-                return None
+                return None, None
 
         # ── Tune individual models ──────────────────────────────────────────
         models_dir = os.path.join(output_dir, "models")
         os.makedirs(models_dir, exist_ok=True)
         tuned_models, individual_model_paths, model_test_predictions = [], {}, {}
+        per_model_chart: dict = {}
 
         for i, model in enumerate(best):
             name = f"tuned_model_{i + 1}"
+            label = type(model).__name__
             model_dir = os.path.join(models_dir, name)
             os.makedirs(model_dir, exist_ok=True)
             logging.info(f"Tuning {name} ({i + 1}/{len(best)})")
@@ -377,8 +494,15 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
                 tuned = tune_model(model)
                 tuned_models.append(tuned)
 
-                pull().to_csv(os.path.join(model_dir, f"{name}_results.csv"), index=True)
+                cv_df = pull()
+                cv_df.to_csv(os.path.join(model_dir, f"{name}_results.csv"), index=True)
                 created_files.append((f"{name} Results", os.path.join(model_dir, f"{name}_results.csv")))
+                mean_row = cv_df.loc["Mean"] if "Mean" in cv_df.index else cv_df.iloc[-1]
+                cv_metrics = {
+                    str(column): _safe_float(value)
+                    for column, value in mean_row.items()
+                    if column != "TT (Sec)"
+                }
 
                 model_pkl = os.path.join(model_dir, name)
                 try:
@@ -394,10 +518,20 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
                 created_files.extend(_create_interpretations(tuned, plots_dir))
 
                 holdout_path = os.path.join(model_dir, f"holdout_predictions_{name}.csv")
-                result = _eval_on_holdout(tuned, holdout_path, name)
-                if result:
-                    model_test_predictions[name] = result
-                    created_files.append((f"{name} Holdout Predictions", result))
+                result_path, chart_info = _eval_on_holdout(tuned, holdout_path, name)
+                if result_path:
+                    model_test_predictions[name] = result_path
+                    created_files.append((f"{name} Holdout Predictions", result_path))
+                per_model_chart[name] = {
+                    "label": label,
+                    "cv_metrics": cv_metrics,
+                    "holdout_metrics": chart_info.get("metrics", {}) if chart_info else {},
+                    "prediction_points": chart_info.get("prediction_points", []) if chart_info else [],
+                    "confusion_matrix": None,
+                    "confusion_matrix_labels": None,
+                    "roc_curve": None,
+                    "pr_curve": None,
+                }
 
             except Exception as exc:
                 logging.error(f"Failed to process {name}: {exc}")
@@ -409,8 +543,15 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
             os.makedirs(blend_dir, exist_ok=True)
             try:
                 blended_model = blend_models(tuned_models)
-                pull().to_csv(os.path.join(blend_dir, "blended_model_results.csv"), index=True)
+                blend_cv = pull()
+                blend_cv.to_csv(os.path.join(blend_dir, "blended_model_results.csv"), index=True)
                 created_files.append(("Blended Model Results", os.path.join(blend_dir, "blended_model_results.csv")))
+                blend_mean = blend_cv.loc["Mean"] if "Mean" in blend_cv.index else blend_cv.iloc[-1]
+                blend_cv_metrics = {
+                    str(column): _safe_float(value)
+                    for column, value in blend_mean.items()
+                    if column != "TT (Sec)"
+                }
 
                 blend_pkl = os.path.join(blend_dir, "blended_model")
                 try:
@@ -426,10 +567,20 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
                 created_files.extend(_create_interpretations(blended_model, blend_plots_dir))
 
                 holdout_path = os.path.join(blend_dir, "holdout_predictions_blended_model.csv")
-                result = _eval_on_holdout(blended_model, holdout_path, "blended_model")
-                if result:
-                    model_test_predictions["blended_model"] = result
-                    created_files.append(("Blended Model Holdout Predictions", result))
+                result_path, chart_info = _eval_on_holdout(blended_model, holdout_path, "blended_model")
+                if result_path:
+                    model_test_predictions["blended_model"] = result_path
+                    created_files.append(("Blended Model Holdout Predictions", result_path))
+                per_model_chart["blended_model"] = {
+                    "label": "Blended Regressor",
+                    "cv_metrics": blend_cv_metrics,
+                    "holdout_metrics": chart_info.get("metrics", {}) if chart_info else {},
+                    "prediction_points": chart_info.get("prediction_points", []) if chart_info else [],
+                    "confusion_matrix": None,
+                    "confusion_matrix_labels": None,
+                    "roc_curve": None,
+                    "pr_curve": None,
+                }
 
             except Exception as exc:
                 logging.error(f"Blending failed: {exc}")
@@ -463,7 +614,10 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
         logging.info("Regression experiment complete.")
         return json.dumps({
             "status": "success",
+            "task_type": "regression",
             "experiment_name": experiment_name,
+            "target_column": target_column,
+            "target_resolution": target_resolution,
             "output_dir": output_dir,
             "final_model_path": final_model_path,
             "individual_model_paths": individual_model_paths,
@@ -471,6 +625,21 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
             "model_summary": summary_path,
             "log_file": log_file,
             "created_files": created_files,
+            "chart_data": {
+                "task_type": "regression",
+                "comparison_table": comparison_table,
+                "per_model": per_model_chart,
+                "fold": effective_fold,
+                "metric_definitions": {
+                    "MAE": "Mean Absolute Error (lower is better)",
+                    "MSE": "Mean Squared Error (lower is better)",
+                    "RMSE": "Root Mean Squared Error (lower is better)",
+                    "R2": "Coefficient of Determination (higher is better)",
+                    "MedianAE": "Median Absolute Error (lower is better)",
+                    "ExplainedVariance": "Explained Variance (higher is better)",
+                    "Pearson": "Pearson Correlation (higher is better)",
+                },
+            },
         }, indent=2)
 
     except Exception as exc:

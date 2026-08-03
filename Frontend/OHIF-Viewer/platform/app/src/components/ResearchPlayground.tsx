@@ -71,11 +71,16 @@ function normalizeModelingPayload(payload: any): Record<string, any> {
     const isExperiment = (value: any) => Boolean(
         value &&
         typeof value === 'object' &&
-        (value.chart_data || value.experiment_name || value.tool === 'classification')
+        (
+            value.chart_data ||
+            value.experiment_name ||
+            value.tool === 'classification' ||
+            value.tool === 'regression'
+        )
     );
 
     if (isExperiment(result)) {
-        const experimentName = result.experiment_name || 'classification_experiment';
+        const experimentName = result.experiment_name || `${result.task_type || result.tool || 'modeling'}_experiment`;
         return { [experimentName]: result };
     }
 
