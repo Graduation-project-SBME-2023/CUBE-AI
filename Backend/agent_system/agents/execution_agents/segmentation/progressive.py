@@ -163,6 +163,10 @@ def build_segmentation_snapshot(
         ]
 
     return {
+        "runId": next(
+            (str(item["run_id"]) for item in ordered if item.get("run_id")),
+            None,
+        ),
         "targetRoi": ", ".join(label for label in target_labels if label),
         "targets": targets,
         "selectedModel": ", ".join(str(model) for model in selected_models),

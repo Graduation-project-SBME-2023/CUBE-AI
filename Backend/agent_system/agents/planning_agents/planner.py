@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import asyncio
+import copy
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Awaitable, Any, Optional
@@ -54,12 +55,114 @@ from agents.literature_review_agent.literature_review_agent import run_literatur
 InputProvider = Callable[[], Awaitable[str]]
 OutputCallback = Callable[[str, Any], Awaitable[None]]
 
-logger = logging.getLogger(__name__)
-
 # Constants
-MAX_REFINEMENT_ITERATIONS = 10
-REFINEMENT_TIMEOUT_SECONDS = 300  # 5 minutes
 MAX_WS_MESSAGE_SIZE = 64000  # 64KB limit for WebSocket messages
+WS_TRUNCATION_MARKER = "\n\n[... Truncated for WebSocket; full version is in the workspace ...]"
+
+
+def _json_size_bytes(value: Any) -> int:
+    """Return the UTF-8 byte size of a JSON-serializable value."""
+    return len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+
+
+def _fit_literature_payload(
+    data: dict[str, Any],
+    max_bytes: int = MAX_WS_MESSAGE_SIZE,
+) -> dict[str, Any]:
+    """Return a non-mutating literature payload that fits the WS byte cap."""
+    payload = copy.deepcopy(data)
+    if _json_size_bytes(payload) <= max_bytes:
+        return payload
+
+    truncated_fields: set[str] = set()
+    target_bytes = max(1024, max_bytes - 512)
+    minimum_text_chars = {
+        "knowledge_base": 6000,
+        "sources_guide": 1500,
+        "report": 6000,
+    }
+
+    while _json_size_bytes(payload) > target_bytes:
+        text_candidates = [
+            (key, value)
+            for key, value in payload.items()
+            if isinstance(value, str)
+            and len(value)
+            > minimum_text_chars.get(key, 1000) + len(WS_TRUNCATION_MARKER)
+        ]
+        if text_candidates:
+            key, value = max(
+                text_candidates,
+                key=lambda item: len(item[1].encode("utf-8")),
+            )
+            minimum = minimum_text_chars.get(key, 1000)
+            new_length = max(minimum, len(value) // 2)
+            payload[key] = value[:new_length] + WS_TRUNCATION_MARKER
+            truncated_fields.add(key)
+            continue
+
+        list_candidates = [
+            (key, value)
+            for key, value in payload.items()
+            if isinstance(value, list) and len(value) > 5
+        ]
+        if list_candidates:
+            key, value = max(
+                list_candidates,
+                key=lambda item: _json_size_bytes(item[1]),
+            )
+            payload[key] = value[: max(5, len(value) // 2)]
+            truncated_fields.add(key)
+            continue
+
+        removable = next(
+            (
+                key
+                for key in (
+                    "context",
+                    "ranked_papers",
+                    "report",
+                    "knowledge_base",
+                    "sources_guide",
+                )
+                if key in payload
+            ),
+            None,
+        )
+        if removable is None:
+            break
+        payload.pop(removable)
+        truncated_fields.add(removable)
+
+    if truncated_fields:
+        payload["_truncated"] = {
+            "fields": sorted(truncated_fields),
+            "full_version": "workspace",
+        }
+
+    if _json_size_bytes(payload) > max_bytes:
+        # Last-resort envelope: retain the PICO and a small paper sample rather
+        # than sending a frame large enough to disconnect the WebSocket.
+        payload = {
+            "hypothesis": payload.get("hypothesis", {}),
+            "papers": list(payload.get("papers") or [])[:5],
+            "_truncated": {
+                "fields": sorted(set(data) - {"hypothesis"}),
+                "full_version": "workspace",
+            },
+        }
+        while payload["papers"] and _json_size_bytes(payload) > max_bytes:
+            payload["papers"].pop()
+
+    if _json_size_bytes(payload) > max_bytes:
+        payload = {
+            "_truncated": {
+                "fields": sorted(data),
+                "full_version": "workspace",
+            }
+        }
+
+    return payload
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -132,8 +235,12 @@ class ClinicalPlanner:
         # ── Directory & Path Setup ──────────────────────────────────────
         root_dir = Path(__file__).parent.parent.parent
         log_dir = os.path.join(root_dir, "logs")
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        log_file = os.path.join(log_dir, f"planner_{timestamp}.log")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+        session_tag = str(session.session_id).replace("/", "_").replace("\\", "_")
+        log_file = os.path.join(
+            log_dir,
+            f"planner_{timestamp}_{session_tag}.log",
+        )
         self.log_path = Path(log_file)
 
         self.state_path = Path(workspace_dir) / "state.json"
@@ -156,6 +263,9 @@ class ClinicalPlanner:
         self.db_state_store = PlannerDbStateStore()
         self.session = session
         self.session_service = session_service
+        self.logger = logging.getLogger(
+            f"{__name__}.session.{session.session_id}.{id(self)}"
+        )
 
         # ── Internal State ──────────────────────────────────────────────
         self._pipeline_instructions: dict = {}
@@ -224,7 +334,7 @@ Output ONLY valid JSON in the following format:
                 raise ValueError("Empty validation response")
             return HypothesisValidationResult.model_validate(data).model_dump()
         except Exception as e:
-            logger.error("Validation error: %s", e)
+            self.logger.error("Validation error: %s", e)
             return {
                 "valid": False,
                 "feedback": (
@@ -263,19 +373,19 @@ Output ONLY valid JSON in the following format:
         """
         Set up dual logging handlers (file + stdout) for the planner.
 
-        IMPORTANT: Only adds handlers if they don't already exist to prevent
-        duplicate log messages and memory leaks from repeated instantiation.
+        Each planner instance owns a uniquely named logger and file handler so
+        concurrent sessions cannot leak records into one another's files.
         """
-        if not logger.handlers:
-            os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
+        os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
 
-            file_handler = logging.FileHandler(self.log_path)
-            file_handler.setFormatter(
-                logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-            )
+        file_handler = logging.FileHandler(self.log_path, encoding="utf-8")
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+        )
 
-            logger.addHandler(file_handler)
-            logger.setLevel(logging.INFO)
+        self.logger.addHandler(file_handler)
+        self.logger.setLevel(logging.INFO)
+        self.logger.propagate = True
 
     async def initialize(self) -> None:
         """
@@ -284,6 +394,12 @@ Output ONLY valid JSON in the following format:
         Should be called once after construction and before run().
         """
         await self._load_state()
+
+    def close(self) -> None:
+        """Close this planner's private file handlers."""
+        for handler in list(self.logger.handlers):
+            self.logger.removeHandler(handler)
+            handler.close()
 
     async def _send(
         self,
@@ -305,26 +421,22 @@ Output ONLY valid JSON in the following format:
         # Check payload size for literature review output
         if type_ == "lit_review_output" and isinstance(data, dict):
             try:
-                payload_size = len(json.dumps(data, ensure_ascii=False))
+                payload_size = _json_size_bytes(data)
                 if payload_size > MAX_WS_MESSAGE_SIZE:
-                    logger.warning(
+                    fitted_data = _fit_literature_payload(data)
+                    fitted_size = _json_size_bytes(fitted_data)
+                    self.logger.warning(
                         "Literature review payload too large (%d bytes), "
-                        "truncating knowledge base fields",
+                        "sending bounded payload (%d bytes)",
                         payload_size,
+                        fitted_size,
                     )
-                    # Truncate the largest fields to prevent WS disconnection
-                    if "knowledge_base" in data:
-                        data["knowledge_base"] = (
-                            data["knowledge_base"][:50000]
-                            + "\n\n[... Truncated for WebSocket — full version in workspace ...]"
-                        )
-                    if "sources_guide" in data:
-                        data["sources_guide"] = (
-                            data["sources_guide"][:30000]
-                            + "\n\n[... Truncated for WebSocket — full version in workspace ...]"
-                        )
-            except Exception:
-                pass  # Best-effort size check
+                    data = fitted_data
+            except Exception as exc:
+                self.logger.warning(
+                    "Could not bound literature review payload: %s",
+                    exc,
+                )
 
         await self.output_handler(type_, data, self.session.session_id)
 
@@ -394,7 +506,10 @@ Output ONLY valid JSON in the following format:
         Returns:
             JSON string with invalid backslashes properly escaped.
         """
-        return re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
+        # ``\u`` is only a valid JSON escape when it is followed by exactly
+        # four hexadecimal digits.  Treating every ``\u`` as valid leaves
+        # common LaTeX commands such as ``\usepackage`` broken.
+        return re.sub(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', r'\\\\', text)
 
     # ══════════════════════════════════════════════════════════════════════
     # STATE PERSISTENCE
@@ -413,7 +528,7 @@ Output ONLY valid JSON in the following format:
             async with aiofiles.open(self.state_path, "w", encoding="utf-8") as f:
                 await f.write(self.state.model_dump_json(indent=2))
         except Exception as e:
-            logger.error("Save Error: %s", e)
+            self.logger.error("Save Error: %s", e)
 
     async def _load_state(self) -> None:
         """
@@ -432,7 +547,7 @@ Output ONLY valid JSON in the following format:
             self._state_load_failed = False
 
             if self.state.hypothesis.id:
-                logger.info(
+                self.logger.info(
                     "Loaded planner state from DB for session %s "
                     "(hypothesis=%s, plan_steps=%d)",
                     self.session.session_id,
@@ -440,12 +555,12 @@ Output ONLY valid JSON in the following format:
                     len(self.state.plan.steps),
                 )
             else:
-                logger.info(
+                self.logger.info(
                     "No persisted planner state found in DB for session %s",
                     self.session.session_id,
                 )
         except Exception as e:
-            logger.error("Load Error: %s", e)
+            self.logger.error("Load Error: %s", e)
             self._state_load_failed = True
             # Don't silently continue — notify the caller
             raise RuntimeError(
@@ -486,32 +601,32 @@ Output ONLY valid JSON in the following format:
                 return json.loads(content)
             except json.JSONDecodeError as e:
                 if attempt == 0:
-                    logger.warning(
+                    self.logger.warning(
                         "%s: JSON attempt 1 failed (%s), retrying with escape fix...",
                         log_prefix, e,
                     )
                     continue
                 else:
-                    logger.error(
+                    self.logger.error(
                         "%s: JSON parse error after escape fix: %s",
                         log_prefix, e,
                     )
 
                     # FALLBACK: Try YAML parsing for near-JSON content
                     try:
-                        logger.warning(
+                        self.logger.warning(
                             "%s: Attempting yaml.safe_load as fallback...",
                             log_prefix,
                         )
                         data = yaml.safe_load(content)
                         if data and isinstance(data, dict):
-                            logger.info(
+                            self.logger.info(
                                 "%s: Successfully parsed using yaml fallback",
                                 log_prefix,
                             )
                             return data
                     except Exception as yaml_e:
-                        logger.error(
+                        self.logger.error(
                             "%s: YAML fallback also failed: %s",
                             log_prefix, yaml_e,
                         )
@@ -519,7 +634,7 @@ Output ONLY valid JSON in the following format:
                     preview = clean_content[:300].encode(
                         "ascii", errors="replace"
                     ).decode("ascii")
-                    logger.error(
+                    self.logger.error(
                         "%s: Clean content preview: %s",
                         log_prefix, preview,
                     )
@@ -538,7 +653,7 @@ Output ONLY valid JSON in the following format:
         Args:
             response_content: Raw response text from the HypothesisArchitect.
         """
-        logger.info("[HypothesisArchitect]: %s...", response_content[:100])
+        self.logger.info("[HypothesisArchitect]: %s...", response_content[:100])
 
         data = await self._parse_llm_json(
             response_content,
@@ -547,7 +662,7 @@ Output ONLY valid JSON in the following format:
 
         match data:
             case None:
-                logger.error(
+                self.logger.error(
                     "Failed to parse HypothesisArchitect response as JSON. "
                     "Sending error message to chat."
                 )
@@ -587,7 +702,7 @@ Output ONLY valid JSON in the following format:
 
         await self._save_state()
 
-    async def _process_pipeline_response(self, response_content: str) -> None:
+    async def _process_pipeline_response(self, response_content: str) -> bool:
         """
         Parse pipeline plan JSON from the PipelineArchitect and update state/UI.
 
@@ -597,28 +712,68 @@ Output ONLY valid JSON in the following format:
         Args:
             response_content: Raw response text from the PipelineArchitect.
         """
-        logger.info("[PipelineArchitect]: %s...", response_content[:100])
+        self.logger.info("[PipelineArchitect]: %s...", response_content[:100])
 
         data = await self._parse_llm_json(
             response_content,
             log_prefix="[PipelineArchitect]",
         )
 
-        if data is None:
-            logger.error(
+        if not isinstance(data, dict):
+            self.logger.error(
                 "Failed to parse PipelineArchitect response as JSON. "
                 "Sending error message to chat."
             )
+            if self.state.plan.steps:
+                await self._send(
+                    "msg",
+                    "The requested revision was not valid, so the last valid "
+                    "pipeline plan has been kept unchanged.",
+                )
+                return True
             await self._send(
                 "msg",
                 "The agent generated an improperly formatted plan. "
                 "Please ask it to regenerate or revise your request.",
             )
-            return
+            await self._send(
+                "planning_failed",
+                {"reason": "invalid_pipeline_response"},
+            )
+            return False
 
-        if "steps" in data and isinstance(data["steps"], list):
+        if "steps" not in data and self.state.plan.steps:
+            if data.get("message"):
+                await self._send("msg", data["message"])
+            await self._save_state()
+            return True
+
+        steps = data.get("steps")
+        if not isinstance(steps, list) or not steps:
+            self.logger.error(
+                "PipelineArchitect response did not contain a non-empty steps list"
+            )
+            if self.state.plan.steps:
+                await self._send(
+                    "msg",
+                    "The requested revision contained no executable steps, so "
+                    "the last valid pipeline plan has been kept unchanged.",
+                )
+                return True
+            await self._send(
+                "msg",
+                "The generated plan did not contain any executable pipeline steps. "
+                "Please ask the agent to regenerate or revise the plan.",
+            )
+            await self._send(
+                "planning_failed",
+                {"reason": "empty_pipeline"},
+            )
+            return False
+
+        if isinstance(steps, list):
             persisted_plan = await self.session_service.handle_plan_update(
-                self.session, data["steps"]
+                self.session, steps
             )
 
             if persisted_plan is not None:
@@ -632,7 +787,7 @@ Output ONLY valid JSON in the following format:
                         description=s.get("description", ""),
                         module=s.get("id", ""),
                     )
-                    for s in data["steps"]
+                    for s in steps
                 ]
                 self.state.plan.study_goal = self.state.hypothesis.title
 
@@ -673,7 +828,7 @@ Output ONLY valid JSON in the following format:
             # Store full instructions for later context augmentation
             self._pipeline_instructions = {
                 s.get("id", ""): s.get("instructions", "")
-                for s in data["steps"]
+                for s in steps
             }
 
         # Forward any accompanying message to chat
@@ -681,6 +836,7 @@ Output ONLY valid JSON in the following format:
             await self._send("msg", data["message"])
 
         await self._save_state()
+        return bool(self.state.plan.steps)
 
     # ══════════════════════════════════════════════════════════════════════
     # PICO EXTRACTION & KNOWLEDGE BUILDING
@@ -728,7 +884,7 @@ Output ONLY valid JSON in the following format:
             Exception: Propagated from build_knowledge_base — caught by caller.
         """
         pico = self._extract_pico_from_hypothesis()
-        logger.info("Building knowledge base with PICO: %s", pico)
+        self.logger.info("Building knowledge base with PICO: %s", pico)
 
         loop = asyncio.get_event_loop()
 
@@ -758,7 +914,7 @@ Output ONLY valid JSON in the following format:
             )
         )
 
-        logger.info(
+        self.logger.info(
             "Knowledge base built: %s chars, sources guide: %s chars, "
             "papers: %d, sections: %s",
             len(knowledge_base),
@@ -814,9 +970,9 @@ Output ONLY valid JSON in the following format:
                 await f.write(
                     json.dumps(context_data, indent=2, ensure_ascii=False)
                 )
-            logger.info("Literature context saved to %s", lit_context_path)
+            self.logger.info("Literature context saved to %s", lit_context_path)
         except Exception as e:
-            logger.error("Failed to save literature context: %s", e)
+            self.logger.error("Failed to save literature context: %s", e)
 
     # ══════════════════════════════════════════════════════════════════════
     # RETRY LOGIC FOR LLM CALLS
@@ -860,14 +1016,14 @@ Output ONLY valid JSON in the following format:
                 last_exception = e
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
-                    logger.warning(
+                    self.logger.warning(
                         "Agent call failed (attempt %d/%d): %s. "
                         "Retrying in %ds...",
                         attempt + 1, max_retries, e, wait_time,
                     )
                     await asyncio.sleep(wait_time)
                 else:
-                    logger.error(
+                    self.logger.error(
                         "Agent call failed after %d attempts: %s",
                         max_retries, e,
                     )
@@ -893,9 +1049,8 @@ Output ONLY valid JSON in the following format:
             2. Literature Review — Builds domain knowledge base from PubMed
                and runs multi-agent literature review pipeline.
             3. Pipeline Planning — Dynamically designs the research execution
-               plan using the PipelineArchitect agent. Supports refinement
-               loop (max {MAX_REFINEMENT_ITERATIONS} iterations with
-               {REFINEMENT_TIMEOUT_SECONDS}s timeout) until user approves.
+               plan using the PipelineArchitect agent and accepts ongoing
+               chat-based revisions while the planning task remains active.
 
         After all phases complete, compiles context-augmented task messages
         for downstream execution agents.
@@ -917,7 +1072,7 @@ Output ONLY valid JSON in the following format:
         # ── Concurrency Guard ─────────────────────────────────────────
         async with self._run_lock:
             await self._load_state()
-            logger.info(
+            self.logger.info(
                 "Planner %s state before run: %s",
                 start_query, self.state,
             )
@@ -925,13 +1080,13 @@ Output ONLY valid JSON in the following format:
 
             # Exit early if hypothesis is already confirmed
             if self.state.hypothesis.state == "confirmed":
-                logger.info(
+                self.logger.info(
                     "Hypothesis already confirmed for session %s, skipping planning",
                     self.session.session_id,
                 )
                 return
 
-            logger.info(
+            self.logger.info(
                 "State not confirmed, planning phases engaged (session_id=%s)",
                 self.session.session_id,
             )
@@ -981,7 +1136,7 @@ Output ONLY valid JSON in the following format:
                         prompt,
                         cancellation_token=cancellation_token,
                     )
-                    logger.info("HypothesisArchitect response: %s", response.chat_message.content[:200])
+                    self.logger.info("HypothesisArchitect response: %s", response.chat_message.content[:200])
                     await self._process_hypothesis_response(response.chat_message.content)
                     
                     self.state.hypothesis.state = "confirmed"
@@ -1126,7 +1281,7 @@ Output ONLY valid JSON in the following format:
                     )
 
                 except Exception as e:
-                    logger.error(
+                    self.logger.error(
                         "Knowledge building failed: %s", e, exc_info=True
                     )
                     await self._send("lit_review_done", True)
@@ -1169,7 +1324,9 @@ Output ONLY valid JSON in the following format:
                 "Based on this hypothesis and the domain knowledge, design an optimal "
                 "research pipeline. Select the agents needed, order them logically, and "
                 "provide detailed, study-specific instructions for each agent. "
-                "Return JSON with 'steps', 'rationale', and 'message'."
+                "Return JSON with 'steps', 'rationale', and 'message'. The JSON "
+                "must be strictly valid: escape every backslash inside strings "
+                "and prefer plain-language instructions over raw LaTeX commands."
             )
 
             response = await self._call_agent_with_retry(
@@ -1177,61 +1334,89 @@ Output ONLY valid JSON in the following format:
                 pipeline_prompt,
                 cancellation_token=cancellation_token,
             )
-            logger.info(
+            self.logger.info(
                 "PipelineArchitect response: %s",
                 response.chat_message.content[:200],
             )
-            await self._process_pipeline_response(response.chat_message.content)
+            pipeline_ready = await self._process_pipeline_response(
+                response.chat_message.content
+            )
 
             # ── Pipeline Revision Loop (Infinite) ──────────
             while True:
                 # ══════════════════════════════════════════════════════════════
                 # FINALIZE: Compile task messages with context augmentation
                 # ══════════════════════════════════════════════════════════════
-                try:
-                    task_messages = compile_task_messages(
-                        hypothesis=self.state.hypothesis,
-                        plan=self.state.plan,
-                        knowledge_sections=knowledge_sections,
-                        sources_guide=sources_guide,
-                        pipeline_instructions=self._pipeline_instructions,
-                        locked_roi_interpretation=locked_roi,
-                    )
-                    await self.session_service.confirm_plan(self.session)
-                    await self.session_service.save_task_messages_for_plan(
-                        self.session,
-                        task_messages,
-                    )
-                    task_summaries = [
-                        {
-                            "task_id": tm.task_id,
-                            "phase": tm.phase,
-                            "agent_id": tm.agent_id,
-                            "agent_title": tm.agent_title,
-                            "has_knowledge": bool(tm.context_augmentation.knowledge_summary),
-                            "has_literature": bool(tm.context_augmentation.literature_findings),
-                            "has_methodology": bool(tm.context_augmentation.methodology_guidance),
-                            "instructions_preview": (
-                                tm.instructions[:150] + "..."
-                                if len(tm.instructions) > 150
-                                else tm.instructions
-                            ),
-                        }
-                        for tm in task_messages
-                    ]
-                    await self._send("task_messages", task_summaries)
-                except Exception as e:
-                    logger.error("Task message compilation failed (non-fatal): %s", e, exc_info=True)
+                if pipeline_ready and self.state.plan.steps:
+                    try:
+                        task_messages = compile_task_messages(
+                            hypothesis=self.state.hypothesis,
+                            plan=self.state.plan,
+                            knowledge_sections=knowledge_sections,
+                            sources_guide=sources_guide,
+                            pipeline_instructions=self._pipeline_instructions,
+                            locked_roi_interpretation=locked_roi,
+                        )
+                        if not task_messages:
+                            raise ValueError(
+                                "Task message compiler produced an empty execution pipeline"
+                            )
+                        await self.session_service.confirm_plan(self.session)
+                        await self.session_service.save_task_messages_for_plan(
+                            self.session,
+                            task_messages,
+                        )
+                        task_summaries = [
+                            {
+                                "task_id": tm.task_id,
+                                "phase": tm.phase,
+                                "agent_id": tm.agent_id,
+                                "agent_title": tm.agent_title,
+                                "has_knowledge": bool(tm.context_augmentation.knowledge_summary),
+                                "has_literature": bool(tm.context_augmentation.literature_findings),
+                                "has_methodology": bool(tm.context_augmentation.methodology_guidance),
+                                "instructions_preview": (
+                                    tm.instructions[:150] + "..."
+                                    if len(tm.instructions) > 150
+                                    else tm.instructions
+                                ),
+                            }
+                            for tm in task_messages
+                        ]
+                        await self._send("task_messages", task_summaries)
+                    except Exception as e:
+                        pipeline_ready = False
+                        self.logger.error(
+                            "Task message compilation failed; pipeline is not executable: %s",
+                            e,
+                            exc_info=True,
+                        )
+                        await self._send(
+                            "msg",
+                            "The plan could not be prepared for execution. Please ask "
+                            "the agent to regenerate or revise the plan.",
+                        )
+                        await self._send(
+                            "planning_failed",
+                            {"reason": "task_compilation_failed"},
+                        )
 
                 await self._save_state()
-                await self._send("planning_complete", True)
-                await self._send("modules_matched", True)
+                if pipeline_ready:
+                    await self._send(
+                        "planning_complete",
+                        {
+                            "has_pipeline": True,
+                            "step_count": len(self.state.plan.steps),
+                        },
+                    )
+                    await self._send("modules_matched", True)
                 
                 try:
                     # Wait indefinitely for chat-based revisions
                     user_feedback = await self.input_provider()
                 except Exception as e:
-                    logger.info("Input provider stopped, ending planner task: %s", e)
+                    self.logger.info("Input provider stopped, ending planner task: %s", e)
                     break
 
                 # Process user chat feedback
@@ -1251,9 +1436,25 @@ Output ONLY valid JSON in the following format:
                         refinement_prompt,
                         cancellation_token=cancellation_token,
                     )
-                    await self._process_pipeline_response(response.chat_message.content)
+                    pipeline_ready = await self._process_pipeline_response(
+                        response.chat_message.content
+                    )
                 except Exception as e:
-                    logger.error("Error generating revised pipeline: %s", e)
-                    await self._send("msg", f"Sorry, an error occurred while revising the pipeline: {e}")
-                    await self._send("planning_failed", str(e))
-                    continue # Try again on next input
+                    self.logger.error("Error generating revised pipeline: %s", e)
+                    if pipeline_ready and self.state.plan.steps:
+                        await self._send(
+                            "msg",
+                            "The pipeline revision could not be generated, so "
+                            "the last valid plan has been kept unchanged.",
+                        )
+                    else:
+                        await self._send(
+                            "msg",
+                            "The pipeline could not be generated. Please retry "
+                            "or revise the request.",
+                        )
+                        await self._send(
+                            "planning_failed",
+                            {"reason": "pipeline_revision_failed"},
+                        )
+                    continue  # Try again on next input

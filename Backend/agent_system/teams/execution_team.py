@@ -67,17 +67,6 @@ AGENT_FACTORIES = {
     "latex_reporter_agent":           ReporterAgent.create,
 }
 
-# Fallback order when the planner provides no task_messages.
-DEFAULT_PIPELINE_ORDER: List[str] = [
-    "study_population_planner_agent",
-    "segmentation_agent",
-    "feature_extraction_agent",
-    "modeling_agent",
-    "result_reporter_agent",
-    "latex_reporter_agent",
-]
-
-
 class BasicPipelineBuilder(DiGraphBuilder):
 
     def __init__(self, task_messages: Optional[List[TaskMessage]] = None):
@@ -108,12 +97,11 @@ class BasicPipelineBuilder(DiGraphBuilder):
                     planned_ids.append(tm.agent_id)
 
         if not planned_ids:
-            # Planner produced no usable plan → run the complete default pipeline
-            logger.warning(
-                "No valid task_messages received from planner — "
-                "falling back to the default full pipeline."
+            logger.error("Planner supplied no valid task messages")
+            raise ValueError(
+                "Cannot build execution pipeline: planner supplied no valid "
+                "task messages"
             )
-            planned_ids = list(DEFAULT_PIPELINE_ORDER)
 
         if start_agent_id:
             if start_agent_id not in planned_ids:
