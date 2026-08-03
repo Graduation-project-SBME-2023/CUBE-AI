@@ -1202,13 +1202,13 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                     <div className="flex flex-col items-end gap-2 pt-2 border-t border-[#1f2d40]">
                         <button
                             onClick={handleApproveCohort}
-                            disabled={!canApprove || isApproving}
-                            title={!canApprove ? 'You must label at least one volume in the Patient Labeling tab before approving.' : 'Approve cohort and resume segmentation pipeline'}
+                            disabled={!canApprove || isApproving || cohortApproved}
+                            title={cohortApproved ? 'Cohort is already approved and locked.' : !canApprove ? 'You must label at least one volume in the Patient Labeling tab before approving.' : 'Approve cohort and resume segmentation pipeline'}
                             className={`flex items-center gap-2 px-6 py-3 rounded-lg text-sm font-bold uppercase tracking-wider transition-all border shadow-xl ${
                                 !canApprove
                                     ? 'bg-[#151a1f] text-gray-500 border-gray-700 cursor-not-allowed opacity-60'
                                     : cohortApproved
-                                        ? 'bg-[#152e2e] text-[#5ce6b0] border-[#234d4d] cursor-default shadow-[0_0_20px_rgba(92,230,176,0.3)]'
+                                        ? 'bg-[#152e2e] text-[#5ce6b0] border-[#234d4d] cursor-not-allowed pointer-events-none select-none shadow-[0_0_20px_rgba(92,230,176,0.3)]'
                                         : 'bg-[#5acce6] hover:bg-[#43b2cc] text-black border-white/20 shadow-[0_0_20px_rgba(92,204,230,0.4)] cursor-pointer'
                             }`}
                         >
