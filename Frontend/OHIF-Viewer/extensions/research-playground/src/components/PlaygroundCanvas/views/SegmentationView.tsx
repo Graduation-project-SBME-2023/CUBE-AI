@@ -12,7 +12,123 @@ import { RightPanel } from './segmentation/Shared';
 import EmbeddedSegmentationModal, {
   SegmentationSubmitPayload,
 } from './segmentation/EmbeddedSegmentationModal';
-import { addCacheBuster, handleModifyAction, saveSegmentationReview } from './segmentation/utils';
+import {
+  addCacheBuster,
+  handleModifyAction,
+  saveSegmentationReview,
+  saveSegmentationReviewDraft,
+} from './segmentation/utils';
+
+const isSavedReviewChoice = (value: unknown): value is ReviewStatus =>
+  value === 'accepted' || value === 'rejected' || value === 'modified';
+
+const getReviewDraftStorageKey = (sessionId?: string, runId?: string) =>
+  sessionId
+    ? `cube_segmentation_review_${encodeURIComponent(sessionId)}_${encodeURIComponent(
+        runId || 'legacy'
+      )}`
+    : null;
+
+const getReviewSubmittedStorageKey = (sessionId?: string, runId?: string) =>
+  sessionId
+    ? `cube_segmentation_submitted_${encodeURIComponent(sessionId)}_${encodeURIComponent(
+        runId || 'legacy'
+      )}`
+    : null;
+
+const loadReviewSubmitted = (sessionId?: string, runId?: string): boolean => {
+  const key = getReviewSubmittedStorageKey(sessionId, runId);
+  if (!key || typeof window === 'undefined') {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(key) === 'true';
+  } catch (_) {
+    return false;
+  }
+};
+
+const persistReviewSubmitted = (sessionId?: string, runId?: string) => {
+  const key = getReviewSubmittedStorageKey(sessionId, runId);
+  if (!key || typeof window === 'undefined') {
+    return;
+  }
+  try {
+    window.localStorage.setItem(key, 'true');
+  } catch (_) {
+    // Silently ignore storage errors.
+  }
+};
+
+const loadReviewDraft = (storageKey: string | null): Record<string, ReviewStatus> => {
+  if (!storageKey || typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(storageKey) || '{}');
+    if (!saved || typeof saved !== 'object' || Array.isArray(saved)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(saved).filter(([, status]) => isSavedReviewChoice(status))
+    ) as Record<string, ReviewStatus>;
+  } catch (_) {
+    return {};
+  }
+};
+
+const loadReviewDraftForRun = (sessionId?: string, runId?: string) => {
+  const storageKey = getReviewDraftStorageKey(sessionId, runId);
+  const currentDraft = loadReviewDraft(storageKey);
+  if (Object.keys(currentDraft).length > 0 || !sessionId || !runId) {
+    return currentDraft;
+  }
+
+  // Sessions created before run-aware drafts used the legacy session-only key.
+  // Migrate it once so replaying an older hypothesis cannot drop the choice
+  // when the reconstructed manifest introduces its run ID.
+  const legacyStorageKey = getReviewDraftStorageKey(sessionId);
+  const legacyDraft = loadReviewDraft(legacyStorageKey);
+  if (Object.keys(legacyDraft).length > 0 && storageKey && typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(legacyDraft));
+      if (legacyStorageKey) {
+        window.localStorage.removeItem(legacyStorageKey);
+      }
+    } catch (_) {
+      // Continue with the in-memory migration when storage is unavailable.
+    }
+  }
+  return legacyDraft;
+};
+
+const buildReviewStatus = (
+  volumes: VolumeGif[],
+  draft: Record<string, ReviewStatus>
+): Record<string, ReviewStatus> => {
+  const next: Record<string, ReviewStatus> = {};
+  volumes.forEach(volume => {
+    const reviewKey = volume.pairId || volume.seriesInstanceUid;
+    // The draft is the user's newest choice. A replayed manifest can still
+    // contain the older accepted value until the review is consumed, or
+    // forever for an already-completed historical hypothesis.
+    // Default is 'accepted'. Only explicit user choices (rejected / modified /
+    // re-accepted) are stored in the draft. If a volume has no draft entry it
+    // was never touched, so it correctly stays 'accepted'.
+    next[reviewKey] = isSavedReviewChoice(draft[reviewKey])
+      ? draft[reviewKey]
+      : isSavedReviewChoice(volume.reviewStatus)
+        ? volume.reviewStatus
+        : 'accepted';
+  });
+  return next;
+};
+
+const getSavedReviewChoices = (reviewStatus: Record<string, ReviewStatus>) =>
+  Object.fromEntries(
+    Object.entries(reviewStatus).filter(([, status]) => isSavedReviewChoice(status))
+  ) as Record<string, 'accepted' | 'rejected' | 'modified'>;
 
 // ─── Review View ──────────────────────────────────────────────────────────────
 
@@ -26,6 +142,7 @@ function ReviewView({
   isLoading,
   isFinished,
   sessionId,
+  runId,
   onVolumeUpdated,
 }: {
   targetRoi: string;
@@ -37,12 +154,18 @@ function ReviewView({
   isLoading: boolean;
   isFinished: boolean;
   sessionId?: string;
+  runId?: string;
   onVolumeUpdated: (pairId: string, updates: Partial<VolumeGif>) => void;
 }) {
-  const [reviewStatus, setReviewStatus] = useState<Record<string, ReviewStatus>>({});
+  const reviewDraftStorageKey = getReviewDraftStorageKey(sessionId, runId);
+  const [reviewStatus, setReviewStatus] = useState<Record<string, ReviewStatus>>(() =>
+    buildReviewStatus(volumes, loadReviewDraftForRun(sessionId, runId))
+  );
   const [openingPairId, setOpeningPairId] = useState<string | null>(null);
   const [previewRefresh, setPreviewRefresh] = useState<Record<string, 'loading' | 'error'>>({});
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'submitted'>('idle');
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'submitted'>(
+    () => (loadReviewSubmitted(sessionId, runId) ? 'submitted' : 'idle')
+  );
   const [editor, setEditor] = useState<{
     volume: VolumeGif;
     reviewKey: string;
@@ -52,51 +175,82 @@ function ReviewView({
   const snackbar = useSnackbar();
 
   useEffect(() => {
+    // Re-read the persisted draft from localStorage every time the volumes
+    // list changes (e.g., new pairs streamed in, or component remounted after
+    // the user exits and re-enters a hypothesis). Using the localStorage draft
+    // as the authoritative source — rather than just the in-memory `prev` —
+    // guarantees that explicit reject/modify choices survive a remount even
+    // when the component state is freshly initialised.
+    const persistedDraft = loadReviewDraftForRun(sessionId, runId);
     setReviewStatus(prev => {
-      const next = { ...prev };
-      let changed = false;
-      volumes.forEach(v => {
-        const reviewKey = v.pairId || v.seriesInstanceUid;
-        const persistedStatus = v.reviewStatus;
-
-        // A completed review is authoritative when a session is replayed.
-        // Progressive snapshots are still pending, so preserve any local
-        // choice and retain the existing opt-out default for new masks.
-        if (
-          persistedStatus &&
-          persistedStatus !== 'pending' &&
-          next[reviewKey] !== persistedStatus
-        ) {
-          next[reviewKey] = persistedStatus;
-          changed = true;
-          return;
-        }
-
-        if (!next[reviewKey]) {
-          next[reviewKey] = 'accepted';
-          changed = true;
+      // Merge: persisted draft wins > in-memory state > volume.reviewStatus > 'accepted' (default)
+      const mergedDraft: Record<string, ReviewStatus> = { ...prev };
+      Object.entries(persistedDraft).forEach(([key, status]) => {
+        if (isSavedReviewChoice(status)) {
+          mergedDraft[key] = status;
         }
       });
-      return changed ? next : prev;
+      const next = buildReviewStatus(volumes, mergedDraft);
+      const previousKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      const unchanged =
+        previousKeys.length === nextKeys.length &&
+        nextKeys.every(key => prev[key] === next[key]);
+      return unchanged ? prev : next;
     });
-  }, [volumes]);
+  }, [volumes, sessionId, runId]);
 
   useEffect(() => {
-    setSaveState('idle');
-  }, [sessionId]);
+    if (
+      !reviewDraftStorageKey ||
+      typeof window === 'undefined' ||
+      Object.keys(reviewStatus).length === 0
+    ) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(reviewDraftStorageKey, JSON.stringify(reviewStatus));
+    } catch (_) {
+      // Browser storage is a resilience layer; review controls must still work
+      // when storage is unavailable or full.
+    }
+  }, [reviewDraftStorageKey, reviewStatus]);
+
+  useEffect(() => {
+    // When the session changes, only reset if the new session hasn't been submitted.
+    setSaveState(loadReviewSubmitted(sessionId, runId) ? 'submitted' : 'idle');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, runId]);
 
   useEffect(() => {
     if (!isFinished) {
-      setSaveState('idle');
+      // Only reset to idle when not yet submitted for this session.
+      setSaveState(prev => (prev === 'submitted' ? 'submitted' : 'idle'));
     }
   }, [isFinished]);
 
   const isReviewLocked = !isFinished || saveState !== 'idle';
 
+  const persistReviewDraft = useCallback(
+    (next: Record<string, ReviewStatus>) => {
+      if (!sessionId) {
+        return;
+      }
+      void saveSegmentationReviewDraft(sessionId, runId, getSavedReviewChoices(next)).catch(
+        error => console.error('Failed to persist segmentation review draft:', error)
+      );
+    },
+    [runId, sessionId]
+  );
+
   const handleToggle = useCallback(
-    (uid: string, status: 'accepted' | 'rejected' | 'modified') =>
-      setReviewStatus(prev => ({ ...prev, [uid]: status })),
-    []
+    (uid: string, status: 'accepted' | 'rejected' | 'modified') => {
+      const next = { ...reviewStatus, [uid]: status };
+      setReviewStatus(next);
+      persistReviewDraft(next);
+    },
+    [persistReviewDraft, reviewStatus]
   );
 
   const handleAcceptAll = useCallback(() => {
@@ -105,7 +259,8 @@ function ReviewView({
       s[v.pairId || v.seriesInstanceUid] = 'accepted';
     });
     setReviewStatus(s);
-  }, [volumes]);
+    persistReviewDraft(s);
+  }, [persistReviewDraft, volumes]);
 
   const handleRejectAll = useCallback(() => {
     const s: Record<string, ReviewStatus> = {};
@@ -113,7 +268,8 @@ function ReviewView({
       s[v.pairId || v.seriesInstanceUid] = 'rejected';
     });
     setReviewStatus(s);
-  }, [volumes]);
+    persistReviewDraft(s);
+  }, [persistReviewDraft, volumes]);
 
   const handleModify = async (volume: VolumeGif) => {
     const uid = volume.seriesInstanceUid;
@@ -233,7 +389,12 @@ function ReviewView({
     const modified = Object.keys(reviewStatus).filter(uid => reviewStatus[uid] === 'modified');
     setSaveState('saving');
     const saved = await onSave({ accepted, rejected, modified });
-    setSaveState(saved ? 'submitted' : 'idle');
+    if (saved) {
+      persistReviewSubmitted(sessionId, runId);
+      setSaveState('submitted');
+    } else {
+      setSaveState('idle');
+    }
   };
 
   const acceptedCount = Object.values(reviewStatus).filter(s => s === 'accepted').length;
@@ -577,6 +738,7 @@ function ReviewView({
 
 export default function SegmentationView({ segmentationData }: ReviewContainerProps) {
   const [data, setData] = useState<{
+    runId?: string;
     targetRoi: string;
     selectedModel: string;
     volumes: VolumeGif[];
@@ -585,6 +747,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
     sessionId?: string;
     isFinished: boolean;
   }>({
+    runId: undefined,
     targetRoi: '-',
     selectedModel: '-',
     volumes: [],
@@ -605,6 +768,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
       segmentationData?.isFinished
     ) {
       setData({
+        runId: segmentationData.runId,
         targetRoi: segmentationData.targetRoi || '-',
         selectedModel: segmentationData.selectedModel || '-',
         volumes: segmentationData.volumes || [],
@@ -616,6 +780,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
       setIsLoading(false);
     } else if (!segmentationData) {
       setData({
+        runId: undefined,
         targetRoi: '-',
         selectedModel: '-',
         volumes: [],
@@ -679,7 +844,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
 
   return (
     <ReviewView
-      key={data.sessionId || 'no-session'}
+      key={`${data.sessionId || 'no-session'}:${data.runId || 'legacy'}`}
       targetRoi={data.targetRoi}
       selectedModel={data.selectedModel}
       volumes={data.volumes}
@@ -689,6 +854,7 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
       isLoading={isLoading}
       isFinished={data.isFinished}
       sessionId={data.sessionId}
+      runId={data.runId}
       onVolumeUpdated={handleVolumeUpdated}
     />
   );

@@ -270,6 +270,7 @@ class ProgressiveSnapshotTests(unittest.TestCase):
                         "pair_id": pair_id,
                         "artifact_key": artifact_key,
                         "sequence_index": index,
+                        "run_id": "review-run-1",
                         "volume_uid": pair_id.split("__", 1)[0],
                         "target_id": pair_id.split("__", 1)[1],
                         "canonical_label": pair_id.split("__", 1)[1],
@@ -296,6 +297,7 @@ class ProgressiveSnapshotTests(unittest.TestCase):
             )
 
             self.assertEqual(snapshot["failedVolumes"], [])
+            self.assertEqual(snapshot["runId"], "review-run-1")
             self.assertEqual(
                 {
                     entry["pairId"]: entry["reviewStatus"]

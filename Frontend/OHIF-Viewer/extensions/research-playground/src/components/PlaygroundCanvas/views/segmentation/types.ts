@@ -23,6 +23,7 @@ export interface SegmentationProgress {
 }
 
 export interface SegmentationData {
+    runId?: string;
     volumes?: VolumeGif[];
     failedVolumes?: FailedVolume[];
     progress?: SegmentationProgress;
