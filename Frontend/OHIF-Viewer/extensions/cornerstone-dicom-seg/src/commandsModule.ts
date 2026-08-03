@@ -204,7 +204,7 @@ const commandsModule = ({
       // Todo: handle adding more than one segmentation
       const displaySet = displaySets[0];
 
-      updateViewportsForSegmentationRendering({
+      return updateViewportsForSegmentationRendering({
         viewportId,
         servicesManager,
         referencedDisplaySetInstanceUID: displaySet.referencedDisplaySetInstanceUID,

@@ -1,13 +1,26 @@
-.modelSelector .table {
+.modelSelector {
+  line-height: 1.5;
+}
+
+.modelSelector .modelSelector__table {
   border-collapse: collapse;
   border: 0 solid;
   width: 100%;
+  margin-bottom: 6px;
 }
-.modelSelector .table tr td {
+.modelSelector .modelSelector__table tr td {
   border: 0 solid;
+}
+.modelSelector .modelSelector__label {
+  padding-bottom: 7px !important;
+  font-weight: 600;
 }
 .modelSelector .selectBox {
   width: 100%;
+}
+.modelSelector p {
+  margin: 10px 4px 4px;
+  line-height: 1.55;
 }
 .modelSelector .actionButton {
   border: 2px solid #000;
@@ -18,6 +31,10 @@
   padding: 0 15px;
   outline: none;
   cursor: pointer;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
 }
 .modelSelector .actionButton:hover,
 .modelSelector .actionButton:active {
@@ -30,4 +47,34 @@
   margin-right: 4px;
   position: relative;
   top: 2px;
+}
+
+.modelSelector__spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: monai-model-spinner 0.75s linear infinite;
+}
+
+.modelSelector__status {
+  margin: 8px 4px 4px;
+  padding: 8px 10px;
+  border-radius: 5px;
+  background: #101c35;
+  color: #a9c7e8;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.modelSelector__status--error {
+  border-left: 3px solid #ef6a6a;
+  color: #ffd0d0;
+}
+
+@keyframes monai-model-spinner {
+  to {
+    transform: rotate(360deg);
+  }
 }

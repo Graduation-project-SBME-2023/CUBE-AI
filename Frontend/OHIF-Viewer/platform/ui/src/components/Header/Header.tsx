@@ -26,12 +26,12 @@ function Header({
 
   return (
     <NavBar
-      className="justify-between border-b border-[#1a2333]"
+      className="relative justify-between border-b border-[#1a2333]"
       isSticky={isSticky}
     >
-      <div className="flex flex-1 justify-between">
+      <div className="relative flex flex-1 items-center justify-end">
         {isReturnEnabled && (
-          <div className="flex items-center">
+          <div className="absolute left-0 flex items-center">
             <div
               className="mr-3 inline-flex cursor-pointer items-center"
               onClick={onClickReturn}
@@ -44,7 +44,9 @@ function Header({
             </div>
           </div>
         )}
-        <div className="flex items-center">{children}</div>
+        <div className="absolute left-1/2 flex -translate-x-1/2 items-center justify-center">
+          {children}
+        </div>
 
         <div className="flex items-center">
           <span className="text-[#91b9cd] mr-3 text-lg">{t('INVESTIGATIONAL USE ONLY')}</span>

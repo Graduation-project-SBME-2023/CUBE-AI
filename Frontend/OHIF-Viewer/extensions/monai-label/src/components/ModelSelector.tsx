@@ -3,7 +3,6 @@ import PropTypes from 'prop-types';
 
 import './ModelSelector.css';
 
-
 export default class ModelSelector extends Component {
   static propTypes = {
     name: PropTypes.string,
@@ -15,40 +14,48 @@ export default class ModelSelector extends Component {
     onSelectModel: PropTypes.func,
     scribblesSelector: PropTypes.any,
     isDisabled: PropTypes.bool,
+    statusMessage: PropTypes.string,
+    statusType: PropTypes.string,
   };
 
   constructor(props) {
     super(props);
 
-    // Select 'sam' if it's found in the models array, otherwise use the first model or default to an empty string
-    const currentModel = props.models.includes('sam')
-      ? 'sam'
-      : props.currentModel || (props.models.length > 0 ? props.models[0] : '');
+    const currentModel =
+      props.currentModel || (props.models.length > 0 ? props.models[0] : '');
 
     this.state = {
       models: props.models,
       currentModel: currentModel,
       buttonDisabled: false,
     };
-
   }
 
   static getDerivedStateFromProps(props, current_state) {
-    if (current_state.models !== props.models) {
-      // Check for 'sam' in the updated models list
-      const currentModel = props.models.includes('sam') ? 'sam' : (props.models.length > 0 ? props.models[0] : '');
+    const modelsChanged =
+      current_state.models.length !== props.models.length ||
+      current_state.models.some(
+        (model, index) => model !== props.models[index]
+      );
+    const currentModel =
+      props.currentModel ||
+      (props.models.includes(current_state.currentModel)
+        ? current_state.currentModel
+        : props.models[0] || '');
 
+    if (modelsChanged || currentModel !== current_state.currentModel) {
       return {
         models: props.models,
-        currentModel: currentModel,
+        currentModel,
       };
     }
     return null;
   }
 
-  onChangeModel = evt => {
-
-    if (this.props.isDisabled) return; // Disable model change if isDisabled is true
+  onChangeModel = (evt) => {
+    if (this.props.isDisabled) {
+      return;
+    }
 
     this.setState({ currentModel: evt.target.value });
     // AutoSegmentation.clearSam2UIContrainers();
@@ -59,7 +66,9 @@ export default class ModelSelector extends Component {
     //   AutoSegmentation.calculateImageEmbeddings(false);
     // }
 
-    if (this.props.onSelectModel) this.props.onSelectModel(evt.target.value);
+    if (this.props.onSelectModel) {
+      this.props.onSelectModel(evt.target.value);
+    }
   };
 
   currentModel = () => {
@@ -73,27 +82,32 @@ export default class ModelSelector extends Component {
       return;
     }
 
-    let model = this.state.currentModel;
+    let model = this.currentModel();
     if (!model) {
       console.error('This should never happen!');
       model = this.props.models.length > 0 ? this.props.models[0] : '';
     }
 
     this.setState({ buttonDisabled: true });
-    await this.props.onClick(model);
-    this.setState({ buttonDisabled: false });
+    try {
+      await this.props.onClick(model);
+    } finally {
+      this.setState({ buttonDisabled: false });
+    }
   };
 
   render() {
     const currentModel = this.currentModel();
-    const buttonText = currentModel === 'sam' ? 'Propagate' : 'Run';  // Change button text based on current model
+    const buttonText = 'Run';
 
     return (
       <div className="modelSelector">
-        <table>
+        <table className="modelSelector__table">
           <tbody>
             <tr>
-              <td colSpan="3">Models:</td>
+              <td className="modelSelector__label" colSpan="3">
+                Model
+              </td>
             </tr>
             <tr>
               <td width="80%">
@@ -103,7 +117,7 @@ export default class ModelSelector extends Component {
                   value={currentModel}
                   disabled={this.props.isDisabled}
                 >
-                  {this.props.models.map(model => (
+                  {this.props.models.map((model) => (
                     <option key={model} name={model} value={model}>
                       {`${model} `}
                     </option>
@@ -117,16 +131,19 @@ export default class ModelSelector extends Component {
                   onClick={this.onClickBtn}
                   title={'Run ' + this.props.title}
                   disabled={
-                    this.state.isButtonDisabled || !this.props.models.length || this.props.isDisabled
+                    this.state.buttonDisabled ||
+                    !this.props.models.length ||
+                    this.props.isDisabled
                   }
-                  style={{
-                    display: this.props.onClick ? 'block' : 'none',
-                    fontSize: '12px',
-                    padding: '2px 15px',
-                    background: "#010839ff",
-                    color: "#7bcfe9ff"
-                  }}
+                  aria-busy={this.state.buttonDisabled}
+                  style={{ display: this.props.onClick ? 'flex' : 'none' }}
                 >
+                  {this.state.buttonDisabled && (
+                    <span
+                      className="modelSelector__spinner"
+                      aria-hidden="true"
+                    />
+                  )}
                   {buttonText}
                 </button>
               </td>
@@ -135,6 +152,16 @@ export default class ModelSelector extends Component {
           </tbody>
         </table>
         {this.props.usage}
+        {this.props.statusMessage && (
+          <div
+            className={`modelSelector__status modelSelector__status--${
+              this.props.statusType || 'info'
+            }`}
+            role="status"
+          >
+            {this.props.statusMessage}
+          </div>
+        )}
       </div>
     );
   }

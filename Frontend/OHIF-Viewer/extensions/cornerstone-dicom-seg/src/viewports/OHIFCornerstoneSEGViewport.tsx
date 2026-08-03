@@ -292,7 +292,7 @@ function OHIFCornerstoneSEGViewport(props) {
   } = referencedDisplaySetRef.current.metadata;
 
   const hydrateSEGDisplaySet = ({ segDisplaySet, viewportId }) => {
-    commandsManager.runCommand('loadSegmentationDisplaySetsForViewport', {
+    return commandsManager.runCommand('loadSegmentationDisplaySetsForViewport', {
       displaySets: [segDisplaySet],
       viewportId,
     });

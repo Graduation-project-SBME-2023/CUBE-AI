@@ -1,20 +1,11 @@
 import React from 'react';
 import ModelSelector from '../ModelSelector';
 import BaseTab from './BaseTab';
-import { getRenderingEngines, utilities as csUtils } from '@cornerstonejs/core';
-import getActiveViewportEnabledElement from '../../../../cornerstone/src/utils/getActiveViewportEnabledElement';
-import { getEnabledElement } from '@cornerstonejs/core';
-import { getEnabledElement as OHIFgetEnabledElement } from '../../../../cornerstone/src/state';
 // import { getPatientName } from '../../../../../platform/app/src/routes/WorkList/WorkList'
-import { vec3 } from 'gl-matrix';
 import VistaLabels from '../../components/Toolbox/VistaLabels.json';
-
-
 
 export default class AutoSegmentation extends BaseTab {
   static instance = null; // Static reference to hold the instance
-  currentSlice: any;
-
   //To terminate SAM2-Calc-Img-Embeddings request
   embeddingAbortController = null;
 
@@ -30,18 +21,20 @@ export default class AutoSegmentation extends BaseTab {
     // Convert the JSON to an array of {name, value} pairs
     const vistaClasses = Object.entries(VistaLabels).map(([name, value]) => ({
       name,
-      value
+      value,
     }));
 
-
     this.state = {
-      currentModel: 'vista', 
+      currentModel: 'vista',
       selectedQueue: null,
 
       vistaMode: 'automatic', // 'automatic' or 'interactive'
       vistaSelectedClass: vistaClasses[0] || { name: 'liver', value: 1 }, // default to first class
       vistaClasses: vistaClasses, // store the array in state
-
+      vistaClassSearch: '',
+      vistaClassSearchOpen: false,
+      statusMessage: '',
+      statusType: 'info',
     };
 
     //initialize a viewportGridService for sam2 functionalities
@@ -55,7 +48,6 @@ export default class AutoSegmentation extends BaseTab {
       'mpr-sagittal': 0,
       'mpr-coronal': 0,
     };
-
   }
   /*
    Clear the static reference when unmounted
@@ -64,15 +56,59 @@ export default class AutoSegmentation extends BaseTab {
     AutoSegmentation.instance = null;
   }
 
-  
-  // Update your handleClassChange to store the selected class object for vista
-  handleClassChange = (event) => {
-    const selectedName = event.target.value;
-    const selectedClass = this.state.vistaClasses.find(cls => cls.name === selectedName);
-    this.setState({ vistaSelectedClass: selectedClass });
-    console.log("selectedName", selectedName)
-    console.log("selectedClass", selectedClass)
-    console.log("this.state.vistaSelectedClass", this.state.vistaSelectedClass)
+  selectVistaClass = (selectedName) => {
+    const selectedClass = this.state.vistaClasses.find(
+      (cls) => cls.name === selectedName
+    );
+    if (!selectedClass) {
+      return;
+    }
+
+    this.setState({
+      vistaSelectedClass: selectedClass,
+      vistaClassSearch: selectedClass.name,
+      vistaClassSearchOpen: false,
+    });
+  };
+
+  handleClassSearchChange = (event) => {
+    const searchText = event.target.value;
+    const exactMatch = this.state.vistaClasses.find(
+      (cls) => cls.name.toLowerCase() === searchText.trim().toLowerCase()
+    );
+    this.setState({
+      vistaClassSearch: searchText,
+      vistaClassSearchOpen: true,
+      ...(exactMatch ? { vistaSelectedClass: exactMatch } : {}),
+    });
+  };
+
+  handleClassSearchKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      this.setState({ vistaClassSearchOpen: false });
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      const firstMatch = this.getMatchingVistaClasses(
+        this.state.vistaClassSearch
+      )[0];
+      if (firstMatch) {
+        event.preventDefault();
+        this.selectVistaClass(firstMatch.name);
+      }
+    }
+  };
+
+  getMatchingVistaClasses = (searchText) => {
+    const normalizedSearch = searchText.trim().toLowerCase();
+    return this.state.vistaClasses
+      .filter((cls) => cls.name.toLowerCase().includes(normalizedSearch))
+      .sort((a, b) => {
+        const aStartsWith = a.name.toLowerCase().startsWith(normalizedSearch);
+        const bStartsWith = b.name.toLowerCase().startsWith(normalizedSearch);
+        return Number(bStartsWith) - Number(aStartsWith);
+      });
   };
 
   // Struct for segmentation enqueue request
@@ -90,12 +126,9 @@ export default class AutoSegmentation extends BaseTab {
   }
 
   onSelectModel = (model) => {
-
-    this.setState(
-      {
-        currentModel: model
-      },);
-
+    this.setState({
+      currentModel: model,
+    });
   };
 
   // Set the selected queue to the current selected one
@@ -105,55 +138,49 @@ export default class AutoSegmentation extends BaseTab {
     this.setState({ selectedQueue });
   };
 
-
   generateSessionId = () => {
     return `session-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
   };
 
-
   //parse multipart form data and extract the mask
   onSegmentation = async (samCheck = true) => {
-
+    this.setState({ statusMessage: '', statusType: 'info' });
     const { info, viewConstants } = this.props;
     const image = viewConstants.SeriesInstanceUID;
     const model = this.modelSelector.current.currentModel();
     const config = this.props.onOptionsConfig();
-    const params =
-      config && config.infer && config.infer[model] ? config.infer[model] : {};
-
-    const nid = this.notification.show({
-      title: 'MONAI Label',
-      message: 'Running Auto-Segmentation...',
-      type: 'info',
-      duration: 60000,
-    });
+    const params = {
+      ...(config && config.infer && config.infer[model]
+        ? config.infer[model]
+        : {}),
+    };
 
     //if vista
-    if (model == 'vista') {
-        //send class value
-        params.Class = this.state.vistaSelectedClass.value;
-        console.log("params.Class", params.Class);
-      
+    if (model === 'vista') {
+      //send class value
+      params.Class = this.state.vistaSelectedClass.value;
+      console.log('params.Class', params.Class);
     }
 
     const labels = info.models[model].labels;
-    const response = await this.props
-      .client()
-      .segmentation(model, image, params);
-    console.log("the parameters for model autoseg run", params);
-
-    if (!nid) {
-      window.snackbar.hideAll();
-    } else {
-      this.notification.hide(nid);
+    let response;
+    try {
+      response = await this.props.client().segmentation(model, image, params);
+    } catch (error) {
+      console.error(`Failed to run ${model} auto-segmentation`, error);
+      this.setState({
+        statusMessage: 'Segmentation could not be completed. Please try again.',
+        statusType: 'error',
+      });
+      return;
     }
+    console.log('the parameters for model autoseg run', params);
 
     if (response.status !== 200) {
-      this.notification.show({
-        title: 'MONAI Label',
-        message: 'Failed to Run Segmentation',
-        type: 'error',
-        duration: 5000,
+      this.setState({
+        statusMessage:
+          'Segmentation failed. Please check the model and try again.',
+        statusType: 'error',
       });
     } else {
       await this.props.updateView(response, labels, model);
@@ -169,20 +196,25 @@ export default class AutoSegmentation extends BaseTab {
   };
 
   render() {
-  let models = [];
+    const models = [];
 
-  if (this.props.info && this.props.info.models) {
-    for (let [name, model] of Object.entries(this.props.info.models)) {
-      if (
-        model.type === 'segmentation' &&
-        name !== 'sam' &&
-        name !== 'nninteractive' &&
-        name !== 'voxtell'
-      ) {
-        models.push(name);
+    if (this.props.info && this.props.info.models) {
+      for (const [name, model] of Object.entries(this.props.info.models)) {
+        if (
+          model.type === 'segmentation' &&
+          name !== 'sam' &&
+          name !== 'nninteractive' &&
+          name !== 'voxtell'
+        ) {
+          models.push(name);
+        }
       }
     }
-  }
+
+    const filteredVistaClasses = this.getMatchingVistaClasses(
+      this.state.vistaClassSearch
+    );
+    const visibleVistaClasses = filteredVistaClasses.slice(0, 8);
 
     return (
       <div className="tab">
@@ -214,6 +246,8 @@ export default class AutoSegmentation extends BaseTab {
             currentModel={this.state.currentModel}
             onClick={this.onSegmentation}
             onSelectModel={this.onSelectModel}
+            statusMessage={this.state.statusMessage}
+            statusType={this.state.statusType}
             usage={
               <p style={{ fontSize: 'smaller' }}>
                 Fully automated segmentation <b>without any user prompt</b>.
@@ -223,75 +257,120 @@ export default class AutoSegmentation extends BaseTab {
           />
 
           {this.state.currentModel === 'vista' && (
-            <div style={{
-              width: '80%',
-              margin: '10px 0',
-              borderTop: '1px solid #eee',
-              paddingTop: '15px'
-            }}>
-       
-
+            <div
+              style={{
+                width: '80%',
+                margin: '10px 0',
+                borderTop: '1px solid #eee',
+                paddingTop: '15px',
+              }}
+            >
               {/* Conditional Rendering (keep the rest of your existing code here) */}
-            {this.state.vistaMode === 'automatic' ? (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center', // 1. Centers the Label + Input group
-                width: '100%',            // 2. Ensures the container uses available space
-                padding: '0 5px',         // 3. Adds a tiny safety buffer on the sides
-                boxSizing: 'border-box',  // 4. Prevents padding from causing overflow
-                gap: '10px'
-              }}>
-                <label
-                  htmlFor="vista-classes"
+              {this.state.vistaMode === 'automatic' ? (
+                <div
                   style={{
-                    fontSize: '14px',     // Adjusted slightly for balance
-                    fontWeight: '500',
-                    color: '#333',
-                    whiteSpace: 'nowrap'
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'stretch',
+                    width: '100%', // 2. Ensures the container uses available space
+                    padding: '0 5px', // 3. Adds a tiny safety buffer on the sides
+                    boxSizing: 'border-box', // 4. Prevents padding from causing overflow
+                    gap: '8px',
                   }}
                 >
-                  Class:
-                </label>
-                <select
-                  id="vista-classes"
-                  value={this.state.vistaSelectedClass.name}
-                  onChange={this.handleClassChange}
-                  style={{
-                    flex: 1,                 // 5. Allows the input to fill space...
-                    maxWidth: '160px',       // 6. ...but stops it before hitting the edge
-                    padding: '4px 8px',      // Increased padding slightly for better look
-                    borderRadius: '6px',
-                    border: '1px solid #ccc',
-                    backgroundColor: '#fff',
-                    fontSize: '12px',        // Matched font size to look proportional
-                    outline: 'none',
-                    cursor: 'pointer'
-                  }}
-                >
-                  {this.state.vistaClasses.map((cls) => (
-                    <option key={cls.name} value={cls.name}>
-                      {cls.name}
-                    </option>
-                  ))}
-                </select>
+                  <label
+                    htmlFor="vista-class-search"
+                    style={{
+                      fontSize: '14px', // Adjusted slightly for balance
+                      fontWeight: '500',
+                      color: '#333',
+                    }}
+                  >
+                    Search label
+                  </label>
+                  <input
+                    id="vista-class-search"
+                    type="text"
+                    value={this.state.vistaClassSearch}
+                    onChange={this.handleClassSearchChange}
+                    onFocus={() =>
+                      this.setState({ vistaClassSearchOpen: true })
+                    }
+                    onBlur={() =>
+                      this.setState({ vistaClassSearchOpen: false })
+                    }
+                    onKeyDown={this.handleClassSearchKeyDown}
+                    placeholder="Type label name..."
+                    autoComplete="off"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    aria-expanded={this.state.vistaClassSearchOpen}
+                    aria-controls="vista-class-matches"
+                  />
+                  {this.state.vistaClassSearchOpen && (
+                    <div
+                      id="vista-class-matches"
+                      role="listbox"
+                      aria-label="Matching Vista labels"
+                      style={{
+                        maxHeight: '190px',
+                        overflowY: 'auto',
+                        border: '1px solid #1e3058',
+                        borderRadius: '6px',
+                        background: '#071020',
+                      }}
+                    >
+                      {!visibleVistaClasses.length ? (
+                        <div style={{ padding: '8px', color: '#7a9cc8' }}>
+                          No matching labels
+                        </div>
+                      ) : (
+                        visibleVistaClasses.map((cls) => (
+                          <button
+                            key={cls.name}
+                            type="button"
+                            role="option"
+                            aria-selected={
+                              cls.name === this.state.vistaSelectedClass.name
+                            }
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              this.selectVistaClass(cls.name);
+                            }}
+                            style={{
+                              display: 'block',
+                              width: '100%',
+                              padding: '8px 10px',
+                              border: 'none',
+                              borderBottom: '1px solid #1a2540',
+                              background:
+                                cls.name === this.state.vistaSelectedClass.name
+                                  ? '#17345d'
+                                  : 'transparent',
+                              color: '#c8d8f0',
+                              textAlign: 'left',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {cls.name}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
-                
-                  <div style={{
-                  display: 'flex',
-                  alignItems: 'center', // Vertically center items
-                  justifyContent: 'center',
-                  marginBottom: '15px'
-                }}> 
-                   
-                 
-                </div>
-                 
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center', // Vertically center items
+                    justifyContent: 'center',
+                    marginBottom: '15px',
+                  }}
+                ></div>
               )}
             </div>
           )}
-
         </div>
       </div>
     );

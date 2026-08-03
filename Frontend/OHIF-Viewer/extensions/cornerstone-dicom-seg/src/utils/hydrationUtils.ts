@@ -1,4 +1,22 @@
 import { Enums, cache } from '@cornerstonejs/core';
+import { utilities as csToolsUtils } from '@cornerstonejs/tools';
+
+function getDisplaySetFrameOfReferenceUID(displaySet) {
+  const referencedFrameOfReferenceSequence = Array.isArray(
+    displaySet?.instance?.ReferencedFrameOfReferenceSequence
+  )
+    ? displaySet.instance.ReferencedFrameOfReferenceSequence[0]
+    : displaySet?.instance?.ReferencedFrameOfReferenceSequence;
+
+  return (
+    displaySet?.frameOfReferenceUID ||
+    displaySet?.FrameOfReferenceUID ||
+    displaySet?.instances?.[0]?.FrameOfReferenceUID ||
+    displaySet?.images?.[0]?.FrameOfReferenceUID ||
+    displaySet?.instance?.FrameOfReferenceUID ||
+    referencedFrameOfReferenceSequence?.FrameOfReferenceUID
+  );
+}
 
 /**
  * Updates the viewports in preparation for rendering segmentations.
@@ -25,8 +43,13 @@ async function updateViewportsForSegmentationRendering({
   servicesManager: any;
   referencedDisplaySetInstanceUID?: string;
 }) {
-  const { cornerstoneViewportService, segmentationService, viewportGridService } =
-    servicesManager.services;
+  const {
+    cornerstoneViewportService,
+    displaySetService,
+    segmentationService,
+    toolGroupService,
+    viewportGridService,
+  } = servicesManager.services;
 
   const viewport = getTargetViewport({ viewportId, viewportGridService });
   const targetViewportId = viewport.viewportOptions.viewportId;
@@ -42,9 +65,53 @@ async function updateViewportsForSegmentationRendering({
 
   // create Segmentation callback which needs to be waited until
   // the volume is created (if coming from stack)
+  let segmentationPromise;
+
   const createSegmentationForVolume = async () => {
     const segmentationId = await loadFn();
+    const segmentation = segmentationService.getSegmentation(segmentationId);
+    const referencedDisplaySet = displaySetService.getDisplaySetByUID(
+      referencedDisplaySetInstanceUID
+    );
+    const referencedFrameOfReferenceUID = getDisplaySetFrameOfReferenceUID(referencedDisplaySet);
+
+    // A DICOM SEG belongs to the referenced image series. Prefer that series'
+    // Frame of Reference over incomplete or inconsistent SEG metadata so the
+    // representation can be associated with the active viewport reliably.
+    if (segmentation && referencedFrameOfReferenceUID) {
+      segmentation.FrameOfReferenceUID = referencedFrameOfReferenceUID;
+    }
+
     segmentationService.hydrateSegmentation(segmentationId);
+
+    const toolGroup = toolGroupService.getToolGroupForViewport(targetViewportId);
+    if (toolGroup) {
+      const representations =
+        segmentationService.getSegmentationRepresentationsForToolGroup(toolGroup.id) || [];
+      const representationExists = representations.some(
+        representation => representation.segmentationId === segmentationId
+      );
+
+      if (!representationExists) {
+        await segmentationService.addSegmentationRepresentationToToolGroup(
+          toolGroup.id,
+          segmentationId,
+          false,
+          segmentation?.type
+        );
+      }
+
+      csToolsUtils.segmentation.triggerSegmentationRender(toolGroup.id);
+    }
+
+    cornerstoneViewportService.getCornerstoneViewport(targetViewportId)?.render();
+
+    return segmentationId;
+  };
+
+  const createSegmentationOnce = () => {
+    segmentationPromise ||= createSegmentationForVolume();
+    return segmentationPromise;
   };
 
   // the reference volume that is used to draw the segmentation. so check if the
@@ -53,7 +120,9 @@ async function updateViewportsForSegmentationRendering({
     volumeId.includes(referencedDisplaySetInstanceUID)
   );
 
-  updatedViewports.forEach(async viewport => {
+  let targetViewportHydrationPromise;
+
+  updatedViewports.forEach(viewport => {
     viewport.viewportOptions = {
       ...viewport.viewportOptions,
       viewportType: 'volume',
@@ -67,14 +136,28 @@ async function updateViewportsForSegmentationRendering({
     // only run the createSegmentationForVolume for the targetViewportId
     // since the rest will get handled by cornerstoneViewportService
     if (volumeExists && viewportId === targetViewportId) {
-      await createSegmentationForVolume();
+      targetViewportHydrationPromise = createSegmentationOnce();
       return;
+    }
+
+    let resolveTargetViewportHydration;
+    let rejectTargetViewportHydration;
+
+    if (viewportId === targetViewportId) {
+      targetViewportHydrationPromise = new Promise((resolve, reject) => {
+        resolveTargetViewportHydration = resolve;
+        rejectTargetViewportHydration = reject;
+      });
     }
 
     const createNewSegmentationWhenVolumeMounts = async evt => {
       const isTheActiveViewportVolumeMounted = evt.detail.volumeActors?.find(ac =>
         ac.uid.includes(referencedDisplaySetInstanceUID)
       );
+
+      if (!isTheActiveViewportVolumeMounted) {
+        return;
+      }
 
       // Note: make sure to re-grab the viewport since it might have changed
       // during the time it took for the volume to be mounted, for instance
@@ -87,13 +170,13 @@ async function updateViewportsForSegmentationRendering({
         createNewSegmentationWhenVolumeMounts
       );
 
-      if (!isTheActiveViewportVolumeMounted) {
-        // it means it is one of those other updated viewports so just update the camera
-        return;
-      }
-
       if (viewportId === targetViewportId) {
-        await createSegmentationForVolume();
+        try {
+          await createSegmentationOnce();
+          resolveTargetViewportHydration?.(true);
+        } catch (error) {
+          rejectTargetViewportHydration?.(error);
+        }
       }
     };
 
@@ -105,6 +188,8 @@ async function updateViewportsForSegmentationRendering({
 
   // Set the displaySets for the viewports that require to be updated
   viewportGridService.setDisplaySetsForViewports(updatedViewports);
+
+  await targetViewportHydrationPromise;
 
   return true;
 }
@@ -149,7 +234,14 @@ function getUpdatedViewportsForSegmentation({
     referencedDisplaySetInstanceUID || displaySetInstanceUIDs[0];
 
   const referencedDisplaySet = displaySetService.getDisplaySetByUID(referenceDisplaySetInstanceUID);
-  const segmentationFrameOfReferenceUID = referencedDisplaySet.instances[0].FrameOfReferenceUID;
+  const segmentationFrameOfReferenceUID = getDisplaySetFrameOfReferenceUID(referencedDisplaySet);
+
+  if (!segmentationFrameOfReferenceUID) {
+    return hangingProtocolService.getViewportsRequireUpdate(
+      targetViewportId,
+      referenceDisplaySetInstanceUID
+    );
+  }
 
   const updatedViewports = hangingProtocolService.getViewportsRequireUpdate(
     targetViewportId,
