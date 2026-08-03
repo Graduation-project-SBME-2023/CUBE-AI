@@ -32,7 +32,14 @@ class ModelingAgent(AssistantAgent):
                          max_tool_iterations=max_tool_iterations)
 
     @classmethod
-    async def create(cls, model_client=None, workspace_folder=None, mcp_server_path=None, session_id=None):
+    async def create(
+        cls,
+        model_client=None,
+        workspace_folder=None,
+        mcp_server_path=None,
+        session_id=None,
+        max_tool_iterations=40,
+    ):
         model_client = OllamaClient() if not model_client else model_client
         if not mcp_server_path:
             mcp_server_path = os.path.abspath(
@@ -56,10 +63,28 @@ class ModelingAgent(AssistantAgent):
         except Exception as exc:
             logger.exception("Failed to initialize MCP tools from %s", mcp_server_path)
             raise RuntimeError(f"Failed to initialize MCP tools from {mcp_server_path}") from exc
-        desired_mcp_tools = ['read_agent_task_context', 'pycaret_train_classifier', 'pycaret_run_inference', 'scratchpad_register_agent', 'scratchpad_write_note', 'scratchpad_raise_flag',
-                             'scratchpad_write_summary', 'scratchpad_set_status', 'scratchpad_read_agent',
-                             'write_agent_output', 'browse_workspace']
         
+        desired_mcp_tools = [
+            'read_agent_task_context',
+            'radiomics_inspect_dataset',
+            'radiomics_train_classifier',
+            'radiomics_train_regressor',
+            'pycaret_train_classifier',
+            'pycaret_run_inference',
+            'pycaret_train_regressor',
+            'pycaret_run_regression_inference',
+            'scratchpad_register_agent',
+            'scratchpad_write_note',
+            'scratchpad_raise_flag',
+            'scratchpad_write_summary',
+            'scratchpad_set_status',
+            'scratchpad_read_agent',
+            'read_agent_output',
+            'read_all_agent_outputs',
+            'write_agent_output',
+            'browse_workspace',
+        ]
+
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
         # modelling_classification_tool_wrapper = FunctionTool(
         #     func=classification_modelling,
@@ -86,7 +111,7 @@ class ModelingAgent(AssistantAgent):
             tools=tools,
             description=description,
             system_message=system_message,
-            max_tool_iterations=20
+            max_tool_iterations=max_tool_iterations
         )
 
     @staticmethod

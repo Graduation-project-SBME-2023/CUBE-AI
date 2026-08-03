@@ -1365,6 +1365,72 @@ async def upload_targets(
     session_id: str = Query(..., description="The ID of the current session"),
     file: UploadFile = File(...)
 ):
+    import csv as csv_mod
+    import io
+
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Please upload a CSV target file.")
+
+    raw_targets = await file.read()
+    try:
+        decoded_targets = raw_targets.decode("utf-8-sig")
+        rows = list(csv_mod.DictReader(io.StringIO(decoded_targets)))
+    except (UnicodeDecodeError, csv_mod.Error) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid CSV file: {exc}") from exc
+    if not rows:
+        raise HTTPException(status_code=400, detail="The target CSV has no data rows.")
+
+    columns = list(rows[0].keys())
+    aliases = ("target", "y", "label", "outcome", "response", "endpoint")
+    target_column = next(
+        (column for alias in aliases for column in columns if column.strip().casefold() == alias),
+        None,
+    )
+    identifier_aliases = {"id", "subject_id", "patient_id", "case_id", "name", "uid"}
+    id_column = next(
+        (column for column in columns if column.strip().casefold() in identifier_aliases),
+        None,
+    )
+    if target_column is None:
+        non_identifier = [
+            column for column in columns
+            if column.strip().casefold() not in identifier_aliases
+        ]
+        if len(non_identifier) == 1:
+            target_column = non_identifier[0]
+    if target_column is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Could not identify the outcome column. Name it 'y', 'target', 'label', "
+                "'outcome', 'response', or 'endpoint'."
+            ),
+        )
+    if id_column is None:
+        id_candidates = [column for column in columns if column != target_column]
+        id_column = id_candidates[0] if len(id_candidates) == 1 else None
+    if id_column is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not identify the patient ID column in the target CSV.",
+        )
+    if any(not str(row.get(target_column, "")).strip() for row in rows):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Target column '{target_column}' contains missing values.",
+        )
+    identifiers = [str(row.get(id_column, "")).strip() for row in rows]
+    if any(not identifier for identifier in identifiers):
+        raise HTTPException(
+            status_code=400,
+            detail=f"ID column '{id_column}' contains missing values.",
+        )
+    if len(set(identifiers)) != len(identifiers):
+        raise HTTPException(
+            status_code=400,
+            detail=f"ID column '{id_column}' contains duplicate values.",
+        )
+
     # 1. Get the base workspace directory, matching your run_planner logic
     current_dir = os.path.dirname(os.path.abspath(__file__))
     base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
@@ -1381,14 +1447,16 @@ async def upload_targets(
     # 4. Define the final file path
     csv_path = os.path.join(output_dir, "targets.csv")
 
-    # 5. Debug output to verify the absolute path
-    print(f"========== DEBUG: SAVING TARGETS CSV TO ==========")
-    print(os.path.abspath(csv_path))
-
-    # 6. Save the uploaded file securely
+    # Save under the canonical workspace filename used by feature extraction.
+    # The extractor's legacy fallback treats the first column as the ID, so
+    # normalize column order while preserving the user's outcome name (e.g. y).
+    ordered_columns = [id_column, *[column for column in columns if column != id_column]]
     try:
-        with open(csv_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        with open(csv_path, "w", newline="", encoding="utf-8") as buffer:
+            writer = csv_mod.DictWriter(buffer, fieldnames=ordered_columns)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({column: row.get(column, "") for column in ordered_columns})
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to write file: {str(e)}")
 
@@ -1410,9 +1478,12 @@ async def upload_targets(
     )
 
     return {
-        "message": "Targets saved successfully", 
+        "message": "Targets saved successfully",
         "session_id": session_id,
-        "path": os.path.abspath(csv_path)
+        "path": os.path.abspath(csv_path),
+        "id_column": id_column,
+        "target_column": target_column,
+        "row_count": len(rows),
     }
 @app.post("/segmentation-review")
 async def segmentation_review(data: dict):

@@ -210,6 +210,44 @@ async def _emit_tool_result_to_view(
             data = {exp_name: experiment_entry}
             await emit_modeling_output(data, session_id)
 
+        elif tool_name == "pycaret_train_regressor":
+            msg_type = "modeling_output"
+            exp_name = parsed.get("experiment_name") or "regression_experiment"
+            experiment_entry = {
+                "tool": "regression",
+                "task_type": "regression",
+                "status": parsed.get("status", "completed"),
+                "experiment_name": exp_name,
+                "target_column": parsed.get("target_column"),
+                "target_resolution": parsed.get("target_resolution"),
+                "model_summary": parsed.get("model_summary"),
+                "final_model_path": parsed.get("final_model_path"),
+                "created_files": parsed.get("created_files", []),
+                "individual_model_paths": parsed.get("individual_model_paths", {}),
+                "model_test_predictions": parsed.get("model_test_predictions", {}),
+                "chart_data": parsed.get("chart_data"),
+            }
+            data = {exp_name: experiment_entry}
+            await emit_modeling_output(data, session_id)
+
+        elif tool_name in {"radiomics_train_classifier", "radiomics_train_regressor"}:
+            # The leakage-safe radiomics tools are the modeling agent's primary
+            # experiments. Forward their chart contract just like PyCaret runs.
+            task_type = parsed.get("task_type") or (
+                "regression" if tool_name.endswith("regressor") else "classification"
+            )
+            if parsed.get("chart_data"):
+                msg_type = "modeling_output"
+                exp_name = parsed.get("experiment_name") or f"radiomics_{task_type}"
+                experiment_entry = {
+                    **parsed,
+                    "tool": task_type,
+                    "task_type": task_type,
+                    "experiment_name": exp_name,
+                }
+                data = {exp_name: experiment_entry}
+                await emit_modeling_output(data, session_id)
+
     # ── Result Reporter agent ─────────────────────────────────────────────
     elif "result_reporter" in source.lower():
         msg_type = "report_output"
