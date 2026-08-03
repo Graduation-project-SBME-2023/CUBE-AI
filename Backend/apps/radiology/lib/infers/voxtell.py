@@ -10,6 +10,7 @@
 # # # limitations under the License.
 import os
 import gc
+import sys
 import time
 import pickle
 import ctypes
@@ -34,6 +35,7 @@ from typing import Callable, Sequence, List, Union
 from unittest.mock import patch, MagicMock
 
 from transformers import AutoModel, AutoTokenizer
+from tqdm import tqdm
 
 from voxtell.inference.predictor import VoxTellPredictor
 from voxtell.utils.text_embedding import last_token_pool, wrap_with_instruction
@@ -45,6 +47,16 @@ from monailabel.tasks.infer.basic_infer import BasicInferTask
 
 # Medical vocabulary is maintained centrally — do not duplicate synonyms here.
 logger = logging.getLogger(__name__)
+
+
+def _terminal_tqdm(*args, **kwargs):
+    """Keep VoxTell sliding-window progress visible in captured terminals."""
+    kwargs.setdefault("file", sys.stdout)
+    kwargs.setdefault("disable", False)
+    kwargs.setdefault("dynamic_ncols", True)
+    kwargs.setdefault("mininterval", 0.5)
+    kwargs.setdefault("leave", True)
+    return tqdm(*args, **kwargs)
 
 # ── Module-level predictor singleton ──────────────────────────────────────────
 # MONAI Label creates a NEW instance of the `voxtell` class on every HTTP
@@ -300,9 +312,13 @@ class MyVoxTellPredictor(VoxTellPredictor):
         check_memory("AFTER preprocessing the data", torch.device("cuda"))
 
         logger.info("Phase 3: Running sliding window inference...")
-        prediction = self.predict_sliding_window_return_logits(
-            data, embeddings
-        ).to("cpu")
+        sys.stdout.flush()
+        # VoxTell uses tqdm internally. Force it onto stdout and keep it enabled
+        # so progress remains visible through Docker/uvicorn log capture.
+        with patch("voxtell.inference.predictor.tqdm", _terminal_tqdm):
+            prediction = self.predict_sliding_window_return_logits(
+                data, embeddings
+            ).to("cpu")
         check_memory("AFTER SLIDING WINDOW INFERENCE", torch.device("cuda"))
 
         with torch.no_grad():
