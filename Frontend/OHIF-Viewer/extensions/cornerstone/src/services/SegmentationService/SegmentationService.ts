@@ -517,6 +517,7 @@ class SegmentationService extends PubSubService {
       ...defaultScheme,
       id: segmentationId,
       displaySetInstanceUID: segDisplaySet.displaySetInstanceUID,
+      FrameOfReferenceUID: this._getFrameOfReferenceUIDForSeg(segDisplaySet),
       type: representationType,
       label: segDisplaySet.SeriesDescription,
       representationData: {
@@ -1491,7 +1492,7 @@ class SegmentationService extends PubSubService {
   }
 
   public shouldRenderSegmentation(viewportDisplaySetInstanceUIDs, segmentationFrameOfReferenceUID) {
-    if (!viewportDisplaySetInstanceUIDs?.length) {
+    if (!viewportDisplaySetInstanceUIDs?.length || !segmentationFrameOfReferenceUID) {
       return false;
     }
 
@@ -1508,7 +1509,7 @@ class SegmentationService extends PubSubService {
       // don't want to show the segmentation for all the frames
       if (
         displaySet.isReconstructable &&
-        displaySet?.images?.[0]?.FrameOfReferenceUID === segmentationFrameOfReferenceUID
+        this._getFrameOfReferenceUIDForSeg(displaySet) === segmentationFrameOfReferenceUID
       ) {
         shouldDisplaySeg = true;
         break;
@@ -2092,15 +2093,23 @@ class SegmentationService extends PubSubService {
   }
 
   private _getFrameOfReferenceUIDForSeg(displaySet) {
-    const frameOfReferenceUID = displaySet.instance?.FrameOfReferenceUID;
+    const frameOfReferenceUID =
+      displaySet.frameOfReferenceUID ||
+      displaySet.FrameOfReferenceUID ||
+      displaySet.instances?.[0]?.FrameOfReferenceUID ||
+      displaySet.images?.[0]?.FrameOfReferenceUID ||
+      displaySet.instance?.FrameOfReferenceUID;
 
     if (frameOfReferenceUID) {
       return frameOfReferenceUID;
     }
 
     // if not found we should try the ReferencedFrameOfReferenceSequence
-    const referencedFrameOfReferenceSequence =
-      displaySet.instance?.ReferencedFrameOfReferenceSequence;
+    const referencedFrameOfReferenceSequence = Array.isArray(
+      displaySet.instance?.ReferencedFrameOfReferenceSequence
+    )
+      ? displaySet.instance.ReferencedFrameOfReferenceSequence[0]
+      : displaySet.instance?.ReferencedFrameOfReferenceSequence;
 
     if (referencedFrameOfReferenceSequence) {
       return referencedFrameOfReferenceSequence.FrameOfReferenceUID;

@@ -600,7 +600,7 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
       }
 
       if (!segFrameOfReferenceUID) {
-        return;
+        continue;
       }
 
       let shouldDisplaySeg = false;
@@ -615,7 +615,7 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
       }
 
       if (!shouldDisplaySeg) {
-        return;
+        continue;
       }
 
       segmentationService.addSegmentationRepresentationToToolGroup(
@@ -745,13 +745,42 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
     }
 
     if (displaySet.Modality === 'SEG') {
-      const { instance } = displaySet;
-      return instance.FrameOfReferenceUID;
+      const referencedDisplaySetInstanceUID = displaySet.referencedDisplaySetInstanceUID;
+      if (
+        referencedDisplaySetInstanceUID &&
+        referencedDisplaySetInstanceUID !== displaySetInstanceUID
+      ) {
+        const referencedFrameOfReferenceUID = this._getFrameOfReferenceUID(
+          referencedDisplaySetInstanceUID
+        );
+
+        if (referencedFrameOfReferenceUID) {
+          return referencedFrameOfReferenceUID;
+        }
+      }
+
+      const { instance = {} } = displaySet;
+      const referencedFrameOfReferenceSequence = Array.isArray(
+        instance.ReferencedFrameOfReferenceSequence
+      )
+        ? instance.ReferencedFrameOfReferenceSequence[0]
+        : instance.ReferencedFrameOfReferenceSequence;
+
+      return (
+        instance.FrameOfReferenceUID || referencedFrameOfReferenceSequence?.FrameOfReferenceUID
+      );
     }
 
     if (displaySet.Modality === 'RTSTRUCT') {
       const { instance } = displaySet;
       return instance.ReferencedFrameOfReferenceSequence.FrameOfReferenceUID;
+    }
+
+    const frameOfReferenceUID =
+      displaySet.FrameOfReferenceUID || displaySet.instances?.[0]?.FrameOfReferenceUID;
+
+    if (frameOfReferenceUID) {
+      return frameOfReferenceUID;
     }
 
     const { images } = displaySet;

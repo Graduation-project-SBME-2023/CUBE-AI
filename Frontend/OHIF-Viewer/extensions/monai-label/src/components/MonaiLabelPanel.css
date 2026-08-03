@@ -1,4 +1,4 @@
-@import url("w3.css");
+@import url('w3.css');
 
 .monaiLabelPanel {
   background-color: #0d1526;
@@ -10,7 +10,7 @@
   display: flex;
   flex-direction: column;
   color: #c8d8f0;
-  padding: 2px;
+  padding: 8px;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -34,9 +34,10 @@
   text-decoration: none;
   font-weight: 600;
   color: #7a9cc8;
-  margin: 1px;
+  margin: 6px 2px;
   text-align: left;
   letter-spacing: 0.02em;
+  line-height: 1.45;
 }
 
 .monaiLabelPanel .tabs {
@@ -68,16 +69,19 @@
 .monaiLabelPanel .tab-label {
   display: flex;
   justify-content: space-between;
-  padding: 6px 8px;
+  padding: 10px 12px;
   background: #0d1526;
   border-right: none;
   border-bottom: 1px solid #1a2540;
   color: #8ab4e0;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
+  line-height: 1.4;
   cursor: pointer;
   letter-spacing: 0.01em;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .monaiLabelPanel .tab-label:hover {
@@ -86,7 +90,7 @@
 }
 
 .monaiLabelPanel .tab-label::after {
-  content: "❯";
+  content: '❯';
   width: 1em;
   height: 1em;
   text-align: center;
@@ -100,20 +104,24 @@
   background: #071020;
   transition: all 0.35s;
   width: 100%;
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.55;
   color: #c8d8f0;
   border-top: 1px solid #1a2540;
+  box-sizing: border-box;
 }
 
 .monaiLabelPanel .tab-close {
   display: flex;
   justify-content: flex-end;
-  padding: 1em;
+  padding: 14px 12px;
   font-size: 0.75em;
   background: #0d1526;
   cursor: pointer;
   color: #5a8ab8;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .monaiLabelPanel .tab-close:hover {
@@ -145,15 +153,16 @@
 
 .monaiLabelPanel .actionInput,
 .monaiLabelPanel select,
-.monaiLabelPanel input[type="text"],
-.monaiLabelPanel input[type="number"],
-.monaiLabelPanel input[type="password"] {
+.monaiLabelPanel input[type='text'],
+.monaiLabelPanel input[type='number'],
+.monaiLabelPanel input[type='password'] {
   background-color: #071020 !important;
   border: 1px solid #1e3058 !important;
   border-radius: 3px !important;
   color: #c8d8f0 !important;
-  font-size: 11px !important;
-  padding: 3px 6px !important;
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+  padding: 7px 8px !important;
   outline: none !important;
   appearance: none !important;
   -webkit-appearance: none !important;
@@ -164,8 +173,8 @@
 
 .monaiLabelPanel .actionInput:focus,
 .monaiLabelPanel select:focus,
-.monaiLabelPanel input[type="text"]:focus,
-.monaiLabelPanel input[type="number"]:focus {
+.monaiLabelPanel input[type='text']:focus,
+.monaiLabelPanel input[type='number']:focus {
   border-color: #4a9eff !important;
   box-shadow: 0 0 0 1px #4a9eff22 !important;
 }
@@ -180,10 +189,10 @@
   border: none !important;
   border-radius: 3px !important;
   color: #c8d8f0 !important;
-  font-size: 11px !important;
+  font-size: 12px !important;
   font-weight: 600 !important;
   line-height: normal !important;
-  padding: 4px 10px !important;
+  padding: 7px 12px !important;
   cursor: pointer !important;
   transition: background-color 0.15s !important;
 }
@@ -210,18 +219,20 @@
 
 .monaiLabelPanel label {
   color: #8ab4e0 !important;
-  font-size: 11px !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
 }
 
 .monaiLabelPanel td,
 .monaiLabelPanel th {
   color: #c8d8f0 !important;
-  font-size: 11px !important;
-  padding: 3px 4px !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  padding: 6px 5px !important;
   border-bottom: 1px solid #1a2540 !important;
 }
 
-.monaiLabelPanel input[type="checkbox"] {
+.monaiLabelPanel input[type='checkbox'] {
   accent-color: #4a9eff !important;
   cursor: pointer !important;
 }

@@ -1,28 +1,21 @@
-import React, { Component } from 'react';
+import React from 'react';
 import ModelSelector from '../ModelSelector';
 import BaseTab from './BaseTab';
 import * as cornerstoneTools from '@cornerstonejs/tools';
 import ModelBasedRendering from '../../tools/ModelBasedRendering';
-import getActiveViewportEnabledElement from '../../../../cornerstone/src/utils/getActiveViewportEnabledElement';
-import { getEnabledElement } from '@cornerstonejs/core';
-import { getEnabledElement as OHIFgetEnabledElement } from '../../../../cornerstone/src/state';
-import {
-  getRenderingEngines,
-  utilities as csUtils,
-  cache,
-} from '@cornerstonejs/core';
+import { getRenderingEngines, cache, eventTarget } from '@cornerstonejs/core';
 import { getAgentsApiBaseUrl } from '../../utils/runtimeUrls';
 
 const SEGMENTATION_SUBMITTED_MESSAGE = 'cube:segmentation-submitted';
 
 export default class InteractiveSegmentation extends BaseTab {
-  modelSelector: any;
+  modelSelector: React.RefObject<ModelSelector>;
   static instance = null;
   constructor(props) {
     super(props);
     // InteractiveSegmentation.instance = this;
 
-    this.modelSelector = React.createRef();
+    this.modelSelector = React.createRef<ModelSelector>();
     const models = this.getModels();
     this.state = {
       currentModel: models.length > 0 ? models[0] : null, // null brings so much errors
@@ -30,6 +23,9 @@ export default class InteractiveSegmentation extends BaseTab {
       clickPoints: new Map(),
       flagNninteractive: { positive: false, negative: false },
       isSubmitting: false,
+      activeTool: null,
+      statusMessage: '',
+      statusType: 'info',
 
       // availableOrgans: models.length > 0 ? this.getModelLabels(models[0]) : {},
     };
@@ -46,6 +42,43 @@ export default class InteractiveSegmentation extends BaseTab {
   }
   // to remove active listner later
   activeListeners = [];
+  promptHistory = [];
+
+  handleAnnotationCompleted = (evt) => {
+    const annotation = evt.detail?.annotation;
+    const toolName = annotation?.metadata?.toolName;
+    const isPointPrompt =
+      toolName === 'ProbeMONAILabelPos' || toolName === 'ProbeMONAILabelNeg';
+    const isSamPrompt =
+      this.state.currentModel === 'sam' &&
+      (isPointPrompt || toolName === 'RecROIToolMONAILabel');
+    const shouldTrackPrompt =
+      (isPointPrompt &&
+        ['vista', 'nninteractive'].includes(this.state.currentModel)) ||
+      isSamPrompt;
+
+    if (
+      shouldTrackPrompt &&
+      annotation.annotationUID &&
+      !this.promptHistory.some(
+        (entry) => entry.annotationUID === annotation.annotationUID
+      )
+    ) {
+      this.promptHistory.push({
+        annotationUID: annotation.annotationUID,
+        toolName,
+        objectId: this.state.currentObject,
+        viewportId: evt.detail?.viewportId,
+      });
+    }
+  };
+
+  componentDidMount() {
+    eventTarget.addEventListener(
+      cornerstoneTools.Enums.Events.ANNOTATION_COMPLETED,
+      this.handleAnnotationCompleted
+    );
+  }
 
   initPromptObject = (objectId) => {
     //[[{POINTS:[[[25,10]],[1]], BOXES:[]}],[],]
@@ -62,7 +95,9 @@ export default class InteractiveSegmentation extends BaseTab {
     console.log('iam inside get last annotations', saved);
 
     const frameOfReferenceUID = Object.keys(saved)[0];
-    if (!frameOfReferenceUID) return null;
+    if (!frameOfReferenceUID) {
+      return null;
+    }
 
     const annotations = saved[frameOfReferenceUID];
 
@@ -126,19 +161,47 @@ export default class InteractiveSegmentation extends BaseTab {
     console.log('cleaned and removed old viewport listeners');
   };
 
+  deactivatePromptTools = () => {
+    this.cleanupViewportListeners();
+    const { toolGroupService, viewportGridService } =
+      this.props.servicesManager.services;
+    const { viewports, activeViewportId } = viewportGridService.getState();
+    const viewport = viewports.get(activeViewportId);
+    const toolGroupId = viewport?.viewportOptions?.toolGroupId;
+    const toolGroup = toolGroupId
+      ? toolGroupService.getToolGroup(toolGroupId)
+      : null;
+
+    if (!toolGroup) {
+      return;
+    }
+
+    [
+      'ProbeMONAILabelPos',
+      'ProbeMONAILabelNeg',
+      'RecROIToolMONAILabel',
+    ].forEach((toolName) => {
+      try {
+        toolGroup.setToolPassive(toolName);
+      } catch (error) {
+        console.debug(`Unable to set ${toolName} passive`, error);
+      }
+    });
+  };
+
   handleUpdatePrompts = (mode) => {
     //todo: instead of timeout , use event listner as the cornerstone creation take time not reliable !
     setTimeout(() => {
       const { cornerstoneViewportService } =
         this.props.servicesManager.services;
-      const { viewport, displaySet } = this.props.getActiveViewportInfo();
+      const { viewport } = this.props.getActiveViewportInfo();
       const viewportInfo = cornerstoneViewportService.getViewportInfo(
         viewport.viewportId
       );
       const currentViewPort = viewportInfo.viewportId;
       const { worldToIndex } =
         viewportInfo.viewportData.data[0].volume.imageData;
-      const { currentModel, currentObject, clickPoints } = this.state;
+      const { currentObject } = this.state;
       console.log('the current object is ', currentObject);
       const result = this.getLastAnnotations(worldToIndex);
       console.log('the results getted from the function is ', result);
@@ -148,12 +211,10 @@ export default class InteractiveSegmentation extends BaseTab {
         (mode === 'positive' || mode === 'negative') &&
         currentViewPort !== 'mpr-axial'
       ) {
-        const nid = this.notification.show({
-          title: 'MONAI Label',
-          message:
-            'Positive/Negative point prompts are supported only in Axial view. Please switch to axial.',
-          type: 'warning',
-          duration: 8000,
+        this.setState({
+          statusMessage:
+            'Point prompts are supported only in the axial view. Switch to axial and try again.',
+          statusType: 'error',
         });
         return; // stop execution, don’t call sam2d
       }
@@ -224,14 +285,26 @@ export default class InteractiveSegmentation extends BaseTab {
           this.sam2dstate = 'Auxillary_Box';
           this.AuxillaryID = currentObject;
         }
+
+        for (let index = this.promptHistory.length - 1; index >= 0; index--) {
+          const historyEntry = this.promptHistory[index];
+          if (
+            historyEntry.toolName === 'RecROIToolMONAILabel' &&
+            String(historyEntry.objectId) === String(currentObject)
+          ) {
+            historyEntry.isAuxiliaryBox = currentViewPort !== 'mpr-axial';
+            break;
+          }
+        }
       }
       console.log('the prompts is ,', this.prompts);
-      this.onsam2d(this.sam2dstate);
     }, 500);
   };
 
   configureViewportInteraction = (mode: 'positive' | 'negative') => {
-    if (!this.viewportGridService) return;
+    if (!this.viewportGridService) {
+      return;
+    }
 
     this.cleanupViewportListeners(); // remove old listeners
 
@@ -295,7 +368,9 @@ export default class InteractiveSegmentation extends BaseTab {
 
     viewports.forEach((vpConfig) => {
       const viewport = renderingEngines[0].getViewport(vpConfig.viewportId);
-      if (!viewport?.element) return;
+      if (!viewport?.element) {
+        return;
+      }
 
       viewport.element.addEventListener('click', handleClick);
       this.activeListeners.push({
@@ -309,7 +384,9 @@ export default class InteractiveSegmentation extends BaseTab {
   };
 
   configureViewportBoxInteraction = () => {
-    if (!this.viewportGridService) return;
+    if (!this.viewportGridService) {
+      return;
+    }
 
     this.cleanupViewportListeners();
 
@@ -395,7 +472,9 @@ export default class InteractiveSegmentation extends BaseTab {
 
     viewports.forEach((vpConfig) => {
       const viewport = renderingEngines[0].getViewport(vpConfig.viewportId);
-      if (!viewport?.element) return;
+      if (!viewport?.element) {
+        return;
+      }
 
       viewport.element.addEventListener('mousedown', handleDown);
       viewport.element.addEventListener('mousemove', handleMove);
@@ -433,10 +512,12 @@ export default class InteractiveSegmentation extends BaseTab {
     this.currentSlice = null;
     this.resetnnInteractiveAll = false;
     this.voxtellTextPrompt = '';
+    this.promptHistory = [];
   };
 
   onSelectModel = (model) => {
     // console.log('Selecting  (Point) Interaction Model...');
+    this.deactivatePromptTools();
     const currentObject = 1;
     const clickPoints = new Map();
     this.setState({
@@ -445,26 +526,21 @@ export default class InteractiveSegmentation extends BaseTab {
       clickPoints: clickPoints,
       // availableOrgans: this.getModelLabels(model),
       flagNninteractive: { positive: false, negative: false },
+      activeTool: null,
+      statusMessage: '',
+      statusType: 'info',
     });
     this.resetProps();
     this.clearAllPoints();
   };
 
   onEnterActionTab = () => {
-    console.log(this.props.commandsManager);
-    this.props.commandsManager.runCommand('setToolActive', {
-      toolName: 'ProbeMONAILabelNeg',
-    });
-    this.props.commandsManager.runCommand('setToolActive', {
-      toolName: 'RecROIToolMONAILabel',
-    });
-    this.props.commandsManager.runCommand('setToolActive', {
-      toolName: 'ProbeMONAILabelPos',
-    });
-    console.info('Here we activate the probe');
+    this.deactivatePromptTools();
+    this.setState({ activeTool: null });
   };
 
   onLeaveActionTab = () => {
+    this.cleanupViewportListeners();
     this.onChangeLabel(null);
 
     const { toolGroupService, viewportGridService } =
@@ -495,6 +571,7 @@ export default class InteractiveSegmentation extends BaseTab {
     this.props.commandsManager.runCommand('setToolActive', {
       toolName: 'ProbeMONAILabelPos',
     });
+    this.setState({ activeTool: 'positive', statusMessage: '' });
     this.configureViewportInteraction('positive');
   };
 
@@ -503,6 +580,7 @@ export default class InteractiveSegmentation extends BaseTab {
     this.props.commandsManager.runCommand('setToolActive', {
       toolName: 'ProbeMONAILabelNeg',
     });
+    this.setState({ activeTool: 'negative', statusMessage: '' });
     this.configureViewportInteraction('negative');
   };
 
@@ -511,108 +589,197 @@ export default class InteractiveSegmentation extends BaseTab {
     this.props.commandsManager.runCommand('setToolActive', {
       toolName: 'RecROIToolMONAILabel',
     });
+    this.setState({ activeTool: 'box', statusMessage: '' });
     this.configureViewportBoxInteraction();
   };
-  clearPoints = (objectId) => {
-    console.log('Clearing points for Object', objectId);
-    cornerstoneTools.annotation.state
-      .getAnnotationManager()
-      .removeAllAnnotations();
+  renderAnnotations = () => {
     this.props.servicesManager.services.cornerstoneViewportService
       .getRenderingEngine()
       .render();
-    this.setState({ flagNninteractive: { positive: false, negative: false } });
   };
-  onsam2d = async (state) => {
-    console.log('iam inside onsame2d function');
-    const nid = this.notification.show({
-      title: 'MONAI Label',
-      message:
-        'Running 2d SAM Segmentation... For 3d segmentation press Propagate button',
-      type: 'info',
-      duration: 10000,
+
+  getPointAnnotations = () => {
+    const manager = cornerstoneTools.annotation.state.getAnnotationManager();
+    return manager
+      .getAllAnnotations()
+      .filter((annotation) =>
+        ['ProbeMONAILabelPos', 'ProbeMONAILabelNeg'].includes(
+          annotation.metadata?.toolName
+        )
+      );
+  };
+
+  syncNnInteractiveFlags = () => {
+    const annotations = this.getPointAnnotations();
+    this.setState({
+      flagNninteractive: {
+        positive: annotations.some(
+          (annotation) => annotation.metadata?.toolName === 'ProbeMONAILabelPos'
+        ),
+        negative: annotations.some(
+          (annotation) => annotation.metadata?.toolName === 'ProbeMONAILabelNeg'
+        ),
+      },
     });
-    const { info } = this.props;
-    const { viewport, displaySet } = this.props.getActiveViewportInfo();
-    const config = this.props.onOptionsConfig();
-    const params =
-      config && config.infer && config.infer[model] ? config.infer[model] : {};
-    params['restore_label_idx'] = false;
-    params['result_compress'] = false;
-    params['result_dtype'] = 'uint16';
-    params['result_extension'] = '.nrrd';
-    params['sam2config'] = this.prompts;
-    params['SliceIndex'] = this.currentSlice;
-    if (state === '2d') {
-      params['State'] = '2d';
-    } else if (state === 'Auxillary_Box') {
-      params['Auxillary_Box'] = this.AuxillaryBox;
-      params['Auxillary_Id'] = this.AuxillaryID;
-      params['State'] = 'Auxillary_Box';
-    }
-    console.log('the parameters are ', params);
+  };
 
-    const response = await this.props
-      .client()
-      .infer('sam', displaySet.SeriesInstanceUID, params);
-    const labels = info.models['sam'].labels;
-    console.log(response);
-
-    if (!nid) {
-      window.snackbar.hideAll();
-    } else {
-      this.notification.hide(nid);
+  removeSamPromptFromPayload = (historyEntry) => {
+    if (!historyEntry) {
+      return;
     }
 
-    if (response.status !== 200) {
-      this.notification.show({
-        title: 'MONAI Label',
-        message: 'Failed to Run Segmentation',
-        type: 'error',
-        duration: 5000,
-      });
-    } else {
-      this.notification.show({
-        title: 'MONAI Label',
-        message: 'Run SAM Segmentation Successfully',
-        type: 'success',
-        duration: 10000,
-      });
+    const { toolName, objectId, viewportId, isAuxiliaryBox } = historyEntry;
+    const objectPrompts = this.prompts[objectId];
+
+    if (
+      toolName === 'ProbeMONAILabelPos' ||
+      toolName === 'ProbeMONAILabelNeg'
+    ) {
+      if (!objectPrompts?.points) {
+        return;
+      }
+
+      const labelToRemove = toolName === 'ProbeMONAILabelPos' ? 1 : 0;
+      const labels = objectPrompts.points[1];
+      const pointIndex = labels.lastIndexOf(labelToRemove);
+      if (pointIndex >= 0) {
+        objectPrompts.points[0].splice(pointIndex, 1);
+        labels.splice(pointIndex, 1);
+      }
+      return;
     }
 
-    this.props.updateView(response, labels, 'sam');
+    if (toolName === 'RecROIToolMONAILabel') {
+      const shouldRemoveAuxiliaryBox =
+        isAuxiliaryBox === true ||
+        (isAuxiliaryBox === undefined &&
+          viewportId &&
+          viewportId !== 'mpr-axial') ||
+        (isAuxiliaryBox === undefined &&
+          !viewportId &&
+          this.AuxillaryID === objectId);
+      if (shouldRemoveAuxiliaryBox) {
+        this.AuxillaryBox = {};
+        this.AuxillaryID = null;
+      } else {
+        objectPrompts?.boxes?.pop();
+      }
+    }
+  };
+
+  undoLastPoint = (objectId) => {
+    const manager = cornerstoneTools.annotation.state.getAnnotationManager();
+    let historyEntry = null;
+
+    while (this.promptHistory.length && !historyEntry) {
+      let candidateIndex = this.promptHistory.length - 1;
+      if (objectId !== undefined && objectId !== null) {
+        candidateIndex = -1;
+        for (let index = this.promptHistory.length - 1; index >= 0; index--) {
+          if (String(this.promptHistory[index].objectId) === String(objectId)) {
+            candidateIndex = index;
+            break;
+          }
+        }
+      }
+
+      if (candidateIndex < 0) {
+        break;
+      }
+
+      const [candidate] = this.promptHistory.splice(candidateIndex, 1);
+      if (manager.getAnnotation(candidate.annotationUID)) {
+        historyEntry = candidate;
+      }
+    }
+
+    if (!historyEntry) {
+      const promptToolNames =
+        this.state.currentModel === 'sam'
+          ? ['ProbeMONAILabelPos', 'ProbeMONAILabelNeg', 'RecROIToolMONAILabel']
+          : ['ProbeMONAILabelPos', 'ProbeMONAILabelNeg'];
+      const annotations = manager
+        .getAllAnnotations()
+        .filter((annotation) =>
+          promptToolNames.includes(annotation.metadata?.toolName)
+        );
+      const annotation = annotations[annotations.length - 1];
+      if (annotation) {
+        historyEntry = {
+          annotationUID: annotation.annotationUID,
+          toolName: annotation.metadata?.toolName,
+          objectId: objectId ?? this.state.currentObject,
+        };
+      }
+    }
+
+    if (!historyEntry) {
+      return;
+    }
+
+    if (this.state.currentModel === 'sam') {
+      this.removeSamPromptFromPayload(historyEntry);
+    }
+    cornerstoneTools.annotation.state.removeAnnotation(
+      historyEntry.annotationUID
+    );
+    this.renderAnnotations();
+    this.syncNnInteractiveFlags();
+  };
+
+  removeAllPromptAnnotations = () => {
+    const manager = cornerstoneTools.annotation.state.getAnnotationManager();
+    manager
+      .getAllAnnotations()
+      .filter((annotation) =>
+        [
+          'ProbeMONAILabelPos',
+          'ProbeMONAILabelNeg',
+          'RecROIToolMONAILabel',
+        ].includes(annotation.metadata?.toolName)
+      )
+      .forEach((annotation) =>
+        cornerstoneTools.annotation.state.removeAnnotation(
+          annotation.annotationUID
+        )
+      );
+    this.promptHistory = [];
+    this.renderAnnotations();
   };
 
   correct_xy_format = (point) => {
     return [point[1], point[0], point[2]];
   };
 
+  getPointPrompts = (worldToIndex, swapXY = false) => {
+    return this.getPointAnnotations().map((annotation) => {
+      const toolName = annotation.metadata?.toolName;
+      let point = worldToIndex(annotation.data.handles.points[0]);
+      if (swapXY) {
+        point = this.correct_xy_format(point);
+      }
+
+      return {
+        point: point.map((value, index) =>
+          !swapXY || index === 2 ? Math.round(value) : value
+        ),
+        label: toolName === 'ProbeMONAILabelPos' ? 1 : 0,
+      };
+    });
+  };
+
   getNnInteractivePrompts = (worldToIndex) => {
-    const manager = cornerstoneTools.annotation.state.getAnnotationManager();
-    const saved = manager.saveAnnotations();
-    const frameOfReferenceUID = Object.keys(saved)[0];
-    const annotations = frameOfReferenceUID ? saved[frameOfReferenceUID] : {};
+    return this.getPointPrompts(worldToIndex);
+  };
 
-    const toIndex = (annotation) =>
-      worldToIndex(annotation.data.handles.points[0]).map((value) =>
-        Math.round(value)
-      );
-    const pointsForTool = (toolName, label) =>
-      Object.values(annotations?.[toolName] || {}).map((annotation) => ({
-        point: toIndex(annotation),
-        label,
-      }));
-
-    return [
-      ...pointsForTool('ProbeMONAILabelPos', 1),
-      ...pointsForTool('ProbeMONAILabelNeg', 0),
-    ];
+  getVistaPrompts = (worldToIndex) => {
+    return this.getPointPrompts(worldToIndex, true);
   };
 
   onRunInference = async () => {
     console.log(' run inference start');
-    const { currentModel, currentObject, clickPoints, flagNninteractive } =
-      this.state;
+    this.setState({ statusMessage: '', statusType: 'info' });
+    const { currentModel, currentObject, clickPoints } = this.state;
     const { info } = this.props;
     const { viewport, displaySet } = this.props.getActiveViewportInfo();
 
@@ -627,21 +794,12 @@ export default class InteractiveSegmentation extends BaseTab {
 
     const model = models.length > 0 ? models[selectedModel] : null;
     if (!model) {
-      this.notification.show({
-        title: 'MONAI Label',
-        message: 'Something went wrong: Model is not selected',
-        type: 'error',
-        duration: 10000,
+      this.setState({
+        statusMessage: 'Select a model before running inference.',
+        statusType: 'error',
       });
       return;
     }
-
-    const nid = this.notification.show({
-      title: 'MONAI Label - ' + model,
-      message: 'Running Interactive Inference...',
-      type: 'info',
-      duration: 4000,
-    });
 
     const { cornerstoneViewportService } = this.props.servicesManager.services;
     const viewportInfo = cornerstoneViewportService.getViewportInfo(
@@ -702,22 +860,16 @@ export default class InteractiveSegmentation extends BaseTab {
 
     // =====================================================================
     const config = this.props.onOptionsConfig();
-    const params =
-      config && config.infer && config.infer[model] ? config.infer[model] : {};
+    const params = {
+      ...(config && config.infer && config.infer[model]
+        ? config.infer[model]
+        : {}),
+    };
     if (model === 'vista') {
+      const prompts = this.getVistaPrompts(worldToIndex);
       params['Points'] = {
-        points: [
-          ...(positive_points[currentObject] || []),
-          ...(negative_points[currentObject] || []),
-        ].map(([x, y, z]) => [x, y, Math.round(z)]),
-        labels: [
-          ...(positive_points[currentObject]
-            ? new Array(positive_points[currentObject].length).fill(1)
-            : []),
-          ...(negative_points[currentObject]
-            ? new Array(negative_points[currentObject].length).fill(0)
-            : []),
-        ],
+        points: prompts.map(({ point }) => point),
+        labels: prompts.map(({ label }) => label),
       };
       params['Mode'] = 'interactive';
       params['Class'] = 133;
@@ -730,11 +882,10 @@ export default class InteractiveSegmentation extends BaseTab {
       // (positive_points/negative_points), so no valid request could be sent.
       const prompts = this.getNnInteractivePrompts(worldToIndex);
       if (!prompts.length) {
-        this.notification.show({
-          title: 'MONAI Label - nnInteractive',
-          message: 'Add a positive or negative point before running inference.',
-          type: 'warning',
-          duration: 5000,
+        this.setState({
+          statusMessage:
+            'Add a positive or negative point before running inference.',
+          statusType: 'error',
         });
         return;
       }
@@ -747,37 +898,46 @@ export default class InteractiveSegmentation extends BaseTab {
     } else if (model === 'voxtell') {
       params['text_prompts'] = this.voxtellTextPrompt;
     } else {
-      this.notification.show({
-        title: 'MONAI Label - ' + model,
-        message: 'Model not yet supported for Point Inference',
-        type: 'error',
-        duration: 6000,
+      this.setState({
+        statusMessage: 'This model does not support point inference yet.',
+        statusType: 'error',
       });
-      // hideNotification(nid, this.notification);
       return;
     }
 
-    const response = await this.props
-      .client()
-      .infer(model, displaySet.SeriesInstanceUID, params);
+    let response;
+    try {
+      response = await this.props
+        .client()
+        .infer(model, displaySet.SeriesInstanceUID, params);
+    } catch (error) {
+      console.error(`Failed to run ${model} inference`, error);
+      this.setState({
+        statusMessage: 'Inference could not be completed. Please try again.',
+        statusType: 'error',
+      });
+      return;
+    }
     const labels = info.models[model].labels;
     // console.log(response);
     console.log('the parameters for model interactive run', params);
 
     if (response.status !== 200) {
-      this.notification.show({
-        title: 'MONAI Label - ' + model,
-        message: 'Failed to Run Inference for Point Prompts',
-        type: 'error',
-        duration: 6000,
+      this.setState({
+        statusMessage: 'Inference failed. Check the prompts and try again.',
+        statusType: 'error',
       });
       return;
     }
-    this.props.updateView(response, labels, model);
+    await this.props.updateView(response, labels, model);
+    if (model === 'nninteractive') {
+      this.resetnnInteractiveAll = false;
+    }
+    this.setState({ statusMessage: '', statusType: 'info' });
 
     this.notification.show({
       title: 'MONAI Label - ' + model,
-      message: 'Running Inference for Interactive Segmentation - Successful',
+      message: 'Interactive segmentation completed successfully.',
       type: 'success',
       duration: 4000,
     });
@@ -809,13 +969,27 @@ export default class InteractiveSegmentation extends BaseTab {
   //     manager.restoreAnnotations(annotations);
   //   }
   // };
-  onRestAllClick = () => {
-    this.resetnnInteractiveAll = !this.resetnnInteractiveAll;
+  onResetAllClick = () => {
+    if (this.state.currentModel === 'nninteractive') {
+      this.resetnnInteractiveAll = true;
+    }
+    this.prompts = {};
+    this.AuxillaryBox = {};
+    this.AuxillaryID = null;
+    this.removeAllPromptAnnotations();
+    this.setState({
+      clickPoints: new Map(),
+      flagNninteractive: { positive: false, negative: false },
+      statusMessage: '',
+    });
   };
   clearAllPoints = () => {
-    const clickPoints = new Map();
-    this.setState({ clickPoints: clickPoints });
-    this.clearPoints();
+    this.removeAllPromptAnnotations();
+    this.setState({
+      clickPoints: new Map(),
+      flagNninteractive: { positive: false, negative: false },
+      activeTool: null,
+    });
   };
 
   segColorToRgb(s) {
@@ -905,22 +1079,19 @@ export default class InteractiveSegmentation extends BaseTab {
     return model;
   }
   componentWillUnmount() {
+    eventTarget.removeEventListener(
+      cornerstoneTools.Enums.Events.ANNOTATION_COMPLETED,
+      this.handleAnnotationCompleted
+    );
     this.cleanupViewportListeners();
     this.resetProps();
-    // this.nLeaveActionTab();
-    const manager = cornerstoneTools.annotation.state.getAnnotationManager();
-    manager.removeAllAnnotations();
-    const { cornerstoneViewportService } = this.props.servicesManager.services;
-    cornerstoneViewportService.getRenderingEngine().render();
-    console.log('the annotations removed');
+    this.removeAllPromptAnnotations();
   }
 
   render() {
     const models = this.getModels();
     const display = models.length > 0 ? 'block' : 'none';
     // const segInfo = this.segmentInfo();
-    const labels = this.getModelLabels(this.getSelectedModel());
-
     return (
       <div className="tab" style={{ display: display }}>
         <input
@@ -943,9 +1114,12 @@ export default class InteractiveSegmentation extends BaseTab {
             currentModel={this.state.currentModel}
             onClick={this.onRunInference}
             onSelectModel={this.onSelectModel}
+            statusMessage={this.state.statusMessage}
+            statusType={this.state.statusType}
             usage={
               <ModelBasedRendering
                 mode={this.state.currentModel}
+                activeTool={this.state.activeTool}
                 positiveDisabled={
                   this.state.currentModel === 'nninteractive' &&
                   this.state.flagNninteractive.positive
@@ -957,8 +1131,8 @@ export default class InteractiveSegmentation extends BaseTab {
                 onBoxClick={(id) => this.enableBoxTool(id)}
                 onPositiveClick={(id) => this.enablePositiveProbe(id)}
                 onNegativeClick={(id) => this.enableNegativeProbe(id)}
-                onResetClick={(id) => this.clearPoints(id)}
-                onResetAllClick={this.onRestAllClick}
+                onResetClick={this.undoLastPoint}
+                onResetAllClick={this.onResetAllClick}
                 onObjectIdChange={this.onObjectIdChange}
                 onColorChange={this.onColorChange}
                 onAddObjectClick={this.onAddObject}
@@ -1017,7 +1191,11 @@ export default class InteractiveSegmentation extends BaseTab {
       return;
     }
 
-    this.setState({ isSubmitting: true });
+    this.setState({
+      isSubmitting: true,
+      statusMessage: '',
+      statusType: 'info',
+    });
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const sessionId = urlParams.get('session_id');
@@ -1028,7 +1206,10 @@ export default class InteractiveSegmentation extends BaseTab {
       const pairId = urlParams.get('pair_id') || seriesUid;
 
       if (!sessionId) {
-        alert('No session ID found.');
+        this.setState({
+          statusMessage: 'No session ID was found for this submission.',
+          statusType: 'error',
+        });
         return;
       }
 
@@ -1060,32 +1241,27 @@ export default class InteractiveSegmentation extends BaseTab {
       if (!labelVolume && activeViewportId) {
         try {
           labelVolume = cache.getVolume(activeViewportId);
-        } catch (err) {}
+        } catch (err) {
+          console.debug('Active viewport is not backed by a label volume', err);
+        }
       }
 
       // 3. Fallback to hardcoded '1' if it was loaded that way
       if (!labelVolume) {
         try {
           labelVolume = cache.getVolume('1');
-        } catch (err) {}
+        } catch (err) {
+          console.debug('Fallback label volume was not available', err);
+        }
       }
 
       if (!labelVolume) {
-        this.notification.show({
-          title: 'MONAI Label',
-          message: 'No labelmap found to submit.',
-          type: 'warning',
-          duration: 4000,
+        this.setState({
+          statusMessage: 'No labelmap is available to submit.',
+          statusType: 'error',
         });
         return;
       }
-
-      this.notification.show({
-        title: 'Agent System',
-        message: 'Uploading modified mask...',
-        type: 'info',
-        duration: 4000,
-      });
 
       // If scalarData is backed by a SharedArrayBuffer, we must copy it to a normal ArrayBuffer
       // before constructing a Blob. We can do this by creating a new typed array of the same type.
@@ -1153,12 +1329,9 @@ export default class InteractiveSegmentation extends BaseTab {
       }
     } catch (e) {
       console.error(e);
-      alert(`Error submitting to agent: ${e.message}`);
-      this.notification.show({
-        title: 'Agent System',
-        message: 'Failed to upload mask.',
-        type: 'error',
-        duration: 5000,
+      this.setState({
+        statusMessage: 'The modified mask could not be uploaded.',
+        statusType: 'error',
       });
     } finally {
       this.setState({ isSubmitting: false });

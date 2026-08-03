@@ -109,13 +109,7 @@ function ViewerHeader({ hotkeysManager, servicesManager }) {
       WhiteLabeling={appConfig.whiteLabeling}
     >
       <ErrorBoundary context="Primary Toolbar">
-        <div
-          className={
-            isEmbeddedEditMask
-              ? 'absolute left-1/2 top-1/2 z-10 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center'
-              : 'relative flex items-center justify-center gap-3'
-          }
-        >
+        <div className="flex items-center justify-center gap-3">
           {!isEmbeddedEditMask && (
             <>
               <button
