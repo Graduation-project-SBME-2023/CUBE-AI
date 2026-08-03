@@ -99,14 +99,6 @@ export default function CanvasHeader({
           </>
         )}
 
-        {mode === 'results' && (
-          <button
-            onClick={onReset}
-            className="flex items-center gap-2 rounded bg-[#5e98ac] px-3 py-1 text-xs font-medium text-black transition-colors hover:bg-[#72adc2]"
-          >
-            <RotateCcw size={12} /> Reset
-          </button>
-        )}
       </div>
 
       {/* ── Literature Text ── */}
