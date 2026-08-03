@@ -182,11 +182,14 @@ async def run_planner(session: Session, message: str, do_lit_review: bool = True
         session_service=session_service,
         api_key=api_key,
     )
-    await planner.run(start_query=message, do_lit_review=do_lit_review)
-    logging.getLogger("HypothesisFlow").info(
-        "[HypothesisFlow][Planner] Planner finished | session_id=%s",
-        session.session_id,
-    )
+    try:
+        await planner.run(start_query=message, do_lit_review=do_lit_review)
+        logging.getLogger("HypothesisFlow").info(
+            "[HypothesisFlow][Planner] Planner finished | session_id=%s",
+            session.session_id,
+        )
+    finally:
+        planner.close()
 
 
 # ----------------------------------------------------------------------
@@ -712,6 +715,18 @@ async def replay_logs(session_id: str):
                 os.environ.get("MAS_BASE_URL", "http://localhost:8150"),
             )
             if snapshot:
+                draft = _load_review_draft_from_disk(session_id) or {}
+                draft_run_id = str(draft.get("run_id") or "")
+                manifest_run_id = str(manifest.get("run_id") or "")
+                decisions = draft.get("decisions")
+                if (
+                    isinstance(decisions, dict)
+                    and (not draft_run_id or draft_run_id == manifest_run_id)
+                ):
+                    for volume in snapshot.get("volumes", []):
+                        status = decisions.get(volume.get("pairId"))
+                        if status in {"accepted", "rejected", "modified"}:
+                            volume["reviewStatus"] = status
                 await ws_manager.send_ws_message(
                     "segmentation_output",
                     snapshot,
@@ -1015,6 +1030,37 @@ def _review_disk_path(session_id: str) -> str:
     base = os.environ.get("AGENTS_WORKSPACE_DIR", "/app/agents_workspace")
     workspace = os.path.join(base, f"workspace_{session_id}")
     return os.path.join(workspace, "review_result.json")
+
+
+def _review_draft_disk_path(session_id: str) -> str:
+    return os.path.join(os.path.dirname(_review_disk_path(session_id)), "review_draft.json")
+
+
+def _persist_review_draft_to_disk(session_id: str, payload: dict) -> None:
+    """Atomically persist in-progress review choices without resuming the agent."""
+    path = _review_draft_disk_path(session_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    temporary_path = f"{path}.tmp"
+    with open(temporary_path, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream)
+    os.replace(temporary_path, path)
+
+
+def _load_review_draft_from_disk(session_id: str) -> dict | None:
+    try:
+        path = _review_draft_disk_path(session_id)
+        if not os.path.isfile(path):
+            return None
+        with open(path, "r", encoding="utf-8") as stream:
+            payload = json.load(stream)
+        return payload if isinstance(payload, dict) else None
+    except (OSError, json.JSONDecodeError):
+        logger.warning(
+            "Could not load segmentation review draft for session %s",
+            session_id,
+            exc_info=True,
+        )
+        return None
 
 
 def _persist_review_to_disk(session_id: str, payload: dict) -> None:
@@ -1485,6 +1531,63 @@ async def upload_targets(
         "target_column": target_column,
         "row_count": len(rows),
     }
+@app.post("/segmentation-review/draft")
+async def segmentation_review_draft(data: dict):
+    """Persist UI review choices without resolving the agent's review wait."""
+    session_id = str(data.get("session_id") or "")
+    decisions = data.get("decisions")
+    if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
+        raise HTTPException(status_code=400, detail="A valid session_id is required")
+    if not isinstance(decisions, dict):
+        raise HTTPException(status_code=400, detail="decisions must be an object")
+
+    manifest_path = os.path.join(
+        os.path.dirname(_review_draft_disk_path(session_id)),
+        "segmentation_manifest.json",
+    )
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as stream:
+            manifest = json.load(stream)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Segmentation review is not available")
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="Could not load segmentation review") from exc
+
+    manifest_run_id = str(manifest.get("run_id") or "")
+    request_run_id = str(data.get("run_id") or "")
+    if request_run_id and manifest_run_id and request_run_id != manifest_run_id:
+        raise HTTPException(status_code=409, detail="Segmentation run has changed")
+
+    pair_ids = {
+        str(item.get("pair_id"))
+        for item in manifest.get("pairs", [])
+        if isinstance(item, dict) and item.get("pair_id")
+    }
+    unknown_pair_ids = set(map(str, decisions)) - pair_ids
+    if unknown_pair_ids:
+        raise HTTPException(status_code=400, detail="Review contains unknown segmentation pairs")
+
+    allowed_statuses = {"accepted", "rejected", "modified"}
+    clean_decisions = {
+        str(pair_id): str(status)
+        for pair_id, status in decisions.items()
+        if str(status) in allowed_statuses
+    }
+    if len(clean_decisions) != len(decisions):
+        raise HTTPException(status_code=400, detail="Review contains an invalid status")
+
+    try:
+        _persist_review_draft_to_disk(
+            session_id,
+            {"run_id": manifest_run_id, "decisions": clean_decisions},
+        )
+    except OSError as exc:
+        logger.error("Could not persist review draft for session %s", session_id, exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not persist review draft") from exc
+
+    return {"status": "ok"}
+
+
 @app.post("/segmentation-review")
 async def segmentation_review(data: dict):
     session_id = data.get("session_id", "default")

@@ -101,7 +101,40 @@ class SessionService:
             raise SessionPlanningConflict(
                 f"Session {session_id} already contains persisted planning state"
             )
-        self.tasks.start_planning(session, message, planner)
+
+        async def planner_with_failure_notification(
+            active_session: Session,
+            starting_message: str,
+        ) -> None:
+            try:
+                await planner(active_session, starting_message)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                user_message = (
+                    "Planning stopped because the planning service encountered "
+                    "an unrecoverable error. Please retry the request."
+                )
+                await self._ws_send(
+                    "msg",
+                    user_message,
+                    session_id=active_session.session_id,
+                )
+                await self._ws_send(
+                    "planning_failed",
+                    {
+                        "reason": "planner_exception",
+                        "message": user_message,
+                    },
+                    session_id=active_session.session_id,
+                )
+                raise
+
+        self.tasks.start_planning(
+            session,
+            message,
+            planner_with_failure_notification,
+        )
 
     async def start_execution(
         self,
@@ -116,6 +149,15 @@ class SessionService:
         if session.execution_task and not session.execution_task.done():
             raise SessionExecutionConflict(
                 f"Execution already running for session {session_id}"
+            )
+
+        if (
+            session.plan is None
+            or not session.plan.steps
+            or str(session.plan.state or "").lower() != "confirmed"
+        ):
+            raise SessionExecutionConflict(
+                f"Session {session_id} has no confirmed executable pipeline plan"
             )
 
         persisted_steps = []
