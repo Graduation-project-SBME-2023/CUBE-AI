@@ -246,33 +246,7 @@ export default function PhaseSidebar({
                 })}
             </div>
 
-            {/* ── Footer: Dynamic Step Count ── */}
-            {!isCollapsed && (
-                <div
-                    className="shrink-0 border-t px-4 py-2.5 flex flex-col gap-0.5"
-                    style={{ borderColor: '#1a2a3a' }}
-                >
-                    {planReceived ? (
-                        <>
-                            <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#4a6580' }}>
-                                Pipeline Steps
-                            </span>
-                            <span className="text-[11px] font-semibold" style={{ color: '#5acce6' }}>
-                                {totalCount} step{totalCount !== 1 ? 's' : ''} planned
-                            </span>
-                        </>
-                    ) : (
-                        <>
-                            <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#2a3a4a' }}>
-                                Pipeline Steps
-                            </span>
-                            <span className="text-[10px] italic" style={{ color: '#2a3a4a' }}>
-                                Awaiting plan…
-                            </span>
-                        </>
-                    )}
-                </div>
-            )}
+
 
         </div>
     );
