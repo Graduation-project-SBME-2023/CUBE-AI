@@ -12,7 +12,7 @@ import ModelingView from './PlaygroundCanvas/views/ModelingView';
 import ReportingView from './PlaygroundCanvas/views/ReportingView';
 import ChatSidebar from './PlaygroundCanvas/ChatSidebar';
 import ClientSettingsPanel from './PlaygroundCanvas/ClientSettingsPanel';
-import { RESEARCH_PHASES } from '../constants/researchPhases';
+import { RESEARCH_PHASES, MODULE_TO_PHASE_ID, resolveStepToPhaseId } from '../constants/researchPhases';
 import { ResearchProvider } from '../context/ResearchContext';
 import { useResearchData } from '../hooks/useResearchData';
 import websocketService from '../services/websocket';
@@ -101,6 +101,22 @@ function ResearchPlaygroundInner() {
   const [phaseUpdateMessages, setPhaseUpdateMessages] = useState<Record<string, string>>({});
   const [waitingPhaseIds, setWaitingPhaseIds] = useState<string[]>([]);
   const [viewsReady, setViewsReady] = useState(false);
+  /**
+   * Phase IDs that the backend plan actually includes.
+   * null  = no plan received yet  → show all phases (fall-back)
+   * []    = plan received but empty → show all phases (fall-back)
+   * [...] = plan received          → only show these phases in the sidebar
+   */
+  const [activePipelinePhaseIds, setActivePipelinePhaseIds] = useState<string[] | null>(null);
+  /**
+   * The phase ID of the furthest agent that has started or completed.
+   * Drives the progressive one-by-one sidebar unlock during execution.
+   * null = execution not started or re-started.
+   */
+  const [furthestReachedPhaseId, setFurthestReachedPhaseId] = useState<string | null>(null);
+  /** Mirror of sidebarPhases readable inside WS handler closures without stale state. */
+  const sidebarPhasesRef = useRef<any[]>([]);
+  const furthestReachedPhaseIdxRef = useRef<number>(-1);
   const [restoredMode, setRestoredMode] = useState<'planning' | 'executing' | 'results'>('planning');
   const [hydratedExecutionState, setHydratedExecutionState] = useState<any>(null);
   const [manualResumeRequired, setManualResumeRequired] = useState(false);
@@ -282,6 +298,11 @@ function ResearchPlaygroundInner() {
     // Reset approval and execution gates when execution restarts
     setIsPlanApproved(false);
     setIsAgentExecuting(false);
+    // Reset the dynamic phase list so a new plan can re-populate the sidebar
+    setActivePipelinePhaseIds(null);
+    // Reset progressive unlock frontier
+    setFurthestReachedPhaseId(null);
+    furthestReachedPhaseIdxRef.current = -1;
     // Also clear persisted state so a hard restart begins fresh
     if (sessionId) {
       try {
@@ -290,9 +311,68 @@ function ResearchPlaygroundInner() {
       } catch (_) {}
     }
   }, [setData, sessionId]);
-  const sidebarPhases = useMemo(
+  /**
+   * The full list of sidebar-eligible phases (everything except planning & execution).
+   * Used as a fallback before the backend plan arrives.
+   */
+  const allSidebarPhases = useMemo(
     () => phases.filter(phase => phase.id !== 'planning' && phase.id !== 'execution'),
     [phases]
+  );
+
+  /**
+   * Dynamically filtered sidebar phases — driven by the backend plan.
+   * - Before a plan arrives (null / empty): show ALL sidebar phases so the
+   *   user can see what steps exist (they will be locked).
+   * - After a plan arrives: show ONLY the phases the backend selected, always
+   *   prepending Literature Review when includeLitReview is true.
+   */
+  const sidebarPhases = useMemo(() => {
+    if (!activePipelinePhaseIds || activePipelinePhaseIds.length === 0) {
+      // No plan yet — show everything as a preview
+      return allSidebarPhases;
+    }
+
+    // Build an ordered list that respects RESEARCH_PHASES ordering
+    return allSidebarPhases.filter(phase => activePipelinePhaseIds.includes(phase.id));
+  }, [activePipelinePhaseIds, allSidebarPhases]);
+
+  // Keep sidebarPhasesRef in sync so WS handlers can read the latest list
+  useEffect(() => {
+    sidebarPhasesRef.current = sidebarPhases;
+  }, [sidebarPhases]);
+
+  // During the planning stage (before execution starts), lock every sidebar phase
+  // except Literature Review so the user knows these steps exist but are not yet active.
+  const lockedPhaseIds = useMemo(
+    () => {
+      if (!isPlanApproved) {
+        // Planning stage: lock all sidebar phases except Literature Review
+        return sidebarPhases
+          .filter(phase => phase.id !== 'literature')
+          .map(phase => phase.id);
+      }
+
+      // Execution stage — progressive one-by-one unlock:
+      // Find the index of the furthest phase that has been reached.
+      // Everything after that index stays locked.
+      if (!furthestReachedPhaseId) {
+        // Execution just started but no agent has been reported yet—keep locked
+        return sidebarPhases
+          .filter(phase => phase.id !== 'literature')
+          .map(phase => phase.id);
+      }
+
+      const furthestIdx = sidebarPhases.findIndex(p => p.id === furthestReachedPhaseId);
+      if (furthestIdx === -1) {
+        // Phase ID not found in the current sidebar (shouldn’t happen), unlock all
+        return [];
+      }
+
+      // Lock every phase that comes AFTER the furthest reached one
+      return sidebarPhases.slice(furthestIdx + 1).map(p => p.id);
+    },
+    [isPlanApproved, furthestReachedPhaseId, sidebarPhases]
   );
 
   const isValidPhase = !phaseId || phases.some(phase => phase.id === phaseId);
@@ -436,6 +516,50 @@ function ResearchPlaygroundInner() {
     replay();
   }, [hydratedExecutionState, sessionId, viewsReady, restoredModeReady]);
 
+  // ── Plan-driven sidebar: listen for pipeline plan events ───────────────────
+  useEffect(() => {
+    const unsubscribe = websocketService.subscribe((event: any) => {
+      const { type, payload } = event;
+      const incomingSessionId = event?.session_id;
+      if (incomingSessionId && sessionId && String(incomingSessionId) !== String(sessionId)) return;
+
+      if (
+        type === 'pipeline_update' ||
+        type === 'plan' ||
+        type === 'PLAN_UPDATE'
+      ) {
+        const planData = payload || event.data || event;
+        const steps: any[] = Array.isArray(planData?.steps) ? planData.steps : [];
+
+        if (steps.length === 0) return; // no meaningful plan yet
+
+        // Map each backend step → sidebar phase ID, deduplicate, preserve order
+        const seen = new Set<string>();
+        const phaseIds: string[] = [];
+
+        // Literature always comes first if enabled (arrives via lit_review_node,
+        // not via steps[], so inject it here if not already present)
+        if (includeLitReview) {
+          seen.add('literature');
+          phaseIds.push('literature');
+        }
+
+        for (const step of steps) {
+          const phaseId = resolveStepToPhaseId(step);
+          if (phaseId && !seen.has(phaseId)) {
+            seen.add(phaseId);
+            phaseIds.push(phaseId);
+          }
+        }
+
+        if (phaseIds.length > 0) {
+          setActivePipelinePhaseIds(phaseIds);
+        }
+      }
+    });
+    return unsubscribe;
+  }, [sessionId, includeLitReview]);
+
   useEffect(() => {
     const unsubscribe = websocketService.subscribe((event: any) => {
       const { type, payload } = event;
@@ -533,6 +657,37 @@ function ResearchPlaygroundInner() {
         if (!updateStateRef.current.isHydrating && !updateStateRef.current.isHistorical) {
           setIsAgentExecuting(!allDone && !anyWaiting);
         }
+
+        // ── Progressive sidebar unlock ──────────────────────────────────────
+        // Find the furthest phase (in sidebarPhases order) where the
+        // corresponding agent has STARTED (anything other than PENDING/READY).
+        const phases = sidebarPhasesRef.current;
+        let newFurthestIdx = furthestReachedPhaseIdxRef.current;
+        let newFurthestId: string | null = null;
+
+        for (const agent of agents) {
+          const agentName = String(agent?.name || '').trim().toLowerCase();
+          const status = String(agent?.status || '').trim().toUpperCase();
+          // Consider an agent "reached" as soon as it is not merely pending/ready
+          const hasStarted = agentName && !['PENDING', 'NOT_CONFIRMED', 'READY'].includes(status);
+          if (!hasStarted) continue;
+
+          const phaseId = MODULE_TO_PHASE_ID[agentName];
+          if (!phaseId) continue;
+
+          const idx = phases.findIndex(p => p.id === phaseId);
+          if (idx > newFurthestIdx) {
+            newFurthestIdx = idx;
+            newFurthestId = phaseId;
+          }
+        }
+
+        if (newFurthestId && newFurthestIdx > furthestReachedPhaseIdxRef.current) {
+          furthestReachedPhaseIdxRef.current = newFurthestIdx;
+          setFurthestReachedPhaseId(newFurthestId);
+        }
+        // ────────────────────────────────────────────────────────
+
         for (const agent of agents) {
           const agentName = String(agent?.name || '');
           if (
@@ -546,6 +701,21 @@ function ResearchPlaygroundInner() {
             );
             if (outputForAgent) clearPhaseIndicator(outputForAgent.phase);
             tryShowCompletedUpdate(agentName);
+          }
+        }
+      }
+
+      // run_status also carries the current active agent — use it to advance
+      // the progressive unlock frontier in real-time between status broadcasts.
+      if (type === 'run_status' && payload?.current_agent) {
+        const agentName = String(payload.current_agent).trim().toLowerCase();
+        const phaseId = MODULE_TO_PHASE_ID[agentName];
+        if (phaseId) {
+          const phases = sidebarPhasesRef.current;
+          const idx = phases.findIndex(p => p.id === phaseId);
+          if (idx > furthestReachedPhaseIdxRef.current) {
+            furthestReachedPhaseIdxRef.current = idx;
+            setFurthestReachedPhaseId(phaseId);
           }
         }
       }
@@ -704,6 +874,8 @@ function ResearchPlaygroundInner() {
           updatedPhaseIds={updatedPhaseIds}
           updateMessages={phaseUpdateMessages}
           forceVisibleUpdatePhaseIds={waitingPhaseIds}
+          lockedPhaseIds={lockedPhaseIds}
+          planReceived={activePipelinePhaseIds !== null}
           onSelectPhase={selectPhase}
           isCollapsed={isPhaseSidebarCollapsed}
           onToggleCollapse={() => setIsPhaseSidebarCollapsed(prev => !prev)}
