@@ -762,23 +762,8 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
   const snackbar = useSnackbar();
 
   useEffect(() => {
-    if (
-      segmentationData?.volumes?.length ||
-      segmentationData?.failedVolumes?.length ||
-      segmentationData?.isFinished
-    ) {
-      setData({
-        runId: segmentationData.runId,
-        targetRoi: segmentationData.targetRoi || '-',
-        selectedModel: segmentationData.selectedModel || '-',
-        volumes: segmentationData.volumes || [],
-        failedVolumes: segmentationData.failedVolumes || [],
-        progress: segmentationData.progress,
-        sessionId: segmentationData.sessionId,
-        isFinished: segmentationData.isFinished ?? false,
-      });
-      setIsLoading(false);
-    } else if (!segmentationData) {
+    if (!segmentationData) {
+      // No data at all — reset to blank loading state
       setData({
         runId: undefined,
         targetRoi: '-',
@@ -790,6 +775,32 @@ export default function SegmentationView({ segmentationData }: ReviewContainerPr
         isFinished: false,
       });
       setIsLoading(true);
+      return;
+    }
+
+    const hasEarlyInfo = segmentationData.targetRoi || segmentationData.selectedModel;
+    const hasMaskData =
+      segmentationData?.volumes?.length ||
+      segmentationData?.failedVolumes?.length ||
+      segmentationData?.isFinished;
+
+    if (hasEarlyInfo || hasMaskData) {
+      // Merge incoming data with existing state so early targetRoi/selectedModel
+      // are preserved when subsequent mask updates arrive (and vice versa).
+      setData(prev => ({
+        runId: segmentationData.runId ?? prev.runId,
+        targetRoi: segmentationData.targetRoi || prev.targetRoi || '-',
+        selectedModel: segmentationData.selectedModel || prev.selectedModel || '-',
+        volumes: segmentationData.volumes ?? prev.volumes ?? [],
+        failedVolumes: segmentationData.failedVolumes ?? prev.failedVolumes ?? [],
+        progress: segmentationData.progress ?? prev.progress,
+        sessionId: segmentationData.sessionId ?? prev.sessionId,
+        isFinished: segmentationData.isFinished ?? prev.isFinished ?? false,
+      }));
+      // Stop the loading spinner only once actual mask data (or finish) arrives
+      if (hasMaskData) {
+        setIsLoading(false);
+      }
     } else {
       setIsLoading(true);
     }
