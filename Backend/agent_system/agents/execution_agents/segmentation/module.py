@@ -481,6 +481,13 @@ class SegmentationModule:
                     item["error"] = "Ready checkpoint is missing its preview artifacts"
 
         # Reused masks are made visible before any new inference begins.
+        reused_count = sum(1 for item in ordered if item.get("reused") and item.get("status") not in {"ready", "failed"})
+        if reused_count:
+            await emit_tool_events(
+                event_types=["tool_started", "tool_finished"],
+                content=TextPayload(message=f"Sending {reused_count} existing segmentation mask(s) to frontend."),
+                session_id=self.session_id,
+            )
         for item in ordered:
             if not item.get("reused") or item.get("status") in {"ready", "failed"}:
                 continue
@@ -641,6 +648,11 @@ class SegmentationModule:
                 )
 
         if pending:
+            await emit_tool_events(
+                event_types=["tool_started", "tool_finished"],
+                content=TextPayload(message=f"Starting Segmentation on {len(pending)} volume(s)."),
+                session_id=self.session_id,
+            )
             if plan.chosen_path == "automatic":
                 await run_automatic_pipeline(
                     pending,
@@ -942,6 +954,11 @@ class SegmentationModule:
             run_id=run_id,
         )
         result = self._build_result(manifest_path, plan, work_items)
+        await emit_tool_events(
+            event_types=["tool_started", "tool_finished"],
+            content=TextPayload(message="Segmentation is done."),
+            session_id=self.session_id,
+        )
         await emit_tool_event(
             event_type="tool_finished",
             content=TextPayload(
