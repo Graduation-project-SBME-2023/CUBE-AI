@@ -73,6 +73,7 @@ class ResearchNotificationService {
   private wsUnsubscribe: (() => void) | null = null;
   private wsStatusUnsubscribe: (() => void) | null = null;
   private previousAgentStatuses: Map<string, string> = new Map();
+  private isDisconnectedNotificationShown: boolean = false;
 
   constructor(notificationService?: UINotificationService) {
     this.notification = notificationService || new UINotificationService();
@@ -265,18 +266,20 @@ class ResearchNotificationService {
   private handleWebSocketStatusChange = (isConnected: boolean): void => {
     if (isConnected && this.enabled) {
       console.log('[ResearchNotificationService] WebSocket reconnected, service active');
+      this.isDisconnectedNotificationShown = false;
       this.showNotification('websocket_connected', {
         title: 'Connected',
         message: 'Research service connected.',
         type: 'success',
         duration: 3000,
       });
-    } else if (!isConnected) {
+    } else if (!isConnected && !this.isDisconnectedNotificationShown) {
+      this.isDisconnectedNotificationShown = true;
       this.showNotification('websocket_disconnected', {
         title: 'Disconnected',
         message: 'Research service disconnected. Reconnecting...',
         type: 'warning',
-        duration: 5000,
+        duration: 0, // keep it visible until reconnected
       });
     }
   };
@@ -308,6 +311,7 @@ class ResearchNotificationService {
     this.completedPhases.clear();
     this.isStudyComplete = false;
     this.previousAgentStatuses.clear();
+    this.isDisconnectedNotificationShown = false;
   }
 
   restart(): void {
