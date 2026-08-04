@@ -29,9 +29,6 @@ export default function PhaseSidebar({
     isCollapsed,
     onToggleCollapse,
 }: PhaseSidebarProps) {
-    const activeIndex = phases.findIndex(p => p.id === activePhase);
-    const activeStep = activeIndex >= 0 ? activeIndex + 1 : 0;
-    const progressPct = phases.length ? Math.round((activeStep / phases.length) * 100) : 0;
     const activePhaseObj = phases.find(p => p.id === activePhase);
 
     return (
@@ -203,51 +200,6 @@ export default function PhaseSidebar({
                 })}
             </div>
 
-            {/* ── Add Node Button ── */}
-            <div className="px-2 pb-1">
-                <button
-                    type="button"
-                    className={`w-full rounded-lg flex items-center justify-center gap-1.5 py-2 transition-all text-[11px] font-medium
-                        border border-dashed border-[#1e3248] text-[#4a6a84]
-                        hover:border-[#5acce6] hover:text-[#5acce6] hover:bg-[#0d1e2e]
-                        ${isCollapsed ? 'px-1' : 'px-3'}`}
-                >
-                    <PlusIcon size={12} strokeWidth={2.5} />
-                    {!isCollapsed && <span>Add Node</span>}
-                </button>
-            </div>
-
-            {/* ── Progress Footer ── */}
-            <div
-                className="px-3.5 pt-2.5 pb-3.5 border-t"
-                style={{ borderColor: '#1a2a3a' }}
-            >
-                {!isCollapsed && (
-                    <div className="flex items-center justify-between mb-1.5">
-                        <span
-                            className="text-[9px] font-semibold uppercase tracking-wider"
-                            style={{ color: '#3d5a72' }}
-                        >
-                            Progress
-                        </span>
-                        <span className="text-[9px] font-bold" style={{ color: '#5a8aaa' }}>
-                            {activeStep}/{phases.length} steps
-                        </span>
-                    </div>
-                )}
-                <div
-                    className="h-[3px] rounded-full overflow-hidden"
-                    style={{ background: '#1a2a3a' }}
-                >
-                    <div
-                        className="h-full rounded-full transition-all duration-500"
-                        style={{
-                            width: `${progressPct}%`,
-                            background: 'linear-gradient(90deg, #2eca8e, #5acce6)',
-                        }}
-                    />
-                </div>
-            </div>
         </div>
     );
 }
