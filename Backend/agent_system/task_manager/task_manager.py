@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from models.session import Session, SessionState
+from services.timeout_policy import CANCELLATION_GRACE_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,20 @@ class TaskManager:
         self.stop(session)
         if session.execution_task and not session.execution_task.done():
             try:
-                await session.execution_task
+                await asyncio.wait_for(
+                    asyncio.shield(session.execution_task),
+                    timeout=CANCELLATION_GRACE_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "Execution %s did not stop within %.1fs; refusing an overlapping restart",
+                    session.session_id,
+                    CANCELLATION_GRACE_SECONDS,
+                )
+                session.execution_task.cancel()
+                raise RuntimeError(
+                    "The previous execution did not stop cleanly; restart was aborted"
+                )
             except (asyncio.CancelledError, Exception):
                 pass
 

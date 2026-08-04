@@ -11,10 +11,113 @@ from typing import Annotated
 from pydantic import Field
 import os
 import asyncio
+import hashlib
 
 logger = logging.getLogger(__name__)
 
 MONAI_LABEL_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
+INFERENCE_JOB_TIMEOUT_SECONDS = float(
+    os.environ.get("SEGMENTATION_JOB_TIMEOUT_SECONDS", "1800")
+)
+INFERENCE_POLL_SECONDS = float(os.environ.get("SEGMENTATION_POLL_SECONDS", "3"))
+
+
+def _inference_job_id(model: str, image: str, params: dict) -> str:
+    payload = json.dumps(
+        {
+            "model": model,
+            "image": image,
+            "params": params,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def _await_inference_job(
+    client: httpx.AsyncClient,
+    *,
+    model: str,
+    image: str,
+    params: dict,
+) -> tuple[httpx.Response, dict]:
+    job_id = _inference_job_id(model, image, params)
+    job_url = f"{MONAI_LABEL_URL}/inference-jobs/{job_id}"
+    start_response = await client.post(
+        f"{MONAI_LABEL_URL}/inference-jobs/",
+        json={
+            "job_id": job_id,
+            "model": model,
+            "image": image,
+            "params": params,
+            "max_runtime_seconds": INFERENCE_JOB_TIMEOUT_SECONDS,
+        },
+        timeout=30.0,
+    )
+    start_response.raise_for_status()
+    started = asyncio.get_running_loop().time()
+    unavailable_since: float | None = None
+    UNAVAILABLE_GRACE_SECONDS = 120.0
+
+    try:
+        while True:
+            if (
+                asyncio.get_running_loop().time() - started
+                >= INFERENCE_JOB_TIMEOUT_SECONDS
+            ):
+                await client.delete(job_url, timeout=10.0)
+                raise TimeoutError(
+                    f"Inference exceeded {INFERENCE_JOB_TIMEOUT_SECONDS:.0f}s"
+                )
+
+            try:
+                status_response = await client.get(job_url, timeout=10.0)
+                status_response.raise_for_status()
+                job = status_response.json()
+                unavailable_since = None
+            except (
+                httpx.HTTPStatusError,
+                httpx.ConnectError,
+                httpx.ReadError,
+                httpx.TimeoutException,
+                httpx.RemoteProtocolError,
+            ) as exc:
+                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500 and exc.response.status_code != 404:
+                    raise RuntimeError(f"Inference job status failed: HTTP {exc.response.status_code}")
+                
+                now = asyncio.get_running_loop().time()
+                unavailable_since = unavailable_since or now
+                if now - unavailable_since >= UNAVAILABLE_GRACE_SECONDS:
+                    raise RuntimeError(
+                        f"Inference service remained unavailable for "
+                        f"{UNAVAILABLE_GRACE_SECONDS:.0f}s: {exc}"
+                    )
+                await asyncio.sleep(INFERENCE_POLL_SECONDS)
+                continue
+
+            job_status = str(job.get("status") or "").upper()
+            if job_status == "SUCCEEDED":
+                result_response = await client.get(
+                    f"{job_url}/result",
+                    timeout=httpx.Timeout(180.0, connect=15.0),
+                )
+                result_response.raise_for_status()
+                return result_response, job
+            if job_status in {"FAILED", "TIMED_OUT", "CANCELLED"}:
+                raise RuntimeError(
+                    str(job.get("error") or f"Inference job {job_status.lower()}")
+                )
+            await asyncio.sleep(INFERENCE_POLL_SECONDS)
+    except asyncio.CancelledError:
+        try:
+            await asyncio.wait_for(
+                client.delete(job_url, timeout=10.0),
+                timeout=10.0,
+            )
+        except Exception:
+            pass
+        raise
 
 from typing import List, Dict, Any, Union
 
@@ -108,31 +211,26 @@ async def run_segmentation(
     infer_url = f"{MONAI_LABEL_URL}/infer/{clean_model}"
     query_params = {"image": series_instance_uid}
 
-    inference_params = params or {}
+    inference_params = dict(params or {})
     inference_params["label_info"] = normalized_label_info
-
-    files = {"params": (None, json.dumps(inference_params), "application/json")}
 
     logger.info("Starting inference request...")
     logger.info(" This may take several minutes for large volumes...")
     
-    # long timeouts for large volume inference
-    timeout_config = httpx.Timeout(
-        connect=30.0,      # 30 seconds to establish connection
-        read=300.0,        # 5 minutes to read response
-        write=30.0,        # 30 seconds to write request
-        pool=30.0          # 30 seconds to get connection from pool
-    )
-    
-    async with httpx.AsyncClient(timeout=timeout_config) as client:  
+    async with httpx.AsyncClient() as client:
         try:
             inference_start = datetime.now()
-            response = await client.post(infer_url, params=query_params, files=files)
+            response, inference_job = await _await_inference_job(
+                client,
+                model=clean_model,
+                image=series_instance_uid,
+                params=inference_params,
+            )
             inference_duration = (datetime.now() - inference_start).total_seconds()
             
             logger.info(f"Inference completed in {inference_duration:.1f}s with status: {response.status_code}")
             
-        except httpx.TimeoutException as e:
+        except (httpx.TimeoutException, TimeoutError) as e:
             elapsed = (datetime.now() - start_time).total_seconds()
             logger.error(f"Inference timeout after {elapsed:.1f}s: {str(e)}")
             return {
@@ -150,7 +248,9 @@ async def run_segmentation(
         "query_params": query_params,
         "sent_params": inference_params,
         "status_code": response.status_code,
-        "inference_duration_seconds": inference_duration
+        "inference_duration_seconds": inference_duration,
+        "inference_job_id": inference_job.get("job_id"),
+        "retry_count": inference_job.get("attempt", 1),
     }
 
     if response.status_code != 200:

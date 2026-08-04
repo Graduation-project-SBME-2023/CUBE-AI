@@ -103,6 +103,7 @@ async def run_automatic_pipeline(
                     series_instance_uid=volume_uid,
                     label_info=label,
                     params={"text_prompts": [prompt]},
+                    job_id=str(item["inference_job_id"]),
                 ),
                 session_id=session_id,
                 current=index - 0.5,

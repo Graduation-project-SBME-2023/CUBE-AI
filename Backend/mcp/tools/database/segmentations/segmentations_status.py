@@ -1,8 +1,9 @@
 from ... import mcp 
 import httpx
 import os
+from service_urls import CONTROL_API_URL
 
-base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+base_url = CONTROL_API_URL
 
 @mcp.tool()
 async def get_segmentation_stats():

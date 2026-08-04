@@ -46,6 +46,7 @@ Backend/agent_system/benchmarking/benchmark_results
 Backend/agent_system/benchmarking/execution_evaluation/runs
 Backend/apps/radiology/bin/
 Backend/apps/radiology/General_Data/
+Backend/apps/radiology/inference_jobs/
 Backend/apps/radiology/Labels/
 Backend/apps/radiology/Data/
 

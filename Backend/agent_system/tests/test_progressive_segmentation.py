@@ -24,6 +24,7 @@ class _FakeSegmentationService:
         series_instance_uid,
         label_info,
         params,
+        job_id,
     ):
         self.calls.append(
             {
@@ -31,6 +32,7 @@ class _FakeSegmentationService:
                 "volume_uid": series_instance_uid,
                 "label": label_info,
                 "prompt": params["text_prompts"][0],
+                "job_id": job_id,
             }
         )
         return {
@@ -51,6 +53,7 @@ class PairPipelineTests(unittest.IsolatedAsyncioTestCase):
                 "canonical_label": "liver",
                 "model": "model-liver",
                 "inference_prompt": "prompt-liver",
+                "inference_job_id": "job-liver",
             },
             {
                 "pair_id": "volume__tumor",
@@ -59,6 +62,7 @@ class PairPipelineTests(unittest.IsolatedAsyncioTestCase):
                 "canonical_label": "liver tumor",
                 "model": "model-tumor",
                 "inference_prompt": "prompt-tumor",
+                "inference_job_id": "job-tumor",
             },
         ]
 
@@ -94,12 +98,14 @@ class PairPipelineTests(unittest.IsolatedAsyncioTestCase):
                     "volume_uid": "volume",
                     "label": "liver",
                     "prompt": "prompt-liver",
+                    "job_id": "job-liver",
                 },
                 {
                     "model": "model-tumor",
                     "volume_uid": "volume",
                     "label": "liver tumor",
                     "prompt": "prompt-tumor",
+                    "job_id": "job-tumor",
                 },
             ],
         )
@@ -124,6 +130,7 @@ class PairPipelineTests(unittest.IsolatedAsyncioTestCase):
                 "canonical_label": f"target {index}",
                 "model": "model",
                 "inference_prompt": f"prompt {index}",
+                "inference_job_id": f"job-{index}",
             }
             for index in range(2)
         ]

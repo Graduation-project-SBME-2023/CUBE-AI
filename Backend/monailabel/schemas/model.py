@@ -37,5 +37,6 @@ class Model(ModelBase):
     model_id: UUID
     created_at: Optional[datetime] = None
 
-    # Pydantic v2 way to enable ORM compatibility
-    model_config = ConfigDict(from_attributes=True)
+    # Pydantic v2: disable the model_ namespace guard so model_id is allowed
+    # without a UserWarning about protected field names.
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())

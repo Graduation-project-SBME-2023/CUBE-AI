@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 from PIL import Image
 
 MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
+CONTROL_API_URL = os.environ.get("CONTROL_API_URL", MONAI_URL)
 REQUEST_TIMEOUT_SECONDS = 10.0
 async def check_having_mask(
     volume_uid,
@@ -29,7 +30,7 @@ async def check_having_mask(
     Checks if a segmentation mask exists for the given volume SeriesInstanceUID (volume_uid).
     Calls the endpoint /segmentations/by-volume/{volume_uid} and returns the list of segmentations.
     """
-    url = f"{MONAI_URL}/segmentations/by-volume/{volume_uid}"
+    url = f"{CONTROL_API_URL}/segmentations/by-volume/{volume_uid}"
     request_client = client or httpx.AsyncClient()
     try:
         response = await request_client.get(

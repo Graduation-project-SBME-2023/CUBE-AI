@@ -17,6 +17,7 @@ from system_prompts.system_messages import MODELING_AGENT_SYSTEM_PROMPT
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
 from tools.classification_tool import classification_modelling
 from autogen_core.tools import FunctionTool
+from services.timeout_policy import MCP_COMPUTE_READ_SECONDS
 
 modelling_classification_tool = classification_modelling
 logger = logging.getLogger(__name__)
@@ -56,7 +57,10 @@ class ModelingAgent(AssistantAgent):
             "AGENT_ID": "modeling_agent"
         })
         mcp_server = StdioServerParams(
-            command=sys.executable, args=[mcp_server_path], env=env, read_timeout_seconds=3600
+            command=sys.executable,
+            args=[mcp_server_path],
+            env=env,
+            read_timeout_seconds=MCP_COMPUTE_READ_SECONDS,
         )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)

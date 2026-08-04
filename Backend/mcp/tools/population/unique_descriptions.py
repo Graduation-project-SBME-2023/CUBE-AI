@@ -1,10 +1,11 @@
 import httpx
 from .. import mcp
 import os
+from service_urls import CONTROL_API_URL
 
 # Assuming your mcp instance is imported here
 # from your_mcp_server import mcp
-base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+base_url = CONTROL_API_URL
 
 @mcp.tool()
 async def get_unique_series_descriptions() -> dict:

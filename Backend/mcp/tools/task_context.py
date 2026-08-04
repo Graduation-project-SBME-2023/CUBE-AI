@@ -1,4 +1,5 @@
 import os
+from service_urls import CONTROL_API_URL
 import httpx
 from typing import Any
 import logging
@@ -8,7 +9,7 @@ logger = logging.getLogger(__name__)
 from . import mcp
 from tool_logging import ToolEvent, log_tool_state, TextPayload
 
-BASE_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
+BASE_URL = CONTROL_API_URL
 SESSION_ID = os.environ.get("SESSION_ID", "")
 AGENT_ID = os.environ.get("AGENT_ID", "")
 

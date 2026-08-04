@@ -160,7 +160,9 @@ async def extract_cohort_labels() -> dict:
             inclusion_criteria = config.get("inclusion_criteria", [])
             exclusion_criteria = config.get("exclusion_criteria", [])
 
-    base_url_orthanc = os.environ.get("MONAI_URL", "http://localhost:8000")
+    from service_urls import CONTROL_API_URL
+
+    base_url_orthanc = CONTROL_API_URL
 
     # ── 2. Resolve patient IDs + metadata from the volume dataset list ──────────
     available_cases: set = set()

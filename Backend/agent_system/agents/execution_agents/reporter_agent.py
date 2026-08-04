@@ -16,6 +16,7 @@ from autogen_core import CancellationToken
 from descriptions.models_descriptions import REPORTER_AGENT_DESCRIPTION
 from system_prompts.system_messages import REPORTER_AGENT_SYSTEM_MESSAGE
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
+from services.timeout_policy import MCP_STANDARD_READ_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class ReporterAgent(AssistantAgent):
             command=sys.executable,
             args=[mcp_server_path],
             env=env,
-            read_timeout_seconds=2000,
+            read_timeout_seconds=MCP_STANDARD_READ_SECONDS,
         )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)

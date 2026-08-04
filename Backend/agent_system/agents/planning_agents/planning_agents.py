@@ -12,6 +12,7 @@ Architecture:
 from typing import Dict, Callable, Awaitable, Any
 from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
 from autogen_ext.models.ollama import OllamaChatCompletionClient
+from client_config import add_model_client_retries
 
 from ..clinical_roi_policy import ROI_IDENTITY_POLICY
 
@@ -34,7 +35,7 @@ def create_model_client(
     Returns:
         Configured OllamaChatCompletionClient instance.
     """
-    return OllamaChatCompletionClient(
+    return add_model_client_retries(OllamaChatCompletionClient(
         model=model,
         model_info={
             "vision": False,
@@ -42,7 +43,7 @@ def create_model_client(
             "json_output": True,
         },
         api_key=api_key,
-    )
+    ))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

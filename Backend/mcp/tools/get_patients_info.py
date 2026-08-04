@@ -1,8 +1,8 @@
 from . import mcp
-import requests
-import os
+import httpx
+from service_urls import CONTROL_API_URL
 
-base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+base_url = CONTROL_API_URL
 
 
 @mcp.tool()
@@ -11,5 +11,7 @@ async def get_all_patients_info():
     This tool returns all the patients info that could be used in 
     specifying the population that is targeted in the study
     """
-    response = requests.get(base_url + "/patients")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(base_url + "/patients")
+    response.raise_for_status()
     return response.json()

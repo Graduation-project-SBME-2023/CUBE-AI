@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 
 import re
 import tempfile
@@ -60,6 +61,7 @@ from services.session_service import (
     SessionPlanningConflict,
     SessionService,
 )
+from services.best_effort import drain_best_effort, initialize_best_effort
 from services.pipeline_monitor import PipelineMonitor, raise_for_fatal_tool_failure
 from clients.backend_client import BackendClient
 from agents.execution_agents.segmentation.progressive import (
@@ -85,10 +87,20 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 # App setup
 # ----------------------------------------------------------------------
 
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    initialize_best_effort()
+    try:
+        yield
+    finally:
+        await drain_best_effort(timeout_seconds=2.0)
+
+
 app = FastAPI(
     title="MAS Orchestrator API",
     description="Receive a clinical hypothesis, run the Planner → Executor pipeline.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 _cors_origins = os.environ.get(
     "CORS_ORIGINS",
@@ -820,7 +832,10 @@ async def get_session_chat_messages(session_id: str):
     Used when recovering a session from hypothesis history.
     """
     async with httpx.AsyncClient() as client:
-        monai_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+        monai_url = os.environ.get(
+            "CONTROL_API_URL",
+            os.environ.get("MONAI_URL", "http://localhost:8000"),
+        )
         try:
             response = await client.get(
                 f"{monai_url}/chat_messages/{session_id}", timeout=10.0

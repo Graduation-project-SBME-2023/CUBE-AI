@@ -140,6 +140,14 @@ class OllamaClient(OllamaChatCompletionClient):
             model_info = model_info,
             options    = {"num_ctx": num_ctx},
         )
+        # Apply the same transient-error retry wrapper used by all other agents.
+        # Prevents a single Ollama ConnectionError or 500 from killing the
+        # entire Literature Review pipeline (PICO_Analyst -> Context_Compiler).
+        try:
+            from client_config import add_model_client_retries
+            add_model_client_retries(self)
+        except ImportError:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════════

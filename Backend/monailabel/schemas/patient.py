@@ -1,7 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from datetime import date, datetime
 from uuid import UUID
+
 class PatientBase(BaseModel):
     name: str
     birth_date: Optional[date] = None  # ISO format date
@@ -22,5 +23,4 @@ class Patient(PatientBase):
     created_at: datetime | None = None  # ISO format date-time
     age: Optional[int] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import time
 import urllib.parse
@@ -45,9 +46,17 @@ CACHE_DIR = DEFAULT_CACHE_DIR
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 NCBI_API_KEY: str = os.environ.get("NCBI_API_KEY", "")
+# Optional Semantic Scholar API key — free key raises limit from 100 to 1000 req/day.
+# Register at https://www.semanticscholar.org/product/api
+S2_API_KEY: str = os.environ.get("S2_API_KEY", "")
+
 PUBMED_DELAY: float = 0.4
 GENERIC_DELAY: float = 0.25
-SEMANTIC_SCHOLAR_DELAY: float = 3.5  # S2 rate-limits aggressively without API key
+GENERIC_JITTER: float = 0.5   # random extra seconds added to Wikipedia calls
+SEMANTIC_SCHOLAR_DELAY: float = 5.0  # raised from 3.5s; S2 rate-limits aggressively
+
+# Minimum papers Semantic Scholar must return before we warn about an incomplete KB
+S2_MIN_PAPERS_THRESHOLD: int = 5
 
 # Maximum reviews/papers to fetch per concept for knowledge extraction
 MAX_REVIEWS_PER_CONCEPT = 5
@@ -277,7 +286,7 @@ def _fetch_wikipedia_summary(topic: str) -> Optional[Dict[str, str]]:
     if cached is not None:
         return cached
 
-    time.sleep(GENERIC_DELAY)
+    time.sleep(GENERIC_DELAY + random.uniform(0, GENERIC_JITTER))
     encoded = urllib.parse.quote(topic.replace(" ", "_"))
     url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}"
 
@@ -308,7 +317,7 @@ def _fetch_wikipedia_via_search(topic: str) -> Optional[Dict[str, str]]:
     if cached is not None:
         return cached
 
-    time.sleep(GENERIC_DELAY)
+    time.sleep(GENERIC_DELAY + random.uniform(0, GENERIC_JITTER))
     search_url = (
         f"https://en.wikipedia.org/w/api.php"
         f"?action=query&list=search&srsearch={urllib.parse.quote(topic)}"
@@ -323,7 +332,7 @@ def _fetch_wikipedia_via_search(topic: str) -> Optional[Dict[str, str]]:
         if not best_title:
             return None
         # Now fetch the summary for the matched title
-        time.sleep(GENERIC_DELAY)
+        time.sleep(GENERIC_DELAY + random.uniform(0, GENERIC_JITTER))
         encoded = urllib.parse.quote(best_title.replace(" ", "_"))
         url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{encoded}"
         data = json.loads(_http_get(url).decode("utf-8"))
@@ -392,7 +401,7 @@ def _fetch_mesh_info(term: str) -> Optional[Dict[str, Any]]:
     if cached is not None:
         return cached
 
-    time.sleep(GENERIC_DELAY)
+    time.sleep(GENERIC_DELAY + random.uniform(0, GENERIC_JITTER))
 
     try:
         # ── Strategy 1: NLM MeSH REST API (preferred — returns JSON) ─────────
@@ -401,7 +410,7 @@ def _fetch_mesh_info(term: str) -> Optional[Dict[str, Any]]:
             f"https://id.nlm.nih.gov/mesh/lookup/descriptor"
             f"?label={urllib.parse.quote(term)}&match=contains&limit=5"
         )
-        lookup_data = json.loads(_http_get(lookup_url).decode("utf-8"))
+        lookup_data = json.loads(_http_get(lookup_url, timeout=30).decode("utf-8"))
 
         if not lookup_data:
             # Try with exact match disabled
@@ -409,7 +418,7 @@ def _fetch_mesh_info(term: str) -> Optional[Dict[str, Any]]:
                 f"https://id.nlm.nih.gov/mesh/lookup/term"
                 f"?label={urllib.parse.quote(term)}&match=contains&limit=5"
             )
-            lookup_data = json.loads(_http_get(lookup_url).decode("utf-8"))
+            lookup_data = json.loads(_http_get(lookup_url, timeout=30).decode("utf-8"))
 
         if not lookup_data:
             return None
@@ -430,7 +439,7 @@ def _fetch_mesh_info(term: str) -> Optional[Dict[str, Any]]:
 
         # Step 2: Fetch full descriptor details via SPARQL-like JSON endpoint
         if mesh_ui:
-            time.sleep(GENERIC_DELAY)
+            time.sleep(GENERIC_DELAY + random.uniform(0, GENERIC_JITTER))
             detail_url = f"https://id.nlm.nih.gov/mesh/{mesh_ui}.json"
             try:
                 detail_data = json.loads(_http_get(detail_url).decode("utf-8"))
@@ -727,8 +736,17 @@ def _fetch_semantic_scholar_trends(query: str, max_results: int = 10) -> List[Di
         "sort": "citationCount:desc",
     })
 
+    # Build request — attach API key header if provided
+    req = urllib.request.Request(
+        f"{BASE}?{params}",
+        headers={"User-Agent": "PICO-KnowledgeBuilder/1.0"},
+    )
+    if S2_API_KEY:
+        req.add_header("x-api-key", S2_API_KEY)
+
     try:
-        data = json.loads(_http_get(f"{BASE}?{params}").decode("utf-8"))
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
 
         results = []
         for paper in data.get("data", []):
@@ -802,6 +820,15 @@ def fetch_method_trends(concepts: Dict[str, List[str]]) -> Dict[str, List[Dict[s
         f"Semantic Scholar trends: fetched {sum(len(v) for v in results.values())} "
         f"papers across {len(results)} queries"
     )
+    total_papers = sum(len(v) for v in results.values())
+    if total_papers < S2_MIN_PAPERS_THRESHOLD:
+        logger.warning(
+            "Semantic Scholar returned only %d papers across %d queries. "
+            "The knowledge base may be incomplete — consider setting the S2_API_KEY "
+            "environment variable to raise the rate limit (100 -> 1000 req/day).",
+            total_papers,
+            len(unique_queries),
+        )
     return results
 
 
@@ -829,7 +856,7 @@ def _fetch_europepmc_journal_stats(query: str, max_results: int = 50) -> Dict[st
         "resultType": "lite",
     })
 
-    time.sleep(GENERIC_DELAY)
+    time.sleep(GENERIC_DELAY + random.uniform(0, GENERIC_JITTER))
 
     try:
         resp_bytes = _http_get(f"{BASE}?{params}")

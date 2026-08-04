@@ -13,6 +13,8 @@ CHANGES vs original:
     These arrays drive the React chart components directly — no CSV fetching needed.
 """
 
+import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -37,6 +39,10 @@ from .consolidation import (
 
 from tool_logging import ToolEvent, log_tool_state, TextPayload, ProgressPayload
 
+FEATURE_EXTRACTION_TIMEOUT_SECONDS = float(
+    os.environ.get("FEATURE_EXTRACTION_TIMEOUT_SECONDS", "600")
+)
+
 # ADDED FOR UI ENHANCEMENT — Import helper modules for Tasks 2, 3, 4.
 # Wrapped in try/except so a missing file (e.g. first-run before deploy) never
 # crashes the import of the whole features module.
@@ -55,6 +61,14 @@ def _run_extractor(image_path: str, mask_path: str, params_file: str) -> dict:
     extractor = featureextractor.RadiomicsFeatureExtractor(params_file)
     result = extractor.execute(image_path, mask_path)
     return {str(k): v for k, v in result.items() if not k.startswith("diagnostics_")}
+
+
+def _terminate_process_pool(executor: concurrent.futures.ProcessPoolExecutor) -> None:
+    processes = getattr(executor, "_processes", None) or {}
+    for process in list(processes.values()):
+        if process.is_alive():
+            process.terminate()
+    executor.shutdown(wait=False, cancel_futures=True)
 
 def _setup_logging(log_file: str, verbose: bool = True) -> None:
     logger = logging.getLogger(__name__)
@@ -754,7 +768,6 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                     tmp_mask_path = os.path.join(temp_dir, f"{subject_id}_lbl{lbl}.nii.gz")
                     sitk.WriteImage(bin_img, tmp_mask_path)
                     try:
-                        import concurrent.futures
                         import multiprocessing
 
                         # ADDED FOR UI ENHANCEMENT — Task 4: Cache lookup.
@@ -778,13 +791,31 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                             # ── Full extraction via isolated subprocess (original logic) ──
                             ctx = multiprocessing.get_context('spawn')
                             _n_workers = max(1, min(params.n_workers, os.cpu_count() or 1))
-                            with concurrent.futures.ProcessPoolExecutor(
+                            executor = concurrent.futures.ProcessPoolExecutor(
                                 max_workers=_n_workers, mp_context=ctx
-                            ) as executor:
+                            )
+                            try:
                                 future = executor.submit(
                                     _run_extractor, files["image"], tmp_mask_path, params_file
                                 )
-                                _features = future.result(timeout=600)
+                                _features = await asyncio.to_thread(
+                                    future.result,
+                                    FEATURE_EXTRACTION_TIMEOUT_SECONDS,
+                                )
+                            except (
+                                concurrent.futures.TimeoutError,
+                                asyncio.CancelledError,
+                            ):
+                                _terminate_process_pool(executor)
+                                executor = None
+                                raise
+                            finally:
+                                if executor is not None:
+                                    await asyncio.to_thread(
+                                        executor.shutdown,
+                                        wait=True,
+                                        cancel_futures=True,
+                                    )
 
                             # ADDED FOR UI ENHANCEMENT — Task 4: Cache save.
                             if _HELPERS_AVAILABLE and _cache_key:
@@ -814,7 +845,10 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                             )
                             wide_row[f"{target_id}__{namespaced_feature}"] = feature_value
                     except concurrent.futures.TimeoutError:
-                        logger.error(f"  {subject_id} label {lbl}: extraction timed out after 10 minutes — skipping")
+                        logger.error(
+                            f"  {subject_id} label {lbl}: extraction timed out after "
+                            f"{FEATURE_EXTRACTION_TIMEOUT_SECONDS:.0f}s; skipping"
+                        )
                     except concurrent.futures.process.BrokenProcessPool:
                         logger.error(f"  {subject_id} label {lbl}: extraction crashed (OOM or Segfault) — skipping volume")
                     except Exception as exc:
