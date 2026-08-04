@@ -498,7 +498,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                 setCohortApproved(true);
                 show({ 
                     title: 'Cohort Approved!', 
-                    message: `Successfully locked ${body.labeled_count} labeled volume(s). Segmentation pipeline continuing...`, 
+                    message: `Successfully locked ${body.labeled_count} labeled volume(s).`, 
                     type: 'success', 
                     duration: 6000 
                 });
@@ -991,23 +991,27 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                         </div>
 
                         <div className="flex items-center gap-2 flex-wrap">
-                            <label className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border cursor-pointer ${
-                                isUploadingTargets
-                                    ? 'border-[#3c5d80] text-gray-500 cursor-wait'
-                                    : 'border-[#5acce6]/40 bg-[#152433] text-[#5acce6] hover:border-[#5acce6]'
+                            <label className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border ${
+                                cohortApproved
+                                    ? 'border-gray-700 bg-[#151a1f] text-gray-600 cursor-not-allowed pointer-events-none opacity-50 select-none'
+                                    : isUploadingTargets
+                                        ? 'border-[#3c5d80] text-gray-500 cursor-wait'
+                                        : 'border-[#5acce6]/40 bg-[#152433] text-[#5acce6] hover:border-[#5acce6] cursor-pointer'
                             }`}>
                                 <UploadIcon size={14} />
                                 {isUploadingTargets ? 'Uploading...' : 'Upload Target CSV'}
                                 <input type="file" accept=".csv,text/csv" className="hidden"
-                                    disabled={isUploadingTargets} onChange={handleTargetCsvUpload} />
+                                    disabled={isUploadingTargets || cohortApproved} onChange={handleTargetCsvUpload} />
                             </label>
                             <button
                                 onClick={handleSaveLabels}
-                                disabled={isSavingLabels}
+                                disabled={isSavingLabels || cohortApproved}
                                 className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border shadow-lg ${
-                                    isSavingLabels
-                                        ? 'bg-[#152e2e]/50 text-gray-500 border-gray-700 cursor-not-allowed'
-                                        : 'bg-[#152e2e] hover:bg-[#1f4242] text-[#5ce6b0] border-[#234d4d] shadow-[0_0_15px_rgba(92,230,176,0.2)]'
+                                    cohortApproved
+                                        ? 'bg-[#152e2e]/30 text-gray-600 border-gray-700 cursor-not-allowed pointer-events-none opacity-50 select-none shadow-none'
+                                        : isSavingLabels
+                                            ? 'bg-[#152e2e]/50 text-gray-500 border-gray-700 cursor-not-allowed'
+                                            : 'bg-[#152e2e] hover:bg-[#1f4242] text-[#5ce6b0] border-[#234d4d] shadow-[0_0_15px_rgba(92,230,176,0.2)]'
                                 }`}
                             >
                                 <SaveIcon size={14} />
