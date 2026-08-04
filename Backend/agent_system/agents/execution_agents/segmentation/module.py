@@ -919,6 +919,16 @@ class SegmentationModule:
         ready_items = [item for item in work_items if item["status"] == "ready"]
         await publisher.publish_final()
         if ready_items:
+            await emit_tool_events(
+                event_types=["tool_started", "tool_finished"],
+                content=TextPayload(
+                    message=(
+                        f"{len(ready_items)} mask(s) are ready"
+                        " — waiting for your review!"
+                    )
+                ),
+                session_id=self.session_id,
+            )
             raw_review = await self._wait_for_review()
             review = self._normalise_review_keys(
                 raw_review,
