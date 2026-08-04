@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
 
   control-api:
-    image: cubeai1/custom-monailabel:latest-cpu
+    image: cubeai1/custom-monailabel:latest-gpu
     container_name: control-api-backend
     command: python /monailabel/control_server_start.py
     ports:
