@@ -49,13 +49,37 @@ from monailabel.tasks.infer.basic_infer import BasicInferTask
 logger = logging.getLogger(__name__)
 
 
+class _LineProgressWriter:
+    """Convert tqdm carriage-return refreshes into flushed log lines."""
+
+    def write(self, message):
+        line = message.replace("\r", "").rstrip("\n")
+        if line.strip():
+            sys.stdout.write(f"{line}\n")
+            sys.stdout.flush()
+        return len(message)
+
+    def flush(self):
+        sys.stdout.flush()
+
+    def isatty(self):
+        return False
+
+
+_PROGRESS_WRITER = _LineProgressWriter()
+
+
 def _terminal_tqdm(*args, **kwargs):
-    """Keep VoxTell sliding-window progress visible in captured terminals."""
-    kwargs.setdefault("file", sys.stdout)
+    """Print every VoxTell sliding-window update as a complete log line."""
+    kwargs.setdefault("file", _PROGRESS_WRITER)
     kwargs.setdefault("disable", False)
-    kwargs.setdefault("dynamic_ncols", True)
-    kwargs.setdefault("mininterval", 0.5)
-    kwargs.setdefault("leave", True)
+    kwargs.setdefault("ascii", False)
+    kwargs.setdefault("dynamic_ncols", False)
+    kwargs.setdefault("mininterval", 0.0)
+    kwargs.setdefault("miniters", 1)
+    # The final update is already printed as a line; avoid printing 100% twice
+    # when tqdm closes (carriage-return terminals normally overwrite it).
+    kwargs.setdefault("leave", False)
     return tqdm(*args, **kwargs)
 
 # ── Module-level predictor singleton ──────────────────────────────────────────
@@ -313,8 +337,8 @@ class MyVoxTellPredictor(VoxTellPredictor):
 
         logger.info("Phase 3: Running sliding window inference...")
         sys.stdout.flush()
-        # VoxTell uses tqdm internally. Force it onto stdout and keep it enabled
-        # so progress remains visible through Docker/uvicorn log capture.
+        # VoxTell uses carriage returns for tqdm updates. Convert each refresh
+        # to a flushed line so Docker/uvicorn does not buffer it until 100%.
         with patch("voxtell.inference.predictor.tqdm", _terminal_tqdm):
             prediction = self.predict_sliding_window_return_logits(
                 data, embeddings
