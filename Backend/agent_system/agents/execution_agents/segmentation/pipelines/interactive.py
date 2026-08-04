@@ -82,7 +82,7 @@ async def run_interactive_pipeline(
 ):
     """Run interactive-path inference once per volume-target pair."""
     total = len(pending_work_items)
-    payload = TextPayload(message=f"Starting interactive segmentation on {total} pairs.")
+    payload = TextPayload(message=f"Starting interactive segmentation on {total} volumes.")
     await emit_tool_events(
         event_types=["tool_started", "tool_progress"],
         content=payload,
@@ -91,7 +91,7 @@ async def run_interactive_pipeline(
 
     await emit_tool_event(
         event_type="tool_progress",
-        content=ProgressPayload(current=0, total=total, label="Segmenting pairs"),
+        content=ProgressPayload(current=0, total=total, label="Segmenting volumes"),
         content_type="progress",
         session_id=session_id,
     )
@@ -116,7 +116,7 @@ async def run_interactive_pipeline(
             content=ProgressPayload(
                 current=index - 0.5,
                 total=total,
-                label="Segmenting pairs",
+                label="Segmenting volumes",
             ),
             content_type="progress",
             session_id=session_id,
@@ -133,7 +133,7 @@ async def run_interactive_pipeline(
                 session_id=session_id,
                 current=index - 0.5,
                 total=total,
-                label=f"Segmenting pair {index} of {total}",
+                label=f"Segmenting volume {index} of {total}",
                 volume_uid=volume_uid,
             )
             raise_for_segmentation_error(result, volume_uid, label)
@@ -175,7 +175,7 @@ async def run_interactive_pipeline(
         )
         await emit_tool_event(
             event_type="tool_progress",
-            content=ProgressPayload(current=index, total=total, label="Segmenting pairs"),
+            content=ProgressPayload(current=index, total=total, label="Segmenting volumes"),
             content_type="progress",
             session_id=session_id,
         )
