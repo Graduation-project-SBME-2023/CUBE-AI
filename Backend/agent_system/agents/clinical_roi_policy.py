@@ -27,6 +27,13 @@ segmented or used for feature extraction. Apply these rules in order:
 6. If a radiomics hypothesis names a disease and organ but does not say whether
    features come from the whole organ, a lesion/pathology, or both, the ROI is
    ambiguous and must be clarified rather than guessed.
+7. Express each canonical segmentation target as a short, anatomy-first noun
+   label containing only target identity: target-defining laterality, anatomy,
+   and the base pathological entity when one is requested. Imaging appearance,
+   acquisition, treatment, size, and other descriptive context belong in the
+   rationale, not in the target label or VoxTell prompt. For example,
+   "enhancing tumor of brain" has the canonical target `brain tumor`, with
+   anatomy `brain` and pathology `tumor`.
 
 Examples:
 - "Features extracted from the spleen classify healthy versus diseased
@@ -37,6 +44,8 @@ Examples:
   lesions" -> one pathological target: `spleen lesion`.
 - "Features from the whole spleen and the splenic lesion" -> two targets:
   `spleen` and `spleen lesion`.
+- "Features from the enhancing tumor of brain" -> one pathological target:
+  `brain tumor`; `enhancing` is imaging description, not target identity.
 - "Use radiomics to detect splenic cancer" -> ambiguous; ask which ROI supplies
   the features.
 """

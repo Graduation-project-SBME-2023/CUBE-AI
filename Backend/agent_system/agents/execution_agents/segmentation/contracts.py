@@ -1,3 +1,4 @@
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -5,6 +6,69 @@ from pydantic import BaseModel, Field, model_validator
 
 REUSE_CONFIDENCE_THRESHOLD = 0.6
 RESOLVED_REASON_MAX_LENGTH = 2048
+
+
+# VoxTell works best with a compact target noun label. These terms describe
+# image appearance rather than the anatomical/pathological identity used to
+# select the ROI. Keep this deliberately narrow: clinical subtype words must
+# not be removed by a generic stop-word list.
+_ENHANCEMENT_DESCRIPTION_RE = re.compile(
+    r"\b(?:contrast[\s-]+)?(?:non[\s-]*)?enhanc(?:ed|ing)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _strip_inference_description(value: str) -> str:
+    value = _ENHANCEMENT_DESCRIPTION_RE.sub(" ", value)
+    return " ".join(value.split()).strip(" -_,")
+
+
+def _base_pathology_label(
+    pathology: str,
+    anatomy: str,
+    laterality: str,
+) -> str:
+    """Remove anatomy repeated inside the structured pathology field."""
+    pathology = _strip_inference_description(pathology)
+    side = "" if laterality == "unspecified" else laterality
+    anatomy_forms = {
+        anatomy,
+        " ".join(part for part in (side, anatomy) if part),
+    }
+    for anatomy_form in sorted(anatomy_forms, key=len, reverse=True):
+        for article in ("the ", ""):
+            suffix = f" of {article}{anatomy_form}"
+            if pathology.casefold().endswith(suffix.casefold()):
+                return pathology[: -len(suffix)].strip()
+    return pathology
+
+
+def _canonicalize_target_label(
+    label: str,
+    anatomy: str,
+    pathology: str | None,
+    laterality: str,
+) -> str:
+    """Return a compact VoxTell target label without imaging description."""
+    label = _strip_inference_description(label)
+    if not pathology:
+        return label
+
+    # Naturalize LLM phrases such as "tumor of brain" to the anatomy-first
+    # target name expected by VoxTell. This is structural normalization using
+    # the already-resolved identity fields, not runtime clinical synonym
+    # matching.
+    side = "" if laterality == "unspecified" else laterality
+    anatomy_with_side = " ".join(part for part in (side, anatomy) if part)
+    inverted_forms = {
+        f"{pathology} of {anatomy}".casefold(),
+        f"{pathology} of the {anatomy}".casefold(),
+        f"{pathology} of {anatomy_with_side}".casefold(),
+        f"{pathology} of the {anatomy_with_side}".casefold(),
+    }
+    if label.casefold() in inverted_forms:
+        return " ".join(part for part in (side, anatomy, pathology) if part)
+    return label
 
 
 class ClinicalTargetIntent(BaseModel):
@@ -18,10 +82,24 @@ class ClinicalTargetIntent(BaseModel):
 
     @model_validator(mode="after")
     def normalize_clinical_identity(self):
-        self.canonical_label = self.canonical_label.strip()
         self.anatomy = self.anatomy.strip()
         if self.pathology:
-            self.pathology = self.pathology.strip()
+            self.pathology = _base_pathology_label(
+                self.pathology,
+                self.anatomy,
+                self.laterality,
+            )
+            if not self.pathology:
+                raise ValueError(
+                    "Pathology must contain a base target entity, not only "
+                    "imaging description"
+                )
+        self.canonical_label = _canonicalize_target_label(
+            self.canonical_label.strip(),
+            self.anatomy,
+            self.pathology,
+            self.laterality,
+        )
         self.rationale = self.rationale.strip()
         if not self.canonical_label or not self.anatomy or not self.rationale:
             raise ValueError(
@@ -217,6 +295,9 @@ def validate_candidate_references(
 ) -> TargetResolutionPlan:
     mask_ids = {candidate.candidate_id for candidate in mask_candidates}
     cache_ids = {candidate.candidate_id for candidate in cache_candidates}
+    cache_by_id = {
+        candidate.candidate_id: candidate for candidate in cache_candidates
+    }
 
     for target in plan.targets:
         unknown_masks = set(target.accepted_mask_candidate_ids) - mask_ids
@@ -231,6 +312,12 @@ def validate_candidate_references(
                 raise ValueError(
                     f"Target {target.target_id!r} returned unknown cache candidate "
                     f"ID: {candidate_id}"
+                )
+            cached_prompt = cache_by_id[candidate_id].prompt.strip()
+            if cached_prompt.casefold() != target.canonical_label.casefold():
+                raise ValueError(
+                    f"VoxTell cache prompt for target {target.target_id!r} must "
+                    "exactly match its compact canonical label"
                 )
     return plan
 
@@ -253,6 +340,9 @@ def validate_candidate_decision_references(
 
     mask_ids = {candidate.candidate_id for candidate in mask_candidates}
     cache_ids = {candidate.candidate_id for candidate in cache_candidates}
+    cache_by_id = {
+        candidate.candidate_id: candidate for candidate in cache_candidates
+    }
     intent_by_id = {
         target.target_id: target for target in intent_plan.targets
     }
@@ -270,6 +360,13 @@ def validate_candidate_decision_references(
                 raise ValueError(
                     f"Target {decision.target_id!r} returned unknown cache "
                     f"candidate ID: {candidate_id}"
+                )
+            cached_prompt = cache_by_id[candidate_id].prompt.strip()
+            canonical = intent_by_id[decision.target_id].canonical_label
+            if cached_prompt.casefold() != canonical.casefold():
+                raise ValueError(
+                    f"VoxTell cache prompt for target {decision.target_id!r} "
+                    "must exactly match its compact canonical label"
                 )
         else:
             prompt = str(decision.voxtell_prompt.prompt or "").strip()

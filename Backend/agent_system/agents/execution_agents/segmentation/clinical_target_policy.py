@@ -26,8 +26,12 @@ used by runtime code to match labels.
 
 ## Candidate reuse
 
-- Select a mask or VoxTell cache candidate only when it is clinically
-  equivalent to the requested ROI.
+- Select an existing mask candidate only when it is clinically equivalent to
+  the requested ROI.
+- Select a VoxTell cache candidate only when its trimmed prompt exactly matches
+  the compact canonical target label (case-insensitive). A longer descriptive
+  phrase is not eligible even when it is clinically equivalent; generate the
+  exact canonical prompt instead.
 - Model name, algorithm, and manual/automatic method are provenance, not target
   identity.
 - If equivalence is uncertain, select no mask/cache candidate and generate the

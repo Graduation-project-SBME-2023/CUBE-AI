@@ -44,14 +44,22 @@ feature-extraction or segmentation wording controls the target. Never infer a
 lesion solely from a disease or cancer label, and never add an unrequested
 second target.
 
+The canonical_label is sent verbatim to VoxTell when no equivalent cached
+prompt exists. It must be a compact, anatomy-first target noun label, not a
+sentence or descriptive ROI phrase. Put only target-defining laterality,
+anatomy, and the base pathological entity in canonical_label; put imaging
+appearance and other qualifiers in rationale. The anatomy and pathology fields
+must likewise contain base identity only. Example: resolve "enhancing tumor of
+brain" as canonical_label="brain tumor", anatomy="brain", pathology="tumor".
+
 Return one JSON object only:
 {{
   "targets": [
     {{
       "target_id": "stable_lowercase_slug",
-      "canonical_label": "precise clinical target",
-      "anatomy": "anatomical site",
-      "pathology": "pathology or null",
+      "canonical_label": "compact anatomy-first target noun label",
+      "anatomy": "base anatomical site",
+      "pathology": "base pathological entity or null",
       "laterality": "left|right|bilateral|unspecified",
       "confidence": 0.0,
       "rationale": "why this is the requested ROI rather than study context"
@@ -77,7 +85,8 @@ pathology, or laterality fields. Never invent target IDs. For each locked target
 ID:
 - accept only mask candidate IDs that are clinically equivalent in anatomy,
   pathology, scope, and laterality;
-- select a cache candidate only when its prompt is clinically equivalent;
+- select a cache candidate only when its trimmed prompt exactly matches the
+  locked compact canonical label, ignoring case;
 - otherwise generate the exact locked canonical label;
 - choose an available segmentation model and automatic or interactive path;
 - call the model discovery tool and select only a model it returns;

@@ -14,6 +14,7 @@ from agent_system.agents.clinical_roi_policy import (
     ROI_IDENTITY_POLICY,
 )
 from agent_system.agents.execution_agents.segmentation.contracts import (
+    CachePromptCandidate,
     ClinicalPlanAudit,
     ClinicalTargetIntent,
     ClinicalTargetIntentPlan,
@@ -24,6 +25,7 @@ from agent_system.agents.execution_agents.segmentation.contracts import (
     TargetResolutionPlan,
     VoxTellPromptDecision,
     validate_audited_plan_identity,
+    validate_candidate_references,
 )
 from agent_system.agents.execution_agents.segmentation.planner import (
     AUDITOR_SYSTEM_MESSAGE,
@@ -274,6 +276,79 @@ class ClinicalRoiPolicyTests(unittest.TestCase):
 
 
 class SegmentationContractTests(unittest.TestCase):
+    def test_voxtell_target_drops_enhancement_description(self):
+        intent = ClinicalTargetIntent(
+            target_id="brain_tumor",
+            canonical_label="enhancing tumor of brain",
+            anatomy="brain",
+            pathology="enhancing tumor of brain",
+            confidence=1.0,
+            rationale="The enhancing tumor is the feature-extraction ROI.",
+        )
+
+        self.assertEqual(intent.canonical_label, "brain tumor")
+        self.assertEqual(intent.pathology, "tumor")
+
+        candidate = TargetCandidateDecisionPlan(
+            chosen_path="interactive",
+            decisions=[
+                TargetCandidateDecision(
+                    target_id="brain_tumor",
+                    voxtell_prompt=VoxTellPromptDecision(
+                        mode="generate",
+                        prompt="brain tumor",
+                    ),
+                    selected_model="voxtell",
+                    confidence=1.0,
+                    rationale="Generate the compact canonical target.",
+                )
+            ],
+        )
+        plan = _compose_resolution_plan(
+            ClinicalTargetIntentPlan(targets=[intent]),
+            candidate,
+        )
+
+        self.assertEqual(plan.targets[0].voxtell_prompt.prompt, "brain tumor")
+
+    def test_intent_prompt_defines_compact_voxtell_target(self):
+        self.assertIn(
+            'canonical_label="brain tumor", anatomy="brain", pathology="tumor"',
+            INTENT_SYSTEM_MESSAGE,
+        )
+
+    def test_descriptive_voxtell_cache_prompt_cannot_replace_compact_target(self):
+        plan = TargetResolutionPlan(
+            chosen_path="interactive",
+            selected_models=["voxtell"],
+            targets=[
+                ResolvedTarget(
+                    target_id="brain_tumor",
+                    canonical_label="brain tumor",
+                    anatomy="brain",
+                    pathology="tumor",
+                    voxtell_prompt=VoxTellPromptDecision(
+                        mode="cache",
+                        cache_candidate_id="cache_descriptive",
+                    ),
+                    confidence=1.0,
+                    reason="The cache phrase is descriptive.",
+                )
+            ],
+        )
+
+        with self.assertRaisesRegex(ValueError, "compact canonical label"):
+            validate_candidate_references(
+                plan,
+                mask_candidates=[],
+                cache_candidates=[
+                    CachePromptCandidate(
+                        candidate_id="cache_descriptive",
+                        prompt="enhancing tumor of brain",
+                    )
+                ],
+            )
+
     @staticmethod
     def _resolution_inputs(intent_rationale: str, candidate_rationale: str):
         intent_plan = ClinicalTargetIntentPlan(
