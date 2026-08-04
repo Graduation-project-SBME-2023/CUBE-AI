@@ -1,7 +1,8 @@
 import React from 'react';
-import { Home, PanelLeftClose, PanelLeftOpen, Plus, Rocket } from 'lucide-react';
+import { Home, Lock, PanelLeftClose, PanelLeftOpen, Plus, Rocket } from 'lucide-react';
 
 const HomeIcon: any = Home;
+const LockIcon: any = Lock;
 const PanelLeftCloseIcon: any = PanelLeftClose;
 const PanelLeftOpenIcon: any = PanelLeftOpen;
 const PlusIcon: any = Plus;
@@ -11,9 +12,17 @@ interface PhaseSidebarProps {
     phases: any[];
     activePhase: string;
     updatedPhaseIds?: string[];
-
     updateMessages?: Record<string, string>;
     forceVisibleUpdatePhaseIds?: string[];
+    /** Phase IDs that are locked (not yet accessible). Locked phases are shown
+     *  grayed-out and cannot be selected. */
+    lockedPhaseIds?: string[];
+    /**
+     * True once the backend has sent a plan. Used to distinguish between
+     * "plan not yet received" (show a waiting hint) and "plan received but
+     * execution not started yet" (show a step count).
+     */
+    planReceived?: boolean;
     onSelectPhase: (id: string) => void;
     isCollapsed: boolean;
     onToggleCollapse: () => void;
@@ -25,11 +34,17 @@ export default function PhaseSidebar({
     updatedPhaseIds = [],
     updateMessages = {},
     forceVisibleUpdatePhaseIds = [],
+    lockedPhaseIds = [],
+    planReceived = false,
     onSelectPhase,
     isCollapsed,
     onToggleCollapse,
 }: PhaseSidebarProps) {
     const activePhaseObj = phases.find(p => p.id === activePhase);
+
+    // Count how many phases are actually active (not locked) for the step badge
+    const unlockedCount = phases.filter(p => !lockedPhaseIds.includes(p.id)).length;
+    const totalCount = phases.length;
 
     return (
         <div
@@ -96,22 +111,38 @@ export default function PhaseSidebar({
                 {phases.map((phase, index) => {
                     const isActive = activePhase === phase.id;
                     const isCoreView = phase.id === 'planning' || phase.id === 'execution';
+                    const isLocked = lockedPhaseIds.includes(phase.id);
                     const PhaseIcon = (phase.icon as any) || PlusIcon;
                     const isWaiting = forceVisibleUpdatePhaseIds.includes(phase.id);
-                    const hasUpdate = updatedPhaseIds.includes(phase.id) && (
+                    const hasUpdate = !isLocked && updatedPhaseIds.includes(phase.id) && (
                         !isActive || isWaiting
                     );
                     const updateMessage = updateMessages[phase.id] || (isWaiting ? 'Waiting for user input' : 'New update received');
 
+                    // Locked tooltip text
+                    const lockedTitle = isCollapsed
+                        ? `${phase.label} — Not started yet. This step will unlock once execution begins.`
+                        : 'Not started yet. This step will unlock once execution begins.';
+
                     return (
                         <div key={phase.id} className="relative flex flex-col">
                             <button
-                                onClick={() => onSelectPhase(phase.id)}
-                                title={isCollapsed ? `${phase.label} - ${phase.short_desc}` : undefined}
+                                onClick={() => !isLocked && onSelectPhase(phase.id)}
+                                disabled={isLocked}
+                                title={
+                                    isLocked
+                                        ? lockedTitle
+                                        : isCollapsed
+                                        ? `${phase.label} - ${phase.short_desc}`
+                                        : undefined
+                                }
+                                aria-disabled={isLocked}
                                 className={`w-full flex items-center transition-all rounded-xl text-left ${
                                     isCollapsed ? 'justify-center px-1 py-3' : 'gap-2.5 px-2.5 py-2.5'
                                 } ${
-                                    hasUpdate
+                                    isLocked
+                                        ? 'border border-transparent opacity-40 cursor-not-allowed'
+                                        : hasUpdate
                                         ? 'border border-[#2a82c8] bg-[#071a2a] shadow-[0_0_0_1px_rgba(42,130,200,0.45),0_0_14px_rgba(42,130,200,0.22)]'
                                         : isActive
                                         ? isCoreView
@@ -125,10 +156,12 @@ export default function PhaseSidebar({
                                 {/* Phase Icon */}
                                 <div
                                     className={`relative flex items-center justify-center w-7 h-7 rounded-full flex-shrink-0 z-10 transition-all
-                                        ${isActive
+                                        ${isLocked
+                                            ? 'border-[#1a2a3a] bg-[#0a1218] text-[#2a3a4a]'
+                                            : isActive
                                             ? isCoreView
                                                 ? 'border-[#c98cff] bg-[#2d1b3a] text-[#d8adff] shadow-[0_0_12px_rgba(216,173,255,0.25),inset_0_0_8px_rgba(216,173,255,0.08)]'
-                                            : 'border-[#5acce6] bg-[#0d2035] text-[#5acce6] shadow-[0_0_12px_rgba(90,204,230,0.25),inset_0_0_8px_rgba(90,204,230,0.08)]'
+                                                : 'border-[#5acce6] bg-[#0d2035] text-[#5acce6] shadow-[0_0_12px_rgba(90,204,230,0.25),inset_0_0_8px_rgba(90,204,230,0.08)]'
                                             : hasUpdate
                                             ? 'border-[#2a82c8] bg-[#0b2035] text-[#7ec8f0] shadow-[0_0_12px_rgba(42,130,200,0.22)]'
                                             : isCoreView
@@ -137,7 +170,11 @@ export default function PhaseSidebar({
                                         }`}
                                     style={{ border: '1.5px solid' }}
                                 >
-                                    {phase.id === 'execution' ? <RocketIcon size={13} /> : <PhaseIcon size={13} />}
+                                    {isLocked
+                                        ? <LockIcon size={11} />
+                                        : phase.id === 'execution'
+                                        ? <RocketIcon size={13} />
+                                        : <PhaseIcon size={13} />}
                                 </div>
 
                                 {/* Text Content */}
@@ -145,7 +182,9 @@ export default function PhaseSidebar({
                                     <div className="flex flex-col overflow-hidden">
                                         <span
                                             className={`text-[12px] font-semibold truncate leading-snug ${
-                                                hasUpdate
+                                                isLocked
+                                                    ? 'text-[#2e3f52]'
+                                                    : hasUpdate
                                                     ? 'text-[#7ec8f0]'
                                                     : isActive
                                                     ? isCoreView
@@ -160,7 +199,9 @@ export default function PhaseSidebar({
                                         </span>
                                         <span
                                             className={`text-[10px] truncate mt-0.5 leading-snug ${
-                                                hasUpdate
+                                                isLocked
+                                                    ? 'text-[#1e2d3d] italic'
+                                                    : hasUpdate
                                                     ? 'text-[#4d8cb0]'
                                                     : isActive
                                                     ? isCoreView
@@ -171,9 +212,14 @@ export default function PhaseSidebar({
                                                     : 'text-[#3d5a72]'
                                             }`}
                                         >
-                                            {phase.short_desc}
+                                            {isLocked ? 'Not started yet' : phase.short_desc}
                                         </span>
-                                        {hasUpdate && (
+                                        {isLocked && (
+                                            <span className="mt-0.5 text-[8px] font-medium uppercase tracking-wide text-[#1e3040] truncate">
+                                                Unlocks after execution
+                                            </span>
+                                        )}
+                                        {!isLocked && hasUpdate && (
                                             <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#5acce6]">
                                                 {updateMessage}
                                             </span>
@@ -199,6 +245,34 @@ export default function PhaseSidebar({
                     );
                 })}
             </div>
+
+            {/* ── Footer: Dynamic Step Count ── */}
+            {!isCollapsed && (
+                <div
+                    className="shrink-0 border-t px-4 py-2.5 flex flex-col gap-0.5"
+                    style={{ borderColor: '#1a2a3a' }}
+                >
+                    {planReceived ? (
+                        <>
+                            <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#4a6580' }}>
+                                Pipeline Steps
+                            </span>
+                            <span className="text-[11px] font-semibold" style={{ color: '#5acce6' }}>
+                                {totalCount} step{totalCount !== 1 ? 's' : ''} planned
+                            </span>
+                        </>
+                    ) : (
+                        <>
+                            <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#2a3a4a' }}>
+                                Pipeline Steps
+                            </span>
+                            <span className="text-[10px] italic" style={{ color: '#2a3a4a' }}>
+                                Awaiting plan…
+                            </span>
+                        </>
+                    )}
+                </div>
+            )}
 
         </div>
     );
