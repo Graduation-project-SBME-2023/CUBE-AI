@@ -1080,6 +1080,36 @@ class SegmentationModule:
         )
         plan = resolution_outcome.plan
 
+        # ── Early announcement ──────────────────────────────────────────────
+        # Push the resolved target ROI and model to the sidebar card
+        # immediately, before any mask processing begins.
+        try:
+            target_labels = [t.canonical_label for t in plan.targets if t.canonical_label]
+            selected_models = list(plan.selected_models)
+            await send_ws_message_remote(
+                "segmentation_output",
+                {
+                    "runId": run_id,
+                    "targetRoi": ", ".join(target_labels),
+                    "targets": [
+                        {"targetId": t.target_id, "canonicalLabel": t.canonical_label}
+                        for t in plan.targets
+                    ],
+                    "selectedModel": ", ".join(str(m) for m in selected_models),
+                    "volumes": [],
+                    "failedVolumes": [],
+                    "progress": {"total": len(datasetlist), "generated": 0, "failed": 0},
+                    "isFinished": False,
+                },
+                self.session_id,
+                client=self.http_client,
+                base_url=self.agent_base_url,
+                timeout=10.0,
+            )
+        except Exception:
+            logger.warning("Could not send early segmentation target announcement", exc_info=True)
+        # ────────────────────────────────────────────────────────────────────
+
         work_items: list[dict[str, Any]] = []
         for target_index, target in enumerate(plan.targets):
             prompt, cache_hit = resolve_voxtell_prompt(
