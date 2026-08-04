@@ -348,7 +348,8 @@ class SegmentationModule:
                     "artifact_key": artifact_key,
                     "volume_uid": item["volume_uid"],
                     "target_id": item["target_id"],
-                    "label_uid": item["source_segmentation_uid"],
+                    "label_uid": item.get("source_segmentation_uid"),
+                    "is_empty_mask": bool(item.get("is_empty_mask")),
                 }
             ],
             download_volumes=not self._workspace_volume_is_valid(
@@ -510,7 +511,9 @@ class SegmentationModule:
         for item in ordered:
             if item.get("status") not in {"inference_succeeded", "preparing"}:
                 continue
-            if not item.get("source_segmentation_uid"):
+            if not item.get("source_segmentation_uid") and not item.get(
+                "is_empty_mask"
+            ):
                 item["status"] = "pending"
                 continue
             await self._prepare_pair_preview(
@@ -569,10 +572,11 @@ class SegmentationModule:
                     return
 
                 inference_result = outcome.get("inference_result") or {}
+                is_empty_mask = bool(inference_result.get("is_empty_mask"))
                 segmentation_uid = str(
                     inference_result.get("segmentation_series_uid") or ""
                 )
-                if not segmentation_uid:
+                if not segmentation_uid and not is_empty_mask:
                     await self._fail_pair(
                         item,
                         stage="inference_result",
@@ -598,13 +602,36 @@ class SegmentationModule:
                         "geometry_adjusted",
                         "original_mask_shape",
                         "final_mask_shape",
+                        "is_empty_mask",
+                        "foreground_voxels",
                     )
                 }
-                item["source_segmentation_uid"] = segmentation_uid
+                item["source_segmentation_uid"] = segmentation_uid or None
+                item["is_empty_mask"] = is_empty_mask
+                item["warning"] = (
+                    "No segmentation foreground was found; showing the source "
+                    "volume without a mask"
+                    if is_empty_mask
+                    else None
+                )
                 item["status"] = "inference_succeeded"
                 self._persist_processing_state(
                     workspace_dir, resolution_outcome, work_items, run_id
                 )
+
+                if is_empty_mask:
+                    await self._prepare_pair_preview(
+                        item,
+                        workspace_dir=workspace_dir,
+                        resolution_outcome=resolution_outcome,
+                        work_items=work_items,
+                        run_id=run_id,
+                        publisher=publisher,
+                    )
+                    await self.segmentation_service.purge_inference_job(
+                        str(inference_result.get("inference_job_id") or "") or None
+                    )
+                    return
 
                 record = await self._wait_for_exact_mask(
                     item["volume_uid"], segmentation_uid
@@ -883,7 +910,11 @@ class SegmentationModule:
             "accepted_count": accepted_count,
             "reused_count": sum(bool(item["reused"]) for item in work_items),
             "generated_count": sum(
-                not item["reused"] and item["source_segmentation_uid"] is not None
+                not item["reused"]
+                and (
+                    item["source_segmentation_uid"] is not None
+                    or bool(item.get("is_empty_mask"))
+                )
                 for item in work_items
             ),
             "failures": [

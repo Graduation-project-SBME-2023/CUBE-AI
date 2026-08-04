@@ -65,6 +65,8 @@ class InferenceResult(TypedDict):
     upload_response: NotRequired[str]
     retry_count: NotRequired[int]
     inference_job_id: NotRequired[str]
+    is_empty_mask: NotRequired[bool]
+    foreground_voxels: NotRequired[int]
 
 
 class SegmentationService:
@@ -460,6 +462,20 @@ class SegmentationService:
                 series_instance_uid,
                 label_info,
             )
+            result.update(
+                {
+                    "is_empty_mask": True,
+                    "foreground_voxels": 0,
+                    "message": (
+                        "Segmentation completed with no foreground; the source "
+                        "volume will be shown without a mask"
+                    ),
+                }
+            )
+            # An all-zero prediction is a valid model result.  Do not try to
+            # encode it as DICOM-SEG: an empty SEG is not useful downstream and
+            # some DICOM writers reject pixel arrays with no encoded segment.
+            return result
 
         logger.info(
             "Parsed NRRD data: image_shape=%s, image_dtype=%s, header_keys=%s",
@@ -520,11 +536,24 @@ class SegmentationService:
         result["original_mask_shape"] = list(original_shape)
         result["final_mask_shape"] = list(labelmap_np.shape)
 
+        foreground_voxels = int(labelmap_np.sum())
         logger.info(
             "After binarisation: unique=%s foreground_voxels=%s",
             np.unique(labelmap_np),
-            int(labelmap_np.sum()),
+            foreground_voxels,
         )
+        if foreground_voxels == 0:
+            result.update(
+                {
+                    "is_empty_mask": True,
+                    "foreground_voxels": 0,
+                    "message": (
+                        "Segmentation completed with no foreground after geometry "
+                        "normalization; the source volume will be shown without a mask"
+                    ),
+                }
+            )
+            return result
         description_segment = hd.seg.SegmentDescription(
             segment_number=1,
             segment_label=organ_list[0] if organ_list else "Segment",
