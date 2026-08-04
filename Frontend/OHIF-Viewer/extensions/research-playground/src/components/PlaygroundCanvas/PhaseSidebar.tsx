@@ -141,7 +141,7 @@ export default function PhaseSidebar({
                                     isCollapsed ? 'justify-center px-1 py-3' : 'gap-2.5 px-2.5 py-2.5'
                                 } ${
                                     isLocked
-                                        ? 'border border-transparent opacity-40 cursor-not-allowed'
+                                        ? 'border border-transparent opacity-60 cursor-not-allowed'
                                         : hasUpdate
                                         ? 'border border-[#2a82c8] bg-[#071a2a] shadow-[0_0_0_1px_rgba(42,130,200,0.45),0_0_14px_rgba(42,130,200,0.22)]'
                                         : isActive
@@ -157,7 +157,7 @@ export default function PhaseSidebar({
                                 <div
                                     className={`relative flex items-center justify-center w-7 h-7 rounded-full flex-shrink-0 z-10 transition-all
                                         ${isLocked
-                                            ? 'border-[#1a2a3a] bg-[#0a1218] text-[#2a3a4a]'
+                                            ? 'border-[#2a3a4a] bg-[#0a1218] text-[#4a6580]'
                                             : isActive
                                             ? isCoreView
                                                 ? 'border-[#c98cff] bg-[#2d1b3a] text-[#d8adff] shadow-[0_0_12px_rgba(216,173,255,0.25),inset_0_0_8px_rgba(216,173,255,0.08)]'
@@ -183,7 +183,7 @@ export default function PhaseSidebar({
                                         <span
                                             className={`text-[12px] font-semibold truncate leading-snug ${
                                                 isLocked
-                                                    ? 'text-[#2e3f52]'
+                                                    ? 'text-[#5a7999]'
                                                     : hasUpdate
                                                     ? 'text-[#7ec8f0]'
                                                     : isActive
@@ -200,7 +200,7 @@ export default function PhaseSidebar({
                                         <span
                                             className={`text-[10px] truncate mt-0.5 leading-snug ${
                                                 isLocked
-                                                    ? 'text-[#1e2d3d] italic'
+                                                    ? 'text-[#4a6580] italic'
                                                     : hasUpdate
                                                     ? 'text-[#4d8cb0]'
                                                     : isActive
@@ -215,7 +215,7 @@ export default function PhaseSidebar({
                                             {isLocked ? 'Not started yet' : phase.short_desc}
                                         </span>
                                         {isLocked && (
-                                            <span className="mt-0.5 text-[8px] font-medium uppercase tracking-wide text-[#1e3040] truncate">
+                                            <span className="mt-0.5 text-[8px] font-medium uppercase tracking-wide text-[#4a6580] truncate">
                                                 Unlocks after execution
                                             </span>
                                         )}
