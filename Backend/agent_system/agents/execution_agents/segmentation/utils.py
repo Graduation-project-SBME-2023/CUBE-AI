@@ -425,6 +425,45 @@ async def download_and_pair_volumes(
             logger.exception("Error normalizing label %s", src_path)
             return None
 
+    def create_empty_label(
+        reference_volume_path,
+        volume_uid,
+        dest_dir,
+        target_id=None,
+        artifact_key=None,
+    ):
+        """Create an all-zero mask with the source volume's exact geometry."""
+        if artifact_key:
+            filename = f"{artifact_key}.nii.gz"
+        elif target_id:
+            filename = f"{volume_uid}__{target_id}.nii.gz"
+        else:
+            filename = f"{volume_uid}.nii.gz"
+        dst = os.path.join(dest_dir, filename)
+        reference = sitk.ReadImage(reference_volume_path)
+        empty = sitk.Image(reference.GetSize(), sitk.sitkUInt8)
+        empty.CopyInformation(reference)
+        sitk.WriteImage(empty, dst)
+        geometry = {
+            "size": list(reference.GetSize()),
+            "spacing": list(reference.GetSpacing()),
+            "origin": list(reference.GetOrigin()),
+            "direction": list(reference.GetDirection()),
+        }
+        logger.info(
+            "Created empty local mask for volume=%s target=%s at %s",
+            volume_uid,
+            target_id,
+            dst,
+        )
+        return {
+            "path": dst,
+            "geometry_adjusted": False,
+            "alignment_mode": "generated_empty",
+            "original_geometry": geometry,
+            "final_geometry": geometry,
+        }
+
     # ------------------------------------------------------------------ #
     #  1. pair volumes and labels                                        #
     # ------------------------------------------------------------------ #
@@ -433,6 +472,7 @@ async def download_and_pair_volumes(
     target_ids_to_process = []
     pair_ids_to_process = []
     artifact_keys_to_process = []
+    empty_masks_to_process = []
 
     for pair in resolved_pairs:
         volume_uid = str(pair.get("volume_uid") or "").strip()
@@ -440,7 +480,12 @@ async def download_and_pair_volumes(
         target_id = str(pair.get("target_id") or "").strip()
         pair_id = str(pair.get("pair_id") or f"{volume_uid}__{target_id}").strip()
         artifact_key = str(pair.get("artifact_key") or pair_id).strip()
-        if not volume_uid or not label_uid or not target_id:
+        is_empty_mask = bool(pair.get("is_empty_mask"))
+        if (
+            not volume_uid
+            or not target_id
+            or (not label_uid and not is_empty_mask)
+        ):
             logger.error("Invalid resolved segmentation pair: %s", pair)
             continue
         volumes_to_process.append(volume_uid)
@@ -448,6 +493,7 @@ async def download_and_pair_volumes(
         target_ids_to_process.append(target_id)
         pair_ids_to_process.append(pair_id)
         artifact_keys_to_process.append(artifact_key)
+        empty_masks_to_process.append(is_empty_mask)
 
     if not volumes_to_process:
         logger.error("Nothing to process; aborting.")
@@ -535,12 +581,13 @@ async def download_and_pair_volumes(
     successful = []
     skipped_oom = []
     copied_volumes: dict[str, str] = {}
-    for vol_uid, label_uid, target_id, pair_id, artifact_key in zip(
+    for vol_uid, label_uid, target_id, pair_id, artifact_key, is_empty_mask in zip(
         volumes_to_process,
         labels_to_process,
         target_ids_to_process,
         pair_ids_to_process,
         artifact_keys_to_process,
+        empty_masks_to_process,
     ):
         label_src = found_labels.get(label_uid) if label_uid else None
         if not label_src and label_uid:
@@ -566,7 +613,16 @@ async def download_and_pair_volumes(
                 )
             vol_result = copied_volumes[vol_uid]
 
-        if label_src:
+        if is_empty_mask:
+            label_result = await asyncio.to_thread(
+                create_empty_label,
+                vol_result,
+                vol_uid,
+                FINAL_DIR_LABEL,
+                target_id,
+                artifact_key,
+            )
+        elif label_src:
             label_result = await asyncio.to_thread(
                 copy_and_normalize_label,
                 label_src,

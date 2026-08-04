@@ -655,8 +655,7 @@ function ReviewView({
             {failedVolumes.length > 0 && (
               <div className="mt-2 rounded-lg border border-[#7f1d1d] bg-[#1a1010] p-3 text-xs text-red-200">
                 <div className="mb-2 font-semibold text-red-300">
-                  {failedCount} volume
-                  {failedCount === 1 ? ' mask is empty or missing' : ' masks are empty or missing'}
+                  {failedCount} segmentation{failedCount === 1 ? ' failed' : 's failed'}
                 </div>
                 <div className="space-y-1 font-mono text-[10px] text-red-200/80">
                   {failedVolumes.map(volume => (
@@ -666,7 +665,7 @@ function ReviewView({
                     >
                       <span>{volume.seriesInstanceUid.slice(-8)}</span>
                       <span className="font-sans text-red-200/60">
-                        {volume.reason || 'Volume mask is empty.'}
+                        {volume.reason || 'Segmentation failed.'}
                       </span>
                     </div>
                   ))}

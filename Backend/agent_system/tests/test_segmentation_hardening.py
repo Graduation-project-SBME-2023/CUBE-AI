@@ -3,7 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import numpy as np
 import SimpleITK as sitk
 from pydicom.dataset import Dataset
@@ -49,6 +51,7 @@ from agent_system.models.plans import ClinicalHypothesis, StudyPlan, StudyStep
 from agent_system.agents.execution_agents.segmentation.utils import (
     _validated_nrrd_array,
     align_and_binarize_mask,
+    download_and_pair_volumes,
     parse_multipart_response,
 )
 from agent_system.services.resume_recovery import reset_interrupted_agent
@@ -782,6 +785,180 @@ class SegmentationDicomGeometryTests(unittest.TestCase):
             [float(item.ImagePositionPatient[2]) for item in ordered],
             [0.0, 2.0, 4.0],
         )
+
+
+class EmptySegmentationResultTests(unittest.IsolatedAsyncioTestCase):
+    async def test_all_zero_prediction_skips_dicom_seg_creation(self):
+        client = httpx.AsyncClient()
+        service = SegmentationService(client=client)
+        response = httpx.Response(200, content=b"multipart-result")
+        service._await_inference_job = AsyncMock(
+            return_value=(response, {"status": "SUCCEEDED", "attempt": 1})
+        )
+        service.fetch_source_datasets_from_orthanc = AsyncMock()
+
+        try:
+            with (
+                patch(
+                    "agent_system.agents.execution_agents.segmentation.services.parse_multipart_response",
+                    return_value=(b"nrrd-result", {}),
+                ),
+                patch(
+                    "agent_system.agents.execution_agents.segmentation.services.parse_nrrd_data",
+                    return_value=(
+                        np.zeros((1, 5, 4, 3), dtype=np.uint8),
+                        {"sizes": [1, 5, 4, 3]},
+                    ),
+                ),
+            ):
+                result = await service.run_segmentation(
+                    model="voxtell",
+                    series_instance_uid="volume-uid",
+                    label_info="liver lesion",
+                    params={"text_prompts": ["liver lesion"]},
+                    job_id="empty-result-job",
+                )
+        finally:
+            await client.aclose()
+
+        self.assertFalse(result["error"])
+        self.assertTrue(result["is_empty_mask"])
+        self.assertEqual(result["foreground_voxels"], 0)
+        self.assertNotIn("segmentation_series_uid", result)
+        service.fetch_source_datasets_from_orthanc.assert_not_awaited()
+
+    async def test_empty_result_creates_geometry_matched_local_mask(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            volumes = workspace / "volumes"
+            volumes.mkdir()
+            reference = sitk.Image([5, 4, 3], sitk.sitkInt16)
+            reference.SetSpacing((0.8, 0.9, 2.5))
+            reference.SetOrigin((10.0, 20.0, -5.0))
+            volume_path = volumes / "volume-uid.nii.gz"
+            sitk.WriteImage(reference, str(volume_path))
+
+            successful, skipped = await download_and_pair_volumes(
+                str(workspace),
+                [
+                    {
+                        "pair_id": "volume-uid__lesion",
+                        "artifact_key": "empty-mask-key",
+                        "volume_uid": "volume-uid",
+                        "target_id": "lesion",
+                        "label_uid": None,
+                        "is_empty_mask": True,
+                    }
+                ],
+                download_volumes=False,
+            )
+
+            mask = sitk.ReadImage(
+                str(workspace / "masks" / "empty-mask-key.nii.gz")
+            )
+            self.assertEqual(len(successful), 1)
+            self.assertEqual(skipped, [])
+            self.assertEqual(mask.GetSize(), reference.GetSize())
+            self.assertTrue(
+                np.allclose(mask.GetSpacing(), reference.GetSpacing(), atol=1e-6)
+            )
+            self.assertTrue(
+                np.allclose(mask.GetOrigin(), reference.GetOrigin(), atol=1e-6)
+            )
+            self.assertEqual(int(sitk.GetArrayFromImage(mask).sum()), 0)
+
+    async def test_empty_inference_result_becomes_ready_volume_preview(self):
+        module = SegmentationModule(session_id="session")
+        module.segmentation_service = SimpleNamespace(
+            run_segmentation=AsyncMock(
+                return_value={
+                    "error": False,
+                    "stage": "completed",
+                    "message": "No foreground",
+                    "is_empty_mask": True,
+                    "foreground_voxels": 0,
+                    "inference_job_id": "empty-job",
+                    "status_code": 200,
+                }
+            ),
+            purge_inference_job=AsyncMock(),
+        )
+        module._persist_processing_state = MagicMock()
+        item = {
+            "pair_id": "volume-uid__lesion",
+            "artifact_key": "empty-mask-key",
+            "sequence_index": 0,
+            "status": "pending",
+            "reused": False,
+            "volume_uid": "volume-uid",
+            "target_id": "lesion",
+            "canonical_label": "liver lesion",
+            "model": "voxtell",
+            "inference_prompt": "liver lesion",
+            "inference_job_id": "empty-job",
+        }
+        resolution = SimpleNamespace(
+            plan=SimpleNamespace(chosen_path="automatic")
+        )
+        publisher = SimpleNamespace(
+            publish_ready=AsyncMock(),
+            publish_failure=AsyncMock(),
+        )
+
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch(
+                "agent_system.agents.execution_agents.segmentation.module.download_and_pair_volumes",
+                new=AsyncMock(
+                    return_value=(
+                        [
+                            {
+                                "pair_id": item["pair_id"],
+                                "geometry_adjusted": False,
+                                "geometry": None,
+                            }
+                        ],
+                        [],
+                    )
+                ),
+            ),
+            patch(
+                "agent_system.agents.execution_agents.segmentation.module.generate_gif_overlays",
+                return_value=[
+                    {
+                        "pairId": item["pair_id"],
+                        "gifPath": "overlays/empty-mask-key.gif",
+                        "isEmptyMask": True,
+                    }
+                ],
+            ),
+            patch(
+                "agent_system.agents.execution_agents.segmentation.module.emit_tool_events",
+                new=AsyncMock(),
+            ),
+            patch(
+                "agent_system.agents.execution_agents.segmentation.pipelines.automatic.emit_tool_event",
+                new=AsyncMock(),
+            ),
+            patch(
+                "agent_system.agents.execution_agents.segmentation.pipelines.automatic.emit_tool_events",
+                new=AsyncMock(),
+            ),
+        ):
+            await module._execute_work_items(
+                temp_dir,
+                resolution,
+                [item],
+                "run-id",
+                publisher,
+            )
+
+        self.assertEqual(item["status"], "ready")
+        self.assertTrue(item["is_empty_mask"])
+        self.assertIsNone(item["source_segmentation_uid"])
+        self.assertIsNone(item["error"])
+        publisher.publish_failure.assert_not_awaited()
+        publisher.publish_ready.assert_awaited()
 
 
 class SegmentationRecoveryTests(unittest.TestCase):
