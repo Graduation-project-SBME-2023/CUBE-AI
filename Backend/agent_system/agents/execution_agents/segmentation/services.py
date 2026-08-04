@@ -12,7 +12,16 @@ from pydicom.sr.codedict import codes
 import numpy as np
 import io
 import pydicom
+from pydicom.uid import generate_uid
 from scipy import ndimage
+
+from services.timeout_policy import (
+    CONTROL_HTTP_TIMEOUT,
+    SEGMENTATION_JOB_TIMEOUT_SECONDS,
+    SEGMENTATION_POLL_SECONDS,
+    SEGMENTATION_RESULT_READ_SECONDS,
+    SEGMENTATION_UNAVAILABLE_GRACE_SECONDS,
+)
 
 from .utils import (
     parse_multipart_response,
@@ -22,13 +31,13 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
-INFERENCE_TIMEOUT = httpx.Timeout(connect=30.0, read=1800.0, write=60.0, pool=30.0)
+INFERENCE_TIMEOUT = httpx.Timeout(
+    connect=30.0,
+    read=SEGMENTATION_RESULT_READ_SECONDS,
+    write=60.0,
+    pool=30.0,
+)
 QUICK_TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
-
-# Retry settings for transient server-disconnect errors (e.g. when monailabel
-# is under heavy RAM pressure and drops the connection after finishing inference)
-_MAX_INFERENCE_RETRIES = 3
-_RETRY_BACKOFF_SECONDS = [5, 15, 30]   # wait before each retry attempt
 
 
 class InferenceResult(TypedDict):
@@ -55,6 +64,7 @@ class InferenceResult(TypedDict):
     upload_status_code: NotRequired[int]
     upload_response: NotRequired[str]
     retry_count: NotRequired[int]
+    inference_job_id: NotRequired[str]
 
 
 class SegmentationService:
@@ -75,6 +85,208 @@ class SegmentationService:
         if self._owns_client:
             await self.client.aclose()
 
+    @staticmethod
+    def _fallback_job_id(
+        model: str,
+        series_instance_uid: str,
+        params: dict[str, Any],
+    ) -> str:
+        import hashlib
+
+        encoded = json.dumps(
+            {
+                "model": model,
+                "image": series_instance_uid,
+                "params": params,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    async def _cancel_inference_job(self, job_id: str) -> None:
+        try:
+            await self.client.delete(
+                f"{self.monai_url}/inference-jobs/{job_id}",
+                timeout=CONTROL_HTTP_TIMEOUT,
+            )
+        except Exception as exc:
+            logger.warning("Could not cancel inference job %s: %s", job_id, exc)
+
+    async def purge_inference_job(self, job_id: str | None) -> None:
+        if not job_id:
+            return
+        try:
+            await self.client.delete(
+                f"{self.monai_url}/inference-jobs/{job_id}",
+                params={"purge": "true"},
+                timeout=CONTROL_HTTP_TIMEOUT,
+            )
+        except Exception as exc:
+            logger.warning("Could not purge inference job %s: %s", job_id, exc)
+
+    async def _await_inference_job(
+        self,
+        *,
+        job_id: str,
+        model: str,
+        series_instance_uid: str,
+        params: dict[str, Any],
+    ) -> tuple[httpx.Response | None, dict[str, Any]]:
+        job_url = f"{self.monai_url}/inference-jobs/{job_id}"
+        request_payload = {
+            "job_id": job_id,
+            "model": model,
+            "image": series_instance_uid,
+            "params": params,
+            "max_runtime_seconds": SEGMENTATION_JOB_TIMEOUT_SECONDS,
+        }
+        started = asyncio.get_running_loop().time()
+        unavailable_since: float | None = None
+        start_confirmed = False
+
+        try:
+            while True:
+                elapsed = asyncio.get_running_loop().time() - started
+                if elapsed >= SEGMENTATION_JOB_TIMEOUT_SECONDS:
+                    await self._cancel_inference_job(job_id)
+                    return None, {
+                        "status": "TIMED_OUT",
+                        "error": (
+                            f"Inference job exceeded "
+                            f"{SEGMENTATION_JOB_TIMEOUT_SECONDS:.0f}s"
+                        ),
+                    }
+
+                if not start_confirmed:
+                    try:
+                        start_response = await self.client.post(
+                            f"{self.monai_url}/inference-jobs/",
+                            json=request_payload,
+                            timeout=QUICK_TIMEOUT,
+                        )
+                        start_response.raise_for_status()
+                        start_confirmed = True
+                        unavailable_since = None
+                    except httpx.HTTPStatusError as exc:
+                        if exc.response.status_code < 500:
+                            return None, {
+                                "status": "FAILED",
+                                "error": (
+                                    "Inference job could not be started: "
+                                    f"HTTP {exc.response.status_code} "
+                                    f"{exc.response.text[:300]}"
+                                ),
+                            }
+                        now = asyncio.get_running_loop().time()
+                        unavailable_since = unavailable_since or now
+                    except (
+                        httpx.ConnectError,
+                        httpx.ReadError,
+                        httpx.TimeoutException,
+                        httpx.RemoteProtocolError,
+                    ) as exc:
+                        now = asyncio.get_running_loop().time()
+                        unavailable_since = unavailable_since or now
+
+                    if not start_confirmed:
+                        if (
+                            unavailable_since is not None
+                            and asyncio.get_running_loop().time() - unavailable_since
+                            >= SEGMENTATION_UNAVAILABLE_GRACE_SECONDS
+                        ):
+                            return None, {
+                                "status": "UNAVAILABLE",
+                                "error": (
+                                    "Inference service remained unavailable while "
+                                    "starting the job for "
+                                    f"{SEGMENTATION_UNAVAILABLE_GRACE_SECONDS:.0f}s"
+                                ),
+                            }
+                        await asyncio.sleep(SEGMENTATION_POLL_SECONDS)
+                        continue
+
+                try:
+                    status_response = await self.client.get(
+                        job_url,
+                        timeout=CONTROL_HTTP_TIMEOUT,
+                    )
+                    status_response.raise_for_status()
+                    job = status_response.json()
+                    unavailable_since = None
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 404:
+                        start_confirmed = False
+                        await asyncio.sleep(SEGMENTATION_POLL_SECONDS)
+                        continue
+                    if exc.response.status_code < 500:
+                        return None, {
+                            "status": "FAILED",
+                            "error": (
+                                "Inference job status failed: "
+                                f"HTTP {exc.response.status_code} "
+                                f"{exc.response.text[:300]}"
+                            ),
+                        }
+                    now = asyncio.get_running_loop().time()
+                    unavailable_since = unavailable_since or now
+                    if now - unavailable_since >= SEGMENTATION_UNAVAILABLE_GRACE_SECONDS:
+                        return None, {
+                            "status": "UNAVAILABLE",
+                            "error": (
+                                "Inference service remained unavailable for "
+                                f"{SEGMENTATION_UNAVAILABLE_GRACE_SECONDS:.0f}s: {exc}"
+                            ),
+                        }
+                    await asyncio.sleep(SEGMENTATION_POLL_SECONDS)
+                    continue
+                except (
+                    httpx.ConnectError,
+                    httpx.ReadError,
+                    httpx.TimeoutException,
+                    httpx.RemoteProtocolError,
+                ) as exc:
+                    now = asyncio.get_running_loop().time()
+                    unavailable_since = unavailable_since or now
+                    if now - unavailable_since >= SEGMENTATION_UNAVAILABLE_GRACE_SECONDS:
+                        return None, {
+                            "status": "UNAVAILABLE",
+                            "error": (
+                                "Inference service remained unavailable for "
+                                f"{SEGMENTATION_UNAVAILABLE_GRACE_SECONDS:.0f}s: {exc}"
+                            ),
+                        }
+                    await asyncio.sleep(SEGMENTATION_POLL_SECONDS)
+                    continue
+
+                job_status = str(job.get("status") or "").upper()
+                if job_status == "SUCCEEDED":
+                    result_timeout = httpx.Timeout(
+                        connect=15.0,
+                        read=SEGMENTATION_RESULT_READ_SECONDS,
+                        write=30.0,
+                        pool=15.0,
+                    )
+                    result_response = await self.client.get(
+                        f"{job_url}/result",
+                        timeout=result_timeout,
+                    )
+                    result_response.raise_for_status()
+                    return result_response, job
+                if job_status in {"FAILED", "TIMED_OUT", "CANCELLED"}:
+                    return None, job
+
+                await asyncio.sleep(SEGMENTATION_POLL_SECONDS)
+        except asyncio.CancelledError:
+            try:
+                await asyncio.wait_for(
+                    self._cancel_inference_job(job_id),
+                    timeout=5.0,
+                )
+            except Exception:
+                pass
+            raise
+
 
     async def run_segmentation(
         self,
@@ -94,6 +306,7 @@ class SegmentationService:
             Dict[str, Any] | None,
             Field(description="Optional inference parameters")
         ] = None,
+        job_id: str | None = None,
     ) -> InferenceResult:
         try:
             return await self._run_segmentation(
@@ -101,6 +314,7 @@ class SegmentationService:
                 series_instance_uid=series_instance_uid,
                 label_info=label_info,
                 params=params,
+                job_id=job_id,
             )
         except Exception as exc:
             logger.exception(
@@ -123,8 +337,8 @@ class SegmentationService:
         series_instance_uid: str,
         label_info: str,
         params: Dict[str, Any] | None = None,
+        job_id: str | None = None,
     ) -> InferenceResult:
-        start_time = datetime.now()
         clean_model = model.strip().rstrip(",")
 
         organ_list = self._normalize_label_info(label_info)
@@ -144,98 +358,40 @@ class SegmentationService:
         # often resolves to 0 (background), the entire mask is silently erased.
         inference_params["restore_label_idxs"] = False
 
-        files = {"params": (None, json.dumps(inference_params), "application/json")}
+        effective_job_id = job_id or self._fallback_job_id(
+            clean_model,
+            series_instance_uid,
+            inference_params,
+        )
 
-        # ---- Inference with retry on transient server-disconnect errors ----
-        # The monailabel server can disconnect mid-response when RAM is near capacity
-        # (97%+ RAM observed in logs). The inference itself finishes, but the HTTP
-        # connection is dropped before the response arrives. A short backoff lets the
-        # server free memory and accept the next request normally.
+        # Start or reattach to the deterministic durable inference job. The
+        # short requests below never hold this worker on one long HTTP read.
         inference_start = datetime.now()
-        inference_duration = 0.0
-        response = None
-        last_exc = None
+        response, job = await self._await_inference_job(
+            job_id=effective_job_id,
+            model=clean_model,
+            series_instance_uid=series_instance_uid,
+            params=inference_params,
+        )
+        inference_duration = (datetime.now() - inference_start).total_seconds()
+        attempt = int(job.get("attempt") or 1)
 
-        for attempt in range(1, _MAX_INFERENCE_RETRIES + 1):
-            try:
-                response = await self.client.post(
-                    infer_url,
-                    params=query_params,
-                    files=files,
-                    timeout=INFERENCE_TIMEOUT,
-                )
-                inference_duration = (datetime.now() - inference_start).total_seconds()
-                logger.info(
-                    "Inference completed in %.1fs with status %s (attempt %s/%s)",
-                    inference_duration,
-                    response.status_code,
-                    attempt,
-                    _MAX_INFERENCE_RETRIES,
-                )
-                last_exc = None
-                break  # success — exit retry loop
-
-            except httpx.TimeoutException as e:
-                elapsed = (datetime.now() - start_time).total_seconds()
-                logger.error("Inference timeout after %.1fs: %s", elapsed, e)
-                return {
-                    "error": True,
-                    "stage": "inference_timeout",
-                    "message": (
-                        f"Inference exceeded timeout after {elapsed:.1f}s. "
-                        "Try with smaller volume or different model."
-                    ),
-                    "elapsed_seconds": elapsed,
-                    "volume_uid": series_instance_uid,
-                    "model": clean_model,
-                    "prompt": self._first_text_prompt(inference_params),
-                    "retry_count": attempt,
-                }
-            except (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadError) as e:
-                last_exc = e
-                elapsed = (datetime.now() - inference_start).total_seconds()
-                if attempt < _MAX_INFERENCE_RETRIES:
-                    wait = _RETRY_BACKOFF_SECONDS[attempt - 1]
-                    logger.warning(
-                        "Inference attempt %s/%s failed after %.1fs (%s: %s). "
-                        "Server likely under memory pressure. Retrying in %ss...",
-                        attempt,
-                        _MAX_INFERENCE_RETRIES,
-                        elapsed,
-                        type(e).__name__,
-                        e,
-                        wait,
-                    )
-                    await asyncio.sleep(wait)
-                else:
-                    logger.error(
-                        "Inference failed after %s attempts: %s",
-                        _MAX_INFERENCE_RETRIES,
-                        e,
-                    )
-            except Exception as e:
-                logger.exception("Inference request failed (attempt %s/%s)", attempt, _MAX_INFERENCE_RETRIES)
-                return {
-                    "error": True,
-                    "stage": "inference_request",
-                    "message": str(e),
-                    "volume_uid": series_instance_uid,
-                    "model": clean_model,
-                    "prompt": self._first_text_prompt(inference_params),
-                    "retry_count": attempt,
-                }
-
-        if last_exc is not None:
-            # All retries exhausted for a transient connection error
-            logger.exception("Inference request failed after all retries", exc_info=last_exc)
+        if response is None:
+            job_status = str(job.get("status") or "FAILED").lower()
             return {
                 "error": True,
-                "stage": "inference_request",
-                "message": str(last_exc),
+                "stage": (
+                    "inference_timeout"
+                    if job_status == "timed_out"
+                    else "inference_request"
+                ),
+                "message": str(job.get("error") or f"Inference job {job_status}"),
+                "elapsed_seconds": inference_duration,
                 "volume_uid": series_instance_uid,
                 "model": clean_model,
                 "prompt": self._first_text_prompt(inference_params),
-                "retry_count": _MAX_INFERENCE_RETRIES,
+                "retry_count": attempt,
+                "inference_job_id": effective_job_id,
             }
 
         result: InferenceResult = {
@@ -251,6 +407,7 @@ class SegmentationService:
             "status_code": response.status_code,
             "inference_duration_seconds": inference_duration,
             "retry_count": attempt,
+            "inference_job_id": effective_job_id,
         }
 
         if response.status_code != 200:
@@ -388,6 +545,33 @@ class SegmentationService:
             labelmap_np.shape,
         )
 
+        uid_prefix = "1.2.826.0.1.3680043.10.511.3."
+        seg_series_uid = generate_uid(
+            prefix=uid_prefix,
+            entropy_srcs=[effective_job_id, "series"],
+        )
+        seg_sop_uid = generate_uid(
+            prefix=uid_prefix,
+            entropy_srcs=[effective_job_id, "instance"],
+        )
+
+        existing_instance_id = await self._find_existing_segmentation_instance(
+            seg_series_uid
+        )
+        if existing_instance_id:
+            result["segmentation_series_uid"] = seg_series_uid
+            result["orthanc_instance_id"] = existing_instance_id
+            result["sync_succeeded"] = await self._sync_uploaded_segmentation_series(
+                existing_instance_id,
+                seg_series_uid,
+            )
+            logger.info(
+                "Reconciled existing DICOM-SEG for inference job %s: %s",
+                effective_job_id,
+                seg_series_uid,
+            )
+            return result
+
         seg = await asyncio.to_thread(
             partial(
                 hd.seg.Segmentation,
@@ -395,9 +579,9 @@ class SegmentationService:
                 pixel_array=labelmap_np,
                 segmentation_type=hd.seg.SegmentationTypeValues.BINARY,
                 segment_descriptions=[description_segment],
-                series_instance_uid=hd.UID(),
+                series_instance_uid=seg_series_uid,
                 series_number=1001,
-                sop_instance_uid=hd.UID(),
+                sop_instance_uid=seg_sop_uid,
                 # Target identity lives in SegmentLabel/target_label. Keep the
                 # human-readable SeriesDescription free of encoded model/time
                 # fields so no runtime code is tempted to parse provenance.
@@ -459,6 +643,40 @@ class SegmentationService:
             result["upload_response"] = response.text[:500]
 
         return result
+
+    async def _find_existing_segmentation_instance(
+        self,
+        dicom_series_uid: str,
+    ) -> str | None:
+        """Reconcile a deterministic SEG UID before attempting another upload."""
+        try:
+            find_response = await self.client.post(
+                f"{self.orthanc_url}/tools/find",
+                json={
+                    "Level": "Series",
+                    "Query": {"SeriesInstanceUID": dicom_series_uid},
+                },
+                timeout=QUICK_TIMEOUT,
+            )
+            find_response.raise_for_status()
+            series_ids = find_response.json()
+            if not series_ids:
+                return None
+
+            series_response = await self.client.get(
+                f"{self.orthanc_url}/series/{series_ids[0]}",
+                timeout=QUICK_TIMEOUT,
+            )
+            series_response.raise_for_status()
+            instances = series_response.json().get("Instances") or []
+            return str(instances[0]) if instances else None
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Could not reconcile DICOM-SEG series %s: %s",
+                dicom_series_uid,
+                exc,
+            )
+            return None
 
     async def _sync_uploaded_segmentation_series(
         self,

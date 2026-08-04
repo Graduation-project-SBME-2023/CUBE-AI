@@ -15,6 +15,7 @@ import SimpleITK as sitk
 from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
 
 from agent_system.models.tool_logging import TextPayload
+from services.timeout_policy import MCP_STANDARD_READ_SECONDS
 from client_config import create_model_client_from_config
 
 from .contracts import TargetResolutionOutcome
@@ -96,7 +97,7 @@ class SegmentationModule:
         server = StdioServerParams(
             command="python",
             args=[str(server_path)],
-            read_timeout_seconds=2000,
+            read_timeout_seconds=MCP_STANDARD_READ_SECONDS,
             env=env,
         )
         tools = await mcp_server_tools(server)
@@ -521,9 +522,6 @@ class SegmentationModule:
                 publisher=publisher,
             )
 
-        for item in ordered:
-            if item.get("status") == "inferencing":
-                item["status"] = "pending"
         self._persist_processing_state(
             workspace_dir, resolution_outcome, work_items, run_id
         )
@@ -531,7 +529,14 @@ class SegmentationModule:
         if any(item.get("status") == "ready" for item in ordered):
             await publisher.publish_ready()
 
-        pending = [item for item in ordered if item.get("status") == "pending"]
+        # An interrupted pair keeps its deterministic remote job ID. The
+        # pipeline will attach to that job instead of launching another model
+        # invocation.
+        pending = [
+            item
+            for item in ordered
+            if item.get("status") in {"pending", "inferencing"}
+        ]
 
         async def on_pair_started(event: dict[str, Any]) -> None:
             item = item_by_pair[event["pair_id"]]
@@ -588,6 +593,7 @@ class SegmentationModule:
                         "orthanc_instance_id",
                         "sync_succeeded",
                         "retry_count",
+                        "inference_job_id",
                         "status_code",
                         "geometry_adjusted",
                         "original_mask_shape",
@@ -632,6 +638,9 @@ class SegmentationModule:
                     work_items=work_items,
                     run_id=run_id,
                     publisher=publisher,
+                )
+                await self.segmentation_service.purge_inference_job(
+                    str(inference_result.get("inference_job_id") or "") or None
                 )
             except Exception as exc:
                 logger.exception("Pair completion failed for %s", item["pair_id"])
@@ -797,6 +806,20 @@ class SegmentationModule:
                 seen_sequence_indexes.add(sequence_index)
                 item["sequence_index"] = sequence_index
                 item.setdefault("inference_result", None)
+                item_run_id = str(item.get("run_id") or payload.get("run_id") or "")
+                item["run_id"] = item_run_id
+                inference_job_id = artifact_key_for_pair(
+                    "|".join(
+                        (
+                            item_run_id,
+                            pair_id,
+                            str(item.get("model") or ""),
+                            str(item.get("inference_prompt") or ""),
+                        )
+                    )
+                )
+                item.setdefault("idempotency_key", inference_job_id)
+                item.setdefault("inference_job_id", inference_job_id)
                 item.setdefault("gif_path", None)
                 item.setdefault("reuse_candidate_uid", None)
                 if item.get("mask_path"):
@@ -1129,6 +1152,12 @@ class SegmentationModule:
                         "sequence_index": -1,
                         "run_id": run_id,
                         "correlation_id": f"{run_id}:{pair_id}",
+                        "idempotency_key": artifact_key_for_pair(
+                            f"{run_id}|{pair_id}|{model}|{prompt}"
+                        ),
+                        "inference_job_id": artifact_key_for_pair(
+                            f"{run_id}|{pair_id}|{model}|{prompt}"
+                        ),
                         "volume_uid": volume_uid,
                         "target_id": target.target_id,
                         "canonical_label": target.canonical_label,

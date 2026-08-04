@@ -5,10 +5,11 @@ import httpx
 import logging
 from . import mcp
 from tool_logging import ToolEvent, log_tool_state, TextPayload
-from .scratchpad import scratchpad_raise_flag, RaiseFlagInput
+from .scratchpad import scratchpad_raise_flag
 import asyncio
+from service_urls import CONTROL_API_URL
 
-base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+base_url = CONTROL_API_URL
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -98,11 +99,11 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
         extraction_result = await extract_cohort_labels()
         if isinstance(extraction_result, dict) and extraction_result.get("status") == "error":
             err_msg = f"extract_cohort_labels failed: {extraction_result.get('message', 'unknown error')}"
-            await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
+            await scratchpad_raise_flag(level="error", message=err_msg)
             return json.dumps({"status": "error", "message": err_msg})
         if not os.path.exists(cohort_labels_path):
             err_msg = "cohort_labels.csv still missing after extract_cohort_labels ran."
-            await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
+            await scratchpad_raise_flag(level="error", message=err_msg)
             return json.dumps({"status": "error", "message": err_msg})
 
     labels_dict: dict = {}
@@ -163,7 +164,7 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
 
     if not valid_uids:
         err_msg = "No matching targets found. All volumes were dropped because they lack clinical labels."
-        await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
+        await scratchpad_raise_flag(level="error", message=err_msg)
         return json.dumps({"status": "error", "message": err_msg})
 
     # Update config.json to only contain validated UIDs
@@ -177,14 +178,14 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
             f"Dropped {len(dropped_patients)} volumes because no medical report exists for them. "
             f"Continuing with {len(valid_targets)} valid patients."
         )
-        await scratchpad_raise_flag(RaiseFlagInput(level="warning", message=msg))
+        await scratchpad_raise_flag(level="warning", message=msg)
 
     if low_confidence_patients:
         msg = (
             f"Included {len(low_confidence_patients)} patients with low LLM confidence "
             f"(retained as per policy). See metadata for details."
         )
-        await scratchpad_raise_flag(RaiseFlagInput(level="warning", message=msg))
+        await scratchpad_raise_flag(level="warning", message=msg)
 
     with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -240,7 +241,7 @@ async def generate_targets() -> str:
             "You MUST call search_volumes_by_description first to populate the volume list, "
             "then call generate_targets."
         )
-        await scratchpad_raise_flag(RaiseFlagInput(level="error", message=err_msg))
+        await scratchpad_raise_flag(level="error", message=err_msg)
         return json.dumps({"status": "error", "message": err_msg})
 
     if labelling_mode == "automatic":

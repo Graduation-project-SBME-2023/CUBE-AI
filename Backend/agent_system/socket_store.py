@@ -1,3 +1,4 @@
+import copy
 import json
 import asyncio
 import logging
@@ -5,6 +6,8 @@ from typing import List, Any, Dict
 from fastapi import WebSocket
 from clients.backend_client import BackendClient
 from models.logs import WS_Log
+from services.best_effort import schedule_best_effort
+from services.timeout_policy import WS_SEND_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +40,23 @@ class ConnectionManager:
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
             logger.info("WebSocket client disconnected.")
+        if self.solely_connected_socket is websocket:
+            self.solely_connected_socket = (
+                self.active_connections[0] if self.active_connections else None
+            )
+
+    def clear_message_queue(self, session_id: str | None) -> int:
+        """Discard input only when the owning session lifecycle is reset."""
+        key = session_id or "default"
+        queue = self.message_queues.pop(key, None)
+        discarded = queue.qsize() if queue is not None else 0
+        if discarded:
+            logger.info(
+                "Discarded %s queued messages for reset session=%s",
+                discarded,
+                key,
+            )
+        return discarded
 
     async def push_to_queue(self, raw_text: str, session_id: str | None = None):
         """
@@ -73,8 +93,16 @@ class ConnectionManager:
         dead_sockets = []
         for connection in self.active_connections:
             try:
-                print(f"will send to frontend msg: {message_data}")
-                await connection.send_text(message_data)
+                await asyncio.wait_for(
+                    connection.send_text(message_data),
+                    timeout=WS_SEND_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "WebSocket send timed out after %.1fs",
+                    WS_SEND_TIMEOUT_SECONDS,
+                )
+                dead_sockets.append(connection)
             except Exception as e:
                 logger.error(f"Failed to send message: {e}")
                 dead_sockets.append(connection)
@@ -82,10 +110,14 @@ class ConnectionManager:
         # if self.solely_connected_socket:
         #     await self.solely_connected_socket.send_text(message_data)
 
-        # db persistence of logs
+        # Log persistence is useful for replay, but it must never delay a live
+        # WebSocket message or a long-running tool heartbeat.
         if not replaying:
             log = WS_Log(msg_type=msg_type, payload=payload, session_id=session_id)
-            await BackendClient.save_log(log)
+            schedule_best_effort(
+                lambda _log=copy.deepcopy(log): BackendClient.save_log(_log),
+                name=f"save-ws-log:{msg_type}",
+            )
 
         # Cleanup broken connections
         for dead in dead_sockets:

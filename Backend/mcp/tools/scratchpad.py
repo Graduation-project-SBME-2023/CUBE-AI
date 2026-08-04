@@ -201,15 +201,14 @@ class ReadAgentInput(BaseModel):
         "openWorldHint": False,
     },
 )
-async def scratchpad_register_agent(params: RegisterAgentInput) -> str:
+async def scratchpad_register_agent(role: str = "agent") -> str:
     """Register an agent in the scratchpad at the start of its work.
 
     Must be called before any other scratchpad tool. Creates an isolated section
     for the agent keyed by agent_id, and logs the registration to the activity log.
 
     Args:
-        params (RegisterAgentInput):
-            - role (str): Agent's role (e.g. 'researcher', 'writer', 'ROI extractor', 'modeler').
+        role (str): Agent's role (e.g. 'researcher', 'writer', 'ROI extractor', 'modeler').
 
     Returns:
         str: JSON confirmation, or error if agent_id is already registered.
@@ -223,14 +222,14 @@ async def scratchpad_register_agent(params: RegisterAgentInput) -> str:
 
     data["agents"][current_agent_id] = {
         "agent_id": current_agent_id,
-        "role": params.role,
+        "role": role,
         "status": "in_progress",
         "registered_at": _now(),
         "notes": [],
         "flags": [],
         "summary": None,
     }
-    _log_activity(data, current_agent_id, params.role, "registered", f"Role: {params.role}")
+    _log_activity(data, current_agent_id, role, "registered", f"Role: {role}")
     _save(data)
 
     # Calculate the absolute directory path
@@ -251,10 +250,10 @@ async def scratchpad_register_agent(params: RegisterAgentInput) -> str:
         payload_ws = {
             "type": "agent_registered",
             "agent_id": current_agent_id,
-            "role": params.role,
+            "role": role,
             "status": "in_progress",
             "timestamp": _now(),
-            "content": f"Agent {current_agent_id} registered as {params.role}"
+            "content": f"Agent {current_agent_id} registered as {role}"
         }
         if session_id:
             asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
@@ -265,7 +264,7 @@ async def scratchpad_register_agent(params: RegisterAgentInput) -> str:
     return json.dumps({
         "status": "ok", 
         "agent_id": current_agent_id, 
-        "role": params.role,
+        "role": role,
         "save_path": save_directory
     }, indent=2)
 
@@ -279,7 +278,7 @@ async def scratchpad_register_agent(params: RegisterAgentInput) -> str:
         "openWorldHint": False,
     },
 )
-async def scratchpad_write_note(params: WriteNoteInput) -> str:
+async def scratchpad_write_note(content: str) -> str:
     """Append a private working note to the agent's scratchpad section.
 
     Use this for intermediate thoughts, observations, or partial results during
@@ -287,8 +286,7 @@ async def scratchpad_write_note(params: WriteNoteInput) -> str:
     and are excluded from the reporter's cross-agent view.
 
     Args:
-        params (WriteNoteInput):
-            - content (str): Note text.
+        content (str): Note text (1-10000 characters).
 
     Returns:
         str: JSON confirmation with the note index.
@@ -299,7 +297,7 @@ async def scratchpad_write_note(params: WriteNoteInput) -> str:
     except ValueError as e:
         return json.dumps({"status": "error", "message": str(e)}, indent=2)
 
-    note = {"content": params.content, "created_at": _now()}
+    note = {"content": content, "created_at": _now()}
     agent["notes"].append(note)
     _log_activity(data, current_agent_id, agent["role"], "wrote_note",
                   f"Note #{len(agent['notes']) - 1}")
@@ -311,7 +309,7 @@ async def scratchpad_write_note(params: WriteNoteInput) -> str:
             "type": "agent_note",
             "agent_id": current_agent_id,
             "role": agent["role"],
-            "content": params.content,
+            "content": content,
             "timestamp": _now(),
             "note_index": len(agent["notes"]) - 1
         }
@@ -333,7 +331,7 @@ async def scratchpad_write_note(params: WriteNoteInput) -> str:
         "openWorldHint": False,
     },
 )
-async def scratchpad_raise_flag(params: RaiseFlagInput) -> str:
+async def scratchpad_raise_flag(level: str = "warning", message: str = "No message provided.") -> str:
     """Raise a flag in the agent's section to surface issues to the reporting agent.
 
     Use this to highlight anything the reporter should pay attention to:
@@ -341,23 +339,24 @@ async def scratchpad_raise_flag(params: RaiseFlagInput) -> str:
     Flags appear prominently in the reporter's cross-agent view.
 
     Args:
-        params (RaiseFlagInput):
-            - level (str): 'info' | 'warning' | 'error' | 'critical'
-            - message (str): Description of the issue.
+        level (str): Severity — 'info' | 'warning' | 'error' | 'critical'.
+        message (str): Clear description of the issue (1-2000 characters).
 
     Returns:
         str: JSON confirmation with flag index.
     """
+    if level not in ("info", "warning", "error", "critical"):
+        return json.dumps({"status": "error", "message": f"Invalid level '{level}'. Must be one of: info, warning, error, critical."}, indent=2)
     data = _load()
     try:
         agent = _require_agent(data, current_agent_id)
     except ValueError as e:
         return json.dumps({"status": "error", "message": str(e)}, indent=2)
 
-    flag = {"level": params.level, "message": params.message, "created_at": _now()}
+    flag = {"level": level, "message": message, "created_at": _now()}
     agent["flags"].append(flag)
     _log_activity(data, current_agent_id, agent["role"], "raised_flag",
-                  f"[{params.level.upper()}] {params.message[:120]}")
+                  f"[{level.upper()}] {message[:120]}")
     _save(data)
 
     try:
@@ -366,8 +365,8 @@ async def scratchpad_raise_flag(params: RaiseFlagInput) -> str:
             "type": "agent_flag",
             "agent_id": current_agent_id,
             "role": agent["role"],
-            "level": params.level,
-            "content": params.message,
+            "level": level,
+            "content": message,
             "timestamp": _now(),
             "flag_index": len(agent["flags"]) - 1
         }
@@ -389,7 +388,7 @@ async def scratchpad_raise_flag(params: RaiseFlagInput) -> str:
         "openWorldHint": False,
     },
 )
-async def scratchpad_set_status(params: SetStatusInput) -> str:
+async def scratchpad_set_status(status: str) -> str:
     """Update the calling agent's status in the scratchpad.
 
     Call this whenever your state changes. The reporting agent uses statuses
@@ -397,12 +396,13 @@ async def scratchpad_set_status(params: SetStatusInput) -> str:
     If setting status to 'blocked' or 'failed', also call scratchpad_raise_flag.
 
     Args:
-        params (SetStatusInput):
-            - status (str): 'in_progress' | 'done' | 'blocked' | 'failed'
+        status (str): Agent's current status — 'in_progress' | 'done' | 'blocked' | 'failed'.
 
     Returns:
         str: JSON confirmation with previous and new status.
     """
+    if status not in ("in_progress", "done", "blocked", "failed"):
+        return json.dumps({"status": "error", "message": f"Invalid status '{status}'. Must be one of: in_progress, done, blocked, failed."}, indent=2)
     data = _load()
     try:
         agent = _require_agent(data, current_agent_id)
@@ -410,9 +410,9 @@ async def scratchpad_set_status(params: SetStatusInput) -> str:
         return json.dumps({"status": "error", "message": str(e)}, indent=2)
 
     previous = agent["status"]
-    agent["status"] = params.status
+    agent["status"] = status
     _log_activity(data, current_agent_id, agent["role"], "status_change",
-                  f"{previous} → {params.status}")
+                  f"{previous} -> {status}")
     _save(data)
 
     try:
@@ -421,17 +421,17 @@ async def scratchpad_set_status(params: SetStatusInput) -> str:
             "type": "agent_status",
             "agent_id": current_agent_id,
             "role": agent["role"],
-            "status": params.status,
+            "status": status,
             "previous_status": previous,
             "timestamp": _now(),
-            "content": f"Status changed: {previous} → {params.status}"
+            "content": f"Status changed: {previous} -> {status}"
         }
         if session_id:
             asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
     except Exception as e:
         print(f"Warning: Could not broadcast agent status: {e}")
 
-    return json.dumps({"status": "ok", "previous_status": previous, "new_status": params.status}, indent=2)
+    return json.dumps({"status": "ok", "previous_status": previous, "new_status": status}, indent=2)
 
 
 @mcp.tool(
@@ -444,7 +444,7 @@ async def scratchpad_set_status(params: SetStatusInput) -> str:
         "openWorldHint": False,
     },
 )
-async def scratchpad_write_summary(params: WriteSummaryInput) -> str:
+async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str:
     """Write the agent's final work summary. Call this when the task is complete.
 
     The summary is the primary input the reporting agent uses to review this
@@ -453,9 +453,8 @@ async def scratchpad_write_summary(params: WriteSummaryInput) -> str:
     status to 'done' via scratchpad_set_status.
 
     Args:
-        params (WriteSummaryInput):
-            - summary (str): Full summary text.
-            - overwrite (bool): Replace existing summary (default False).
+        summary (str): Full summary of completed work (1-20000 characters).
+        overwrite (bool): Replace an existing summary (default False).
 
     Returns:
         str: JSON confirmation, or error if summary exists and overwrite=False.
@@ -466,15 +465,15 @@ async def scratchpad_write_summary(params: WriteSummaryInput) -> str:
     except ValueError as e:
         return json.dumps({"status": "error", "message": str(e)}, indent=2)
 
-    if agent["summary"] is not None and not params.overwrite:
+    if agent["summary"] is not None and not overwrite:
         return json.dumps({
             "status": "error",
             "message": "A summary already exists for this agent. Set overwrite=true to replace it.",
         }, indent=2)
 
-    agent["summary"] = {"content": params.summary, "updated_at": _now()}
+    agent["summary"] = {"content": summary, "updated_at": _now()}
     _log_activity(data, current_agent_id, agent["role"], "wrote_summary",
-                  f"{len(params.summary)} chars")
+                  f"{len(summary)} chars")
     _save(data)
 
     try:
@@ -483,9 +482,9 @@ async def scratchpad_write_summary(params: WriteSummaryInput) -> str:
             "type": "agent_summary",
             "agent_id": current_agent_id,
             "role": agent["role"],
-            "content": params.summary,
+            "content": summary,
             "timestamp": _now(),
-            "summary_length": len(params.summary)
+            "summary_length": len(summary)
         }
         if session_id:
             asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
@@ -511,35 +510,31 @@ async def scratchpad_write_summary(params: WriteSummaryInput) -> str:
         "openWorldHint": False,
     },
 )
-async def scratchpad_read_agent(params: ReadAgentInput) -> str:
+async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True) -> str:
     """Read the full scratchpad section for a specific agent.
 
     Returns the agent's status, flags, summary, and optionally their private notes.
     Any agent can read any other agent's section, enabling context sharing.
 
     Args:
-        params (ReadAgentInput):
-            - target_agent_id (str): ID of the agent to read.
-            - include_notes (bool): Include private working notes (default True).
+        target_agent_id (str): ID of the agent whose section to read.
+        include_notes (bool): Include private working notes (default True).
 
     Returns:
         str: JSON of the agent's full section, with notes optionally omitted.
     """
     data = _load()
-    # FIX 1: Change params.agent_id to params.target_agent_id
-    agent = _get_agent(data, params.target_agent_id)
+    agent = _get_agent(data, target_agent_id)
     if agent is None:
         return json.dumps({
             "status": "error",
-            # FIX 2: Change params.agent_id to params.target_agent_id
-            "message": f"Agent '{params.target_agent_id}' not found.",
+            "message": f"Agent '{target_agent_id}' not found.",
         }, indent=2)
 
-    result = {k: v for k, v in agent.items() if k != "notes" or params.include_notes}
+    result = {k: v for k, v in agent.items() if k != "notes" or include_notes}
 
-    # FIX 3: Change params.agent_id to params.target_agent_id
     try:
-        payload = TextPayload(message=f"Reading {params.target_agent_id}'s notes.")
+        payload = TextPayload(message=f"Reading {target_agent_id}'s notes.")
         start_event = ToolEvent('tool_started', 'text', payload)
         log_tool_state(start_event)
         finished_event = ToolEvent('tool_finished', 'text', payload)

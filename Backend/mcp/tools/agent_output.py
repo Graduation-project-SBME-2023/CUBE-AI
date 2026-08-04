@@ -64,11 +64,11 @@ class WriteAgentOutputInput(BaseModel):
             "{'hypothesis': '...', 'data_source': '...', 'upstream_agent': '...'}."
         ),
     )
-    output_files: Dict[str, str] = Field(
+    output_files: Dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Dictionary mapping logical file names to their paths. For example: "
-            "{'targets_csv': 'targets.csv', 'radiomics_features': 'features/radiomics_features.csv'}."
+            "Dictionary mapping logical file names to their paths (can be null if generation failed). For example: "
+            "{'targets_csv': 'targets.csv', 'radiomics_features': null}."
         ),
     )
     output_metrics: Dict[str, Any] = Field(

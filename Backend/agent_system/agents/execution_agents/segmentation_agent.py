@@ -20,6 +20,7 @@ from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
 from autogen_core.tools import FunctionTool
 
 from agent_system.clients.ollamaClient import OllamaClient
+from services.timeout_policy import MCP_STANDARD_READ_SECONDS
 
 from .segmentation.module import SegmentationModule, resolve_mcp_server_path
 
@@ -153,7 +154,7 @@ class SegmentationAgent(AssistantAgent):
             command=sys.executable,
             args=[str(mcp_server_path)],
             env=env,
-            read_timeout_seconds=2000,
+            read_timeout_seconds=MCP_STANDARD_READ_SECONDS,
         )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)

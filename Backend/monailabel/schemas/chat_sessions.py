@@ -1,6 +1,6 @@
 
 # schemas/chat_session.py
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 from datetime import date, datetime
 from uuid import UUID
@@ -11,8 +11,8 @@ from .chat_messages import ChatMessage
 
 class StudyRef(BaseModel):
     study_uid: str
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
+
 class ChatSessionBase(BaseModel):
     title: Optional[str] = None
     is_active: Optional[bool] = True
@@ -20,6 +20,7 @@ class ChatSessionBase(BaseModel):
 
 class ChatSessionCreate(ChatSessionBase):
     study_uid: Optional[List[str]] = []   # multiple studies
+
 class ChatSessionUpdate(BaseModel):
     title: Optional[str] = None
     is_active: Optional[bool] = None
@@ -27,11 +28,10 @@ class ChatSessionUpdate(BaseModel):
     study_uid: Optional[List[str]] = None
 
 class ChatSession(ChatSessionBase):
-    chat_id:UUID
+    chat_id: UUID
     started_at: datetime = None
     last_activity: Optional[datetime] = None
     studies: List[StudyRef] = []
     messages: List[ChatMessage] = []
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

@@ -31,6 +31,7 @@
   "SslEnabled": false,
   "SslCertificate": "certificate.pem",
   "AuthenticationEnabled": false,
+  "__SECURITY_WARNING__": "RemoteAccessAllowed=true + AuthenticationEnabled=false is intentional for local Docker dev only. ENABLE authentication before any external network exposure.",
   "RegisteredUsers": {
     "test": "test"
   },

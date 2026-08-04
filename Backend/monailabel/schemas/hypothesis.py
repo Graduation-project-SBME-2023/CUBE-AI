@@ -1,8 +1,9 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from uuid import UUID
 from typing import Optional
 
 from datetime import datetime
+
 class HypothesisBase(BaseModel):
     title: str
     population: Optional[str] = None
@@ -30,7 +31,6 @@ class HypothesisUpdate(BaseModel):
     relationship_type: Optional[str] = None
     state: Optional[str] = None
 
-
     hypothesis: Optional[str] = None
     column: Optional[str] = None
     comparison: Optional[str] = None
@@ -39,6 +39,5 @@ class HypothesisOut(HypothesisBase):
     id: UUID
     chat_id: UUID
     created_at: datetime
-    class Config:
-        orm_mode = True
 
+    model_config = ConfigDict(from_attributes=True)

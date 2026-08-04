@@ -7,11 +7,15 @@ import os
 import json
 from uuid import UUID
 from typing import Any
+from services.timeout_policy import CONTROL_HTTP_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
-BASE_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
-DEFAULT_TIMEOUT = httpx.Timeout(connect=30.0, read=600.0, write=60.0, pool=60.0)
+BASE_URL = os.environ.get(
+    "CONTROL_API_URL",
+    os.environ.get("MONAI_URL", "http://localhost:8000"),
+).rstrip("/")
+DEFAULT_TIMEOUT = CONTROL_HTTP_TIMEOUT
 class BackendClient:
     """
     Async HTTP client for the backend REST API.

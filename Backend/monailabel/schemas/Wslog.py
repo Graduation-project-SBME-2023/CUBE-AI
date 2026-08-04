@@ -1,6 +1,4 @@
-# schemas/ws_log.py
-
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Any
 from datetime import datetime
 from uuid import UUID
@@ -19,10 +17,10 @@ class WSLogCreate(BaseModel):
 class WSLogUpdate(BaseModel):
     msg_type: Optional[str] = None
     payload: Optional[Any] = None
+
 class WSLog(WSLogBase):
     uuid: UUID
     session_id: UUID
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

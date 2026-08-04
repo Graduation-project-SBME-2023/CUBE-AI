@@ -13,6 +13,7 @@ from system_prompts.system_messages import FEATURE_EXTRACTION_AGENT_SYSTEM_PROMP
 
 # from tools.feature_extraction_tools import extract_radiomic_features, analyze_feature_importance
 from autogen_core.tools import FunctionTool
+from services.timeout_policy import MCP_COMPUTE_READ_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ class FeatureExtractionAgent(AssistantAgent):
             command=sys.executable,
             args=[mcp_server_path],
             env=env,
-            read_timeout_seconds=3600,
+            read_timeout_seconds=MCP_COMPUTE_READ_SECONDS,
         )
         try:
             mcp_tools = await mcp_server_tools(mcp_server)

@@ -66,6 +66,36 @@ class TaskManagerCancellationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("cancelled internally", "\n".join(captured.output))
 
+    async def test_restart_refuses_to_overlap_uncooperative_execution(self):
+        manager = TaskManager()
+        session = Session(session_id="stubborn-execution")
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def executor(_session):
+            started.set()
+            while not release.is_set():
+                try:
+                    await release.wait()
+                except asyncio.CancelledError:
+                    continue
+
+        await manager.start_execution(session, executor)
+        original_task = session.execution_task
+        await started.wait()
+
+        with patch(
+            "task_manager.task_manager.CANCELLATION_GRACE_SECONDS",
+            0.02,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "restart was aborted"):
+                await manager.restart_execution(session, executor)
+
+        self.assertIs(session.execution_task, original_task)
+        self.assertGreaterEqual(original_task.cancelling(), 2)
+        release.set()
+        await original_task
+
 
 class SegmentationCancellationGuardTests(unittest.TestCase):
     @staticmethod

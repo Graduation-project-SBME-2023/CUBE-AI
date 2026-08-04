@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import logging
 from typing import Awaitable, Callable, Dict, Any, List
 
@@ -14,6 +15,7 @@ from .execution_state import (
     planning_start_allowed,
 )
 from .resume_recovery import reset_interrupted_agent
+from .best_effort import schedule_best_effort
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,11 @@ class SessionService:
         except Exception as e:
             logger.warning(f"WS broadcast failed [event={event}]: {e}")
 
+    def _clear_session_input(self, session_id: str) -> None:
+        clear_queue = getattr(self.ws, "clear_message_queue", None)
+        if callable(clear_queue):
+            clear_queue(session_id)
+
     # ------------------------------------------------------------------
     # Task lifecycle — routes call these
     # ------------------------------------------------------------------
@@ -101,6 +108,8 @@ class SessionService:
             raise SessionPlanningConflict(
                 f"Session {session_id} already contains persisted planning state"
             )
+
+        self._clear_session_input(session_id)
 
         async def planner_with_failure_notification(
             active_session: Session,
@@ -185,6 +194,7 @@ class SessionService:
         session.resume_from_agent = None
         session.resume_agent_statuses = {}
         if restart:
+            self._clear_session_input(session_id)
             await self.tasks.restart_execution(session, executor)
         else:
             await self.tasks.start_execution(session, executor)
@@ -306,6 +316,7 @@ class SessionService:
                 session_id=session_id,
             )
 
+            self._clear_session_input(session_id)
             await self.tasks.restart_execution(session, executor)
             await self.update_state(session, SessionState.RUNNING)
             logger.info(
@@ -336,11 +347,13 @@ class SessionService:
         logger.info(f"[{session_id}] Stopping")
         session = self.store.require(session_id)
         self.tasks.stop(session)
+        self._clear_session_input(session_id)
         asyncio.create_task(self._sync_state(session))
 
     async def restart_execution(self, session_id: str, executor) -> None:
         logger.info(f"[{session_id}] Restarting execution")
         session = await self.store.require_async(session_id)
+        self._clear_session_input(session_id)
         await self.tasks.restart_execution(session, executor)
 
     # ------------------------------------------------------------------
@@ -688,7 +701,6 @@ class SessionService:
             s.module: str(s.id) for s in session.plan.steps if s.id and s.module
         }
 
-        persist_tasks = []
         for agent in agents:
             step_id = step_index.get(agent["name"])
             if not step_id:
@@ -705,15 +717,12 @@ class SessionService:
                     }
                 ]
 
-            persist_tasks.append(BackendClient.update_plan_step(step_id, patch))
-
-        results = await asyncio.gather(*persist_tasks, return_exceptions=True)
-
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(
-                    f"[{session.session_id}] Failed to persist step update: {result}"
-                )
+            schedule_best_effort(
+                lambda step_id=step_id, patch=copy.deepcopy(patch): (
+                    BackendClient.update_plan_step(step_id, patch)
+                ),
+                name=f"pipeline-status:{agent['name']}",
+            )
 
         await self._ws_send(
             "pipeline_agent_status", {"agents": agents}, session_id=session.session_id
@@ -722,19 +731,30 @@ class SessionService:
     async def update_agent_tool_logs(
         self, session: Session, agent: str, log: Dict
     ) -> None:
-        # use backend client first to update the logs of the specific step
-        # then update the frontend via ws
-
-        step_id = next(step.id for step in session.plan.steps if step.module == agent)
+        step = next(
+            (step for step in session.plan.steps if step.module == agent),
+            None,
+        ) if session.plan else None
         body = {
             "status": "RUNNING",
             "log": log,
         }
-        await BackendClient.update_plan_step(step_id, body)
+        if step and step.id:
+            schedule_best_effort(
+                lambda _step_id=str(step.id), _body=copy.deepcopy(body): (
+                    BackendClient.update_plan_step(_step_id, _body)
+                ),
+                name=f"tool-log:{agent}",
+            )
         await self._ws_send(log.get("type"), log.get("payload"), log.get("session_id"))
 
     async def update_tool_views(self, session, agent, msg_type, payload):
-        step_id = next(step.id for step in session.plan.steps if step.module == agent)
+        step = next(
+            (step for step in session.plan.steps if step.module == agent),
+            None,
+        ) if session.plan else None
+        if not step or not step.id:
+            return
 
         body = {
             "status": "RUNNING",
@@ -745,7 +765,12 @@ class SessionService:
             },
         }
 
-        await BackendClient.update_plan_step(step_id, body)
+        schedule_best_effort(
+            lambda _step_id=str(step.id), _body=copy.deepcopy(body): (
+                BackendClient.update_plan_step(_step_id, _body)
+            ),
+            name=f"tool-view:{agent}:{msg_type}",
+        )
 
     async def persist_agent_status(
         self,

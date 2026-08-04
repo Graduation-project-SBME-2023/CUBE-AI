@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from uuid import UUID
 
@@ -14,5 +14,4 @@ class Radiomics(RadiomicsBase):
     id: UUID
     created_at: datetime | None = None  # ISO format date-time
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

@@ -1,7 +1,8 @@
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 from uuid import UUID
+
 # --- Chat Message Schemas ---
 class ChatMessageBase(BaseModel):
     role: str
@@ -16,6 +17,4 @@ class ChatMessage(ChatMessageBase):
     chat_id: UUID
     timestamp: datetime
 
-    class Config:
-        orm_mode = True
-
+    model_config = ConfigDict(from_attributes=True)

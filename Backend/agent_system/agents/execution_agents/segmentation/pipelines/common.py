@@ -3,6 +3,10 @@ import logging
 import time
 
 from agent_system.models.tool_logging import ProgressPayload
+from services.timeout_policy import (
+    LONG_TOOL_TIMEOUT_SECONDS,
+    TOOL_HEARTBEAT_SECONDS,
+)
 
 from ..logging_config import emit_tool_event
 
@@ -42,6 +46,10 @@ class SegmentationPipelineError(RuntimeError):
 
 class SessionExecutionStateError(RuntimeError):
     """Raised when segmentation outlives a failed orchestration task."""
+
+
+class ToolDeadlineExceeded(TimeoutError):
+    """Raised when a long tool exceeds its configured wall-clock budget."""
 
 
 def raise_for_segmentation_error(result, volume_uid: str, label: str) -> None:
@@ -113,6 +121,27 @@ def check_session_cancelled(session_id: str | None) -> None:
         pass
 
 
+async def wait_if_session_paused(session_id: str | None) -> None:
+    if not session_id:
+        return
+    try:
+        from app import session_service
+
+        session = session_service.store.get(session_id)
+        if not session:
+            return
+        while not session.pause_event.is_set():
+            check_session_cancelled(session_id)
+            try:
+                await asyncio.wait_for(session.pause_event.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+    except (KeyError, ImportError):
+        return
+
+
+
+
 async def run_with_progress_heartbeat(
     awaitable,
     *,
@@ -121,18 +150,42 @@ async def run_with_progress_heartbeat(
     total: int,
     label: str,
     volume_uid: str,
-    interval_seconds: float = 30.0,
+    interval_seconds: float = TOOL_HEARTBEAT_SECONDS,
+    timeout_seconds: float = LONG_TOOL_TIMEOUT_SECONDS,
 ):
     check_session_cancelled(session_id)
     task = asyncio.create_task(awaitable)
     started = time.monotonic()
+    wall_started = time.time()
     last_log_time = started
 
     try:
         while True:
             check_session_cancelled(session_id)
+            await wait_if_session_paused(session_id)
+            elapsed_seconds = time.monotonic() - started
+            
+            # Check for excessive sleep/suspension (e.g. host went to sleep for > 3 hours)
+            wall_elapsed = time.time() - wall_started
+            if wall_elapsed - elapsed_seconds > 3 * 3600:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                raise ToolDeadlineExceeded(
+                    f"{label} aborted due to system suspension exceeding 3 hours"
+                )
+
+            remaining = timeout_seconds - elapsed_seconds
+            if remaining <= 0:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                raise ToolDeadlineExceeded(
+                    f"{label} exceeded its {timeout_seconds:.0f}s wall-clock limit"
+                )
             try:
-                return await asyncio.wait_for(asyncio.shield(task), timeout=3.0)
+                return await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=min(3.0, remaining),
+                )
             except asyncio.TimeoutError:
                 check_session_cancelled(session_id)
                 now = time.monotonic()

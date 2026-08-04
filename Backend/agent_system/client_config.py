@@ -13,6 +13,7 @@ Supported providers
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import json
@@ -22,6 +23,139 @@ from typing import Any, Dict, Literal, Optional
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+
+def _retry_delays() -> tuple[float, ...]:
+    raw = os.environ.get("LLM_RETRY_DELAYS_SECONDS", "1,4,16")
+    try:
+        delays = tuple(float(value.strip()) for value in raw.split(","))
+    except (TypeError, ValueError):
+        return (1.0, 4.0, 16.0)
+    if not delays or any(value < 0 for value in delays):
+        return (1.0, 4.0, 16.0)
+    return delays
+
+
+LLM_RETRY_DELAYS_SECONDS = _retry_delays()
+
+
+def _is_retryable_llm_error(exc: Exception) -> bool:
+    current: BaseException | None = exc
+    for _ in range(4):
+        if current is None:
+            break
+        status_code = getattr(current, "status_code", None)
+        response = getattr(current, "response", None)
+        if status_code is None and response is not None:
+            status_code = getattr(response, "status_code", None)
+        if status_code in {408, 409, 429} or (
+            isinstance(status_code, int) and status_code >= 500
+        ):
+            return True
+        if isinstance(current, (TimeoutError, ConnectionError)):
+            return True
+        if type(current).__name__ in {
+            "APIConnectionError",
+            "APITimeoutError",
+            "ConnectError",
+            "ConnectTimeout",
+            "InternalServerError",
+            "NetworkError",
+            "RateLimitError",
+            "ReadError",
+            "ReadTimeout",
+            "RemoteProtocolError",
+        }:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _token_is_cancelled(token: Any) -> bool:
+    if token is None:
+        return False
+    value = getattr(token, "is_cancelled", False)
+    try:
+        return bool(value() if callable(value) else value)
+    except Exception:
+        return False
+
+
+async def _wait_before_llm_retry(delay: float, cancellation_token: Any) -> None:
+    deadline = asyncio.get_running_loop().time() + delay
+    while True:
+        if _token_is_cancelled(cancellation_token):
+            raise asyncio.CancelledError()
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            return
+        await asyncio.sleep(min(0.25, remaining))
+
+
+def add_model_client_retries(client):
+    """Retry transient model failures before AutoGen fails the whole run."""
+    if getattr(client, "_cube_retry_wrapped", False):
+        return client
+
+    original_create = client.create
+    original_create_stream = getattr(client, "create_stream", None)
+
+    async def create_with_retry(*args, **kwargs):
+        cancellation_token = kwargs.get("cancellation_token")
+        for attempt in range(len(LLM_RETRY_DELAYS_SECONDS) + 1):
+            try:
+                return await original_create(*args, **kwargs)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if (
+                    attempt >= len(LLM_RETRY_DELAYS_SECONDS)
+                    or not _is_retryable_llm_error(exc)
+                ):
+                    raise
+                delay = LLM_RETRY_DELAYS_SECONDS[attempt]
+                logger.warning(
+                    "Transient LLM %s on attempt %s/%s; retrying in %.1fs",
+                    type(exc).__name__,
+                    attempt + 1,
+                    len(LLM_RETRY_DELAYS_SECONDS) + 1,
+                    delay,
+                )
+                await _wait_before_llm_retry(delay, cancellation_token)
+
+    async def create_stream_with_retry(*args, **kwargs):
+        cancellation_token = kwargs.get("cancellation_token")
+        for attempt in range(len(LLM_RETRY_DELAYS_SECONDS) + 1):
+            emitted = False
+            try:
+                async for chunk in original_create_stream(*args, **kwargs):
+                    emitted = True
+                    yield chunk
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if (
+                    emitted
+                    or attempt >= len(LLM_RETRY_DELAYS_SECONDS)
+                    or not _is_retryable_llm_error(exc)
+                ):
+                    raise
+                delay = LLM_RETRY_DELAYS_SECONDS[attempt]
+                logger.warning(
+                    "Transient streaming LLM %s on attempt %s/%s; retrying in %.1fs",
+                    type(exc).__name__,
+                    attempt + 1,
+                    len(LLM_RETRY_DELAYS_SECONDS) + 1,
+                    delay,
+                )
+                await _wait_before_llm_retry(delay, cancellation_token)
+
+    client.create = create_with_retry
+    if callable(original_create_stream):
+        client.create_stream = create_stream_with_retry
+    client._cube_retry_wrapped = True
+    return client
 
 
 # ── Configuration Model ─────────────────────────────────────────────────────
@@ -128,7 +262,7 @@ def create_model_client_from_config(config: ClientConfig | None = None):
             kwargs["max_tokens"] = config.max_tokens
         if config.top_p is not None:
             kwargs["top_p"] = config.top_p
-        return OpenAIChatCompletionClient(**kwargs)
+        return add_model_client_retries(OpenAIChatCompletionClient(**kwargs))
 
     elif config.provider == "azure_openai":
         from autogen_ext.models.openai import AzureOpenAIChatCompletionClient
@@ -149,7 +283,7 @@ def create_model_client_from_config(config: ClientConfig | None = None):
             kwargs["max_tokens"] = config.max_tokens
         if config.top_p is not None:
             kwargs["top_p"] = config.top_p
-        return AzureOpenAIChatCompletionClient(**kwargs)
+        return add_model_client_retries(AzureOpenAIChatCompletionClient(**kwargs))
 
     else:  # ollama — use OpenAI-compatible endpoint
         from autogen_ext.models.openai import OpenAIChatCompletionClient
@@ -166,4 +300,4 @@ def create_model_client_from_config(config: ClientConfig | None = None):
             kwargs["max_tokens"] = config.max_tokens
         if config.top_p is not None:
             kwargs["top_p"] = config.top_p
-        return OpenAIChatCompletionClient(**kwargs)
+        return add_model_client_retries(OpenAIChatCompletionClient(**kwargs))

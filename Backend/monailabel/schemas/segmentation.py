@@ -1,6 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from typing import Optional
+
 class SegmentationBase(BaseModel):
     label_series_instance_uid: str
     volume_series_instance_uid: str
@@ -22,5 +23,5 @@ class SegmentationUpdate(BaseModel):
 
 class Segmentation(SegmentationBase):
     orthanc_series_id: Optional[str] = None
-    class Config:
-        orm_mode = True
+
+    model_config = ConfigDict(from_attributes=True)

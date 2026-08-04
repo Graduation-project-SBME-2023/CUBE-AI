@@ -1,4 +1,5 @@
 from autogen_ext.models.ollama import OllamaChatCompletionClient
+from client_config import add_model_client_retries
 
 
 class OllamaClient(OllamaChatCompletionClient):
@@ -18,3 +19,4 @@ class OllamaClient(OllamaChatCompletionClient):
         super().__init__(model=model, model_info=model_info, options={"num_ctx": 16384})
         self._model = model
         self._model_info = model_info
+        add_model_client_retries(self)
