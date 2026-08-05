@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
     Users, Filter, Database, AlertTriangle, Check, Activity, Layers, 
-    Table, Tag, CheckCircle2, Save, ShieldCheck, Search, Info, RefreshCw, Lock, AlertCircle, Upload
+    Table, Tag, CheckCircle2, Save, ShieldCheck, Search, Info, RefreshCw, Lock, AlertCircle, Upload, Eye
 } from 'lucide-react';
 import { useSnackbar } from '@ohif/ui';
 import { getBackendApiBaseUrl, getAgentsApiBaseUrl } from '../../../utils/apiBase';
@@ -25,6 +25,7 @@ const RefreshCwIcon: any = RefreshCw;
 const LockIcon: any = Lock;
 const AlertCircleIcon: any = AlertCircle;
 const UploadIcon: any = Upload;
+const EyeIcon: any = Eye;
 
 // --- PAUSABLE GIF PREVIEW COMPONENT ---
 const PausableGif = ({ uid, isHovered }: { uid: string; isHovered: boolean }) => {
@@ -334,7 +335,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
     };
 
     useEffect(() => {
-        if (subpage === 'browser' && isPlanApproved) {
+        if ((subpage === 'browser' || subpage === 'labeling') && isPlanApproved) {
             fetchAllVolumes();
         }
     }, [subpage, isPlanApproved]);
@@ -929,6 +930,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                                 <thead className="bg-[#152433] sticky top-0 z-20 text-[11px] font-bold text-[#5acce6] uppercase tracking-wider border-b border-[#3c5d80]">
                                     <tr>
                                         <th className="py-3 px-4 w-12 text-center">Include</th>
+                                        <th className="py-3 px-2 w-12 text-center" title="View in DICOM Viewer">View</th>
                                         <th className="py-3 px-4">Series Instance UID</th>
                                         <th className="py-3 px-4">Organ / Body Part</th>
                                         <th className="py-3 px-4">Modality</th>
@@ -954,6 +956,19 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                                                             className="w-4 h-4 rounded bg-[#0b1015] border-[#3c5d80] text-[#5acce6] focus:ring-0 cursor-pointer accent-[#5acce6]"
                                                         />
                                                     </td>
+                                                    <td className="py-3 px-2 text-center" onClick={(e) => e.stopPropagation()}>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                                const studyUid = vol.study_uid || '';
+                                                                window.open(`/viewer?StudyInstanceUIDs=${studyUid}&seriesInstanceUID=${vol.volume_series_instance_uid}`, '_blank', 'noopener,noreferrer');
+                                                            }}
+                                                            title="Open volume in OHIF 3D DICOM Viewer (New Tab)"
+                                                            className="p-1.5 rounded bg-[#152433] hover:bg-[#5acce6]/20 text-[#5acce6] border border-[#3c5d80] hover:border-[#5acce6] transition-colors inline-flex items-center justify-center shadow"
+                                                        >
+                                                            <EyeIcon size={14} />
+                                                        </button>
+                                                    </td>
                                                     <td className="py-3 px-4 font-mono text-[#91b9cd]" title={vol.volume_series_instance_uid}>
                                                         {vol.volume_series_instance_uid ? `...${vol.volume_series_instance_uid.slice(-20)}` : 'N/A'}
                                                     </td>
@@ -976,7 +991,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                                         })
                                     ) : (
                                         <tr>
-                                            <td colSpan={6} className="py-12 text-center text-gray-500 italic">
+                                            <td colSpan={7} className="py-12 text-center text-gray-500 italic">
                                                 No volumes matched your filter criteria in Orthanc PACS.
                                             </td>
                                         </tr>
@@ -1056,6 +1071,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                             <thead className="bg-[#152433] sticky top-0 z-20 text-[11px] font-bold text-[#5acce6] uppercase tracking-wider border-b border-[#3c5d80]">
                                 <tr>
                                     <th className="py-3 px-4 w-44">Patient / Volume ID</th>
+                                    <th className="py-3 px-2 w-12 text-center" title="View in DICOM Viewer">View</th>
                                     <th className="py-3 px-4 w-52">Target Disease Label</th>
                                     <th className="py-3 px-4 w-40">Confidence</th>
                                     <th className="py-3 px-4">Clinical Evidence & Rationale</th>
@@ -1071,6 +1087,24 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                                             <tr key={row.patient_id} className="hover:bg-[#151a1f]/70 transition-colors">
                                                 <td className="py-3 px-4 font-mono text-[#91b9cd]" title={row.patient_id}>
                                                     {row.patient_id ? (row.patient_id.length > 22 ? `...${row.patient_id.slice(-20)}` : row.patient_id) : 'Unknown'}
+                                                </td>
+                                                <td className="py-3 px-2 text-center" onClick={(e) => e.stopPropagation()}>
+                                                    {(() => {
+                                                        const match = allVolumes.find(v => v.volume_series_instance_uid === row.patient_id);
+                                                        return (
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    const studyUid = match?.study_uid || '';
+                                                                    window.open(`/viewer?StudyInstanceUIDs=${studyUid}&seriesInstanceUID=${row.patient_id}`, '_blank', 'noopener,noreferrer');
+                                                                }}
+                                                                title="Open volume in OHIF 3D DICOM Viewer (New Tab)"
+                                                                className="p-1.5 rounded bg-[#152433] hover:bg-[#5acce6]/20 text-[#5acce6] border border-[#3c5d80] hover:border-[#5acce6] transition-colors inline-flex items-center justify-center shadow"
+                                                            >
+                                                                <EyeIcon size={14} />
+                                                            </button>
+                                                        );
+                                                    })()}
                                                 </td>
 
                                                 {/* Label selection pills */}
@@ -1136,7 +1170,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                                     })
                                 ) : (
                                     <tr>
-                                        <td colSpan={4} className="py-12 text-center text-gray-500 italic">
+                                        <td colSpan={5} className="py-12 text-center text-gray-500 italic">
                                             No study candidates available to label. Please wait for the Population Agent or add volumes via the Data Browser.
                                         </td>
                                     </tr>
