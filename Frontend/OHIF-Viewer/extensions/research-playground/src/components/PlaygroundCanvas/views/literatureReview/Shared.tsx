@@ -131,7 +131,7 @@ export function PaperCard({ paper }: { paper: Paper }) {
   const cat = CATEGORY_COLORS[paper.category || ''] || CATEGORY_COLORS.Review;
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-900/75 p-4 hover:border-slate-500 transition-all duration-200 hover:shadow-md">
+    <div className="rounded-2xl border border-white/5 bg-[#0b1015]/60 p-5 hover:bg-[#121922] hover:border-white/10 hover:-translate-y-0.5 transition-all duration-300 shadow-md hover:shadow-xl hover:shadow-cyan-900/10 flex flex-col h-full">
       <div className="flex items-center gap-2 mb-2">
         {paper.rank && (
           <span className="w-6 h-6 rounded-full bg-[#0d2847] text-[#5acce6] text-[10px] font-bold flex items-center justify-center border border-[#5acce6]/30">
@@ -192,9 +192,9 @@ export function PaperCard({ paper }: { paper: Paper }) {
             {expanded ? 'Hide abstract' : 'Show abstract'}
           </button>
           {expanded && (
-            <div className="rounded-lg bg-[#060d14] border border-[#1f2d40]/50 p-3 mt-1">
+            <div className="rounded-xl bg-[#060d14]/80 border border-white/5 p-4 mt-2 shadow-inner">
               <div className="flex items-start gap-2">
-                <QuoteIcon size={12} className="text-slate-500 shrink-0 mt-0.5" />
+                <QuoteIcon size={12} className="text-[#5acce6]/70 shrink-0 mt-0.5" />
                 <p className="text-[11px] leading-7 text-slate-300">{paper.abstract}</p>
               </div>
             </div>
