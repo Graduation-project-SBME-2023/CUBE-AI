@@ -273,7 +273,7 @@ async def generate_targets() -> str:
     # HITL Approval Gate: wait for doctor to sign off on Subpage 4
     result = await _wait_for_cohort_approval(workspace_dir, config_json_path, csv_path, timeout_seconds=3600)
 
-    # Re-read config after approval to obtain definitive final volume count (reflecting user manual selection in UI)
+    # Re-read config and targets.csv after approval to obtain definitive final volume count (reflecting user manual selection in UI)
     final_count = len(datasetlist)
     if os.path.exists(config_json_path):
         try:
@@ -283,10 +283,26 @@ async def generate_targets() -> str:
         except Exception as e:
             logger.warning(f"Failed to re-read config after cohort approval: {e}")
 
-    if final_count > 0 and not datasetlist:
+    # Verify actual row count in targets.csv as the ultimate truth after user labeling
+    if os.path.exists(result):
+        try:
+            with open(result, mode="r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                rows = list(reader)
+                if len(rows) > 0:
+                    final_count = len(rows)
+        except Exception as e:
+            logger.warning(f"Failed to read targets.csv row count after approval: {e}")
+
+    if final_count > 0:
         await scratchpad_write_note(
-            title="Cohort Updated During UI Review",
-            content=f"User manually selected and approved {final_count} volumes in the UI dataviewer. The cohort is no longer empty and targets.csv is ready for downstream processing."
+            title="Validated Study Cohort Approved by Doctor",
+            content=f"The user has reviewed and approved the final cohort in the UI dataviewer with a final count of {final_count} volume(s). Even if preliminary automated searches yielded fewer or zero cases, this post-review count ({final_count}) is the authoritative cohort size. All downstream agents (feature extraction, modeling, reporting) MUST use this finalized cohort from targets.csv without errors."
+        )
+    else:
+        await scratchpad_write_note(
+            title="Empty Cohort Approved by Doctor",
+            content="The user has reviewed the cohort in the UI dataviewer and approved a 0-size cohort."
         )
 
     log_tool_state(ToolEvent(event_type='tool_finished', content_type='text',
@@ -295,7 +311,7 @@ async def generate_targets() -> str:
         "status": "success",
         "targets_path": result,
         "final_cohort_size": final_count,
-        "message": f"Cohort approved with {final_count} volumes in targets.csv. You MUST report this exact final cohort size ({final_count}) and targets.csv path in your final summary."
+        "message": f"Human-in-the-Loop review complete and cohort approved in the UI. Final validated cohort size after user review and manual labeling is exactly {final_count} volumes. You MUST report this exact final cohort size ({final_count}) and targets.csv path in your final summary and write_agent_output calls."
     })
 
 
