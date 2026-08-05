@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useSnackbar } from '@ohif/ui';
 import { getBackendApiBaseUrl, getAgentsApiBaseUrl } from '../../../utils/apiBase';
+import websocketService from '../../../services/websocket';
 
 // Cast icons to avoid TS "not assignable" errors on JSX usage
 const CheckIcon: any = Check;
@@ -300,7 +301,17 @@ export default function DataCohortView({ populationData, segmentationData, sessi
             fetchCohortState();
         };
         window.addEventListener('labellingModeChanged', handleModeChange);
-        return () => window.removeEventListener('labellingModeChanged', handleModeChange);
+
+        const unsubscribeWs = websocketService.subscribe((event: any) => {
+            if (event?.type === 'cohort_labels_output' || event?.type === 'population_output' || event?.type === 'generate_targets_output') {
+                fetchCohortState();
+            }
+        });
+
+        return () => {
+            window.removeEventListener('labellingModeChanged', handleModeChange);
+            unsubscribeWs();
+        };
     }, [isPlanApproved, populationData, subpage, fetchCohortState]);
 
     // Fetch all Orthanc volumes when opening Data Browser — only after plan approval
@@ -810,7 +821,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
 
                             {accumulatedPop.uids.length > 0 ? (
                                 accumulatedPop.uids.map(uid => {
-                                    const isLabeled = unifiedLabels.some(l => l.patient_id === uid && (l.has_target_disease === 'true' || l.has_target_disease === 'false' || l.has_target_disease === '1' || l.has_target_disease === '0'));
+                                    const isLabeled = finalLabeledCohort.some(l => l.patient_id === uid);
                                     return (
                                         <div
                                             key={uid}

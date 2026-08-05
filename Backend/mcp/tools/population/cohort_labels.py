@@ -463,9 +463,17 @@ async def extract_cohort_labels() -> dict:
                     matched_uid = vol_uid
                     break
 
+            htd_val = res.get("has_target_disease")
+            if isinstance(htd_val, bool):
+                htd_str = "true" if htd_val else "false"
+            elif htd_val is not None and str(htd_val).strip() != "":
+                htd_str = str(htd_val).strip().lower()
+            else:
+                htd_str = ""
+
             writer.writerow({
                 "patient_id": matched_uid,
-                "has_target_disease": res.get("has_target_disease"),
+                "has_target_disease": htd_str,
                 "confidence": res.get("confidence", "low"),
                 "requires_manual_review": res.get("requires_manual_review", False),
                 "source_evidence": res.get("source_evidence", "")
