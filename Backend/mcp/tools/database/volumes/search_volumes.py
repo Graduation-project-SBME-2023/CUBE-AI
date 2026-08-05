@@ -47,19 +47,27 @@ async def search_volumes(
 
 @mcp.tool()
 async def search_volumes_by_description(
-    words_to_include: Annotated[list[str], Field(description="List of keywords that MUST be present in the volume description.")],
+    words_to_include: Annotated[list[str], Field(description="List of keywords that MUST be present in the volume description or body part examined.")],
     words_to_exclude: Annotated[list[str] | None, Field(description="Optional list of keywords that MUST NOT be present in the volume description.")] = None
 ) -> dict:
     """
-    Search for volume UIDs based on included and excluded words in the series description,
-    and save the resulting list of UIDs to the workspace config.
+    Search for volumes based on included and excluded words in the series description
+    and body_part_examined fields, and save the resulting list of UIDs to the workspace config.
+
+    Returns detailed volume info (uid, series_description, body_part_examined, modality)
+    so you can verify the anatomy of each volume matches your hypothesis before proceeding.
 
     Use this tool in these scenarios:
     1. To find volumes matching specific descriptive terms (e.g., ["brain", "mri"]).
     2. To refine searches by filtering out unwanted terms (e.g., excluding ["contrast"]).
+
+    IMPORTANT: After receiving the results, inspect the body_part_examined and
+    series_description fields to confirm the volumes match your hypothesis anatomy.
+    If the volumes belong to a different body region, do NOT proceed with them.
     """
 
-    uids_list = []
+    volume_details = []  # list of dicts from the API
+    uids_list = []       # flat list of UIDs for config.json
 
     # 1. Fetch the data from the FastAPI endpoint
     async with httpx.AsyncClient() as client:
@@ -73,7 +81,8 @@ async def search_volumes_by_description(
                 params=params
             )
             response.raise_for_status()
-            uids_list = response.json()
+            volume_details = response.json()  # list of dicts
+            uids_list = [v["uid"] for v in volume_details]
 
         except httpx.HTTPStatusError as e:
             return {"status": "error", "message": f"HTTP error occurred: {str(e)}"}
@@ -105,7 +114,7 @@ async def search_volumes_by_description(
                 except json.JSONDecodeError:
                     json_data = {}
 
-            # Update the datasetlist with the newly found UIDs
+            # Update the datasetlist with the newly found UIDs (flat list for downstream tools)
             json_data["datasetlist"] = uids_list
 
             # Save the updated JSON back to the file
@@ -119,35 +128,12 @@ async def search_volumes_by_description(
             # Catch the error but DO NOT return, allowing the broadcast to proceed
             file_status_msg = f"Failed to save to disk: {str(e)}"
 
-    # 3. ALWAYS Broadcast to the Frontend
-    try:
-        async with httpx.AsyncClient() as broadcast_client:
-            await broadcast_client.post(
-                "http://localhost:8150/ws-broadcast",
-                json={
-                    "type": "population_output",
-                    "payload": {
-                        "tool": "search_volumes_by_description",
-                        "status": "completed",
-                        "count": len(uids_list),
-                        "uid_list": uids_list,
-                        "saved_path": str(json_path) if file_saved else "N/A"
-                    },
-                    "session_id": session_id
-                }
-            )
-
-        return {
-            "status": "success",
-            "message": f"Found {len(uids_list)} volumes. Broadcast successful. {file_status_msg}",
-            "count": len(uids_list),
-            "saved_path": str(json_path) if file_saved else "N/A"
-        }
-
-    except Exception as e:
-        # Hard error only if the broadcast itself fails
-        return {
-            "status": "error",
-            "message": f"Search succeeded, but broadcast failed: {str(e)}. File status: {file_status_msg}",
-            "count": len(uids_list)
-        }
+    # 3. Return results without broadcasting via WebSocket
+    # (Broadcast will occur AFTER validate_population_anatomy executes)
+    return {
+        "status": "success",
+        "message": f"Found {len(uids_list)} candidate volumes. {file_status_msg} Now call validate_population_anatomy to confirm anatomical alignment.",
+        "count": len(uids_list),
+        "volumes_detail": volume_details,
+        "saved_path": str(json_path) if file_saved else "N/A"
+    }
