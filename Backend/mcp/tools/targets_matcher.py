@@ -5,7 +5,7 @@ import httpx
 import logging
 from . import mcp
 from tool_logging import ToolEvent, log_tool_state, TextPayload
-from .scratchpad import scratchpad_raise_flag
+from .scratchpad import scratchpad_raise_flag, scratchpad_write_note
 import asyncio
 from service_urls import CONTROL_API_URL
 
@@ -273,8 +273,29 @@ async def generate_targets() -> str:
     # HITL Approval Gate: wait for doctor to sign off on Subpage 4
     result = await _wait_for_cohort_approval(workspace_dir, config_json_path, csv_path, timeout_seconds=3600)
 
+    # Re-read config after approval to obtain definitive final volume count (reflecting user manual selection in UI)
+    final_count = len(datasetlist)
+    if os.path.exists(config_json_path):
+        try:
+            with open(config_json_path, mode="r", encoding="utf-8") as f:
+                final_config = json.load(f)
+                final_count = len(final_config.get("datasetlist", []))
+        except Exception as e:
+            logger.warning(f"Failed to re-read config after cohort approval: {e}")
+
+    if final_count > 0 and not datasetlist:
+        await scratchpad_write_note(
+            title="Cohort Updated During UI Review",
+            content=f"User manually selected and approved {final_count} volumes in the UI dataviewer. The cohort is no longer empty and targets.csv is ready for downstream processing."
+        )
+
     log_tool_state(ToolEvent(event_type='tool_finished', content_type='text',
-                             content=TextPayload(message="Cohort Approved & Targets Locked!")))
-    return result
+                             content=TextPayload(message=f"Cohort Approved & Targets Locked! ({final_count} volumes)")))
+    return json.dumps({
+        "status": "success",
+        "targets_path": result,
+        "final_cohort_size": final_count,
+        "message": f"Cohort approved with {final_count} volumes in targets.csv. You MUST report this exact final cohort size ({final_count}) and targets.csv path in your final summary."
+    })
 
 

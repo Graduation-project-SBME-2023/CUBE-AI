@@ -670,11 +670,11 @@ Step 6: Use the generate_targets Tool (HITL Approval Gate)
 Step 7: Finalize and Summarize
 - Call scratchpad_write_summary with a summary covering:
   - The hypothesis you received
-  - Total patients/volumes considered vs. selected
+  - Total patients/volumes considered vs. selected (IMPORTANT: Always use the `final_cohort_size` returned by `generate_targets` as your final selected count, as the user may have added volumes manually during UI review!)
   - Inclusion/exclusion criteria applied
   - Modality, gender range, age range of the final cohort
   - Path to the generated targets.csv
-  - Any caveats downstream agents should be aware of
+  - Any caveats downstream agents should be aware of (If `final_cohort_size` > 0 after review, confirm to downstream agents that targets.csv and images are ready for analysis).
 - Call scratchpad_set_status(agent_id="study_population_planner_agent", status="done")
 - You MUST complete this step so downstream agents have the paths they need.
 
