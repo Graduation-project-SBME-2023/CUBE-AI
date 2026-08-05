@@ -79,6 +79,7 @@ class PopulationPlannerAgent(AssistantAgent):
         desired_tools = [
             'get_unique_series_descriptions',
             'search_volumes_by_description',
+            'validate_population_anatomy',
             'write_inclusion_criteria',
             'generate_targets',
             'read_agent_task_context',
