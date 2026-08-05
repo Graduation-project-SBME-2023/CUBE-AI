@@ -88,6 +88,7 @@ async def _save_and_broadcast_cohort(validated_uids: list[str]) -> dict:
                 with open(config_path, "r", encoding="utf-8") as f:
                     config_data = json.load(f)
             config_data["datasetlist"] = validated_uids
+            config_data["anatomy_validated"] = True
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, indent=4)
             config_updated = True
