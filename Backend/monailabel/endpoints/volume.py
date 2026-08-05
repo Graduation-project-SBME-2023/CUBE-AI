@@ -181,7 +181,7 @@ async def read_study_by_volume(
     """
     return await get_study_by_volume(db, volume_series_instance_uid)
 
-@router.get("/search/description/", response_model=list[str])
+@router.get("/search/description/")
 async def search_volumes_description_endpoint(
     words_to_include: list[str] = Query(
         ..., 
@@ -194,7 +194,8 @@ async def search_volumes_description_endpoint(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Search volume UIDs based on included and excluded words in the series description.
+    Search volumes by keywords in series_description and body_part_examined.
+    Returns detailed volume info (uid, series_description, body_part_examined, modality).
     """
     return await search_volumes_by_description(
         db=db, 

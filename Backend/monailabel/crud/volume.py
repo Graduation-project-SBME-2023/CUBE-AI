@@ -114,23 +114,50 @@ async def search_volumes(db: AsyncSession, modality: str | None = None, keyword:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
 async def search_volumes_by_description(db:AsyncSession, words_to_include: list[str], words_to_exclude: list[str] | None = None):
+    """
+    Search volumes by keywords in series_description AND body_part_examined.
+    Returns a list of dicts with uid, series_description, body_part_examined,
+    and modality so the caller can see what anatomy each volume covers.
+    """
     try:
         if not words_to_include:
             return []
 
-        query = select(Volume.volume_series_instance_uid)
+        query = select(
+            Volume.volume_series_instance_uid,
+            Volume.series_description,
+            Volume.body_part_examined,
+            Volume.modality,
+        )
+        # Search both series_description and body_part_examined for each keyword
         include_conditions = [
-            Volume.series_description.ilike(f"%{word}%") for word in words_to_include
+            or_(
+                Volume.series_description.ilike(f"%{word}%"),
+                Volume.body_part_examined.ilike(f"%{word}%"),
+            )
+            for word in words_to_include
         ]
         query = query.where(or_(*include_conditions))
         if words_to_exclude:
             exclude_conditions = [
-                Volume.series_description.ilike(f"%{word}%") for word in words_to_exclude
+                or_(
+                    Volume.series_description.ilike(f"%{word}%"),
+                    Volume.body_part_examined.ilike(f"%{word}%"),
+                )
+                for word in words_to_exclude
             ]
             query = query.where(not_(or_(*exclude_conditions)))
         results = await db.execute(query)
-        uids = results.scalars().all()
-        return uids
+        rows = results.all()
+        return [
+            {
+                "uid": row.volume_series_instance_uid,
+                "series_description": row.series_description or "",
+                "body_part_examined": row.body_part_examined or "",
+                "modality": row.modality or "",
+            }
+            for row in rows
+        ]
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500,detail=f"Database error: {str(e)}")
 
