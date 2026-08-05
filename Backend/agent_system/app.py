@@ -736,7 +736,11 @@ async def replay_logs(session_id: str):
                     and (not draft_run_id or draft_run_id == manifest_run_id)
                 ):
                     for volume in snapshot.get("volumes", []):
-                        status = decisions.get(volume.get("pairId"))
+                        # The frontend stores decisions keyed by `pairId || seriesInstanceUid`
+                        # (matching the reviewKey logic in SegmentationView.tsx). Look up both
+                        # so that volumes without a pairId still recover their draft status.
+                        review_key = volume.get("pairId") or volume.get("seriesInstanceUid")
+                        status = decisions.get(review_key)
                         if status in {"accepted", "rejected", "modified"}:
                             volume["reviewStatus"] = status
                 await ws_manager.send_ws_message(
