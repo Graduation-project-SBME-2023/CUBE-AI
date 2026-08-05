@@ -163,9 +163,16 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
     valid_uids = [uid for uid, _, _ in valid_targets]
 
     if not valid_uids:
-        err_msg = "No matching targets found. All volumes were dropped because they lack clinical labels."
-        await scratchpad_raise_flag(level="error", message=err_msg)
-        return json.dumps({"status": "error", "message": err_msg})
+        msg = "0 valid target labels found in cohort. Proceeding with 0-size initial targets so the user can manually select volumes in the dataviewer UI."
+        await scratchpad_raise_flag(level="warning", message=msg)
+        config_json_path = os.path.join(workspace_dir, "config.json")
+        config["datasetlist"] = []
+        with open(config_json_path, mode="w", encoding="utf-8") as f:
+            json.dump(config, f, indent=4)
+        with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["id", "name", "target"])
+        return csv_path
 
     # Update config.json to only contain validated UIDs
     config_json_path = os.path.join(workspace_dir, "config.json")
@@ -236,13 +243,8 @@ async def generate_targets() -> str:
             pass
 
     if not datasetlist:
-        err_msg = (
-            "generate_targets called before volume search: datasetlist is empty in config.json. "
-            "You MUST call search_volumes_by_description first to populate the volume list, "
-            "then call generate_targets."
-        )
-        await scratchpad_raise_flag(level="error", message=err_msg)
-        return json.dumps({"status": "error", "message": err_msg})
+        msg = "Datasetlist is empty (0 cohort). Proceeding directly to Human-in-the-Loop UI checkpoint so user can view and manually select volumes from the dataviewer if desired."
+        await scratchpad_raise_flag(level="warning", message=msg)
 
     if labelling_mode == "automatic":
         print(f"[generate_targets] Automatic mode — building candidate targets for {len(datasetlist)} volumes...")

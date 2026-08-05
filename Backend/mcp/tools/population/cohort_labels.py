@@ -204,12 +204,24 @@ async def extract_cohort_labels() -> dict:
             print(f"Failed to fetch available patients: {e}")
 
     if not available_cases and not volume_patient_meta:
+        populations_dir = os.path.join(workspace_dir, "populations")
+        os.makedirs(populations_dir, exist_ok=True)
+        output_csv = os.path.join(populations_dir, "cohort_labels.csv")
+        with open(output_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                "patient_id", "has_target_disease", "confidence",
+                "requires_manual_review", "source_evidence"
+            ])
+            writer.writeheader()
+
         return {
-            "status": "error",
+            "status": "success",
             "message": (
-                "No imaging cohort found. "
-                "Please run the population search first to populate the dataset list."
-            )
+                "Dataset list is empty (0 cohort). Created empty cohort_labels.csv. "
+                "Skipping automatic label extraction. Proceed directly to generate_targets so the user can review the 0 cohort in the UI and manually select volumes from the dataviewer if desired."
+            ),
+            "extracted_count": 0,
+            "saved_path": output_csv
         }
 
     # ── 3. Locate clinical data (workspace first, then MCP fallback) ────────────
