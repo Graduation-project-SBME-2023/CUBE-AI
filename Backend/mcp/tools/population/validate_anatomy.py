@@ -252,10 +252,11 @@ async def validate_population_anatomy(
 
     if not validated:
         result["status"] = "success"
+        reasons_str = ", ".join(set(r["reason"].split("'")[1] for r in rejected if "reason" in r and "'" in r["reason"]))
         result["message"] = (
             f"0 matching volumes found for anatomy ('{matched_group}'). "
             f"All {len(volume_details)} candidate volumes were filtered out because they belong to different body regions "
-            f"({', '.join(set(r['reason'].split(\"'\")[1] for r in rejected if 'reason' in r))}). "
+            f"({reasons_str}). "
             f"A 0-volume cohort has been saved to config.json and sent to the interactive UI. "
             f"DO NOT STOP execution or raise a pipeline error! Instead: "
             f"(1) Raise a scratchpad flag with level='warning' (or mention in your execution summary) that 0 matching studies were automatically found for this anatomy. "
