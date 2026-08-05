@@ -114,15 +114,16 @@ async def search_volumes_by_description(
                 except json.JSONDecodeError:
                     json_data = {}
 
-            # Update the datasetlist with the newly found UIDs (flat list for downstream tools)
-            json_data["datasetlist"] = uids_list
+            # Save candidate UIDs separately under 'candidate_datasetlist' so un-validated studies are not displayed in the UI before validate_population_anatomy completes
+            json_data["candidate_datasetlist"] = uids_list
+            json_data["anatomy_validated"] = False
 
             # Save the updated JSON back to the file
             with open(json_path, 'w', encoding='utf-8') as file:
                 json.dump(json_data, file, indent=4)
 
             file_saved = True
-            file_status_msg = f"Successfully updated datasetlist in {json_path}"
+            file_status_msg = f"Successfully saved candidate volumes in {json_path}."
 
         except Exception as e:
             # Catch the error but DO NOT return, allowing the broadcast to proceed
