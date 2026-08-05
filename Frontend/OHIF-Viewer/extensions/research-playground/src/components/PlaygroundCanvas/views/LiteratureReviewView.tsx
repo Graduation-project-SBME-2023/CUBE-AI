@@ -62,7 +62,7 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
     return groups;
   }, [papers]);
 
-  const [papersExpanded, setPapersExpanded] = useState(false);
+  const [activeTab, setActiveTab] = useState<'overview' | 'report' | 'papers'>('overview');
 
   // Empty / loading state
   if (!hasData) {
@@ -85,16 +85,15 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
   }
 
   return (
-    <div className="w-full h-full overflow-auto bg-slate-950">
-      <div className="max-w-5xl mx-auto p-6 space-y-5">
-
+    <div className="w-full h-full overflow-auto bg-[#06090e] flex flex-col [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#1f2d40] [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-[#5acce6]/50 transition-colors">
+      <div className="max-w-6xl mx-auto p-6 md:p-8 space-y-6 w-full flex-1">
         {/* ── Header ──────────────────────────────────────────────────── */}
-        <div className="rounded-xl border border-slate-700 bg-slate-900/75 px-5 py-4 flex items-center gap-4 shadow-sm">
-          <div className="w-10 h-10 rounded-lg bg-[#0d2847] flex items-center justify-center border border-[#5acce6]/30">
-            <BookOpenTextIcon size={20} className="text-[#5acce6]" />
+        <div className="rounded-3xl border border-white/5 bg-[#0b1015]/80 backdrop-blur-md px-6 py-5 flex items-center gap-5 shadow-lg shadow-black/20">
+          <div className="w-12 h-12 rounded-2xl bg-[#0d2847]/80 flex items-center justify-center border border-[#5acce6]/20 shadow-[0_0_15px_rgba(90,204,230,0.15)]">
+            <BookOpenTextIcon size={22} className="text-[#5acce6]" />
           </div>
           <div className="flex-1">
-            <p className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold">Literature Review</p>
+            <p className="text-[10px] uppercase tracking-[0.2em] text-[#5acce6]/70 font-bold mb-0.5">Literature Review</p>
             <p className="text-sm text-slate-100 font-medium">Domain Knowledge Base &amp; Evidence Summary</p>
           </div>
           <div className="flex items-center gap-2">
@@ -111,134 +110,146 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
           </div>
         </div>
 
-        {/* ── Hypothesis & PICO ────────────────────────────────────────── */}
-        {(hypothesis.hypothesis || hasPico) && (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {/* Hypothesis */}
-            {hypothesis.hypothesis && (
-              <div className="rounded-xl border border-[#1f2d40] bg-[#0b1015] overflow-hidden">
-                <div className="flex items-center gap-2 px-4 py-3 border-b border-[#1f2d40]/50 bg-gradient-to-r from-[#5acce608] to-transparent">
-                  <FlaskConicalIcon size={14} className="text-[#5acce6]" />
-                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#5acce6]">Hypothesis</h3>
-                </div>
-                <div className="p-4 space-y-2">
-                  {hypothesis.title && (
-                    <p className="text-[13px] font-semibold text-white">{hypothesis.title}</p>
-                  )}
-                  <p className="text-[12px] leading-relaxed text-gray-300">{hypothesis.hypothesis}</p>
-                  {hypothesis.question && (
-                    <p className="text-[11px] italic text-[#91b9cd] border-t border-[#1f2d40]/50 pt-2 mt-2">
-                      <ChevronRightIcon size={10} className="inline mr-1" />
-                      {hypothesis.question}
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
+        {/* ── Tabs Navigation ────────────────────────────────────────── */}
+        <div className="flex items-center gap-2 p-1.5 bg-[#0b1015]/60 border border-white/5 rounded-2xl w-fit backdrop-blur-md shadow-sm">
+          <button
+            onClick={() => setActiveTab('overview')}
+            className={`px-5 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wider transition-all duration-300 ${
+              activeTab === 'overview'
+                ? 'bg-[#5acce6]/15 text-[#5acce6] shadow-sm shadow-[#5acce6]/10'
+                : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
+            }`}
+          >
+            Overview & PICO
+          </button>
+          {parsed.report && (
+            <button
+              onClick={() => setActiveTab('report')}
+              className={`px-5 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wider transition-all duration-300 ${
+                activeTab === 'report'
+                  ? 'bg-[#a78bfa]/15 text-[#a78bfa] shadow-sm shadow-[#a78bfa]/10'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
+              }`}
+            >
+              Full Report
+            </button>
+          )}
+          {papers.length > 0 && (
+            <button
+              onClick={() => setActiveTab('papers')}
+              className={`px-5 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wider transition-all duration-300 ${
+                activeTab === 'papers'
+                  ? 'bg-[#5acce6]/15 text-[#5acce6] shadow-sm shadow-[#5acce6]/10'
+                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
+              }`}
+            >
+              Ranked Papers
+            </button>
+          )}
+        </div>
 
-            {/* PICO */}
-            {hasPico && (
-              <div className="rounded-xl border border-[#1f2d40] bg-[#0b1015] overflow-hidden">
-                <div className="flex items-center gap-2 px-4 py-3 border-b border-[#1f2d40]/50 bg-gradient-to-r from-[#a78bfa08] to-transparent">
-                  <FileSearchIcon size={14} className="text-[#a78bfa]" />
-                  <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#a78bfa]">PICO Framework</h3>
-                </div>
-                <div className="p-4 space-y-0.5">
-                  <PicoRow icon={<UsersIcon size={13} />} label="Population" value={hypothesis.population} color="#5acce6" />
-                  <PicoRow icon={<StethoscopeIcon size={13} />} label="Intervention" value={hypothesis.intervention} color="#6fe5b8" />
-                  <PicoRow icon={<GitCompareIcon size={13} />} label="Comparison" value={hypothesis.comparison} color="#f59e42" />
-                  <PicoRow icon={<TargetIcon size={13} />} label="Outcome" value={hypothesis.outcome} color="#e879a5" />
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Literature Report ────────────────────────────────────── */}
-        {parsed.report && (
-          <div className="rounded-xl border border-[#1f2d40] bg-[#0b1015] overflow-hidden">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-[#1f2d40]/50 bg-gradient-to-r from-[#5acce608] to-transparent">
-              <FileTextIcon size={14} className="text-[#5acce6]" />
-              <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#5acce6]">Literature Report</h3>
-            </div>
-            <div className="p-4">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                {parsed.report}
-              </ReactMarkdown>
-            </div>
-          </div>
-        )}
-
-        {/* ── Ranked Papers (expandable) ────────────────────────────── */}
-        {papers.length > 0 && (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-[#1f2d40] bg-[#0b1015] overflow-hidden">
-              <button
-                onClick={() => setPapersExpanded(v => !v)}
-                className="w-full flex items-center gap-2 px-4 py-3 border-b border-[#1f2d40]/50 bg-gradient-to-r from-[#a78bfa08] to-transparent hover:from-[#a78bfa12] transition-colors cursor-pointer"
-              >
-                <AwardIcon size={14} className="text-[#a78bfa]" />
-                <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#a78bfa] flex-1 text-left">
-                  Ranked Papers
-                </h3>
-                <span className="text-[10px] text-[#566a84] mr-2">{papers.length} papers found</span>
-                {papersExpanded ? <ChevronUpIcon size={14} className="text-[#566a84]" /> : <ChevronDownIcon size={14} className="text-[#566a84]" />}
-              </button>
-              {papersExpanded && (
-                <div className="p-4 space-y-6">
-                  {Object.entries(papersByCategory).map(([category, catPapers]) => (
-                    <div key={category}>
-                      <div className="flex items-center gap-2 mb-3">
-                        <span
-                          className="text-[10px] font-bold uppercase tracking-wider rounded px-2 py-0.5"
-                          style={{
-                            color: (CATEGORY_COLORS[category] || CATEGORY_COLORS.Review).text,
-                            background: (CATEGORY_COLORS[category] || CATEGORY_COLORS.Review).bg,
-                            border: `1px solid ${(CATEGORY_COLORS[category] || CATEGORY_COLORS.Review).border}`,
-                          }}
-                        >
-                          {category}
-                        </span>
-                        <span className="text-[10px] text-[#566a84]">{catPapers.length} papers</span>
-                        <div className="flex-1 border-t border-[#1f2d40]/30" />
+        {/* ── Tab Content ───────────────────────────────────────────── */}
+        <div className="pt-2 pb-10">
+          {/* OVERVIEW TAB */}
+          {activeTab === 'overview' && (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              {/* Hypothesis */}
+              {hypothesis.hypothesis && (
+                <div className="rounded-3xl border border-white/5 bg-[#0b1015]/60 backdrop-blur-md overflow-hidden shadow-lg shadow-black/20 h-fit transition-all duration-300 hover:border-white/10 hover:shadow-cyan-900/5">
+                  <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-gradient-to-r from-[#5acce6]/[0.03] to-transparent">
+                    <FlaskConicalIcon size={16} className="text-[#5acce6]" />
+                    <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#5acce6]">Hypothesis</h3>
+                  </div>
+                  <div className="p-6 space-y-4">
+                    {hypothesis.title && (
+                      <p className="text-[15px] font-medium text-white tracking-wide">{hypothesis.title}</p>
+                    )}
+                    <p className="text-[13px] leading-relaxed text-slate-300">{hypothesis.hypothesis}</p>
+                    {hypothesis.question && (
+                      <div className="rounded-xl bg-[#5acce6]/5 border border-[#5acce6]/10 p-3 mt-4">
+                        <p className="text-[12px] italic text-[#91b9cd] flex items-start gap-2">
+                          <ChevronRightIcon size={14} className="mt-0.5 shrink-0 text-[#5acce6]/70" />
+                          <span>{hypothesis.question}</span>
+                        </p>
                       </div>
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                        {catPapers.map((paper, i) => (
-                          <PaperCard key={i} paper={paper} />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* PICO */}
+              {hasPico && (
+                <div className="rounded-3xl border border-white/5 bg-[#0b1015]/60 backdrop-blur-md overflow-hidden shadow-lg shadow-black/20 h-fit transition-all duration-300 hover:border-white/10 hover:shadow-purple-900/5">
+                  <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-gradient-to-r from-[#a78bfa]/[0.03] to-transparent">
+                    <FileSearchIcon size={16} className="text-[#a78bfa]" />
+                    <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#a78bfa]">PICO Framework</h3>
+                  </div>
+                  <div className="p-6 space-y-2">
+                    <PicoRow icon={<UsersIcon size={14} />} label="Population" value={hypothesis.population} color="#5acce6" />
+                    <PicoRow icon={<StethoscopeIcon size={14} />} label="Intervention" value={hypothesis.intervention} color="#6fe5b8" />
+                    <PicoRow icon={<GitCompareIcon size={14} />} label="Comparison" value={hypothesis.comparison} color="#f59e42" />
+                    <PicoRow icon={<TargetIcon size={14} />} label="Outcome" value={hypothesis.outcome} color="#e879a5" />
+                  </div>
                 </div>
               )}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* ── Knowledge Base Sections ──────────────────────────────────
-        {kbSections.length > 0 && (
-          <div className="space-y-4">
-            {kbSections.map((section, i) => (
-              <SectionCard key={i} section={section} />
-            ))}
-          </div>
-        )} */}
+          {/* REPORT TAB */}
+          {activeTab === 'report' && parsed.report && (
+            <div className="rounded-3xl border border-white/5 bg-[#0b1015]/60 backdrop-blur-md overflow-hidden shadow-lg shadow-black/20">
+              <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-gradient-to-r from-[#a78bfa]/[0.03] to-transparent">
+                <FileTextIcon size={16} className="text-[#a78bfa]" />
+                <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#a78bfa]">Full Literature Report</h3>
+              </div>
+              <div className="p-8 max-w-4xl mx-auto">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                  {parsed.report}
+                </ReactMarkdown>
+              </div>
+            </div>
+          )}
 
-        {/* ── Sources Guide ────────────────────────────────────────── */}
-        {/* {sourcesMarkdown && (
-          <div className="rounded-xl border border-[#1f2d40] bg-[#0b1015] overflow-hidden">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-[#1f2d40]/50 bg-gradient-to-r from-[#f59e4208] to-transparent">
-              <GlobeIcon size={14} className="text-[#f59e42]" />
-              <h3 className="text-[11px] font-bold uppercase tracking-wider text-[#f59e42]">Search Sources Guide</h3>
+          {/* PAPERS TAB */}
+          {activeTab === 'papers' && papers.length > 0 && (
+            <div className="rounded-3xl border border-white/5 bg-[#0b1015]/60 backdrop-blur-md overflow-hidden shadow-lg shadow-black/20">
+              <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-gradient-to-r from-[#5acce6]/[0.03] to-transparent">
+                <AwardIcon size={16} className="text-[#5acce6]" />
+                <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#5acce6] flex-1">
+                  Ranked Papers
+                </h3>
+                <span className="text-[10px] font-medium text-slate-400 bg-black/20 px-3 py-1 rounded-full border border-white/5">{papers.length} papers found</span>
+              </div>
+              <div className="p-6 md:p-8 space-y-10">
+                {Object.entries(papersByCategory).map(([category, catPapers]) => (
+                  <div key={category}>
+                    <div className="flex items-center gap-3 mb-5">
+                      <span
+                        className="text-[10px] font-bold uppercase tracking-widest rounded-lg px-3 py-1 shadow-sm"
+                        style={{
+                          color: (CATEGORY_COLORS[category] || CATEGORY_COLORS.Review).text,
+                          background: (CATEGORY_COLORS[category] || CATEGORY_COLORS.Review).bg,
+                          border: `1px solid ${(CATEGORY_COLORS[category] || CATEGORY_COLORS.Review).border}`,
+                        }}
+                      >
+                        {category}
+                      </span>
+                      <span className="text-[11px] font-medium text-slate-500">{catPapers.length} papers</span>
+                      <div className="flex-1 border-t border-white/5 ml-2" />
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                      {catPapers.map((paper, i) => (
+                        <PaperCard key={i} paper={paper} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="p-4">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                {sourcesMarkdown}
-              </ReactMarkdown>
-            </div>
-          </div>
-        )} */}
+          )}
+        </div>
       </div>
     </div>
   );
 }
+
