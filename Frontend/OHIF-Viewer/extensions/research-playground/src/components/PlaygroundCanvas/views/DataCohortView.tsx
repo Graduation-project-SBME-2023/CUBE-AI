@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
     Users, Filter, Database, AlertTriangle, Check, Activity, Layers, 
-    Table, Tag, CheckCircle2, Save, ShieldCheck, Search, Info, RefreshCw, Lock, AlertCircle, Upload, Eye
+    Table, Tag, CheckCircle2, Save, ShieldCheck, Search, Info, RefreshCw, Lock, AlertCircle, Eye
 } from 'lucide-react';
 import { useSnackbar } from '@ohif/ui';
 import { getBackendApiBaseUrl, getAgentsApiBaseUrl } from '../../../utils/apiBase';
@@ -24,7 +24,6 @@ const InfoIcon: any = Info;
 const RefreshCwIcon: any = RefreshCw;
 const LockIcon: any = Lock;
 const AlertCircleIcon: any = AlertCircle;
-const UploadIcon: any = Upload;
 const EyeIcon: any = Eye;
 
 // --- PAUSABLE GIF PREVIEW COMPONENT ---
@@ -176,10 +175,6 @@ export default function DataCohortView({ populationData, segmentationData, sessi
     // Patient Labeling State
     const [labels, setLabels] = useState<LabelRecord[]>([]);
     const [isSavingLabels, setIsSavingLabels] = useState<boolean>(false);
-    const [isUploadingTargets, setIsUploadingTargets] = useState<boolean>(false);
-    const [uploadedTargetInfo, setUploadedTargetInfo] = useState<{
-        filename: string; targetColumn: string; rowCount: number;
-    } | null>(null);
     const [isApproving, setIsApproving] = useState<boolean>(false);
 
     // Reset all local cohort state whenever the plan becomes freshly approved (new run)
@@ -440,55 +435,6 @@ export default function DataCohortView({ populationData, segmentationData, sessi
         }
     };
 
-    const handleTargetCsvUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const targetFile = event.target.files?.[0];
-        event.target.value = '';
-        if (!targetFile) return;
-        const activeSessionId = sessionStorage.getItem('active_cube_session') || sessionId;
-        if (!activeSessionId) {
-            show({ title: 'Error', message: 'No active session found.', type: 'error', duration: 3000 });
-            return;
-        }
-        if (!targetFile.name.toLowerCase().endsWith('.csv')) {
-            show({ title: 'Invalid File', message: 'Please select a .csv target file.', type: 'error', duration: 4000 });
-            return;
-        }
-
-        setIsUploadingTargets(true);
-        try {
-            const formData = new FormData();
-            formData.append('file', targetFile);
-            const response = await fetch(
-                `${getAgentsApiBaseUrl()}/populations/upload-targets?session_id=${encodeURIComponent(activeSessionId)}`,
-                { method: 'POST', body: formData }
-            );
-            const body = await response.json().catch(() => ({}));
-            if (!response.ok) {
-                throw new Error(body.detail || 'Target CSV validation failed.');
-            }
-            setUploadedTargetInfo({
-                filename: targetFile.name,
-                targetColumn: body.target_column,
-                rowCount: body.row_count,
-            });
-            setCohortApproved(false);
-            show({
-                title: 'Target CSV Uploaded',
-                message: `Loaded ${body.row_count} targets from column “${body.target_column}”.`,
-                type: 'success',
-                duration: 5000,
-            });
-        } catch (error) {
-            show({
-                title: 'Target Upload Failed',
-                message: error instanceof Error ? error.message : 'Could not upload the target CSV.',
-                type: 'error',
-                duration: 6000,
-            });
-        } finally {
-            setIsUploadingTargets(false);
-        }
-    };
 
     // Handle Cohort Approval (HITL Gate) from Subpage 4
     const handleApproveCohort = async () => {
@@ -1012,53 +958,24 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                                 <TagIcon size={18} className="text-[#5acce6]" /> Interactive Patient Labeling
                             </h2>
                             <p className="text-xs text-gray-400 mt-1">
-                                Assign classification labels here, or upload a CSV for continuous regression targets.
+                                Assign or review Target Disease status (Positive / Negative). All edits persist directly in the backend session without external CSV uploads.
                             </p>
                         </div>
 
-                        <div className="flex items-center gap-2 flex-wrap">
-                            <label className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border ${
+                        <button
+                            onClick={handleSaveLabels}
+                            disabled={isSavingLabels || cohortApproved}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border shadow-lg ${
                                 cohortApproved
-                                    ? 'border-gray-700 bg-[#151a1f] text-gray-600 cursor-not-allowed pointer-events-none opacity-50 select-none'
-                                    : isUploadingTargets
-                                        ? 'border-[#3c5d80] text-gray-500 cursor-wait'
-                                        : 'border-[#5acce6]/40 bg-[#152433] text-[#5acce6] hover:border-[#5acce6] cursor-pointer'
-                            }`}>
-                                <UploadIcon size={14} />
-                                {isUploadingTargets ? 'Uploading...' : 'Upload Target CSV'}
-                                <input type="file" accept=".csv,text/csv" className="hidden"
-                                    disabled={isUploadingTargets || cohortApproved} onChange={handleTargetCsvUpload} />
-                            </label>
-                            <button
-                                onClick={handleSaveLabels}
-                                disabled={isSavingLabels || cohortApproved}
-                                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all border shadow-lg ${
-                                    cohortApproved
-                                        ? 'bg-[#152e2e]/30 text-gray-600 border-gray-700 cursor-not-allowed pointer-events-none opacity-50 select-none shadow-none'
-                                        : isSavingLabels
-                                            ? 'bg-[#152e2e]/50 text-gray-500 border-gray-700 cursor-not-allowed'
-                                            : 'bg-[#152e2e] hover:bg-[#1f4242] text-[#5ce6b0] border-[#234d4d] shadow-[0_0_15px_rgba(92,230,176,0.2)]'
-                                }`}
-                            >
-                                <SaveIcon size={14} />
-                                {isSavingLabels ? 'Saving...' : 'Save & Apply Labels'}
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="rounded-lg border border-[#1f2d40] bg-[#0b1015] px-4 py-3 flex items-start gap-3">
-                        <InfoIcon size={15} className="mt-0.5 text-[#5acce6] shrink-0" />
-                        <div className="min-w-0">
-                            <div className="text-xs font-semibold text-[#91b9cd]">Regression target file</div>
-                            <p className="mt-1 text-[11px] text-[#566a84]">
-                                Include one patient identifier column and one numeric outcome column named <span className="font-mono text-[#5acce6]">y</span> or <span className="font-mono text-[#5acce6]">target</span>. Missing targets and duplicate IDs are rejected before the pipeline resumes.
-                            </p>
-                            {uploadedTargetInfo && (
-                                <div className="mt-2 text-[10px] font-mono text-[#6fe5b8]">
-                                    {uploadedTargetInfo.filename} · {uploadedTargetInfo.rowCount} rows · target: {uploadedTargetInfo.targetColumn}
-                                </div>
-                            )}
-                        </div>
+                                    ? 'bg-[#152e2e]/30 text-gray-600 border-gray-700 cursor-not-allowed pointer-events-none opacity-50 select-none shadow-none'
+                                    : isSavingLabels
+                                        ? 'bg-[#152e2e]/50 text-gray-500 border-gray-700 cursor-not-allowed'
+                                        : 'bg-[#152e2e] hover:bg-[#1f4242] text-[#5ce6b0] border-[#234d4d] shadow-[0_0_15px_rgba(92,230,176,0.2)]'
+                            }`}
+                        >
+                            <SaveIcon size={14} />
+                            {isSavingLabels ? 'Saving...' : 'Save & Apply Labels'}
+                        </button>
                     </div>
 
                     <div className="flex-1 overflow-y-auto border border-[#1f2d40] rounded-lg bg-[#0b1015]
