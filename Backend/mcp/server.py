@@ -35,6 +35,7 @@ from tools.list_models import list_models
 import tools.population.inclusion_criteria
 import tools.population.unique_descriptions
 import tools.population.cohort_labels
+import tools.population.validate_anatomy
 
 import tools.scratchpad
 import tools.agent_output

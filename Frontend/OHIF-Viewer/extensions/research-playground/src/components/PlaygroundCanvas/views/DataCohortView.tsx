@@ -221,7 +221,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                 }
                 if (populationData.modality) next.modality = populationData.modality;
             }
-            if (populationData.tool === 'search_volumes_by_description') {
+            if (populationData.tool === 'search_volumes_by_description' || populationData.tool === 'validate_population_anatomy') {
                 if (populationData.count !== undefined) next.count = populationData.count;
                 if (populationData.uid_list) next.uids = populationData.uid_list;
             }
