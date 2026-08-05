@@ -296,13 +296,11 @@ async def generate_targets() -> str:
 
     if final_count > 0:
         await scratchpad_write_note(
-            title="Validated Study Cohort Approved by Doctor",
-            content=f"The user has reviewed and approved the final cohort in the UI dataviewer with a final count of {final_count} volume(s). Even if preliminary automated searches yielded fewer or zero cases, this post-review count ({final_count}) is the authoritative cohort size. All downstream agents (feature extraction, modeling, reporting) MUST use this finalized cohort from targets.csv without errors."
+            content=f"### Validated Study Cohort Approved by Doctor\nThe user has reviewed and approved the final cohort in the UI dataviewer with a final count of {final_count} volume(s). Even if preliminary automated searches yielded fewer or zero cases, this post-review count ({final_count}) is the authoritative cohort size. All downstream agents (feature extraction, modeling, reporting) MUST use this finalized cohort from targets.csv without errors."
         )
     else:
         await scratchpad_write_note(
-            title="Empty Cohort Approved by Doctor",
-            content="The user has reviewed the cohort in the UI dataviewer and approved a 0-size cohort."
+            content="### Empty Cohort Approved by Doctor\nThe user has reviewed the cohort in the UI dataviewer and approved a 0-size cohort."
         )
 
     log_tool_state(ToolEvent(event_type='tool_finished', content_type='text',
