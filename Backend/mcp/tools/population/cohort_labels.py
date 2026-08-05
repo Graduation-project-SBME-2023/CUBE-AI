@@ -40,8 +40,8 @@ async def _extract_with_llm(client, model_name: str, flattened_text: str, contex
             f"You are a Clinical Adjudicator.\n\n{context_prompt}\n\n"
             "Output pure JSON only, in this exact format:\n"
             "{\n"
-            '  "has_target_disease": true/false,\n'
-            '  "confidence": "high" | "medium" | "low",\n'
+            '  "has_target_disease": true, false, or null,\n'
+            '  "confidence": "high" | "medium" | "low" | "unlabeled",\n'
             '  "source_evidence": "Detailed reasoning here"\n'
             "}\n"
             "Do not include Markdown fences."
@@ -245,11 +245,10 @@ async def extract_cohort_labels() -> dict:
         f"INCLUSION CRITERIA: {json.dumps(inclusion_criteria)}\n"
         f"EXCLUSION CRITERIA: {json.dumps(exclusion_criteria)}\n\n"
         "You must determine if the patient has the target disease/condition specified "
-        "in the inclusion criteria. "
-        "If the medical report confirms the presence of the target disease, output "
-        "'has_target_disease': true. "
-        "If the report explicitly states the disease is absent, or if the report lacks "
-        "any evidence of the target disease, output 'has_target_disease': false."
+        "in the inclusion criteria. Follow these strict labeling rules:\n"
+        "1. If the medical report is relevant to the target organ/condition and confirms the presence of the target disease, output 'has_target_disease': true.\n"
+        "2. If the medical report is relevant to the target organ/condition and explicitly confirms the target disease is absent (e.g., normal or healthy reference findings for that organ), output 'has_target_disease': false.\n"
+        "3. If the medical report discusses an unrelated organ or body region, or completely lacks relevant clinical information regarding the target disease/hypothesis, do NOT label it! Leave it unlabeled by outputting 'has_target_disease': null, set 'confidence': 'unlabeled', and clearly document in 'source_evidence' why the report is unrelated or lacks sufficient clinical evidence."
     )
 
     # ── 5. Build per-patient task list ───────────────────────────────────────────
@@ -466,16 +465,20 @@ async def extract_cohort_labels() -> dict:
             htd_val = res.get("has_target_disease")
             if isinstance(htd_val, bool):
                 htd_str = "true" if htd_val else "false"
-            elif htd_val is not None and str(htd_val).strip() != "":
+            elif htd_val is not None and str(htd_val).strip().lower() in ("true", "false", "1", "0"):
                 htd_str = str(htd_val).strip().lower()
             else:
                 htd_str = ""
 
+            conf_val = res.get("confidence", "low")
+            if htd_str == "" and conf_val not in ("unlabeled", "manual override"):
+                conf_val = "unlabeled"
+
             writer.writerow({
                 "patient_id": matched_uid,
                 "has_target_disease": htd_str,
-                "confidence": res.get("confidence", "low"),
-                "requires_manual_review": res.get("requires_manual_review", False),
+                "confidence": conf_val,
+                "requires_manual_review": True if htd_str == "" else res.get("requires_manual_review", False),
                 "source_evidence": res.get("source_evidence", "")
             })
 
