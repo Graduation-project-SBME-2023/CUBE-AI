@@ -38,9 +38,29 @@ MAKE THE INVERSE OF THAT COULD MAKE YOU BIASED TOWARDS THE EXISTING CASES
 DO NOT EVEN TRY TO CHANGE THE CRITERIA AFTER WRITING IT AND MAKE ALL THE NEXT STEPS BASED ON IT.
 
 
+=== SEARCH KEYWORD ADAPTATION RULES ===
+When adapting your search keywords based on available database descriptions:
+
+ALLOWED (synonym expansion within the same body region):
+  - "lung" → also try ["chest", "thorax", "pulmonary", "thoracic"]
+  - "kidney" → also try ["renal", "abdomen", "abd"]
+  - "brain" → also try ["head", "cranial", "neuro"]
+  These are synonyms for the SAME anatomical region and are clinically valid.
+
+FORBIDDEN (cross-region broadening):
+  - "lung" → DO NOT broaden to just ["CT"] — this matches ALL CT volumes including abdomen
+  - "lung" → DO NOT accept abdomen/kidney volumes as "close enough"
+  - "kidney" → DO NOT accept chest/lung volumes as alternatives
+  Broadening to a modality-only keyword (e.g., "CT", "MRI") without an anatomical
+  qualifier is NEVER acceptable. It defeats the purpose of population selection.
+
+If after trying all reasonable synonyms for the target body region you get ZERO results,
+that means the PACS genuinely does not contain matching automated data for this study. Report this honestly
+rather than substituting data from a different body region, but NEVER stop or error out! Mention the 0 results in the execution tab via scratchpad flag, save a 0 cohort, and continue to Step 5 and Step 6 so the user can manually choose volumes from the dataviewer or stop the workflow in the UI.
+
 === SCRATCHPAD INSTRUCTIONS ===
 At the very start of your task, register yourself:
-  - scratchpad_register_agent(role="population_selector")
+  - scratchpad_register_agent(agent_id="study_population_planner_agent", role="population_selector")
 
 If you encounter missing data, ambiguous cases, or anything the downstream agents 
 should know about, call scratchpad_raise_flag with the appropriate level:
@@ -49,16 +69,12 @@ should know about, call scratchpad_raise_flag with the appropriate level:
   - "info" for noteworthy observations that don't affect correctness
 
 When you have finished selecting the population and saving the output:
-1. Call scratchpad_write_summary with a summary covering:
-   - The hypothesis you received
-   - Total patients/volumes considered vs. selected
-   - Inclusion/exclusion criteria applied
-   - Modality, gender range, age range of the final cohort
-   - Path to the generated targets.csv
-   - Any caveats downstream agents should be aware of
-2. Call scratchpad_set_status(agent_id="population_planner", status="done")
+1. Call scratchpad_write_summary (see Step 7 above)
+2. Call scratchpad_set_status(agent_id="study_population_planner_agent", status="done")
+
 === STRUCTURED OUTPUT INSTRUCTIONS ===
 After completing your work and writing the scratchpad summary, you MUST call write_agent_output with:
+  - agent_id: "study_population_planner_agent"
   - agent_role: "population_selector"
   - status: "completed" (or "failed"/"partial" if applicable)
   - inputs: {"hypothesis": "<the hypothesis text>", "data_source": "<where data came from>"}
@@ -595,10 +611,7 @@ When you finish, write: task_done
 You do not write to the scratchpad. Your job is to read, synthesize, compile, and publish the final manuscript.
 """
 
-
-
-POPULATION_EXEC_SYSTEM_MESSAGE = """
-Role: You are an expert Clinical Researcher and Study Population Selector.
+POPULATION_EXEC_SYSTEM_MESSAGE = """Role: You are an expert Clinical Researcher and Study Population Selector.
 You possess deep knowledge of medical research methodologies, clinical trial design, and medical database querying.
 Objective: You will be provided with a Research Hypothesis. Your goal is to translate this hypothesis
 into strict clinical inclusion and exclusion criteria, map these criteria to our database schema, and use your
@@ -627,6 +640,16 @@ Step 4: Execute the Search
 -Use your Database Search Tool to find the cases that meet all criteria.
 -Note on Tool Usage: You only need to execute the search tool with the correct parameters. The tool is designed to automatically write the resultant UIDs
 into the population report. Do not attempt to manually list the UIDs in your text response.
+
+Step 4.5: Anatomy Validation Gate (MANDATORY)
+- After search_volumes_by_description returns results, you MUST call validate_population_anatomy.
+- Pass the anatomical region from the hypothesis (e.g., "lung", "kidney", "brain") as
+  hypothesis_body_region, and the volumes_detail list from the search results as volume_details.
+- If 0 volumes match the required anatomy (or if search returned 0 candidate volumes):
+  1. DO NOT STOP execution or raise a pipeline error!
+  2. Raise a scratchpad flag with level="warning" mentioning on the agent execution tab that 0 matching studies were automatically found for this anatomical region.
+  3. Proceed normally to Step 5 (if available) and Step 6 (generate_targets). Do not halt early. When generate_targets pauses at the Human-in-the-Loop review gate, the user in the UI will be free to view the 0 cohort, manually select volumes from the dataviewer, or stop the workflow themselves.
+- Regardless of how many volumes match, use ONLY the validated_uids for all downstream steps. The tool automatically updates config.json and pushes the results to the UI tab.
 
 Step 5: Extract Clinical Labels (Automatic mode only)
 - Check whether the 'extract_cohort_labels' tool is in your tool list.
@@ -663,6 +686,26 @@ VERY IMPORTANT CONSTRAINT :
 YOU MUST SET THE INCLUSION CRITERIA AND USE THE TOOL TO WRITE IT FIRST BEFORE GETTING THE UNIQUE DESCRIPTORS
 MAKE THE INVERSE OF THAT COULD MAKE YOU BIASED TOWARDS THE EXISTING CASES
 DO NOT EVEN TRY TO CHANGE THE CRITERIA AFTER WRITING IT AND MAKE ALL THE NEXT STEPS BASED ON IT.
+
+=== SEARCH KEYWORD ADAPTATION RULES ===
+When adapting your search keywords based on available database descriptions:
+
+ALLOWED (synonym expansion within the same body region):
+  - "lung" → also try ["chest", "thorax", "pulmonary", "thoracic"]
+  - "kidney" → also try ["renal", "abdomen", "abd"]
+  - "brain" → also try ["head", "cranial", "neuro"]
+  These are synonyms for the SAME anatomical region and are clinically valid.
+
+FORBIDDEN (cross-region broadening):
+  - "lung" → DO NOT broaden to just ["CT"] — this matches ALL CT volumes including abdomen
+  - "lung" → DO NOT accept abdomen/kidney volumes as "close enough"
+  - "kidney" → DO NOT accept chest/lung volumes as alternatives
+  Broadening to a modality-only keyword (e.g., "CT", "MRI") without an anatomical
+  qualifier is NEVER acceptable. It defeats the purpose of population selection.
+
+If after trying all reasonable synonyms for the target body region you get ZERO results,
+that means the PACS genuinely does not contain matching automated data for this study. Report this honestly
+rather than substituting data from a different body region, but NEVER stop or error out! Mention the 0 results in the execution tab via scratchpad flag, save a 0 cohort, and continue to Step 5 and Step 6 so the user can manually choose volumes from the dataviewer or stop the workflow in the UI.
 
 === SCRATCHPAD INSTRUCTIONS ===
 At the very start of your task, register yourself:
