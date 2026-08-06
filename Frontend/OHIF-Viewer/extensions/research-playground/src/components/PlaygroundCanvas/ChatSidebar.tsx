@@ -649,7 +649,7 @@ const ChatSidebar = ({
       />
       <div className="flex h-14 items-center justify-between border-b border-[#1a2a3a] bg-[#0a1520] px-5">
         <div className="flex items-center gap-2.5 text-[15px] font-semibold text-[#e0f0ff]">
-          {renderIcon(MessageSquare, 16)} Assistant
+          <img src="/assets/icon_white.png" alt="CUBE AI Icon" className="h-[18px] w-[18px] object-contain" /> CUBE Assistant
         </div>
         <div className="flex items-center gap-1.5">
           {/* (<button
@@ -711,14 +711,14 @@ const ChatSidebar = ({
         {messages.map(msg => (
           <div
             key={msg.id}
-            className={`flex max-w-full flex-col gap-1 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+            className={`flex max-w-full flex-col gap-1.5 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
           >
-            <div className={`max-w-[88%] rounded-[18px] border p-3 text-[14.5px] leading-6 shadow ${msg.role === 'user' ? 'border-[#2a5a8a] bg-[linear-gradient(135deg,#1a4a7a_0%,#0d3560_100%)] text-[#e0f0ff]' : msg.role === 'assistant' ? 'border-[#1e3248] bg-[#111d29] text-[#8ab8cc]' : 'border-[#1a2a3a] bg-[#0d1e2e] text-[#b0d4ea]'}`}>
+            <div className={`max-w-[85%] rounded-[18px] border px-4 py-3 text-[14.5px] leading-[1.6] shadow-md ${msg.role === 'user' ? 'border-[#3269a0] bg-[linear-gradient(135deg,#1f578f_0%,#134375_100%)] text-white rounded-br-sm' : msg.role === 'assistant' ? 'border-[#263c55] bg-[#1a2836] text-[#b0d4ea] rounded-bl-sm' : 'border-[#1a2a3a] bg-[#0d1e2e] text-[#b0d4ea] rounded-bl-sm'}`}>
               <div>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text || ''}</ReactMarkdown>
               </div>
             </div>
-            <span className="mx-1 text-[11px] text-[#2d4a5e]">
+            <span className={`mx-2 text-[11px] font-medium ${msg.role === 'user' ? 'text-[#3d5a72]' : 'text-[#4a6d88]'}`}>
               {new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
@@ -732,10 +732,10 @@ const ChatSidebar = ({
         <div ref={messagesEndRef} />
       </div>
       <div className="border-t border-[#1a2a3a] bg-[#0a1520] px-5 py-4">
-        <div className="flex items-end rounded-xl border border-[#1e3248] bg-[#0d1e2e] px-3 py-2">
+        <div className={`flex items-end rounded-xl border px-3 py-2 transition-colors ${isChatLocked ? 'border-[#3d5a72]/30 bg-[#162432]/50' : 'border-[#1e3248] bg-[#0d1e2e]'}`}>
           <input
             type="text"
-            className="flex-1 bg-transparent py-1 text-[14.5px] text-[#e0f0ff] outline-none placeholder:text-[#3d5a72] disabled:opacity-50"
+            className={`flex-1 bg-transparent py-1 text-[14.5px] text-[#e0f0ff] outline-none transition-colors ${isChatLocked ? 'placeholder:text-[#6a8da6]' : 'placeholder:text-[#4a6b85]'}`}
             placeholder={isChatLocked ? "Chat is locked during execution/results" : "Type a message..."}
             value={input}
             onChange={e => setInput(e.target.value)}

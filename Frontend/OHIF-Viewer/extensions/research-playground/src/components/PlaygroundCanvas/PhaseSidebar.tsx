@@ -218,35 +218,33 @@ export default function PhaseSidebar({
                                 {!isCollapsed && (
                                     <div className="flex flex-col overflow-hidden">
                                         <span
-                                            className={`text-[12px] font-semibold truncate leading-snug ${
+                                            className={`text-[13px] font-semibold truncate leading-snug ${
                                                 isLocked
-                                                    ? 'text-[#5a7999]'
+                                                    ? 'text-[#6a8da6]'
                                                     : hasUpdate
-                                                    ? 'text-[#7ec8f0]'
+                                                    ? 'text-[#8cd2f6]'
                                                     : isActive
-                                                    ? isCoreView
-                                                        ? 'text-[#f0ddff]'
-                                                        : 'text-[#e0f0ff]'
+                                                    ? 'text-white'
                                                     : isCoreView
-                                                    ? 'text-[#b28dd0]'
-                                                    : 'text-[#7aa8c4]'
+                                                    ? 'text-[#ccaede]'
+                                                    : 'text-[#a6c8de]'
                                             }`}
                                         >
                                             {phase.label}
                                         </span>
                                         <span
-                                            className={`text-[10px] truncate mt-0.5 leading-snug ${
+                                            className={`text-[11px] truncate mt-0.5 leading-snug ${
                                                 isLocked
-                                                    ? 'text-[#4a6580] italic'
+                                                    ? 'text-[#5a7b99] italic'
                                                     : hasUpdate
-                                                    ? 'text-[#4d8cb0]'
+                                                    ? 'text-[#61a4c9]'
                                                     : isActive
                                                     ? isCoreView
-                                                        ? 'text-[#b791d6]'
-                                                        : 'text-[#4d7a9a]'
+                                                        ? 'text-[#dcbdf2]'
+                                                        : 'text-[#77aed4]'
                                                     : isCoreView
-                                                    ? 'text-[#8765a4]'
-                                                    : 'text-[#3d5a72]'
+                                                    ? 'text-[#a584c2]'
+                                                    : 'text-[#6488a6]'
                                             }`}
                                         >
                                             {isLocked ? 'Not started yet' : phase.short_desc}
