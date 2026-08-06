@@ -67,6 +67,8 @@ class InferenceResult(TypedDict):
     inference_job_id: NotRequired[str]
     is_empty_mask: NotRequired[bool]
     foreground_voxels: NotRequired[int]
+    z_axis_reversed: NotRequired[bool]
+    slice_alignment: NotRequired[dict[str, Any]]
 
 
 class SegmentationService:
@@ -197,14 +199,11 @@ class SegmentationService:
                             and asyncio.get_running_loop().time() - unavailable_since
                             >= SEGMENTATION_UNAVAILABLE_GRACE_SECONDS
                         ):
-                            return None, {
-                                "status": "UNAVAILABLE",
-                                "error": (
-                                    "Inference service remained unavailable while "
-                                    "starting the job for "
-                                    f"{SEGMENTATION_UNAVAILABLE_GRACE_SECONDS:.0f}s"
-                                ),
-                            }
+                            logger.warning(
+                                "Inference service remained unavailable while "
+                                "starting the job for %ss. Continuing to wait...",
+                                SEGMENTATION_UNAVAILABLE_GRACE_SECONDS
+                            )
                         await asyncio.sleep(SEGMENTATION_POLL_SECONDS)
                         continue
 
@@ -233,13 +232,11 @@ class SegmentationService:
                     now = asyncio.get_running_loop().time()
                     unavailable_since = unavailable_since or now
                     if now - unavailable_since >= SEGMENTATION_UNAVAILABLE_GRACE_SECONDS:
-                        return None, {
-                            "status": "UNAVAILABLE",
-                            "error": (
-                                "Inference service remained unavailable for "
-                                f"{SEGMENTATION_UNAVAILABLE_GRACE_SECONDS:.0f}s: {exc}"
-                            ),
-                        }
+                        logger.warning(
+                            "Inference service remained unavailable for %ss: %s. Continuing to wait...",
+                            SEGMENTATION_UNAVAILABLE_GRACE_SECONDS,
+                            exc
+                        )
                     await asyncio.sleep(SEGMENTATION_POLL_SECONDS)
                     continue
                 except (
@@ -251,13 +248,11 @@ class SegmentationService:
                     now = asyncio.get_running_loop().time()
                     unavailable_since = unavailable_since or now
                     if now - unavailable_since >= SEGMENTATION_UNAVAILABLE_GRACE_SECONDS:
-                        return None, {
-                            "status": "UNAVAILABLE",
-                            "error": (
-                                "Inference service remained unavailable for "
-                                f"{SEGMENTATION_UNAVAILABLE_GRACE_SECONDS:.0f}s: {exc}"
-                            ),
-                        }
+                        logger.warning(
+                            "Inference service remained unavailable for %ss: %s. Continuing to wait...",
+                            SEGMENTATION_UNAVAILABLE_GRACE_SECONDS,
+                            exc
+                        )
                     await asyncio.sleep(SEGMENTATION_POLL_SECONDS)
                     continue
 
@@ -507,6 +502,16 @@ class SegmentationService:
             labelmap_np = labelmap_np.squeeze(0)
         labelmap_np = np.transpose(labelmap_np, (2, 1, 0))
         logger.info("Labelmap shape after squeeze+transpose: %s", labelmap_np.shape)
+
+        labelmap_np, z_axis_reversed, slice_alignment = (
+            self._align_labelmap_z_to_source_slices(
+                labelmap_np,
+                header,
+                dicom_datasets,
+            )
+        )
+        result["z_axis_reversed"] = z_axis_reversed
+        result["slice_alignment"] = slice_alignment
 
         # VoxTell always returns binary masks — binarize with >0
         labelmap_np = (labelmap_np > 0).astype(np.uint8)
@@ -854,6 +859,204 @@ class SegmentationService:
             datasets,
             key=lambda ds: int(getattr(ds, "InstanceNumber", 0) or 0),
         )
+
+    @staticmethod
+    def _nrrd_space_to_lps_signs(space: Any) -> np.ndarray:
+        """Return component signs that convert an NRRD world space to DICOM LPS.
+
+        NRRD commonly uses either LPS (left-posterior-superior) or RAS
+        (right-anterior-superior).  DICOM ImagePositionPatient and
+        ImageOrientationPatient are always expressed in LPS.
+        """
+        normalized = str(space or "").strip().lower().replace("_", "-")
+        aliases = {
+            "lps": "left-posterior-superior",
+            "ras": "right-anterior-superior",
+            "las": "left-anterior-superior",
+            "rps": "right-posterior-superior",
+        }
+        normalized = aliases.get(normalized, normalized)
+        parts = [part for part in normalized.split("-") if part]
+        if len(parts) < 3:
+            # pynrrd files produced by the MONAI/SimpleITK path are normally
+            # LPS.  Keep that as the conservative default, but log it.
+            logger.warning(
+                "NRRD space %r is missing or unsupported; assuming DICOM LPS",
+                space,
+            )
+            return np.ones(3, dtype=float)
+
+        signs = []
+        for axis_name in parts[:3]:
+            if axis_name == "left":
+                signs.append(1.0)
+            elif axis_name == "right":
+                signs.append(-1.0)
+            elif axis_name == "posterior":
+                signs.append(1.0)
+            elif axis_name == "anterior":
+                signs.append(-1.0)
+            elif axis_name == "superior":
+                signs.append(1.0)
+            elif axis_name == "inferior":
+                signs.append(-1.0)
+            else:
+                logger.warning(
+                    "Unsupported NRRD space axis %r in %r; assuming LPS",
+                    axis_name,
+                    space,
+                )
+                return np.ones(3, dtype=float)
+        return np.asarray(signs, dtype=float)
+
+    @classmethod
+    def _nrrd_z_geometry_lps(
+        cls,
+        header: dict[str, Any],
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        """Return (origin, z-direction) in DICOM LPS coordinates."""
+        raw_origin = next(
+            (
+                header[key]
+                for key in ("space origin", "space_origin", "spaceOrigin")
+                if key in header and header[key] is not None
+            ),
+            None,
+        )
+        raw_directions = next(
+            (
+                header[key]
+                for key in (
+                    "space directions",
+                    "space_directions",
+                    "spaceDirections",
+                )
+                if key in header and header[key] is not None
+            ),
+            None,
+        )
+        if raw_origin is None or raw_directions is None:
+            return None
+
+        try:
+            origin = np.asarray(raw_origin, dtype=float).reshape(-1)
+        except (TypeError, ValueError):
+            return None
+        if origin.size != 3 or not np.all(np.isfinite(origin)):
+            return None
+
+        spatial_directions: list[np.ndarray] = []
+        try:
+            direction_entries = list(raw_directions)
+        except TypeError:
+            return None
+        for entry in direction_entries:
+            if entry is None:
+                continue
+            try:
+                vector = np.asarray(entry, dtype=float).reshape(-1)
+            except (TypeError, ValueError):
+                continue
+            if vector.size == 3 and np.all(np.isfinite(vector)):
+                spatial_directions.append(vector)
+        if len(spatial_directions) < 3:
+            return None
+
+        signs = cls._nrrd_space_to_lps_signs(header.get("space"))
+        return origin * signs, spatial_directions[-1] * signs
+
+    @classmethod
+    def _align_labelmap_z_to_source_slices(
+        cls,
+        labelmap_np: np.ndarray,
+        header: dict[str, Any],
+        source_images: list[pydicom.Dataset],
+    ) -> tuple[np.ndarray, bool, dict[str, Any]]:
+        """Align mask frame 0 with source image frame 0 using patient geometry.
+
+        ``labelmap_np`` is already in (Z, Y, X) order.  The NRRD Z direction
+        determines whether increasing array indices move from the first sorted
+        DICOM slice to the last one or in the opposite direction.  This avoids
+        relying on InstanceNumber, file order, or a model-specific flip rule.
+        """
+        details: dict[str, Any] = {"mode": "unchanged"}
+        if labelmap_np.ndim != 3 or labelmap_np.shape[0] <= 1:
+            return labelmap_np, False, details
+
+        nrrd_geometry = cls._nrrd_z_geometry_lps(header)
+        if nrrd_geometry is None:
+            details["mode"] = "metadata_unavailable"
+            logger.warning(
+                "Cannot determine NRRD Z direction; leaving mask frame order unchanged"
+            )
+            return labelmap_np, False, details
+
+        source_positions = [cls._physical_slice_position(ds) for ds in source_images]
+        if not source_positions or any(value is None for value in source_positions):
+            details["mode"] = "dicom_positions_unavailable"
+            logger.warning(
+                "Cannot determine DICOM slice positions; leaving mask frame order unchanged"
+            )
+            return labelmap_np, False, details
+
+        orientation = np.asarray(source_images[0].ImageOrientationPatient, dtype=float)
+        normal = np.cross(orientation[:3], orientation[3:])
+        normal_norm = float(np.linalg.norm(normal))
+        if normal_norm == 0:
+            details["mode"] = "invalid_dicom_orientation"
+            return labelmap_np, False, details
+        normal /= normal_norm
+
+        origin_lps, z_direction_lps = nrrd_geometry
+        mask_first = float(np.dot(origin_lps, normal))
+        mask_last = float(
+            np.dot(
+                origin_lps + z_direction_lps * (labelmap_np.shape[0] - 1),
+                normal,
+            )
+        )
+        source_first = float(source_positions[0])
+        source_last = float(source_positions[-1])
+
+        direct_error = abs(mask_first - source_first) + abs(mask_last - source_last)
+        reverse_error = abs(mask_first - source_last) + abs(mask_last - source_first)
+        source_spacing = (
+            float(np.median(np.abs(np.diff(np.asarray(source_positions, dtype=float)))))
+            if len(source_positions) > 1
+            else 0.0
+        )
+        tolerance = max(1e-3, source_spacing * 0.1)
+        should_reverse = reverse_error + tolerance < direct_error
+
+        details.update(
+            {
+                "mode": "physical_endpoint_match",
+                "mask_first_position": mask_first,
+                "mask_last_position": mask_last,
+                "source_first_position": source_first,
+                "source_last_position": source_last,
+                "direct_error": direct_error,
+                "reverse_error": reverse_error,
+                "tolerance": tolerance,
+            }
+        )
+        if should_reverse:
+            logger.info(
+                "Reversing MONAI mask Z frames to match physically sorted DICOM "
+                "slices (direct_error=%.6f, reverse_error=%.6f)",
+                direct_error,
+                reverse_error,
+            )
+            details["mode"] = "physical_endpoint_match_reversed"
+            return np.flip(labelmap_np, axis=0).copy(), True, details
+
+        logger.info(
+            "MONAI mask Z frames already match physically sorted DICOM slices "
+            "(direct_error=%.6f, reverse_error=%.6f)",
+            direct_error,
+            reverse_error,
+        )
+        return labelmap_np, False, details
 
     async def fetch_source_datasets_from_orthanc(
         self,

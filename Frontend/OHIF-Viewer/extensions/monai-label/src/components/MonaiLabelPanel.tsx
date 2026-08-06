@@ -20,6 +20,138 @@ import { getAgentsApiBaseUrl } from '../utils/runtimeUrls';
 import { createReportAsync } from '@ohif/extension-default';
 import { servicesManager } from 'platform/app/src/App';
 
+const toNumericVector = (
+  value: unknown,
+  expectedLength: number
+): number[] | null => {
+  if (!Array.isArray(value) || value.length !== expectedLength) {
+    return null;
+  }
+  const parsed = value.map(Number);
+  return parsed.every(Number.isFinite) ? parsed : null;
+};
+
+const dot3 = (a: number[], b: number[]) =>
+  a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+const cross3 = (a: number[], b: number[]) => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+
+const nrrdSpaceToLpsSigns = (space: unknown): number[] => {
+  const aliases: Record<string, string> = {
+    lps: 'left-posterior-superior',
+    ras: 'right-anterior-superior',
+    las: 'left-anterior-superior',
+    rps: 'right-posterior-superior',
+  };
+  const raw = String(space || '')
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-');
+  const normalized = aliases[raw] || raw;
+  const parts = normalized.split('-').filter(Boolean);
+  if (parts.length < 3) {
+    return [1, 1, 1];
+  }
+  return parts.slice(0, 3).map((axis) => {
+    if (axis === 'right' || axis === 'anterior' || axis === 'inferior') {
+      return -1;
+    }
+    return 1;
+  });
+};
+
+const shouldReverseMaskZ = (
+  header: any,
+  instances: any[],
+  numSlices: number
+): boolean => {
+  if (
+    !header ||
+    !Array.isArray(instances) ||
+    instances.length < 2 ||
+    numSlices < 2
+  ) {
+    return false;
+  }
+
+  const orientation = toNumericVector(instances[0]?.ImageOrientationPatient, 6);
+  if (!orientation) {
+    return false;
+  }
+  let normal = cross3(orientation.slice(0, 3), orientation.slice(3, 6));
+  const normalLength = Math.sqrt(dot3(normal, normal));
+  if (!normalLength) {
+    return false;
+  }
+  normal = normal.map((value) => value / normalLength);
+
+  const sourcePositions = instances
+    .map((instance) => {
+      const position = toNumericVector(instance?.ImagePositionPatient, 3);
+      return position ? dot3(position, normal) : null;
+    })
+    .filter((value): value is number => value !== null)
+    .sort((a, b) => a - b);
+  if (sourcePositions.length < 2) {
+    return false;
+  }
+
+  const origin = toNumericVector(
+    header.spaceOrigin || header['space origin'] || header.space_origin,
+    3
+  );
+  const rawDirections =
+    header.spaceDirections ||
+    header['space directions'] ||
+    header.space_directions;
+  if (!origin || !Array.isArray(rawDirections)) {
+    return false;
+  }
+  const spatialDirections = rawDirections
+    .map((direction) => toNumericVector(direction, 3))
+    .filter((direction): direction is number[] => direction !== null);
+  if (spatialDirections.length < 3) {
+    return false;
+  }
+
+  const signs = nrrdSpaceToLpsSigns(header.space);
+  const originLps = origin.map((value, index) => value * signs[index]);
+  const zDirectionLps = spatialDirections[spatialDirections.length - 1].map(
+    (value, index) => value * signs[index]
+  );
+  const maskFirst = dot3(originLps, normal);
+  const maskLast = dot3(
+    originLps.map(
+      (value, index) => value + zDirectionLps[index] * (numSlices - 1)
+    ),
+    normal
+  );
+  const sourceFirst = sourcePositions[0];
+  const sourceLast = sourcePositions[sourcePositions.length - 1];
+  const directError =
+    Math.abs(maskFirst - sourceFirst) + Math.abs(maskLast - sourceLast);
+  const reverseError =
+    Math.abs(maskFirst - sourceLast) + Math.abs(maskLast - sourceFirst);
+  const spacing =
+    Math.abs(sourceLast - sourceFirst) /
+    Math.max(1, sourcePositions.length - 1);
+  const tolerance = Math.max(1e-3, spacing * 0.1);
+
+  console.info('Physical mask Z alignment', {
+    maskFirst,
+    maskLast,
+    sourceFirst,
+    sourceLast,
+    directError,
+    reverseError,
+  });
+  return reverseError + tolerance < directError;
+};
+
 export default class MonaiLabelPanel extends Component {
   static propTypes = {
     commandsManager: PropTypes.any,
@@ -325,19 +457,48 @@ export default class MonaiLabelPanel extends Component {
     }
 
     const { image: buffer, header } = ret;
-    const data = new Uint16Array(buffer);
+    let data = new Uint16Array(buffer);
+
+    // Get the active display set (each series = unique segmentation ID)
+    const { displaySet } = this.getActiveViewportInfo();
+    const segmentationId = displaySet.SeriesInstanceUID;
+
+    const numSlices =
+      header && header.sizes && header.sizes.length >= 3
+        ? Number(header.sizes[2])
+        : 0;
+    const isReversedZ = shouldReverseMaskZ(
+      header,
+      displaySet?.instances || [],
+      numSlices
+    );
+    if (isReversedZ) {
+      console.info(
+        'Reversing mask Z slices to match the physically sorted source volume.'
+      );
+      const sliceSize = Number(header.sizes[0]) * Number(header.sizes[1]);
+      const reversedData = new Uint16Array(data.length);
+      for (let i = 0; i < numSlices; i++) {
+        const srcOffset = i * sliceSize;
+        const destOffset = (numSlices - 1 - i) * sliceSize;
+        reversedData.set(
+          data.subarray(srcOffset, srcOffset + sliceSize),
+          destOffset
+        );
+      }
+      data = reversedData;
+    }
 
     // Reformat centroids
     const centroidsIJK = new Map();
     for (const [key, value] of Object.entries(response.centroids || {})) {
       const segmentIndex = parseInt(value[0], 10);
       const image = value.slice(1).map((v) => parseFloat(v));
+      if (isReversedZ && image.length >= 3) {
+        image[2] = numSlices - 1 - image[2];
+      }
       centroidsIJK.set(segmentIndex, { image: image, world: [] });
     }
-
-    // Get the active display set (each series = unique segmentation ID)
-    const { displaySet } = this.getActiveViewportInfo();
-    const segmentationId = displaySet.SeriesInstanceUID;
 
     // Define segmentation object with proper structure
     const segmentation_object = {

@@ -214,7 +214,7 @@ class SegmentationModule:
         self,
         volume_uid: str,
         segmentation_uid: str,
-        timeout_seconds: float = 120.0,
+        timeout_seconds: float = 600.0,
     ) -> dict[str, Any] | None:
         deadline = asyncio.get_running_loop().time() + timeout_seconds
         while asyncio.get_running_loop().time() < deadline:
@@ -434,6 +434,10 @@ class SegmentationModule:
             or pair_result.get("geometry_adjusted")
         )
         item["geometry"] = pair_result.get("geometry")
+        item["alignment_mode"] = pair_result.get("alignment_mode")
+        item["slice_alignment"] = (item.get("inference_result") or {}).get(
+            "slice_alignment"
+        )
 
         previews = await asyncio.to_thread(
             generate_gif_overlays,
