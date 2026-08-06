@@ -36,7 +36,7 @@ export function CollapsibleSection({
     );
 }
 
-export function RightPanel({
+export function InfoPanel({
     targetRoi,
     selectedModel,
 }: {
@@ -44,9 +44,9 @@ export function RightPanel({
     selectedModel: string;
 }) {
     return (
-        <div className="w-64 flex flex-col gap-3 shrink-0 overflow-y-auto pr-0.5">
+        <div className="w-full shrink-0">
             <CollapsibleSection title="Segmentation Info" icon={<Target size={11} />} accent="#5acce6">
-                <div className="flex flex-col gap-4 pt-1">
+                <div className="flex flex-row gap-12 pt-1">
                     <div>
                         <p className="text-[#566a84] text-[10px] uppercase flex items-center gap-1 mb-0.5">
                             <Target size={11} /> Target ROI
@@ -57,7 +57,7 @@ export function RightPanel({
                         <p className="text-[#566a84] text-[10px] uppercase flex items-center gap-1 mb-0.5">
                             <Cpu size={11} /> Selected Model
                         </p>
-                        <div className="text-sm font-bold text-white">{selectedModel}</div>
+                        <div className="text-base font-bold text-white">{selectedModel}</div>
                     </div>
                 </div>
             </CollapsibleSection>

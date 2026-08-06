@@ -8,7 +8,7 @@ import {
   ReviewContainerProps,
   ReviewStatus,
 } from './segmentation/types';
-import { RightPanel } from './segmentation/Shared';
+import { InfoPanel } from './segmentation/Shared';
 import EmbeddedSegmentationModal, {
   SegmentationSubmitPayload,
 } from './segmentation/EmbeddedSegmentationModal';
@@ -407,7 +407,12 @@ function ReviewView({
 
   return (
     <div className="flex h-full w-full flex-col gap-4 overflow-hidden bg-[#000000] p-4">
-      <div className="flex min-h-0 flex-1 gap-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-4">
+        {/* ── Top Panel ── */}
+        <InfoPanel
+          targetRoi={targetRoi}
+          selectedModel={selectedModel}
+        />
         {/* ── GIF Grid ── */}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#1f2d40] bg-[#151a1f] p-4">
           {/* Bulk actions + counters */}
@@ -465,7 +470,7 @@ function ReviewView({
           )}
 
           {/* GIF Grid */}
-          <div className="flex-1 overflow-y-auto pr-1">
+          <div className="ohif-scrollbar flex-1 overflow-y-auto">
             <div className="grid grid-cols-2 gap-4 pb-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
               {volumes.map(volume => {
                 const reviewKey = volume.pairId || volume.seriesInstanceUid;
@@ -675,11 +680,6 @@ function ReviewView({
           </div>
         </div>
 
-        {/* ── Right Panel ── */}
-        <RightPanel
-          targetRoi={targetRoi}
-          selectedModel={selectedModel}
-        />
       </div>
 
       {/* Save */}

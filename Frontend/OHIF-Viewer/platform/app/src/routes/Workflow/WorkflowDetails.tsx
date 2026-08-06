@@ -862,7 +862,7 @@ function WorkflowDetailPage({
           seriesTableColumns={{}}
           seriesTableDataSource={
             seriesInStudiesMap.has(studyInstanceUid)
-              ? seriesInStudiesMap.get(studyInstanceUid).map(s => {})
+              ? seriesInStudiesMap.get(studyInstanceUid).map(s => { })
               : []
           }
         >
@@ -900,7 +900,7 @@ function WorkflowDetailPage({
                           variant={isValidMode ? 'contained' : 'disabled'}
                           disabled={!isValidMode}
                           endIcon={<Icon name="launch-arrow" />} // launch-arrow | launch-info
-                          onClick={() => {}}
+                          onClick={() => { }}
                           data-cy={`mode-${mode.routeName}-${studyInstanceUid}`}
                         >
                           {t(`Modes:${mode.displayName}`)}
@@ -920,356 +920,355 @@ function WorkflowDetailPage({
     };
   });
 
-return (
-  <div className="h-screen bg-[#0d1526]">
+  return (
+    <div className="h-screen bg-[#0d1526]">
 
-  {/* Top Navbar */}
-  <div className="bg-[#101c35] border-b border-[#1a2540] relative z-10">
-    <div className="flex items-center justify-between px-6 h-14">
-      <div className="flex items-center space-x-4">
-        <button
-          onClick={onClickReturnButton}
-          className="group relative flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-200 hover:bg-[#1a2540] active:scale-95"
-          aria-label="Go back"
-        >
-          <Icon
-            name="chevron-left"
-            className="text-[#5a8ab8] group-hover:text-[#4a9eff] h-5 w-5 transition-colors duration-200"
-          />
-        </button>
-
-        <div className="h-6 w-px bg-[#1a2540]" />
-
-        <div className="flex items-center space-x-2.5">
-          <Typography variant="h4" className="text-[14px] font-semibold text-[#c8d8f0] tracking-tight">
-            {workflowName}
-          </Typography>
-          <span className="bg-[#4a9eff]/10 text-[#4a9eff] border border-[#4a9eff]/30 rounded-full px-2.5 py-0.5 text-[10px] font-semibold tracking-wider uppercase">
-            Active
-          </span>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  {/* Main Content Layout */}
-  <div className="flex" style={{ height: 'calc(100vh - 56px)' }}>
-
-    {/* Left Panel - Studies Table */}
-    <div className="flex-1 overflow-y-auto bg-[#0d1526] p-5">
-      <div className="mb-5 flex items-center justify-between">
-        <Typography variant="h5" className="text-[13px] font-semibold text-[#c8d8f0]">
-          Studies
-        </Typography>
-        <div className="flex items-center gap-2">
-          <LegacyButton
-            rounded="full"
-            variant="outlined"
-            color="primaryActive"
-            border="primaryActive"
-            onClick={handleSelectAll}
-            className="text-[11px] border border-[#1e3058] text-[#4a9eff] bg-transparent hover:bg-[#4a9eff]/10 transition-all duration-200 px-3 py-1 rounded-full"
-          >
-            {selectAll ? 'Unselect All' : 'Select All'}
-          </LegacyButton>
-
-          <LegacyButton
-            rounded="full"
-            variant="outlined"
-            onClick={handleDeletion}
-            className="text-[11px] border border-[#e05a5a]/30 text-[#e05a5a] bg-[#e05a5a]/10 hover:bg-[#e05a5a]/20 transition-all duration-200 px-3 py-1 rounded-full"
-          >
-            {t('Delete')}
-          </LegacyButton>
-        </div>
-      </div>
-
-      <div className="max-h-full">
-        <TableHeader tableHeader={tableHeader} />
-        {hasStudies ? (
-          <StudyListTable
-            tableDataSource={tableDataSource}
-            numOfStudies={studiesTotal}
-            querying={querying}
-            filtersMeta={filtersMeta}
-          />
-        ) : (
-          <EmptyStudies />
-        )}
-      </div>
-    </div>
-
-    {/* Right Panel - Configuration */}
-    <div className="w-[320px] flex-shrink-0 h-full overflow-y-auto bg-[#0d1526] border-l border-[#1a2540] scrollbar-thin scrollbar-thumb-[#1e3058]">
-      <div className="p-3 space-y-3">
-
-        {/* Server Header */}
-        <div className="flex items-center justify-between p-3 bg-[#071020] rounded-lg border border-[#1a2540]">
-          <div className="flex flex-col gap-0.5">
-            <span className="text-[9px] font-bold text-[#3d6a9e] uppercase tracking-[0.12em]">
-              Server
-            </span>
-            <Typography variant="h6" className="text-[13px] font-semibold text-[#c8d8f0]">
-              Workflow
-            </Typography>
-          </div>
-          <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border ${isConnected ? 'bg-[#1a4a3a]/40 border-[#1e5a3a]' : 'bg-[#1a2540]/50 border-[#1e3058]'}`}>
-            <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-[#34d399]' : 'bg-[#3d6a9e]'}`} />
-            <span className={`text-[10px] font-medium ${isConnected ? 'text-[#34d399]' : 'text-[#5a8ab8]'}`}>
-              {isConnected ? 'Connected' : 'Disconnected'}
-            </span>
-          </div>
-        </div>
-
-        {/* Model Settings Section */}
-        <div className="bg-[#071020] border border-[#1a2540] rounded-lg p-3 space-y-3">
-          <h3 className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#3d6a9e]">
-            Model
-          </h3>
-
-          {/* Labels Section */}
-          <div className="flex w-full items-center justify-between">
-            <label className="text-[11px] font-medium text-[#8ab4e0]">
-              Labels<span className="text-[#1e3058] ml-0.5">:</span>
-            </label>
+      {/* Top Navbar */}
+      <div className="bg-[#101c35] border-b border-[#1a2540] relative z-10">
+        <div className="flex items-center justify-between px-6 h-14">
+          <div className="flex items-center space-x-4">
             <button
-              type="button"
-              onClick={addLabel}
-              aria-label="Add Label"
-              className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-[#1e3058] bg-transparent text-[11px] text-[#4a9eff] transition-all duration-200 hover:border-[#4a9eff]/50 hover:bg-[#4a9eff]/10 active:scale-90"
+              onClick={onClickReturnButton}
+              className="group relative flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-200 hover:bg-[#1a2540] active:scale-95"
+              aria-label="Go back"
             >
-              +
+              <Icon
+                name="chevron-left"
+                className="text-[#5a8ab8] group-hover:text-[#4a9eff] h-5 w-5 transition-colors duration-200"
+              />
             </button>
+
+            <div className="h-6 w-px bg-[#1a2540]" />
+
+            <div className="flex items-center space-x-2.5">
+              <Typography variant="h4" className="text-[14px] font-semibold text-[#c8d8f0] tracking-tight">
+                {workflowName}
+              </Typography>
+              <span className="bg-[#4a9eff]/10 text-[#4a9eff] border border-[#4a9eff]/30 rounded-full px-2.5 py-0.5 text-[10px] font-semibold tracking-wider uppercase">
+                Active
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Layout */}
+      <div className="flex" style={{ height: 'calc(100vh - 56px)' }}>
+
+        {/* Left Panel - Studies Table */}
+        <div className="flex-1 overflow-y-auto bg-[#0d1526] p-5">
+          <div className="mb-5 flex items-center justify-between">
+            <Typography variant="h5" className="text-[13px] font-semibold text-[#c8d8f0]">
+              Studies
+            </Typography>
+            <div className="flex items-center gap-2">
+              <LegacyButton
+                rounded="full"
+                variant="outlined"
+                color="primaryActive"
+                border="primaryActive"
+                onClick={handleSelectAll}
+                className="text-[11px] border border-[#1e3058] text-[#4a9eff] bg-transparent hover:bg-[#4a9eff]/10 transition-all duration-200 px-3 py-1 rounded-full"
+              >
+                {selectAll ? 'Unselect All' : 'Select All'}
+              </LegacyButton>
+
+              <LegacyButton
+                rounded="full"
+                variant="outlined"
+                onClick={handleDeletion}
+                className="text-[11px] border border-[#e05a5a]/30 text-[#e05a5a] bg-[#e05a5a]/10 hover:bg-[#e05a5a]/20 transition-all duration-200 px-3 py-1 rounded-full"
+              >
+                {t('Delete')}
+              </LegacyButton>
+            </div>
           </div>
 
-          {/* Dynamic Labels */}
-          <div className="space-y-1.5">
-            {labels.map(labelObj => (
-              <div key={labelObj.id} className="group flex items-center gap-2">
-                <label className="min-w-[60px] whitespace-nowrap text-[10px] font-medium text-[#5a8ab8]">
-                  {labelObj.label}<span className="ml-0.5 text-[#1e3058]">:</span>
+          <div className="max-h-full">
+            <TableHeader tableHeader={tableHeader} />
+            {hasStudies ? (
+              <StudyListTable
+                tableDataSource={tableDataSource}
+                numOfStudies={studiesTotal}
+                querying={querying}
+                filtersMeta={filtersMeta}
+              />
+            ) : (
+              <EmptyStudies />
+            )}
+          </div>
+        </div>
+
+        {/* Right Panel - Configuration */}
+        <div className="w-[320px] flex-shrink-0 h-full overflow-y-auto bg-[#0d1526] border-l border-[#1a2540] scrollbar-thin scrollbar-thumb-[#1e3058]">
+          <div className="p-3 space-y-3">
+
+            {/* Server Header */}
+            <div className="flex items-center justify-between p-3 bg-[#071020] rounded-lg border border-[#1a2540]">
+              <div className="flex flex-col gap-0.5">
+                <span className="text-[9px] font-bold text-[#3d6a9e] uppercase tracking-[0.12em]">
+                  Server
+                </span>
+                <Typography variant="h6" className="text-[13px] font-semibold text-[#c8d8f0]">
+                  Workflow
+                </Typography>
+              </div>
+              <div className={`flex items-center gap-1.5 px-2 py-1 rounded-md border ${isConnected ? 'bg-[#1a4a3a]/40 border-[#1e5a3a]' : 'bg-[#1a2540]/50 border-[#1e3058]'}`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-[#34d399]' : 'bg-[#3d6a9e]'}`} />
+                <span className={`text-[10px] font-medium ${isConnected ? 'text-[#34d399]' : 'text-[#5a8ab8]'}`}>
+                  {isConnected ? 'Connected' : 'Disconnected'}
+                </span>
+              </div>
+            </div>
+
+            {/* Model Settings Section */}
+            <div className="bg-[#071020] border border-[#1a2540] rounded-lg p-3 space-y-3">
+              <h3 className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#3d6a9e]">
+                Model
+              </h3>
+
+              {/* Labels Section */}
+              <div className="flex w-full items-center justify-between">
+                <label className="text-[11px] font-medium text-[#8ab4e0]">
+                  Labels<span className="text-[#1e3058] ml-0.5">:</span>
                 </label>
-                <input
-                  id={`input-${labelObj.id}`}
-                  type="text"
-                  placeholder="Enter value..."
-                  onBlur={e => handleLabelBlur(labelObj.id, e.target.value)}
-                  className="flex-1 rounded-[3px] border border-[#1e3058] bg-[#071020] px-1.5 py-0.5 text-[11px] text-[#c8d8f0] outline-none transition-all duration-200 placeholder:text-[#3d6a9e] focus:border-[#4a9eff]/50 focus:ring-1 focus:ring-[#4a9eff]/20"
-                />
                 <button
                   type="button"
-                  onClick={() => handleDeleteLabel(labelObj.id)}
-                  aria-label={`Delete ${labelObj.label}`}
-                  className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full text-[#1e3058] hover:text-[#e05a5a] hover:bg-[#e05a5a]/10 opacity-0 group-hover:opacity-100 transition-all duration-200 cursor-pointer"
+                  onClick={addLabel}
+                  aria-label="Add Label"
+                  className="flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-[#1e3058] bg-transparent text-[11px] text-[#4a9eff] transition-all duration-200 hover:border-[#4a9eff]/50 hover:bg-[#4a9eff]/10 active:scale-90"
                 >
-                  <Icon name="old-trash" size="10" className="text-current pointer-events-none" />
+                  +
                 </button>
               </div>
-            ))}
-          </div>
 
-          {/* Model Type Dropdown */}
-          <div className="flex w-full items-center justify-between gap-2">
-            <label className="whitespace-nowrap text-[11px] font-medium text-[#8ab4e0]">
-              Model Type<span className="text-[#1e3058] ml-0.5">:</span>
-            </label>
-            <div className="relative max-w-[160px] flex-1">
-              <select
-                value={modelConfig}
-                onChange={e => setModelConfig(e.target.value)}
-                className="w-full cursor-pointer appearance-none rounded-[3px] border border-[#1e3058] bg-[#071020] py-1 pl-2 pr-7 text-[11px] text-[#c8d8f0] outline-none transition-all duration-200 focus:border-[#4a9eff]/50 focus:ring-1 focus:ring-[#4a9eff]/20"
+              {/* Dynamic Labels */}
+              <div className="space-y-1.5">
+                {labels.map(labelObj => (
+                  <div key={labelObj.id} className="group flex items-center gap-2">
+                    <label className="min-w-[60px] whitespace-nowrap text-[10px] font-medium text-[#5a8ab8]">
+                      {labelObj.label}<span className="ml-0.5 text-[#1e3058]">:</span>
+                    </label>
+                    <input
+                      id={`input-${labelObj.id}`}
+                      type="text"
+                      placeholder="Enter value..."
+                      onBlur={e => handleLabelBlur(labelObj.id, e.target.value)}
+                      className="flex-1 rounded-[3px] border border-[#1e3058] bg-[#071020] px-1.5 py-0.5 text-[11px] text-[#c8d8f0] outline-none transition-all duration-200 placeholder:text-[#3d6a9e] focus:border-[#4a9eff]/50 focus:ring-1 focus:ring-[#4a9eff]/20"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteLabel(labelObj.id)}
+                      aria-label={`Delete ${labelObj.label}`}
+                      className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full text-[#1e3058] hover:text-[#e05a5a] hover:bg-[#e05a5a]/10 opacity-0 group-hover:opacity-100 transition-all duration-200 cursor-pointer"
+                    >
+                      <Icon name="old-trash" size="10" className="text-current pointer-events-none" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Model Type Dropdown */}
+              <div className="flex w-full items-center justify-between gap-2">
+                <label className="whitespace-nowrap text-[11px] font-medium text-[#8ab4e0]">
+                  Model Type<span className="text-[#1e3058] ml-0.5">:</span>
+                </label>
+                <div className="relative max-w-[160px] flex-1">
+                  <select
+                    value={modelConfig}
+                    onChange={e => setModelConfig(e.target.value)}
+                    className="w-full cursor-pointer appearance-none rounded-[3px] border border-[#1e3058] bg-[#071020] py-1 pl-2 pr-7 text-[11px] text-[#c8d8f0] outline-none transition-all duration-200 focus:border-[#4a9eff]/50 focus:ring-1 focus:ring-[#4a9eff]/20"
+                  >
+                    <option value="2d" className="bg-[#071020] text-[#c8d8f0]">2D</option>
+                    <option value="3d_lowres" className="bg-[#071020] text-[#c8d8f0]">3D</option>
+                    <option value="3d_fullres" className="bg-[#071020] text-[#c8d8f0]">3D Full Resolution</option>
+                  </select>
+                  <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
+                    <Icon name="chevron-down" size="11" className="text-[#3d6a9e]" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Number of Folds */}
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-medium text-[#8ab4e0] whitespace-nowrap">
+                  Number of Folds<span className="text-[#1e3058] ml-0.5">:</span>
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    max="5"
+                    value={numFolds}
+                    onChange={e => setNumFolds(Math.min(5, Math.max(1, Number(e.target.value))))}
+                    className="w-12 bg-[#071020] border border-[#1e3058] rounded-[3px] py-1 text-[11px] text-[#c8d8f0] text-center outline-none cursor-pointer focus:border-[#4a9eff]/50 focus:ring-1 focus:ring-[#4a9eff]/20 transition-all duration-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                  <div className="relative group">
+                    <div className="flex items-center justify-center w-4 h-4 rounded-full cursor-help text-[#3d6a9e] hover:text-[#4a9eff] transition-colors duration-200">
+                      <Icon name="notifications-info" size="13" className="text-current" />
+                    </div>
+                    <div className="pointer-events-none absolute right-0 bottom-full mb-2 w-48 p-2.5 rounded-lg bg-[#101c35] border border-[#1e3058] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                      <p className="text-[10px] text-[#8ab4e0] leading-relaxed">
+                        Used for <span className="text-[#4a9eff] font-medium">k-fold cross-validation</span>. Increasing folds improves generalization but takes more computation.
+                      </p>
+                      <div className="absolute right-3 -bottom-[5px] w-2 h-2 bg-[#101c35] border-b border-r border-[#1e3058] rotate-45 -z-10" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Training Info Section */}
+            <div className="bg-[#071020] border border-[#1a2540] rounded-lg p-3 space-y-2">
+              <h3 className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#3d6a9e] mb-2">
+                Training Info
+              </h3>
+
+              <div className="flex items-center justify-between py-0.5">
+                <span className="text-[11px] text-[#8ab4e0]">Training Studies:</span>
+                <span className="text-[11px] font-medium text-[#c8d8f0]">{trainCount}</span>
+              </div>
+
+              <div className="flex items-center justify-between py-0.5">
+                <span className="text-[11px] text-[#8ab4e0]">Validation Studies:</span>
+                <span className="text-[11px] font-medium text-[#c8d8f0]">{validationCount}</span>
+              </div>
+
+              <div className="flex items-center justify-between mt-1.5 bg-[#0d1526] border border-[#1e3058] rounded-[3px] px-2.5 py-1.5">
+                <span className="text-[11px] font-semibold text-[#8ab4e0]">Train/Validation Ratio:</span>
+                <span className="text-[11px] font-bold text-[#4a9eff]">{`${trainCount} : ${validationCount}`}</span>
+              </div>
+
+              {/* Train Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (isTraining) {
+                    setIsTraining(false);
+                  } else {
+                    const { isValid } = validateLabels(labels);
+                    if (isValid) setIsModalOpen(true);
+                  }
+                }}
+                className={`w-full mt-3 py-2 rounded-[3px] font-semibold text-[11px] transition-all duration-200 active:scale-[0.98] cursor-pointer border-none ${isTraining
+                    ? 'bg-[#e05a5a]/20 text-[#e05a5a] border border-[#e05a5a]/30 hover:bg-[#e05a5a]/30'
+                    : 'bg-[#1a4a8a] text-[#c8d8f0] hover:bg-[#1e5aaa]'
+                  }`}
               >
-                <option value="2d" className="bg-[#071020] text-[#c8d8f0]">2D</option>
-                <option value="3d_lowres" className="bg-[#071020] text-[#c8d8f0]">3D</option>
-                <option value="3d_fullres" className="bg-[#071020] text-[#c8d8f0]">3D Full Resolution</option>
-              </select>
-              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                <Icon name="chevron-down" size="11" className="text-[#3d6a9e]" />
-              </div>
+                {isTraining ? 'Stop Training' : 'Train Model'}
+              </button>
             </div>
-          </div>
 
-          {/* Number of Folds */}
-          <div className="flex items-center justify-between">
-            <label className="text-[11px] font-medium text-[#8ab4e0] whitespace-nowrap">
-              Number of Folds<span className="text-[#1e3058] ml-0.5">:</span>
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min="1"
-                max="5"
-                value={numFolds}
-                onChange={e => setNumFolds(Math.min(5, Math.max(1, Number(e.target.value))))}
-                className="w-12 bg-[#071020] border border-[#1e3058] rounded-[3px] py-1 text-[11px] text-[#c8d8f0] text-center outline-none cursor-pointer focus:border-[#4a9eff]/50 focus:ring-1 focus:ring-[#4a9eff]/20 transition-all duration-200 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-              <div className="relative group">
-                <div className="flex items-center justify-center w-4 h-4 rounded-full cursor-help text-[#3d6a9e] hover:text-[#4a9eff] transition-colors duration-200">
-                  <Icon name="notifications-info" size="13" className="text-current" />
+            {/* Model Progress Section */}
+            <div className="bg-[#071020] border border-[#1a2540] rounded-lg p-3 space-y-3">
+              <h3 className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#3d6a9e]">
+                Model Progress
+              </h3>
+
+              {/* Training Progress Bar */}
+              <div className="flex items-center gap-3">
+                <span className="w-24 text-[11px] text-[#8ab4e0] flex-shrink-0">Training Progress</span>
+                <div className="relative h-2 w-full rounded-full bg-[#0d1526] border border-[#1e3058] overflow-hidden">
+                  <div
+                    className="absolute top-0 left-0 h-full rounded-full transition-all duration-500"
+                    style={{ width: `0%`, background: 'linear-gradient(to right, #f97316, #eab308)' }}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-[#c8d8f0]">
+                    0%
+                  </div>
                 </div>
-                <div className="pointer-events-none absolute right-0 bottom-full mb-2 w-48 p-2.5 rounded-lg bg-[#101c35] border border-[#1e3058] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
-                  <p className="text-[10px] text-[#8ab4e0] leading-relaxed">
-                    Used for <span className="text-[#4a9eff] font-medium">k-fold cross-validation</span>. Increasing folds improves generalization but takes more computation.
-                  </p>
-                  <div className="absolute right-3 -bottom-[5px] w-2 h-2 bg-[#101c35] border-b border-r border-[#1e3058] rotate-45 -z-10" />
+              </div>
+
+              {/* Dice Metric Progress Bar */}
+              <div className="flex items-center gap-3">
+                <span className="w-24 text-[11px] text-[#8ab4e0] flex-shrink-0">Dice Metric</span>
+                <div className="relative h-2 w-full rounded-full bg-[#0d1526] border border-[#1e3058] overflow-hidden">
+                  <div
+                    className="absolute top-0 left-0 h-full rounded-full transition-all duration-500"
+                    style={{ width: `0%`, background: 'linear-gradient(to right, #e05a5a, #22c55e)' }}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-[#c8d8f0]">
+                    0%
+                  </div>
                 </div>
               </div>
             </div>
+
+          </div>
+        </div>
+      </div>
+
+      {/* Training Summary Modal */}
+      <Modal
+        isOpen={isModalOpen}
+        onRequestClose={() => setIsModalOpen(false)}
+        contentLabel="Training Summary"
+        style={{
+          overlay: {
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backdropFilter: 'blur(4px)',
+            zIndex: 50,
+          },
+          content: {
+            width: '380px',
+            padding: '20px',
+            borderRadius: '8px',
+            backgroundColor: '#0d1526',
+            border: '1px solid #1a2540',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            textAlign: 'center',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
+          },
+        }}
+      >
+        <h2 className="mb-5 text-[14px] font-bold text-[#c8d8f0]">Training Summary</h2>
+        <div className="w-full space-y-2 text-left mb-5">
+          <div className="flex justify-between px-1.5 py-1 border-b border-[#1a2540]">
+            <span className="text-[#5a8ab8] text-[11px]">Model Type:</span>
+            <span className="text-[#c8d8f0] text-[11px] font-medium">{modelConfigDict[modelConfig]}</span>
+          </div>
+          <div className="flex justify-between px-1.5 py-1 border-b border-[#1a2540]">
+            <span className="text-[#5a8ab8] text-[11px]">Number of Folds:</span>
+            <span className="text-[#c8d8f0] text-[11px] font-medium">{numFolds}</span>
+          </div>
+          <div className="flex justify-between px-1.5 py-1 border-b border-[#1a2540]">
+            <span className="text-[#5a8ab8] text-[11px]">Labels:</span>
+            <span className="text-[#c8d8f0] text-[11px] font-medium">
+              {Object.keys(labelsDictionary).length > 0 ? Object.keys(labelsDictionary).join(', ') : 'No labels defined'}
+            </span>
+          </div>
+          <div className="flex justify-between px-1.5 py-1">
+            <span className="text-[#5a8ab8] text-[11px]">Total Studies:</span>
+            <span className="text-[#c8d8f0] text-[11px] font-medium">{workflowStudies.length}</span>
           </div>
         </div>
 
-        {/* Training Info Section */}
-        <div className="bg-[#071020] border border-[#1a2540] rounded-lg p-3 space-y-2">
-          <h3 className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#3d6a9e] mb-2">
-            Training Info
-          </h3>
-
-          <div className="flex items-center justify-between py-0.5">
-            <span className="text-[11px] text-[#8ab4e0]">Training Studies:</span>
-            <span className="text-[11px] font-medium text-[#c8d8f0]">{trainCount}</span>
-          </div>
-
-          <div className="flex items-center justify-between py-0.5">
-            <span className="text-[11px] text-[#8ab4e0]">Validation Studies:</span>
-            <span className="text-[11px] font-medium text-[#c8d8f0]">{validationCount}</span>
-          </div>
-
-          <div className="flex items-center justify-between mt-1.5 bg-[#0d1526] border border-[#1e3058] rounded-[3px] px-2.5 py-1.5">
-            <span className="text-[11px] font-semibold text-[#8ab4e0]">Train/Validation Ratio:</span>
-            <span className="text-[11px] font-bold text-[#4a9eff]">{`${trainCount} : ${validationCount}`}</span>
-          </div>
-
-          {/* Train Button */}
+        <div className="flex w-full gap-2">
           <button
-            type="button"
-            onClick={() => {
-              if (isTraining) {
-                setIsTraining(false);
-              } else {
-                const { isValid } = validateLabels(labels);
-                if (isValid) setIsModalOpen(true);
-              }
-            }}
-            className={`w-full mt-3 py-2 rounded-[3px] font-semibold text-[11px] transition-all duration-200 active:scale-[0.98] cursor-pointer border-none ${
-              isTraining
-                ? 'bg-[#e05a5a]/20 text-[#e05a5a] border border-[#e05a5a]/30 hover:bg-[#e05a5a]/30'
-                : 'bg-[#1a4a8a] text-[#c8d8f0] hover:bg-[#1e5aaa]'
-            }`}
+            onClick={() => setIsModalOpen(false)}
+            className="flex-1 py-2 rounded-[3px] bg-transparent border border-[#1e3058] text-[#5a8ab8] text-[11px] font-medium hover:border-[#4a9eff] hover:text-[#4a9eff] transition-colors cursor-pointer"
           >
-            {isTraining ? 'Stop Training' : 'Train Model'}
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              setIsModalOpen(false);
+              setIsTraining(true);
+              train();
+            }}
+            className="flex-1 py-2 rounded-[3px] bg-[#1a4a8a] text-[#c8d8f0] text-[11px] font-bold hover:bg-[#1e5aaa] transition-colors cursor-pointer"
+          >
+            Proceed
           </button>
         </div>
-
-        {/* Model Progress Section */}
-        <div className="bg-[#071020] border border-[#1a2540] rounded-lg p-3 space-y-3">
-          <h3 className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#3d6a9e]">
-            Model Progress
-          </h3>
-
-          {/* Training Progress Bar */}
-          <div className="flex items-center gap-3">
-            <span className="w-24 text-[11px] text-[#8ab4e0] flex-shrink-0">Training Progress</span>
-            <div className="relative h-2 w-full rounded-full bg-[#0d1526] border border-[#1e3058] overflow-hidden">
-              <div
-                className="absolute top-0 left-0 h-full rounded-full transition-all duration-500"
-                style={{ width: `0%`, background: 'linear-gradient(to right, #f97316, #eab308)' }}
-              />
-              <div className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-[#c8d8f0]">
-                0%
-              </div>
-            </div>
-          </div>
-
-          {/* Dice Metric Progress Bar */}
-          <div className="flex items-center gap-3">
-            <span className="w-24 text-[11px] text-[#8ab4e0] flex-shrink-0">Dice Metric</span>
-            <div className="relative h-2 w-full rounded-full bg-[#0d1526] border border-[#1e3058] overflow-hidden">
-              <div
-                className="absolute top-0 left-0 h-full rounded-full transition-all duration-500"
-                style={{ width: `0%`, background: 'linear-gradient(to right, #e05a5a, #22c55e)' }}
-              />
-              <div className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-[#c8d8f0]">
-                0%
-              </div>
-            </div>
-          </div>
-        </div>
-
-      </div>
+      </Modal>
     </div>
-  </div>
-
-  {/* Training Summary Modal */}
-  <Modal
-    isOpen={isModalOpen}
-    onRequestClose={() => setIsModalOpen(false)}
-    contentLabel="Training Summary"
-    style={{
-      overlay: {
-        backgroundColor: 'rgba(0, 0, 0, 0.7)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backdropFilter: 'blur(4px)',
-        zIndex: 50,
-      },
-      content: {
-        width: '380px',
-        padding: '20px',
-        borderRadius: '8px',
-        backgroundColor: '#0d1526',
-        border: '1px solid #1a2540',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        textAlign: 'center',
-        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
-      },
-    }}
-  >
-    <h2 className="mb-5 text-[14px] font-bold text-[#c8d8f0]">Training Summary</h2>
-    <div className="w-full space-y-2 text-left mb-5">
-      <div className="flex justify-between px-1.5 py-1 border-b border-[#1a2540]">
-        <span className="text-[#5a8ab8] text-[11px]">Model Type:</span>
-        <span className="text-[#c8d8f0] text-[11px] font-medium">{modelConfigDict[modelConfig]}</span>
-      </div>
-      <div className="flex justify-between px-1.5 py-1 border-b border-[#1a2540]">
-        <span className="text-[#5a8ab8] text-[11px]">Number of Folds:</span>
-        <span className="text-[#c8d8f0] text-[11px] font-medium">{numFolds}</span>
-      </div>
-      <div className="flex justify-between px-1.5 py-1 border-b border-[#1a2540]">
-        <span className="text-[#5a8ab8] text-[11px]">Labels:</span>
-        <span className="text-[#c8d8f0] text-[11px] font-medium">
-          {Object.keys(labelsDictionary).length > 0 ? Object.keys(labelsDictionary).join(', ') : 'No labels defined'}
-        </span>
-      </div>
-      <div className="flex justify-between px-1.5 py-1">
-        <span className="text-[#5a8ab8] text-[11px]">Total Studies:</span>
-        <span className="text-[#c8d8f0] text-[11px] font-medium">{workflowStudies.length}</span>
-      </div>
-    </div>
-
-    <div className="flex w-full gap-2">
-      <button
-        onClick={() => setIsModalOpen(false)}
-        className="flex-1 py-2 rounded-[3px] bg-transparent border border-[#1e3058] text-[#5a8ab8] text-[11px] font-medium hover:border-[#4a9eff] hover:text-[#4a9eff] transition-colors cursor-pointer"
-      >
-        Cancel
-      </button>
-      <button
-        onClick={() => {
-          setIsModalOpen(false);
-          setIsTraining(true);
-          train();
-        }}
-        className="flex-1 py-2 rounded-[3px] bg-[#1a4a8a] text-[#c8d8f0] text-[11px] font-bold hover:bg-[#1e5aaa] transition-colors cursor-pointer"
-      >
-        Proceed
-      </button>
-    </div>
-  </Modal>
-</div>
-      );
+  );
 }
 
 export default WorkflowDetailPage;

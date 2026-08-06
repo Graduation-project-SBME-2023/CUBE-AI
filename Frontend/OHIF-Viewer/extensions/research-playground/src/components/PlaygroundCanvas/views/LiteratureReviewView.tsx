@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { LiteratureReviewViewProps, Paper } from './literatureReview/types';
 import { parseOutput, parseKnowledgeBase, CATEGORY_COLORS, sectionToMarkdown } from './literatureReview/utils';
-import { mdComponents, PicoRow, SectionCard, PaperCard } from './literatureReview/Shared';
+import { mdComponents, PicoCard, SectionCard, PaperCard } from './literatureReview/Shared';
 
 const BookOpenTextIcon: any = BookOpenText;
 const FlaskConicalIcon: any = FlaskConical;
@@ -86,7 +86,7 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
 
   return (
     <div className="w-full h-full overflow-auto bg-[#06090e] flex flex-col [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#1f2d40] [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-[#5acce6]/50 transition-colors">
-      <div className="max-w-6xl mx-auto p-6 md:p-8 space-y-6 w-full flex-1">
+      <div className="w-full flex-1 p-6 md:px-10 md:py-8 space-y-6">
         {/* ── Header ──────────────────────────────────────────────────── */}
         <div className="rounded-3xl border border-white/5 bg-[#0b1015]/80 backdrop-blur-md px-6 py-5 flex items-center gap-5 shadow-lg shadow-black/20">
           <div className="w-12 h-12 rounded-2xl bg-[#0d2847]/80 flex items-center justify-center border border-[#5acce6]/20 shadow-[0_0_15px_rgba(90,204,230,0.15)]">
@@ -152,7 +152,7 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
         <div className="pt-2 pb-10">
           {/* OVERVIEW TAB */}
           {activeTab === 'overview' && (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="flex flex-col gap-6">
               {/* Hypothesis */}
               {hypothesis.hypothesis && (
                 <div className="rounded-3xl border border-white/5 bg-[#0b1015]/60 backdrop-blur-md overflow-hidden shadow-lg shadow-black/20 h-fit transition-all duration-300 hover:border-white/10 hover:shadow-cyan-900/5">
@@ -184,11 +184,11 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
                     <FileSearchIcon size={16} className="text-[#a78bfa]" />
                     <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#a78bfa]">PICO Framework</h3>
                   </div>
-                  <div className="p-6 space-y-2">
-                    <PicoRow icon={<UsersIcon size={14} />} label="Population" value={hypothesis.population} color="#5acce6" />
-                    <PicoRow icon={<StethoscopeIcon size={14} />} label="Intervention" value={hypothesis.intervention} color="#6fe5b8" />
-                    <PicoRow icon={<GitCompareIcon size={14} />} label="Comparison" value={hypothesis.comparison} color="#f59e42" />
-                    <PicoRow icon={<TargetIcon size={14} />} label="Outcome" value={hypothesis.outcome} color="#e879a5" />
+                  <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <PicoCard icon={<UsersIcon size={14} />} label="Population" value={hypothesis.population} color="#5acce6" />
+                    <PicoCard icon={<StethoscopeIcon size={14} />} label="Intervention" value={hypothesis.intervention} color="#6fe5b8" />
+                    <PicoCard icon={<GitCompareIcon size={14} />} label="Comparison" value={hypothesis.comparison} color="#f59e42" />
+                    <PicoCard icon={<TargetIcon size={14} />} label="Outcome" value={hypothesis.outcome} color="#e879a5" />
                   </div>
                 </div>
               )}

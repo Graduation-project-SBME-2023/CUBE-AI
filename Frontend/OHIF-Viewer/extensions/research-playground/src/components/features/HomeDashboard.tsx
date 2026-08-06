@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Bot, Box, Clock, List, Search, Trash2, Settings, AlertTriangle, Check, ChevronDown, Book, Sliders, Dna, Activity, BrainCircuit } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bot, Box, Clock, List, Search, Trash2, Settings, AlertTriangle, Check, ChevronDown, Book, Sliders, Dna, Activity, BrainCircuit, LayoutList } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../ui/Card';
 import { getBackendApiBaseUrl, getAgentsApiBaseUrl } from '../../utils/apiBase';
@@ -268,34 +268,55 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
         style={{ background: 'radial-gradient(circle at 50% 0%, rgba(111, 229, 184, 0.1), transparent 60%)' }}
       />
 
-      <div className="z-50 flex h-12 shrink-0 items-center justify-between border-b border-[#3c5d80] bg-[#151a1f]/80 px-8 backdrop-blur-md">
-        <div className="flex items-center gap-3 text-lg font-bold tracking-wide text-[#91b9cd]">
+      <div className="z-50 flex h-14 shrink-0 items-center justify-between  bg-[#0f1419]/90 px-6 backdrop-blur-md shadow-sm relative">
+        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#5acce6]/20 to-transparent"></div>
+        
+        <div className="flex items-center gap-4">
           <button
             onClick={() => (onBack ? onBack() : navigate('/'))}
-            className="rounded-full p-2 text-[#566a84] transition-colors hover:bg-[#1f2d40] hover:text-white"
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2e445c] bg-[#1a2535] text-[#91b9cd] transition-all duration-300 hover:bg-[#25364d] hover:text-[#cbe1ed] hover:border-[#5acce6] hover:shadow-[0_0_12px_rgba(90,204,230,0.15)] group"
             title="Back to Startup"
-            aria-label="Back to Startup"
           >
-            <ArrowLeft size={20} />
-
+            <ArrowLeft size={16} className="transition-transform group-hover:-translate-x-0.5" />
           </button>
 
-          <button
-            onClick={() => navigate('/worklist')}
-            className="mr-2 p-2 rounded-md transition-all hover:bg-[#0d1e2e] text-[#5a8aaa] hover:text-[#5acce6] border border-transparent hover:border-[#1e3248]"
-            title="Go to Worklist"
-            aria-label="Go to Worklist"
-          >
-            <List size={16} />
-          </button>
+          <div className="w-px h-5 bg-[#2e445c]"></div>
 
+          <div className="flex items-center gap-3">
+            <img src="/assets/icon.png" alt="Icon" className="h-8 w-auto object-contain drop-shadow-[0_0_12px_rgba(90,204,230,0.3)] transition-transform hover:scale-105" />
+            <div className="flex flex-col justify-center mt-0.5">
+                <span className="text-[15px] font-black tracking-widest text-[#e2f1f8] leading-none mb-1">
+                    CUBE<span className="text-[#5acce6]">.AI</span>
+                </span>
+                <span className="text-[9px] text-[#5acce6] font-bold leading-none tracking-widest uppercase">Radiology Platform</span>
+            </div>
+          </div>
         </div>
 
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => window.open('/worklist', '_blank')}
+            className="flex h-8 items-center gap-2 rounded-lg border border-[#2e445c] bg-[#151a1f] px-4 text-[11px] font-bold uppercase tracking-wider text-[#91b9cd] transition-all duration-300 hover:border-[#5acce6] hover:bg-[#1a2535] hover:text-[#cbe1ed] hover:shadow-[0_0_12px_rgba(90,204,230,0.15)] group"
+            title="Go to Worklist"
+          >
+            <LayoutList size={14} className="transition-transform group-hover:scale-110" /> Worklist
+          </button>
+
+          <div className="w-px h-5 bg-[#2e445c] mx-1"></div>
+
+          <button
+            onClick={() => setShowModelSettings(true)}
+            className="flex h-8 items-center gap-2 rounded-lg border border-[#2e445c] bg-[#151a1f] px-4 text-[11px] font-bold uppercase tracking-wider text-[#91b9cd] transition-all duration-300 hover:border-[#5acce6] hover:bg-[#1a2535] hover:text-[#cbe1ed] hover:shadow-[0_0_12px_rgba(90,204,230,0.15)] group"
+            title="Model Settings"
+          >
+            <Settings size={14} className="transition-transform group-hover:rotate-45" /> Model Config
+          </button>
+        </div>
       </div>
 
       <div className="relative flex-1 w-full overflow-y-auto ohif-scrollbar">
 
-      <div className="z-10 mx-auto w-full max-w-5xl space-y-8 px-6 pb-12 pt-12 text-center">
+      <div className="z-10 mx-auto w-full max-w-6xl space-y-8 px-6 pb-12 pt-12 text-center">
         <p className="mx-auto max-w-4xl bg-gradient-to-r from-white to-[#91b9cd] bg-clip-text text-2xl font-medium leading-relaxed text-transparent md:text-3xl">
           Describe your research question or hypothesis, and CUBE will construct the workflow.
         </p>
@@ -321,10 +342,10 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
             return (
               <React.Fragment key={s.num}>
                 <div className="flex items-center gap-2">
-                  <div className={`flex items-center justify-center w-8 h-8 rounded-full border-2 transition-all duration-300 ${isCompleted ? 'bg-green-500/20 border-green-500 text-green-400' : isActive ? 'border-amber-500 text-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.4)]' : 'border-[#2e445c] text-[#566a84]'}`}>
+                  <div className={`flex items-center justify-center w-8 h-8 rounded-full border-2 transition-all duration-300 ${isCompleted ? 'bg-green-500/20 border-green-500 text-green-400' : isActive ? 'border-[#5acce6] text-[#5acce6] shadow-[0_0_15px_rgba(90,204,230,0.4)]' : 'border-[#2e445c] text-[#566a84]'}`}>
                     {isCompleted ? <Check size={16} /> : <span className="text-sm font-bold">{s.num}</span>}
                   </div>
-                  <span className={`text-sm font-medium ${isCompleted ? 'text-green-400' : isActive ? 'text-amber-500' : 'text-[#566a84]'}`}>{s.label}</span>
+                  <span className={`text-sm font-medium ${isCompleted ? 'text-green-400' : isActive ? 'text-[#5acce6]' : 'text-[#566a84]'}`}>{s.label}</span>
                 </div>
                 {idx < 2 && <div className={`w-12 h-[2px] rounded-full transition-colors duration-300 ${isCompleted ? 'bg-green-500/50' : 'bg-[#2e445c]'}`} />}
               </React.Fragment>
@@ -332,7 +353,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
           })}
         </div>
 
-        <div className="group relative mx-auto w-full max-w-4xl rounded-3xl border border-[#2e445c] bg-[#151a1f] p-2 shadow-2xl transition-all focus-within:border-[#5acce6] focus-within:shadow-[0_0_30px_rgba(90,204,230,0.15)]">
+        <div className="group relative mx-auto w-full max-w-6xl rounded-3xl border border-[#2e445c] bg-[#151a1f] p-2 shadow-2xl transition-all focus-within:border-[#5acce6] focus-within:shadow-[0_0_30px_rgba(90,204,230,0.15)]">
           {/* Search Area */}
           <div className="relative flex items-start">
             <Search

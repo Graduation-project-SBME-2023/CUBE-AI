@@ -1,5 +1,6 @@
 import React from 'react';
-import { Home, Lock, PanelLeftClose, PanelLeftOpen, Plus, Rocket } from 'lucide-react';
+import { Home, Lock, PanelLeftClose, PanelLeftOpen, Plus, Rocket, ArrowLeft, BrainCircuit } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 const HomeIcon: any = Home;
 const LockIcon: any = Lock;
@@ -7,6 +8,8 @@ const PanelLeftCloseIcon: any = PanelLeftClose;
 const PanelLeftOpenIcon: any = PanelLeftOpen;
 const PlusIcon: any = Plus;
 const RocketIcon: any = Rocket;
+const ArrowLeftIcon: any = ArrowLeft;
+const BrainCircuitIcon: any = BrainCircuit;
 
 interface PhaseSidebarProps {
     phases: any[];
@@ -40,6 +43,7 @@ export default function PhaseSidebar({
     isCollapsed,
     onToggleCollapse,
 }: PhaseSidebarProps) {
+    const navigate = useNavigate();
     const activePhaseObj = phases.find(p => p.id === activePhase);
 
     // Count how many phases are actually active (not locked) for the step badge
@@ -49,19 +53,79 @@ export default function PhaseSidebar({
     return (
         <div
             className={`flex flex-col z-10 shrink-0 transition-[width] duration-200 ${
-                isCollapsed ? 'w-16' : 'w-60'
+                isCollapsed ? 'w-16' : 'w-64'
             }`}
-            style={{ background: '#0f1923', borderRight: '1px solid #1a2a3a' }}
+            style={{ background: '#0a1118', borderRight: '1px solid #1a2a3a' }}
         >
             {/* ── Header ── */}
             <div
-                className={`border-b flex flex-col ${
-                    isCollapsed ? 'items-center px-2 py-3' : 'px-4 py-3'
+                className={`border-b flex flex-col gap-5 ${
+                    isCollapsed ? 'items-center px-2 py-4' : 'px-5 py-5'
                 }`}
                 style={{ borderColor: '#1a2a3a' }}
             >
+                {!isCollapsed ? (
+                    <div className="flex items-center gap-3 w-full">
+                        <button
+                            type="button"
+                            onClick={() => navigate('/agentic-home')}
+                            className="h-8 w-8 shrink-0 rounded-lg flex items-center justify-center transition-all bg-[#0f1923] border border-[#1e3248] text-[#5a8aaa] hover:border-[#5acce6] hover:text-[#5acce6] hover:bg-[#152537] shadow-sm"
+                            title="Back to Dashboard"
+                        >
+                            <ArrowLeftIcon size={14} strokeWidth={2.5} />
+                        </button>
+                        <div className="flex items-center gap-3">
+                            <img src="/assets/icon.png" alt="Icon" className="h-8 w-auto object-contain drop-shadow-[0_0_12px_rgba(90,204,230,0.3)] transition-transform hover:scale-105" />
+                            <div className="flex flex-col justify-center mt-0.5">
+                                <span className="text-[15px] font-black tracking-widest text-[#e2f1f8] leading-none mb-1">
+                                    CUBE<span className="text-[#5acce6]">.AI</span>
+                                </span>
+                                <span className="text-[7px] text-[#5acce6] font-bold leading-none tracking-widest uppercase">Research Playground</span>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex flex-col items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => navigate('/agentic-home')}
+                            className="h-8 w-8 rounded-lg flex items-center justify-center transition-all bg-[#0f1923] border border-[#1e3248] text-[#5a8aaa] hover:border-[#5acce6] hover:text-[#5acce6] hover:bg-[#152537] shadow-sm"
+                            title="Back to Dashboard"
+                        >
+                            <ArrowLeftIcon size={14} strokeWidth={2.5} />
+                        </button>
+                        <img src="/assets/icon.png" alt="Icon" className="h-8 w-auto object-contain drop-shadow-[0_0_12px_rgba(90,204,230,0.3)] transition-transform hover:scale-105" title="CUBE.AI" />
+                    </div>
+                )}
+                {/* Navigation and Actions */}
+                <div className={`flex items-center ${isCollapsed ? 'flex-col gap-3' : 'justify-between'}`}>
+                    <div className={`flex items-center ${isCollapsed ? 'flex-col gap-3' : 'gap-2'}`}>
+                        <button
+                            type="button"
+                            onClick={() => onSelectPhase('planning')}
+                            className={`h-8 w-8 rounded-lg flex items-center justify-center transition-all shadow-sm ${
+                                activePhase === 'planning'
+                                    ? 'border border-[#5acce6] text-[#5acce6] bg-[#0d2540] shadow-[0_0_10px_rgba(90,204,230,0.15)]'
+                                    : 'border border-[#1e3248] text-[#5a8aaa] bg-[#0f1923] hover:border-[#5acce6] hover:text-[#5acce6] hover:bg-[#152537]'
+                            }`}
+                            title="Study Planning"
+                        >
+                            <HomeIcon size={14} strokeWidth={activePhase === 'planning' ? 2.5 : 2} />
+                        </button>
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={onToggleCollapse}
+                        className="h-8 w-8 rounded-lg flex items-center justify-center transition-all text-[#5a8aaa] hover:text-[#5acce6] hover:bg-[#0f1923]"
+                        title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                    >
+                        {isCollapsed ? <PanelLeftOpenIcon size={16} strokeWidth={2.5} /> : <PanelLeftCloseIcon size={16} strokeWidth={2.5} />}
+                    </button>
+                </div>
+
                 {!isCollapsed && (
-                    <>
+                    <div className="flex flex-col mt-2">
                         <span
                             className="text-[9px] font-bold uppercase tracking-widest mb-0.5"
                             style={{ color: '#4a6580' }}
@@ -69,41 +133,14 @@ export default function PhaseSidebar({
                             Current Module
                         </span>
                         <span
-                            className="text-[13px] font-bold leading-tight"
+                            className="text-[14px] font-bold leading-tight"
                             style={{ color: '#e8f4ff', letterSpacing: '-0.01em' }}
                         >
                             {activePhaseObj?.label ?? ''}
                         </span>
-                    </>
+                    </div>
                 )}
 
-                {/* Action Buttons */}
-                <div className={`flex items-center gap-1.5 ${isCollapsed ? '' : 'mt-3'}`}>
-                    <button
-                        type="button"
-                        onClick={() => onSelectPhase('planning')}
-                        className={`h-7 w-7 rounded-md flex items-center justify-center transition-all ${
-                            activePhase === 'planning'
-                                ? 'border-[#5acce6] text-[#5acce6] bg-[#0d1e2e]'
-                                : 'border-[#1e3248] text-[#5a8aaa] hover:border-[#5acce6] hover:text-[#5acce6] hover:bg-[#0d1e2e]'
-                        }`}
-                        style={{ border: '1px solid' }}
-                        title="Go to home (Planning)"
-                        aria-label="Go to home (Planning)"
-                    >
-                        <HomeIcon size={13} />
-                    </button>
-
-                    <button
-                        type="button"
-                        onClick={onToggleCollapse}
-                        className="h-7 w-7 rounded-md flex items-center justify-center transition-all border border-[#1e3248] text-[#5a8aaa] hover:border-[#5acce6] hover:text-[#5acce6] hover:bg-[#0d1e2e]"
-                        title={isCollapsed ? 'Expand workflow sidebar' : 'Collapse workflow sidebar'}
-                        aria-label={isCollapsed ? 'Expand workflow sidebar' : 'Collapse workflow sidebar'}
-                    >
-                        {isCollapsed ? <PanelLeftOpenIcon size={13} /> : <PanelLeftCloseIcon size={13} />}
-                    </button>
-                </div>
             </div>
 
             {/* ── Phase List ── */}

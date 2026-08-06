@@ -103,10 +103,16 @@ function ViewerHeader({ hotkeysManager, servicesManager }) {
     });
   }
 
+  const onClickReturnButton = () => {
+    onClickWorklistButton();
+  };
+
   return (
     <Header
       menuOptions={menuOptions}
       WhiteLabeling={appConfig.whiteLabeling}
+      isReturnEnabled={true}
+      onClickReturnButton={onClickReturnButton}
     >
       <ErrorBoundary context="Primary Toolbar">
         <div className="flex items-center justify-center gap-3">

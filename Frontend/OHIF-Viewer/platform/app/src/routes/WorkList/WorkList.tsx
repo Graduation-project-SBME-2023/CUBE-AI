@@ -675,32 +675,28 @@ function WorkList({
         onClickReturnButton={() => navigate('/')}
         WhiteLabeling={appConfig.whiteLabeling}
       >
-        <div className="relative flex items-center justify-center gap-3">
+        <div className="relative flex items-center justify-center gap-1 bg-[#0a1118] p-1 shadow-inner">
           <button
             type="button"
-            data-cy="header-worklist-icon"
-            className="inline-flex items-center justify-center p-2 text-[#5acce6] transition duration-300 ease-in-out hover:bg-primary-light hover:text-black"
+            className="flex items-center gap-2 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[#5acce6] bg-[#1a2535] rounded-md shadow-[0_0_10px_rgba(90,204,230,0.15)] transition-all"
             onClick={() => navigate('/worklist')}
-            title="Go to Worklist"
-            aria-label="Go to Worklist"
+            title="Study List"
           >
-            <Icon name="list-bullets" className="h-5 w-5" />
+             Study List
           </button>
 
           <button
             type="button"
-            data-cy="header-agentic-home-icon"
-            className="inline-flex items-center justify-center p-2 text-[#5acce6] transition duration-300 ease-in-out hover:bg-primary-light hover:text-black"
+            className="flex items-center gap-2 px-4 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[#5a8aaa] hover:text-[#91b9cd] hover:bg-[#111a24] rounded-md transition-all"
             onClick={() => navigate('/agentic-home')}
-            title="Go to Agentic Home"
-            aria-label="Go to Agentic Home"
+            title="Go to Playground"
           >
-            <Icon name="profile" className="h-5 w-5" />
+          Playground
           </button>
         </div>
       </Header>
-      <div className="flex flex-row justify-center gap-4 ">
-        <div className="ohif-scrollbar flex max-w-[75%] grow flex-col overflow-y-auto pl-4">
+      <div className="flex w-full flex-row gap-4">
+        <div className="ohif-scrollbar flex grow flex-col overflow-y-auto px-4">
           <StudyListFilter
             numOfStudies={pageNumber * resultsPerPage > 100 ? 101 : numOfStudies}
             filtersMeta={filtersMeta}
@@ -759,12 +755,15 @@ function WorkList({
           ) : (
             <div className="text-gray-400">No workflows available</div>
           )}
-          <div className="container mx-auto my-4 flex justify-center">
+          <div className="mt-8 mb-4 w-full px-2">
             <button
-              className="rounded bg-blue-500 py-2 px-4 font-bold text-white hover:bg-blue-600"
               onClick={handleOpenModal}
+              className="group relative flex w-full items-center justify-center gap-2.5 overflow-hidden rounded-[10px] border border-primary-active bg-primary-dark px-4 py-3 transition-all duration-300 hover:border-white   active:scale-[0.98]"
             >
-              {t('Create Workflow')}
+              
+              <span className="text-[13px] font-bold tracking-[0.08em]  uppercase transition-colors duration-300 group-hover:text-white">
+                {t('Create Workflow')}
+              </span>
             </button>
           </div>
         </div>
