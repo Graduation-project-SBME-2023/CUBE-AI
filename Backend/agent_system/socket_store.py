@@ -88,6 +88,7 @@ class ConnectionManager:
             "type": msg_type,
             "payload": payload,
             "session_id": session_id,
+            "replaying": replaying,
         }, default=str)
 
         dead_sockets = []
