@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, List, MessageSquare, PlayCircle, Rocket, Settings } from 'lucide-react';
+import { ArrowLeft, LayoutList, List, MessageSquare, PlayCircle, Rocket, Settings } from 'lucide-react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import PhaseSidebar from './PlaygroundCanvas/PhaseSidebar';
 import PlanningView from './PlaygroundCanvas/views/PlanningView';
@@ -796,92 +796,85 @@ function ResearchPlaygroundInner() {
   );
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden bg-black font-sans text-white">
-      <div className="z-20 flex h-14 shrink-0 items-center justify-between bg-[#0a1520] px-4 shadow-[0_1px_0_#0d1e2e,0_4px_24px_rgba(0,0,0,0.4)] border-b border-[#1a2a3a]">
-        <div className="flex items-center">
-            <button
-                onClick={() => navigate('/agentic-home')}
-                className="mr-3 p-1.5 rounded-md transition-all hover:bg-[#0d1e2e] text-[#5a8aaa] hover:text-[#5acce6] border border-transparent hover:border-[#1e3248]"
-                title="Back to Home"
-            >
-              <ArrowLeft size={16} />
-            </button>
+    <div className="flex h-screen w-full overflow-hidden bg-black font-sans text-white">
+      <PhaseSidebar
+        phases={sidebarPhases}
+        activePhase={activePhase}
+        updatedPhaseIds={updatedPhaseIds}
+        updateMessages={phaseUpdateMessages}
+        forceVisibleUpdatePhaseIds={waitingPhaseIds}
+        lockedPhaseIds={lockedPhaseIds}
+        planReceived={activePipelinePhaseIds !== null}
+        onSelectPhase={selectPhase}
+        isCollapsed={isPhaseSidebarCollapsed}
+        onToggleCollapse={() => setIsPhaseSidebarCollapsed(prev => !prev)}
+      />
 
+      <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+        {/* Top Navbar */}
+        <div className="z-20 flex h-14 shrink-0 items-center justify-between bg-[#0a1520]/95 backdrop-blur-md px-4 shadow-sm border-b border-[#1a2a3a] relative">
+          {/* Subtle top highlight line */}
+          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#2a4a6c]/30 to-transparent"></div>
           
-
-
-          <div className="flex items-center gap-2 px-4">
-            <div className="flex items-center rounded-md border border-[#2a3a4c] bg-[#0d1b2a] p-0.5">
+          <div className="flex items-center">
+            {/* Mode Segmented Control */}
+            <div className="flex items-center rounded-lg border border-[#233547] bg-[#07111a] p-1 shadow-inner">
               <button
                 onClick={() => selectPhase('planning')}
-                className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-[10px] font-bold uppercase tracking-widest transition-all duration-300 ${
                   activePhase === 'planning'
-                    ? 'border border-[#6f8db3] bg-[#1d3249] text-[#d1e7ff]'
-                    : 'border border-transparent text-[#7fa2c4] hover:bg-[#152537] hover:text-[#c7def6]'
+                    ? 'bg-gradient-to-r from-[#1d3249] to-[#264463] text-[#e0f0ff] shadow-[0_2px_12px_rgba(40,80,120,0.4)] border border-[#3b5b80]'
+                    : 'text-[#6f8db3] hover:text-[#c7def6] hover:bg-[#111e2b] border border-transparent'
                 }`}
               >
-                <PlayCircle size={12} /> Study Planning
+                <PlayCircle size={13} /> Study Planning
               </button>
               <button
                 onClick={() => selectPhase('execution')}
-                className={`flex items-center gap-1.5 rounded px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1 text-[10px] font-bold uppercase tracking-widest transition-all duration-300 ${
                   activePhase === 'execution'
-                    ? 'border border-[#a06fd4] bg-[#2b1b38] text-[#f0ddff]'
-                    : 'border border-transparent text-[#a987c4] hover:bg-[#20152b] hover:text-[#dfc6f2]'
+                    ? 'bg-gradient-to-r from-[#38234a] to-[#4f3166] text-[#f4e6ff] shadow-[0_2px_12px_rgba(90,40,120,0.4)] border border-[#6b478c]'
+                    : 'text-[#8a6b9e] hover:text-[#dfc6f2] hover:bg-[#1d1226] border border-transparent'
                 }`}
               >
-                <Rocket size={12} /> Agent Execution
+                <Rocket size={13} /> Agent Execution
               </button>
             </div>
+          </div>
 
+          <div className="flex items-center gap-2">
+            <button
+                onClick={() => window.open('/worklist', '_blank')}
+                className="flex h-8 items-center gap-2 rounded-lg border border-[#233547] bg-[#0a1520] px-3 text-[10px] font-bold uppercase tracking-wider text-[#7a9ab5] transition-all duration-300 hover:border-[#5acce6] hover:bg-[#11202e] hover:text-[#5acce6] hover:shadow-[0_0_12px_rgba(90,204,230,0.15)] group"
+                title="Go to Worklist"
+            >
+              <LayoutList size={13} className="transition-transform group-hover:scale-110" /> Worklist
+            </button>
+            
+            <div className="w-px h-4 bg-[#233547] mx-1"></div> {/* Divider */}
+            
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="flex h-8 items-center gap-2 rounded-lg border border-[#233547] bg-[#0a1520] px-3 text-[10px] font-bold uppercase tracking-wider text-[#7a9ab5] transition-all duration-300 hover:border-[#5acce6] hover:bg-[#11202e] hover:text-[#5acce6] hover:shadow-[0_0_12px_rgba(90,204,230,0.15)] group"
+            >
+              <Settings size={13} className="transition-transform group-hover:rotate-45" /> Model
+            </button>
+            <button
+              onClick={() => setIsChatOpen(!isChatOpen)}
+              className={`flex h-8 items-center gap-2 rounded-lg border px-3 text-[10px] font-bold uppercase tracking-wider transition-all duration-300 group ${
+                isChatOpen
+                  ? 'border-[#5acce6] bg-gradient-to-r from-[#0d2540] to-[#143659] text-[#5acce6] shadow-[0_0_15px_rgba(90,204,230,0.3)]'
+                  : 'border-[#233547] bg-[#0a1520] text-[#7a9ab5] hover:border-[#5acce6] hover:bg-[#11202e] hover:text-[#5acce6] hover:shadow-[0_0_12px_rgba(90,204,230,0.15)]'
+              }`}
+            >
+              <MessageSquare size={13} className={`transition-transform ${isChatOpen ? 'scale-110' : 'group-hover:scale-110'}`} /> AI Assistant
+            </button>
           </div>
         </div>
-        
-        
 
-        <div className="flex items-center gap-2">
-           <button
-                onClick={() => navigate('/worklist')}
-                className="mr-2 p-1.5 rounded-md transition-all hover:bg-[#0d1e2e] text-[#5a8aaa] hover:text-[#5acce6] border border-transparent hover:border-[#1e3248]"
-                title="Go to Worklist"
-                aria-label="Go to Worklist"
-            >
-              <List size={16} />
-            </button>
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="flex h-8 items-center gap-2 rounded-md border border-[#1e3248] bg-[#0d1e2e] px-3 text-[10px] font-semibold uppercase tracking-wider text-[#5a8aaa] transition-all hover:border-[#5acce6] hover:bg-[#111d29] hover:text-[#e0f0ff]"
-          >
-            <Settings size={13} /> Model
-          </button>
-          <button
-            onClick={() => setIsChatOpen(!isChatOpen)}
-            className={`flex h-8 items-center gap-2 rounded-md border px-3 text-[10px] font-semibold uppercase tracking-wider transition-all ${
-              isChatOpen
-                ? 'border-[#5acce6] bg-[#0d2540] text-[#5acce6] shadow-[0_0_12px_rgba(90,204,230,0.2)]'
-                : 'border-[#1e3248] bg-[#0d1e2e] text-[#5a8aaa] hover:border-[#5acce6] hover:bg-[#111d29] hover:text-[#e0f0ff]'
-            }`}
-          >
-            <MessageSquare size={13} /> AI Assistant
-          </button>
-        </div>
-      </div>
-
-      <div className="relative flex flex-1 overflow-hidden">
-        <PhaseSidebar
-          phases={sidebarPhases}
-          activePhase={activePhase}
-          updatedPhaseIds={updatedPhaseIds}
-          updateMessages={phaseUpdateMessages}
-          forceVisibleUpdatePhaseIds={waitingPhaseIds}
-          lockedPhaseIds={lockedPhaseIds}
-          planReceived={activePipelinePhaseIds !== null}
-          onSelectPhase={selectPhase}
-          isCollapsed={isPhaseSidebarCollapsed}
-          onToggleCollapse={() => setIsPhaseSidebarCollapsed(prev => !prev)}
-        />
-
-        <div className="relative flex min-w-0 flex-1 flex-col bg-black">
+        {/* Main Content Area */}
+        <div className="relative flex flex-1 overflow-hidden">
+          <div className="relative flex min-w-0 flex-1 flex-col bg-black">
           <div className="relative flex-1 overflow-hidden">
             {viewNodes.map(view => (
               <div
@@ -921,6 +914,7 @@ function ResearchPlaygroundInner() {
             <div className="flex items-center gap-1.5"><span className="rounded border border-[#1e3248] bg-[#0d1e2e] px-1.5 py-0.5 text-[#5a8aaa]">Right-click</span><span>Menu</span></div>
             <div className="flex items-center gap-1.5"><span className="rounded border border-[#1e3248] bg-[#0d1e2e] px-1.5 py-0.5 text-[#5a8aaa]">Ctrl+Scroll</span><span>Zoom</span></div>
             <div className="flex items-center gap-1.5"><span className="rounded border border-[#1e3248] bg-[#0d1e2e] px-1.5 py-0.5 text-[#5a8aaa]">Space</span><span>Pan</span></div>
+          </div>
           </div>
         </div>
       </div>

@@ -20,19 +20,19 @@ const WorkflowList = ({
    <React.Fragment>
 
   {/* Header */}
-  <div className="bg-[#101c35] border-b border-[#1a2540]">
-    <div className="container relative mx-auto flex flex-col px-5 pt-4 pb-3">
+  <div className="bg-black">
+    <div className="w-full relative mx-auto flex flex-col pt-5 pb-5 px-5">
       <div className="flex flex-row items-center justify-between">
 
-        <Typography variant="h6" className="text-[13px] font-semibold text-[#c8d8f0] tracking-tight">
+        <Typography variant="h6" className="text-white">
           {t('Workflow List')}
         </Typography>
 
-        <div className="flex items-center gap-1.5">
-          <Typography variant="h6" className="text-[12px] font-bold text-[#4a9eff]" data-cy={'num-workflows'}>
+        <div className="flex h-[34px] flex-row items-center">
+          <Typography variant="h6" className="mr-2" data-cy={'num-workflows'}>
             {numOfWorkflows > 100 ? '>100' : numOfWorkflows}
           </Typography>
-          <Typography variant="h6" className="text-[12px] text-[#5a8ab8]">
+          <Typography variant="h6" className="text-primary-light">
             {t('Workflows')}
           </Typography>
         </div>
@@ -42,22 +42,22 @@ const WorkflowList = ({
   </div>
 
   {/* Workflow List */}
-  <div className="sticky -top-1 z-10 mx-auto border-b border-[#1a2540]">
-    <div className="bg-[#0d1526] py-2">
+  <div className="sticky -top-1 z-10 mx-auto border-b-4 border-black">
+    <div className="bg-black py-2">
 
       <div>
         {workflowsMeta.map(workflow => (
           <div
             key={workflow}
-            className="group flex items-center justify-between cursor-pointer border-b border-[#1a2540] py-2 px-4 transition-colors duration-150 hover:bg-[#071020]"
+            className="group flex items-center justify-between cursor-pointer border-b border-secondary-light py-2 px-4 transition duration-300 hover:bg-secondary-main bg-primary-dark"
             onClick={() => onWorkflowClick(workflow)}
           >
-            <span className="text-[12px] text-[#8ab4e0] group-hover:text-[#4a9eff] transition-colors duration-150">
+            <span className="text-base text-white">
               {workflow}
             </span>
             <Icon
               name="chevron-right"
-              className="w-3.5 h-3.5 text-[#1e3058] group-hover:text-[#4a9eff] transition-colors duration-150"
+              className="inline-flex w-4 text-white"
             />
           </div>
         ))}
@@ -66,9 +66,9 @@ const WorkflowList = ({
     </div>
 
     {numOfWorkflows > 100 && (
-      <div className="container m-auto">
-        <div className="bg-[#071020] border border-[#1a2540] rounded-b py-1.5 text-center">
-          <p className="text-[11px] text-[#5a8ab8]">
+      <div className="w-full m-auto px-4">
+        <div className="bg-primary-main rounded-b py-1 text-center text-base">
+          <p className="text-white">
             {t('NumOfWorkflowsHigherThan100Message')}
           </p>
         </div>

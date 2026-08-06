@@ -83,15 +83,14 @@ export const mdComponents: Record<string, React.FC<any>> = {
   ),
 };
 
-export function PicoRow({ icon, label, value, color }: { icon: React.ReactNode; label: string; value?: string; color: string }) {
+export function PicoCard({ icon, label, value, color }: { icon: React.ReactNode; label: string; value?: string; color: string }) {
   if (!value) return null;
   return (
-    <div className="flex items-start gap-3 py-2">
-      <div className="mt-0.5 shrink-0" style={{ color }}>{icon}</div>
-      <div className="min-w-0">
-        <span className="text-[10px] font-bold uppercase tracking-widest block" style={{ color }}>{label}</span>
-        <span className="text-[12px] leading-relaxed text-gray-300 block mt-0.5">{value}</span>
+    <div className="rounded-2xl border border-white/5 bg-[#121922]/40 p-5 hover:bg-[#121922]/80 hover:border-white/10 transition-all duration-300 shadow-sm">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color }}>{label}</span>
       </div>
+      <div className="text-[13px] leading-relaxed text-slate-300">{value}</div>
     </div>
   );
 }

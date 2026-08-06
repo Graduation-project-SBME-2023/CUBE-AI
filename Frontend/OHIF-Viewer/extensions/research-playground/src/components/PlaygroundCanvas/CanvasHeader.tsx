@@ -101,42 +101,41 @@ export default function CanvasHeader({
 
       </div>
 
-      {/* ── Literature Text ── */}
-      {literatureEnabled && (
-        <>
-          <span className="text-[#33485d] text-xs font-bold px-1">•</span>
-          <span className="flex items-center gap-1 text-xs font-medium text-[#7ec8e3]">
-            <BookOpen size={12} />
-            Literature
-          </span>
-        </>
-      )}
 
       {/* ── Labelling Mode Toggle ── */}
       <span className="text-[#33485d] text-xs font-bold px-1">•</span>
-      <button
-        onClick={onToggleLabellingMode}
-        disabled={labellingModeLocked}
-        title={labellingModeLocked ? 'Labelling mode locked' : 'Toggle labelling method'}
-        className={`flex items-center rounded border border-[#3c5d80] text-[10px] uppercase transition-all ${
-          labellingModeLocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:border-[#7ec8e3]'
-        }`}
-      >
-        <span
-          className={`flex items-center gap-1 px-2 py-1 transition-colors ${
-            labellingMode === 'manual' ? 'bg-[#3c5d80] text-white' : 'text-gray-400'
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onToggleLabellingMode}
+          disabled={labellingModeLocked}
+          title={labellingModeLocked ? 'Labeling mode is locked during execution' : 'Switch labeling mode'}
+          className={`relative flex items-center rounded-full p-[2px] bg-[#0b1218] border border-[#1f2d40] shadow-inner transition-all ${
+            labellingModeLocked ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:border-[#3c5d80]'
           }`}
         >
-          <Upload size={10} /> Manual
-        </span>
-        <span
-          className={`flex items-center gap-1 px-2 py-1 transition-colors ${
-            labellingMode === 'automatic' ? 'bg-[#3c5d80] text-white' : 'text-gray-400'
-          }`}
-        >
-          <Bot size={10} /> Auto
-        </span>
-      </button>
+          {/* Active Slider Background */}
+          <div 
+             className={`absolute inset-y-[2px] w-[calc(50%-2px)] rounded-full bg-[#5e98ac] transition-all duration-300 ease-out shadow-sm ${
+               labellingMode === 'manual' ? 'left-[2px]' : 'left-[calc(50%)]'
+             }`}
+          />
+          
+          <span
+            className={`relative z-10 flex items-center justify-center gap-1 px-2 py-[3px] text-[9px] uppercase tracking-wider font-bold transition-colors duration-300 w-24 whitespace-nowrap ${
+              labellingMode === 'manual' ? 'text-black' : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Upload size={10} /> Manual
+          </span>
+          <span
+            className={`relative z-10 flex items-center justify-center gap-1 px-2 py-[3px] text-[9px] uppercase tracking-wider font-bold transition-colors duration-300 w-24 whitespace-nowrap ${
+              labellingMode === 'automatic' ? 'text-black' : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Bot size={10} /> Auto
+          </span>
+        </button>
+      </div>
     </div>
   );
 }

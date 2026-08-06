@@ -19,8 +19,8 @@ export default function ExecutionView({ sessionId }: { sessionId: string | numbe
         <p className="text-[11px] uppercase tracking-widest text-[#5a8aaa] font-semibold">Live Agent Execution</p>
       </div>
       
-      <div className="flex-1 overflow-y-auto px-6 pb-20 pt-12 relative" ref={scrollRef}>
-        <div className="max-w-4xl mx-auto">
+      <div className="ohif-scrollbar flex-1 overflow-y-auto px-6 pb-20 pt-12 relative" ref={scrollRef}>
+        <div className="w-full">
           {messages.length === 0 ? (
             <div className="h-full mt-32 flex flex-col items-center justify-center text-center opacity-50">
               <Activity size={48} className="text-[#3c5d80] mb-4 animate-pulse" />

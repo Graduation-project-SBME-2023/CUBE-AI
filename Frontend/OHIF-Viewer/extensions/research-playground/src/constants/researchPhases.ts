@@ -1,4 +1,4 @@
-import { BarChart3, BookOpenText, Database, FileText, Layout, Scan, Users } from 'lucide-react';
+import { BarChart3, BookOpenText, Database, FileText, Layout, Target, Activity, Users } from 'lucide-react';
 
 export interface ResearchPhase {
   id: string;
@@ -41,14 +41,14 @@ export const RESEARCH_PHASES: ResearchPhase[] = [
     id: 'segmentation',
     label: 'Segmentation QC',
     short_desc: 'Segmentation HITL',
-    icon: Scan,
+    icon: Target,
     description: 'Radiologists Approval of Segmentations',
   },
   {
     id: 'features',
     label: 'Feature Extraction',
     short_desc: 'ROI & Radiomics',
-    icon: Scan,
+    icon: Activity,
     description: 'ROI Definition, Radiomics & Preprocessing',
   },
   {

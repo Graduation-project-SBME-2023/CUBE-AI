@@ -32,9 +32,9 @@ const StudyListFilter = ({
     <React.Fragment>
       <div>
         <div className="bg-black">
-          <div className="container relative mx-auto flex flex-col pt-5">
+          <div className="w-full relative mx-auto flex flex-col pt-5">
             <div className="mb-5 flex flex-row justify-between">
-              <div className="flex min-w-[1px] shrink flex-row items-center gap-6">
+              <div className="flex min-w-[1px] shrink flex-row items-center gap-6 pl-4">
                 <Typography
                   variant="h6"
                   className="text-white"
@@ -97,7 +97,7 @@ const StudyListFilter = ({
           />
         </div>
         {numOfStudies > 100 && (
-          <div className="container m-auto">
+          <div className="w-full m-auto px-4">
             <div className="bg-primary-main rounded-b py-1 text-center text-base">
               <p className="text-white">{t('NumOfStudiesHiggerThan100Message')}</p>
             </div>
