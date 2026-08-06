@@ -29,13 +29,7 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import mcp
-from ..helpers.target_columns import load_feature_schema, resolve_target_column
 from ..helpers.workspace import WorkspacePath, base_on_workspace_dir
-from .consolidation import (
-    build_availability_audit,
-    build_fusion_table,
-    normalize_organ_name,
-)
 
 from tool_logging import ToolEvent, log_tool_state, TextPayload, ProgressPayload
 
@@ -174,6 +168,42 @@ def _json_serializable(obj):
         pass
     return obj
 
+def build_fusion_table(cohort_table, features_by_subject, organs, id_col, tgt_col):
+    cohort_df = cohort_table.copy()
+    cohort_df.rename(columns={id_col: "subject_id"}, inplace=True)
+    if not features_by_subject:
+        for organ in organs:
+            cohort_df[f"{organ}_present"] = 0
+        return cohort_df
+    features_df = pd.DataFrame.from_dict(features_by_subject, orient="index")
+    if "target" in features_df.columns:
+        features_df = features_df.drop(columns=["target"])
+    cohort_df["subject_id"] = cohort_df["subject_id"].astype(str)
+    features_df["subject_id"] = features_df["subject_id"].astype(str)
+    fusion = pd.merge(cohort_df, features_df, on="subject_id", how="left")
+    for organ in organs:
+        organ_cols = [c for c in fusion.columns if c.startswith(f"{organ}__")]
+        if organ_cols:
+            fusion[f"{organ}_present"] = fusion[organ_cols[0]].notna().astype(int)
+        else:
+            fusion[f"{organ}_present"] = 0
+    return fusion
+
+
+def build_availability_audit(fusion_table, organs):
+    records = []
+    for _, row in fusion_table.iterrows():
+        subject_id = row["subject_id"]
+        for organ in organs:
+            present = row.get(f"{organ}_present", 0)
+            records.append({
+                "subject_id": subject_id,
+                "organ": organ,
+                "present": present,
+                "status": "extracted" if present else "missing"
+            })
+    return pd.DataFrame(records)
+
 
 # ── Input Models ───────────────────────────────────────────────────────────────
 
@@ -199,24 +229,13 @@ class ExtractFeaturesInput(BaseModel):
     image_dir: WorkspacePath = Field(default=None)
     mask_dir: WorkspacePath = Field(default=None)
     output_dir: WorkspacePath = Field(default=None)
-    organs: Optional[Union[str, List[str]]] = Field(
-        default=None,
-        description="Optional target/organ IDs to extract from the segmentation manifest",
-    )
-    require_all_organs: bool = Field(
-        default=False,
-        description="Fail the run when any cohort subject lacks a requested organ",
-    )
+    require_all_organs: bool = Field(default=False)
 
 
 class AnalyzeImportanceInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="ignore")
 
     input_path: WorkspacePath = Field(...)
-    target_column: Optional[str] = Field(
-        default=None,
-        description="Outcome column; omit to resolve it from feature_schema.json or the CSV",
-    )
     top_features: Union[int, str, List[Union[int, str]]] = Field(default="10")
     task_type: Optional[str] = Field(default=None)
     method: str = Field(default="rf")
@@ -300,6 +319,8 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                     found_mask_dir = cand_path
         mask_dir = found_mask_dir or (requested_mask_dir or base_on_workspace_dir('masks'))
 
+    target_column = 'target'
+
     os.makedirs(output_dir, exist_ok=True)
     log_file = os.path.join(output_dir, "radiomics_extraction.log")
     _setup_logging(log_file)
@@ -315,11 +336,6 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
     specific_features = _csv_str(params.specific_features)
     mask_labels_raw = _csv_int(params.mask_labels)
     pixel_spacing  = _csv_float(params.pixel_spacing) or [1.0, 1.0, 1.0]
-    requested_organs = (
-        sorted({normalize_organ_name(value) for value in _csv_str(params.organs)})
-        if params.organs
-        else []
-    )
 
     # ── Guard: catch image-type names mistakenly passed as feature_classes ──────
     # The LLM sometimes puts 'wavelet', 'LoG', 'Gradient' etc. in feature_classes.
@@ -484,16 +500,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
             }, indent=2)
 
         id_col  = params.id_column or tdf.columns[0]
-        try:
-            tgt_col, target_resolution = resolve_target_column(
-                tdf.columns,
-                requested=params.target_column,
-            )
-        except ValueError as exc:
-            return json.dumps({
-                "status": "error",
-                "error_message": str(exc),
-            }, indent=2)
+        tgt_col = params.target_column or (target_column if target_column in tdf.columns else tdf.columns[-1])
         if id_col not in tdf.columns or tgt_col not in tdf.columns:
             return json.dumps({
                 "status": "error",
@@ -510,44 +517,27 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                     return value[:-len(extension)]
             return value
 
-        valid_targets = tdf.dropna(subset=[id_col, tgt_col]).copy()
+        valid_targets = tdf.dropna(subset=[id_col, tgt_col])
         if valid_targets.empty:
             return json.dumps({
                 "status": "error",
                 "error_message": f"targets.csv at '{targets_csv_path}' has no rows with both an ID and target label.",
             }, indent=2)
 
-        valid_targets[id_col] = valid_targets[id_col].astype(str).str.strip()
-        duplicate_ids = valid_targets[id_col].duplicated(keep=False)
-        if duplicate_ids.any():
-            duplicates = sorted(valid_targets.loc[duplicate_ids, id_col].unique().tolist())
-            return json.dumps({
-                "status": "error",
-                "error_message": f"targets.csv contains duplicate patient IDs: {duplicates[:10]}",
-            }, indent=2)
-
-        # Aliases map image/manifest identifiers back to the canonical cohort ID.
-        target_dict: dict[str, Any] = {}
-        canonical_subject_by_key: dict[str, str] = {}
-        for _, row in valid_targets.iterrows():
-            canonical_subject = str(row[id_col]).strip()
-            key = _normalise_id(canonical_subject)
-            target_dict[key] = row[tgt_col]
-            canonical_subject_by_key[key] = canonical_subject
+        # Build a normalised lookup so case and NIfTI extensions do not make
+        # otherwise valid labels disappear from the training table.
+        target_dict = {
+            _normalise_id(row[id_col]): row[tgt_col]
+            for _, row in valid_targets.iterrows()
+        }
         # ALSO key by 'name' column (case_id / clinical_pid) if present,
         # so NIfTI filename stems (e.g. 'case_00005') match the correct label.
         if "name" in valid_targets.columns and "name" != id_col:
             for _, row in valid_targets.iterrows():
-                if pd.isna(row["name"]):
-                    continue
                 name_val = _normalise_id(row["name"])
                 if name_val and name_val not in target_dict:
                     target_dict[name_val] = row[tgt_col]
-                    canonical_subject_by_key[name_val] = str(row[id_col]).strip()
-        logger.info(
-            "Loaded %d label keys from %s (id_col=%r, tgt_col=%r, resolution=%s)",
-            len(target_dict), targets_csv_path, id_col, tgt_col, target_resolution,
-        )
+        logger.info(f"Loaded {len(target_dict)} label keys from {targets_csv_path} (id_col={id_col!r}, tgt_col={tgt_col!r})")
 
         image_files = sorted(_glob.glob(os.path.join(image_dir, params.image_pattern)))
         mask_files  = sorted(_glob.glob(os.path.join(mask_dir,  params.mask_pattern)))
@@ -585,8 +575,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 if pair.get("review_status") not in ("accepted", "modified"):
                     continue
                 subject_id = str(pair.get("volume_uid") or "")
-                target_id_raw = str(pair.get("target_id") or "")
-                target_id = normalize_organ_name(target_id_raw) if target_id_raw else ""
+                target_id = str(pair.get("target_id") or "")
                 pair_id = str(pair.get("pair_id") or "")
                 mask_rel = str(pair.get("mask_path") or "")
                 image_path = images_dict.get(subject_id)
@@ -615,13 +604,6 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 for sid in images_dict if sid in masks_dict
             }
 
-        if requested_organs:
-            pairs = {
-                pair_id: files
-                for pair_id, files in pairs.items()
-                if files["target_id"] in requested_organs
-            }
-
         if not pairs:
             raise ValueError("No matching image-mask pairs found.")
 
@@ -646,15 +628,6 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
             }, indent=2)
         if unlabeled_subject_ids:
             logger.warning("Skipping %s image-mask pair(s) with no target label: %s", len(unlabeled_subject_ids), unlabeled_subject_ids)
-
-        for files in pairs.values():
-            files["cohort_subject_id"] = canonical_subject_by_key[
-                _normalise_id(files["subject_id"])
-            ]
-
-        organs = requested_organs or sorted(
-            {files["target_id"] for files in pairs.values()}
-        )
 
         if mask_labels_raw is None:
             found: set = set()
@@ -706,7 +679,6 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         log_tool_state(ToolEvent("tool_started", "text", payload))
         for idx, (pair_id, files) in enumerate(pairs.items(), 1):
             subject_id = files["subject_id"]
-            cohort_subject_id = files["cohort_subject_id"]
             target_id = files["target_id"]
             logger.info(
                 "Processing %s target=%s (%d/%d)",
@@ -734,7 +706,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                     try:
                         _aligned, _sw_msg = check_spatial_alignment(files["image"], files["mask"])
                         if not _aligned and _sw_msg:
-                            spatial_warnings[cohort_subject_id] = _sw_msg
+                            spatial_warnings[subject_id] = _sw_msg
                             logger.warning(f"  [Task 3] {subject_id}: {_sw_msg}")
                     except Exception as _sa_exc:
                         logger.debug(f"  [Task 3] Spatial check error for {subject_id}: {_sa_exc}")
@@ -760,7 +732,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                         logger.warning(f"  [Task 2] {subject_id}: {_reason} — skipping extraction.")
                         # Record in spatial_warnings so it appears in the audit CSV.
                         # Only set if no stronger spatial warning already exists.
-                        spatial_warnings.setdefault(cohort_subject_id, _reason)
+                        spatial_warnings.setdefault(subject_id, _reason)
                         continue
 
                     bin_img = sitk.GetImageFromArray(binary)
@@ -825,8 +797,8 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
 
                         target_value = target_dict[_normalise_id(subject_id)]
                         target_row = {
-                            "subject_id": cohort_subject_id,
-                            tgt_col: target_value,
+                            "subject_id": subject_id,
+                            "target": target_value,
                             **features,
                         }
                         all_features_by_target.setdefault(target_id, []).append(
@@ -834,16 +806,21 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                         )
 
                         wide_row = features_by_subject.setdefault(
-                            cohort_subject_id,
-                            {},
+                            subject_id,
+                            {
+                                "subject_id": subject_id,
+                                "target": target_value,
+                            },
+                        )
+                        feature_prefix = (
+                            target_id
+                            if len(mask_labels_raw) == 1
+                            else f"{target_id}_label_{lbl}"
                         )
                         for feature_name, feature_value in features.items():
-                            namespaced_feature = (
-                                feature_name
-                                if len(mask_labels_raw) == 1
-                                else f"label_{lbl}__{feature_name}"
-                            )
-                            wide_row[f"{target_id}__{namespaced_feature}"] = feature_value
+                            wide_row[
+                                f"{feature_prefix}__{feature_name}"
+                            ] = feature_value
                     except concurrent.futures.TimeoutError:
                         logger.error(
                             f"  {subject_id} label {lbl}: extraction timed out after "
@@ -871,7 +848,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 continue
             df = pd.DataFrame(rows)
             id_cols = [c for c in df.columns if c.lower() in ("id", "subject_id", "patientid")]
-            tgt_cols = [tgt_col] if tgt_col in df.columns else []
+            tgt_cols = [c for c in df.columns if c.lower() in ("target", "label", "outcome")]
             feat_cols = sorted([c for c in df.columns if c not in id_cols + tgt_cols])
             df = df[id_cols + tgt_cols + feat_cols]
             csv_path = os.path.join(
@@ -883,6 +860,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
 
         default_csv_path = os.path.join(output_dir, "radiomics_features.csv")
         cohort_table = valid_targets[[id_col, tgt_col]].copy()
+        organs = sorted(list({files["target_id"] for files in pairs.values()}))
         default_feature_table = build_fusion_table(
             cohort_table,
             features_by_subject,
@@ -911,7 +889,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
 
         audit = build_availability_audit(default_feature_table, organs)
         available_pairs = {
-            (files["cohort_subject_id"], files["target_id"])
+            (files["subject_id"], files["target_id"])
             for files in pairs.values()
         }
         failed_mask = (
@@ -945,7 +923,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
             "subject_id_column": "subject_id",
             "target_column": tgt_col,
             "source_target_column": tgt_col,
-            "target_resolution": target_resolution,
+            "target_resolution": pixel_spacing,
             "targets_csv": str(targets_csv_path),
             "organ_prefix_delimiter": "__",
             "organs": organs,
@@ -972,7 +950,6 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
             return json.dumps({
                 "status": "error",
                 "error_message": "No radiomic features were extracted from any matched image-mask pair.",
-                "csv_paths": csv_paths,
                 "paired_subjects": paired_subject_count,
                 "labeled_subjects": len(pairs),
             }, indent=2)
@@ -1015,15 +992,11 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         return json.dumps({
             "status": "success",
             "csv_paths": csv_paths,
-            "num_subjects": len(default_feature_table),
-            "num_subjects_with_features": len(features_by_subject),
+            "num_subjects": len(features_by_subject),
             "num_volume_target_pairs": len(pairs),
             "paired_subjects": paired_subject_count,
             "unlabeled_subject_ids": unlabeled_subject_ids,
             "num_features": num_features,
-            "organs": organs,
-            "target_column": tgt_col,
-            "missing_patient_organs": int((audit["present"] == 0).sum()),
             "mask_labels": mask_labels_raw,
             "params_file": params_file,
             "processing_time_seconds": round(processing_time, 2),
@@ -1088,6 +1061,8 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
     _setup_logging(log_file)
     logger = logging.getLogger(__name__)
 
+    target_column = 'target'
+
     # Count the main pipeline stages for progress reporting:
     #   1. Data loading & preprocessing
     #   2. Importance computation
@@ -1120,11 +1095,8 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         log_tool_state(ToolEvent("tool_started", "text", payload))
 
         df = pd.read_csv(params.input_path)
-        target_column, target_resolution = resolve_target_column(
-            df.columns,
-            requested=params.target_column,
-            schema=load_feature_schema(params.input_path),
-        )
+        if target_column not in df.columns:
+            raise ValueError(f"target_column '{target_column}' not found in data.")
 
         X = df.drop(columns=[target_column])
         id_cols_to_drop = [
@@ -1513,8 +1485,6 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             "status": "success",
             "output_dir": output_dir,
             "task_type": task_type,
-            "target_column": target_column,
-            "target_resolution": target_resolution,
             "method": params.method,
             "feature_count": int(X.shape[1]),
             "result_files": {

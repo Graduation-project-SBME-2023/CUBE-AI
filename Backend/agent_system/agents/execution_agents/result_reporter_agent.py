@@ -85,8 +85,6 @@ class ResultReporterAgent(AssistantAgent):
             "scratchpad_write_summary",
             "scratchpad_set_status",
             "scratchpad_read_agent",
-            "read_agent_output",
-            "read_all_agent_outputs",
             "write_agent_output",
         ]
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
@@ -100,7 +98,7 @@ class ResultReporterAgent(AssistantAgent):
             tools=final_tools,
             description=description,
             system_message=system_message,
-            max_tool_iterations=16,
+            max_tool_iterations=10,
         )
 
     @staticmethod
