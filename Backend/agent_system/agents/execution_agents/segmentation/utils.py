@@ -211,13 +211,13 @@ def align_and_binarize_mask(
     *,
     preserve_index_order_if_same_size: bool = False,
 ) -> dict:
-    """Binarize a mask and align it to the reference volume geometry.
+    """Binarize a mask and align it in physical patient space.
 
-    MONAI Label outputs are derived directly from the input volume voxel array,
-    but their exported NIfTI header can describe the Z axis in the opposite
-    direction.  When those arrays have the same size, physical resampling would
-    reverse the already-aligned slice order.  Callers handling those outputs can
-    therefore preserve index order and replace only the geometry metadata.
+    Shape equality is not evidence of spatial alignment: two volumes can have
+    identical dimensions while their Z directions are opposite.  The reference
+    volume geometry is therefore authoritative for both newly generated and
+    reused masks.  ``preserve_index_order_if_same_size`` is retained only for
+    call compatibility and is intentionally ignored.
     """
     reference = sitk.ReadImage(reference_volume_path)
     mask = sitk.ReadImage(mask_path)
@@ -228,20 +228,14 @@ def align_and_binarize_mask(
         "direction": list(mask.GetDirection()),
     }
     geometry_adjusted = not _geometry_matches(mask, reference)
-    same_size = (
-        mask.GetDimension() == reference.GetDimension()
-        and mask.GetSize() == reference.GetSize()
-    )
     alignment_mode = "unchanged"
-    if geometry_adjusted and preserve_index_order_if_same_size and same_size:
-        alignment_mode = "reference_geometry_only"
-        logger.warning(
-            "Preserving mask voxel order for %s and copying reference geometry; "
-            "mask and reference sizes are identical (%s)",
+    if preserve_index_order_if_same_size:
+        logger.debug(
+            "Ignoring deprecated preserve_index_order_if_same_size for %s; "
+            "physical geometry is authoritative",
             mask_path,
-            list(reference.GetSize()),
         )
-    elif geometry_adjusted:
+    if geometry_adjusted:
         alignment_mode = "physical_resample"
         resample = sitk.ResampleImageFilter()
         resample.SetReferenceImage(reference)
@@ -326,7 +320,7 @@ async def download_and_pair_volumes(
             if client is None:
                 await request_client.aclose()
 
-    async def wait_and_find(search_dir, uid_to_search_key, timeout_s=120, poll_interval=3.0):
+    async def wait_and_find(search_dir, uid_to_search_key, timeout_s=600, poll_interval=3.0):
         """
         Waits for NIfTI files to appear in *search_dir*.
 
@@ -419,7 +413,6 @@ async def download_and_pair_volumes(
                 src_path,
                 reference_volume_path,
                 dst,
-                preserve_index_order_if_same_size=True,
             )
         except Exception:
             logger.exception("Error normalizing label %s", src_path)
@@ -657,6 +650,11 @@ async def download_and_pair_volumes(
                         bool(label_result.get("geometry_adjusted"))
                         if isinstance(label_result, dict)
                         else False
+                    ),
+                    "alignment_mode": (
+                        label_result.get("alignment_mode")
+                        if isinstance(label_result, dict)
+                        else None
                     ),
                     "geometry": (
                         {
