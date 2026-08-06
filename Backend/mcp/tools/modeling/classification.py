@@ -92,11 +92,11 @@ def _df_to_records(df: pd.DataFrame) -> list:
     return records
 
 
-def _compute_roc(y_true, y_prob) -> Optional[dict]:
+def _compute_roc(y_true, y_prob, pos_label=None) -> Optional[dict]:
     """Return {fpr, tpr, thresholds} lists for an ROC curve, or None."""
     try:
         from sklearn.metrics import roc_curve
-        fpr, tpr, thresh = roc_curve(y_true, y_prob)
+        fpr, tpr, thresh = roc_curve(y_true, y_prob, pos_label=pos_label)
         # Down-sample to 200 points max to keep payload small
         step = max(1, len(fpr) // 200)
         return {
@@ -107,11 +107,11 @@ def _compute_roc(y_true, y_prob) -> Optional[dict]:
         return None
 
 
-def _compute_pr(y_true, y_prob) -> Optional[dict]:
+def _compute_pr(y_true, y_prob, pos_label=None) -> Optional[dict]:
     """Return {precision, recall} lists for a PR curve, or None."""
     try:
         from sklearn.metrics import precision_recall_curve
-        prec, rec, _ = precision_recall_curve(y_true, y_prob)
+        prec, rec, _ = precision_recall_curve(y_true, y_prob, pos_label=pos_label)
         step = max(1, len(prec) // 200)
         return {
             "precision": [round(float(x), 5) for x in prec[::step]],
@@ -160,17 +160,18 @@ def _holdout_metrics(predictions: pd.DataFrame, y_true: pd.Series) -> dict:
         prob_cols = [c for c in predictions.columns if c.startswith("Score_")]
         if not prob_cols:
             prob_cols = [c for c in predictions.columns if "score" in c.lower() or "prob" in c.lower()]
+        
         if prob_cols:
             pos_class = sorted(unique_classes)[1]
             prob_col = next(
-                (c for c in prob_cols if str(pos_class) in c or "_1" in c),
+                (c for c in prob_cols if str(pos_class) in c or "_1" in c or c.endswith("1")),
                 prob_cols[0],
             )
             y_prob = predictions[prob_col]
             try:
                 metrics["auc"] = _safe_float(roc_auc_score(y_true, y_prob))
-                roc_data = _compute_roc(y_true, y_prob)
-                pr_data  = _compute_pr(y_true, y_prob)
+                roc_data = _compute_roc(y_true, y_prob, pos_label=pos_class)
+                pr_data  = _compute_pr(y_true, y_prob, pos_label=pos_class)
             except Exception:
                 pass
 
@@ -351,22 +352,13 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             }, indent=2)
 
         # ── Adaptive dataset-size handling ───────────────────────────────
-        # For small datasets we must:
-        #   1. Cap CV folds so each fold has ≥ 2 samples per class
-        #   2. Disable SMOTE when the minority class is too small for its
-        #      default k_neighbors (5, meaning 6 total samples needed)
-        #   3. Restrict candidate models to lightweight ones
-        #   4. Use a larger train split to maximise training samples
         SMOTE_MIN_SAMPLES = 7  # SMOTE default k_neighbors=5 → need ≥ 6 minority samples in train
         SMALL_COHORT_THRESHOLD = 30
 
-        # Estimate minority-class training samples after train/test split
         train_ratio = 0.8 if n_rows < 50 else 0.7
         estimated_train_minority = int(min_class_count * train_ratio)
-
         is_small_cohort = n_rows < SMALL_COHORT_THRESHOLD
 
-        # Decide whether SMOTE is safe
         if params.fix_imbalance and estimated_train_minority < SMOTE_MIN_SAMPLES:
             effective_fix_imbalance = False
             logger.warning(
@@ -387,8 +379,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         else:
             effective_n_select = params.n_select
 
-        # Store ground truth for holdout evaluation
-        y_holdout = None  # will be set after setup splits data
+        y_holdout = None 
 
         use_gpu = params.use_gpu
         if use_gpu:
@@ -417,7 +408,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             transformation=params.transformation,
             pca=params.pca,
         )
-        # For small datasets, allocate more rows to training
+
         if n_rows < 50:
             setup_kwargs["train_size"] = 0.8
             logger.info("Using train_size=0.8 for small dataset (%d rows).", n_rows)
@@ -432,9 +423,6 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                 setup_kwargs[key] = value
 
         def _try_setup(kwargs):
-            # PyCaret minor versions expose slightly different setup
-            # parameters. Remove every unsupported optional parameter, not
-            # just the first one, before falling back to the legacy path.
             kwargs = dict(kwargs)
             while True:
                 try:
@@ -474,7 +462,6 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         _try_setup(setup_kwargs)
         logger.info("PyCaret setup complete.")
 
-        # Extract holdout (test) set ground truth from PyCaret's internal split
         try:
             from pycaret.classification import get_config
             X_test = get_config("X_test")
@@ -488,7 +475,6 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
 
         compare_kwargs: dict = {"n_select": effective_n_select}
         if is_small_cohort and not params.include_models:
-            # These models can train with only a few observations per CV fold.
             compare_kwargs["include"] = ["lr", "nb", "dt", "ridge", "svm", "knn", "rf"]
         if params.include_models:
             compare_kwargs["include"] = _csv_list(params.include_models)
@@ -521,11 +507,9 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         compare_df.to_csv(compare_path, index=True)
         created_files.append(("Model Comparison Results", compare_path))
 
-        # Build comparison table for chart_data
         comparison_table = _df_to_records(compare_df.reset_index().rename(columns={"index": "Model"}))
 
         def _get_model_label(model) -> str:
-            """Return a short human-readable name for a PyCaret model object."""
             try:
                 return type(model).__name__
             except Exception:
@@ -575,7 +559,12 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         def _eval_on_holdout(model, output_path: str, name: str):
             """Run holdout evaluation; return (csv_path | None, chart_dict | None)."""
             try:
-                preds = predict_model(model)
+                # Force raw_score=True so predictions contain full probabilities
+                try:
+                    preds = predict_model(model, raw_score=True)
+                except Exception:
+                    preds = predict_model(model)
+                    
                 preds.to_csv(output_path, index=False)
                 logger.info(f"Holdout predictions for '{name}' → {output_path}")
 
@@ -592,7 +581,6 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         os.makedirs(models_dir, exist_ok=True)
         tuned_models, individual_model_paths, model_test_predictions = [], {}, {}
 
-        # chart_data accumulator
         per_model_chart: dict = {}
 
         # ── Stages 3…(2+N): Tune, evaluate & plot each model ───────────────
@@ -618,13 +606,11 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                 cv_df.to_csv(os.path.join(model_dir, f"{name}_results.csv"), index=True)
                 created_files.append((f"{name} Results", os.path.join(model_dir, f"{name}_results.csv")))
 
-                # Extract mean CV metrics for chart_data
                 cv_metrics = {}
                 if "Mean" in cv_df.index:
                     cv_metrics = {str(col): _safe_float(cv_df.loc["Mean", col])
                                   for col in cv_df.columns if col != "TT (Sec)"}
                 else:
-                    # Last row is usually the mean
                     last = cv_df.iloc[-1]
                     cv_metrics = {str(k): _safe_float(v) for k, v in last.items() if k != "TT (Sec)"}
 
@@ -652,9 +638,6 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                     "label": label,
                     "cv_metrics": cv_metrics,
                     "holdout_metrics": chart_info.get("metrics", {})           if chart_info else {},
-                    # _holdout_metrics keeps confusion data inside its metrics
-                    # dictionary. Reading it at the outer level always yielded
-                    # null, even when a confusion-matrix image was generated.
                     "confusion_matrix": chart_info.get("metrics", {}).get("confusion_matrix") if chart_info else None,
                     "confusion_matrix_labels": chart_info.get("metrics", {}).get("confusion_matrix_labels") if chart_info else None,
                     "roc_curve": chart_info.get("roc_curve")                   if chart_info else None,
@@ -758,7 +741,6 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             "model_summary": summary_path,
             "log_file": log_file,
             "created_files": created_files,
-            # ── NEW: chart data for frontend visualizations ─────────────────
             "chart_data": {
                 "comparison_table": comparison_table,
                 "per_model": per_model_chart,
