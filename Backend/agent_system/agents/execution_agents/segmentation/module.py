@@ -1000,7 +1000,11 @@ class SegmentationModule:
             stage="awaiting_review",
             run_id=run_id,
         )
-        ready_items = [item for item in work_items if item["status"] == "ready"]
+        ready_items = [
+            item
+            for item in work_items
+            if item["status"] == "ready" and item.get("review_status", "pending") == "pending"
+        ]
         await publisher.publish_final()
         if ready_items:
             await emit_tool_events(
@@ -1014,14 +1018,36 @@ class SegmentationModule:
                 session_id=self.session_id,
             )
             raw_review = await self._wait_for_review()
+            
+            overlaps = (
+                set(raw_review.get("accepted", [])) & set(raw_review.get("rejected", [])) |
+                set(raw_review.get("accepted", [])) & set(raw_review.get("modified", [])) |
+                set(raw_review.get("rejected", [])) & set(raw_review.get("modified", []))
+            )
+            if overlaps:
+                logger.debug(f"Overlapping ids in raw_review (frontend glitch signature): {overlaps}")
+                
             review = self._normalise_review_keys(
                 raw_review,
                 work_items,
                 len(plan.targets),
             )
             ready_pair_ids = {item["pair_id"] for item in ready_items}
-            review["accepted"] -= review["modified"]
-            review["rejected"] -= review["modified"] | review["accepted"]
+
+            # A pair that isn't currently open for review (already decided in an
+            # earlier round, or not "ready" at all) must not be touched, no matter
+            # what the incoming payload contains.
+            review["modified"] &= ready_pair_ids
+            review["rejected"] &= ready_pair_ids
+            review["accepted"] &= ready_pair_ids
+
+            # Precedence: explicit negative decisions always beat the default
+            # "accepted" state. "accepted" is the no-action default, so it must
+            # NEVER be allowed to silently override an explicit reject or modify —
+            # only the reverse. modified is the strongest signal, then rejected.
+            review["accepted"] -= review["modified"] | review["rejected"]
+            review["rejected"] -= review["modified"]
+
             reviewed_pair_ids = (
                 review["modified"] | review["accepted"] | review["rejected"]
             )
