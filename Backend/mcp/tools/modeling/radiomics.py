@@ -336,7 +336,7 @@ def _select_models(
 
 
 def _pipeline_variants(
-    spec: ModelSpec, params: RadiomicsModelInput
+    spec: ModelSpec, params: RadiomicsModelInput, feature_count: int
 ) -> list[tuple[str, Any]]:
     from sklearn.base import clone
     from sklearn.feature_selection import VarianceThreshold
@@ -364,12 +364,9 @@ def _pipeline_variants(
                     ),
                 )
             )
-        steps.extend(
-            [
-                ("variance", VarianceThreshold(0.0)),
-                ("correlation", CorrelationFilter(params.correlation_threshold)),
-            ]
-        )
+        if feature_count > 1:
+            steps.append(("variance", VarianceThreshold(0.0)))
+        steps.append(("correlation", CorrelationFilter(params.correlation_threshold)))
         if spec.scale:
             steps.append(("scaler", StandardScaler()))
         steps.append(("estimator", clone(spec.estimator)))
@@ -777,7 +774,7 @@ def _train_radiomics(params: RadiomicsModelInput, task_type: str) -> dict[str, A
     candidates = []
     for dataset_name, columns in datasets.items():
         for model_name, spec in models.items():
-            for strategy, pipeline in _pipeline_variants(spec, params):
+            for strategy, pipeline in _pipeline_variants(spec, params, len(columns)):
                 candidates.append((dataset_name, columns, model_name, strategy, pipeline))
     total_fits = max(1, len(candidates) * len(splits))
     completed_fits = 0
@@ -905,34 +902,30 @@ def _train_radiomics(params: RadiomicsModelInput, task_type: str) -> dict[str, A
     fusion_rows = best_rows[best_rows["dataset"].str.startswith("fusion:")]
     fusion_gain_path = None
     if not fusion_rows.empty:
-        best_fusion_row = (
-            fusion_rows.loc[fusion_rows[comparison_metric].idxmax()]
-            if task_type == "classification"
-            else fusion_rows.loc[fusion_rows[comparison_metric].idxmin()]
-        )
         gain_rows = []
         for _, baseline_row in best_rows[
             best_rows["dataset"].str.startswith("baseline:")
         ].iterrows():
             baseline_value = float(baseline_row[comparison_metric])
-            fusion_value = float(best_fusion_row[comparison_metric])
-            gain = (
-                fusion_value - baseline_value
-                if task_type == "classification"
-                else baseline_value - fusion_value
-            )
-            gain_rows.append(
-                {
-                    "baseline_dataset": baseline_row["dataset"],
-                    "baseline_model": baseline_row["model"],
-                    "fusion_dataset": best_fusion_row["dataset"],
-                    "fusion_model": best_fusion_row["model"],
-                    "metric": comparison_metric,
-                    "baseline_value": baseline_value,
-                    "fusion_value": fusion_value,
-                    "fusion_gain_positive_is_better": gain,
-                }
-            )
+            for _, fusion_row in fusion_rows.iterrows():
+                fusion_value = float(fusion_row[comparison_metric])
+                gain = (
+                    fusion_value - baseline_value
+                    if task_type == "classification"
+                    else baseline_value - fusion_value
+                )
+                gain_rows.append(
+                    {
+                        "baseline_dataset": baseline_row["dataset"],
+                        "baseline_model": baseline_row["model"],
+                        "fusion_dataset": fusion_row["dataset"],
+                        "fusion_model": fusion_row["model"],
+                        "metric": comparison_metric,
+                        "baseline_value": baseline_value,
+                        "fusion_value": fusion_value,
+                        "fusion_gain_positive_is_better": gain,
+                    }
+                )
         fusion_gain_path = os.path.join(output_dir, "fusion_gain.csv")
         pd.DataFrame(gain_rows).to_csv(fusion_gain_path, index=False)
 
