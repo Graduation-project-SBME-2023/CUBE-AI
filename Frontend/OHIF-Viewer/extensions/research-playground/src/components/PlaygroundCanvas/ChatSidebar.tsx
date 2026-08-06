@@ -451,6 +451,7 @@ const ChatSidebar = ({
     if (data.type === 'run_finished') {
       const currentSessionId = activeSessionIdRef.current;
       if (!currentSessionId) return;
+      if (data.replaying) return;
       const completionMsg = {
         id: makeId('a'),
         role: 'assistant',
@@ -480,6 +481,7 @@ const ChatSidebar = ({
     if (data.type === 'run_stopped') {
       const currentSessionId = activeSessionIdRef.current;
       if (!currentSessionId) return;
+      if (data.replaying) return;
       const stoppedMsg = {
         id: makeId('a'),
         role: 'assistant',
