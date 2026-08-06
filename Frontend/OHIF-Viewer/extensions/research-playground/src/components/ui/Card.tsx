@@ -72,7 +72,7 @@ export default function Card({
           {icon}
         </div>
 
-        <div className="flex-1">
+        <div className="flex-1 pr-8">
           <div className="text-lg font-bold text-white">{title}</div>
 
           {description && (
