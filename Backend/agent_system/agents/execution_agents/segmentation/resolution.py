@@ -119,8 +119,12 @@ def resolve_voxtell_prompt(
     target: ResolvedTarget,
     cache_candidates: list[CachePromptCandidate],
 ) -> tuple[str, bool]:
+    # Use inference_prompt (the explicit VoxTell field) rather than
+    # canonical_label. They are equal by the ResolvedTarget invariant, but
+    # inference_prompt is the semantically correct source for what is sent to
+    # the model.
     if target.voxtell_prompt.mode == "generate":
-        return target.canonical_label, False
+        return target.inference_prompt, False
     prompt_by_id = {
         candidate.candidate_id: candidate.prompt for candidate in cache_candidates
     }

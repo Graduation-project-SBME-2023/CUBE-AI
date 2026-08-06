@@ -383,10 +383,10 @@ For study_population_planner_agent:
 
 For segmentation_agent:
   "Preserve the explicitly requested extraction ROI. For whole-spleen radiomics,
-   segment one target named `spleen` on each CT volume, including healthy and
-   diseased cohorts; do not add `spleen lesion`. For lesion radiomics, segment
-   only the explicitly named splenic lesion. Export masks as NIfTI for
-   PyRadiomics compatibility."
+   use one canonical target and VoxTell prompt named `spleen` on each CT volume,
+   including healthy and diseased cohorts; do not add `spleen lesion`. For lesion
+   radiomics, use only the explicitly named splenic lesion as the canonical
+   target. Export masks as NIfTI for PyRadiomics compatibility."
 
 INTERACTION RULES
 ─────────────────
@@ -401,6 +401,8 @@ CONSTRAINTS
   analysis.
 • Instructions must be actionable and specific — not generic templates.
 • Reference domain knowledge when justifying method choices.
+• VoxTell prompts must be compact canonical target labels such as `spleen`;
+  never generate command-style prompts such as `segment spleen`.
 • Include at minimum 3 steps and at maximum all {len(AVAILABLE_AGENTS)} agents.
 • CRITICAL JSON FORMATTING: If you include any LaTeX commands or paths in your 
   instructions, you MUST double-escape all backslashes.

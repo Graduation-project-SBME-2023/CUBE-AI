@@ -1,110 +1,96 @@
-import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 
+CURRENT_SCHEMA_VERSION = 2
 REUSE_CONFIDENCE_THRESHOLD = 0.6
 RESOLVED_REASON_MAX_LENGTH = 2048
 
 
-# VoxTell works best with a compact target noun label. These terms describe
-# image appearance rather than the anatomical/pathological identity used to
-# select the ROI. Keep this deliberately narrow: clinical subtype words must
-# not be removed by a generic stop-word list.
-_ENHANCEMENT_DESCRIPTION_RE = re.compile(
-    r"\b(?:contrast[\s-]+)?(?:non[\s-]*)?enhanc(?:ed|ing)\b",
-    flags=re.IGNORECASE,
-)
-
-
-def _strip_inference_description(value: str) -> str:
-    value = _ENHANCEMENT_DESCRIPTION_RE.sub(" ", value)
-    return " ".join(value.split()).strip(" -_,")
-
-
-def _base_pathology_label(
-    pathology: str,
-    anatomy: str,
-    laterality: str,
-) -> str:
-    """Remove anatomy repeated inside the structured pathology field."""
-    pathology = _strip_inference_description(pathology)
-    side = "" if laterality == "unspecified" else laterality
-    anatomy_forms = {
-        anatomy,
-        " ".join(part for part in (side, anatomy) if part),
-    }
-    for anatomy_form in sorted(anatomy_forms, key=len, reverse=True):
-        for article in ("the ", ""):
-            suffix = f" of {article}{anatomy_form}"
-            if pathology.casefold().endswith(suffix.casefold()):
-                return pathology[: -len(suffix)].strip()
-    return pathology
-
-
-def _canonicalize_target_label(
-    label: str,
-    anatomy: str,
-    pathology: str | None,
-    laterality: str,
-) -> str:
-    """Return a compact VoxTell target label without imaging description."""
-    label = _strip_inference_description(label)
-    if not pathology:
-        return label
-
-    # Naturalize LLM phrases such as "tumor of brain" to the anatomy-first
-    # target name expected by VoxTell. This is structural normalization using
-    # the already-resolved identity fields, not runtime clinical synonym
-    # matching.
-    side = "" if laterality == "unspecified" else laterality
-    anatomy_with_side = " ".join(part for part in (side, anatomy) if part)
-    inverted_forms = {
-        f"{pathology} of {anatomy}".casefold(),
-        f"{pathology} of the {anatomy}".casefold(),
-        f"{pathology} of {anatomy_with_side}".casefold(),
-        f"{pathology} of the {anatomy_with_side}".casefold(),
-    }
-    if label.casefold() in inverted_forms:
-        return " ".join(part for part in (side, anatomy, pathology) if part)
-    return label
+# ---------------------------------------------------------------------------
+# Agent 1 output: clinical target identity
+# ---------------------------------------------------------------------------
 
 
 class ClinicalTargetIntent(BaseModel):
+    """Locked physical ROI identity produced by Agent 1.
+
+    Agent 1 determines *what* region to delineate. It must not see existing
+    masks, cache prompts, or model names so that the available inventory
+    cannot bias the clinical interpretation.
+    """
+
     target_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_]{0,63}$")
     canonical_label: str = Field(min_length=1, max_length=200)
+
     anatomy: str = Field(min_length=1, max_length=120)
     pathology: str | None = Field(default=None, max_length=120)
+
+    scope: Literal[
+        "whole_organ",
+        "whole_lesion",
+        "lesion_subregion",
+        "tissue_region",
+    ]
+
+    subregion: str | None = Field(default=None, max_length=120)
+
     laterality: Literal["left", "right", "bilateral", "unspecified"] = "unspecified"
-    confidence: float = Field(ge=0.0, le=1.0)
+
+    # Words whose removal would change the voxel boundary, select a different
+    # lesion, or collapse a separately delineated subregion into a broader ROI.
+    target_defining_modifiers: list[str] = Field(default_factory=list)
+
+    # Clinically important context that does not alter the mask boundary
+    # (treatment history, study cohort, imaging rationale, etc.).
+    contextual_descriptors: list[str] = Field(default_factory=list)
+
+    # Verbatim span from the clinical instruction that establishes the target.
+    evidence_span: str = Field(min_length=1, max_length=500)
+
+    intent_confidence: float = Field(ge=0.0, le=1.0)
     rationale: str = Field(min_length=1, max_length=1000)
 
     @model_validator(mode="after")
-    def normalize_clinical_identity(self):
+    def validate_clinical_identity(self):
         self.anatomy = self.anatomy.strip()
-        if self.pathology:
-            self.pathology = _base_pathology_label(
-                self.pathology,
-                self.anatomy,
-                self.laterality,
-            )
+        if self.pathology is not None:
+            self.pathology = self.pathology.strip()
             if not self.pathology:
-                raise ValueError(
-                    "Pathology must contain a base target entity, not only "
-                    "imaging description"
-                )
-        self.canonical_label = _canonicalize_target_label(
-            self.canonical_label.strip(),
-            self.anatomy,
-            self.pathology,
-            self.laterality,
-        )
+                raise ValueError("pathology cannot be blank when provided")
+        self.canonical_label = self.canonical_label.strip()
         self.rationale = self.rationale.strip()
+        self.evidence_span = self.evidence_span.strip()
         if not self.canonical_label or not self.anatomy or not self.rationale:
             raise ValueError(
-                "Clinical target identity fields cannot contain only whitespace"
+                "canonical_label, anatomy, and rationale cannot be blank"
             )
+
+        # A lesion subregion must name the subregion.
+        if self.scope == "lesion_subregion" and not self.subregion:
+            raise ValueError(
+                "subregion is required when scope is 'lesion_subregion'"
+            )
+
+        # Every target-defining modifier must appear in the canonical label so
+        # the agent cannot claim to preserve a word it actually dropped.
+        canonical_lower = self.canonical_label.casefold()
+        for modifier in self.target_defining_modifiers:
+            if modifier.casefold() not in canonical_lower:
+                raise ValueError(
+                    f"target_defining_modifier {modifier!r} is not present in "
+                    f"canonical_label {self.canonical_label!r}"
+                )
+
+        # Reject sentence-length labels: they are likely the raw instruction,
+        # not a compact target noun phrase.
+        if len(self.canonical_label.split()) > 8:
+            raise ValueError(
+                "canonical_label must be a compact target noun phrase, not a "
+                "sentence (too many words)"
+            )
+
         return self
 
 
@@ -117,8 +103,15 @@ class ClinicalTargetIntentPlan(BaseModel):
         if len(target_ids) != len(set(target_ids)):
             raise ValueError("target_id values must be unique")
         if any("__" in target_id for target_id in target_ids):
-            raise ValueError("target_id values cannot contain the reserved '__' delimiter")
+            raise ValueError(
+                "target_id values cannot contain the reserved '__' delimiter"
+            )
         return self
+
+
+# ---------------------------------------------------------------------------
+# Agent 2 input: candidate inventories
+# ---------------------------------------------------------------------------
 
 
 class MaskLabelCandidate(BaseModel):
@@ -130,6 +123,27 @@ class MaskLabelCandidate(BaseModel):
 class CachePromptCandidate(BaseModel):
     candidate_id: str
     prompt: str
+
+
+# ---------------------------------------------------------------------------
+# Agent 2 output: mask/cache resolution decisions
+# ---------------------------------------------------------------------------
+
+
+class RejectedCandidate(BaseModel):
+    """Explains why a specific mask candidate was not accepted."""
+
+    candidate_id: str
+    relation: Literal[
+        "broader_than_target",
+        "narrower_than_target",
+        "different_subregion",
+        "different_pathology",
+        "different_anatomy",
+        "different_laterality",
+        "insufficient_metadata",
+    ]
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class VoxTellPromptDecision(BaseModel):
@@ -152,11 +166,18 @@ class VoxTellPromptDecision(BaseModel):
 
 
 class TargetCandidateDecision(BaseModel):
+    """Agent 2 output for a single locked target.
+
+    This schema intentionally omits anatomy, pathology, scope, subregion,
+    laterality, and canonical_label — those fields are locked by Agent 1 and
+    must not be re-interpreted here.
+    """
+
     target_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_]{0,63}$")
     accepted_mask_candidate_ids: list[str] = Field(default_factory=list)
+    rejected_mask_candidates: list[RejectedCandidate] = Field(default_factory=list)
     voxtell_prompt: VoxTellPromptDecision
-    selected_model: str = Field(min_length=1, max_length=120)
-    confidence: float = Field(ge=0.0, le=1.0)
+    match_confidence: float = Field(ge=0.0, le=1.0)
     rationale: str = Field(min_length=1, max_length=1000)
 
     @model_validator(mode="after")
@@ -165,7 +186,7 @@ class TargetCandidateDecision(BaseModel):
             set(self.accepted_mask_candidate_ids)
         ):
             raise ValueError("accepted_mask_candidate_ids must be unique")
-        if self.confidence < REUSE_CONFIDENCE_THRESHOLD:
+        if self.match_confidence < REUSE_CONFIDENCE_THRESHOLD:
             if self.accepted_mask_candidate_ids:
                 raise ValueError(
                     "Low-confidence candidate decisions cannot reuse masks"
@@ -174,17 +195,13 @@ class TargetCandidateDecision(BaseModel):
                 raise ValueError(
                     "Low-confidence candidate decisions must generate a prompt"
                 )
-        self.selected_model = self.selected_model.strip()
         self.rationale = self.rationale.strip()
-        if not self.selected_model or not self.rationale:
-            raise ValueError(
-                "Candidate model and rationale cannot contain only whitespace"
-            )
+        if not self.rationale:
+            raise ValueError("rationale cannot be blank")
         return self
 
 
 class TargetCandidateDecisionPlan(BaseModel):
-    chosen_path: Literal["automatic", "interactive"]
     decisions: list[TargetCandidateDecision] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -195,31 +212,70 @@ class TargetCandidateDecisionPlan(BaseModel):
         return self
 
 
+# ---------------------------------------------------------------------------
+# Composed resolution: merges Agent 1 + Agent 2 outputs
+# ---------------------------------------------------------------------------
+
+
 class ResolvedTarget(BaseModel):
+    """Final resolved target carrying both intent identity and execution plan."""
+
     target_id: str = Field(pattern=r"^[a-z0-9][a-z0-9_]{0,63}$")
     canonical_label: str = Field(min_length=1, max_length=200)
+
+    # Clinical identity (locked from Agent 1, never modified by Agent 2).
     anatomy: str = Field(min_length=1, max_length=120)
     pathology: str | None = Field(default=None, max_length=120)
+    scope: Literal[
+        "whole_organ",
+        "whole_lesion",
+        "lesion_subregion",
+        "tissue_region",
+    ]
+    subregion: str | None = Field(default=None, max_length=120)
     laterality: Literal["left", "right", "bilateral", "unspecified"] = "unspecified"
+    target_defining_modifiers: list[str] = Field(default_factory=list)
+
     accepted_mask_candidate_ids: list[str] = Field(default_factory=list)
+
+    # The exact text sent to VoxTell. Stored separately for observability; an
+    # invariant validator enforces equality with canonical_label so there is no
+    # drift path in the current release.
+    inference_prompt: str = Field(min_length=1, max_length=200)
+
     voxtell_prompt: VoxTellPromptDecision
-    confidence: float = Field(ge=0.0, le=1.0)
+
+    # Confidence fields are kept separate so debugging can distinguish a weak
+    # clinical interpretation from a weak mask match.
+    intent_confidence: float = Field(ge=0.0, le=1.0)
+    match_confidence: float = Field(ge=0.0, le=1.0)
     reason: str = Field(min_length=1, max_length=RESOLVED_REASON_MAX_LENGTH)
 
     @model_validator(mode="after")
-    def generated_prompt_is_canonical(self):
+    def validate_resolved_target(self):
+        # inference_prompt must equal canonical_label (case-insensitive, whitespace-normalized).
+        prompt = " ".join((self.inference_prompt or "").split()).casefold()
+        canonical = " ".join((self.canonical_label or "").split()).casefold()
+        if prompt != canonical:
+            raise ValueError(
+                "inference_prompt must equal canonical_label "
+                f"(got {self.inference_prompt!r} vs {self.canonical_label!r})"
+            )
+        # Normalize to the canonical casing.
+        self.inference_prompt = " ".join(self.canonical_label.split())
+
+        # VoxTell generate-mode prompt must equal canonical_label.
         if self.voxtell_prompt.mode == "generate":
-            prompt = str(self.voxtell_prompt.prompt or "").strip()
-            canonical = self.canonical_label.strip()
-            if prompt.casefold() != canonical.casefold():
+            vt_prompt = " ".join((self.voxtell_prompt.prompt or "").split()).casefold()
+            if vt_prompt != canonical:
                 raise ValueError(
                     "A generated VoxTell prompt must equal canonical_label"
                 )
-            self.voxtell_prompt.prompt = canonical
-        self.canonical_label = self.canonical_label.strip()
-        if self.pathology:
-            self.pathology = self.pathology.strip()
-        if self.confidence < REUSE_CONFIDENCE_THRESHOLD:
+            self.voxtell_prompt.prompt = " ".join(self.canonical_label.split())
+
+        # Composite reuse gate: both confidences must be above threshold.
+        reuse_confidence = min(self.intent_confidence, self.match_confidence)
+        if reuse_confidence < REUSE_CONFIDENCE_THRESHOLD:
             if self.accepted_mask_candidate_ids:
                 raise ValueError(
                     "Low-confidence targets cannot reuse existing masks"
@@ -229,6 +285,11 @@ class ResolvedTarget(BaseModel):
                     "Low-confidence targets must generate the exact canonical prompt"
                 )
         return self
+
+    @property
+    def confidence(self) -> float:
+        """Composite confidence for backward-compatible code paths."""
+        return min(self.intent_confidence, self.match_confidence)
 
 
 class TargetResolutionPlan(BaseModel):
@@ -253,39 +314,38 @@ class TargetResolutionPlan(BaseModel):
         return [target.canonical_label for target in self.targets]
 
 
-class ClinicalPlanAudit(BaseModel):
-    approved: bool
-    clinical_identity_invalid: bool = False
-    issues: list[str] = Field(default_factory=list)
-    corrected_plan: TargetResolutionPlan | None = None
-
-    @model_validator(mode="after")
-    def validate_audit_decision(self):
-        if self.approved:
-            if self.clinical_identity_invalid:
-                raise ValueError(
-                    "An approved audit cannot mark clinical identity invalid"
-                )
-            if self.corrected_plan is not None:
-                raise ValueError("An approved audit must not return corrected_plan")
-        if not self.approved:
-            if not self.issues:
-                raise ValueError("A rejected audit must explain at least one issue")
-            if self.clinical_identity_invalid and self.corrected_plan is not None:
-                raise ValueError(
-                    "An invalid locked clinical identity must not be silently replaced"
-                )
-            if not self.clinical_identity_invalid and self.corrected_plan is None:
-                raise ValueError("A rejected audit must return corrected_plan")
-        return self
-
-
 class TargetResolutionOutcome(BaseModel):
+    schema_version: int = CURRENT_SCHEMA_VERSION
     plan: TargetResolutionPlan
     intent_plan: ClinicalTargetIntentPlan
     candidate_plan: TargetCandidateDecisionPlan
-    audit: ClinicalPlanAudit
     policy_fingerprint: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+# ---------------------------------------------------------------------------
+# Code-derived concept list (never written by an agent)
+# ---------------------------------------------------------------------------
+
+
+def required_target_concepts(target: ClinicalTargetIntent) -> list[str]:
+    """Return the minimal set of words that must appear in a valid VoxTell prompt.
+
+    This list is derived mechanically from the structured fields so that the
+    code — not the agent — guarantees concept presence. It is used for
+    presence-only validation, never for clinical interpretation.
+    """
+    concepts: list[str] = [target.anatomy]
+    if target.pathology:
+        concepts.append(target.pathology)
+    concepts.extend(target.target_defining_modifiers)
+    if target.laterality != "unspecified":
+        concepts.append(target.laterality)
+    return [c for c in concepts if c]
+
+
+# ---------------------------------------------------------------------------
+# Deterministic reference validators (called by planner.py after agent output)
+# ---------------------------------------------------------------------------
 
 
 def validate_candidate_references(
@@ -317,7 +377,7 @@ def validate_candidate_references(
             if cached_prompt.casefold() != target.canonical_label.casefold():
                 raise ValueError(
                     f"VoxTell cache prompt for target {target.target_id!r} must "
-                    "exactly match its compact canonical label"
+                    "exactly match its canonical label"
                 )
     return plan
 
@@ -354,6 +414,7 @@ def validate_candidate_decision_references(
                 f"Target {decision.target_id!r} returned unknown mask candidate "
                 f"IDs: {sorted(unknown_masks)}"
             )
+        canonical = intent_by_id[decision.target_id].canonical_label
         if decision.voxtell_prompt.mode == "cache":
             candidate_id = str(decision.voxtell_prompt.cache_candidate_id)
             if candidate_id not in cache_ids:
@@ -362,59 +423,17 @@ def validate_candidate_decision_references(
                     f"candidate ID: {candidate_id}"
                 )
             cached_prompt = cache_by_id[candidate_id].prompt.strip()
-            canonical = intent_by_id[decision.target_id].canonical_label
             if cached_prompt.casefold() != canonical.casefold():
                 raise ValueError(
                     f"VoxTell cache prompt for target {decision.target_id!r} "
-                    "must exactly match its compact canonical label"
+                    "must exactly match its canonical label"
                 )
         else:
-            prompt = str(decision.voxtell_prompt.prompt or "").strip()
-            canonical = intent_by_id[decision.target_id].canonical_label
+            prompt = " ".join((decision.voxtell_prompt.prompt or "").split())
             if prompt.casefold() != canonical.casefold():
                 raise ValueError(
                     "A generated VoxTell prompt must equal the locked canonical "
                     f"label for target {decision.target_id!r}"
                 )
             decision.voxtell_prompt.prompt = canonical
-    return plan
-
-
-def validate_audited_plan_identity(
-    plan: TargetResolutionPlan,
-    intent_plan: ClinicalTargetIntentPlan,
-) -> TargetResolutionPlan:
-    """Prevent the audit stage from rewriting the locked clinical target."""
-    expected = {target.target_id: target for target in intent_plan.targets}
-    returned = {target.target_id: target for target in plan.targets}
-    if returned.keys() != expected.keys():
-        raise ValueError(
-            "An audited correction must preserve the locked target IDs exactly"
-        )
-
-    for target_id, intent in expected.items():
-        resolved = returned[target_id]
-        identity_fields = {
-            "canonical_label": (
-                resolved.canonical_label.casefold(),
-                intent.canonical_label.casefold(),
-            ),
-            "anatomy": (resolved.anatomy.casefold(), intent.anatomy.casefold()),
-            "pathology": (
-                (resolved.pathology or "").casefold(),
-                (intent.pathology or "").casefold(),
-            ),
-            "laterality": (resolved.laterality, intent.laterality),
-        }
-        changed = [
-            field
-            for field, (actual, locked) in identity_fields.items()
-            if actual != locked
-        ]
-        if changed:
-            raise ValueError(
-                f"Audited correction changed locked clinical identity for "
-                f"{target_id!r}: {changed}. Clinical intent issues must fail "
-                "safely instead of being rewritten in the candidate audit."
-            )
     return plan
