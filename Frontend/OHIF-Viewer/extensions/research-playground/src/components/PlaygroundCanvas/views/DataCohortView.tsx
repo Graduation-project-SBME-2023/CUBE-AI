@@ -435,7 +435,6 @@ export default function DataCohortView({ populationData, segmentationData, sessi
         }
     };
 
-
     // Handle Cohort Approval (HITL Gate) from Subpage 4
     const handleApproveCohort = async () => {
         const activeSessionId = sessionStorage.getItem('active_cube_session') || sessionId;

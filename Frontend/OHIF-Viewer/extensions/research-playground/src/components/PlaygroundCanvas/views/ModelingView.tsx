@@ -7,7 +7,7 @@ import {
 import {
     LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
     Tooltip, Legend, ResponsiveContainer, Cell, RadarChart,
-    PolarGrid, PolarAngleAxis, Radar, ScatterChart, Scatter, ReferenceLine,
+    PolarGrid, PolarAngleAxis, Radar,
 } from 'recharts';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -26,30 +26,21 @@ interface PerModelData {
     confusion_matrix_labels: string[] | null;
     roc_curve: RocCurve | null;
     pr_curve: PrCurve | null;
-    prediction_points?: Array<{ actual: number; predicted: number; residual: number }>;
-    dataset?: string;
-    model_id?: string;
-    missing_strategy?: string;
 }
 
 interface ChartData {
-    task_type?: 'classification' | 'regression';
     comparison_table: Array<Record<string, any>>;
     per_model: Record<string, PerModelData>;
     fold: number;
-    metric_definitions?: Record<string, string>;
 }
 
 export interface ModelingData {
     status: string;
-    tool?: 'classification' | 'regression';
-    task_type?: 'classification' | 'regression';
-    target_column?: string;
     experiment_name?: string;
     output_dir?: string;
     final_model_path?: string;
     individual_model_paths?: Record<string, string>;
-    model_test_predictions?: Record<string, string>;
+    model_test_predictions?: string;
     model_summary?: string;
     created_files?: string[] | null;
     chart_data?: ChartData | null;
@@ -67,36 +58,6 @@ const MODEL_COLORS = [
     '#f472b6', '#34d399', '#fb923c', '#60a5fa',
 ];
 const METRIC_KEYS = ['Accuracy', 'AUC', 'F1', 'Precision', 'Recall'];
-const REGRESSION_METRIC_KEYS = ['MAE', 'MSE', 'RMSE', 'R2', 'MedianAE', 'ExplainedVariance', 'Pearson'];
-const LOWER_IS_BETTER = new Set(['MAE', 'MSE', 'RMSE', 'MedianAE']);
-
-const metricValue = (metrics: Record<string, number | null> | undefined, metric: string) => {
-    if (!metrics) return null;
-    const aliases: Record<string, string[]> = {
-        R2: ['R2', 'R²', 'r2'],
-        MedianAE: ['MedianAE', 'Median Absolute Error', 'median_absolute_error'],
-        ExplainedVariance: ['ExplainedVariance', 'Explained Variance', 'explained_variance'],
-        Pearson: ['Pearson', 'pearson'],
-    };
-    const candidates = aliases[metric] ?? [metric, metric.toLowerCase()];
-    for (const candidate of candidates) {
-        const exact = metrics[candidate];
-        if (typeof exact === 'number') return exact;
-        const key = Object.keys(metrics).find(k => k.toLowerCase() === candidate.toLowerCase());
-        if (key && typeof metrics[key] === 'number') return metrics[key];
-    }
-    return null;
-};
-
-const modelingTaskType = (data: ModelingData): 'classification' | 'regression' => {
-    if (data.task_type === 'regression' || data.tool === 'regression' || data.chart_data?.task_type === 'regression') {
-        return 'regression';
-    }
-    const firstRow = data.chart_data?.comparison_table?.[0];
-    return firstRow && Object.keys(firstRow).some(key => ['mae', 'mse', 'rmse', 'r2'].includes(key.toLowerCase()))
-        ? 'regression'
-        : 'classification';
-};
 
 const fmt = (v: number | null | undefined, d = 3) => v == null ? '—' : v.toFixed(d);
 const pct = (v: number | null | undefined) => v == null ? '—' : `${(v * 100).toFixed(1)}%`;
@@ -243,114 +204,6 @@ function ModelComparisonBars({ data, metric, hidden, onToggle }: {
 }
 
 // ── ROC chart ──────────────────────────────────────────────────────────────────
-
-function RegressionComparisonBars({ data, metric, hidden, onToggle }: {
-    data: ChartData; metric: string; hidden: Set<string>; onToggle: (key: string) => void;
-}) {
-    const allRows = useMemo(() => Object.entries(data.per_model).map(([key, model], index) => ({
-        key,
-        name: model.label || key,
-        dataset: model.dataset,
-        color: MODEL_COLORS[index % MODEL_COLORS.length],
-        value: metricValue(model.holdout_metrics, metric) ?? metricValue(model.cv_metrics, metric),
-    })), [data, metric]);
-    const rows = allRows.filter(row => !hidden.has(row.key) && row.value != null);
-
-    return (
-        <div>
-            <div className="flex gap-1.5 mb-3 flex-wrap">
-                {allRows.map(row => (
-                    <SeriesToggle key={row.key}
-                        label={`${row.name}${row.dataset ? ` · ${row.dataset}` : ''}`}
-                        color={row.color} active={!hidden.has(row.key)} onClick={() => onToggle(row.key)} />
-                ))}
-            </div>
-            {rows.length ? (
-                <ResponsiveContainer width="100%" height={Math.max(180, rows.length * 42)}>
-                    <BarChart data={rows} layout="vertical" margin={{ left: 8, right: 28, top: 4, bottom: 4 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1f2d40" horizontal={false} />
-                        <XAxis type="number" domain={['auto', 'auto']} tick={{ fill: '#566a84', fontSize: 10 }} />
-                        <YAxis type="category" dataKey="name" width={145} tick={{ fill: '#91b9cd', fontSize: 9 }} />
-                        <Tooltip formatter={(value: number) => fmt(value, 4)}
-                            contentStyle={{ background: '#0b1015', border: '1px solid #1f2d40', borderRadius: 8 }} />
-                        <Bar dataKey="value" name={`${metric} (${LOWER_IS_BETTER.has(metric) ? 'lower' : 'higher'} is better)`}
-                            radius={[0, 4, 4, 0]}>
-                            {rows.map(row => <Cell key={row.key} fill={row.color} />)}
-                        </Bar>
-                    </BarChart>
-                </ResponsiveContainer>
-            ) : (
-                <div className="py-12 text-center text-xs text-[#3c5d80]">No {metric} values are available.</div>
-            )}
-        </div>
-    );
-}
-
-function ActualVsPredictedChart({ model, height = 300 }: { model: PerModelData; height?: number }) {
-    const points = model.prediction_points ?? [];
-    const values = points.flatMap(point => [point.actual, point.predicted]);
-    const low = values.length ? Math.min(...values) : 0;
-    const high = values.length ? Math.max(...values) : 1;
-    if (!points.length) return <div className="py-16 text-center text-xs text-[#3c5d80]">Prediction data is unavailable.</div>;
-    return (
-        <ResponsiveContainer width="100%" height={height}>
-            <ScatterChart margin={{ top: 12, right: 20, bottom: 28, left: 12 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2d40" />
-                <XAxis type="number" dataKey="actual" name="Actual"
-                    label={{ value: 'Actual target', position: 'insideBottom', offset: -14, fill: '#566a84', fontSize: 10 }}
-                    tick={{ fill: '#566a84', fontSize: 9 }} domain={['auto', 'auto']} />
-                <YAxis type="number" dataKey="predicted" name="Predicted"
-                    label={{ value: 'Predicted', angle: -90, position: 'insideLeft', fill: '#566a84', fontSize: 10 }}
-                    tick={{ fill: '#566a84', fontSize: 9 }} domain={['auto', 'auto']} />
-                <Tooltip cursor={{ strokeDasharray: '3 3' }} formatter={(value: number) => fmt(value, 4)}
-                    contentStyle={{ background: '#0b1015', border: '1px solid #1f2d40', borderRadius: 8 }} />
-                <ReferenceLine segment={[{ x: low, y: low }, { x: high, y: high }]} stroke="#6fe5b8" strokeDasharray="5 5" />
-                <Scatter data={points} fill="#5acce6" fillOpacity={0.75} />
-            </ScatterChart>
-        </ResponsiveContainer>
-    );
-}
-
-function ResidualChart({ model, height = 300 }: { model: PerModelData; height?: number }) {
-    const points = model.prediction_points ?? [];
-    if (!points.length) return <div className="py-16 text-center text-xs text-[#3c5d80]">Residual data is unavailable.</div>;
-    return (
-        <ResponsiveContainer width="100%" height={height}>
-            <ScatterChart margin={{ top: 12, right: 20, bottom: 28, left: 12 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2d40" />
-                <XAxis type="number" dataKey="predicted" name="Predicted"
-                    label={{ value: 'Predicted target', position: 'insideBottom', offset: -14, fill: '#566a84', fontSize: 10 }}
-                    tick={{ fill: '#566a84', fontSize: 9 }} domain={['auto', 'auto']} />
-                <YAxis type="number" dataKey="residual" name="Residual"
-                    label={{ value: 'Actual − predicted', angle: -90, position: 'insideLeft', fill: '#566a84', fontSize: 10 }}
-                    tick={{ fill: '#566a84', fontSize: 9 }} domain={['auto', 'auto']} />
-                <Tooltip cursor={{ strokeDasharray: '3 3' }} formatter={(value: number) => fmt(value, 4)}
-                    contentStyle={{ background: '#0b1015', border: '1px solid #1f2d40', borderRadius: 8 }} />
-                <ReferenceLine y={0} stroke="#6fe5b8" strokeDasharray="5 5" />
-                <Scatter data={points} fill="#a78bfa" fillOpacity={0.75} />
-            </ScatterChart>
-        </ResponsiveContainer>
-    );
-}
-
-function RegressionMetricCards({ model }: { model: PerModelData }) {
-    return (
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
-            {REGRESSION_METRIC_KEYS.map(metric => {
-                const value = metricValue(model.holdout_metrics, metric) ?? metricValue(model.cv_metrics, metric);
-                return (
-                    <div key={metric} className="bg-[#0b1015] rounded-xl border border-[#1f2d40] p-3">
-                        <div className="text-[9px] text-[#566a84] uppercase tracking-wider">{metric}</div>
-                        <div className="mt-1 text-lg font-mono font-semibold text-[#5acce6]">{fmt(value, 4)}</div>
-                        <div className="mt-1 text-[8px] uppercase text-[#3c5d80]">
-                            {LOWER_IS_BETTER.has(metric) ? 'Lower is better' : 'Higher is better'}
-                        </div>
-                    </div>
-                );
-            })}
-        </div>
-    );
-}
 
 function RocChart({ data, hidden, onToggle, height = 260 }: {
     data: ChartData; hidden: Set<string>;
@@ -558,9 +411,7 @@ function MetricRadar({ data, hidden, onToggle, height = 220 }: {
 
 // ── Comparison table ───────────────────────────────────────────────────────────
 
-function ComparisonTable({ table, taskType = 'classification' }: {
-    table: Array<Record<string, any>>; taskType?: 'classification' | 'regression';
-}) {
+function ComparisonTable({ table }: { table: Array<Record<string, any>> }) {
     if (!table.length) return null;
     const cols = Object.keys(table[0]);
     const metricCols = cols.filter(c => !['Model', 'TT (Sec)'].includes(c));
@@ -582,9 +433,7 @@ function ComparisonTable({ table, taskType = 'classification' }: {
                             {metricCols.map(c => (
                                 <td key={c} className="text-right py-2 px-2 font-mono">
                                     <span className={i === 0 ? 'text-[#5acce6] font-semibold' : 'text-[#566a84]'}>
-                                        {typeof row[c] === 'number'
-                                            ? (taskType === 'regression' ? fmt(row[c], 4) : pct(row[c]))
-                                            : (row[c] ?? '—')}
+                                        {typeof row[c] === 'number' ? pct(row[c]) : (row[c] ?? '—')}
                                     </span>
                                 </td>
                             ))}
@@ -607,7 +456,7 @@ function EmptyState() {
       <div>
         <h3 className="text-xl font-semibold text-slate-100">Modeling & Statistics</h3>
         <p className="mt-2 max-w-md text-sm text-[#566a84]">
-          Classification curves or regression prediction and residual diagnostics will appear here once training completes.
+          ROC curves, PR curves, confusion matrices, and per-model metric comparisons will appear here once training completes.
         </p>
       </div>
     </div>
@@ -616,35 +465,27 @@ function EmptyState() {
 
 // ── Best metric badge (used in accordion header) ───────────────────────────────
 
-function BestMetricBadge({ chartData, taskType }: {
-    chartData: ChartData; taskType: 'classification' | 'regression';
-}) {
+function BestMetricBadge({ chartData }: { chartData: ChartData }) {
+    // Find the best holdout accuracy across all models in this experiment
     const best = useMemo(() => {
         let bestVal: number | null = null;
         let bestModel = '';
-        const hasR2 = Object.values(chartData.per_model).some(model =>
-            metricValue(model.holdout_metrics, 'R2') != null || metricValue(model.cv_metrics, 'R2') != null
-        );
-        const metric = taskType === 'regression' ? (hasR2 ? 'R2' : 'RMSE') : 'Accuracy';
         Object.entries(chartData.per_model).forEach(([, m]) => {
-            const value = metricValue(m.holdout_metrics, metric) ?? metricValue(m.cv_metrics, metric);
-            const better = metric === 'RMSE'
-                ? bestVal == null || (value != null && value < bestVal)
-                : bestVal == null || (value != null && value > bestVal);
-            if (value != null && better) {
-                bestVal = value;
+            const acc = m.holdout_metrics?.Accuracy ?? m.holdout_metrics?.accuracy ?? null;
+            if (acc != null && (bestVal == null || acc > bestVal)) {
+                bestVal = acc;
                 bestModel = m.label;
             }
         });
-        return { val: bestVal, model: bestModel, metric };
-    }, [chartData, taskType]);
+        return { val: bestVal, model: bestModel };
+    }, [chartData]);
 
     if (best.val == null) return null;
 
     return (
         <span className="flex items-center gap-1.5 text-[10px] font-mono px-2 py-0.5 rounded border border-[#6fe5b8]/30 bg-[#6fe5b8]/8 text-[#6fe5b8]">
             <CheckCircle size={9} />
-            Best {best.metric}: {taskType === 'regression' ? fmt(best.val, 3) : pct(best.val)} ({best.model})
+            Best: {pct(best.val)} ({best.model})
         </span>
     );
 }
@@ -666,12 +507,6 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
 
     const h = (id: string): Set<string> => hidden[id] ?? new Set();
     const chartData = data.chart_data;
-    const taskType = modelingTaskType(data);
-    const isRegression = taskType === 'regression';
-    useEffect(() => {
-        setActiveMetric(isRegression ? 'RMSE' : 'Accuracy');
-        setSelectedModel(null);
-    }, [isRegression, expKey]);
     // A comparison table is useful even when tuning/holdout evaluation failed
     // for every individual model, so do not hide the whole experiment.
     const hasCharts = !!(
@@ -705,106 +540,6 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
         return (
             <div className="px-4 pb-4 pt-2 text-[#3c5d80] text-xs italic">
                 No chart data available for this experiment yet.
-            </div>
-        );
-    }
-
-    if (isRegression) {
-        const RegressionMetricBar = () => (
-            <div className="flex gap-2 flex-wrap">
-                {REGRESSION_METRIC_KEYS.map(metric => (
-                    <button key={metric} onClick={() => setActiveMetric(metric)}
-                        title={chartData?.metric_definitions?.[metric]}
-                        className={`px-3 py-1 rounded text-[10px] font-medium uppercase tracking-wider border transition-colors ${
-                            activeMetric === metric
-                                ? 'bg-[#5acce6]/20 text-[#5acce6] border-[#5acce6]/60'
-                                : 'text-[#566a84] border-[#1f2d40] hover:text-[#91b9cd]'
-                        }`}>
-                        {metric}
-                    </button>
-                ))}
-            </div>
-        );
-
-        return (
-            <div className="px-4 pb-5 pt-3 space-y-4">
-                <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-2 bg-[#0b1015] border border-[#1f2d40] rounded-lg px-3 py-1.5">
-                        <Layers size={11} className="text-[#5acce6]" />
-                        <span className="text-[10px] text-[#91b9cd]">{modelKeys.length} evaluated configuration{modelKeys.length !== 1 ? 's' : ''}</span>
-                    </div>
-                    {chartData?.fold && (
-                        <div className="flex items-center gap-2 bg-[#0b1015] border border-[#1f2d40] rounded-lg px-3 py-1.5">
-                            <Database size={11} className="text-[#a78bfa]" />
-                            <span className="text-[10px] text-[#91b9cd]">{chartData.fold}-fold CV</span>
-                        </div>
-                    )}
-                    {data.target_column && (
-                        <div className="flex items-center gap-2 bg-[#0b1015] border border-[#1f2d40] rounded-lg px-3 py-1.5">
-                            <Target size={11} className="text-[#6fe5b8]" />
-                            <span className="text-[10px] text-[#91b9cd]">Target: {data.target_column}</span>
-                        </div>
-                    )}
-                    <span className="text-[10px] text-[#3c5d80] ml-auto">Regression · double-click any graph to expand</span>
-                </div>
-
-                {chartData?.comparison_table?.length > 0 && (
-                    <Section title="Regression Model Comparison (Cross-Validation)" icon={<BarChart3 size={13} />}
-                        expandContent={<ComparisonTable table={chartData.comparison_table} taskType="regression" />}>
-                        <ComparisonTable table={chartData.comparison_table} taskType="regression" />
-                    </Section>
-                )}
-
-                <Section title="Metric Comparison" icon={<Activity size={13} />}
-                    expandContent={
-                        <div className="space-y-4">
-                            <RegressionMetricBar />
-                            <RegressionComparisonBars data={chartData!} metric={activeMetric}
-                                hidden={h('regression-bars')} onToggle={key => toggle('regression-bars', key)} />
-                        </div>
-                    }>
-                    <div className="space-y-3">
-                        <RegressionMetricBar />
-                        <RegressionComparisonBars data={chartData!} metric={activeMetric}
-                            hidden={h('regression-bars')} onToggle={key => toggle('regression-bars', key)} />
-                    </div>
-                </Section>
-
-                {modelKeys.length > 0 && activeModel && (
-                    <>
-                        <Section title="Selected Model Diagnostics" icon={<Target size={13} />}>
-                            <div className="flex gap-2 flex-wrap mb-4">
-                                {modelKeys.map((key, index) => {
-                                    const model = chartData!.per_model[key];
-                                    return (
-                                        <button key={key} onClick={() => setSelectedModel(key)}
-                                            title={[model.dataset, model.missing_strategy].filter(Boolean).join(' · ')}
-                                            className={`px-3 py-1.5 rounded-lg text-[10px] font-medium border transition-colors flex items-center gap-1.5 ${
-                                                activeKey === key
-                                                    ? 'border-[#5acce6]/60 text-[#5acce6] bg-[#5acce6]/10'
-                                                    : 'border-[#1f2d40] text-[#566a84] hover:text-[#91b9cd]'
-                                            }`}>
-                                            <span className="w-2 h-2 rounded-full" style={{ background: MODEL_COLORS[index % MODEL_COLORS.length] }} />
-                                            {model.label || key}{model.dataset ? ` · ${model.dataset}` : ''}
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                            <RegressionMetricCards model={activeModel} />
-                        </Section>
-
-                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-                            <Section title="Actual vs Predicted" icon={<TrendingUp size={13} />}
-                                expandContent={<ActualVsPredictedChart model={activeModel} height={440} />}>
-                                <ActualVsPredictedChart model={activeModel} />
-                            </Section>
-                            <Section title="Residual Analysis" icon={<GitBranch size={13} />}
-                                expandContent={<ResidualChart model={activeModel} height={440} />}>
-                                <ResidualChart model={activeModel} />
-                            </Section>
-                        </div>
-                    </>
-                )}
             </div>
         );
     }
@@ -963,7 +698,6 @@ function ExperimentAccordion({
     const [open, setOpen] = useState(defaultOpen);
     if (!data) return null;
     const chartData = data.chart_data;
-    const taskType = modelingTaskType(data);
     const modelCount = chartData ? Object.keys(chartData.per_model ?? {}).length : 0;
     const accentColor = MODEL_COLORS[index % MODEL_COLORS.length];
 
@@ -1000,14 +734,7 @@ function ExperimentAccordion({
                             {modelCount} model{modelCount !== 1 ? 's' : ''}
                         </span>
                     )}
-                    <span className={`text-[9px] px-2 py-0.5 rounded border font-mono uppercase ${
-                        taskType === 'regression'
-                            ? 'border-[#a78bfa]/30 text-[#a78bfa] bg-[#a78bfa]/8'
-                            : 'border-[#5acce6]/30 text-[#5acce6] bg-[#5acce6]/8'
-                    }`}>
-                        {taskType}
-                    </span>
-                    {chartData && <BestMetricBadge chartData={chartData} taskType={taskType} />}
+                    {chartData && <BestMetricBadge chartData={chartData} />}
                     {data.status === 'success' && (
                         <CheckCircle size={12} className="text-[#6fe5b8]" />
                     )}
