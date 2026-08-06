@@ -21,10 +21,10 @@ const SnackbarItem = ({ options, onClose }) => {
   }, []);
 
   const typeClasses = {
-    [SnackbarTypes.INFO]: 'bg-[#bed1db]',
-    [SnackbarTypes.WARNING]: 'bg-[#ebe5c4]',
-    [SnackbarTypes.SUCCESS]: 'bg-[#c6d9bf]',
-    [SnackbarTypes.ERROR]: 'bg-[#dabdbe]',
+    [SnackbarTypes.INFO]: 'bg-[#0f1923] border border-[#2a5a8a] shadow-[0_8px_24px_-4px_rgba(0,0,0,0.5)] rounded-xl',
+    [SnackbarTypes.WARNING]: 'bg-[#0f1923] border border-[#b28a2b] shadow-[0_8px_24px_-4px_rgba(0,0,0,0.5)] rounded-xl',
+    [SnackbarTypes.SUCCESS]: 'bg-[#0f1923] border border-[#2ea043] shadow-[0_8px_24px_-4px_rgba(0,0,0,0.5)] rounded-xl',
+    [SnackbarTypes.ERROR]: 'bg-[#0f1923] border border-[#da3633] shadow-[0_8px_24px_-4px_rgba(0,0,0,0.5)] rounded-xl',
   };
 
   const hidden = 'duration-300 transition-all ease-in-out h-0 opacity-0 pt-0 mb-0 pb-0';
@@ -41,19 +41,19 @@ const SnackbarItem = ({ options, onClose }) => {
         <div className="mx-2 flex-col">
           {/* </span> */}
           {options.title && (
-            <div className="break-normal text-lg font-bold text-black">{options.title}</div>
+            <div className="break-normal text-[14.5px] font-bold text-[#e0f0ff]">{options.title}</div>
           )}
           {options.message && (
-            <div className="break-normal text-base text-black">{options.message}</div>
+            <div className="break-normal text-[13px] text-[#8ab8cc] mt-0.5 leading-snug">{options.message}</div>
           )}
         </div>
         <div
           onClick={handleClose}
-          className="relative left-[3px] top-[-3px] ml-auto flex h-5 w-5 items-center justify-center self-start rounded-full text-[#0944b3]"
+          className="relative left-[3px] top-[-3px] ml-auto flex h-6 w-6 cursor-pointer items-center justify-center self-start rounded-md transition-colors hover:bg-[#1a2a3a]"
         >
           <Icon
             name="close"
-            className="text-black"
+            className="text-[#5a8aaa] transition-colors group-hover:text-[#e0f0ff]"
           />
         </div>
       </div>
