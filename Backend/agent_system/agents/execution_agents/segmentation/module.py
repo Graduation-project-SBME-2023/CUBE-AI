@@ -14,11 +14,17 @@ import httpx
 import SimpleITK as sitk
 from autogen_ext.tools.mcp import StdioServerParams, mcp_server_tools
 
+from agent_system.agents.clinical_roi_policy import (
+    canonicalize_voxtell_prompt_instructions,
+)
 from agent_system.models.tool_logging import TextPayload
 from services.timeout_policy import MCP_STANDARD_READ_SECONDS
 from client_config import create_model_client_from_config
 
-from .contracts import TargetResolutionOutcome
+from .clinical_target_policy import (
+    CLINICAL_TARGET_POLICY_FINGERPRINT,
+)
+from .contracts import CURRENT_SCHEMA_VERSION, TargetResolutionOutcome
 from .logging_config import emit_tool_event, emit_tool_events
 from .pipelines.automatic import run_automatic_pipeline
 from .pipelines.interactive import (
@@ -28,7 +34,6 @@ from .pipelines.interactive import (
 )
 from .planner import (
     create_candidate_resolution_agent,
-    create_target_auditor_agent,
     create_target_intent_agent,
     run_planner,
 )
@@ -59,6 +64,7 @@ logger = logging.getLogger("SegmentationModule")
 
 def resolve_mcp_server_path() -> Path:
     return Path(__file__).resolve().parents[4] / "mcp" / "server.py"
+
 
 
 class SegmentationModule:
@@ -141,7 +147,15 @@ class SegmentationModule:
         return config, state
 
     @staticmethod
-    def _build_instruction(state: dict[str, Any]) -> str:
+    def _build_instruction(
+        state: dict[str, Any],
+    ) -> tuple[str, dict | None]:
+        """Return (instruction_text, locked_roi_interpretation).
+
+        The locked_roi_interpretation is the structured ROI object set by the
+        Clinical Planner. It is passed as authoritative context to Agent 1 so
+        the agent does not need to re-derive scope from the prose instruction.
+        """
         steps = state.get("plan", {}).get("steps", [])
         segmentation_step = next(
             (step for step in steps if step.get("module") == "segmentation_agent"),
@@ -153,6 +167,7 @@ class SegmentationModule:
         instructions = str(
             segmentation_step.get("task_message", {}).get("instructions") or ""
         ).strip()
+        instructions = canonicalize_voxtell_prompt_instructions(instructions)
         hypothesis = state.get("hypothesis", {})
         if not instructions:
             instructions = (
@@ -173,7 +188,17 @@ class SegmentationModule:
                 context_parts.append(f"{label}: {value}")
         if context_parts:
             instructions += "\n\n" + "\n".join(context_parts)
-        return instructions
+
+        # Extract the structured ROI lock produced by the Clinical Planner.
+        # This may be stored directly on the hypothesis or on the step context.
+        roi_interpretation: dict | None = None
+        raw_roi = hypothesis.get("roi_interpretation") or (
+            segmentation_step.get("task_message", {}).get("roi_interpretation")
+        )
+        if isinstance(raw_roi, dict) and raw_roi:
+            roi_interpretation = raw_roi
+
+        return instructions, roi_interpretation
 
     @staticmethod
     def _model_for_target(plan, target_index: int) -> str:
@@ -224,26 +249,32 @@ class SegmentationModule:
                 existing_created_at = None
         now = datetime.now(timezone.utc).isoformat()
         payload = {
+            "schema_version": CURRENT_SCHEMA_VERSION,
             "run_id": run_id,
             "stage": stage,
             "created_at": existing_created_at or now,
             "updated_at": now,
             "chosen_path": plan.chosen_path,
             "resolution": {
+                "schema_version": CURRENT_SCHEMA_VERSION,
                 "policy_fingerprint": resolution_outcome.policy_fingerprint,
                 "intent_plan": resolution_outcome.intent_plan.model_dump(),
                 "candidate_plan": resolution_outcome.candidate_plan.model_dump(),
-                "audit": resolution_outcome.audit.model_dump(),
                 "final_plan": plan.model_dump(),
             },
             "targets": [
                 {
                     "target_id": target.target_id,
                     "canonical_label": target.canonical_label,
+                    "inference_prompt": target.inference_prompt,
                     "anatomy": target.anatomy,
                     "pathology": target.pathology,
+                    "scope": target.scope,
+                    "subregion": target.subregion,
                     "laterality": target.laterality,
-                    "confidence": target.confidence,
+                    "target_defining_modifiers": target.target_defining_modifiers,
+                    "intent_confidence": target.intent_confidence,
+                    "match_confidence": target.match_confidence,
                     "reason": target.reason,
                 }
                 for target in plan.targets
@@ -801,6 +832,29 @@ class SegmentationModule:
             return None
         try:
             payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+            # Reject checkpoints produced under a different schema version or
+            # policy fingerprint. Resuming a stale checkpoint could apply an
+            # old clinical interpretation to a new run.
+            stored_schema_version = payload.get("schema_version")
+            if stored_schema_version != CURRENT_SCHEMA_VERSION:
+                logger.info(
+                    "Ignoring segmentation checkpoint with schema_version=%r "
+                    "(current=%r); re-running target planning",
+                    stored_schema_version,
+                    CURRENT_SCHEMA_VERSION,
+                )
+                return None
+            resolution_block = payload.get("resolution") or {}
+            stored_fingerprint = resolution_block.get("policy_fingerprint")
+            if stored_fingerprint != CLINICAL_TARGET_POLICY_FINGERPRINT:
+                logger.info(
+                    "Ignoring segmentation checkpoint created under an old "
+                    "target policy (fingerprint mismatch); re-running target "
+                    "planning"
+                )
+                return None
+
             stage = str(payload.get("stage") or "")
             if stage not in {
                 "processing",
@@ -858,14 +912,13 @@ class SegmentationModule:
                 if item.get("status") == "resolved":
                     item["status"] = "reusing" if item.get("reused") else "preparing"
 
-            resolution = payload["resolution"]
             outcome = TargetResolutionOutcome.model_validate(
                 {
-                    "plan": resolution["final_plan"],
-                    "intent_plan": resolution["intent_plan"],
-                    "candidate_plan": resolution["candidate_plan"],
-                    "audit": resolution["audit"],
-                    "policy_fingerprint": resolution["policy_fingerprint"],
+                    "schema_version": stored_schema_version,
+                    "plan": resolution_block["final_plan"],
+                    "intent_plan": resolution_block["intent_plan"],
+                    "candidate_plan": resolution_block["candidate_plan"],
+                    "policy_fingerprint": resolution_block["policy_fingerprint"],
                 }
             )
             return (
@@ -1105,7 +1158,7 @@ class SegmentationModule:
                 publisher,
             )
 
-        instructions = self._build_instruction(state)
+        instructions, locked_roi_interpretation = self._build_instruction(state)
         run_id = str(uuid4())
 
         await emit_tool_events(
@@ -1133,14 +1186,13 @@ class SegmentationModule:
             self.model_client,
             self.discovery_tools,
         )
-        auditor_agent = create_target_auditor_agent(self.model_client)
         resolution_outcome = await run_planner(
             intent_agent,
             candidate_agent,
-            auditor_agent,
             instructions,
             mask_inventory.candidates,
             cache_candidates,
+            locked_roi_interpretation=locked_roi_interpretation,
         )
         plan = resolution_outcome.plan
 

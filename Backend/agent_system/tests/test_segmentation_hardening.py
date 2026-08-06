@@ -17,7 +17,6 @@ from agent_system.agents.clinical_roi_policy import (
 )
 from agent_system.agents.execution_agents.segmentation.contracts import (
     CachePromptCandidate,
-    ClinicalPlanAudit,
     ClinicalTargetIntent,
     ClinicalTargetIntentPlan,
     RESOLVED_REASON_MAX_LENGTH,
@@ -26,14 +25,13 @@ from agent_system.agents.execution_agents.segmentation.contracts import (
     TargetCandidateDecisionPlan,
     TargetResolutionPlan,
     VoxTellPromptDecision,
-    validate_audited_plan_identity,
     validate_candidate_references,
 )
 from agent_system.agents.execution_agents.segmentation.planner import (
-    AUDITOR_SYSTEM_MESSAGE,
     INTENT_SYSTEM_MESSAGE,
     _compose_resolution_reason,
     _compose_resolution_plan,
+    run_planner,
 )
 from agent_system.agents.execution_agents.segmentation.module import SegmentationModule
 from agent_system.agents.execution_agents.segmentation.pipelines.common import (
@@ -122,17 +120,8 @@ class ClinicalRoiPolicyTests(unittest.TestCase):
                 },
             )
 
-    def test_shared_policy_is_authoritative_in_intent_and_audit_prompts(self):
+    def test_shared_policy_is_authoritative_in_intent_prompt(self):
         self.assertIn(ROI_IDENTITY_POLICY, INTENT_SYSTEM_MESSAGE)
-        self.assertIn(ROI_IDENTITY_POLICY, AUDITOR_SYSTEM_MESSAGE)
-        self.assertNotIn(
-            "requires a pathological spleen target",
-            AUDITOR_SYSTEM_MESSAGE,
-        )
-        self.assertIn(
-            'single whole-organ target "spleen" with pathology null',
-            AUDITOR_SYSTEM_MESSAGE,
-        )
 
     def test_supplied_whole_spleen_hypotheses_keep_explicit_roi_context(self):
         questions = [
@@ -196,7 +185,10 @@ class ClinicalRoiPolicyTests(unittest.TestCase):
             {},
             "",
             pipeline_instructions={
-                "segmentation_agent": "Incorrectly add a spleen lesion."
+                "segmentation_agent": (
+                    'Run VoxTell with the prompt "segment spleen" and do not '
+                    "add a spleen lesion."
+                )
             },
             locked_roi_interpretation={
                 "scope": "whole_organ",
@@ -209,73 +201,8 @@ class ClinicalRoiPolicyTests(unittest.TestCase):
         self.assertLess(locked_index, generated_index)
         self.assertIn('"scope": "whole_organ"', task.instructions)
         self.assertIn('"spleen"', task.instructions)
-
-    def test_auditor_cannot_turn_whole_spleen_into_lesion_or_add_lesion(self):
-        intent = ClinicalTargetIntentPlan(
-            targets=[
-                ClinicalTargetIntent(
-                    target_id="spleen",
-                    canonical_label="spleen",
-                    anatomy="spleen",
-                    pathology=None,
-                    confidence=1.0,
-                    rationale="Features are explicitly extracted from the spleen.",
-                )
-            ]
-        )
-        lesion_rewrite = TargetResolutionPlan(
-            chosen_path="interactive",
-            selected_models=["voxtell"],
-            targets=[
-                ResolvedTarget(
-                    target_id="spleen",
-                    canonical_label="spleen lesion",
-                    anatomy="spleen",
-                    pathology="lesion",
-                    voxtell_prompt=VoxTellPromptDecision(
-                        mode="generate",
-                        prompt="spleen lesion",
-                    ),
-                    confidence=1.0,
-                    reason="Incorrect disease-keyword rewrite.",
-                )
-            ],
-        )
-        with self.assertRaisesRegex(ValueError, "locked clinical identity"):
-            validate_audited_plan_identity(lesion_rewrite, intent)
-
-        added_lesion = TargetResolutionPlan(
-            chosen_path="interactive",
-            selected_models=["voxtell"],
-            targets=[
-                ResolvedTarget(
-                    target_id="spleen",
-                    canonical_label="spleen",
-                    anatomy="spleen",
-                    pathology=None,
-                    voxtell_prompt=VoxTellPromptDecision(
-                        mode="generate",
-                        prompt="spleen",
-                    ),
-                    confidence=1.0,
-                    reason="Correct whole-organ target.",
-                ),
-                ResolvedTarget(
-                    target_id="spleen_lesion",
-                    canonical_label="spleen lesion",
-                    anatomy="spleen",
-                    pathology="lesion",
-                    voxtell_prompt=VoxTellPromptDecision(
-                        mode="generate",
-                        prompt="spleen lesion",
-                    ),
-                    confidence=1.0,
-                    reason="Unrequested extra target.",
-                ),
-            ],
-        )
-        with self.assertRaisesRegex(ValueError, "target IDs exactly"):
-            validate_audited_plan_identity(added_lesion, intent)
+        self.assertIn('prompt "spleen"', task.instructions)
+        self.assertNotIn('prompt "segment spleen"', task.instructions)
 
 
 class SegmentationContractTests(unittest.TestCase):
@@ -458,71 +385,6 @@ class SegmentationContractTests(unittest.TestCase):
                 ]
             )
 
-    def test_auditor_cannot_rewrite_locked_clinical_identity(self):
-        intent = ClinicalTargetIntentPlan(
-            targets=[
-                ClinicalTargetIntent(
-                    target_id="liver",
-                    canonical_label="liver",
-                    anatomy="liver",
-                    confidence=1.0,
-                    rationale="Explicitly requested.",
-                )
-            ]
-        )
-        changed_plan = TargetResolutionPlan(
-            chosen_path="interactive",
-            selected_models=["voxtell"],
-            targets=[
-                ResolvedTarget(
-                    target_id="liver",
-                    canonical_label="spleen",
-                    anatomy="spleen",
-                    voxtell_prompt=VoxTellPromptDecision(
-                        mode="generate",
-                        prompt="spleen",
-                    ),
-                    confidence=1.0,
-                    reason="Incorrect correction.",
-                )
-            ],
-        )
-        with self.assertRaisesRegex(ValueError, "locked clinical identity"):
-            validate_audited_plan_identity(changed_plan, intent)
-
-    def test_invalid_locked_identity_fails_without_replacement(self):
-        audit = ClinicalPlanAudit(
-            approved=False,
-            clinical_identity_invalid=True,
-            issues=["Requested anatomy is clinically ambiguous."],
-            corrected_plan=None,
-        )
-        self.assertTrue(audit.clinical_identity_invalid)
-
-        with self.assertRaises(ValidationError):
-            ClinicalPlanAudit(
-                approved=False,
-                clinical_identity_invalid=True,
-                issues=["Requested anatomy is clinically ambiguous."],
-                corrected_plan=TargetResolutionPlan(
-                    chosen_path="interactive",
-                    selected_models=["voxtell"],
-                    targets=[
-                        ResolvedTarget(
-                            target_id="liver",
-                            canonical_label="liver",
-                            anatomy="liver",
-                            voxtell_prompt=VoxTellPromptDecision(
-                                mode="generate",
-                                prompt="liver",
-                            ),
-                            confidence=1.0,
-                            reason="Replacement must be forbidden.",
-                        )
-                    ],
-                ),
-            )
-
     def test_error_contract_preserves_safe_diagnostics(self):
         with self.assertRaises(SegmentationPipelineError) as context:
             raise_for_segmentation_error(
@@ -540,6 +402,80 @@ class SegmentationContractTests(unittest.TestCase):
             )
         self.assertEqual(context.exception.as_dict()["retry_count"], 3)
         self.assertEqual(context.exception.as_dict()["status_code"], 503)
+
+
+class SegmentationPlannerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_planner_uses_only_intent_and_candidate_agents(self):
+        intent_agent = SimpleNamespace(
+            run=AsyncMock(
+                return_value=SimpleNamespace(
+                    messages=[
+                        SimpleNamespace(
+                            content=json.dumps(
+                                {
+                                    "targets": [
+                                        {
+                                            "target_id": "spleen",
+                                            "canonical_label": "spleen",
+                                            "anatomy": "spleen",
+                                            "pathology": None,
+                                            "laterality": "unspecified",
+                                            "confidence": 1.0,
+                                            "rationale": "Whole-spleen ROI requested.",
+                                        }
+                                    ]
+                                }
+                            )
+                        )
+                    ]
+                )
+            )
+        )
+        candidate_agent = SimpleNamespace(
+            run=AsyncMock(
+                return_value=SimpleNamespace(
+                    messages=[
+                        SimpleNamespace(
+                            content=json.dumps(
+                                {
+                                    "chosen_path": "interactive",
+                                    "decisions": [
+                                        {
+                                            "target_id": "spleen",
+                                            "accepted_mask_candidate_ids": [],
+                                            "voxtell_prompt": {
+                                                "mode": "generate",
+                                                "cache_candidate_id": None,
+                                                "prompt": "spleen",
+                                            },
+                                            "selected_model": "voxtell",
+                                            "confidence": 1.0,
+                                            "rationale": "Generate canonical prompt.",
+                                        }
+                                    ],
+                                }
+                            )
+                        )
+                    ]
+                )
+            )
+        )
+
+        with patch(
+            "agent_system.agents.execution_agents.segmentation.planner."
+            "get_enabled_segmentation_model_paths",
+            return_value={"voxtell": "interactive"},
+        ):
+            outcome = await run_planner(
+                intent_agent,
+                candidate_agent,
+                "Extract features from the whole spleen.",
+            )
+
+        self.assertEqual(outcome.plan.target_labels, ["spleen"])
+        self.assertFalse(hasattr(outcome, "audit"))
+        intent_agent.run.assert_awaited_once()
+        candidate_agent.run.assert_awaited_once()
 
 
 class SegmentationUtilityTests(unittest.TestCase):
@@ -560,6 +496,29 @@ class SegmentationUtilityTests(unittest.TestCase):
             }
         )
         self.assertEqual(instruction, "Left kidney lesion")
+
+    def test_persisted_voxtell_command_prompt_is_canonicalized(self):
+        instruction = SegmentationModule._build_instruction(
+            {
+                "plan": {
+                    "steps": [
+                        {
+                            "module": "segmentation_agent",
+                            "task_message": {
+                                "instructions": (
+                                    'Run VoxTell with the prompt "segment spleen".'
+                                )
+                            },
+                        }
+                    ]
+                },
+                "hypothesis": {"title": "Spleen study"},
+            }
+        )
+        self.assertEqual(
+            instruction,
+            'Run VoxTell with the prompt "spleen".',
+        )
 
     def test_quoted_multipart_boundary_is_supported(self):
         body = (

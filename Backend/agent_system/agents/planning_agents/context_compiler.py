@@ -28,7 +28,10 @@ from models.plans import (
     TaskMessage,
     ContextAugmentation,
 )
-from ..clinical_roi_policy import ROI_IDENTITY_POLICY
+from ..clinical_roi_policy import (
+    ROI_IDENTITY_POLICY,
+    canonicalize_voxtell_prompt_instructions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -488,6 +491,16 @@ def compile_task_messages(
 
         # Layer 2: Pipeline Architect's study-specific instructions
         planner_instr = pipeline_instructions.get(agent_id, "")
+        if agent_id == "segmentation_agent" and planner_instr:
+            canonical_labels = (
+                locked_roi_interpretation.get("labels", [])
+                if locked_roi_interpretation
+                else []
+            )
+            planner_instr = canonicalize_voxtell_prompt_instructions(
+                planner_instr,
+                canonical_labels,
+            )
         if planner_instr:
             instruction_parts.append(
                 f"## Study-Specific Instructions\n{planner_instr}"
