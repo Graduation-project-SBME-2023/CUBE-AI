@@ -44,7 +44,8 @@ function defaultRouteInit(
       if (
         seriesInstanceUIDs?.length &&
         !isSeriesFilterUsed(seriesMetadata.instances, filters) &&
-        !issuedWarningSeries.includes(seriesInstanceUIDs[0])
+        !issuedWarningSeries.includes(seriesInstanceUIDs[0]) &&
+        !madeInClient
       ) {
         // stores the series instance filter so it shows only once the warning
         issuedWarningSeries.push(seriesInstanceUIDs[0]);
