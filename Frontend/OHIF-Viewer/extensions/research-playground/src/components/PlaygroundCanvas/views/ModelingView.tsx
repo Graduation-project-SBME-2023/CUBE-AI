@@ -7,7 +7,7 @@ import {
 import {
     LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
     Tooltip, Legend, ResponsiveContainer, Cell, RadarChart,
-    PolarGrid, PolarAngleAxis, Radar,
+    PolarGrid, PolarAngleAxis, Radar, PolarRadiusAxis
 } from 'recharts';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -51,7 +51,7 @@ interface ModelingViewProps {
     modelingData?: Record<string, ModelingData> | null;
 }
 
-// ── Palette ────────────────────────────────────────────────────────────────────
+// ── Palette & Helpers ──────────────────────────────────────────────────────────
 
 const MODEL_COLORS = [
     '#5acce6', '#6fe5b8', '#a78bfa', '#f59e0b',
@@ -61,6 +61,12 @@ const METRIC_KEYS = ['Accuracy', 'AUC', 'F1', 'Precision', 'Recall'];
 
 const fmt = (v: number | null | undefined, d = 3) => v == null ? '—' : v.toFixed(d);
 const pct = (v: number | null | undefined) => v == null ? '—' : `${(v * 100).toFixed(1)}%`;
+
+// Safely pull metrics regardless of casing (e.g. Accuracy vs accuracy)
+const getMetricValue = (metrics: Record<string, number | null> | undefined, metric: string) => {
+    if (!metrics) return null;
+    return metrics[metric] ?? metrics[metric.toLowerCase()] ?? metrics[metric.toUpperCase()] ?? null;
+};
 
 // ── Expand modal ───────────────────────────────────────────────────────────────
 
@@ -122,7 +128,7 @@ function Section({ title, icon, children, className = '', expandContent }: {
                         </button>
                     )}
                 </div>
-                <div className="p-4">{children}</div>
+                <div className="p-4 w-full overflow-hidden">{children}</div>
             </div>
             {expanded && expandContent && (
                 <ExpandModal title={title} onClose={() => setExpanded(false)}>
@@ -162,7 +168,7 @@ function ModelComparisonBars({ data, metric, hidden, onToggle }: {
     hidden: Set<string>; onToggle: (key: string) => void;
 }) {
     const allRows = useMemo(() =>
-        Object.entries(data.per_model).map(([key, m], i) => ({
+        Object.entries(data.per_model || {}).map(([key, m], i) => ({
             key, name: m.label || key,
             color: MODEL_COLORS[i % MODEL_COLORS.length],
         })), [data]);
@@ -170,7 +176,11 @@ function ModelComparisonBars({ data, metric, hidden, onToggle }: {
     const rows = useMemo(() =>
         allRows.filter(r => !hidden.has(r.key)).map(r => {
             const m = data.per_model[r.key];
-            return { ...r, cv: m.cv_metrics?.[metric] ?? null, holdout: m.holdout_metrics?.[metric] ?? null };
+            return {
+                ...r, 
+                cv: getMetricValue(m.cv_metrics, metric), 
+                holdout: getMetricValue(m.holdout_metrics, metric) 
+            };
         }), [allRows, data, metric, hidden]);
 
     return (
@@ -210,8 +220,8 @@ function RocChart({ data, hidden, onToggle, height = 260 }: {
     onToggle: (key: string) => void; height?: number;
 }) {
     const series = useMemo(() =>
-        Object.entries(data.per_model)
-            .filter(([, m]) => m.roc_curve != null)
+        Object.entries(data.per_model || {})
+            .filter(([, m]) => m.roc_curve != null && m.roc_curve.fpr && m.roc_curve.tpr)
             .map(([key, m], i) => ({
                 key, label: m.label || key,
                 color: MODEL_COLORS[i % MODEL_COLORS.length],
@@ -219,7 +229,7 @@ function RocChart({ data, hidden, onToggle, height = 260 }: {
                     fpr: +fpr.toFixed(4),
                     tpr: +(m.roc_curve!.tpr[j] ?? 0).toFixed(4),
                 })),
-                auc: m.holdout_metrics?.auc ?? m.cv_metrics?.AUC,
+                auc: getMetricValue(m.holdout_metrics, 'AUC') ?? getMetricValue(m.cv_metrics, 'AUC'),
             })), [data]);
 
     if (!series.length) return (
@@ -268,8 +278,8 @@ function PrChart({ data, hidden, onToggle, height = 220 }: {
     onToggle: (key: string) => void; height?: number;
 }) {
     const series = useMemo(() =>
-        Object.entries(data.per_model)
-            .filter(([, m]) => m.pr_curve != null)
+        Object.entries(data.per_model || {})
+            .filter(([, m]) => m.pr_curve != null && m.pr_curve.recall && m.pr_curve.precision)
             .map(([key, m], i) => ({
                 key, label: m.label || key,
                 color: MODEL_COLORS[i % MODEL_COLORS.length],
@@ -317,7 +327,13 @@ function PrChart({ data, hidden, onToggle, height = 220 }: {
 // ── Confusion matrix ───────────────────────────────────────────────────────────
 
 function ConfusionMatrix({ matrix, labels }: { matrix: number[][]; labels: string[] }) {
-    const max = Math.max(...matrix.flat());
+    if (!matrix || matrix.length === 0) return null;
+    
+    const max = Math.max(...matrix.flat(), 0);
+    // Guarantee labels match the exact dimension of the matrix to avoid grid blowouts
+    const safeLabels = labels?.length === matrix.length 
+        ? labels 
+        : matrix.map((_, i) => labels?.[i] ?? String(i));
 
     const cellTheme = (val: number, ri: number, ci: number) => {
         const intensity = max > 0 ? val / max : 0;
@@ -336,20 +352,20 @@ function ConfusionMatrix({ matrix, labels }: { matrix: number[][]; labels: strin
     return (
         <div className="flex flex-col items-center gap-1">
             <div className="text-[9px] text-[#566a84] uppercase mb-1">Predicted →</div>
-            <div style={{ display: 'grid', gridTemplateColumns: `auto repeat(${labels.length}, 1fr)`, gap: 2 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: `auto repeat(${safeLabels.length}, minmax(36px, 1fr))`, gap: 2 }}>
                 <div />
-                {labels.map(l => (
+                {safeLabels.map(l => (
                     <div key={l} className="text-[9px] text-[#5acce6] text-center font-mono truncate px-1">{l}</div>
                 ))}
                 {matrix.map((row, ri) => (
                     <React.Fragment key={ri}>
-                        <div className="text-[9px] text-[#566a84] font-mono flex items-center pr-2">{labels[ri]}</div>
+                        <div className="text-[9px] text-[#566a84] font-mono flex items-center pr-2">{safeLabels[ri]}</div>
                         {row.map((val, ci) => {
                             const { bg, color } = cellTheme(val, ri, ci);
                             return (
                                 <div key={ci}
                                     className="flex items-center justify-center rounded text-[10px] font-mono font-bold transition-all"
-                                    style={{ minWidth: 36, minHeight: 36, background: bg, color }}>
+                                    style={{ minHeight: 36, background: bg, color }}>
                                     {val}
                                 </div>
                             );
@@ -369,17 +385,19 @@ function MetricRadar({ data, hidden, onToggle, height = 220 }: {
     onToggle: (key: string) => void; height?: number;
 }) {
     const models = useMemo(() =>
-        Object.entries(data.per_model).map(([k, m], i) => ({
+        Object.entries(data.per_model || {}).map(([k, m], i) => ({
             key: k, label: m.label || k, color: MODEL_COLORS[i % MODEL_COLORS.length],
         })), [data]);
 
     const radarData = useMemo(() =>
         METRIC_KEYS.map(metric => {
             const entry: Record<string, any> = { metric };
-            Object.entries(data.per_model).forEach(([key, m]) => {
+            Object.entries(data.per_model || {}).forEach(([key, m]) => {
                 if (!hidden.has(key)) {
-                    const v = m.cv_metrics?.[metric];
-                    entry[m.label || key] = v != null ? +(v * 100).toFixed(1) : null;
+                    // Extract gracefully ignoring casing
+                    const v = getMetricValue(m.cv_metrics, metric);
+                    // Bind to the exact dict `key` instead of `label` to avoid dots in keys crashing Recharts
+                    entry[key] = v != null ? +(v * 100).toFixed(1) : null;
                 }
             });
             return entry;
@@ -397,10 +415,11 @@ function MetricRadar({ data, hidden, onToggle, height = 220 }: {
                 <RadarChart data={radarData}>
                     <PolarGrid stroke="#1f2d40" />
                     <PolarAngleAxis dataKey="metric" tick={{ fill: '#91b9cd', fontSize: 10 }} />
+                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} />
                     <Tooltip contentStyle={{ background: '#0b1015', border: '1px solid #1f2d40', borderRadius: 8, fontSize: 11 }}
                         formatter={(v: number) => `${v.toFixed(1)}%`} />
                     {models.map(m => !hidden.has(m.key) && (
-                        <Radar key={m.key} dataKey={m.label} stroke={m.color}
+                        <Radar key={m.key} name={m.label} dataKey={m.key} stroke={m.color}
                             fill={m.color} fillOpacity={0.08} dot={{ r: 3, fill: m.color }} />
                     ))}
                 </RadarChart>
@@ -412,11 +431,11 @@ function MetricRadar({ data, hidden, onToggle, height = 220 }: {
 // ── Comparison table ───────────────────────────────────────────────────────────
 
 function ComparisonTable({ table }: { table: Array<Record<string, any>> }) {
-    if (!table.length) return null;
+    if (!table || !table.length) return null;
     const cols = Object.keys(table[0]);
     const metricCols = cols.filter(c => !['Model', 'TT (Sec)'].includes(c));
     return (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto w-full">
             <table className="w-full text-xs border-collapse">
                 <thead>
                     <tr className="border-b border-[#1f2d40]">
@@ -466,12 +485,11 @@ function EmptyState() {
 // ── Best metric badge (used in accordion header) ───────────────────────────────
 
 function BestMetricBadge({ chartData }: { chartData: ChartData }) {
-    // Find the best holdout accuracy across all models in this experiment
     const best = useMemo(() => {
         let bestVal: number | null = null;
         let bestModel = '';
-        Object.entries(chartData.per_model).forEach(([, m]) => {
-            const acc = m.holdout_metrics?.Accuracy ?? m.holdout_metrics?.accuracy ?? null;
+        Object.entries(chartData.per_model || {}).forEach(([, m]) => {
+            const acc = getMetricValue(m.holdout_metrics, 'Accuracy') ?? getMetricValue(m.cv_metrics, 'Accuracy');
             if (acc != null && (bestVal == null || acc > bestVal)) {
                 bestVal = acc;
                 bestModel = m.label;
@@ -507,8 +525,7 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
 
     const h = (id: string): Set<string> => hidden[id] ?? new Set();
     const chartData = data.chart_data;
-    // A comparison table is useful even when tuning/holdout evaluation failed
-    // for every individual model, so do not hide the whole experiment.
+    
     const hasCharts = !!(
         chartData &&
         (Object.keys(chartData.per_model ?? {}).length || chartData.comparison_table?.length)
@@ -516,8 +533,7 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
     const modelKeys = hasCharts ? Object.keys(chartData!.per_model ?? {}) : [];
     const activeKey = selectedModel ?? modelKeys[0] ?? null;
     const activeModel = activeKey && hasCharts ? chartData!.per_model?.[activeKey] : null;
-    // Backward-compatible fallback for results emitted before the backend
-    // promoted these fields to the per-model chart-data level.
+    
     const confusionMatrix = activeModel?.confusion_matrix ?? activeModel?.holdout_metrics?.confusion_matrix ?? null;
     const confusionMatrixLabels = activeModel?.confusion_matrix_labels ?? activeModel?.holdout_metrics?.confusion_matrix_labels;
 
@@ -546,7 +562,6 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
 
     return (
         <div className="px-4 pb-5 pt-3 space-y-4">
-            {/* Meta info badges */}
             <div className="flex items-center gap-2 flex-wrap">
                 <div className="flex items-center gap-2 bg-[#0b1015] border border-[#1f2d40] rounded-lg px-3 py-1.5">
                     <Layers size={11} className="text-[#5acce6]" />
@@ -561,7 +576,6 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
                 <span className="text-[10px] text-[#3c5d80] ml-auto">Double-click any chart to expand · click pills to toggle series</span>
             </div>
 
-            {/* Comparison table */}
             {chartData?.comparison_table?.length > 0 && (
                 <Section title="Model Comparison (Cross-Validation)" icon={<BarChart3 size={13} />}
                     expandContent={<ComparisonTable table={chartData.comparison_table} />}>
@@ -569,55 +583,52 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
                 </Section>
             )}
 
-            {/* Metric bars + Radar */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 <Section title="Metric Comparison" icon={<Activity size={13} />}
                     expandContent={
                         <div className="space-y-4">
                             <MetricBar />
-                            <ModelComparisonBars data={chartData} metric={activeMetric}
+                            <ModelComparisonBars data={chartData!} metric={activeMetric}
                                 hidden={h('bars')} onToggle={k => toggle('bars', k)} />
                         </div>
                     }>
                     <div className="space-y-3">
                         <MetricBar />
-                        <ModelComparisonBars data={chartData} metric={activeMetric}
+                        <ModelComparisonBars data={chartData!} metric={activeMetric}
                             hidden={h('bars')} onToggle={k => toggle('bars', k)} />
                     </div>
                 </Section>
 
                 <Section title="CV Metric Radar" icon={<Target size={13} />}
                     expandContent={
-                        <MetricRadar data={chartData} hidden={h('radar')}
+                        <MetricRadar data={chartData!} hidden={h('radar')}
                             onToggle={k => toggle('radar', k)} height={380} />
                     }>
-                    <MetricRadar data={chartData} hidden={h('radar')}
+                    <MetricRadar data={chartData!} hidden={h('radar')}
                         onToggle={k => toggle('radar', k)} />
                 </Section>
             </div>
 
-            {/* ROC + PR */}
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 <Section title="ROC Curves (Holdout)" icon={<TrendingUp size={13} />}
                     expandContent={
-                        <RocChart data={chartData} hidden={h('roc')}
+                        <RocChart data={chartData!} hidden={h('roc')}
                             onToggle={k => toggle('roc', k)} height={420} />
                     }>
-                    <RocChart data={chartData} hidden={h('roc')}
+                    <RocChart data={chartData!} hidden={h('roc')}
                         onToggle={k => toggle('roc', k)} />
                 </Section>
 
                 <Section title="Precision-Recall Curves (Holdout)" icon={<Activity size={13} />}
                     expandContent={
-                        <PrChart data={chartData} hidden={h('pr')}
+                        <PrChart data={chartData!} hidden={h('pr')}
                             onToggle={k => toggle('pr', k)} height={420} />
                     }>
-                    <PrChart data={chartData} hidden={h('pr')}
+                    <PrChart data={chartData!} hidden={h('pr')}
                         onToggle={k => toggle('pr', k)} />
                 </Section>
             </div>
 
-            {/* Confusion matrices */}
             {modelKeys.length > 0 && (
                 <Section title="Confusion Matrices" icon={<Target size={13} />}
                     expandContent={confusionMatrix && (
@@ -626,7 +637,7 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
                                 matrix={confusionMatrix}
                                 labels={confusionMatrixLabels ?? confusionMatrix.map((_, i) => String(i))}
                             />
-                            {activeModel.holdout_metrics && (
+                            {activeModel?.holdout_metrics && (
                                 <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3">
                                     {Object.entries(activeModel.holdout_metrics)
                                         .filter(([k]) => !['confusion_matrix', 'confusion_matrix_labels'].includes(k))
@@ -652,7 +663,7 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
                                 }`}>
                                 <span className="w-2 h-2 rounded-full"
                                     style={{ background: MODEL_COLORS[i % MODEL_COLORS.length] }} />
-                                {chartData.per_model[key].label || key}
+                                {chartData!.per_model[key].label || key}
                             </button>
                         ))}
                     </div>
@@ -662,7 +673,7 @@ function ExperimentPanel({ expKey, data }: { expKey: string; data: ModelingData 
                                 matrix={confusionMatrix}
                                 labels={confusionMatrixLabels ?? confusionMatrix.map((_, i) => String(i))}
                             />
-                            {activeModel.holdout_metrics && Object.keys(activeModel.holdout_metrics).length > 0 && (
+                            {activeModel?.holdout_metrics && Object.keys(activeModel.holdout_metrics).length > 0 && (
                                 <div className="flex-1 grid grid-cols-2 sm:grid-cols-3 gap-3">
                                     {Object.entries(activeModel.holdout_metrics)
                                         .filter(([k]) => !['confusion_matrix', 'confusion_matrix_labels'].includes(k))
@@ -703,31 +714,19 @@ function ExperimentAccordion({
 
     return (
         <div className="rounded-xl border border-[#1f2d40] overflow-hidden bg-[#0b1015]">
-            {/* Header / toggle button */}
             <button
                 onClick={() => setOpen(v => !v)}
                 className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
             >
-                {/* Colored left accent */}
                 <span className="w-1 h-6 rounded-full flex-shrink-0" style={{ background: accentColor }} />
-
-                {/* Expand indicator */}
                 <span className="text-[#3c5d80] flex-shrink-0">
-                    {open
-                        ? <ChevronDown size={13} />
-                        : <ChevronRight size={13} />
-                    }
+                    {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                 </span>
-
-                {/* Icon */}
                 <FlaskConical size={13} style={{ color: accentColor, flexShrink: 0 }} />
-
-                {/* Name */}
                 <span className="font-mono text-[12px] font-semibold text-[#91b9cd] flex-1 truncate">
                     {expKey}
                 </span>
 
-                {/* Right-side badges */}
                 <div className="flex items-center gap-2 flex-shrink-0">
                     {modelCount > 0 && (
                         <span className="text-[10px] px-2 py-0.5 rounded border border-[#1f2d40] text-[#566a84] font-mono">
@@ -741,7 +740,6 @@ function ExperimentAccordion({
                 </div>
             </button>
 
-            {/* Collapsible content */}
             {open && (
                 <div className="border-t border-[#1f2d40]">
                     <ExperimentPanel expKey={expKey} data={data} />
@@ -761,7 +759,6 @@ export default function ModelingView({ modelingData }: ModelingViewProps) {
 
     return (
         <div className="w-full h-full overflow-y-auto bg-[#000000] p-5 space-y-3">
-            {/* Header */}
             <div className="flex items-center gap-3 flex-wrap mb-1">
                 <div className="flex items-center gap-2 bg-[#0b1015] border border-[#1f2d40] rounded-lg px-3 py-2">
                     <FlaskConical size={13} className="text-[#5acce6]" />
@@ -774,14 +771,12 @@ export default function ModelingView({ modelingData }: ModelingViewProps) {
                 </span>
             </div>
 
-            {/* One accordion per experiment */}
             {expEntries.map(([key, data], i) => (
                 <ExperimentAccordion
                     key={key}
                     expKey={key}
                     data={data}
                     index={i}
-                    // Auto-open the most recent (last) experiment
                     defaultOpen={i === expEntries.length - 1}
                 />
             ))}
