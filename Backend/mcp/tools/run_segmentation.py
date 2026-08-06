@@ -58,7 +58,7 @@ async def _await_inference_job(
     start_response.raise_for_status()
     started = asyncio.get_running_loop().time()
     unavailable_since: float | None = None
-    UNAVAILABLE_GRACE_SECONDS = 120.0
+    UNAVAILABLE_GRACE_SECONDS = 600
 
     try:
         while True:
