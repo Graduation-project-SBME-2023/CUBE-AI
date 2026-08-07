@@ -16,9 +16,31 @@
     "output_postfix": "trans",
     "separate_folder": true,
     "input_dict": {
-        "image": "/tmp/tmpwtz1765f.nii.gz",
+        "image": "/root/.cache/monailabel/dicom/277a51f05d17457dc20b8e11c9d93def/1.2.826.0.1.3680043.8.498.90966193394235914543895670294526949480.nii.gz",
         "label_prompt": [
-            1
+            133
+        ],
+        "points": [
+            [
+                329.2263756811165,
+                279.4104388486406,
+                30
+            ],
+            [
+                372.33729043030564,
+                253.54389176057083,
+                30
+            ],
+            [
+                309.8264640439814,
+                229.8328902631737,
+                30
+            ]
+        ],
+        "point_labels": [
+            1,
+            0,
+            0
         ]
     },
     "everything_labels": "$list(set([i+1 for i in range(132)]) - set([2,16,18,20,21,23,24,25,26,27,128,129,130,131,132]))",

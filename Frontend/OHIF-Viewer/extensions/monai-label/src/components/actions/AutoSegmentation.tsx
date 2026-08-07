@@ -174,9 +174,11 @@ export default class AutoSegmentation extends BaseTab {
     };
 
     //if vista
+    let organName = '';
     if (model === 'vista') {
       //send class value
       params.Class = this.state.vistaSelectedClass.value;
+      organName = this.state.vistaSelectedClass.name;
       console.log('params.Class', params.Class);
     }
 
@@ -201,7 +203,7 @@ export default class AutoSegmentation extends BaseTab {
         statusType: 'error',
       });
     } else {
-      await this.props.updateView(response, labels, model);
+      await this.props.updateView(response, labels, model, organName);
       this.state.resetInteractions = false;
 
       this.notification.show({

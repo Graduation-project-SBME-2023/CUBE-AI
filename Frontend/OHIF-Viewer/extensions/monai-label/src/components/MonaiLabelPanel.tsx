@@ -441,7 +441,7 @@ export default class MonaiLabelPanel extends Component {
       : {};
   };
 
-  _update = async (response, labelNames) => {
+  _update = async (response, labelNames, model, organName) => {
     // Update instance variables
     this.updateInstanceVariables();
     const client_response = await this.client().info();
@@ -500,10 +500,26 @@ export default class MonaiLabelPanel extends Component {
       centroidsIJK.set(segmentIndex, { image: image, world: [] });
     }
 
+
+    const now = new Date();
+    const dd = String(now.getDate()).padStart(2, '0');
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const yyyy = now.getFullYear();
+    const dateStr = `${dd}/${mm}/${yyyy}`;
+    const modelStr = model ? `${model}` : '';
+    const organStr = organName ? `${organName}` : '';
+
+    let labelName = `Segmentation_${segmentationId}`;
+    if (model || organName) {
+      const parts = [dateStr, modelStr, organStr].filter(Boolean);
+      labelName = parts.join(' - ');
+    }
+
+
     // Define segmentation object with proper structure
     const segmentation_object = {
       id: segmentationId,
-      label: `Segmentation_${segmentationId}`,
+      label: labelName,
       segments: labels.map((label, index) => ({
         segmentIndex: index + 1,
         label,
@@ -806,13 +822,13 @@ export default class MonaiLabelPanel extends Component {
     return -1;
   }
 
-  saveSegmentation = async (model, segmentationId) => {
+  saveSegmentation = async (model, segmentationId, organName = '') => {
     console.log('model', model);
     const datasources = extensionManager.getActiveDataSource();
     console.log('datasources', datasources);
     console.log('segmentationId', segmentationId);
     // Ensure dataSource is available
-    // Call storeSegmentation from tzhe command module
+    // Call storeSegmentation from the command module
     const seg = await segmentation.state.getSegmentation(segmentationId);
     console.log(`saveSegmentation: in the saveSegmentation `, seg);
     if (!seg) {
@@ -824,15 +840,16 @@ export default class MonaiLabelPanel extends Component {
       segmentationId,
       dataSource: datasources[0],
       isModel: model,
+      organName,
     });
   };
 
-  updateView = async (response, labelNames, model) => {
+  updateView = async (response, labelNames, model, organName = '') => {
     console.log('update_view: inside update view ');
     console.log(`update_view: response ${response} `);
     const { data, centroids } = this.parseResponse(response);
-    const segmentationId = await this._update({ data, centroids }, labelNames);
-    this.saveSegmentation(model, segmentationId);
+    const segmentationId = await this._update({ data, centroids }, labelNames, model, organName);
+    this.saveSegmentation(model, segmentationId, organName);
   };
 
   uploadLabels = async () => {

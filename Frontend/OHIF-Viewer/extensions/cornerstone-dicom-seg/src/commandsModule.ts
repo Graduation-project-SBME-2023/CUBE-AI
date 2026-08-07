@@ -365,15 +365,21 @@ const commandsModule = ({
 
       return naturalizedReport;
     },
-    storeSegmentationModified: async ({ segmentationId, dataSource, isModel }) => {
+    storeSegmentationModified: async ({ segmentationId, dataSource, isModel, organName = '' }) => {
       console.log("Entering storeSegmentation");
-      const timeStamp = new Date().toLocaleTimeString();
+      const now = new Date();
+      const dd = String(now.getDate()).padStart(2, '0');
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const yyyy = now.getFullYear();
+      const dateStr = `${dd}/${mm}/${yyyy}`;
+      const timeStamp = now.toLocaleTimeString();
       let SeriesDescription = "";
       if (isModel) {
-        SeriesDescription = `${isModel}-${timeStamp}`;
+        const parts = [dateStr, isModel, organName].filter(Boolean);
+        SeriesDescription = parts.join(' - ');
       }
       else {
-        SeriesDescription = `new Modification-${timeStamp}`;
+        SeriesDescription = `Modification - ${dateStr} ${timeStamp}`;
       }
       console.log("segmentationId:", segmentationId);
       const segmentation = segmentationService.getSegmentation(segmentationId);
