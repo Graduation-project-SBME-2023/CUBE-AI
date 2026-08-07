@@ -145,8 +145,20 @@ Write-Host ""
     }
 }
 
+#  === 5.5. Backend Development Mode =========================
+Write-Host ""
+Write-Host "Enable Backend Development Mode (Live Reload)? [y/N]"
+$BackendDevChoice = Read-Host "Choice"
+
+$BackendDevMode = $false
+if ($BackendDevChoice -match "^[yY]") {
+    $BackendDevMode = $true
+    $BackendDevCompose = Join-Path $ScriptDir "Backend\docker-compose.backend.dev.yml"
+}
+
 Write-Host ""
 Write-OK "Selected backend: $BackendMode"
+if ($BackendDevMode) { Write-OK "Backend Dev Mode: Enabled" }
 Write-OK "Selected frontend: $FrontendMode"
 Write-Host ""
 
@@ -158,10 +170,18 @@ if ($FrontendMode -eq "Docker") {
     Write-Warn "First run may take several minutes."
     Write-Host ""
 
-    docker compose `
-        -f $FrontendCompose `
-        -f $BackendCompose `
-        up
+    if ($BackendDevMode) {
+        docker compose `
+            -f $BackendCompose `
+            -f $BackendDevCompose `
+            -f $FrontendCompose `
+            up
+    } else {
+        docker compose `
+            -f $BackendCompose `
+            -f $FrontendCompose `
+            up
+    }
 
     if ($LASTEXITCODE -ne 0) {
         Stop-Launch "docker compose exited with code $LASTEXITCODE. Check the output above for errors."
@@ -182,9 +202,16 @@ else {
 
     Write-Warn "Starting backend containers..."
 
-    docker compose `
-        -f $BackendCompose `
-        up -d
+    if ($BackendDevMode) {
+        docker compose `
+            -f $BackendCompose `
+            -f $BackendDevCompose `
+            up -d
+    } else {
+        docker compose `
+            -f $BackendCompose `
+            up -d
+    }
 
     if ($LASTEXITCODE -ne 0) {
         Stop-Launch "Failed to start backend containers."

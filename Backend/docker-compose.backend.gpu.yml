@@ -18,6 +18,8 @@ services:
       MONAI_URL: http://monailabel:8000
       CONTROL_API_URL: http://control-api:8001
       ORTHANC_URL: http://orthanc:8042
+    env_file:
+      - .env
     depends_on:
       postgres:
         condition: service_started
