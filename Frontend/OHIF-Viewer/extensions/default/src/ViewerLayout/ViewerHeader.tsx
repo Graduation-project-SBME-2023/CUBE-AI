@@ -111,7 +111,7 @@ function ViewerHeader({ hotkeysManager, servicesManager }) {
     <Header
       menuOptions={menuOptions}
       WhiteLabeling={appConfig.whiteLabeling}
-      isReturnEnabled={true}
+      isReturnEnabled={!isEmbeddedEditMask}
       onClickReturnButton={onClickReturnButton}
     >
       <ErrorBoundary context="Primary Toolbar">
