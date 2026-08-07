@@ -107,7 +107,7 @@ const buildReviewStatus = (
   volumes: VolumeGif[],
   draft: Record<string, ReviewStatus>
 ): Record<string, ReviewStatus> => {
-  const next: Record<string, ReviewStatus> = {};
+  const next: Record<string, ReviewStatus> = { ...draft };
   volumes.forEach(volume => {
     const reviewKey = volume.pairId || volume.seriesInstanceUid;
     // The draft is the user's newest choice. A replayed manifest can still
