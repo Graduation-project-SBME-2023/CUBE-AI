@@ -67,3 +67,4 @@ class PlannerState(BaseModel):
     sources_guide: str = ""  # Sources guide text (cached)
     knowledge_sections: Dict[str, str] = Field(default_factory=dict)  # Structured sections from knowledge builder
     status: str = "idle"
+    chat_history: List[Dict[str, str]] = Field(default_factory=list)

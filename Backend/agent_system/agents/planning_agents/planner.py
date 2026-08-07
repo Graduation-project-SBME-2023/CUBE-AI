@@ -20,7 +20,7 @@ import asyncio
 import copy
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Awaitable, Any, Optional
+from typing import Callable, Awaitable, Any, Optional, Tuple, List, Dict
 
 import aiofiles
 import yaml
@@ -41,7 +41,6 @@ from .context_compiler import (
     _build_hypothesis_summary,
 )
 from ..clinical_roi_policy import (
-    HypothesisValidationResult,
     ROI_IDENTITY_POLICY,
 )
 
@@ -274,82 +273,41 @@ class ClinicalPlanner:
         # ── Initialize Logging ──────────────────────────────────────────
         self._initialize_logging()
 
-    async def _validate_hypothesis(self, user_input: str, cancellation_token=None) -> dict:
-        """
-        Validates if the user input is a complete PICO hypothesis.
-        Returns a dict with keys:
-          - "valid": bool
-          - "feedback": str (user-friendly explanation if invalid)
-          - "extracted": dict or None (PICO components if valid)
-          - "roi_interpretation": locked internal ROI scope and labels, or None
-        """
-        prompt = f"""
-You are a clinical research validator. Analyze the following user input:
-"{user_input}"
 
-Determine if it constitutes a complete PICO hypothesis for a radiomics study.
-A valid hypothesis MUST explicitly contain:
-- Population (P): e.g., patients with lung cancer, age group, stage.
-- Intervention (I): e.g., CT radiomics, MRI texture analysis.
-- Comparison (C): e.g., compared to standard staging, vs. histopathology.
-- Outcome (O): e.g., overall survival, treatment response, recurrence.
-
-Also determine and lock the feature-extraction/segmentation ROI using this
-authoritative policy:
-
-{ROI_IDENTITY_POLICY}
-
-For a radiomics study, `valid` MUST be false when the text does not specify
-whether features are extracted from the whole organ, a lesion/pathology, or
-both. In that case, ask this specific clarification in `feedback`.
-
-Set "valid": true only when all four PICO components are present (even
-implicitly) and the ROI interpretation is unambiguous. If any PICO component or
-the ROI scope is missing, set "valid": false.
-If invalid, provide concise, actionable feedback in "feedback" specifying which
-components are missing and a brief suggestion on how to fix it.
-
-Output ONLY valid JSON in the following format:
-{{
-  "valid": true/false,
-  "feedback": "empty when valid; actionable clarification when invalid",
-  "extracted": {{"population": "...", "intervention": "...", "comparison": "...", "outcome": "..."}} or null,
-  "roi_interpretation": {{
-    "scope": "whole_organ" | "pathology" | "both",
-    "labels": ["canonical ROI label"],
-    "rationale": "explicit wording that determines the ROI"
-  }} or null
-}}
-"""
-        try:
-            hypothesis_architect = self.agents["hypothesis_architect"]
-            response = await self._call_agent_with_retry(
-                hypothesis_architect,
-                prompt,
-                cancellation_token=cancellation_token,
-            )
-            data = await self._parse_llm_json(response.chat_message.content, log_prefix="[Validator]")
-            
-            if not data:
-                raise ValueError("Empty validation response")
-            return HypothesisValidationResult.model_validate(data).model_dump()
-        except Exception as e:
-            self.logger.error("Validation error: %s", e)
-            return {
-                "valid": False,
-                "feedback": (
-                    "System error validating your input. Please rephrase clearly "
-                    "with Population, Intervention, Comparison, Outcome, and "
-                    "whether radiomic features come from the whole organ, a "
-                    "lesion/pathology, or both."
-                ),
-                "extracted": None,
-                "roi_interpretation": None,
-            }
 
     # ══════════════════════════════════════════════════════════════════════
     # INTERNAL HELPERS
     # ══════════════════════════════════════════════════════════════════════
+
+    def _clean_knowledge_for_ui(self, raw_text: str) -> str:
+        """
+        Convert the ASCII-boxed knowledge base into clean Markdown for the UI.
+        Removes box-drawing characters, trims lines, and converts ALL CAPS
+        section headers into Markdown headings (##).
+        """
+        import re
+        if not raw_text:
+            return ""
+
+        lines = raw_text.splitlines()
+        clean_lines = []
+
+        for line in lines:
+            # Remove leading/trailing box-drawing characters and spaces
+            line = re.sub(r'^[│┌└─]+', '', line).strip()
+            line = re.sub(r'[│┌└─]+$', '', line).strip()
+
+            if not line:
+                continue
+
+            # Detect section headers (e.g., "ANATOMY, PATHOLOGY & CLINICAL CONTEXT")
+            # They are typically all caps, contain commas/ampersands, and are longer than 10 chars.
+            if re.match(r'^[A-Z][A-Z\s,&\-]+$', line) and len(line) > 10:
+                clean_lines.append(f"\n## {line}\n")
+            else:
+                clean_lines.append(line)
+
+        return "\n".join(clean_lines)
 
     async def _user_proxy_input_adapter(
         self,
@@ -982,52 +940,43 @@ Output ONLY valid JSON in the following format:
         self,
         agent,
         prompt: str,
+        history: Optional[List[Dict[str, str]]] = None,
         max_retries: int = 3,
         cancellation_token: Optional[CancellationToken] = None,
-    ) -> Any:
+    ) -> Tuple[Any, List[Dict[str, str]]]:
         """
-        Call an agent with exponential backoff retry logic.
-
-        LLM APIs can be unreliable — this wrapper provides resilience
-        against temporary failures, rate limits, and timeouts.
-
-        Args:
-            agent: The AutoGen agent to call.
-            prompt: The text prompt to send.
-            max_retries: Maximum number of retry attempts.
-            cancellation_token: Optional cancellation token for cooperative
-                                cancellation.
+        Call an agent with exponential backoff retry logic,
+        maintaining a conversation history.
 
         Returns:
-            The agent's response object.
-
-        Raises:
-            Exception: Re-raises the last exception if all retries are exhausted.
+            (response, updated_history)
         """
+        # Build the full message list from history
+        messages = []
+        if history:
+            for entry in history:
+                messages.append(TextMessage(content=entry["content"], source=entry["role"]))
+        # Add the new user prompt
+        messages.append(TextMessage(content=prompt, source="user"))
+
         last_exception = None
         for attempt in range(max_retries):
             try:
-                response = await agent.on_messages(
-                    [TextMessage(content=prompt, source="user")],
-                    cancellation_token=cancellation_token,
-                )
-                return response
+                response = await agent.on_messages(messages, cancellation_token=cancellation_token)
+                # Append the assistant's response to history
+                new_history = (history or []).copy()
+                new_history.append({"role": "user", "content": prompt})
+                new_history.append({"role": "assistant", "content": response.chat_message.content})
+                return response, new_history
             except Exception as e:
                 last_exception = e
                 if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
-                    self.logger.warning(
-                        "Agent call failed (attempt %d/%d): %s. "
-                        "Retrying in %ds...",
-                        attempt + 1, max_retries, e, wait_time,
-                    )
+                    wait_time = 2 ** attempt
+                    self.logger.warning("Agent call failed (attempt %d/%d): %s. Retrying in %ds...",
+                                        attempt+1, max_retries, e, wait_time)
                     await asyncio.sleep(wait_time)
                 else:
-                    self.logger.error(
-                        "Agent call failed after %d attempts: %s",
-                        max_retries, e,
-                    )
-
+                    self.logger.error("Agent call failed after %d attempts: %s", max_retries, e)
         raise last_exception
 
     # ══════════════════════════════════════════════════════════════════════
@@ -1091,77 +1040,81 @@ Output ONLY valid JSON in the following format:
                 self.session.session_id,
             )
 
-            # ══════════════════════════════════════════════════════════════
-            # PHASE 1: HYPOTHESIS STRUCTURING
-            # ══════════════════════════════════════════════════════════════
-
+            # ══════════════════════════════════════════════════════════════════
+            # PHASE 1: HYPOTHESIS STRUCTURING (CONVERSATIONAL)
+            # ══════════════════════════════════════════════════════════════════
             hypothesis_architect = self.agents["hypothesis_architect"]
-            
-            # --- Phase 1: Hypothesis Validation with retry ---
-            max_retries = 3
-            retry_count = 0
-            hypothesis_valid = False
-            locked_roi = None
+            hypothesis_confirmed = False
+            chat_history = self.state.chat_history.copy()  # load existing history
+            locked_roi = {"scope": "both", "labels": [], "rationale": "conversational flow"} # default since validator is removed
 
-            while not hypothesis_valid and retry_count < max_retries:
-                # Determine user input
-                if start_query and not self.state.hypothesis.title:
-                    user_input = start_query
-                    start_query = None # Clear it so next retry asks user
-                else:
-                    await self._send(
-                        "msg",
-                        "Please enter your clinical observation or research idea.",
-                    )
+            while not hypothesis_confirmed:
+                user_input = None
+                
+                # Use start_query if provided, but ignore generic "Start" on resumed sessions
+                if start_query:
+                    if start_query == "Start" and chat_history:
+                        start_query = None  # ignore
+                    else:
+                        user_input = start_query
+                        start_query = None
+                
+                # If no input yet, wait for user
+                if not user_input:
+                    if not chat_history:
+                        await self._send("msg", "Please provide your research idea or answer the clarification questions.")
                     user_input = await self.input_provider()
 
-                # Run validation
-                validation_result = await self._validate_hypothesis(user_input, cancellation_token=cancellation_token)
-
-                if validation_result["valid"]:
-                    locked_roi = validation_result["roi_interpretation"]
-                    # We have a valid hypothesis. Now we can formally extract and persist it using the architect.
-                    # Or if extracted is full, we can just process it.
-                    # The user's code suggests updating self.hypothesis, but we need to persist it.
-                    prompt = (
-                        f"User's clinical observation: {user_input}\n\n"
-                        "LOCKED ROI INTERPRETATION (authoritative; preserve its "
-                        "scope and labels):\n"
-                        f"{json.dumps(locked_roi, ensure_ascii=False, indent=2)}\n\n"
-                        "Structure this into a full PICO hypothesis. "
-                        "Return JSON with 'hypothesis' and 'message' fields."
-                    )
-                    response = await self._call_agent_with_retry(
+                # Send to architect, passing the full history
+                try:
+                    response, updated_history = await self._call_agent_with_retry(
                         hypothesis_architect,
-                        prompt,
+                        user_input,
+                        history=chat_history,
                         cancellation_token=cancellation_token,
                     )
-                    self.logger.info("HypothesisArchitect response: %s", response.chat_message.content[:200])
-                    await self._process_hypothesis_response(response.chat_message.content)
+                    chat_history = updated_history
+                except Exception as e:
+                    self.logger.error("HypothesisArchitect call failed: %s", e)
+                    await self._send("msg", "Sorry, I encountered an error. Please try again or rephrase.")
+                    continue
+
+                content = response.chat_message.content
+                data = await self._parse_llm_json(content)
+
+                hypothesis_dict = data.get("hypothesis", {})
+                if data and isinstance(hypothesis_dict, dict) and hypothesis_dict.get("population") and hypothesis_dict.get("intervention"):
+                    # Architect produced a structured hypothesis. Delegate state and DB sync:
+                    await self._process_hypothesis_response(content)
                     
-                    self.state.hypothesis.state = "confirmed"
+                    # AUTO-CONFIRM THE HYPOTHESIS
+                    if self.state.hypothesis:
+                        self.state.hypothesis.state = "confirmed"
+                    if self.session.hypothesis:
+                        self.session.hypothesis.state = "confirmed"
+                        
                     await self.session_service.confirm_hypothesis(self.session)
                     
-                    hypothesis_dump = self.state.hypothesis.model_dump()
-                    await self._send("hypothesis", hypothesis_dump)
-                    await self._save_state()
+                    hypothesis_confirmed = True
                     
-                    hypothesis_valid = True
+                    # Update the in-memory history with auto-confirmation
+                    chat_history.append({"role": "assistant", "content": "Hypothesis automatically confirmed."})
+                    self.state.chat_history = chat_history
+                    await self._save_state()
                     break
                 else:
-                    retry_count += 1
-                    feedback = validation_result["feedback"]
-                    if retry_count >= max_retries:
-                        error_msg = (
-                            f"❌ I've asked {max_retries} times, but the input is still not a valid PICO hypothesis. "
-                            f"Please restart the research process with a clear hypothesis.\n"
-                            f"Last feedback: {feedback}"
-                        )
-                        await self._send("msg", error_msg)
-                        return
-                    else:
-                        feedback_msg = f"⚠️ Invalid hypothesis: {feedback}\nPlease try again. ({retry_count}/{max_retries})"
-                        await self._send("msg", feedback_msg)
+                    # Architect is asking clarifying questions (or parsing failed)
+                    await self._process_hypothesis_response(content)
+                    self.state.chat_history = chat_history
+                    await self._save_state()
+                    # The loop continues to get user input
+
+            # After confirmation, save the final history
+            self.state.chat_history = chat_history
+            await self._save_state()
+            
+            # Prepare the hypothesis dump for downstream phases
+            hypothesis_dump = self.state.hypothesis.model_dump()
 
             # ══════════════════════════════════════════════════════════════
             # PHASE 2: LITERATURE REVIEW & KNOWLEDGE BUILDING
@@ -1184,6 +1137,11 @@ Output ONLY valid JSON in the following format:
                     knowledge_base, sources_guide, papers, knowledge_sections = (
                         await self._build_knowledge_base()
                     )
+                    
+                    # Generate a clean Markdown version for the UI and the report file
+                    clean_ui_knowledge = self._clean_knowledge_for_ui(knowledge_base)
+                    clean_ui_sources = self._clean_knowledge_for_ui(sources_guide)
+
 
                     # Run multi-agent literature review pipeline
                     workspace_dir = self.state_path.parent
@@ -1253,6 +1211,8 @@ Output ONLY valid JSON in the following format:
                     lit_payload: dict = {
                         "knowledge_base": knowledge_base,
                         "sources_guide": sources_guide,
+                        "ui_knowledge": clean_ui_knowledge,
+                        "ui_sources": clean_ui_sources,
                         "hypothesis": hypothesis_dump,
                         "papers": papers,
                     }
@@ -1329,7 +1289,7 @@ Output ONLY valid JSON in the following format:
                 "and prefer plain-language instructions over raw LaTeX commands."
             )
 
-            response = await self._call_agent_with_retry(
+            response, _ = await self._call_agent_with_retry(
                 pipeline_architect,
                 pipeline_prompt,
                 cancellation_token=cancellation_token,
@@ -1431,7 +1391,7 @@ Output ONLY valid JSON in the following format:
                 )
 
                 try:
-                    response = await self._call_agent_with_retry(
+                    response, _ = await self._call_agent_with_retry(
                         pipeline_architect,
                         refinement_prompt,
                         cancellation_token=cancellation_token,

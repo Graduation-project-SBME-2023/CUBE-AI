@@ -1,13 +1,13 @@
 # Stage 1: Build OHIF Viewer
-FROM node:18.16.1-slim AS builder
+FROM node:20-slim AS builder
 
 WORKDIR /usr/src/app
 
-COPY Viewers-09ff293f5f28c8384cfdfcc56b9d5caef0511520 /usr/src/app
+COPY OHIF-Viewer /usr/src/app
 
-RUN apt-get update && apt-get install -y build-essential python3
+RUN apt-get update && apt-get install -y build-essential python3 git
 RUN yarn config set workspaces-experimental true
-RUN yarn install
+RUN yarn install --ignore-engines
 
 ENV APP_CONFIG=config/docker_openresty-orthanc.js
 ENV QUICK_BUILD=true
@@ -17,20 +17,19 @@ RUN yarn run build
 
 
 # Stage 2: Serve using OpenResty
-FROM openresty/openresty:1.15.8.1rc1-0-alpine-fat
+FROM openresty/openresty:1.31.1.1-2-alpine-fat
 
 # Expose ports
 EXPOSE 80 443
 
 # Install system dependencies
-RUN apk add --no-cache openssl openssl-dev git gcc
+RUN apk add --no-cache openssl openssl-dev git gcc curl unzip
 
 # Install Lua modules
 RUN luarocks install lua-resty-openidc && \
     luarocks install lua-resty-jwt && \
     luarocks install lua-resty-session && \
-    luarocks install lua-resty-http && \
-    luarocks install luacrypto
+    luarocks install lua-resty-http
 
 # Create log directory
 RUN mkdir -p /var/log/nginx
