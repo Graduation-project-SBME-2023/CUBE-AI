@@ -18,6 +18,8 @@ services:
       MONAI_URL: http://monailabel:8000
       CONTROL_API_URL: http://control-api:8001
       ORTHANC_URL: http://orthanc:8042
+    env_file:
+      - .env
     depends_on:
       postgres:
         condition: service_started
@@ -28,7 +30,7 @@ services:
     restart: unless-stopped
 
   control-api:
-    image: cubeai1/custom-monailabel:latest-cpu
+    image: ahmedmokhtar3/custom-monailabel:v1.0-cpu
     container_name: control-api-backend
     command: python /monailabel/control_server_start.py
     ports:
@@ -54,7 +56,7 @@ services:
 
   monailabel:
     # CPU image — multi-arch (arm64 + amd64), no CUDA
-    image: cubeai1/custom-monailabel:latest-cpu
+    image: ahmedmokhtar3/custom-monailabel:v1.0-cpu
     container_name: monailabel-backend
     shm_size: 8G
     ports:

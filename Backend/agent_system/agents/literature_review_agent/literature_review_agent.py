@@ -1454,6 +1454,53 @@ async def run_literature_review(
       print("\n[Pipeline] Using prebuilt knowledge base from planner.")
       knowledge_base = prebuilt_knowledge["knowledge_base"]
       sources_guide = prebuilt_knowledge["sources_guide"]
+
+      # Always write output files if prebuilt knowledge is supplied
+      import json
+      try:
+          from agent_system.agents.planning_agents.planner import ClinicalPlanner
+          clean_knowledge = ClinicalPlanner._clean_knowledge_for_ui(None, knowledge_base)
+          clean_sources = ClinicalPlanner._clean_knowledge_for_ui(None, sources_guide)
+      except ImportError:
+          clean_knowledge = knowledge_base
+          clean_sources = sources_guide
+
+      report_path = _output_dir / "literature_report.md"
+      report_content = f"""# Literature Review
+
+## PICO Summary
+- **Population**: {pico.get('population', 'N/A') if pico else 'N/A'}
+- **Intervention**: {pico.get('intervention', 'N/A') if pico else 'N/A'}
+- **Comparison**: {pico.get('comparison', 'N/A') if pico else 'N/A'}
+- **Outcome**: {pico.get('outcome', 'N/A') if pico else 'N/A'}
+
+## Domain Knowledge
+{clean_knowledge}
+
+## Sources & References
+{clean_sources}
+"""
+      report_path.write_text(report_content, encoding="utf-8")
+
+      context_path = _output_dir / "context.json"
+      context_data = {
+          "pico": pico,
+          "knowledge_sections": prebuilt_knowledge.get("knowledge_sections", {}),
+          "paper_count": len(prebuilt_knowledge.get("papers", [])),
+      }
+      context_path.write_text(json.dumps(context_data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+      ranked_path = _output_dir / "ranked_papers.json"
+      papers = prebuilt_knowledge.get("papers", [])
+      ranked_papers = [{"title": p.get("title", ""), "authors": p.get("authors", ""), "abstract": p.get("abstract", "")} for p in papers]
+      ranked_path.write_text(json.dumps(ranked_papers, indent=2, ensure_ascii=False), encoding="utf-8")
+
+      return {
+          "context_json": str(context_path),
+          "literature_report": str(report_path),
+          "ranked_papers": str(ranked_path),
+          "output_directory": str(_output_dir.resolve()),
+      }
     else:
       print("\n[Pipeline] Building dynamic knowledge base from online medical databases...")
       print("[Pipeline] Sources: PubMed MeSH, Wikipedia, Semantic Scholar, Europe PMC")

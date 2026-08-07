@@ -29,16 +29,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && dpkg -i /tmp/cuda-keyring.deb \
     && rm /tmp/cuda-keyring.deb \
     && apt-get update && apt-get install -y --no-install-recommends \
-        cuda-toolkit-12-4 \
-        cuda-nvcc-12-4 \
-        cuda-cudart-dev-12-4 \
+        cuda-toolkit-12-8 \
+        cuda-nvcc-12-8 \
+        cuda-cudart-dev-12-8 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Make sure nvcc is on PATH
-ENV CUDA_HOME=/usr/local/cuda-12.4
-ENV PATH=/apps/radiology/bin:/usr/local/cuda-12.4/bin:${PATH}
-ENV LD_LIBRARY_PATH=/usr/local/cuda-12.4/lib64${LD_LIBRARY_PATH}
+ENV CUDA_HOME=/usr/local/cuda-12.8
+ENV PATH=/apps/radiology/bin:/usr/local/cuda-12.8/bin:${PATH}
+ENV LD_LIBRARY_PATH=/usr/local/cuda-12.8/lib64${LD_LIBRARY_PATH}
 # sm_80=A100, sm_86=RTX30xx, sm_89=RTX40xx — all supported by cu124 / torch 2.5.1
 ENV TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9"
 # ------------------------------------------------------------
@@ -74,12 +74,12 @@ RUN pip install --no-cache-dir -r /voxtell_requirements.txt
 # --no-deps prevents it from pulling an incompatible PyPI torch.
 RUN pip install --no-deps --no-cache-dir git+https://github.com/huggingface/optimum-quanto.git
 
-# Install torch 2.5.1 + torchvision 0.20.1 from CUDA 12.4 index LAST
+# Install torch 2.11.0 + torchvision 0.26.0 from CUDA 12.8 index LAST
 # so they are never overwritten by any earlier dependency.
 RUN pip install --no-cache-dir \
-        "torch==2.5.1" \
-        "torchvision==0.20.1" \
-        --index-url https://download.pytorch.org/whl/cu124
+        "torch==2.11.0" \
+        "torchvision==0.26.0" \
+        --index-url https://download.pytorch.org/whl/cu128
 
 # ------------------------------------------------------------
 # 3. Patched pydicom-seg sources

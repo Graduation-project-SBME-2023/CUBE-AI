@@ -1,6 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useSnackbar } from '@ohif/ui';
-import { MessageSquare, History, Plus, ChevronRight, Trash2, Send, Activity as ActivityIcon } from 'lucide-react';
+import {
+  MessageSquare,
+  History,
+  Plus,
+  ChevronRight,
+  Trash2,
+  Send,
+  Activity as ActivityIcon,
+} from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import websocketService from '../../services/websocket';
@@ -85,15 +93,17 @@ const ChatSidebar = ({
       setSessions(prev => {
         const exists = prev.some(s => String(s.chat_id) === String(externalSessionId));
         if (!exists) {
-          return [{
-            chat_id: externalSessionId,
-            title: 'Research Session',
-            messages: initialUserMessage
-              ? [{ id: makeId('init'), role: 'user', text: initialUserMessage, ts: Date.now() }]
-              : [],
-            summary: '',
-            last_activity: Date.now(),
-          }];
+          return [
+            {
+              chat_id: externalSessionId,
+              title: 'Research Session',
+              messages: initialUserMessage
+                ? [{ id: makeId('init'), role: 'user', text: initialUserMessage, ts: Date.now() }]
+                : [],
+              summary: '',
+              last_activity: Date.now(),
+            },
+          ];
         }
         // Already in list — keep only this session so history stays scoped
         return prev.filter(s => String(s.chat_id) === String(externalSessionId));
@@ -101,9 +111,14 @@ const ChatSidebar = ({
       // Refresh just this session's metadata from the DB (title, summary, etc.)
       fetchChatSessions(String(externalSessionId));
     }
-    // B2: guard against double-send — only fire once per component mount
-    if (sendInitialMessage && !initialMessageSentRef.current) {
-      initialMessageSentRef.current = true;
+    // B2: guard against double-send — use sessionStorage to survive remounts and HMR
+    if (sendInitialMessage && externalSessionId) {
+      const sentKey = `cube_initial_msg_sent_${externalSessionId}`;
+      if (sessionStorage.getItem(sentKey) === 'true') {
+        return;
+      }
+      sessionStorage.setItem(sentKey, 'true');
+
       console.log('[HypothesisFlow][ChatSidebar] Sending initial message to chat backend', {
         externalSessionId,
         preview: (initialUserMessage || '').slice(0, 120),
@@ -130,7 +145,7 @@ const ChatSidebar = ({
           });
         });
     }
-  }, [externalSessionId]);
+  }, [externalSessionId, sendInitialMessage, initialUserMessage]);
 
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
@@ -265,7 +280,9 @@ const ChatSidebar = ({
           // Merge: use DB messages as base, append any local-only messages not in DB
           const dbIds = new Set(dbMessages.map(m => m.id));
           const dbTexts = new Set(dbMessages.map(m => m.text.trim()));
-          const localOnly = s.messages.filter(m => !dbIds.has(m.id) && !m.id.startsWith('db_') && !dbTexts.has(m.text.trim()));
+          const localOnly = s.messages.filter(
+            m => !dbIds.has(m.id) && !m.id.startsWith('db_') && !dbTexts.has(m.text.trim())
+          );
           return { ...s, messages: [...dbMessages, ...localOnly] };
         })
       );
@@ -413,183 +430,195 @@ const ChatSidebar = ({
     }
   };
   // B1: handleWS extracted to useCallback so it can be referenced by the flush effect
-  const handleWS = useCallback(async (data: any) => {
-    console.log('[ChatSidebar] WS received:', data);
+  const handleWS = useCallback(
+    async (data: any) => {
+      console.log('[ChatSidebar] WS received:', data);
 
-    // Handle echoed user messages from notification buttons
-    if (data.type === 'chat_echo') {
-      const currentSessionId = activeSessionIdRef.current;
-      if (!currentSessionId) return;
+      // Handle echoed user messages from notification buttons
+      if (data.type === 'chat_echo') {
+        const currentSessionId = activeSessionIdRef.current;
+        if (!currentSessionId) return;
+        const incomingSessionId = String(data.session_id);
+        if (incomingSessionId && incomingSessionId !== String(currentSessionId)) return;
+        const userMsg = {
+          id: makeId('u'),
+          role: 'user',
+          text: data.payload?.text || data.payload || '',
+          ts: Date.now(),
+        };
+        setSessions(prev =>
+          prev.map(s =>
+            String(s.chat_id) === String(currentSessionId)
+              ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() }
+              : s
+          )
+        );
+        setIsTyping(true);
+        try {
+          if (isUuid(String(currentSessionId))) {
+            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ role: 'user', text: userMsg.text }),
+            });
+          }
+        } catch (err) {}
+        return;
+      }
+
+      if (data.type === 'run_finished') {
+        const currentSessionId = activeSessionIdRef.current;
+        if (!currentSessionId) return;
+        if (data.replaying) return;
+        const completionMsg = {
+          id: makeId('a'),
+          role: 'assistant',
+          text: '🎉 **Pipeline complete!** All research agents have finished successfully. You can now review the results in each phase tab.',
+          ts: Date.now(),
+        };
+        setSessions(prev =>
+          prev.map(s =>
+            String(s.chat_id) === String(currentSessionId)
+              ? { ...s, messages: [...s.messages, completionMsg], last_activity: Date.now() }
+              : s
+          )
+        );
+        setIsTyping(false);
+        try {
+          if (isUuid(String(currentSessionId))) {
+            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ role: 'assistant', text: completionMsg.text }),
+            });
+          }
+        } catch (_) {}
+        return;
+      }
+
+      if (data.type === 'run_stopped') {
+        const currentSessionId = activeSessionIdRef.current;
+        if (!currentSessionId) return;
+        if (data.replaying) return;
+        const stoppedMsg = {
+          id: makeId('a'),
+          role: 'assistant',
+          text: '⚠️ **Pipeline stopped.** The execution was cancelled. You can restart the pipeline from the canvas when ready.',
+          ts: Date.now(),
+        };
+        setSessions(prev =>
+          prev.map(s =>
+            String(s.chat_id) === String(currentSessionId)
+              ? { ...s, messages: [...s.messages, stoppedMsg], last_activity: Date.now() }
+              : s
+          )
+        );
+        setIsTyping(false);
+        try {
+          if (isUuid(String(currentSessionId))) {
+            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ role: 'assistant', text: stoppedMsg.text }),
+            });
+          }
+        } catch (_) {}
+        return;
+      }
+
+      if (data.type !== 'msg') {
+        return;
+      }
+
       const incomingSessionId = String(data.session_id);
-      if (incomingSessionId && incomingSessionId !== String(currentSessionId)) return;
-      const userMsg = {
-        id: makeId('u'),
-        role: 'user',
-        text: data.payload?.text || data.payload || '',
+      if (
+        incomingSessionId &&
+        activeSessionIdRef.current &&
+        incomingSessionId !== String(activeSessionIdRef.current)
+      ) {
+        return;
+      }
+
+      const currentSessionId = activeSessionIdRef.current;
+      // B1: if session not ready yet, buffer message and wait for flush effect
+      if (!currentSessionId) {
+        earlyMessageBufferRef.current.push(data);
+        return;
+      }
+
+      const textContent =
+        typeof data.payload === 'string'
+          ? data.payload
+          : data.payload.text || JSON.stringify(data.payload);
+
+      // B5: Don't silently drop plan JSON — show a friendly notification instead
+      const trimmed = textContent.trim();
+      if (trimmed.startsWith('{') && trimmed.includes('"steps"')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed.steps && Array.isArray(parsed.steps)) {
+            const planNotifMsg = {
+              id: makeId('a'),
+              role: 'assistant',
+              text: `✅ Pipeline plan received with **${parsed.steps.length} step${parsed.steps.length !== 1 ? 's' : ''}**. Review it in the canvas panel on the left.`,
+              ts: Date.now(),
+            };
+            setSessions(prev =>
+              prev.map(s =>
+                String(s.chat_id) === String(currentSessionId)
+                  ? { ...s, messages: [...s.messages, planNotifMsg], last_activity: Date.now() }
+                  : s
+              )
+            );
+            setIsTyping(false);
+            return;
+          }
+        } catch (_) {
+          /* not valid JSON — fall through and show as normal message */
+        }
+      }
+
+      const assistantMsg = {
+        id: makeId('a'),
+        role: 'assistant',
+        text: textContent,
         ts: Date.now(),
       };
-      setSessions(prev =>
-        prev.map(s =>
-          String(s.chat_id) === String(currentSessionId)
-            ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() }
-            : s
-        )
-      );
-      setIsTyping(true);
+      console.log(assistantMsg);
+      setSessions(prev => {
+        const match = prev.find(s => String(s.chat_id) === String(currentSessionId));
+        if (match) {
+          return prev.map(s =>
+            String(s.chat_id) === String(currentSessionId)
+              ? { ...s, messages: [...s.messages, assistantMsg], last_activity: Date.now() }
+              : s
+          );
+        }
+        // No session exists yet — create one with this message
+        return [
+          {
+            chat_id: currentSessionId,
+            title: 'Research Session',
+            messages: [assistantMsg],
+            summary: '',
+            last_activity: Date.now(),
+          },
+          ...prev,
+        ];
+      });
+      setIsTyping(false);
       try {
         if (isUuid(String(currentSessionId))) {
           await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role: 'user', text: userMsg.text }),
+            body: JSON.stringify({ role: 'assistant', text: assistantMsg.text }),
           });
         }
       } catch (err) {}
-      return;
-    }
-
-    if (data.type === 'run_finished') {
-      const currentSessionId = activeSessionIdRef.current;
-      if (!currentSessionId) return;
-      if (data.replaying) return;
-      const completionMsg = {
-        id: makeId('a'),
-        role: 'assistant',
-        text: '🎉 **Pipeline complete!** All research agents have finished successfully. You can now review the results in each phase tab.',
-        ts: Date.now(),
-      };
-      setSessions(prev =>
-        prev.map(s =>
-          String(s.chat_id) === String(currentSessionId)
-            ? { ...s, messages: [...s.messages, completionMsg], last_activity: Date.now() }
-            : s
-        )
-      );
-      setIsTyping(false);
-      try {
-        if (isUuid(String(currentSessionId))) {
-          await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role: 'assistant', text: completionMsg.text }),
-          });
-        }
-      } catch (_) {}
-      return;
-    }
-
-    if (data.type === 'run_stopped') {
-      const currentSessionId = activeSessionIdRef.current;
-      if (!currentSessionId) return;
-      if (data.replaying) return;
-      const stoppedMsg = {
-        id: makeId('a'),
-        role: 'assistant',
-        text: '⚠️ **Pipeline stopped.** The execution was cancelled. You can restart the pipeline from the canvas when ready.',
-        ts: Date.now(),
-      };
-      setSessions(prev =>
-        prev.map(s =>
-          String(s.chat_id) === String(currentSessionId)
-            ? { ...s, messages: [...s.messages, stoppedMsg], last_activity: Date.now() }
-            : s
-        )
-      );
-      setIsTyping(false);
-      try {
-        if (isUuid(String(currentSessionId))) {
-          await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role: 'assistant', text: stoppedMsg.text }),
-          });
-        }
-      } catch (_) {}
-      return;
-    }
-
-    if (data.type !== 'msg') {
-      return;
-    }
-
-    const incomingSessionId = String(data.session_id);
-    if (incomingSessionId && activeSessionIdRef.current && incomingSessionId !== String(activeSessionIdRef.current)) {
-      return;
-    }
-
-    const currentSessionId = activeSessionIdRef.current;
-    // B1: if session not ready yet, buffer message and wait for flush effect
-    if (!currentSessionId) {
-      earlyMessageBufferRef.current.push(data);
-      return;
-    }
-
-    const textContent =
-      typeof data.payload === 'string'
-        ? data.payload
-        : data.payload.text || JSON.stringify(data.payload);
-
-    // B5: Don't silently drop plan JSON — show a friendly notification instead
-    const trimmed = textContent.trim();
-    if (trimmed.startsWith('{') && trimmed.includes('"steps"')) {
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (parsed.steps && Array.isArray(parsed.steps)) {
-          const planNotifMsg = {
-            id: makeId('a'),
-            role: 'assistant',
-            text: `✅ Pipeline plan received with **${parsed.steps.length} step${parsed.steps.length !== 1 ? 's' : ''}**. Review it in the canvas panel on the left.`,
-            ts: Date.now(),
-          };
-          setSessions(prev =>
-            prev.map(s =>
-              String(s.chat_id) === String(currentSessionId)
-                ? { ...s, messages: [...s.messages, planNotifMsg], last_activity: Date.now() }
-                : s
-            )
-          );
-          setIsTyping(false);
-          return;
-        }
-      } catch (_) { /* not valid JSON — fall through and show as normal message */ }
-    }
-
-    const assistantMsg = {
-      id: makeId('a'),
-      role: 'assistant',
-      text: textContent,
-      ts: Date.now(),
-    };
-    console.log(assistantMsg);
-    setSessions(prev => {
-      const match = prev.find(s => String(s.chat_id) === String(currentSessionId));
-      if (match) {
-        return prev.map(s =>
-          String(s.chat_id) === String(currentSessionId)
-            ? { ...s, messages: [...s.messages, assistantMsg], last_activity: Date.now() }
-            : s
-        );
-      }
-      // No session exists yet — create one with this message
-      return [{
-        chat_id: currentSessionId,
-        title: 'Research Session',
-        messages: [assistantMsg],
-        summary: '',
-        last_activity: Date.now(),
-      }, ...prev];
-    });
-    setIsTyping(false);
-    try {
-      if (isUuid(String(currentSessionId))) {
-        await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role: 'assistant', text: assistantMsg.text }),
-        });
-      }
-    } catch (err) {}
-  }, [snackbar]);
+    },
+    [snackbar]
+  );
 
   // Only connect WebSocket once for the app session (not just when sidebar is open)
   useEffect(() => {
@@ -607,7 +636,10 @@ const ChatSidebar = ({
     if (!activeSessionId || earlyMessageBufferRef.current.length === 0) return;
     const buffered = [...earlyMessageBufferRef.current];
     earlyMessageBufferRef.current = [];
-    console.log(`[ChatSidebar] Flushing ${buffered.length} buffered early message(s) for session`, activeSessionId);
+    console.log(
+      `[ChatSidebar] Flushing ${buffered.length} buffered early message(s) for session`,
+      activeSessionId
+    );
     buffered.forEach(data => handleWS(data));
   }, [activeSessionId, handleWS]);
   useEffect(() => {
@@ -649,7 +681,12 @@ const ChatSidebar = ({
       />
       <div className="flex h-14 items-center justify-between border-b border-[#1a2a3a] bg-[#0a1520] px-5">
         <div className="flex items-center gap-2.5 text-[15px] font-semibold text-[#e0f0ff]">
-          <img src="/assets/icon_white.png" alt="CUBE AI Icon" className="h-[18px] w-[18px] object-contain" /> CUBE Assistant
+          <img
+            src="/assets/icon_white.png"
+            alt="CUBE AI Icon"
+            className="h-[18px] w-[18px] object-contain"
+          />{' '}
+          CUBE Assistant
         </div>
         <div className="flex items-center gap-1.5">
           {/* (<button
@@ -675,9 +712,11 @@ const ChatSidebar = ({
         </div>
       </div>
       {drawerOpen && (
-        <div className="absolute inset-0 top-14 z-20 overflow-y-auto ohif-scrollbar border-l border-[#1a2a3a] bg-[#0a1520]/95 backdrop-blur">
+        <div className="ohif-scrollbar absolute inset-0 top-14 z-20 overflow-y-auto border-l border-[#1a2a3a] bg-[#0a1520]/95 backdrop-blur">
           <div className="p-4">
-            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[#3d5a72]">Chat History</div>
+            <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[#3d5a72]">
+              Chat History
+            </div>
             {sessions.map(s => (
               <div
                 key={s.chat_id}
@@ -694,7 +733,7 @@ const ChatSidebar = ({
                       e.stopPropagation();
                       setSessionToDelete(s);
                     }}
-                    className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-md text-[#ef4444] opacity-0 transition-all group-hover:opacity-100 hover:bg-[#ef4444]/20"
+                    className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-md text-[#ef4444] opacity-0 transition-all hover:bg-[#ef4444]/20 group-hover:opacity-100"
                   >
                     {renderIcon(Trash2, 12)}
                   </button>
@@ -704,39 +743,52 @@ const ChatSidebar = ({
           </div>
         </div>
       )}
-      <div className="flex flex-1 flex-col gap-5 overflow-y-auto ohif-scrollbar bg-[#0f1923] p-6">
+      <div className="ohif-scrollbar flex flex-1 flex-col gap-5 overflow-y-auto bg-[#0f1923] p-6">
         {messages.length === 0 && (
-          <div className="mt-10 text-center text-[13px] text-[#3d5a72]">Start a new conversation...</div>
+          <div className="mt-10 text-center text-[13px] text-[#3d5a72]">
+            Start a new conversation...
+          </div>
         )}
         {messages.map(msg => (
           <div
             key={msg.id}
             className={`flex max-w-full flex-col gap-1.5 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
           >
-            <div className={`max-w-[85%] rounded-[18px] border px-4 py-3 text-[14.5px] leading-[1.6] shadow-md ${msg.role === 'user' ? 'border-[#3269a0] bg-[linear-gradient(135deg,#1f578f_0%,#134375_100%)] text-white rounded-br-sm' : msg.role === 'assistant' ? 'border-[#263c55] bg-[#1a2836] text-[#b0d4ea] rounded-bl-sm' : 'border-[#1a2a3a] bg-[#0d1e2e] text-[#b0d4ea] rounded-bl-sm'}`}>
+            <div
+              className={`max-w-[85%] rounded-[18px] border px-4 py-3 text-[14.5px] leading-[1.6] shadow-md ${msg.role === 'user' ? 'rounded-br-sm border-[#3269a0] bg-[linear-gradient(135deg,#1f578f_0%,#134375_100%)] text-white' : msg.role === 'assistant' ? 'rounded-bl-sm border-[#263c55] bg-[#1a2836] text-[#b0d4ea]' : 'rounded-bl-sm border-[#1a2a3a] bg-[#0d1e2e] text-[#b0d4ea]'}`}
+            >
               <div>
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.text || ''}</ReactMarkdown>
               </div>
             </div>
-            <span className={`mx-2 text-[11px] font-medium ${msg.role === 'user' ? 'text-[#3d5a72]' : 'text-[#4a6d88]'}`}>
+            <span
+              className={`mx-2 text-[11px] font-medium ${msg.role === 'user' ? 'text-[#3d5a72]' : 'text-[#4a6d88]'}`}
+            >
               {new Date(msg.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
           </div>
         ))}
         {showThinking && (
           <div className="flex items-center gap-2 p-2 text-[13px] text-[#3d5a72]">
-            <ActivityIcon size={14} className="animate-spin text-[#5acce6]" />
+            <ActivityIcon
+              size={14}
+              className="animate-spin text-[#5acce6]"
+            />
             <span className="italic">CUBE is thinking...</span>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
       <div className="border-t border-[#1a2a3a] bg-[#0a1520] px-5 py-4">
-        <div className={`flex items-end rounded-xl border px-3 py-2 transition-colors ${isChatLocked ? 'border-[#3d5a72]/30 bg-[#162432]/50' : 'border-[#1e3248] bg-[#0d1e2e]'}`}>
+        <div
+          className={`flex items-end rounded-xl border px-3 py-2 transition-colors ${isChatLocked ? 'border-[#3d5a72]/30 bg-[#162432]/50' : 'border-[#1e3248] bg-[#0d1e2e]'}`}
+        >
           <input
             type="text"
             className={`flex-1 bg-transparent py-1 text-[14.5px] text-[#e0f0ff] outline-none transition-colors ${isChatLocked ? 'placeholder:text-[#6a8da6]' : 'placeholder:text-[#4a6b85]'}`}
-            placeholder={isChatLocked ? "Chat is locked during execution/results" : "Type a message..."}
+            placeholder={
+              isChatLocked ? 'Chat is locked during execution/results' : 'Type a message...'
+            }
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !isChatLocked && sendMessage()}
@@ -744,7 +796,7 @@ const ChatSidebar = ({
           />
           <button
             onClick={() => sendMessage()}
-            className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-[10px] border border-[#2a5a8a] bg-[linear-gradient(135deg,#1a4a7a_0%,#0d3560_100%)] text-[#5acce6] transition-all hover:border-[#5acce6] hover:text-white disabled:cursor-not-allowed disabled:opacity-45"
+            className="disabled:opacity-45 inline-flex h-[34px] w-[34px] items-center justify-center rounded-[10px] border border-[#2a5a8a] bg-[linear-gradient(135deg,#1a4a7a_0%,#0d3560_100%)] text-[#5acce6] transition-all hover:border-[#5acce6] hover:text-white disabled:cursor-not-allowed"
             disabled={!input.trim() || isTyping || isChatLocked}
           >
             {renderIcon(Send, 16)}
@@ -758,7 +810,8 @@ const ChatSidebar = ({
           <div className="w-[320px] rounded-xl border border-[#1e3248] bg-[#0f1923] p-5 shadow-2xl">
             <h3 className="mb-2 text-base font-semibold text-white">Delete Chat?</h3>
             <p className="mb-5 text-sm text-[#8ab8cc]">
-              Are you sure you want to delete <span className="text-white">"{sessionToDelete.title}"</span>?
+              Are you sure you want to delete{' '}
+              <span className="text-white">"{sessionToDelete.title}"</span>?
             </p>
             <div className="flex justify-end gap-2">
               <button
