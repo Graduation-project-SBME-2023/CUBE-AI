@@ -14,6 +14,7 @@ export default class ModelSelector extends Component {
     onSelectModel: PropTypes.func,
     scribblesSelector: PropTypes.any,
     isDisabled: PropTypes.bool,
+    isRunDisabled: PropTypes.bool,
     statusMessage: PropTypes.string,
     statusType: PropTypes.string,
   };
@@ -78,7 +79,7 @@ export default class ModelSelector extends Component {
   };
 
   onClickBtn = async () => {
-    if (this.state.buttonDisabled || this.props.isDisabled) {
+    if (this.state.buttonDisabled || this.props.isDisabled || this.props.isRunDisabled) {
       return;
     }
 
@@ -133,7 +134,8 @@ export default class ModelSelector extends Component {
                   disabled={
                     this.state.buttonDisabled ||
                     !this.props.models.length ||
-                    this.props.isDisabled
+                    this.props.isDisabled ||
+                    this.props.isRunDisabled
                   }
                   aria-busy={this.state.buttonDisabled}
                   style={{ display: this.props.onClick ? 'flex' : 'none' }}

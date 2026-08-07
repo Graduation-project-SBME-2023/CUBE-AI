@@ -26,6 +26,8 @@ export default class InteractiveSegmentation extends BaseTab {
       activeTool: null,
       statusMessage: '',
       statusType: 'info',
+      hasPrompts: false,
+      voxtellTextPrompt: '',
 
       // availableOrgans: models.length > 0 ? this.getModelLabels(models[0]) : {},
     };
@@ -70,6 +72,23 @@ export default class InteractiveSegmentation extends BaseTab {
         objectId: this.state.currentObject,
         viewportId: evt.detail?.viewportId,
       });
+    }
+    this.setState({ hasPrompts: this.checkHasPrompts() });
+  };
+
+  checkHasPrompts = () => {
+    try {
+      const manager = cornerstoneTools.annotation.state.getAnnotationManager();
+      if (!manager) return false;
+      const annotations = manager.getAllAnnotations();
+      const promptToolNames = [
+        'ProbeMONAILabelPos',
+        'ProbeMONAILabelNeg',
+        'RecROIToolMONAILabel',
+      ];
+      return annotations.some((a) => promptToolNames.includes(a.metadata?.toolName));
+    } catch (e) {
+      return false;
     }
   };
 
@@ -536,7 +555,7 @@ export default class InteractiveSegmentation extends BaseTab {
 
   onEnterActionTab = () => {
     this.deactivatePromptTools();
-    this.setState({ activeTool: null });
+    this.setState({ activeTool: null, hasPrompts: this.checkHasPrompts() });
   };
 
   onLeaveActionTab = () => {
@@ -725,6 +744,7 @@ export default class InteractiveSegmentation extends BaseTab {
     );
     this.renderAnnotations();
     this.syncNnInteractiveFlags();
+    this.setState({ hasPrompts: this.checkHasPrompts() });
   };
 
   removeAllPromptAnnotations = () => {
@@ -745,6 +765,7 @@ export default class InteractiveSegmentation extends BaseTab {
       );
     this.promptHistory = [];
     this.renderAnnotations();
+    this.setState({ hasPrompts: false });
   };
 
   correct_xy_format = (point) => {
@@ -1116,6 +1137,10 @@ export default class InteractiveSegmentation extends BaseTab {
             onSelectModel={this.onSelectModel}
             statusMessage={this.state.statusMessage}
             statusType={this.state.statusType}
+            isRunDisabled={
+              (!this.state.hasPrompts && this.state.currentModel !== 'voxtell') ||
+              (this.state.currentModel === 'voxtell' && !this.state.voxtellTextPrompt?.trim())
+            }
             usage={
               <ModelBasedRendering
                 mode={this.state.currentModel}
@@ -1137,7 +1162,10 @@ export default class InteractiveSegmentation extends BaseTab {
                 onColorChange={this.onColorChange}
                 onAddObjectClick={this.onAddObject}
                 onRowSelect={this.onChangeObject}
-                onTextPromptChange={(text) => (this.voxtellTextPrompt = text)}
+                onTextPromptChange={(text) => {
+                  this.voxtellTextPrompt = text;
+                  this.setState({ voxtellTextPrompt: text });
+                }}
               />
             }
           />

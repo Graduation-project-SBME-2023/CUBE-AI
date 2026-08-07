@@ -29,7 +29,7 @@ export default class AutoSegmentation extends BaseTab {
       selectedQueue: null,
 
       vistaMode: 'automatic', // 'automatic' or 'interactive'
-      vistaSelectedClass: vistaClasses[0] || { name: 'liver', value: 1 }, // default to first class
+      vistaSelectedClass: null, // force user to select a class
       vistaClasses: vistaClasses, // store the array in state
       vistaClassSearch: '',
       vistaClassSearchOpen: false,
@@ -109,6 +109,24 @@ export default class AutoSegmentation extends BaseTab {
         const bStartsWith = b.name.toLowerCase().startsWith(normalizedSearch);
         return Number(bStartsWith) - Number(aStartsWith);
       });
+  };
+
+  checkHasPrompts = () => {
+    try {
+      // Import cornerstoneTools to access annotation manager
+      const cornerstoneTools = require('@cornerstonejs/tools');
+      const manager = cornerstoneTools.annotation.state.getAnnotationManager();
+      if (!manager) return false;
+      const annotations = manager.getAllAnnotations();
+      const promptToolNames = [
+        'ProbeMONAILabelPos',
+        'ProbeMONAILabelNeg',
+        'RecROIToolMONAILabel',
+      ];
+      return annotations.some((a) => promptToolNames.includes(a.metadata?.toolName));
+    } catch (e) {
+      return false;
+    }
   };
 
   // Struct for segmentation enqueue request
@@ -248,6 +266,7 @@ export default class AutoSegmentation extends BaseTab {
             onSelectModel={this.onSelectModel}
             statusMessage={this.state.statusMessage}
             statusType={this.state.statusType}
+            isRunDisabled={this.state.currentModel === 'vista' && !this.state.vistaSelectedClass}
             usage={
               <p style={{ fontSize: 'smaller' }}>
                 Fully automated segmentation <b>without any user prompt</b>.
@@ -331,7 +350,7 @@ export default class AutoSegmentation extends BaseTab {
                             type="button"
                             role="option"
                             aria-selected={
-                              cls.name === this.state.vistaSelectedClass.name
+                              cls.name === this.state.vistaSelectedClass?.name
                             }
                             onMouseDown={(event) => {
                               event.preventDefault();
@@ -344,7 +363,7 @@ export default class AutoSegmentation extends BaseTab {
                               border: 'none',
                               borderBottom: '1px solid #1a2540',
                               background:
-                                cls.name === this.state.vistaSelectedClass.name
+                                cls.name === this.state.vistaSelectedClass?.name
                                   ? '#17345d'
                                   : 'transparent',
                               color: '#c8d8f0',
