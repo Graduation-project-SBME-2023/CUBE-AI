@@ -950,7 +950,16 @@ export default class InteractiveSegmentation extends BaseTab {
       });
       return;
     }
-    await this.props.updateView(response, labels, model);
+    let organName = '';
+    if (model === 'vista') {
+      organName = 'interactive';
+    } else if (model === 'voxtell') {
+      organName = this.voxtellTextPrompt?.trim() ? this.voxtellTextPrompt.trim().replace(/\s+/g, '_') : 'voxtell';
+    } else {
+      organName = this.state.currentLabel || '';
+    }
+
+    await this.props.updateView(response, labels, model, organName);
     if (model === 'nninteractive') {
       this.resetnnInteractiveAll = false;
     }

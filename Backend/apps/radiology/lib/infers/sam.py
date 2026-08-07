@@ -605,6 +605,12 @@ class sam(BasicInferTask):
    
     def _handle_3d(self, data, image_array):
         """handle 3D Propagation"""
+        # First process the points in 2D to add them to the predictor
+        self.predictor.reset_state(self.inference_state)
+        if data.get("Mask") is not None :
+            self._handle_mask(data.get("Mask"))
+        self.segment_objects(data, image_array)
+
         logger.info(f"self.StartSliceIndex in 3d: {self.StartSliceIndex}")
         self.StartSliceIndex = image_array.shape[2] - int(self.StartSliceIndex) - 1
         logger.info(f"self.StartSliceIndex after inversion: {self.StartSliceIndex}")
@@ -737,72 +743,88 @@ class sam(BasicInferTask):
             except Exception as e:
                 logger.error(f"Error during cleanup: {str(e)}")
 
-    def segment_objects(self, data,image_array):
-        frame_idx = data["SliceIndex"]  # Get the specific slice index to process
-        labels =None                    # Labels of the points: 1->positive point , 0->negative points
+    def segment_objects(self, data, image_array):
+        # Extract all unique frame indices from all points and boxes
+        frame_indices = set()
+        if "SliceIndex" in data and data["SliceIndex"] is not None:
+            frame_indices.add(int(data["SliceIndex"]))
+            
+        for obj_id, prompt_details in data.get("sam2config", {}).items():
+            points = prompt_details.get("points", [[], []])
+            if len(points) > 0 and len(points[0]) > 0:
+                for pt in points[0]:
+                    frame_indices.add(int(pt[2]))
+            
+            boxes = prompt_details.get("boxes", [])
+            box_entries = boxes
+            if len(boxes) == 1 and isinstance(boxes[0], list) and boxes[0] and isinstance(boxes[0][0], list) and isinstance(boxes[0][0][0], list):
+                box_entries = boxes[0]
+            for box_entry in box_entries:
+                if isinstance(box_entry, (list, tuple)) and len(box_entry) >= 2:
+                    frame_indices.add(int(box_entry[1]))
 
-        #loop over all objects for segmentation
-        for obj_id, prompt_details in data["sam2config"].items():
+        if not frame_indices:
+            logger.info("No frame indices found in prompts")
+            return
 
-            logger.info(f"at obj_id: {obj_id} corresponds: {prompt_details}")
-            points = prompt_details.get("points", [[], []])     #extract points
-            boxes = prompt_details.get("boxes", [])             #extract boxes
+        for frame_idx in frame_indices:
+            #loop over all objects for segmentation
+            for obj_id, prompt_details in data["sam2config"].items():
 
-            if (len(points) > 0 and len(points[0]) > 0) or (len(boxes) > 0 and len(boxes[0]) > 0):
+                logger.info(f"at obj_id: {obj_id} corresponds: {prompt_details}")
+                points = prompt_details.get("points", [[], []])     #extract points
+                boxes = prompt_details.get("boxes", [])             #extract boxes
 
-                    # Process points based on frame index
-                    points_with_frames = np.array(points[0], dtype=np.float32) if len(points[0]) > 0 else np.empty((0, 4))
-                    labels = np.array(points[1], dtype=np.int32) if len(points[1]) > 0 else np.array([])  # Extract labels
+                if (len(points) > 0 and len(points[0]) > 0) or (len(boxes) > 0 and len(boxes[0]) > 0):
 
-                    points_within_triggered_slice = []
-                    Labels_within_triggered_slice = []
+                        # Process points based on frame index
+                        points_with_frames = np.array(points[0], dtype=np.float32) if len(points[0]) > 0 else np.empty((0, 4))
+                        labels = np.array(points[1], dtype=np.int32) if len(points[1]) > 0 else np.array([])  # Extract labels
 
-                    for point,label in zip(points_with_frames,labels):
-                        if point[2] == frame_idx:
-                            points_within_triggered_slice.append( [point[0],point[1]] )
-                            Labels_within_triggered_slice.append(label)
+                        points_within_triggered_slice = []
+                        Labels_within_triggered_slice = []
 
-                    logger.info(f"points_with_frames: {points_with_frames}")
-                    logger.info(f"labels: {labels}")
-                    logger.info(f"points_within_triggered_slice: {points_within_triggered_slice}")
-                    logger.info(f"Labels_within_triggered_slice: {Labels_within_triggered_slice}")
+                        for point,label in zip(points_with_frames,labels):
+                            if point[2] == frame_idx:
+                                points_within_triggered_slice.append( [point[0],point[1]] )
+                                Labels_within_triggered_slice.append(label)
+
+                        logger.info(f"points_with_frames: {points_with_frames}")
+                        logger.info(f"labels: {labels}")
+                        logger.info(f"points_within_triggered_slice: {points_within_triggered_slice}")
+                        logger.info(f"Labels_within_triggered_slice: {Labels_within_triggered_slice}")
 
 
-                    boxes_within_triggered_slice = []
-                    if boxes:
-                        # The UI sends one entry per box as
-                        # ``[[xmin, ymin, xmax, ymax], slice_index, plane]``.
-                        # Older payloads wrapped that list once more, so accept
-                        # both forms.  Iterating ``boxes[0]`` unconditionally
-                        # treated the slice index integer as a box and raised
-                        # ``TypeError: 'int' object is not subscriptable``.
-                        box_entries = boxes
-                        if len(boxes) == 1 and isinstance(boxes[0], list) and boxes[0] and isinstance(boxes[0][0], list) and isinstance(boxes[0][0][0], list):
-                            box_entries = boxes[0]
+                        boxes_within_triggered_slice = []
+                        if boxes:
+                            box_entries = boxes
+                            if len(boxes) == 1 and isinstance(boxes[0], list) and boxes[0] and isinstance(boxes[0][0], list) and isinstance(boxes[0][0][0], list):
+                                box_entries = boxes[0]
 
-                        for box_entry in box_entries:
-                            if not isinstance(box_entry, (list, tuple)) or len(box_entry) < 2:
-                                logger.warning("Ignoring malformed SAM box prompt: %r", box_entry)
-                                continue
-                            box_coords, box_slice = box_entry[0], box_entry[1]
-                            if int(box_slice) == int(frame_idx):
-                                boxes_within_triggered_slice.append(box_coords)
+                            for box_entry in box_entries:
+                                if not isinstance(box_entry, (list, tuple)) or len(box_entry) < 2:
+                                    logger.warning("Ignoring malformed SAM box prompt: %r", box_entry)
+                                    continue
+                                box_coords, box_slice = box_entry[0], box_entry[1]
+                                if int(box_slice) == int(frame_idx):
+                                    boxes_within_triggered_slice.append(box_coords)
 
-                    logger.info(f"boxes_within_triggered_slice: {boxes_within_triggered_slice}")
+                        logger.info(f"boxes_within_triggered_slice: {boxes_within_triggered_slice}")
 
-                    if ( (len(boxes_within_triggered_slice) > 0) or (len(Labels_within_triggered_slice) >0) ):
+                        if ( (len(boxes_within_triggered_slice) > 0) or (len(Labels_within_triggered_slice) >0) ):
 
-                        # Reverse the slice index as the slice numbering in OHIF is reversed
-                        reversed_frame_idx= image_array.shape[2] - frame_idx - 1
-                        #Apply 2d segmentation on that slice
-                        self.segment_2d(reversed_frame_idx,obj_id,points_within_triggered_slice,Labels_within_triggered_slice,boxes_within_triggered_slice)
+                            # Reverse the slice index as the slice numbering in OHIF is reversed
+                            reversed_frame_idx= image_array.shape[2] - frame_idx - 1
+                            #Apply 2d segmentation on that slice
+                            self.segment_2d(reversed_frame_idx,obj_id,points_within_triggered_slice,Labels_within_triggered_slice,boxes_within_triggered_slice)
 
-                        #keep track of the min refrenced slice index for 3d segmentation
-                        logger.info(f"frame_idx: {frame_idx}")
-                        logger.info(f"self.StartSliceIndex: {self.StartSliceIndex}")
-                        if frame_idx < self.StartSliceIndex:
-                            self.StartSliceIndex = frame_idx
-                        logger.info(f"self.StartSliceIndex inside the loop: {self.StartSliceIndex}")
+                            #keep track of the min refrenced slice index for 3d segmentation
+                            logger.info(f"frame_idx: {frame_idx}")
+                            logger.info(f"self.StartSliceIndex: {self.StartSliceIndex}")
+                            if frame_idx < self.StartSliceIndex:
+                                self.StartSliceIndex = frame_idx
+                            logger.info(f"self.StartSliceIndex inside the loop: {self.StartSliceIndex}")
+
 
 
     def segment_2d(self,frame_idx,obj_id,points,labels,box):
