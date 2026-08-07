@@ -4,7 +4,7 @@ services:
     image: cubeai1/agents-app:latest
     container_name: agents-backend
     ports:
-      - '8150:8150'
+      - "8150:8150"
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/agents_workspace:/app/agents_workspace
       - ${COMPOSE_PROJECT_DIR}/Backend/agent_system:/app/Backend/agent_system
@@ -28,11 +28,11 @@ services:
     restart: unless-stopped
 
   control-api:
-    image: cubeai1/custom-monailabel:latest-gpu
+    image: ahmedmokhtar3/custom-monailabel:v1.0-gpu
     container_name: control-api-backend
     command: python /monailabel/control_server_start.py
     ports:
-      - '8001:8001'
+      - "8001:8001"
     environment:
       CONTROL_API_PORT: 8001
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -46,20 +46,26 @@ services:
       monailabel:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://localhost:8001/health", timeout=3)']
-      interval: 5s
-      timeout: 4s
-      retries: 12
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          'import urllib.request; urllib.request.urlopen("http://localhost:8001/health", timeout=3)',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: unless-stopped
 
   monailabel:
     # GPU image — amd64 only, CUDA toolkit included
-    image: cubeai1/custom-monailabel:latest-gpu
+    image: ahmedmokhtar3/custom-monailabel:v1.0-gpu
     container_name: monailabel-backend
     runtime: nvidia
     shm_size: 8G
     ports:
-      - '8000:8000'
+      - "8000:8000"
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
@@ -90,18 +96,24 @@ services:
       - postgres
       - orthanc
     healthcheck:
-      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://localhost:8000/info/", timeout=3)']
-      interval: 5s
-      timeout: 4s
-      retries: 24
-      start_period: 30s
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          'import urllib.request; urllib.request.urlopen("http://localhost:8000/info/", timeout=3)',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 3600s
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
               capabilities: [gpu]
-              device_ids: ["0"]   # RTX 3060 — adjust as needed
+              device_ids: ["0"] # RTX 3060 — adjust as needed
     restart: unless-stopped
 
   orthanc:
@@ -123,7 +135,7 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/backup.sql:/docker-entrypoint-initdb.d/backup.sql
       - postgres-db2:/var/lib/postgresql/data
     ports:
-      - '5433:5432'
+      - "5433:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
