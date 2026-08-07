@@ -62,7 +62,7 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
     return groups;
   }, [papers]);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'report' | 'papers'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'papers'>('overview');
 
   // Empty / loading state
   if (!hasData) {
@@ -122,18 +122,6 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
           >
             Overview & PICO
           </button>
-          {parsed.report && (
-            <button
-              onClick={() => setActiveTab('report')}
-              className={`px-5 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wider transition-all duration-300 ${
-                activeTab === 'report'
-                  ? 'bg-[#a78bfa]/15 text-[#a78bfa] shadow-sm shadow-[#a78bfa]/10'
-                  : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'
-              }`}
-            >
-              Full Report
-            </button>
-          )}
           {papers.length > 0 && (
             <button
               onClick={() => setActiveTab('papers')}
@@ -192,21 +180,6 @@ export default function LiteratureReviewView({ literatureOutput }: LiteratureRev
                   </div>
                 </div>
               )}
-            </div>
-          )}
-
-          {/* REPORT TAB */}
-          {activeTab === 'report' && parsed.report && (
-            <div className="rounded-3xl border border-white/5 bg-[#0b1015]/60 backdrop-blur-md overflow-hidden shadow-lg shadow-black/20">
-              <div className="flex items-center gap-3 px-6 py-4 border-b border-white/5 bg-gradient-to-r from-[#a78bfa]/[0.03] to-transparent">
-                <FileTextIcon size={16} className="text-[#a78bfa]" />
-                <h3 className="text-[11px] font-bold uppercase tracking-widest text-[#a78bfa]">Full Literature Report</h3>
-              </div>
-              <div className="p-8 max-w-4xl mx-auto">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                  {parsed.report}
-                </ReactMarkdown>
-              </div>
             </div>
           )}
 
