@@ -100,6 +100,10 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
     const immediate = true;
     const keepCamera = true;
 
+    if (!this.renderingEngine || this.renderingEngine.hasBeenDestroyed) {
+      return;
+    }
+
     this.renderingEngine.resize(immediate, keepCamera);
     this.renderingEngine.render();
   }
