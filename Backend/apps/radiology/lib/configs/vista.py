@@ -25,6 +25,7 @@ from monailabel.utils.others.generic import download_file, strtobool
 from monai.networks.nets import UNet
 from pathlib import Path
 import gdown
+from lib.configs.model_artifacts import ensure_model_archive
 
 logger = logging.getLogger(__name__)
 
@@ -44,15 +45,15 @@ class VISTAPOINT3D(TaskConfig):
 
 
 
-        if not os.path.exists(self.path[0]):
-            # Google Drive file ID (extracted from the URL)
-            file_id = "1L7rNfTIliBpT10Ty8p2GB2GbuQSBY9ib"
-
-            # Download the file
-            url = f"https://drive.google.com/uc?id={file_id}"
-            gdown.download(url, self.path[0], quiet=False)
-
-            logger.info(f"Checkpoint saved to: {self.path[0]}")
+        # Google Drive file ID (extracted from the URL)
+        file_id = "1L7rNfTIliBpT10Ty8p2GB2GbuQSBY9ib"
+        url = f"https://drive.google.com/uc?id={file_id}"
+        ensure_model_archive(
+            self.path[0],
+            lambda: gdown.download(url, self.path[0], quiet=False),
+            description="VISTA checkpoint",
+            log=logger.info,
+        )
 
 
         self.target_spacing = (1.5, 1.5, 1.5)  # target space for image

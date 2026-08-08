@@ -27,6 +27,7 @@ from monailabel.tasks.scoring.dice import Dice
 from monailabel.tasks.scoring.epistemic import EpistemicScoring
 from monailabel.tasks.scoring.sum import Sum
 from monailabel.utils.others.generic import download_file, strtobool
+from lib.configs.model_artifacts import ensure_model_archive
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,12 @@ class DeepEdit(TaskConfig):
         if strtobool(self.conf.get("use_pretrained_model", "true")):
             url = f"{self.conf.get('pretrained_path', self.PRE_TRAINED_PATH)}"
             url = f"{url}/radiology_deepedit_{network}_multilabel.pt"
-            download_file(url, self.path[0])
+            ensure_model_archive(
+                self.path[0],
+                lambda: download_file(url, self.path[0]),
+                description=f"DeepEdit {network} checkpoint",
+                log=logger.info,
+            )
 
         self.target_spacing = (1.0, 1.0, 1.0)  # target space for image
         self.spatial_size = (128, 128, 128)  # train input size
