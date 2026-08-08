@@ -169,7 +169,11 @@ function ReviewView({
   volumes: VolumeGif[];
   failedVolumes: FailedVolume[];
   progress?: SegmentationProgress;
-  onSave: (results: { accepted: string[]; rejected: string[]; modified: string[] }) => Promise<boolean>;
+  onSave: (results: {
+    accepted: string[];
+    rejected: string[];
+    modified: string[];
+  }) => Promise<boolean>;
   isLoading: boolean;
   isFinished: boolean;
   sessionId?: string;
@@ -182,8 +186,8 @@ function ReviewView({
   );
   const [openingPairId, setOpeningPairId] = useState<string | null>(null);
   const [previewRefresh, setPreviewRefresh] = useState<Record<string, 'loading' | 'error'>>({});
-  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'submitted'>(
-    () => (loadReviewSubmitted(sessionId, runId) ? 'submitted' : 'idle')
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'submitted'>(() =>
+    loadReviewSubmitted(sessionId, runId) ? 'submitted' : 'idle'
   );
   const [editor, setEditor] = useState<{
     volume: VolumeGif;
@@ -213,8 +217,7 @@ function ReviewView({
       const previousKeys = Object.keys(prev);
       const nextKeys = Object.keys(next);
       const unchanged =
-        previousKeys.length === nextKeys.length &&
-        nextKeys.every(key => prev[key] === next[key]);
+        previousKeys.length === nextKeys.length && nextKeys.every(key => prev[key] === next[key]);
       return unchanged ? prev : next;
     });
   }, [volumes, sessionId, runId]);
@@ -256,8 +259,8 @@ function ReviewView({
       if (!sessionId) {
         return;
       }
-      void saveSegmentationReviewDraft(sessionId, runId, getSavedReviewChoices(next)).catch(
-        error => console.error('Failed to persist segmentation review draft:', error)
+      void saveSegmentationReviewDraft(sessionId, runId, getSavedReviewChoices(next)).catch(error =>
+        console.error('Failed to persist segmentation review draft:', error)
       );
     },
     [runId, sessionId]
@@ -265,11 +268,22 @@ function ReviewView({
 
   const handleToggle = useCallback(
     (uid: string, status: 'accepted' | 'rejected' | 'modified') => {
-      const next = { ...reviewStatus, [uid]: status };
-      setReviewStatus(next);
-      persistReviewDraft(next);
+      setReviewStatus(current => {
+        const next = { ...current, [uid]: status };
+
+        // Persist synchronously before the refreshed overlay updates `volumes`.
+        // Otherwise that update can rehydrate the previous accepted decision
+        // and immediately turn the edit icon grey again.
+        if (reviewDraftStorageKey && typeof window !== 'undefined') {
+          try {
+            window.localStorage.setItem(reviewDraftStorageKey, JSON.stringify(next));
+          } catch (_) {}
+        }
+        persistReviewDraft(next);
+        return next;
+      });
     },
-    [persistReviewDraft, reviewStatus]
+    [persistReviewDraft, reviewDraftStorageKey]
   );
 
   const handleAcceptAll = useCallback(() => {
@@ -279,7 +293,12 @@ function ReviewView({
     });
     setReviewStatus(s);
     persistReviewDraft(s);
-  }, [persistReviewDraft, volumes]);
+    if (reviewDraftStorageKey && typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(reviewDraftStorageKey, JSON.stringify(s));
+      } catch (_) {}
+    }
+  }, [persistReviewDraft, volumes, reviewDraftStorageKey]);
 
   const handleRejectAll = useCallback(() => {
     const s: Record<string, ReviewStatus> = {};
@@ -288,7 +307,12 @@ function ReviewView({
     });
     setReviewStatus(s);
     persistReviewDraft(s);
-  }, [persistReviewDraft, volumes]);
+    if (reviewDraftStorageKey && typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(reviewDraftStorageKey, JSON.stringify(s));
+      } catch (_) {}
+    }
+  }, [persistReviewDraft, volumes, reviewDraftStorageKey]);
 
   const handleModify = async (volume: VolumeGif) => {
     const uid = volume.seriesInstanceUid;
@@ -363,12 +387,14 @@ function ReviewView({
         payload.overlay?.updatedAt
       );
 
+      // Commit the review decision first. The preview update changes `volumes`
+      // and triggers draft rehydration, which must already see "modified".
+      handleToggle(reviewKey, 'modified');
       setPreviewRefresh(prev => ({ ...prev, [reviewKey]: 'loading' }));
       onVolumeUpdated(reviewKey, {
         gifUrl: refreshedUrl,
         isEmptyMask: payload.overlay?.isEmptyMask ?? false,
       });
-      handleToggle(reviewKey, 'modified');
       setEditor(null);
     },
     [editor, handleToggle, onVolumeUpdated, sessionId]
@@ -701,7 +727,6 @@ function ReviewView({
             )}
           </div>
         </div>
-
       </div>
 
       {/* Save */}

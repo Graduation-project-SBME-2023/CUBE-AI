@@ -31,6 +31,28 @@ interface EmbeddedSegmentationModalProps {
 
 const CLOSE_TRANSITION_MS = 140;
 
+const isViewerWindow = (source: MessageEventSource | null, viewerWindow: Window | null) => {
+  if (!source || !viewerWindow) {
+    return false;
+  }
+
+  let candidate = source as Window;
+  try {
+    while (candidate) {
+      if (candidate === viewerWindow) {
+        return true;
+      }
+      if (candidate === candidate.parent) {
+        return false;
+      }
+      candidate = candidate.parent;
+    }
+  } catch (_) {
+    // Cross-origin descendants are never valid senders for this editor.
+  }
+  return false;
+};
+
 export default function EmbeddedSegmentationModal({
   viewerUrl,
   scanLabel,
@@ -62,7 +84,7 @@ export default function EmbeddedSegmentationModal({
     const handleMessage = (event: MessageEvent) => {
       if (
         event.origin !== window.location.origin ||
-        event.source !== iframeRef.current?.contentWindow
+        !isViewerWindow(event.source, iframeRef.current?.contentWindow || null)
       ) {
         return;
       }
