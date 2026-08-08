@@ -35,11 +35,9 @@ import torch
 import numpy as np
 from typing import List, Union
 
-# downloading dependencies
-from huggingface_hub import snapshot_download
-
 import urllib.request
 from lib.configs.qwen_embedding_model import ensure_qwen_embedding_model
+from lib.configs.voxtell_artifacts import ensure_voxtell_artifacts
 from lib.configs.voxtell_supported_labels import VOXTELL_SUPPORTED_LABELS
 
 logger = logging.getLogger(__name__)
@@ -63,13 +61,9 @@ class voxtell(TaskConfig):
         self.supported_prompts = VOXTELL_SUPPORTED_LABELS
         self.model_name = "voxtell_v1.1"
 
-        # Download model if not present
+        # Validate every required VoxTell artifact, not only its directories.
+        ensure_voxtell_artifacts(self.model_dir, log=logger.info)
         self.model_path = os.path.join(self.model_dir, self.model_name)
-        if not os.path.exists(self.model_path):
-            logger.info(f"Downloading Voxtell model to {self.model_path}")
-            self.__download_voxtell_checkpoints(self.model_name, self.model_dir)
-        else:
-            logger.info(f"Using existing model at {self.model_path}")
             
         # Downloading text encoding model 
         self.text_encoding_model_name = "qwen3-4b-embedding"
@@ -153,11 +147,3 @@ class voxtell(TaskConfig):
                     num_samples=self.epistemic_samples,
                 )
         return methods
-
-    def __download_voxtell_checkpoints(self, model_name, download_dir):
-        
-        download_path = snapshot_download(
-        repo_id="mrokuss/VoxTell",
-        allow_patterns=[f"{model_name}/*", "*.json"],
-        local_dir=download_dir
-            )
