@@ -1,12 +1,14 @@
 
 import os
 import logging
+import shutil
 import threading
 from typing import Any, Dict, List, Optional
 
 from cachetools import cached, TTLCache
 from monailabel.datastore.dicom import DICOMWebDatastore
 from monailabel.datastore import dicom
+from monailabel.datastore.utils.convert import dicom_to_nifti
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,123 @@ _DOWNLOAD_LABELED_DATA_LOCK = threading.Lock()
 
 class MyDICOMWebDatastore(DICOMWebDatastore):
 
+    @staticmethod
+    def _clear_partial_export(series_dir: str, nifti_path: str) -> None:
+        """Remove a poisoned partial cache so the next attempt is truly fresh."""
+        shutil.rmtree(series_dir, ignore_errors=True)
+        try:
+            if os.path.isfile(nifti_path):
+                os.unlink(nifti_path)
+        except OSError:
+            logger.warning("Could not remove stale NIfTI export: %s", nifti_path)
+
+    def _download_series_with_retry(
+        self,
+        series_id: str,
+        series_dir: str,
+        nifti_path: str,
+        *,
+        is_seg: bool,
+    ) -> str:
+        """Download and convert one DICOM series, repairing partial caches once."""
+        last_error: Exception | None = None
+        for attempt in range(1, 3):
+            try:
+                if not os.path.isdir(series_dir) or not os.listdir(series_dir):
+                    dicom.dicom_web_download_series(
+                        None,
+                        series_id,
+                        series_dir,
+                        self._client,
+                        self._fetch_by_frame,
+                    )
+
+                if not os.path.isdir(series_dir) or not os.listdir(series_dir):
+                    raise FileNotFoundError(
+                        f"DICOMweb returned no instances for series {series_id}"
+                    )
+
+                if not self._convert_to_nifti:
+                    return series_dir
+
+                if not os.path.isfile(nifti_path) or os.path.getsize(nifti_path) <= 0:
+                    converted = dicom_to_nifti(series_dir, is_seg=is_seg)
+                    if not converted or not os.path.isfile(converted):
+                        raise RuntimeError(
+                            f"DICOM-to-NIfTI conversion produced no file for {series_id}"
+                        )
+                    if os.path.realpath(converted) != os.path.realpath(nifti_path):
+                        os.makedirs(os.path.dirname(nifti_path), exist_ok=True)
+                        shutil.copy2(converted, nifti_path)
+                        try:
+                            os.unlink(converted)
+                        except OSError:
+                            logger.debug(
+                                "Could not remove temporary converted file: %s",
+                                converted,
+                            )
+
+                if os.path.getsize(nifti_path) <= 0:
+                    raise RuntimeError(
+                        f"DICOM-to-NIfTI conversion produced an empty file for {series_id}"
+                    )
+                return nifti_path
+            except Exception as exc:
+                last_error = exc
+                logger.exception(
+                    "Series export failed for %s (SEG=%s, attempt %s/2)",
+                    series_id,
+                    is_seg,
+                    attempt,
+                )
+                self._clear_partial_export(series_dir, nifti_path)
+
+        raise RuntimeError(
+            f"Could not export DICOM series {series_id} after cache repair"
+        ) from last_error
+
+    def get_image_uri(self, image_id: str) -> str:
+        """Export a source series while recovering from incomplete cache folders."""
+        logger.info("Fetching source image series: %s", image_id)
+        image_dir = os.path.realpath(
+            os.path.join(self._datastore.image_path(), image_id)
+        )
+        image_nii_gz = os.path.realpath(
+            os.path.join(self._datastore.image_path(), f"{image_id}.nii.gz")
+        )
+        image_was_exported = os.path.isfile(image_nii_gz) and os.path.getsize(image_nii_gz) > 0
+        exported = self._download_series_with_retry(
+            image_id,
+            image_dir,
+            image_nii_gz,
+            is_seg=False,
+        )
+
+        if self._convert_to_nifti and not image_was_exported:
+            # The converted file already lives at the datastore destination.
+            # Calling LocalDatastore.add_image() here would copy the file onto
+            # itself and raise SameFileError. Reconcile the datastore metadata
+            # from disk, then enrich it with DICOM metadata when available.
+            self.refresh()
+            try:
+                image_info = self._dicom_info(image_id)
+            except Exception:
+                logger.warning(
+                    "Could not load DICOM metadata for %s; keeping minimal info",
+                    image_id,
+                    exc_info=True,
+                )
+                image_info = {"SeriesInstanceUID": image_id}
+            try:
+                self.update_image_info(image_id, image_info)
+            except Exception:
+                logger.warning(
+                    "Could not update datastore metadata for %s",
+                    image_id,
+                    exc_info=True,
+                )
+        return exported
+
     # ------------------------------------------------------------------
     # Custom helper used by my_endpoints_datastore.py
     # ------------------------------------------------------------------
@@ -43,18 +162,20 @@ class MyDICOMWebDatastore(DICOMWebDatastore):
         Downloads the series from DICOMweb if it does not already exist
         in the local cache directory.
         """
-        logger.info(f"Fetching Image ID: {image_id}")
-        image_dir = os.path.realpath(os.path.join(self._datastore.image_path(), image_id))
-        logger.info(f"Image Directory Cache: {image_dir}")
-
-        if not os.path.exists(image_dir) or not os.listdir(image_dir):
-            dicom.dicom_web_download_series(None, image_id, image_dir, self._client, self._fetch_by_frame)
-
-        if not self._convert_to_nifti:
-            return image_dir
-
-        image_nii_gz = os.path.realpath(os.path.join(self._datastore.image_path(), f"{image_id}.nii.gz"))
-        return image_nii_gz
+        logger.info("Fetching segmentation series: %s", image_id)
+        # Preserve the path contract used by the custom datastore endpoint:
+        # it expects a label-SeriesInstanceUID export under image_path().
+        label_root = self._datastore.image_path()
+        label_dir = os.path.realpath(os.path.join(label_root, image_id))
+        label_nii_gz = os.path.realpath(
+            os.path.join(label_root, f"{image_id}.nii.gz")
+        )
+        return self._download_series_with_retry(
+            image_id,
+            label_dir,
+            label_nii_gz,
+            is_seg=True,
+        )
 
     # ------------------------------------------------------------------
     # status() — called by MONAILabelApp.info() via datastore.status()

@@ -394,18 +394,52 @@ class SegmentationModule:
             None,
         )
         if pair_result is None:
-            can_fallback = allow_reuse_fallback and any(
-                skipped_item.get("reason") == "normalization_failed"
-                for skipped_item in skipped
+            pair_failure = next(
+                (
+                    skipped_item
+                    for skipped_item in skipped
+                    if skipped_item.get("pair_id") == item["pair_id"]
+                ),
+                skipped[0] if skipped else {},
+            )
+            reason_code = str(pair_failure.get("reason") or "pair_preparation_failed")
+            reusable_mask_failure = reason_code in {
+                "mask_export_failed",
+                "mask_file_missing",
+                "normalization_failed",
+            }
+            can_fallback = (
+                allow_reuse_fallback
+                and reusable_mask_failure
+                and self._workspace_volume_is_valid(
+                    workspace_dir,
+                    item["volume_uid"],
+                )
             )
             if can_fallback:
+                logger.warning(
+                    "Existing mask %s could not be prepared for pair %s (%s); "
+                    "falling back to fresh %s inference",
+                    item.get("source_segmentation_uid"),
+                    item["pair_id"],
+                    reason_code,
+                    item["model"],
+                )
                 item.update(
                     {
                         "reused": False,
+                        "reuse_candidate_uid": item.get("source_segmentation_uid"),
                         "source_segmentation_uid": None,
+                        "source_method": None,
+                        "source_model": None,
+                        "source_description": None,
                         "status": "pending",
                         "mask_path": None,
                         "gif_path": None,
+                        "reuse_fallback": {
+                            "reason": reason_code,
+                            "details": pair_failure,
+                        },
                         "error_stage": None,
                         "error": None,
                         "error_details": None,
@@ -415,11 +449,45 @@ class SegmentationModule:
                     workspace_dir, resolution_outcome, work_items, run_id
                 )
                 return False
+
+            failure_map = {
+                "volume_export_failed": (
+                    "source_volume_export",
+                    "Source volume export failed in MONAI Label",
+                ),
+                "volume_file_missing": (
+                    "source_volume_export",
+                    "Source volume export completed but no NIfTI file appeared",
+                ),
+                "mask_export_failed": (
+                    "existing_mask_export",
+                    "Existing mask export failed in MONAI Label",
+                ),
+                "mask_file_missing": (
+                    "existing_mask_export",
+                    "Existing mask export completed but no NIfTI file appeared",
+                ),
+                "normalization_failed": (
+                    "mask_normalization",
+                    "Mask geometry normalization failed",
+                ),
+                "memory_limit": (
+                    "mask_normalization",
+                    "Mask preparation exceeded the configured memory limit",
+                ),
+            }
+            failure_stage, failure_message = failure_map.get(
+                reason_code,
+                ("mask_export", "Mask download or normalization failed"),
+            )
             await self._fail_pair(
                 item,
-                stage="mask_export",
-                message="Mask download or normalization failed",
-                details={"skipped": skipped},
+                stage=failure_stage,
+                message=failure_message,
+                details={
+                    "reason_code": reason_code,
+                    "pair_failure": pair_failure,
+                },
                 workspace_dir=workspace_dir,
                 resolution_outcome=resolution_outcome,
                 work_items=work_items,
@@ -434,10 +502,6 @@ class SegmentationModule:
             or pair_result.get("geometry_adjusted")
         )
         item["geometry"] = pair_result.get("geometry")
-        item["alignment_mode"] = pair_result.get("alignment_mode")
-        item["slice_alignment"] = (item.get("inference_result") or {}).get(
-            "slice_alignment"
-        )
 
         previews = await asyncio.to_thread(
             generate_gif_overlays,

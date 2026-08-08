@@ -122,6 +122,12 @@ def build_segmentation_snapshot(
             "pairId": item["pair_id"],
             "targetId": item.get("target_id"),
             "reason": item.get("error") or "Segmentation pair failed",
+            "stage": item.get("error_stage"),
+            "reasonCode": (
+                (item.get("error_details") or {}).get("reason_code")
+                if isinstance(item.get("error_details"), dict)
+                else None
+            ),
         }
         for item in ordered
         if item.get("status") == "failed"

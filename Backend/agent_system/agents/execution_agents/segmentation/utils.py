@@ -296,29 +296,104 @@ async def download_and_pair_volumes(
     # ------------------------------------------------------------------ #
     # Helper functions remain exactly the same
     # ------------------------------------------------------------------ #
-    async def trigger_download(url, task_name, uids_list):
+    async def trigger_download(url, task_name, uids_list, *, export_kind):
         if not uids_list:
-            return True
+            return {
+                "ok": True,
+                "status_code": None,
+                "response": "",
+                "attempts": 0,
+                "export_kind": export_kind,
+            }
         logger.info(f"POST {url} | task={task_name} | uids={uids_list}")
         request_client = client or httpx.AsyncClient()
         try:
-            response = await request_client.post(
-                url,
-                params={"task_name": task_name},
-                json=uids_list,
-                timeout=60,
+            last_status = None
+            last_response = ""
+            last_error = ""
+            attempts_made = 0
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                attempts_made = attempt
+                try:
+                    response = await request_client.post(
+                        url,
+                        params={"task_name": task_name},
+                        json=uids_list,
+                        timeout=60,
+                    )
+                    last_status = response.status_code
+                    last_response = response.text[:1000]
+                    logger.info(
+                        "%s export trigger response: %s (attempt %s/%s)",
+                        export_kind,
+                        response.status_code,
+                        attempt,
+                        max_attempts,
+                    )
+                    if 200 <= response.status_code < 300:
+                        return {
+                            "ok": True,
+                            "status_code": response.status_code,
+                            "response": last_response,
+                            "attempts": attempt,
+                            "export_kind": export_kind,
+                        }
+
+                    # Client errors are deterministic for the current request;
+                    # retry only transient server failures.
+                    if response.status_code < 500:
+                        break
+                except httpx.HTTPError as exc:
+                    last_error = f"{type(exc).__name__}: {exc}"
+                    logger.warning(
+                        "%s export trigger request failed (attempt %s/%s): %s",
+                        export_kind,
+                        attempt,
+                        max_attempts,
+                        exc,
+                    )
+
+                if attempt < max_attempts:
+                    await asyncio.sleep(0.5 * attempt)
+
+            logger.error(
+                "%s export trigger failed after %s attempt(s): status=%s response=%s error=%s",
+                export_kind,
+                attempts_made,
+                last_status,
+                last_response[:300],
+                last_error,
             )
-            logger.info("Trigger response: %s", response.status_code)
-            if response.status_code != 200:
-                logger.error("Trigger failed: %s", response.text[:300])
-                return False
-            return True
-        except httpx.HTTPError:
-            logger.exception("Download trigger failed")
-            return False
+            return {
+                "ok": False,
+                "status_code": last_status,
+                "response": last_response,
+                "error": last_error,
+                "attempts": attempts_made,
+                "export_kind": export_kind,
+            }
         finally:
             if client is None:
                 await request_client.aclose()
+
+    def scan_exact_files(search_dir, uid_to_search_key):
+        if isinstance(uid_to_search_key, list):
+            uid_to_search_key = {u: u for u in uid_to_search_key}
+        if not os.path.isdir(search_dir):
+            return {}
+
+        matches = {}
+        expected_by_name = {
+            f"{str(search_key)}.nii.gz".casefold(): key
+            for key, search_key in uid_to_search_key.items()
+        }
+        for root, _, files in os.walk(search_dir):
+            for fname in files:
+                key = expected_by_name.get(fname.casefold())
+                if key is not None:
+                    matches[key] = os.path.join(root, fname)
+        return matches
 
     async def wait_and_find(search_dir, uid_to_search_key, timeout_s=600, poll_interval=3.0):
         """
@@ -352,21 +427,15 @@ async def download_and_pair_volumes(
                 await asyncio.sleep(poll_interval)
                 continue
 
-            def scan_exact_files():
-                matches = {}
-                expected_by_name = {
-                    f"{str(search_key)}.nii.gz".casefold(): key
-                    for key, search_key in uid_to_search_key.items()
-                    if key in remaining_keys
-                }
-                for root, _, files in os.walk(search_dir):
-                    for fname in files:
-                        key = expected_by_name.get(fname.casefold())
-                        if key is not None:
-                            matches[key] = os.path.join(root, fname)
-                return matches
-
-            matches = await asyncio.to_thread(scan_exact_files)
+            pending_search = {
+                key: uid_to_search_key[key]
+                for key in remaining_keys
+            }
+            matches = await asyncio.to_thread(
+                scan_exact_files,
+                search_dir,
+                pending_search,
+            )
             for key, full_path in matches.items():
                 found[key] = full_path
                 remaining_keys.discard(key)
@@ -495,33 +564,65 @@ async def download_and_pair_volumes(
     logger.info(f"Pairs ready: {len(volumes_to_process)}")
 
     # ------------------------------------------------------------------ #
-    #  2. trigger downloads (POST; MONAI saves to its local dirs)        #
+    #  2. use exact local exports first; trigger only what is missing     #
     # ------------------------------------------------------------------ #
-    if download_volumes:
-        images_triggered = await trigger_download(
-            DOWNLOAD_IMAGES_URL,
-            TASK_NAME,
-            list(dict.fromkeys(volumes_to_process)),
-        )
-        if not images_triggered:
-            logger.error("Volume export request failed; aborting without polling")
-            return [], [
-                {"volume_uid": uid, "target_id": target_id}
-                for uid, target_id in zip(volumes_to_process, target_ids_to_process)
-            ]
-    
+    unique_volumes = list(dict.fromkeys(volumes_to_process))
     valid_labels = list(dict.fromkeys(uid for uid in labels_to_process if uid))
-    labels_triggered = await trigger_download(
-        DOWNLOAD_LABELS_URL,
-        TASK_NAME,
+
+    found_volumes = (
+        await asyncio.to_thread(scan_exact_files, MONAI_IMG_DIR, unique_volumes)
+        if download_volumes
+        else {}
+    )
+    found_labels = await asyncio.to_thread(
+        scan_exact_files,
+        MONAI_LABEL_DIR,
         valid_labels,
     )
-    if not labels_triggered:
-        logger.error("Mask export request failed; aborting without polling")
-        return [], [
-            {"volume_uid": uid, "target_id": target_id}
-            for uid, target_id in zip(volumes_to_process, target_ids_to_process)
-        ]
+
+    missing_volumes = [uid for uid in unique_volumes if uid not in found_volumes]
+    missing_labels = [uid for uid in valid_labels if uid not in found_labels]
+
+    if found_volumes:
+        logger.info(
+            "Using %s already-exported volume file(s); skipping redundant datastore POST",
+            len(found_volumes),
+        )
+    if found_labels:
+        logger.info(
+            "Using %s already-exported mask file(s); skipping redundant datastore POST",
+            len(found_labels),
+        )
+
+    image_trigger = {
+        "ok": True,
+        "status_code": None,
+        "response": "",
+        "attempts": 0,
+        "export_kind": "volume",
+    }
+    if download_volumes and missing_volumes:
+        image_trigger = await trigger_download(
+            DOWNLOAD_IMAGES_URL,
+            TASK_NAME,
+            missing_volumes,
+            export_kind="volume",
+        )
+
+    label_trigger = {
+        "ok": True,
+        "status_code": None,
+        "response": "",
+        "attempts": 0,
+        "export_kind": "mask",
+    }
+    if missing_labels:
+        label_trigger = await trigger_download(
+            DOWNLOAD_LABELS_URL,
+            TASK_NAME,
+            missing_labels,
+            export_kind="mask",
+        )
 
     # ------------------------------------------------------------------ #
     #  3. wait for files to appear in MONAI's local dirs                 #
@@ -531,10 +632,14 @@ async def download_and_pair_volumes(
     # NOT by volume UID.  Pass labels_to_process as a plain list so that
     # wait_and_find searches for the label UID in the filename.
 
-    found_volumes = {}
-    if download_volumes:
+    if download_volumes and missing_volumes:
         logger.info("Waiting for images to appear...")
-        found_volumes = await wait_and_find(MONAI_IMG_DIR, volumes_to_process, timeout_s=600)
+        exported_volumes = await wait_and_find(
+            MONAI_IMG_DIR,
+            missing_volumes,
+            timeout_s=600 if image_trigger["ok"] else 15,
+        )
+        found_volumes.update(exported_volumes)
 
     logger.info("Waiting for labels to appear...")
     # Diagnostic: log what's already in MONAI_LABEL_DIR before waiting
@@ -557,11 +662,13 @@ async def download_and_pair_volumes(
 
     # Search by label_uid in filename (MONAI saves as {label_uid}.nii.gz).
     # found_labels is keyed by label_uid -> file path.
-    found_labels = await wait_and_find(
-        MONAI_LABEL_DIR,
-        valid_labels,   # plain list: key == search substring == label_uid
-        timeout_s=600
-    )
+    if missing_labels:
+        exported_labels = await wait_and_find(
+            MONAI_LABEL_DIR,
+            missing_labels,   # key == search substring == label_uid
+            timeout_s=600 if label_trigger["ok"] else 15,
+        )
+        found_labels.update(exported_labels)
     logger.info(
         f"Label files found: {len(found_labels)}/{len(valid_labels)}; "
         f"keys: {list(found_labels.keys())[:3]}..."
@@ -572,7 +679,7 @@ async def download_and_pair_volumes(
     # ------------------------------------------------------------------ #
 
     successful = []
-    skipped_oom = []
+    skipped = []
     copied_volumes: dict[str, str] = {}
     for vol_uid, label_uid, target_id, pair_id, artifact_key, is_empty_mask in zip(
         volumes_to_process,
@@ -582,20 +689,26 @@ async def download_and_pair_volumes(
         artifact_keys_to_process,
         empty_masks_to_process,
     ):
-        label_src = found_labels.get(label_uid) if label_uid else None
-        if not label_src and label_uid:
-            logger.error(
-                f"Label file never appeared for volume={vol_uid} "
-                f"(label_uid={label_uid}); skipping pair"
-            )
-            continue
-
         volume_path = os.path.join(FINAL_DIR_IMG, f"{vol_uid}.nii.gz")
         vol_result = volume_path
         if download_volumes:
             vol_src = found_volumes.get(vol_uid)
             if not vol_src:
                 logger.error("Volume file never appeared for %s; skipping pair", vol_uid)
+                skipped.append(
+                    {
+                        "pair_id": pair_id,
+                        "artifact_key": artifact_key,
+                        "volume_uid": vol_uid,
+                        "target_id": target_id,
+                        "reason": (
+                            "volume_export_failed"
+                            if vol_uid in missing_volumes and not image_trigger["ok"]
+                            else "volume_file_missing"
+                        ),
+                        "export": image_trigger if vol_uid in missing_volumes else None,
+                    }
+                )
                 continue
             if vol_uid not in copied_volumes:
                 copied_volumes[vol_uid] = await asyncio.to_thread(
@@ -605,6 +718,29 @@ async def download_and_pair_volumes(
                     FINAL_DIR_IMG,
                 )
             vol_result = copied_volumes[vol_uid]
+
+        label_src = found_labels.get(label_uid) if label_uid else None
+        if not label_src and label_uid:
+            logger.error(
+                f"Label file never appeared for volume={vol_uid} "
+                f"(label_uid={label_uid}); skipping pair"
+            )
+            skipped.append(
+                {
+                    "pair_id": pair_id,
+                    "artifact_key": artifact_key,
+                    "volume_uid": vol_uid,
+                    "target_id": target_id,
+                    "label_uid": label_uid,
+                    "reason": (
+                        "mask_export_failed"
+                        if label_uid in missing_labels and not label_trigger["ok"]
+                        else "mask_file_missing"
+                    ),
+                    "export": label_trigger if label_uid in missing_labels else None,
+                }
+            )
+            continue
 
         if is_empty_mask:
             label_result = await asyncio.to_thread(
@@ -629,12 +765,13 @@ async def download_and_pair_volumes(
             label_result = True # No label to process for interactive manual
 
         if label_result == "SKIPPED_OOM":
-            skipped_oom.append(
+            skipped.append(
                 {
                     "pair_id": pair_id,
                     "artifact_key": artifact_key,
                     "volume_uid": vol_uid,
                     "target_id": target_id,
+                    "reason": "memory_limit",
                 }
             )
             continue
@@ -668,7 +805,7 @@ async def download_and_pair_volumes(
             )
         else:
             logger.error("Failed to copy vol/label for %s", vol_uid)
-            skipped_oom.append(
+            skipped.append(
                 {
                     "pair_id": pair_id,
                     "artifact_key": artifact_key,
@@ -681,7 +818,7 @@ async def download_and_pair_volumes(
     logger.info("=" * 60)
     logger.info(f"DONE: {len(successful)}/{len(volumes_to_process)} pairs ready in workspace")
     logger.info("=" * 60)
-    return successful, skipped_oom
+    return successful, skipped
 #  ================================
 #  Generate GIF Overlays for front view
 #  ================================

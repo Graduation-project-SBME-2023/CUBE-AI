@@ -130,6 +130,25 @@ const getSavedReviewChoices = (reviewStatus: Record<string, ReviewStatus>) =>
     Object.entries(reviewStatus).filter(([, status]) => isSavedReviewChoice(status))
   ) as Record<string, 'accepted' | 'rejected' | 'modified'>;
 
+const getSegmentationFailureMessage = (failure: FailedVolume) => {
+  switch (failure.reasonCode) {
+    case 'volume_export_failed':
+      return 'The source CT could not be exported from MONAI Label.';
+    case 'volume_file_missing':
+      return 'The source CT export finished, but its NIfTI file was not created.';
+    case 'mask_export_failed':
+      return 'The existing mask could not be exported from MONAI Label.';
+    case 'mask_file_missing':
+      return 'The existing mask export finished, but its NIfTI file was not created.';
+    case 'normalization_failed':
+      return 'The mask could not be aligned to the source CT geometry.';
+    case 'memory_limit':
+      return 'Mask preparation exceeded the configured memory limit.';
+    default:
+      return failure.reason || 'Segmentation failed.';
+  }
+};
+
 // ─── Review View ──────────────────────────────────────────────────────────────
 
 function ReviewView({
@@ -667,10 +686,13 @@ function ReviewView({
                     <div
                       key={volume.pairId || volume.seriesInstanceUid}
                       className="flex gap-2"
+                      title={[volume.seriesInstanceUid, volume.stage, volume.reason]
+                        .filter(Boolean)
+                        .join(' — ')}
                     >
-                      <span>{volume.seriesInstanceUid.slice(-8)}</span>
+                      <span>{volume.seriesInstanceUid.slice(-12)}</span>
                       <span className="font-sans text-red-200/60">
-                        {volume.reason || 'Segmentation failed.'}
+                        {getSegmentationFailureMessage(volume)}
                       </span>
                     </div>
                   ))}
