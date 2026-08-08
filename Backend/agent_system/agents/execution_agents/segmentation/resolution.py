@@ -22,6 +22,40 @@ class MaskInventory:
     candidate_id_by_record_uid: dict[str, str]
 
 
+def is_reusable_mask_record(record: dict[str, Any]) -> bool:
+    """Return whether a database mask record is eligible for reuse.
+
+    New review-gated records must be finalized, stored in PACS, and non-empty.
+    Missing lifecycle fields are tolerated for legacy records, but explicit
+    negative states are never exposed to the planner as reusable inventory.
+    """
+    record_uid = str(record.get("label_series_instance_uid") or "").strip()
+    if not record_uid:
+        return False
+
+    review_status = str(record.get("review_status") or "").strip().casefold()
+    if review_status and review_status not in {
+        "accepted",
+        "approved",
+        "modified",
+    }:
+        return False
+
+    pacs_status = str(record.get("pacs_status") or "").strip().casefold()
+    if pacs_status and pacs_status not in {"stored", "uploaded"}:
+        return False
+
+    empty_value = record.get("is_empty_mask")
+    if (
+        empty_value is True
+        or empty_value == 1
+        or str(empty_value or "").strip().casefold() in {"true", "yes"}
+    ):
+        return False
+
+    return True
+
+
 def _record_label(record: dict[str, Any]) -> tuple[str, bool]:
     target_label = str(record.get("target_label") or "").strip()
     if target_label:
@@ -32,8 +66,15 @@ def _record_label(record: dict[str, Any]) -> tuple[str, bool]:
 def build_mask_inventory(
     records_by_volume: dict[str, list[dict[str, Any]]],
 ) -> MaskInventory:
+    reusable_records_by_volume = {
+        volume_uid: [
+            record for record in records if is_reusable_mask_record(record)
+        ]
+        for volume_uid, records in records_by_volume.items()
+    }
+
     unique_labels: dict[tuple[bool, str], str] = {}
-    for records in records_by_volume.values():
+    for records in reusable_records_by_volume.values():
         for record in records:
             label, structured = _record_label(record)
             if label:
@@ -55,7 +96,7 @@ def build_mask_inventory(
         )
 
     candidate_id_by_record_uid: dict[str, str] = {}
-    for records in records_by_volume.values():
+    for records in reusable_records_by_volume.values():
         for record in records:
             label, structured = _record_label(record)
             uid = str(record.get("label_series_instance_uid") or "")
@@ -63,7 +104,7 @@ def build_mask_inventory(
                 candidate_id_by_record_uid[uid] = unique_labels[(structured, label)]
 
     return MaskInventory(
-        records_by_volume=records_by_volume,
+        records_by_volume=reusable_records_by_volume,
         candidates=candidates,
         candidate_id_by_record_uid=candidate_id_by_record_uid,
     )
