@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 CRITICAL_PIPELINE_TOOLS = {
     ("segmentation_agent", "segmentation_tool"),
+    # FunctionTool exposes the Python wrapper's name at runtime.  Keep the
+    # legacy name above for persisted/older events, but stop the pipeline for
+    # the name emitted by the current segmentation agent as well.
+    ("segmentation_agent", "run_segmentation_with_guard"),
 }
 
 

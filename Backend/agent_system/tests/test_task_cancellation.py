@@ -131,6 +131,24 @@ class SegmentationCancellationGuardTests(unittest.TestCase):
             ):
                 check_session_cancelled(session.session_id)
 
+    def test_live_execution_recovers_stale_cancelled_state(self):
+        session = Session(session_id="live-stale-cancelled-state")
+        session.state = SessionState.CANCELLED
+        session.execution_task = SimpleNamespace(done=lambda: False)
+
+        with patch.dict(
+            sys.modules,
+            {"app": self._app_module_for(session)},
+        ):
+            with self.assertLogs(
+                "agents.execution_agents.segmentation.pipelines.common",
+                level=logging.WARNING,
+            ) as captured:
+                check_session_cancelled(session.session_id)
+
+        self.assertEqual(session.state, SessionState.RUNNING)
+        self.assertIn("stale CANCELLED state", "\n".join(captured.output))
+
     def test_failed_parent_execution_preserves_diagnostic(self):
         session = Session(session_id="failed-parent")
         session.state = SessionState.FAILED

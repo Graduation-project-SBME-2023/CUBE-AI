@@ -108,9 +108,22 @@ def check_session_cancelled(session_id: str | None) -> None:
             )
 
         if session.state == SessionState.CANCELLED:
-            # CANCELLED without cancel_event is inconsistent state.  Do not
-            # report it as a user cancellation; surface it as an internal
-            # orchestration failure so the original problem can be diagnosed.
+            # cancel_event is the authoritative stop signal.  A still-running
+            # execution can otherwise be poisoned by a stale CANCELLED state
+            # left behind by an overlapping lifecycle update, which used to
+            # abort segmentation even though nobody requested a stop.
+            execution_task = session.execution_task
+            if execution_task is not None and not execution_task.done():
+                logger.warning(
+                    "Session %s had a stale CANCELLED state while its execution "
+                    "task was still active; restoring RUNNING.",
+                    session_id,
+                )
+                session.state = SessionState.RUNNING
+                return
+
+            # With no live parent execution, the mismatch remains an internal
+            # orchestration error rather than a user cancellation.
             message = (
                 f"Session {session_id} is CANCELLED without an explicit "
                 "stop signal."
