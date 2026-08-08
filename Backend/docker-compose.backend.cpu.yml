@@ -22,7 +22,7 @@ services:
       - .env
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       monailabel:
         condition: service_healthy
       control-api:
@@ -44,7 +44,7 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/monailabel
     depends_on:
       postgres:
-        condition: service_started
+        condition: service_healthy
       monailabel:
         condition: service_healthy
     healthcheck:
@@ -86,8 +86,10 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/migrations:/alembic/migrations
     # CMD in the Dockerfile.gpu already runs migrations + server.
     depends_on:
-      - postgres
-      - orthanc
+      postgres:
+        condition: service_healthy
+      orthanc:
+        condition: service_started
     healthcheck:
       test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://localhost:8000/info/", timeout=3)']
       interval: 5s
@@ -122,6 +124,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
 volumes:
