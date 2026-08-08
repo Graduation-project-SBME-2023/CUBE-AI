@@ -12,7 +12,6 @@ VOXTELL_REQUIRED_FILES = (
     "voxtell_v1.1/fold_0/INFO.txt",
     "voxtell_v1.1/fold_0/checkpoint_final.pth",
     "voxtell_v1.0/plans.json",
-    "voxtell_v1.0/fold_0/checkpoint_final.pth",
     "embeddings/voxtell_v1.1/labels.json",
     "embeddings/voxtell_v1.1/text_embeddings.npz",
 )
