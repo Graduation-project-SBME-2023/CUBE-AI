@@ -63,6 +63,19 @@ async function updateViewportsForSegmentationRendering({
     referencedDisplaySetInstanceUID,
   });
 
+  // If the referenced series is already displayed, the hanging protocol has
+  // no display-set update to return. The target viewport must still take part
+  // in hydration so the mask representation is attached and rendered.
+  if (!updatedViewports.some(updatedViewport => updatedViewport.viewportId === targetViewportId)) {
+    updatedViewports.push({
+      viewportId: targetViewportId,
+      displaySetInstanceUIDs: viewport.displaySetInstanceUIDs,
+      viewportOptions: {
+        ...viewport.viewportOptions,
+      },
+    });
+  }
+
   // create Segmentation callback which needs to be waited until
   // the volume is created (if coming from stack)
   let segmentationPromise;
