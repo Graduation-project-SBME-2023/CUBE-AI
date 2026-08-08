@@ -876,7 +876,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                                     <tr>
                                         <th className="py-3 px-4 w-12 text-center">Include</th>
                                         <th className="py-3 px-2 w-12 text-center" title="View in DICOM Viewer">View</th>
-                                        <th className="py-3 px-4">Series Instance UID</th>
+                                        <th className="py-3 px-4 w-16 text-center">Order</th>
                                         <th className="py-3 px-4">Organ / Body Part</th>
                                         <th className="py-3 px-4">Modality</th>
                                         <th className="py-3 px-4">Series Description</th>
@@ -914,8 +914,8 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                                                             <EyeIcon size={14} />
                                                         </button>
                                                     </td>
-                                                    <td className="py-3 px-4 font-mono text-[#91b9cd]" title={vol.volume_series_instance_uid}>
-                                                        {vol.volume_series_instance_uid ? `...${vol.volume_series_instance_uid.slice(-20)}` : 'N/A'}
+                                                    <td className="py-3 px-4 text-center font-mono font-bold text-[#5ce6b0]">
+                                                        #{allVolumes.findIndex(v => v.volume_series_instance_uid === vol.volume_series_instance_uid) + 1}
                                                     </td>
                                                     <td className="py-3 px-4 font-semibold text-white">
                                                         {vol.body_part_examined || <span className="text-gray-600 italic">Unspecified</span>}
@@ -986,7 +986,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                         <table className="w-full text-left border-collapse">
                             <thead className="bg-[#152433] sticky top-0 z-20 text-[11px] font-bold text-[#5acce6] uppercase tracking-wider border-b border-[#3c5d80]">
                                 <tr>
-                                    <th className="py-3 px-4 w-44">Patient / Volume ID</th>
+                                    <th className="py-3 px-4 w-16 text-center">Order</th>
                                     <th className="py-3 px-2 w-12 text-center" title="View in DICOM Viewer">View</th>
                                     <th className="py-3 px-4 w-52">Target Disease Label</th>
                                     <th className="py-3 px-4 w-40">Confidence</th>
@@ -1001,8 +1001,8 @@ export default function DataCohortView({ populationData, segmentationData, sessi
                                         
                                         return (
                                             <tr key={row.patient_id} className="hover:bg-[#151a1f]/70 transition-colors">
-                                                <td className="py-3 px-4 font-mono text-[#91b9cd]" title={row.patient_id}>
-                                                    {row.patient_id ? (row.patient_id.length > 22 ? `...${row.patient_id.slice(-20)}` : row.patient_id) : 'Unknown'}
+                                                <td className="py-3 px-4 text-center font-mono font-bold text-[#5ce6b0]">
+                                                    #{allVolumes.findIndex(v => v.volume_series_instance_uid === row.patient_id) + 1}
                                                 </td>
                                                 <td className="py-3 px-2 text-center" onClick={(e) => e.stopPropagation()}>
                                                     {(() => {
