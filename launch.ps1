@@ -117,127 +117,29 @@ Write-Host ""
     }
 }
 
-#  === 5. Frontend Selection =================================
-Write-Host ""
-Write-Host "Select frontend mode:"
-Write-Host "  1) Docker (production)"
-Write-Host "  2) Yarn (development)"
-Write-Host ""
-
-:frontendLoop while ($true) {
-    $FrontendChoice = Read-Host "Choice [1-2]"
-
-    switch ($FrontendChoice) {
-        "1" {
-            $FrontendMode = "Docker"
-            $FrontendCompose = Join-Path $ScriptDir "Frontend\OHIF-Viewer\docker-compose.frontend.prod.yml"
-            break frontendLoop
-        }
-
-        "2" {
-            $FrontendMode = "Yarn"
-            break frontendLoop
-        }
-
-        default {
-            Write-Warn "Invalid selection."
-        }
-    }
-}
-
-#  === 5.5. Backend Development Mode =========================
-Write-Host ""
-Write-Host "Enable Backend Development Mode (Live Reload)? [y/N]"
-$BackendDevChoice = Read-Host "Choice"
-
-$BackendDevMode = $false
-if ($BackendDevChoice -match "^[yY]") {
-    $BackendDevMode = $true
-    $BackendDevCompose = Join-Path $ScriptDir "Backend\docker-compose.backend.dev.yml"
-}
+$FrontendCompose = Join-Path $ScriptDir "Frontend\OHIF-Viewer\docker-compose.frontend.prod.yml"
 
 Write-Host ""
 Write-OK "Selected backend: $BackendMode"
-if ($BackendDevMode) { Write-OK "Backend Dev Mode: Enabled" }
-Write-OK "Selected frontend: $FrontendMode"
 Write-Host ""
 
-#  === 6. Launch =================================
+#  === 5. Launch =================================
 
-if ($FrontendMode -eq "Docker") {
-
-    Write-Warn "Starting Docker containers..."
-    Write-Warn "First run may take several minutes."
-    Write-Host ""
-
-    if ($BackendDevMode) {
-        docker compose `
-            -f $BackendCompose `
-            -f $BackendDevCompose `
-            -f $FrontendCompose `
-            up
-    } else {
-        docker compose `
-            -f $BackendCompose `
-            -f $FrontendCompose `
-            up
-    }
-
-    if ($LASTEXITCODE -ne 0) {
-        Stop-Launch "docker compose exited with code $LASTEXITCODE. Check the output above for errors."
-    }
-}
-else {
-
-    #  === Yarn checks =================================
-    if (-not (Get-Command yarn -ErrorAction SilentlyContinue)) {
-        Stop-Launch "Yarn is not installed.`nInstall it with:`nnpm install -g yarn"
-    }
-
-    $FrontendDir = Join-Path $ScriptDir "Frontend\OHIF-Viewer"
-
-    if (-not (Test-Path $FrontendDir)) {
-        Stop-Launch "Frontend directory not found:`n$FrontendDir"
-    }
-
-    Write-Warn "Starting backend containers..."
-
-    if ($BackendDevMode) {
-        docker compose `
-            -f $BackendCompose `
-            -f $BackendDevCompose `
-            up -d
-    } else {
-        docker compose `
-            -f $BackendCompose `
-            up -d
-    }
-
-    if ($LASTEXITCODE -ne 0) {
-        Stop-Launch "Failed to start backend containers."
-    }
-
-    Write-Host ""
-    Write-Warn "Starting OHIF frontend with Yarn..."
-    Write-Host ""
-
-    Set-Location $FrontendDir
-
-    yarn run dev
-
-    if ($LASTEXITCODE -ne 0) {
-        Stop-Launch "yarn run dev exited with code $LASTEXITCODE."
-    }
-}
-
-#  === 7. Final Message =================================
+Write-Warn "Starting Docker containers..."
+Write-Warn "First run may take several minutes."
 Write-Host ""
 
-if ($FrontendMode -eq "Docker") {
-    Write-OK "Frontend: http://localhost"
+docker compose `
+    -f $BackendCompose `
+    -f $FrontendCompose `
+    up
+
+if ($LASTEXITCODE -ne 0) {
+    Stop-Launch "docker compose exited with code $LASTEXITCODE. Check the output above for errors."
 }
-else {
-    Write-OK "Frontend: http://localhost:3000"
-}
+
+#  === 6. Final Message =================================
+Write-Host ""
+Write-OK "Frontend: http://localhost"
 
 Read-Host "Press Enter to close"
