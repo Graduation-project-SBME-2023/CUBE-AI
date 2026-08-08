@@ -109,8 +109,8 @@ if [[ "$FRONTEND_MODE" == "Docker" ]]; then
   warn "First run may take several minutes."
   echo
   docker compose \
-    -f "$FRONTEND_COMPOSE" \
     -f "$BACKEND_COMPOSE" \
+    -f "$FRONTEND_COMPOSE" \
     up
 else
   # ── Yarn checks ───────────────────────────
