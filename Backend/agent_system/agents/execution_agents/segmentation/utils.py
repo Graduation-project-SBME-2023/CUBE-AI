@@ -4,8 +4,6 @@ import json
 import shutil
 import time
 import asyncio
-import io
-from itertools import permutations
 from pathlib import Path
 import nrrd
 import numpy as np
@@ -13,7 +11,6 @@ import tempfile
 import httpx
 import nibabel as nib
 import SimpleITK as sitk
-import pydicom
 import logging
 from email import policy
 from email.parser import BytesParser
@@ -23,18 +20,6 @@ from PIL import Image
 
 MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
 CONTROL_API_URL = os.environ.get("CONTROL_API_URL", MONAI_URL)
-ORTHANC_URL = os.environ.get("ORTHANC_URL", "http://localhost:8043")
-
-# Geometry provenance written into every DICOM-SEG created by the fixed path.
-# Existing SEG objects that pre-date this marker may have voxel content stored
-# with the old index-order bug even when their exported NIfTI metadata looks
-# perfectly aligned with the source volume.
-SEGMENTATION_GEOMETRY_VERSION = "cubeai-geometry-v2"
-LEGACY_RANDOM_UID_PREFIX = "2.25."
-GEOMETRY_V2_CUTOFF = os.environ.get(
-    "SEGMENTATION_GEOMETRY_V2_CUTOFF",
-    "20260808120000",
-).strip()
 REQUEST_TIMEOUT_SECONDS = 10.0
 async def check_having_mask(
     volume_uid,
@@ -219,205 +204,20 @@ def _geometry_matches(
     )
 
 
-def _unit_vector(vector: np.ndarray, *, name: str) -> np.ndarray:
-    length = float(np.linalg.norm(vector))
-    if not np.isfinite(length) or length <= 0:
-        raise ValueError(f"{name} has zero/invalid length")
-    return np.asarray(vector, dtype=float) / length
-
-
-def _describe_legacy_axis_transform(
-    reference: sitk.Image,
-    dicom_orientation: np.ndarray,
-) -> dict:
-    """Describe the old MONAI-index -> DICOM-grid transform.
-
-    Historical SEG creation copied the MONAI voxel array into highdicom after
-    only a fixed (X,Y,Z)->(Z,Y,X) transpose.  It ignored the physical direction
-    of the MONAI image.  When that direction was opposite to or permuted
-    relative to the DICOM row/column/slice axes, the *pixels themselves* were
-    stored mirrored/reversed even though later SEG->NIfTI export stamped valid
-    source geometry on the result.  Physical resampling alone cannot detect
-    that corruption.
-
-    This function reconstructs the missed index transform from the source
-    volume's SimpleITK direction and the original DICOM IOP.
-    """
-    orientation = np.asarray(dicom_orientation, dtype=float).reshape(-1)
-    if orientation.size != 6:
-        raise ValueError("DICOM ImageOrientationPatient must contain 6 values")
-    row = _unit_vector(orientation[:3], name="dicom_row")
-    col = _unit_vector(orientation[3:], name="dicom_column")
-    normal = _unit_vector(np.cross(row, col), name="dicom_normal")
-    target_axes = (row, col, normal)
-
-    direction_matrix = np.asarray(reference.GetDirection(), dtype=float).reshape(3, 3)
-    source_axes = tuple(
-        _unit_vector(direction_matrix[:, axis], name=f"volume_axis_{axis}")
-        for axis in range(3)
-    )
-    similarity = np.asarray(
-        [
-            [float(np.dot(source_axis, target_axis)) for target_axis in target_axes]
-            for source_axis in source_axes
-        ],
-        dtype=float,
-    )
-    # permutation[target_axis] = source MONAI/NIfTI axis
-    permutation = max(
-        permutations(range(3)),
-        key=lambda candidate: sum(
-            abs(similarity[candidate[target_axis], target_axis])
-            for target_axis in range(3)
-        ),
-    )
-    signed_scores = tuple(
-        float(similarity[permutation[target_axis], target_axis])
-        for target_axis in range(3)
-    )
-    confidence = tuple(abs(score) for score in signed_scores)
-    flips = tuple(score < 0 for score in signed_scores)
-    return {
-        "permutation": tuple(int(value) for value in permutation),
-        "flips": tuple(bool(value) for value in flips),
-        "confidence": tuple(float(value) for value in confidence),
-        "signed_similarity": tuple(float(value) for value in signed_scores),
-        "similarity_matrix": similarity.tolist(),
-        "axis_mapping": {
-            "x": f"source_axis_{permutation[0]}",
-            "y": f"source_axis_{permutation[1]}",
-            "z": f"source_axis_{permutation[2]}",
-        },
-    }
-
-
-def _apply_legacy_index_repair(
-    mask: sitk.Image,
-    reference: sitk.Image,
-    repair: dict,
-) -> tuple[sitk.Image, dict]:
-    """Undo the historical index-order corruption on an already-exported mask."""
-    permutation = tuple(int(value) for value in repair.get("permutation", (0, 1, 2)))
-    flips = tuple(bool(value) for value in repair.get("flips", (False, False, False)))
-    confidence = tuple(float(value) for value in repair.get("confidence", (0, 0, 0)))
-    if sorted(permutation) != [0, 1, 2]:
-        raise ValueError(f"Invalid legacy axis permutation: {permutation}")
-    if len(flips) != 3 or len(confidence) != 3:
-        raise ValueError("Legacy repair requires three flips/confidence values")
-    if min(confidence) < 0.95:
-        raise ValueError(
-            "Legacy axis mapping is ambiguous; refusing automatic repair "
-            f"(confidence={confidence})"
-        )
-
-    data_zyx = sitk.GetArrayFromImage(mask)
-    source_xyz = np.transpose(data_zyx, (2, 1, 0))
-    target_xyz = np.transpose(source_xyz, axes=permutation)
-    for target_axis, should_flip in enumerate(flips):
-        if should_flip:
-            target_xyz = np.flip(target_xyz, axis=target_axis)
-    repaired_zyx = np.transpose(target_xyz, (2, 1, 0)).copy()
-
-    expected_zyx = (
-        int(reference.GetSize()[2]),
-        int(reference.GetSize()[1]),
-        int(reference.GetSize()[0]),
-    )
-    if tuple(repaired_zyx.shape) != expected_zyx:
-        raise ValueError(
-            "Legacy axis repair changed the mask to an incompatible shape: "
-            f"{tuple(repaired_zyx.shape)} vs reference {expected_zyx}"
-        )
-
-    repaired = sitk.GetImageFromArray((repaired_zyx > 0).astype(np.uint8))
-    repaired.CopyInformation(reference)
-    diagnostics = {
-        "applied": permutation != (0, 1, 2) or any(flips),
-        "permutation": list(permutation),
-        "flips": {"x": flips[0], "y": flips[1], "z": flips[2]},
-        "confidence": list(confidence),
-        "axis_mapping": repair.get("axis_mapping"),
-        "signed_similarity": list(repair.get("signed_similarity", ())),
-        "similarity_matrix": repair.get("similarity_matrix"),
-    }
-    return repaired, diagnostics
-
-
-def _dicom_datetime_key(dataset: pydicom.Dataset) -> str:
-    """Return a comparable YYYYMMDDHHMMSS key when available."""
-    candidates = (
-        ("InstanceCreationDate", "InstanceCreationTime"),
-        ("ContentDate", "ContentTime"),
-        ("SeriesDate", "SeriesTime"),
-    )
-    for date_key, time_key in candidates:
-        date_value = str(getattr(dataset, date_key, "") or "").strip()
-        time_value = str(getattr(dataset, time_key, "") or "").strip()
-        if len(date_value) == 8 and date_value.isdigit():
-            digits = "".join(ch for ch in time_value.split(".", 1)[0] if ch.isdigit())
-            return date_value + digits.ljust(6, "0")[:6]
-    return ""
-
-
-def _is_legacy_cube_segmentation(
-    segmentation_uid: str,
-    seg_dataset: pydicom.Dataset,
-) -> tuple[bool, dict]:
-    """Classify only CUBE/MONAI SEG objects that can safely use legacy repair."""
-    model_name = str(getattr(seg_dataset, "ManufacturerModelName", "") or "").strip()
-    software_versions = str(getattr(seg_dataset, "SoftwareVersions", "") or "").strip()
-    created_key = _dicom_datetime_key(seg_dataset)
-    is_ours = model_name == "MONAI Label Backend"
-    is_geometry_v2 = SEGMENTATION_GEOMETRY_VERSION in software_versions
-
-    # The oldest CUBE SEG objects used hd.UID() and therefore have 2.25.* UIDs.
-    # Later pre-fix objects used deterministic UIDs; the deployment cutoff
-    # covers that short migration window.  The cutoff is configurable so a
-    # deployment can move it without code changes.
-    old_uid = str(segmentation_uid).startswith(LEGACY_RANDOM_UID_PREFIX)
-    before_cutoff = bool(
-        GEOMETRY_V2_CUTOFF
-        and created_key
-        and created_key < GEOMETRY_V2_CUTOFF
-    )
-    ambiguous = bool(
-        is_ours
-        and not is_geometry_v2
-        and not old_uid
-        and not created_key
-    )
-    legacy = bool(is_ours and not is_geometry_v2 and (old_uid or before_cutoff))
-    return legacy, {
-        "manufacturer_model_name": model_name,
-        "software_versions": software_versions,
-        "geometry_version": (
-            SEGMENTATION_GEOMETRY_VERSION if is_geometry_v2 else None
-        ),
-        "created_key": created_key or None,
-        "legacy_uid": old_uid,
-        "before_geometry_v2_cutoff": before_cutoff,
-        "cutoff": GEOMETRY_V2_CUTOFF or None,
-        "classified_legacy": legacy,
-        "ambiguous_unversioned": ambiguous,
-    }
-
-
 def align_and_binarize_mask(
     mask_path: str,
     reference_volume_path: str,
     output_path: str,
     *,
     preserve_index_order_if_same_size: bool = False,
-    legacy_repair: dict | None = None,
 ) -> dict:
     """Binarize a mask and align it in physical patient space.
 
-    Modern masks are fixed by physical resampling.  Some historical DICOM-SEG
-    exports have the opposite failure mode: their voxel buffer is already in
-    the source volume's index order, but the generated NIfTI affine is reversed.
-    For an explicitly reused mask with the same dimensions as its source,
-    ``preserve_index_order_if_same_size`` keeps those voxels and replaces only
-    the bad geometry metadata.  Fresh inference never enables that mode.
+    Shape equality is not evidence of spatial alignment: two volumes can have
+    identical dimensions while their Z directions are opposite.  The reference
+    volume geometry is therefore authoritative for both newly generated and
+    reused masks.  ``preserve_index_order_if_same_size`` is retained only for
+    call compatibility and is intentionally ignored.
     """
     reference = sitk.ReadImage(reference_volume_path)
     mask = sitk.ReadImage(mask_path)
@@ -427,33 +227,16 @@ def align_and_binarize_mask(
         "origin": list(mask.GetOrigin()),
         "direction": list(mask.GetDirection()),
     }
-    geometry_differs = not _geometry_matches(mask, reference)
-    same_index_size = (
-        mask.GetDimension() == reference.GetDimension()
-        and mask.GetSize() == reference.GetSize()
-    )
-    preserve_index_order = bool(
-        preserve_index_order_if_same_size and same_index_size
-    )
-    physical_resampled = bool(geometry_differs and not preserve_index_order)
-    reference_geometry_only = bool(geometry_differs and preserve_index_order)
-
-    if reference_geometry_only:
-        logger.warning(
-            "Preserving voxel index order for reused mask %s while replacing "
-            "its exported geometry with the source volume geometry",
+    geometry_adjusted = not _geometry_matches(mask, reference)
+    alignment_mode = "unchanged"
+    if preserve_index_order_if_same_size:
+        logger.debug(
+            "Ignoring deprecated preserve_index_order_if_same_size for %s; "
+            "physical geometry is authoritative",
             mask_path,
         )
-    elif preserve_index_order_if_same_size and not same_index_size:
-        logger.info(
-            "Cannot preserve reused-mask index order for %s because mask size "
-            "%s differs from source size %s; using physical resampling",
-            mask_path,
-            list(mask.GetSize()),
-            list(reference.GetSize()),
-        )
-
-    if physical_resampled:
+    if geometry_adjusted:
+        alignment_mode = "physical_resample"
         resample = sitk.ResampleImageFilter()
         resample.SetReferenceImage(reference)
         resample.SetInterpolator(sitk.sitkNearestNeighbor)
@@ -467,71 +250,16 @@ def align_and_binarize_mask(
             list(reference.GetSize()),
         )
 
-    legacy_diagnostics = None
-    legacy_repair_applied = False
-    if (
-        legacy_repair
-        and legacy_repair.get("apply")
-        and not preserve_index_order
-    ):
-        try:
-            mask, legacy_diagnostics = _apply_legacy_index_repair(
-                mask,
-                reference,
-                legacy_repair,
-            )
-            legacy_repair_applied = bool(legacy_diagnostics.get("applied"))
-            if legacy_repair_applied:
-                logger.warning(
-                    "Repaired historical mask index corruption for %s: "
-                    "permutation=%s flips=%s",
-                    mask_path,
-                    legacy_diagnostics.get("permutation"),
-                    legacy_diagnostics.get("flips"),
-                )
-            else:
-                logger.info(
-                    "Historical mask %s was classified legacy but its source "
-                    "axes already match the DICOM grid; no index repair needed",
-                    mask_path,
-                )
-        except Exception as exc:
-            # A wrong automatic repair is worse than a visible legacy mask.
-            # Fail this pair rather than silently writing guessed pixels.
-            raise ValueError(
-                f"Legacy mask repair could not be applied safely: {exc}"
-            ) from exc
-
     data = sitk.GetArrayFromImage(mask)
     if not np.all(np.isfinite(data)):
         raise ValueError(f"Mask contains NaN or infinite values: {mask_path}")
     binary = sitk.GetImageFromArray((data > 0).astype(np.uint8))
     binary.CopyInformation(reference)
     sitk.WriteImage(binary, output_path)
-
-    if legacy_repair and legacy_repair.get("apply") and preserve_index_order:
-        legacy_diagnostics = {
-            "applied": False,
-            "skipped": "reused_mask_index_order_is_authoritative",
-        }
-
-    modes = []
-    if physical_resampled:
-        modes.append("physical_resample")
-    if reference_geometry_only:
-        modes.append("reference_geometry_only")
-    if legacy_repair_applied:
-        modes.append("legacy_index_repair")
-    alignment_mode = "+".join(modes) if modes else "unchanged"
     return {
         "path": output_path,
-        "geometry_adjusted": geometry_differs or legacy_repair_applied,
+        "geometry_adjusted": geometry_adjusted,
         "alignment_mode": alignment_mode,
-        "legacy_repair_applied": legacy_repair_applied,
-        "legacy_repair": {
-            **(legacy_repair or {}),
-            "diagnostics": legacy_diagnostics,
-        } if legacy_repair else None,
         "original_geometry": original_geometry,
         "final_geometry": {
             "size": list(reference.GetSize()),
@@ -726,104 +454,6 @@ async def download_and_pair_volumes(
             logger.warning("Timeout; missing keys/search-substrings: %s", missing_info)
         return found
 
-    dicom_dataset_cache: dict[str, pydicom.Dataset] = {}
-
-    async def fetch_first_series_dataset(series_uid: str) -> pydicom.Dataset:
-        cached = dicom_dataset_cache.get(series_uid)
-        if cached is not None:
-            return cached
-        request_client = client or httpx.AsyncClient()
-        try:
-            find_response = await request_client.post(
-                f"{ORTHANC_URL}/tools/find",
-                json={
-                    "Level": "Series",
-                    "Query": {"SeriesInstanceUID": series_uid},
-                },
-                timeout=30.0,
-            )
-            find_response.raise_for_status()
-            series_ids = find_response.json()
-            if not series_ids:
-                raise ValueError(f"Series {series_uid} was not found in Orthanc")
-
-            series_response = await request_client.get(
-                f"{ORTHANC_URL}/series/{series_ids[0]}",
-                timeout=30.0,
-            )
-            series_response.raise_for_status()
-            instance_ids = series_response.json().get("Instances") or []
-            if not instance_ids:
-                raise ValueError(f"Series {series_uid} has no Orthanc instances")
-
-            file_response = await request_client.get(
-                f"{ORTHANC_URL}/instances/{instance_ids[0]}/file",
-                timeout=60.0,
-            )
-            file_response.raise_for_status()
-            dataset = await asyncio.to_thread(
-                pydicom.dcmread,
-                io.BytesIO(file_response.content),
-                stop_before_pixels=True,
-            )
-            dicom_dataset_cache[series_uid] = dataset
-            return dataset
-        finally:
-            if client is None:
-                await request_client.aclose()
-
-    async def build_legacy_repair(
-        volume_uid: str,
-        label_uid: str,
-        reference_volume_path: str,
-    ) -> dict | None:
-        """Build a deterministic repair only for known pre-geometry-v2 CUBE SEG."""
-        if not label_uid:
-            return None
-        seg_dataset = await fetch_first_series_dataset(label_uid)
-        is_legacy, provenance = _is_legacy_cube_segmentation(
-            label_uid,
-            seg_dataset,
-        )
-        if provenance.get("ambiguous_unversioned"):
-            raise ValueError(
-                "Existing CUBE SEG has no geometry version and no usable DICOM "
-                "creation timestamp; refusing to guess whether legacy repair is needed"
-            )
-        if not is_legacy:
-            logger.info(
-                "Existing SEG %s is not classified as legacy geometry: %s",
-                label_uid,
-                provenance,
-            )
-            return {
-                "apply": False,
-                "segmentation_uid": label_uid,
-                "provenance": provenance,
-            }
-
-        source_dataset = await fetch_first_series_dataset(volume_uid)
-        orientation = np.asarray(
-            source_dataset.ImageOrientationPatient,
-            dtype=float,
-        )
-        reference = sitk.ReadImage(reference_volume_path)
-        transform = _describe_legacy_axis_transform(reference, orientation)
-        logger.warning(
-            "Legacy SEG %s detected; recovered historical index transform: "
-            "permutation=%s flips=%s confidence=%s",
-            label_uid,
-            transform["permutation"],
-            transform["flips"],
-            transform["confidence"],
-        )
-        return {
-            "apply": True,
-            "segmentation_uid": label_uid,
-            "provenance": provenance,
-            **transform,
-        }
-
     def copy_volume(src_path, volume_uid, dest_dir):
         dst = os.path.join(dest_dir, f"{volume_uid}.nii.gz")
         shutil.copy2(src_path, dst)
@@ -838,8 +468,6 @@ async def download_and_pair_volumes(
         dest_dir,
         target_id=None,
         artifact_key=None,
-        legacy_repair=None,
-        preserve_index_order=False,
     ):
         """Align the label to its reference volume and save a binary mask."""
         if artifact_key:
@@ -854,8 +482,6 @@ async def download_and_pair_volumes(
                 src_path,
                 reference_volume_path,
                 dst,
-                preserve_index_order_if_same_size=preserve_index_order,
-                legacy_repair=legacy_repair,
             )
         except Exception:
             logger.exception("Error normalizing label %s", src_path)
@@ -909,7 +535,6 @@ async def download_and_pair_volumes(
     pair_ids_to_process = []
     artifact_keys_to_process = []
     empty_masks_to_process = []
-    preserve_index_order_to_process = []
 
     for pair in resolved_pairs:
         volume_uid = str(pair.get("volume_uid") or "").strip()
@@ -918,7 +543,6 @@ async def download_and_pair_volumes(
         pair_id = str(pair.get("pair_id") or f"{volume_uid}__{target_id}").strip()
         artifact_key = str(pair.get("artifact_key") or pair_id).strip()
         is_empty_mask = bool(pair.get("is_empty_mask"))
-        preserve_index_order = bool(pair.get("preserve_index_order"))
         if (
             not volume_uid
             or not target_id
@@ -932,7 +556,6 @@ async def download_and_pair_volumes(
         pair_ids_to_process.append(pair_id)
         artifact_keys_to_process.append(artifact_key)
         empty_masks_to_process.append(is_empty_mask)
-        preserve_index_order_to_process.append(preserve_index_order)
 
     if not volumes_to_process:
         logger.error("Nothing to process; aborting.")
@@ -1058,22 +681,13 @@ async def download_and_pair_volumes(
     successful = []
     skipped = []
     copied_volumes: dict[str, str] = {}
-    for (
-        vol_uid,
-        label_uid,
-        target_id,
-        pair_id,
-        artifact_key,
-        is_empty_mask,
-        preserve_index_order,
-    ) in zip(
+    for vol_uid, label_uid, target_id, pair_id, artifact_key, is_empty_mask in zip(
         volumes_to_process,
         labels_to_process,
         target_ids_to_process,
         pair_ids_to_process,
         artifact_keys_to_process,
         empty_masks_to_process,
-        preserve_index_order_to_process,
     ):
         volume_path = os.path.join(FINAL_DIR_IMG, f"{vol_uid}.nii.gz")
         vol_result = volume_path
@@ -1138,63 +752,15 @@ async def download_and_pair_volumes(
                 artifact_key,
             )
         elif label_src:
-            try:
-                legacy_repair = await build_legacy_repair(
-                    vol_uid,
-                    label_uid,
-                    vol_result,
-                )
-            except Exception as exc:
-                logger.exception(
-                    "Could not determine safe legacy repair for SEG %s / volume %s",
-                    label_uid,
-                    vol_uid,
-                )
-                # Fail closed. A reused mask whose provenance/geometry cannot
-                # be classified safely must not be shown with a guessed overlay.
-                # The orchestration layer treats normalization_failed as a reuse
-                # failure and falls back to fresh inference.
-                label_result = None
-                legacy_repair = None
-            else:
-                label_result = await asyncio.to_thread(
-                    copy_and_normalize_label,
-                    label_src,
-                    vol_result,
-                    vol_uid,
-                    FINAL_DIR_LABEL,
-                    target_id,
-                    artifact_key,
-                    legacy_repair,
-                    preserve_index_order,
-                )
-                if (
-                    isinstance(label_result, dict)
-                    and label_result.get("legacy_repair_applied")
-                ):
-                    # Self-heal MONAI's local exported-label cache.  The PACS
-                    # SEG remains untouched, but future runs can reuse the
-                    # corrected local NIfTI instead of repeatedly loading the
-                    # historically corrupted voxel order.
-                    try:
-                        cache_root = MONAI_LABEL_DIR.resolve()
-                        source_cache_path = Path(label_src).resolve()
-                        source_cache_path.relative_to(cache_root)
-                        await asyncio.to_thread(
-                            shutil.copy2,
-                            label_result["path"],
-                            source_cache_path,
-                        )
-                        logger.warning(
-                            "Self-healed legacy local mask cache %s",
-                            source_cache_path,
-                        )
-                    except (OSError, ValueError, KeyError):
-                        logger.warning(
-                            "Could not self-heal legacy local mask cache %s",
-                            label_src,
-                            exc_info=True,
-                        )
+            label_result = await asyncio.to_thread(
+                copy_and_normalize_label,
+                label_src,
+                vol_result,
+                vol_uid,
+                FINAL_DIR_LABEL,
+                target_id,
+                artifact_key,
+            )
         else:
             label_result = True # No label to process for interactive manual
 
@@ -1224,21 +790,6 @@ async def download_and_pair_volumes(
                     ),
                     "alignment_mode": (
                         label_result.get("alignment_mode")
-                        if isinstance(label_result, dict)
-                        else None
-                    ),
-                    "legacy_repair_applied": (
-                        bool(label_result.get("legacy_repair_applied"))
-                        if isinstance(label_result, dict)
-                        else False
-                    ),
-                    "legacy_repair": (
-                        label_result.get("legacy_repair")
-                        if isinstance(label_result, dict)
-                        else None
-                    ),
-                    "geometry_version": (
-                        SEGMENTATION_GEOMETRY_VERSION
                         if isinstance(label_result, dict)
                         else None
                     ),
@@ -1372,18 +923,8 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
             mask_image = sitk.ReadImage(mask_path)
             if not _geometry_matches(mask_image, volume_image):
                 align_and_binarize_mask(mask_path, vol_path, mask_path)
-            # Reorient to canonical RAS before slicing. The saved NIfTI's native
-            # storage order/sign depends on whatever the source DICOM series'
-            # direction cosines happened to be, so slicing it directly (as this
-            # code used to) and then applying a single hard-coded np.rot90()
-            # produced a preview whose on-screen orientation was correct only
-            # by accident for series that matched the assumed convention, and
-            # rotated/mirrored the anatomy for any series that didn't. Forcing
-            # a canonical RAS frame first makes axis 2 reliably the
-            # superior/inferior (slice) axis and makes the per-frame display
-            # transform below correct regardless of the source orientation.
-            vol_data = nib.as_closest_canonical(nib.load(vol_path)).get_fdata()
-            mask_data = nib.as_closest_canonical(nib.load(mask_path)).get_fdata()
+            vol_data = nib.load(vol_path).get_fdata()
+            mask_data = nib.load(mask_path).get_fdata()
 
             if vol_data.shape != mask_data.shape:
                 raise ValueError(
@@ -1453,14 +994,8 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
                     mask_idx = m_slice > 0
                     rgb_frame[mask_idx] = [90, 204, 230]
 
-                # v_slice/m_slice come from a canonical-RAS volume, so this
-                # axial slice is indexed (R, A). Transpose to (A, R) then flip
-                # both axes so Anterior is at the top of the image and
-                # (patient) Right is on the viewer's left - standard
-                # radiological axial display - instead of the previous blind
-                # np.rot90(), whose result depended on the source series'
-                # native storage orientation.
-                rgb_frame = np.transpose(rgb_frame, (1, 0, 2))[::-1, ::-1, :]
+                # rotate 90
+                rgb_frame = np.rot90(rgb_frame)
 
                 frames.append(Image.fromarray(rgb_frame))
 
