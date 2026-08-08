@@ -1,222 +1,78 @@
-# CUBE.AI Deployment Guide (`Release-Version`)
+# CUBE.AI Setup and Deployment Guide
 
-## Choose your setup
+Welcome to the CUBE.AI deployment guide. We've automated and simplified the deployment process so you can get the full platform (Frontend + AI Agents Backend) up and running with a single script.
 
-- [Part 1: First-time installation](#part-1-first-time-installation)
-- [Part 2: Existing installation](#part-2-existing-installation)
-
----
-
-<a id="part-1-first-time-installation"></a>
-
-# Part 1: First-time installation
-
-Use this part only when installing CUBE.AI for the first time.
+> [!IMPORTANT]
+> **Fresh Start Recommended:** If you have run older versions of CUBE.AI before, it is highly recommended to start fresh. Delete your old cloned repository, and clear out old Docker volumes from Docker Desktop to ensure a clean database state.
 
 ## 1. Prerequisites
 
-- Git
-- Docker Desktop (Windows/macOS) or Docker Engine with the Compose plugin (Linux)
-- Node.js and Yarn for frontend development
-- Ollama for the agent-system language model
-- For GPU mode: an NVIDIA CUDA-capable GPU and the NVIDIA Container Toolkit
+Before you begin, ensure you have the following installed:
+- **Git**
+- **Docker Desktop** (Windows/macOS) or **Docker Engine with Compose** (Linux)
+- **Ollama** (for connecting to the cloud LLM agent)
+- *(Optional for GPU Mode)*: An NVIDIA CUDA-capable GPU and the NVIDIA Container Toolkit.
 
-## 2. Clone the `Release-Version` branch
+## 2. Configure Ollama
 
+CUBE.AI relies on Ollama to connect to the cloud AI models. 
+1. Install Ollama from [ollama.com/download](https://ollama.com/download).
+2. Open a terminal and log in to access the cloud models:
+   ```bash
+   ollama login
+   ```
+3. Leave the Ollama app running in the background.
+
+## 3. Clone the Repository
+
+Clone the latest `Release-Version` branch:
 ```bash
 git clone --branch Release-Version https://github.com/Graduation-project-SBME-2023/OHIF-Standalone.git
 cd OHIF-Standalone
 ```
 
-Run all remaining commands from the repository root unless a step says otherwise.
+## 4. Setup the Environment File
 
-## 3. Configure the environment
+To ensure the backend containers can communicate properly, you need a `.env` file. We have already included the `.env` file directly in the repository for now since it is not public yet, so everything might work automatically! 
 
-Create the backend environment file:
+However, we also provide a `.env.example` as a fallback. If your `.env` is ever missing, run this command inside the `OHIF-Standalone` directory:
 
+**Windows PowerShell:**
+```powershell
+Copy-Item Backend/.env.example Backend/.env
+```
+**macOS/Linux:**
 ```bash
-# macOS/Linux
 cp Backend/.env.example Backend/.env
 ```
 
+## 5. Launch the Application
+
+You are now ready to launch! You do not need to manually pull images or run complex docker commands. The interactive launcher script will automatically download any missing Docker images and start the entire stack.
+
+**On Windows:**
+Double-click the `launcher.windows.bat` file in the project folder, or run it from the terminal:
 ```powershell
-# Windows PowerShell
-Copy-Item Backend/.env.example Backend/.env
+.\launcher.windows.bat
 ```
 
-Review `Backend/.env` and change credentials or model settings as needed. The branch defaults to the Ollama model `gpt-oss:120b-cloud`.
-
-Set `COMPOSE_PROJECT_DIR` to the absolute repository path:
-
+**On Linux/macOS:**
 ```bash
-# macOS/Linux
-export COMPOSE_PROJECT_DIR="$(pwd)"
+./launcher.linux.sh
 ```
 
-```powershell
-# Windows PowerShell
-$env:COMPOSE_PROJECT_DIR = (Get-Location).Path
-```
-
-Set this variable again whenever you open a new terminal. Alternatively, set `COMPOSE_PROJECT_DIR` in `Backend/.env` to the absolute repository path.
-
-## 4. Configure Ollama
-
-Install Ollama from [ollama.com/download](https://ollama.com/download), then verify it:
-
-```bash
-ollama --version
-```
-
-Sign in and start the default cloud model once to verify access:
-
-```bash
-ollama login
-ollama run gpt-oss:120b-cloud
-```
-
-Exit the interactive session with `/bye`. The Docker services connect to Ollama through `host.docker.internal:11434`.
-
-## 5. Run in development mode
-
-Development mode runs the backend in Docker and the frontend locally with hot reload.
-
-### Start the backend
-
-CPU:
-
-```bash
-docker compose --env-file Backend/.env -f Backend/docker-compose.backend.cpu.yml -f Backend/docker-compose.backend.dev.yml up
-```
-
-GPU:
-
-```bash
-docker compose --env-file Backend/.env -f Backend/docker-compose.backend.gpu.yml -f Backend/docker-compose.backend.dev.yml up
-```
-
-### Start the frontend
-
-In a second terminal:
-
-```bash
-cd Frontend/OHIF-Viewer
-yarn install
-yarn run dev
-```
-
-Open `http://localhost:3000`.
-
-## 6. Run in production mode
-
-Production mode runs the complete stack in Docker.
-
-CPU:
-
-```bash
-docker compose --env-file Backend/.env -f Backend/docker-compose.backend.cpu.yml -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml up
-```
-
-GPU:
-
-```bash
-docker compose --env-file Backend/.env -f Backend/docker-compose.backend.gpu.yml -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml up
-```
-
-Open `http://localhost` after the services become healthy.
-
-## Service endpoints
-
-| Service | Address |
-| --- | --- |
-| OHIF Viewer (production) | `http://localhost` |
-| OHIF Viewer (development) | `http://localhost:3000` |
-| Agent System API | `http://localhost:8150` |
-| MONAI Label API | `http://localhost:8000` |
-| Orthanc Explorer and DICOMweb/API | `http://localhost:8043` |
-| PostgreSQL | `localhost:5433` |
-
-## Stop the stack
-
-Use the same compose files used to start the stack, replacing `up` with `down`. For example, to stop the CPU production stack:
-
-```bash
-docker compose --env-file Backend/.env -f Backend/docker-compose.backend.cpu.yml -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml down
-```
-
-Add `-v` only when you intentionally want to remove the database and other named-volume data.
+### What to expect:
+1. The script will verify that Docker and Ollama are running.
+2. It will ask you a single question: **Do you want to run the Backend in GPU mode or CPU mode?**
+   - Type `1` for GPU (recommended if you have an NVIDIA GPU).
+   - Type `2` for CPU.
+3. The script will automatically pull the production images for both the Frontend and the Backend. *(Note: The first run may take several minutes as it downloads the images).*
+4. Once everything says "started", open your browser and navigate to:
+   **`http://localhost`**
 
 ## Troubleshooting
 
-- Confirm Docker is running with `docker compose version`.
-- Confirm Ollama is reachable with `ollama list`.
-- If a bind mount fails, verify that `COMPOSE_PROJECT_DIR` is the absolute path to this repository.
-- Inspect services with `docker compose ... ps` and logs with `docker compose ... logs -f <service>`.
-- The first MONAI Label startup can take longer while the Qwen embedding model is downloaded and validated.
-
----
-
-<a id="part-2-existing-installation"></a>
-
-# Part 2: Existing installation
-
-Use this part when CUBE.AI is already installed and you want to run the project again. Do not clone the repository again.
-
-## 1. Update the branch
-
-Open a terminal in the existing `OHIF-Standalone` directory:
-
-```bash
-git switch Release-Version
-git pull --ff-only origin Release-Version
-```
-
-If Git reports that local changes would be overwritten, commit or stash those changes before pulling.
-
-## 2. Set the project directory
-
-```bash
-# macOS/Linux
-export COMPOSE_PROJECT_DIR="$(pwd)"
-```
-
-```powershell
-# Windows PowerShell
-$env:COMPOSE_PROJECT_DIR = (Get-Location).Path
-```
-
-## 3. Pull the Docker images
-
-Choose the command that matches your system.
-
-CPU:
-
-```bash
-docker compose --env-file Backend/.env -f Backend/docker-compose.backend.cpu.yml -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml pull
-```
-
-GPU:
-
-```bash
-docker compose --env-file Backend/.env -f Backend/docker-compose.backend.gpu.yml -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml pull
-```
-
-Docker downloads only missing or changed image layers.
-
-## 4. Start the updated application
-
-CPU:
-
-```bash
-docker compose --env-file Backend/.env -f Backend/docker-compose.backend.cpu.yml -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml up
-```
-
-GPU:
-
-```bash
-docker compose --env-file Backend/.env -f Backend/docker-compose.backend.gpu.yml -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml up
-```
-
-Open `http://localhost` after the services become healthy.
-
-[Back to setup choices](#choose-your-setup)
+- **400 Bad Request / Chat stuck on Waiting:** Ensure you copied `Backend/.env.example` to `Backend/.env` as shown in step 4.
+- **Docker errors:** Confirm Docker Desktop is open and says "Docker is running".
+- **Ollama errors:** Ensure you ran `ollama login` successfully.
+- **Stop the stack:** You can simply close the launcher window (or press `Ctrl+C` in the terminal) to stop the containers gracefully.
