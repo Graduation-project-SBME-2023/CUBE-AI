@@ -30,7 +30,7 @@ services:
     restart: unless-stopped
 
   control-api:
-    image: ahmedmokhtar3/custom-monailabel:v1.0-gpu
+    image: cubeai1/custom-monailabel:v1.0-gpu
     container_name: control-api-backend
     command: python /monailabel/control_server_start.py
     ports:
@@ -62,7 +62,7 @@ services:
 
   monailabel:
     # GPU image — amd64 only, CUDA toolkit included
-    image: ahmedmokhtar3/custom-monailabel:v1.0-gpu
+    image: cubeai1/custom-monailabel:v1.0-gpu
     container_name: monailabel-backend
     runtime: nvidia
     shm_size: 8G
