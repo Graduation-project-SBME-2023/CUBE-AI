@@ -5,24 +5,16 @@ import tempfile
 
 from contextlib import contextmanager
 from transformers import AutoTokenizer, AutoModel
-from huggingface_hub import snapshot_download
 from voxtell.utils.text_embedding import last_token_pool, wrap_with_instruction
+from lib.configs.qwen_embedding_model import ensure_qwen_embedding_model
 from lib.configs.voxtell_supported_labels import VOXTELL_SUPPORTED_LABELS
 
 # Container paths (mounted via docker-compose volumes)
 TEXT_MODEL_PATH = os.environ.get("TEXT_MODEL_PATH", "/models/qwen3-4b-embedding")
 
-# Auto-download the text encoding model if it doesn't exist yet.
-# This mirrors the download logic in voxtell.py, but runs earlier
-# (voxtell_cache_builder executes before the MONAI Label server starts).
-if not os.path.isdir(TEXT_MODEL_PATH):
-    print(f"Text model not found at {TEXT_MODEL_PATH}, downloading Qwen/Qwen3-Embedding-4B...")
-    snapshot_download(
-        repo_id="Qwen/Qwen3-Embedding-4B",
-        ignore_patterns=["*.gguf"],
-        local_dir=TEXT_MODEL_PATH,
-    )
-    print(f"Download complete → {TEXT_MODEL_PATH}")
+# Validate the required tokenizer, index, and weight files. This runs before
+# the cache builder loads the model and resumes any interrupted download.
+ensure_qwen_embedding_model(TEXT_MODEL_PATH)
 VOXTELL_DIR     = os.environ.get("VOXTELL_DIR",     "/models/voxtell_v1.1")
 CACHE_OUTPUT_PATH = os.path.join(VOXTELL_DIR, "text_embeddings_cache.pkl")
 
