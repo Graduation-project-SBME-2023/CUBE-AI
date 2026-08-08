@@ -64,41 +64,44 @@ const nrrdSpaceToLpsSigns = (space: unknown): number[] => {
   });
 };
 
-const shouldReverseMaskZ = (
+type MaskAxisFlips = {
+  flipI: boolean;
+  flipJ: boolean;
+  flipK: boolean;
+};
+
+// Determines, per axis, whether the NRRD mask's voxel array runs opposite to
+// the DICOM-derived cornerstone volume it will be copied into. Cornerstone
+// builds its volume directly from the series' ImageOrientationPatient /
+// ImagePositionPatient (i = row-cosine direction, j = column-cosine
+// direction, k = ascending distance along their cross product - see
+// @cornerstonejs/streaming-image-volume-loader's getVolumeInfo /
+// sortImageIdsAndGetSpacing). MONAI Label's exported NRRD can disagree with
+// that convention on ANY of the three axes (RAS vs LPS space flips X/Y,
+// while a different slice sort order flips Z) - each axis is therefore
+// checked independently rather than assuming only the slice (k) axis can be
+// reversed.
+const computeMaskAxisFlips = (
   header: any,
   instances: any[],
   numSlices: number
-): boolean => {
-  if (
-    !header ||
-    !Array.isArray(instances) ||
-    instances.length < 2 ||
-    numSlices < 2
-  ) {
-    return false;
+): MaskAxisFlips | null => {
+  if (!header || !Array.isArray(instances) || instances.length < 1) {
+    return null;
   }
 
   const orientation = toNumericVector(instances[0]?.ImageOrientationPatient, 6);
   if (!orientation) {
-    return false;
+    return null;
   }
-  let normal = cross3(orientation.slice(0, 3), orientation.slice(3, 6));
+  const rowCosine = orientation.slice(0, 3); // volume i axis (increasing column)
+  const colCosine = orientation.slice(3, 6); // volume j axis (increasing row)
+  let normal = cross3(rowCosine, colCosine); // volume k axis (increasing slice)
   const normalLength = Math.sqrt(dot3(normal, normal));
   if (!normalLength) {
-    return false;
+    return null;
   }
   normal = normal.map((value) => value / normalLength);
-
-  const sourcePositions = instances
-    .map((instance) => {
-      const position = toNumericVector(instance?.ImagePositionPatient, 3);
-      return position ? dot3(position, normal) : null;
-    })
-    .filter((value): value is number => value !== null)
-    .sort((a, b) => a - b);
-  if (sourcePositions.length < 2) {
-    return false;
-  }
 
   const origin = toNumericVector(
     header.spaceOrigin || header['space origin'] || header.space_origin,
@@ -109,47 +112,120 @@ const shouldReverseMaskZ = (
     header['space directions'] ||
     header.space_directions;
   if (!origin || !Array.isArray(rawDirections)) {
-    return false;
+    return null;
   }
   const spatialDirections = rawDirections
     .map((direction) => toNumericVector(direction, 3))
     .filter((direction): direction is number[] => direction !== null);
   if (spatialDirections.length < 3) {
-    return false;
+    return null;
   }
 
   const signs = nrrdSpaceToLpsSigns(header.space);
-  const originLps = origin.map((value, index) => value * signs[index]);
-  const zDirectionLps = spatialDirections[spatialDirections.length - 1].map(
-    (value, index) => value * signs[index]
-  );
-  const maskFirst = dot3(originLps, normal);
-  const maskLast = dot3(
-    originLps.map(
-      (value, index) => value + zDirectionLps[index] * (numSlices - 1)
-    ),
-    normal
-  );
-  const sourceFirst = sourcePositions[0];
-  const sourceLast = sourcePositions[sourcePositions.length - 1];
-  const directError =
-    Math.abs(maskFirst - sourceFirst) + Math.abs(maskLast - sourceLast);
-  const reverseError =
-    Math.abs(maskFirst - sourceLast) + Math.abs(maskLast - sourceFirst);
-  const spacing =
-    Math.abs(sourceLast - sourceFirst) /
-    Math.max(1, sourcePositions.length - 1);
-  const tolerance = Math.max(1e-3, spacing * 0.1);
+  const toLps = (vector: number[]) =>
+    vector.map((value, index) => value * signs[index]);
+  const iDirLps = toLps(spatialDirections[0]);
+  const jDirLps = toLps(spatialDirections[1]);
+  const kDirLps = toLps(spatialDirections[2]);
 
-  console.info('Physical mask Z alignment', {
-    maskFirst,
-    maskLast,
-    sourceFirst,
-    sourceLast,
-    directError,
-    reverseError,
-  });
-  return reverseError + tolerance < directError;
+  const isAntiParallel = (direction: number[], axis: number[]) => {
+    const length = Math.sqrt(dot3(direction, direction));
+    return length ? dot3(direction, axis) / length < 0 : false;
+  };
+
+  const flipI = isAntiParallel(iDirLps, rowCosine);
+  const flipJ = isAntiParallel(jDirLps, colCosine);
+
+  // For K, cross-check against the source series' actual sampled slice
+  // positions (not just the header direction's sign) since slice sort order
+  // is the most ambiguity-prone case and we have ground-truth samples to
+  // validate against.
+  let flipK = isAntiParallel(kDirLps, normal);
+  if (numSlices >= 2 && instances.length >= 2) {
+    const sourcePositions = instances
+      .map((instance) => {
+        const position = toNumericVector(instance?.ImagePositionPatient, 3);
+        return position ? dot3(position, normal) : null;
+      })
+      .filter((value): value is number => value !== null)
+      .sort((a, b) => a - b);
+
+    if (sourcePositions.length >= 2) {
+      const originLps = toLps(origin);
+      const maskFirst = dot3(originLps, normal);
+      const maskLast = dot3(
+        originLps.map(
+          (value, index) => value + kDirLps[index] * (numSlices - 1)
+        ),
+        normal
+      );
+      const sourceFirst = sourcePositions[0];
+      const sourceLast = sourcePositions[sourcePositions.length - 1];
+      const directError =
+        Math.abs(maskFirst - sourceFirst) + Math.abs(maskLast - sourceLast);
+      const reverseError =
+        Math.abs(maskFirst - sourceLast) + Math.abs(maskLast - sourceFirst);
+      const spacing =
+        Math.abs(sourceLast - sourceFirst) /
+        Math.max(1, sourcePositions.length - 1);
+      const tolerance = Math.max(1e-3, spacing * 0.1);
+
+      console.info('Physical mask Z alignment', {
+        maskFirst,
+        maskLast,
+        sourceFirst,
+        sourceLast,
+        directError,
+        reverseError,
+      });
+      flipK = reverseError + tolerance < directError;
+    }
+  }
+
+  return { flipI, flipJ, flipK };
+};
+
+// Re-indexes a NRRD voxel buffer (i fastest, then j, then k) so it lines up
+// with the target volume's axis directions, undoing whichever per-axis
+// mismatches computeMaskAxisFlips reported. A pure index remap (no
+// interpolation) is correct here because the mask is generated on the same
+// physical grid as the reference volume - only the storage order/sign of
+// each axis can differ.
+const applyMaskAxisFlips = (
+  data: Uint16Array,
+  width: number,
+  height: number,
+  numSlices: number,
+  flips: MaskAxisFlips
+): Uint16Array => {
+  const { flipI, flipJ, flipK } = flips;
+  if (!flipI && !flipJ && !flipK) {
+    return data;
+  }
+
+  const sliceSize = width * height;
+  const out = new Uint16Array(data.length);
+  for (let k = 0; k < numSlices; k++) {
+    const srcK = flipK ? numSlices - 1 - k : k;
+    const srcSliceOffset = srcK * sliceSize;
+    const dstSliceOffset = k * sliceSize;
+    for (let j = 0; j < height; j++) {
+      const srcJ = flipJ ? height - 1 - j : j;
+      const srcRowOffset = srcSliceOffset + srcJ * width;
+      const dstRowOffset = dstSliceOffset + j * width;
+      if (flipI) {
+        for (let i = 0; i < width; i++) {
+          out[dstRowOffset + i] = data[srcRowOffset + (width - 1 - i)];
+        }
+      } else {
+        out.set(
+          data.subarray(srcRowOffset, srcRowOffset + width),
+          dstRowOffset
+        );
+      }
+    }
+  }
+  return out;
 };
 
 export default class MonaiLabelPanel extends Component {
@@ -174,6 +250,7 @@ export default class MonaiLabelPanel extends Component {
   StudyInstanceUID: any;
   isMONAILabelConnected: boolean;
   isEmbeddedReview: boolean;
+  embeddedSubmissionInFlight = false;
   initializationCancelled: boolean;
   Modality: any;
 
@@ -198,6 +275,8 @@ export default class MonaiLabelPanel extends Component {
       action: {},
       segmentations: [],
       isDataReady: false,
+      isEmbeddedRunComplete: false,
+      isEmbeddedSubmitting: false,
     };
     this.workflowName = null;
     this.initializationCancelled = false;
@@ -463,30 +542,29 @@ export default class MonaiLabelPanel extends Component {
     const { displaySet } = this.getActiveViewportInfo();
     const segmentationId = displaySet.SeriesInstanceUID;
 
+    const width =
+      header && header.sizes && header.sizes.length >= 1
+        ? Number(header.sizes[0])
+        : 0;
+    const height =
+      header && header.sizes && header.sizes.length >= 2
+        ? Number(header.sizes[1])
+        : 0;
     const numSlices =
       header && header.sizes && header.sizes.length >= 3
         ? Number(header.sizes[2])
         : 0;
-    const isReversedZ = shouldReverseMaskZ(
+    const axisFlips = computeMaskAxisFlips(
       header,
       displaySet?.instances || [],
       numSlices
     );
-    if (isReversedZ) {
+    if (axisFlips && (axisFlips.flipI || axisFlips.flipJ || axisFlips.flipK)) {
       console.info(
-        'Reversing mask Z slices to match the physically sorted source volume.'
+        'Realigning mask voxel axes to match the physically sorted source volume.',
+        axisFlips
       );
-      const sliceSize = Number(header.sizes[0]) * Number(header.sizes[1]);
-      const reversedData = new Uint16Array(data.length);
-      for (let i = 0; i < numSlices; i++) {
-        const srcOffset = i * sliceSize;
-        const destOffset = (numSlices - 1 - i) * sliceSize;
-        reversedData.set(
-          data.subarray(srcOffset, srcOffset + sliceSize),
-          destOffset
-        );
-      }
-      data = reversedData;
+      data = applyMaskAxisFlips(data, width, height, numSlices, axisFlips);
     }
 
     // Reformat centroids
@@ -494,12 +572,19 @@ export default class MonaiLabelPanel extends Component {
     for (const [key, value] of Object.entries(response.centroids || {})) {
       const segmentIndex = parseInt(value[0], 10);
       const image = value.slice(1).map((v) => parseFloat(v));
-      if (isReversedZ && image.length >= 3) {
-        image[2] = numSlices - 1 - image[2];
+      if (axisFlips && image.length >= 3) {
+        if (axisFlips.flipI && width) {
+          image[0] = width - 1 - image[0];
+        }
+        if (axisFlips.flipJ && height) {
+          image[1] = height - 1 - image[1];
+        }
+        if (axisFlips.flipK && numSlices) {
+          image[2] = numSlices - 1 - image[2];
+        }
       }
       centroidsIJK.set(segmentIndex, { image: image, world: [] });
     }
-
 
     const now = new Date();
     const dd = String(now.getDate()).padStart(2, '0');
@@ -514,7 +599,6 @@ export default class MonaiLabelPanel extends Component {
       const parts = [dateStr, modelStr, organStr].filter(Boolean);
       labelName = parts.join(' - ');
     }
-
 
     // Define segmentation object with proper structure
     const segmentation_object = {
@@ -848,8 +932,13 @@ export default class MonaiLabelPanel extends Component {
     console.log('update_view: inside update view ');
     console.log(`update_view: response ${response} `);
     const { data, centroids } = this.parseResponse(response);
-    const segmentationId = await this._update({ data, centroids }, labelNames, model, organName);
-    this.saveSegmentation(model, segmentationId, organName);
+    const segmentationId = await this._update(
+      { data, centroids },
+      labelNames,
+      model,
+      organName
+    );
+    await this.saveSegmentation(model, segmentationId, organName);
   };
 
   uploadLabels = async () => {
@@ -923,13 +1012,61 @@ export default class MonaiLabelPanel extends Component {
     }
   };
 
-  handleEmbeddedSubmit = () => {
-    this.actions['InteractiveSegmentation'].current?.onClickSubmitToAgent();
+  canSubmitUpdatedMask = () =>
+    Boolean(
+      this.state.isDataReady &&
+      this.state.segmentations?.length &&
+      this.state.isEmbeddedRunComplete &&
+      !this.state.isEmbeddedSubmitting
+    );
+
+  handleEmbeddedSubmit = async () => {
+    if (this.embeddedSubmissionInFlight || !this.canSubmitUpdatedMask()) {
+      return;
+    }
+
+    const interactiveSegmentation =
+      this.actions['InteractiveSegmentation'].current;
+    if (!interactiveSegmentation) {
+      return;
+    }
+
+    // Set the instance guard synchronously so even two clicks before React
+    // renders the disabled state cannot start duplicate uploads.
+    this.embeddedSubmissionInFlight = true;
+    this.setState({ isEmbeddedSubmitting: true });
+    this.notification.show({
+      title: 'Syncing Modified Mask',
+      message: 'Please wait while the modified mask finishes syncing.',
+      type: 'info',
+      duration: 5000,
+    });
+
+    try {
+      const submitted = await interactiveSegmentation.onClickSubmitToAgent();
+      // On success, intentionally keep the button loading and disabled. The
+      // submission message closes this embedded tab automatically.
+      if (!submitted) {
+        this.embeddedSubmissionInFlight = false;
+        this.setState({ isEmbeddedSubmitting: false });
+      }
+    } catch (error) {
+      console.error('Failed to submit the modified mask', error);
+      this.embeddedSubmissionInFlight = false;
+      this.setState({ isEmbeddedSubmitting: false });
+    }
+  };
+
+  handleInteractiveRunStateChange = (isComplete: boolean) => {
+    if (this.isEmbeddedReview) {
+      this.setState({ isEmbeddedRunComplete: isComplete });
+    }
   };
 
   render() {
     const { isDataReady } = this.state;
     const isConnected = this.isMONAILabelConnected;
+    const canSubmitUpdatedMask = this.canSubmitUpdatedMask();
 
     return (
       <div
@@ -1000,6 +1137,7 @@ export default class MonaiLabelPanel extends Component {
                   onOptionsConfig={this.onOptionsConfig}
                   getActiveViewportInfo={this.getActiveViewportInfo}
                   commandsManager={this.props.commandsManager}
+                  onRunStateChange={this.handleInteractiveRunStateChange}
                 />
               </div>
             </>
@@ -1044,10 +1182,19 @@ export default class MonaiLabelPanel extends Component {
             <button
               type="button"
               onClick={this.handleEmbeddedSubmit}
-              disabled={!isDataReady || !this.state.segmentations?.length}
-              className="flex-[2] rounded-[4px] border-none bg-[#4a9eff] px-3 py-2 text-[12px] font-bold text-[#04101e] transition-colors hover:bg-[#65b0ff] disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={!canSubmitUpdatedMask}
+              aria-busy={this.state.isEmbeddedSubmitting}
+              className="flex flex-[2] items-center justify-center gap-2 rounded-[4px] border-none bg-[#4a9eff] px-3 py-2 text-[12px] font-bold text-[#04101e] transition-colors hover:bg-[#65b0ff] disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Submit Updated Mask
+              {this.state.isEmbeddedSubmitting && (
+                <span
+                  className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#04101e]/30 border-t-[#04101e]"
+                  aria-hidden="true"
+                />
+              )}
+              {this.state.isEmbeddedSubmitting
+                ? 'Syncing Modified Mask…'
+                : 'Submit Updated Mask'}
             </button>
           </div>
         )}

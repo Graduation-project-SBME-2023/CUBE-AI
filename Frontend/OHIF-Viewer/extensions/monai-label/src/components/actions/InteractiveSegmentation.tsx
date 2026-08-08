@@ -27,6 +27,7 @@ export default class InteractiveSegmentation extends BaseTab {
       statusMessage: '',
       statusType: 'info',
       hasPrompts: false,
+      hasUnsavedChanges: false,
       voxtellTextPrompt: '',
 
       // availableOrgans: models.length > 0 ? this.getModelLabels(models[0]) : {},
@@ -86,7 +87,9 @@ export default class InteractiveSegmentation extends BaseTab {
         'ProbeMONAILabelNeg',
         'RecROIToolMONAILabel',
       ];
-      return annotations.some((a) => promptToolNames.includes(a.metadata?.toolName));
+      return annotations.some((a) =>
+        promptToolNames.includes(a.metadata?.toolName)
+      );
     } catch (e) {
       return false;
     }
@@ -97,7 +100,17 @@ export default class InteractiveSegmentation extends BaseTab {
       cornerstoneTools.Enums.Events.ANNOTATION_COMPLETED,
       this.handleAnnotationCompleted
     );
+    eventTarget.addEventListener(
+      cornerstoneTools.Enums.Events.SEGMENTATION_DATA_MODIFIED,
+      this.handleSegmentationModified
+    );
   }
+
+  handleSegmentationModified = () => {
+    if (!this.state.hasUnsavedChanges) {
+      this.setState({ hasUnsavedChanges: true });
+    }
+  };
 
   initPromptObject = (objectId) => {
     //[[{POINTS:[[[25,10]],[1]], BOXES:[]}],[],]
@@ -799,6 +812,7 @@ export default class InteractiveSegmentation extends BaseTab {
 
   onRunInference = async () => {
     console.log(' run inference start');
+    this.props.onRunStateChange?.(false);
     this.setState({ statusMessage: '', statusType: 'info' });
     const { currentModel, currentObject, clickPoints } = this.state;
     const { info } = this.props;
@@ -954,12 +968,15 @@ export default class InteractiveSegmentation extends BaseTab {
     if (model === 'vista') {
       organName = 'interactive';
     } else if (model === 'voxtell') {
-      organName = this.voxtellTextPrompt?.trim() ? this.voxtellTextPrompt.trim().replace(/\s+/g, '_') : 'voxtell';
+      organName = this.voxtellTextPrompt?.trim()
+        ? this.voxtellTextPrompt.trim().replace(/\s+/g, '_')
+        : 'voxtell';
     } else {
       organName = this.state.currentLabel || '';
     }
 
     await this.props.updateView(response, labels, model, organName);
+    this.props.onRunStateChange?.(true);
     if (model === 'nninteractive') {
       this.resetnnInteractiveAll = false;
     }
@@ -1113,6 +1130,10 @@ export default class InteractiveSegmentation extends BaseTab {
       cornerstoneTools.Enums.Events.ANNOTATION_COMPLETED,
       this.handleAnnotationCompleted
     );
+    eventTarget.removeEventListener(
+      cornerstoneTools.Enums.Events.SEGMENTATION_DATA_MODIFIED,
+      this.handleSegmentationModified
+    );
     this.cleanupViewportListeners();
     this.resetProps();
     this.removeAllPromptAnnotations();
@@ -1147,8 +1168,10 @@ export default class InteractiveSegmentation extends BaseTab {
             statusMessage={this.state.statusMessage}
             statusType={this.state.statusType}
             isRunDisabled={
-              (!this.state.hasPrompts && this.state.currentModel !== 'voxtell') ||
-              (this.state.currentModel === 'voxtell' && !this.state.voxtellTextPrompt?.trim())
+              (!this.state.hasPrompts &&
+                this.state.currentModel !== 'voxtell') ||
+              (this.state.currentModel === 'voxtell' &&
+                !this.state.voxtellTextPrompt?.trim())
             }
             usage={
               <ModelBasedRendering
@@ -1184,34 +1207,51 @@ export default class InteractiveSegmentation extends BaseTab {
               '1' && (
               <button
                 className="actionInput"
+                onClick={this.onClickSubmitToAgent}
+                disabled={
+                  this.state.isSubmitting || !this.state.hasUnsavedChanges
+                }
                 style={{
-                  backgroundColor: '#010839',
-                  color: '#7bcfe9',
-                  fontWeight: 'bold',
-                  fontSize: '14px',
-                  width: '100%',
-                  padding: '8px 14px',
-                  borderRadius: '6px',
-                  border: '2px solid #010839',
-                  cursor: 'pointer',
-                  marginTop: '10px',
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  transition: 'all 0.2s ease-in-out',
+                  ...{
+                    backgroundColor: '#010839',
+                    color: '#7bcfe9',
+                    fontFamily: 'Inter, sans-serif',
+                    fontWeight: 'bold',
+                    fontSize: '14px',
+                    width: '100%',
+                    padding: '8px 14px',
+                    borderRadius: '6px',
+                    border: '2px solid #010839',
+                    cursor:
+                      this.state.isSubmitting || !this.state.hasUnsavedChanges
+                        ? 'not-allowed'
+                        : 'pointer',
+                    opacity:
+                      this.state.isSubmitting || !this.state.hasUnsavedChanges
+                        ? 0.5
+                        : 1,
+                    marginTop: '10px',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    transition: 'all 0.2s ease-in-out',
+                  },
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = 'rgb(72, 193, 230)';
-                  e.currentTarget.style.color = 'rgb(255, 255, 255)';
-                  e.currentTarget.style.borderColor = 'rgb(72, 193, 230)';
+                  if (
+                    !this.state.isSubmitting &&
+                    this.state.hasUnsavedChanges
+                  ) {
+                    e.currentTarget.style.backgroundColor = 'rgb(72, 193, 230)';
+                    e.currentTarget.style.color = 'rgb(255, 255, 255)';
+                    e.currentTarget.style.borderColor = 'rgb(72, 193, 230)';
+                  }
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.backgroundColor = '#010839';
                   e.currentTarget.style.color = '#7bcfe9';
                   e.currentTarget.style.borderColor = '#010839';
                 }}
-                onClick={this.onClickSubmitToAgent}
-                disabled={this.state.isSubmitting}
               >
                 {this.state.isSubmitting
                   ? 'Submitting…'
@@ -1225,7 +1265,7 @@ export default class InteractiveSegmentation extends BaseTab {
 
   onClickSubmitToAgent = async () => {
     if (this.state.isSubmitting) {
-      return;
+      return false;
     }
 
     this.setState({
@@ -1247,7 +1287,7 @@ export default class InteractiveSegmentation extends BaseTab {
           statusMessage: 'No session ID was found for this submission.',
           statusType: 'error',
         });
-        return;
+        return false;
       }
 
       const { viewportGridService } = this.props.servicesManager.services;
@@ -1297,7 +1337,7 @@ export default class InteractiveSegmentation extends BaseTab {
           statusMessage: 'No labelmap is available to submit.',
           statusType: 'error',
         });
-        return;
+        return false;
       }
 
       // If scalarData is backed by a SharedArrayBuffer, we must copy it to a normal ArrayBuffer
@@ -1359,17 +1399,31 @@ export default class InteractiveSegmentation extends BaseTab {
         },
       };
 
+      // The editor can be rendered directly in the review iframe or inside an
+      // additional viewer frame. Notify every owning window so the review UI
+      // always receives the successful submission. A Set prevents duplicate
+      // messages when parent and top are the same window.
+      const messageTargets = new Set<Window>();
       if (window.parent !== window) {
-        window.parent.postMessage(message, window.location.origin);
-      } else if (window.opener && !window.opener.closed) {
-        window.opener.postMessage(message, window.location.origin);
+        messageTargets.add(window.parent);
       }
+      if (window.top && window.top !== window) {
+        messageTargets.add(window.top);
+      }
+      if (window.opener && !window.opener.closed) {
+        messageTargets.add(window.opener);
+      }
+      messageTargets.forEach((target) =>
+        target.postMessage(message, window.location.origin)
+      );
+      return true;
     } catch (e) {
       console.error(e);
       this.setState({
         statusMessage: 'The modified mask could not be uploaded.',
         statusType: 'error',
       });
+      return false;
     } finally {
       this.setState({ isSubmitting: false });
     }
