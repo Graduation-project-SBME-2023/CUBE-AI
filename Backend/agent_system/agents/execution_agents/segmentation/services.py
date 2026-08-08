@@ -5,6 +5,7 @@ import json
 import asyncio
 from datetime import datetime
 from functools import partial
+from itertools import permutations
 from typing import Annotated, Any, Dict, NotRequired, TypedDict
 from pydantic import Field
 import highdicom as hd
@@ -13,7 +14,7 @@ import numpy as np
 import io
 import pydicom
 from pydicom.uid import generate_uid
-from scipy import ndimage
+import SimpleITK as sitk
 
 from services.timeout_policy import (
     CONTROL_HTTP_TIMEOUT,
@@ -24,6 +25,7 @@ from services.timeout_policy import (
 )
 
 from .utils import (
+    SEGMENTATION_GEOMETRY_VERSION,
     parse_multipart_response,
     parse_nrrd_data,
     ensure_required_patient_tags
@@ -68,7 +70,11 @@ class InferenceResult(TypedDict):
     is_empty_mask: NotRequired[bool]
     foreground_voxels: NotRequired[int]
     z_axis_reversed: NotRequired[bool]
+    x_axis_flipped: NotRequired[bool]
+    y_axis_flipped: NotRequired[bool]
+    axis_permutation: NotRequired[dict[str, str]]
     slice_alignment: NotRequired[dict[str, Any]]
+    geometry_version: NotRequired[str]
 
 
 class SegmentationService:
@@ -405,6 +411,7 @@ class SegmentationService:
             "inference_duration_seconds": inference_duration,
             "retry_count": attempt,
             "inference_job_id": effective_job_id,
+            "geometry_version": SEGMENTATION_GEOMETRY_VERSION,
         }
 
         if response.status_code != 200:
@@ -503,41 +510,35 @@ class SegmentationService:
         labelmap_np = np.transpose(labelmap_np, (2, 1, 0))
         logger.info("Labelmap shape after squeeze+transpose: %s", labelmap_np.shape)
 
-        labelmap_np, z_axis_reversed, slice_alignment = (
-            self._align_labelmap_z_to_source_slices(
-                labelmap_np,
-                header,
-                dicom_datasets,
-            )
+        # Keep the pre-alignment shape for diagnostics.  The actual correction
+        # below is physical-space resampling, not index-only resize/flip logic.
+        original_shape = tuple(int(value) for value in labelmap_np.shape)
+        labelmap_np, axis_flips, axis_alignment = await asyncio.to_thread(
+            self._align_labelmap_axes_to_source_slices,
+            labelmap_np,
+            header,
+            dicom_datasets,
         )
-        result["z_axis_reversed"] = z_axis_reversed
-        result["slice_alignment"] = slice_alignment
+        result["z_axis_reversed"] = axis_flips["z"]
+        result["x_axis_flipped"] = axis_flips["x"]
+        result["y_axis_flipped"] = axis_flips["y"]
+        result["axis_permutation"] = axis_alignment.get("axis_mapping", {})
+        result["slice_alignment"] = axis_alignment
 
-        # VoxTell always returns binary masks — binarize with >0
+        # The returned array is already on the exact DICOM grid.  Do NOT use
+        # ndimage.zoom here: shape-only resizing ignores origin, spacing and
+        # direction and can create a geometrically wrong DICOM-SEG.
         labelmap_np = (labelmap_np > 0).astype(np.uint8)
         expected_shape = (num_slices, int(rows), int(cols))
-        original_shape = tuple(int(value) for value in labelmap_np.shape)
-        geometry_adjusted = original_shape != expected_shape
-        if geometry_adjusted:
-            zoom = tuple(
-                target / source
-                for source, target in zip(original_shape, expected_shape)
+        if tuple(labelmap_np.shape) != expected_shape:
+            raise ValueError(
+                "Physical mask resampling did not produce the source DICOM shape: "
+                f"got {tuple(labelmap_np.shape)}, expected {expected_shape}"
             )
-            labelmap_np = await asyncio.to_thread(
-                ndimage.zoom,
-                labelmap_np,
-                zoom,
-                order=0,
-                prefilter=False,
-            )
-            labelmap_np = (labelmap_np > 0).astype(np.uint8)
-            logger.warning(
-                "Resampled mask with nearest-neighbor interpolation from %s "
-                "to source DICOM shape %s",
-                original_shape,
-                expected_shape,
-            )
-        result["geometry_adjusted"] = geometry_adjusted
+
+        result["geometry_adjusted"] = bool(
+            axis_alignment.get("geometry_adjusted", False)
+        )
         result["original_mask_shape"] = list(original_shape)
         result["final_mask_shape"] = list(labelmap_np.shape)
 
@@ -623,7 +624,7 @@ class SegmentationService:
                 instance_number=1,
                 manufacturer='Manufacturer Name',
                 manufacturer_model_name='MONAI Label Backend',
-                software_versions='-',
+                software_versions=SEGMENTATION_GEOMETRY_VERSION,
                 device_serial_number='XYZ',
                 omit_empty_frames=False,
             )
@@ -910,11 +911,16 @@ class SegmentationService:
         return np.asarray(signs, dtype=float)
 
     @classmethod
-    def _nrrd_z_geometry_lps(
+    def _nrrd_axis_geometry_lps(
         cls,
         header: dict[str, Any],
-    ) -> tuple[np.ndarray, np.ndarray] | None:
-        """Return (origin, z-direction) in DICOM LPS coordinates."""
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
+        """Return (origin, x-direction, y-direction, z-direction) in DICOM LPS.
+
+        The three direction vectors correspond, in order, to the NRRD's own
+        axis 0 (i, fastest-varying), axis 1 (j), and axis 2 (k, slices) -
+        the same order as ``header["sizes"]``.
+        """
         raw_origin = next(
             (
                 header[key]
@@ -963,100 +969,371 @@ class SegmentationService:
             return None
 
         signs = cls._nrrd_space_to_lps_signs(header.get("space"))
-        return origin * signs, spatial_directions[-1] * signs
+        return (
+            origin * signs,
+            spatial_directions[0] * signs,
+            spatial_directions[1] * signs,
+            spatial_directions[2] * signs,
+        )
+
+    @staticmethod
+    def _unit_vector(vector: np.ndarray, *, name: str) -> np.ndarray:
+        length = float(np.linalg.norm(vector))
+        if not np.isfinite(length) or length <= 0:
+            raise ValueError(f"{name} has zero/invalid length")
+        return np.asarray(vector, dtype=float) / length
 
     @classmethod
-    def _align_labelmap_z_to_source_slices(
+    def _describe_axis_mapping(
+        cls,
+        nrrd_directions_lps: tuple[np.ndarray, np.ndarray, np.ndarray],
+        dicom_axes_lps: tuple[np.ndarray, np.ndarray, np.ndarray],
+    ) -> tuple[dict[str, bool], dict[str, Any]]:
+        """Describe NRRD-to-DICOM axis permutation/sign for diagnostics only.
+
+        The mapping is intentionally NOT applied as a manual transpose/flip.
+        Physical-space resampling below is authoritative and handles flips,
+        permutations and oblique orientations in one operation without
+        double-transforming the mask.
+        """
+        nrrd_names = ("nrrd_x", "nrrd_y", "nrrd_z")
+        dicom_names = ("x", "y", "z")
+        nrrd_unit = [
+            cls._unit_vector(vector, name=name)
+            for vector, name in zip(nrrd_directions_lps, nrrd_names)
+        ]
+        dicom_unit = [
+            cls._unit_vector(vector, name=f"dicom_{name}")
+            for vector, name in zip(dicom_axes_lps, dicom_names)
+        ]
+        similarity = np.asarray(
+            [
+                [float(np.dot(src, dst)) for dst in dicom_unit]
+                for src in nrrd_unit
+            ],
+            dtype=float,
+        )
+
+        # permutation[target_axis] = source_nrrd_axis.  Evaluate all six
+        # one-to-one assignments and choose the strongest absolute direction
+        # match, so X/Y swaps are detected instead of being mistaken for
+        # "no flip".
+        best_permutation = max(
+            permutations(range(3)),
+            key=lambda permutation: sum(
+                abs(similarity[permutation[target_axis], target_axis])
+                for target_axis in range(3)
+            ),
+        )
+
+        flips: dict[str, bool] = {}
+        mapping: dict[str, str] = {}
+        confidence: dict[str, float] = {}
+        signed_similarity: dict[str, float] = {}
+        for target_axis, target_name in enumerate(dicom_names):
+            source_axis = best_permutation[target_axis]
+            score = float(similarity[source_axis, target_axis])
+            mapping[target_name] = nrrd_names[source_axis]
+            flips[target_name] = score < 0
+            confidence[target_name] = abs(score)
+            signed_similarity[target_name] = score
+
+        details = {
+            "axis_mapping": mapping,
+            "axis_match_confidence": confidence,
+            "axis_signed_similarity": signed_similarity,
+            "direction_similarity_matrix": similarity.tolist(),
+        }
+        if min(confidence.values()) < 0.95:
+            details["axis_mapping_warning"] = (
+                "NRRD and DICOM axes are not nearly parallel; physical "
+                "resampling is required and manual flips would be unsafe"
+            )
+        return flips, details
+
+    @staticmethod
+    def _dicom_reference_geometry(
+        source_images: list[pydicom.Dataset],
+    ) -> dict[str, Any]:
+        if not source_images:
+            raise ValueError("Cannot build reference geometry from an empty DICOM series")
+
+        first = source_images[0]
+        orientation = np.asarray(first.ImageOrientationPatient, dtype=float)
+        position = np.asarray(first.ImagePositionPatient, dtype=float)
+        if orientation.size != 6 or position.size != 3:
+            raise ValueError(
+                "DICOM ImageOrientationPatient/ImagePositionPatient are required "
+                "for safe mask alignment"
+            )
+
+        row_cosine = orientation[:3]
+        col_cosine = orientation[3:]
+        row_cosine = row_cosine / np.linalg.norm(row_cosine)
+        col_cosine = col_cosine / np.linalg.norm(col_cosine)
+        normal = np.cross(row_cosine, col_cosine)
+        normal = normal / np.linalg.norm(normal)
+
+        pixel_spacing = np.asarray(first.PixelSpacing, dtype=float).reshape(-1)
+        if pixel_spacing.size != 2 or np.any(pixel_spacing <= 0):
+            raise ValueError("DICOM PixelSpacing must contain two positive values")
+
+        positions = [
+            SegmentationService._physical_slice_position(ds)
+            for ds in source_images
+        ]
+        if not positions or any(value is None for value in positions):
+            raise ValueError(
+                "DICOM physical slice positions are required for safe mask alignment"
+            )
+        positions_np = np.asarray(positions, dtype=float)
+        if len(positions_np) > 1:
+            deltas = np.diff(positions_np)
+            if np.any(deltas <= 0):
+                raise ValueError(
+                    "Source DICOM slices must be physically sorted with unique positions"
+                )
+            slice_spacing = float(np.median(deltas))
+        else:
+            slice_spacing = float(
+                getattr(first, "SpacingBetweenSlices", 0)
+                or getattr(first, "SliceThickness", 1.0)
+                or 1.0
+            )
+        if slice_spacing <= 0:
+            raise ValueError("DICOM slice spacing must be positive")
+
+        # SimpleITK index X increases across DICOM columns (row cosine),
+        # index Y across DICOM rows (column cosine), and index Z across the
+        # physically sorted slice normal.  DICOM PixelSpacing is [row, col].
+        direction_matrix = np.column_stack(
+            (row_cosine, col_cosine, normal)
+        )
+        return {
+            "size_xyz": (int(first.Columns), int(first.Rows), len(source_images)),
+            "spacing_xyz": (
+                float(pixel_spacing[1]),
+                float(pixel_spacing[0]),
+                slice_spacing,
+            ),
+            "origin_lps": tuple(float(value) for value in position),
+            "direction_matrix": direction_matrix,
+            "axes_lps": (row_cosine, col_cosine, normal),
+            "slice_positions": positions_np,
+        }
+
+    @staticmethod
+    def _physical_geometry_matches(
+        *,
+        source_size_xyz: tuple[int, int, int],
+        source_spacing_xyz: tuple[float, float, float],
+        source_origin_lps: tuple[float, float, float],
+        source_direction: np.ndarray,
+        target: dict[str, Any],
+        tolerance: float = 1e-4,
+    ) -> bool:
+        return (
+            tuple(source_size_xyz) == tuple(target["size_xyz"])
+            and np.allclose(
+                source_spacing_xyz,
+                target["spacing_xyz"],
+                rtol=tolerance,
+                atol=tolerance,
+            )
+            and np.allclose(
+                source_origin_lps,
+                target["origin_lps"],
+                rtol=tolerance,
+                atol=tolerance,
+            )
+            and np.allclose(
+                source_direction,
+                target["direction_matrix"],
+                rtol=tolerance,
+                atol=tolerance,
+            )
+        )
+
+    @classmethod
+    def _align_labelmap_axes_to_source_slices(
         cls,
         labelmap_np: np.ndarray,
         header: dict[str, Any],
         source_images: list[pydicom.Dataset],
-    ) -> tuple[np.ndarray, bool, dict[str, Any]]:
-        """Align mask frame 0 with source image frame 0 using patient geometry.
+    ) -> tuple[np.ndarray, dict[str, bool], dict[str, Any]]:
+        """Resample the NRRD mask onto the exact DICOM patient-space grid.
 
-        ``labelmap_np`` is already in (Z, Y, X) order.  The NRRD Z direction
-        determines whether increasing array indices move from the first sorted
-        DICOM slice to the last one or in the opposite direction.  This avoids
-        relying on InstanceNumber, file order, or a model-specific flip rule.
+        ``labelmap_np`` is in (Z, Y, X) order.  We reconstruct its physical
+        geometry from the NRRD origin/direction vectors, reconstruct the target
+        grid from DICOM IOP/IPP/PixelSpacing, and use nearest-neighbor
+        SimpleITK resampling.  This handles axis flips, X/Y permutations,
+        oblique orientation and spacing/origin differences without relying on
+        array shape or manual flip heuristics.
         """
-        details: dict[str, Any] = {"mode": "unchanged"}
-        if labelmap_np.ndim != 3 or labelmap_np.shape[0] <= 1:
-            return labelmap_np, False, details
+        if labelmap_np.ndim != 3:
+            raise ValueError(
+                f"Expected a 3-D MONAI mask after transpose, got {labelmap_np.shape}"
+            )
 
-        nrrd_geometry = cls._nrrd_z_geometry_lps(header)
+        nrrd_geometry = cls._nrrd_axis_geometry_lps(header)
         if nrrd_geometry is None:
-            details["mode"] = "metadata_unavailable"
-            logger.warning(
-                "Cannot determine NRRD Z direction; leaving mask frame order unchanged"
+            raise ValueError(
+                "NRRD physical geometry is missing or invalid; refusing to create "
+                "a potentially misaligned DICOM-SEG"
             )
-            return labelmap_np, False, details
+        origin_lps, x_dir_lps, y_dir_lps, z_dir_lps = nrrd_geometry
 
-        source_positions = [cls._physical_slice_position(ds) for ds in source_images]
-        if not source_positions or any(value is None for value in source_positions):
-            details["mode"] = "dicom_positions_unavailable"
-            logger.warning(
-                "Cannot determine DICOM slice positions; leaving mask frame order unchanged"
+        nrrd_directions = (x_dir_lps, y_dir_lps, z_dir_lps)
+        source_spacing = tuple(
+            float(np.linalg.norm(direction)) for direction in nrrd_directions
+        )
+        if any(not np.isfinite(value) or value <= 0 for value in source_spacing):
+            raise ValueError(
+                f"NRRD space directions contain invalid spacing: {source_spacing}"
             )
-            return labelmap_np, False, details
 
-        orientation = np.asarray(source_images[0].ImageOrientationPatient, dtype=float)
-        normal = np.cross(orientation[:3], orientation[3:])
-        normal_norm = float(np.linalg.norm(normal))
-        if normal_norm == 0:
-            details["mode"] = "invalid_dicom_orientation"
-            return labelmap_np, False, details
-        normal /= normal_norm
+        source_direction_matrix = np.column_stack(
+            [
+                cls._unit_vector(direction, name=f"nrrd_axis_{index}")
+                for index, direction in enumerate(nrrd_directions)
+            ]
+        )
+        if abs(float(np.linalg.det(source_direction_matrix))) < 1e-6:
+            raise ValueError("NRRD direction matrix is singular")
 
-        origin_lps, z_direction_lps = nrrd_geometry
+        target = cls._dicom_reference_geometry(source_images)
+        flips, mapping_details = cls._describe_axis_mapping(
+            nrrd_directions,
+            target["axes_lps"],
+        )
+
+        source_size_xyz = (
+            int(labelmap_np.shape[2]),
+            int(labelmap_np.shape[1]),
+            int(labelmap_np.shape[0]),
+        )
+        source_origin = tuple(float(value) for value in origin_lps)
+        geometry_adjusted = not cls._physical_geometry_matches(
+            source_size_xyz=source_size_xyz,
+            source_spacing_xyz=source_spacing,
+            source_origin_lps=source_origin,
+            source_direction=source_direction_matrix,
+            target=target,
+        )
+
+        details: dict[str, Any] = {
+            "mode": "physical_resample" if geometry_adjusted else "unchanged",
+            "geometry_adjusted": geometry_adjusted,
+            "flips": dict(flips),
+            **mapping_details,
+            "source": {
+                "size_xyz": list(source_size_xyz),
+                "spacing_xyz": list(source_spacing),
+                "origin_lps": list(source_origin),
+                "direction": source_direction_matrix.tolist(),
+            },
+            "target": {
+                "size_xyz": list(target["size_xyz"]),
+                "spacing_xyz": list(target["spacing_xyz"]),
+                "origin_lps": list(target["origin_lps"]),
+                "direction": target["direction_matrix"].tolist(),
+            },
+        }
+
+        # Preserve the useful first/last-slice diagnostics for the original Z
+        # bug, even though the actual correction is now full 3-D resampling.
+        normal = target["axes_lps"][2]
         mask_first = float(np.dot(origin_lps, normal))
         mask_last = float(
             np.dot(
-                origin_lps + z_direction_lps * (labelmap_np.shape[0] - 1),
+                origin_lps + z_dir_lps * (labelmap_np.shape[0] - 1),
                 normal,
             )
         )
+        source_positions = target["slice_positions"]
         source_first = float(source_positions[0])
         source_last = float(source_positions[-1])
-
         direct_error = abs(mask_first - source_first) + abs(mask_last - source_last)
         reverse_error = abs(mask_first - source_last) + abs(mask_last - source_first)
-        source_spacing = (
-            float(np.median(np.abs(np.diff(np.asarray(source_positions, dtype=float)))))
-            if len(source_positions) > 1
-            else 0.0
-        )
-        tolerance = max(1e-3, source_spacing * 0.1)
-        should_reverse = reverse_error + tolerance < direct_error
-
         details.update(
             {
-                "mode": "physical_endpoint_match",
                 "mask_first_position": mask_first,
                 "mask_last_position": mask_last,
                 "source_first_position": source_first,
                 "source_last_position": source_last,
                 "direct_error": direct_error,
                 "reverse_error": reverse_error,
-                "tolerance": tolerance,
             }
         )
-        if should_reverse:
-            logger.info(
-                "Reversing MONAI mask Z frames to match physically sorted DICOM "
-                "slices (direct_error=%.6f, reverse_error=%.6f)",
-                direct_error,
-                reverse_error,
+
+        foreground_before = int(np.count_nonzero(labelmap_np))
+        source_mask = sitk.GetImageFromArray(
+            (labelmap_np > 0).astype(np.uint8)
+        )
+        source_mask.SetOrigin(source_origin)
+        source_mask.SetSpacing(source_spacing)
+        source_mask.SetDirection(
+            tuple(float(value) for value in source_direction_matrix.reshape(-1))
+        )
+
+        reference = sitk.Image(target["size_xyz"], sitk.sitkUInt8)
+        reference.SetOrigin(target["origin_lps"])
+        reference.SetSpacing(target["spacing_xyz"])
+        reference.SetDirection(
+            tuple(float(value) for value in target["direction_matrix"].reshape(-1))
+        )
+
+        if geometry_adjusted:
+            resampler = sitk.ResampleImageFilter()
+            resampler.SetReferenceImage(reference)
+            resampler.SetInterpolator(sitk.sitkNearestNeighbor)
+            resampler.SetTransform(sitk.Transform(3, sitk.sitkIdentity))
+            resampler.SetDefaultPixelValue(0)
+            aligned_image = resampler.Execute(source_mask)
+            aligned = sitk.GetArrayFromImage(aligned_image).astype(np.uint8)
+        else:
+            aligned = (labelmap_np > 0).astype(np.uint8, copy=True)
+
+        expected_shape = (
+            int(target["size_xyz"][2]),
+            int(target["size_xyz"][1]),
+            int(target["size_xyz"][0]),
+        )
+        if tuple(aligned.shape) != expected_shape:
+            raise ValueError(
+                "Physical resampling returned an unexpected shape: "
+                f"{tuple(aligned.shape)} vs {expected_shape}"
             )
-            details["mode"] = "physical_endpoint_match_reversed"
-            return np.flip(labelmap_np, axis=0).copy(), True, details
+
+        foreground_after = int(np.count_nonzero(aligned))
+        details["foreground_before"] = foreground_before
+        details["foreground_after"] = foreground_after
+        details["foreground_retention_ratio"] = (
+            float(foreground_after) / float(foreground_before)
+            if foreground_before
+            else 1.0
+        )
+        if foreground_before > 0 and foreground_after == 0:
+            raise ValueError(
+                "Mask had foreground before physical resampling but none after it; "
+                "NRRD and DICOM geometry are inconsistent"
+            )
+        if foreground_before > 0 and foreground_after < foreground_before * 0.5:
+            logger.warning(
+                "Physical mask alignment retained only %.1f%% of foreground voxels",
+                100.0 * foreground_after / foreground_before,
+            )
 
         logger.info(
-            "MONAI mask Z frames already match physically sorted DICOM slices "
-            "(direct_error=%.6f, reverse_error=%.6f)",
-            direct_error,
-            reverse_error,
+            "Aligned MONAI mask to DICOM grid: mode=%s mapping=%s flips=%s "
+            "shape=%s -> %s",
+            details["mode"],
+            details["axis_mapping"],
+            flips,
+            source_size_xyz[::-1],
+            aligned.shape,
         )
-        return labelmap_np, False, details
+        return aligned, flips, details
 
     async def fetch_source_datasets_from_orthanc(
         self,

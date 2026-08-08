@@ -64,44 +64,50 @@ const nrrdSpaceToLpsSigns = (space: unknown): number[] => {
   });
 };
 
-type MaskAxisFlips = {
-  flipI: boolean;
-  flipJ: boolean;
-  flipK: boolean;
+type MaskAxisTransform = {
+  // target Cornerstone axis -> source NRRD axis
+  permutation: [number, number, number];
+  flips: [boolean, boolean, boolean];
+  sourceSizes: [number, number, number];
+  targetSizes: [number, number, number];
+  confidence: [number, number, number];
 };
 
-// Determines, per axis, whether the NRRD mask's voxel array runs opposite to
-// the DICOM-derived cornerstone volume it will be copied into. Cornerstone
-// builds its volume directly from the series' ImageOrientationPatient /
-// ImagePositionPatient (i = row-cosine direction, j = column-cosine
-// direction, k = ascending distance along their cross product - see
-// @cornerstonejs/streaming-image-volume-loader's getVolumeInfo /
-// sortImageIdsAndGetSpacing). MONAI Label's exported NRRD can disagree with
-// that convention on ANY of the three axes (RAS vs LPS space flips X/Y,
-// while a different slice sort order flips Z) - each axis is therefore
-// checked independently rather than assuming only the slice (k) axis can be
-// reversed.
-const computeMaskAxisFlips = (
+const computeMaskAxisTransform = (
   header: any,
-  instances: any[],
-  numSlices: number
-): MaskAxisFlips | null => {
+  instances: any[]
+): MaskAxisTransform | null => {
   if (!header || !Array.isArray(instances) || instances.length < 1) {
     return null;
   }
+
+  const sourceSizesRaw = Array.isArray(header.sizes)
+    ? header.sizes.slice(0, 3).map(Number)
+    : [];
+  if (
+    sourceSizesRaw.length !== 3 ||
+    !sourceSizesRaw.every((size) => Number.isFinite(size) && size > 0)
+  ) {
+    return null;
+  }
+  const sourceSizes = sourceSizesRaw as [number, number, number];
 
   const orientation = toNumericVector(instances[0]?.ImageOrientationPatient, 6);
   if (!orientation) {
     return null;
   }
-  const rowCosine = orientation.slice(0, 3); // volume i axis (increasing column)
-  const colCosine = orientation.slice(3, 6); // volume j axis (increasing row)
-  let normal = cross3(rowCosine, colCosine); // volume k axis (increasing slice)
+  const rowCosine = orientation.slice(0, 3);
+  const colCosine = orientation.slice(3, 6);
+  let normal = cross3(rowCosine, colCosine);
   const normalLength = Math.sqrt(dot3(normal, normal));
   if (!normalLength) {
     return null;
   }
   normal = normal.map((value) => value / normalLength);
+  const targetAxes = [rowCosine, colCosine, normal].map((axis) => {
+    const length = Math.sqrt(dot3(axis, axis));
+    return axis.map((value) => value / length);
+  });
 
   const origin = toNumericVector(
     header.spaceOrigin || header['space origin'] || header.space_origin,
@@ -124,108 +130,192 @@ const computeMaskAxisFlips = (
   const signs = nrrdSpaceToLpsSigns(header.space);
   const toLps = (vector: number[]) =>
     vector.map((value, index) => value * signs[index]);
-  const iDirLps = toLps(spatialDirections[0]);
-  const jDirLps = toLps(spatialDirections[1]);
-  const kDirLps = toLps(spatialDirections[2]);
-
-  const isAntiParallel = (direction: number[], axis: number[]) => {
+  const sourceDirections = spatialDirections
+    .slice(0, 3)
+    .map((direction) => toLps(direction));
+  const sourceUnit = sourceDirections.map((direction) => {
     const length = Math.sqrt(dot3(direction, direction));
-    return length ? dot3(direction, axis) / length < 0 : false;
-  };
+    return length ? direction.map((value) => value / length) : [0, 0, 0];
+  });
 
-  const flipI = isAntiParallel(iDirLps, rowCosine);
-  const flipJ = isAntiParallel(jDirLps, colCosine);
+  const similarity = sourceUnit.map((sourceAxis) =>
+    targetAxes.map((targetAxis) => dot3(sourceAxis, targetAxis))
+  );
+  const permutations: [number, number, number][] = [
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+  ];
+  const permutation = permutations.reduce((best, candidate) => {
+    const score = candidate.reduce(
+      (sum, sourceAxis, targetAxis) =>
+        sum + Math.abs(similarity[sourceAxis][targetAxis]),
+      0
+    );
+    const bestScore = best.reduce(
+      (sum, sourceAxis, targetAxis) =>
+        sum + Math.abs(similarity[sourceAxis][targetAxis]),
+      0
+    );
+    return score > bestScore ? candidate : best;
+  }, permutations[0]);
 
-  // For K, cross-check against the source series' actual sampled slice
-  // positions (not just the header direction's sign) since slice sort order
-  // is the most ambiguity-prone case and we have ground-truth samples to
-  // validate against.
-  let flipK = isAntiParallel(kDirLps, normal);
-  if (numSlices >= 2 && instances.length >= 2) {
-    const sourcePositions = instances
-      .map((instance) => {
-        const position = toNumericVector(instance?.ImagePositionPatient, 3);
-        return position ? dot3(position, normal) : null;
-      })
-      .filter((value): value is number => value !== null)
-      .sort((a, b) => a - b);
-
-    if (sourcePositions.length >= 2) {
-      const originLps = toLps(origin);
-      const maskFirst = dot3(originLps, normal);
-      const maskLast = dot3(
-        originLps.map(
-          (value, index) => value + kDirLps[index] * (numSlices - 1)
-        ),
-        normal
-      );
-      const sourceFirst = sourcePositions[0];
-      const sourceLast = sourcePositions[sourcePositions.length - 1];
-      const directError =
-        Math.abs(maskFirst - sourceFirst) + Math.abs(maskLast - sourceLast);
-      const reverseError =
-        Math.abs(maskFirst - sourceLast) + Math.abs(maskLast - sourceFirst);
-      const spacing =
-        Math.abs(sourceLast - sourceFirst) /
-        Math.max(1, sourcePositions.length - 1);
-      const tolerance = Math.max(1e-3, spacing * 0.1);
-
-      console.info('Physical mask Z alignment', {
-        maskFirst,
-        maskLast,
-        sourceFirst,
-        sourceLast,
-        directError,
-        reverseError,
-      });
-      flipK = reverseError + tolerance < directError;
-    }
+  const signedScores = permutation.map(
+    (sourceAxis, targetAxis) => similarity[sourceAxis][targetAxis]
+  ) as [number, number, number];
+  const confidence = signedScores.map((score) => Math.abs(score)) as [
+    number,
+    number,
+    number,
+  ];
+  if (Math.min(...confidence) < 0.95) {
+    console.warn(
+      'NRRD/DICOM axis mapping is ambiguous; leaving voxel order unchanged.',
+      {
+        similarity,
+        confidence,
+      }
+    );
+    return null;
   }
 
-  return { flipI, flipJ, flipK };
+  const flips = signedScores.map((score) => score < 0) as [
+    boolean,
+    boolean,
+    boolean,
+  ];
+
+  // Z gets one extra check using actual sampled DICOM slice positions. This
+  // catches the historical first<->last slice bug even when series/file order
+  // differs from physical order.
+  const sourcePositions = instances
+    .map((instance) => {
+      const position = toNumericVector(instance?.ImagePositionPatient, 3);
+      return position ? dot3(position, normal) : null;
+    })
+    .filter((value): value is number => value !== null)
+    .sort((a, b) => a - b);
+  const sourceAxisForZ = permutation[2];
+  if (sourcePositions.length >= 2 && sourceSizes[sourceAxisForZ] >= 2) {
+    const originLps = toLps(origin);
+    const zDirectionLps = sourceDirections[sourceAxisForZ];
+    const maskAtSourceZero = dot3(originLps, normal);
+    const maskAtSourceLast = dot3(
+      originLps.map(
+        (value, index) =>
+          value + zDirectionLps[index] * (sourceSizes[sourceAxisForZ] - 1)
+      ),
+      normal
+    );
+    const sourceFirst = sourcePositions[0];
+    const sourceLast = sourcePositions[sourcePositions.length - 1];
+    const directError =
+      Math.abs(maskAtSourceZero - sourceFirst) +
+      Math.abs(maskAtSourceLast - sourceLast);
+    const reverseError =
+      Math.abs(maskAtSourceZero - sourceLast) +
+      Math.abs(maskAtSourceLast - sourceFirst);
+    const spacing =
+      Math.abs(sourceLast - sourceFirst) /
+      Math.max(1, sourcePositions.length - 1);
+    const tolerance = Math.max(1e-3, spacing * 0.1);
+    flips[2] = reverseError + tolerance < directError;
+
+    console.info('Physical mask Z alignment', {
+      sourceAxisForZ,
+      maskAtSourceZero,
+      maskAtSourceLast,
+      sourceFirst,
+      sourceLast,
+      directError,
+      reverseError,
+      flipZ: flips[2],
+    });
+  }
+
+  const targetSizes = permutation.map(
+    (sourceAxis) => sourceSizes[sourceAxis]
+  ) as [number, number, number];
+  console.info('NRRD -> Cornerstone mask axis transform', {
+    permutation,
+    flips,
+    sourceSizes,
+    targetSizes,
+    confidence,
+  });
+  return { permutation, flips, sourceSizes, targetSizes, confidence };
 };
 
-// Re-indexes a NRRD voxel buffer (i fastest, then j, then k) so it lines up
-// with the target volume's axis directions, undoing whichever per-axis
-// mismatches computeMaskAxisFlips reported. A pure index remap (no
-// interpolation) is correct here because the mask is generated on the same
-// physical grid as the reference volume - only the storage order/sign of
-// each axis can differ.
-const applyMaskAxisFlips = (
+const applyMaskAxisTransform = (
   data: Uint16Array,
-  width: number,
-  height: number,
-  numSlices: number,
-  flips: MaskAxisFlips
+  transform: MaskAxisTransform
 ): Uint16Array => {
-  const { flipI, flipJ, flipK } = flips;
-  if (!flipI && !flipJ && !flipK) {
+  const { permutation, flips, sourceSizes, targetSizes } = transform;
+  const [sourceX, sourceY, sourceZ] = sourceSizes;
+  const [targetX, targetY, targetZ] = targetSizes;
+  if (sourceX * sourceY * sourceZ !== data.length) {
+    throw new Error(
+      `NRRD buffer length ${data.length} does not match sizes ${sourceSizes.join('x')}`
+    );
+  }
+
+  const isIdentity =
+    permutation[0] === 0 &&
+    permutation[1] === 1 &&
+    permutation[2] === 2 &&
+    !flips[0] &&
+    !flips[1] &&
+    !flips[2];
+  if (isIdentity) {
     return data;
   }
 
-  const sliceSize = width * height;
   const out = new Uint16Array(data.length);
-  for (let k = 0; k < numSlices; k++) {
-    const srcK = flipK ? numSlices - 1 - k : k;
-    const srcSliceOffset = srcK * sliceSize;
-    const dstSliceOffset = k * sliceSize;
-    for (let j = 0; j < height; j++) {
-      const srcJ = flipJ ? height - 1 - j : j;
-      const srcRowOffset = srcSliceOffset + srcJ * width;
-      const dstRowOffset = dstSliceOffset + j * width;
-      if (flipI) {
-        for (let i = 0; i < width; i++) {
-          out[dstRowOffset + i] = data[srcRowOffset + (width - 1 - i)];
+  const sourceDims = [sourceX, sourceY, sourceZ];
+  for (let z = 0; z < targetZ; z++) {
+    for (let y = 0; y < targetY; y++) {
+      for (let x = 0; x < targetX; x++) {
+        const targetCoord = [x, y, z];
+        const sourceCoord = [0, 0, 0];
+        for (let targetAxis = 0; targetAxis < 3; targetAxis++) {
+          const sourceAxis = permutation[targetAxis];
+          const value = targetCoord[targetAxis];
+          sourceCoord[sourceAxis] = flips[targetAxis]
+            ? sourceDims[sourceAxis] - 1 - value
+            : value;
         }
-      } else {
-        out.set(
-          data.subarray(srcRowOffset, srcRowOffset + width),
-          dstRowOffset
-        );
+        const sourceIndex =
+          sourceCoord[0] +
+          sourceCoord[1] * sourceX +
+          sourceCoord[2] * sourceX * sourceY;
+        const targetIndex = x + y * targetX + z * targetX * targetY;
+        out[targetIndex] = data[sourceIndex];
       }
     }
   }
   return out;
+};
+
+const transformCentroidIJK = (
+  sourceImage: number[],
+  transform: MaskAxisTransform
+): number[] => {
+  if (sourceImage.length < 3) {
+    return sourceImage;
+  }
+  const { permutation, flips, sourceSizes } = transform;
+  const target = [0, 0, 0];
+  for (let targetAxis = 0; targetAxis < 3; targetAxis++) {
+    const sourceAxis = permutation[targetAxis];
+    const sourceValue = sourceImage[sourceAxis];
+    target[targetAxis] = flips[targetAxis]
+      ? sourceSizes[sourceAxis] - 1 - sourceValue
+      : sourceValue;
+  }
+  return target;
 };
 
 export default class MonaiLabelPanel extends Component {
@@ -542,46 +632,21 @@ export default class MonaiLabelPanel extends Component {
     const { displaySet } = this.getActiveViewportInfo();
     const segmentationId = displaySet.SeriesInstanceUID;
 
-    const width =
-      header && header.sizes && header.sizes.length >= 1
-        ? Number(header.sizes[0])
-        : 0;
-    const height =
-      header && header.sizes && header.sizes.length >= 2
-        ? Number(header.sizes[1])
-        : 0;
-    const numSlices =
-      header && header.sizes && header.sizes.length >= 3
-        ? Number(header.sizes[2])
-        : 0;
-    const axisFlips = computeMaskAxisFlips(
+    const axisTransform = computeMaskAxisTransform(
       header,
-      displaySet?.instances || [],
-      numSlices
+      displaySet?.instances || []
     );
-    if (axisFlips && (axisFlips.flipI || axisFlips.flipJ || axisFlips.flipK)) {
-      console.info(
-        'Realigning mask voxel axes to match the physically sorted source volume.',
-        axisFlips
-      );
-      data = applyMaskAxisFlips(data, width, height, numSlices, axisFlips);
+    if (axisTransform) {
+      data = applyMaskAxisTransform(data, axisTransform);
     }
 
-    // Reformat centroids
+    // Reformat centroids using the exact same permutation/flips as the mask.
     const centroidsIJK = new Map();
     for (const [key, value] of Object.entries(response.centroids || {})) {
       const segmentIndex = parseInt(value[0], 10);
-      const image = value.slice(1).map((v) => parseFloat(v));
-      if (axisFlips && image.length >= 3) {
-        if (axisFlips.flipI && width) {
-          image[0] = width - 1 - image[0];
-        }
-        if (axisFlips.flipJ && height) {
-          image[1] = height - 1 - image[1];
-        }
-        if (axisFlips.flipK && numSlices) {
-          image[2] = numSlices - 1 - image[2];
-        }
+      let image = value.slice(1).map((v) => parseFloat(v));
+      if (axisTransform) {
+        image = transformCentroidIJK(image, axisTransform);
       }
       centroidsIJK.set(segmentIndex, { image: image, world: [] });
     }
