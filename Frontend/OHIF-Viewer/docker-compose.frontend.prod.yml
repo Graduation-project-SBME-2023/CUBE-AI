@@ -1,7 +1,7 @@
 name: CUBE.AI
 services:
   ohif_viewer:
-    image: ahmedmokhtar3/webapp:v1.0
+    image: cubeai1/webapp:v1.0
     container_name: webapp
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/config/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro

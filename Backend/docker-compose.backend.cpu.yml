@@ -30,7 +30,7 @@ services:
     restart: unless-stopped
 
   control-api:
-    image: ahmedmokhtar3/custom-monailabel:v1.0-cpu
+    image: cubeai1/custom-monailabel:v1.0-cpu
     container_name: control-api-backend
     command: python /monailabel/control_server_start.py
     ports:
@@ -56,7 +56,7 @@ services:
 
   monailabel:
     # CPU image — multi-arch (arm64 + amd64), no CUDA
-    image: ahmedmokhtar3/custom-monailabel:v1.0-cpu
+    image: cubeai1/custom-monailabel:v1.0-cpu
     container_name: monailabel-backend
     shm_size: 8G
     ports:
