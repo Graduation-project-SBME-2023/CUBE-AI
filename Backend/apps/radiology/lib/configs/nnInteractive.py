@@ -22,7 +22,7 @@ from monailabel.interfaces.tasks.train import TrainTask
 from monailabel.utils.others.generic import download_file, strtobool
 from monai.networks.nets import UNet
 from pathlib import Path
-from huggingface_hub import snapshot_download  # Install huggingface_hub if not already installed
+from lib.configs.model_artifacts import ensure_nninteractive_artifacts
 
 
 logger = logging.getLogger(__name__)
@@ -48,16 +48,7 @@ class NNINTERACTIVE(TaskConfig):
             os.path.join(self.model_dir, f"{name}.pt"),  # published
         ]
 
-        REPO_ID = "nnInteractive/nnInteractive"
-        MODEL_NAME = "nnInteractive_v1.0"  # Updated models may be available in the future
-        DOWNLOAD_DIR = os.getenv("MODELS_DIR")  # Specify the download directory
-
-        download_path = snapshot_download(
-            repo_id=REPO_ID,
-            allow_patterns=[f"{MODEL_NAME}/*"],
-            local_dir=DOWNLOAD_DIR
-        )
-        logger.info(f"Model downloaded to: {download_path}")
+        ensure_nninteractive_artifacts(self.model_dir, log=logger.info)
 
         self.target_spacing = (1.5, 1.5, 1.5)  # target space for image
         # Setting ROI size - This is for the image padding

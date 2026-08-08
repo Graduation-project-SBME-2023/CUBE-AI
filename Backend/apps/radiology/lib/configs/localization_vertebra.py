@@ -21,6 +21,7 @@ from monailabel.interfaces.config import TaskConfig
 from monailabel.interfaces.tasks.infer_v2 import InferTask
 from monailabel.interfaces.tasks.train import TrainTask
 from monailabel.utils.others.generic import download_file, strtobool
+from lib.configs.model_artifacts import ensure_model_archive
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,12 @@ class LocalizationVertebra(TaskConfig):
         if strtobool(self.conf.get("use_pretrained_model", "true")):
             url = f"{self.conf.get('pretrained_path', self.PRE_TRAINED_PATH)}"
             url = f"{url}/radiology_segmentation_segresnet_localization_vertebra.pt"
-            download_file(url, self.path[0])
+            ensure_model_archive(
+                self.path[0],
+                lambda: download_file(url, self.path[0]),
+                description="vertebra localization checkpoint",
+                log=logger.info,
+            )
 
         self.target_spacing = (1.3, 1.3, 1.3)  # target space for image
         # Setting ROI size - This is for the image padding

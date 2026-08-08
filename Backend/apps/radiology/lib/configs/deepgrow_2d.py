@@ -21,6 +21,7 @@ from monailabel.interfaces.config import TaskConfig
 from monailabel.interfaces.tasks.infer_v2 import InferTask
 from monailabel.interfaces.tasks.train import TrainTask
 from monailabel.utils.others.generic import download_file, strtobool
+from lib.configs.model_artifacts import ensure_model_archive
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,12 @@ class Deepgrow2D(TaskConfig):
         if strtobool(self.conf.get("use_pretrained_model", "true")):
             url = f"{self.conf.get('pretrained_path', self.PRE_TRAINED_PATH)}"
             url = f"{url}/radiology_deepgrow_2d_bunet.pt"
-            download_file(url, self.path[0])
+            ensure_model_archive(
+                self.path[0],
+                lambda: download_file(url, self.path[0]),
+                description="DeepGrow 2D checkpoint",
+                log=logger.info,
+            )
 
         # Network
         self.network = BasicUNet(

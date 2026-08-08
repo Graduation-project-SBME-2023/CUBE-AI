@@ -30,6 +30,7 @@ from monailabel.tasks.scoring.sum import Sum
 from monailabel.utils.others.generic import strtobool
 
 import urllib.request
+from lib.configs.model_artifacts import ensure_model_archive
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +59,12 @@ class sam(TaskConfig):
 
         # Download model if not present
         self.path = os.path.join(self.model_dir, "sam2.1_hiera_large.pt")
-        if not os.path.exists(self.path):
-            logger.info(f"Downloading model to {self.path}")
-            self.__download_checkpoints()
-        else:
-            logger.info(f"Using existing model at {self.path}")
+        ensure_model_archive(
+            self.path,
+            self.__download_checkpoints,
+            description="SAM 2.1 Hiera Large checkpoint",
+            log=logger.info,
+        )
         
         # Network
         self.network = UNet(
