@@ -39,6 +39,7 @@ from typing import List, Union
 from huggingface_hub import snapshot_download
 
 import urllib.request
+from lib.configs.qwen_embedding_model import ensure_qwen_embedding_model
 from lib.configs.voxtell_supported_labels import VOXTELL_SUPPORTED_LABELS
 
 logger = logging.getLogger(__name__)
@@ -73,9 +74,10 @@ class voxtell(TaskConfig):
         # Downloading text encoding model 
         self.text_encoding_model_name = "qwen3-4b-embedding"
         self.text_encoding_model_path = os.path.join(self.model_dir, self.text_encoding_model_name)
-        if not os.path.exists(self.text_encoding_model_path):
-            logger.info(f"Downloading text encoding model to {self.text_encoding_model_path}")
-            self.__download_text_encoding_checkpoints(self.text_encoding_model_name, self.text_encoding_model_path)
+        ensure_qwen_embedding_model(
+            self.text_encoding_model_path,
+            log=logger.info,
+        )
         
         # Network
         self.network = UNet(
@@ -157,13 +159,5 @@ class voxtell(TaskConfig):
         download_path = snapshot_download(
         repo_id="mrokuss/VoxTell",
         allow_patterns=[f"{model_name}/*", "*.json"],
-        local_dir=download_dir
-            )
-        
-    def __download_text_encoding_checkpoints(self, model_name, download_dir):
-        
-        download_path = snapshot_download(
-        repo_id="Qwen/Qwen3-Embedding-4B",
-        ignore_patterns=["*.gguf"],
         local_dir=download_dir
             )
