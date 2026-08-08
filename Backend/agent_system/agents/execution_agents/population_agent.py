@@ -1,5 +1,6 @@
 import sys
 import os
+from collections.abc import AsyncGenerator, Sequence
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, "..", ".."))
@@ -7,11 +8,14 @@ sys.path.append(root_dir)
 
 from pathlib import Path
 from autogen_agentchat.agents import AssistantAgent
+from autogen_agentchat.base import Response
+from autogen_agentchat.messages import BaseAgentEvent, BaseChatMessage, TextMessage
 from clients.ollamaClient import OllamaClient
 from autogen_core.models import SystemMessage
 from autogen_agentchat.ui import Console
 from autogen_core import CancellationToken
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
+from services.population_handoff import population_handoff_issues
 from services.timeout_policy import MCP_STANDARD_READ_SECONDS
 from descriptions.models_descriptions import POPULATION_PLANNER_AGENT_DESCRIPTION
 from system_prompts.system_messages import POPULATION_PLANNER_AGENT_SYSTEM_MESSAGE, POPULATION_EXEC_SYSTEM_MESSAGE
@@ -28,13 +32,92 @@ If the tool returns status other than 'ok', raise a scratchpad flag and stop.
 """
 
 class PopulationPlannerAgent(AssistantAgent):
-    def __init__(self, name, model_client, tools, description, system_message, max_tool_iterations):
+    COMPLETION_RETRIES = 2
+
+    def __init__(
+        self,
+        name,
+        model_client,
+        tools,
+        description,
+        system_message,
+        max_tool_iterations,
+        workspace_folder=None,
+    ):
         super().__init__(name=name,
                         model_client=model_client, 
                         tools=tools, 
                         description=description, 
                         system_message=system_message,
                         max_tool_iterations=max_tool_iterations)
+        self._workspace_folder = workspace_folder
+        self._population_completion_retries = self.COMPLETION_RETRIES
+
+    async def on_messages_stream(
+        self,
+        messages: Sequence[BaseChatMessage],
+        cancellation_token: CancellationToken,
+    ) -> AsyncGenerator[BaseAgentEvent | BaseChatMessage | Response, None]:
+        """Suppress premature model responses until the handoff is durable."""
+        pending_messages = messages
+        attempts = self._population_completion_retries + 1
+
+        for attempt in range(attempts):
+            final_response: Response | None = None
+            async for event in super().on_messages_stream(
+                pending_messages,
+                cancellation_token,
+            ):
+                if isinstance(event, Response):
+                    final_response = event
+                else:
+                    yield event
+
+            if final_response is None:
+                raise RuntimeError("Population planner did not produce a final response")
+
+            # Production always supplies a workspace. Keep the class usable by
+            # its legacy local harness, where no durable artifacts are expected.
+            if not self._workspace_folder:
+                yield final_response
+                return
+
+            issues = population_handoff_issues(self._workspace_folder)
+            if not issues:
+                yield final_response
+                return
+
+            if attempt == attempts - 1:
+                raise RuntimeError(
+                    "Population planner tried to finish before its mandatory "
+                    "handoff was complete: " + "; ".join(issues)
+                )
+
+            logger.warning(
+                "Population planner attempted an incomplete handoff; retrying "
+                "mandatory steps (%s)",
+                "; ".join(issues),
+            )
+            pending_messages = [
+                TextMessage(
+                    source="user",
+                    content=(
+                        "Your previous response attempted to finish the population stage, "
+                        "but its mandatory durable handoff is incomplete:\n- "
+                        + "\n- ".join(issues)
+                        + "\nContinue from the current tool state; do not restart the task and do "
+                        "not return a final response yet. Call every missing mandatory "
+                        "tool in order: validate_population_anatomy using the exact "
+                        "volumes_detail from the latest search (an empty list is valid only "
+                        "as an intermediate result), "
+                        "extract_cohort_labels once if available, generate_targets and wait "
+                        "until the doctor has selected and labeled at least one volume, "
+                        "scratchpad_write_summary, "
+                        "scratchpad_set_status(status='done'), then write_agent_output with "
+                        "status='completed'. Only finish after all artifacts exist."
+                    ),
+                )
+            ]
     
     @classmethod
     async def create(cls, model_client = None, workspace_folder=None, session_id=None):
@@ -116,7 +199,8 @@ class PopulationPlannerAgent(AssistantAgent):
             tools = final_tools,
             description = description,
             system_message = system_message,
-            max_tool_iterations = 20
+            max_tool_iterations = 20,
+            workspace_folder = workspace_folder,
         )
     
     @staticmethod

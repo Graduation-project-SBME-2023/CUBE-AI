@@ -36,7 +36,13 @@ async def _wait_for_cohort_approval(workspace_dir: str, config_path: str, csv_pa
             try:
                 with open(config_path, mode="r", encoding="utf-8") as f:
                     c = json.load(f)
-                    return c.get("cohort_approved", False) is True
+                datasetlist = c.get("datasetlist", [])
+                if c.get("cohort_approved", False) is not True or not datasetlist:
+                    return False
+                if not os.path.exists(csv_path):
+                    return False
+                with open(csv_path, mode="r", encoding="utf-8", newline="") as f:
+                    return any(csv.DictReader(f))
             except Exception:
                 return False
         return False
@@ -243,7 +249,11 @@ async def generate_targets() -> str:
             pass
 
     if not datasetlist:
-        msg = "Datasetlist is empty (0 cohort). Proceeding directly to Human-in-the-Loop UI checkpoint so user can view and manually select volumes from the dataviewer if desired."
+        msg = (
+            "Datasetlist is empty (0 cohort). Waiting at the Human-in-the-Loop "
+            "checkpoint until the user manually selects and labels at least one volume. "
+            "Downstream execution is blocked for an empty cohort."
+        )
         await scratchpad_raise_flag(level="warning", message=msg)
 
     if labelling_mode == "automatic":
@@ -299,8 +309,9 @@ async def generate_targets() -> str:
             content=f"### Validated Study Cohort Approved by Doctor\nThe user has reviewed and approved the final cohort in the UI dataviewer with a final count of {final_count} volume(s). Even if preliminary automated searches yielded fewer or zero cases, this post-review count ({final_count}) is the authoritative cohort size. All downstream agents (feature extraction, modeling, reporting) MUST use this finalized cohort from targets.csv without errors."
         )
     else:
-        await scratchpad_write_note(
-            content="### Empty Cohort Approved by Doctor\nThe user has reviewed the cohort in the UI dataviewer and approved a 0-size cohort."
+        raise RuntimeError(
+            "Cohort approval produced zero labeled volumes. The population stage "
+            "cannot continue until at least one volume is selected and labeled."
         )
 
     log_tool_state(ToolEvent(event_type='tool_finished', content_type='text',

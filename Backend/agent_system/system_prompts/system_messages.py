@@ -56,7 +56,7 @@ FORBIDDEN (cross-region broadening):
 
 If after trying all reasonable synonyms for the target body region you get ZERO results,
 that means the PACS genuinely does not contain matching automated data for this study. Report this honestly
-rather than substituting data from a different body region, but NEVER stop or error out! Mention the 0 results in the execution tab via scratchpad flag, save a 0 cohort, and continue to Step 5 and Step 6 so the user can manually choose volumes from the dataviewer or stop the workflow in the UI.
+rather than substituting data from a different body region. Mention the 0 results in the execution tab via scratchpad flag, save the 0-result intermediate state, and continue to Step 5 and Step 6 so the user can manually choose volumes in the dataviewer. NEVER finish the population agent or allow downstream agents to start until the doctor has selected and labeled at least one volume.
 
 === SCRATCHPAD INSTRUCTIONS ===
 At the very start of your task, register yourself:
@@ -625,7 +625,7 @@ Step 4.5: Anatomy Validation Gate (MANDATORY)
 - If 0 volumes match the required anatomy (or if search returned 0 candidate volumes):
   1. DO NOT STOP execution or raise a pipeline error!
   2. Raise a scratchpad flag with level="warning" mentioning on the agent execution tab that 0 matching studies were automatically found for this anatomical region.
-  3. Proceed normally to Step 5 (if available) and Step 6 (generate_targets). Do not halt early. When generate_targets pauses at the Human-in-the-Loop review gate, the user in the UI will be free to view the 0 cohort, manually select volumes from the dataviewer, or stop the workflow themselves.
+  3. Proceed normally to Step 5 (if available) and Step 6 (generate_targets). Do not finish early. generate_targets MUST remain at the Human-in-the-Loop review gate until the user has manually selected and labeled at least one volume. Never hand off a 0-size cohort.
 - Regardless of how many volumes match, use ONLY the validated_uids for all downstream steps. The tool automatically updates config.json and pushes the results to the UI tab.
 
 Step 5: Extract Clinical Labels (Automatic mode only)
@@ -642,6 +642,7 @@ Step 6: Use the generate_targets Tool (HITL Approval Gate)
 - This function MUST be used to assign targets to the cases and initiate the Human-in-the-Loop approval checkpoint before segmentation.
 - You MUST call this even if the cohort size is smaller than expected. Do not stop early.
 - In BOTH automatic and manual modes: after processing initial labels, generate_targets pauses execution to let the doctor interactively edit the cohort, assign labels, and explicitly approve the final list in the UI.
+- A valid approval MUST contain at least one selected and labeled volume. Never finalize, summarize, set status to done, write a completed output, or hand off while `final_cohort_size` is 0.
 - If generate_targets returns exactly "SILENT_RETRY", the doctor has not signed off on the final cohort yet. Call generate_targets again immediately. Do NOT output any conversational text or apologies — stay completely silent and keep calling until you receive a file path.
 
 Step 7: Finalize and Summarize
@@ -682,7 +683,7 @@ FORBIDDEN (cross-region broadening):
 
 If after trying all reasonable synonyms for the target body region you get ZERO results,
 that means the PACS genuinely does not contain matching automated data for this study. Report this honestly
-rather than substituting data from a different body region, but NEVER stop or error out! Mention the 0 results in the execution tab via scratchpad flag, save a 0 cohort, and continue to Step 5 and Step 6 so the user can manually choose volumes from the dataviewer or stop the workflow in the UI.
+rather than substituting data from a different body region. Mention the 0 results in the execution tab via scratchpad flag, save the 0-result intermediate state, and continue to Step 5 and Step 6 so the user can manually choose volumes in the dataviewer. NEVER finish the population agent or allow downstream agents to start until the doctor has selected and labeled at least one volume.
 
 === SCRATCHPAD INSTRUCTIONS ===
 At the very start of your task, register yourself:

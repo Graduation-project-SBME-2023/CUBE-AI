@@ -89,6 +89,10 @@ async def _save_and_broadcast_cohort(validated_uids: list[str]) -> dict:
                     config_data = json.load(f)
             config_data["datasetlist"] = validated_uids
             config_data["anatomy_validated"] = True
+            # Any change to the validated cohort invalidates an earlier HITL
+            # approval. The approval endpoint will set this back to true only
+            # after at least one selected volume has a valid target label.
+            config_data["cohort_approved"] = False
             with open(config_path, "w", encoding="utf-8") as f:
                 json.dump(config_data, f, indent=4)
             config_updated = True
@@ -147,7 +151,7 @@ async def validate_population_anatomy(
     Returns:
     - validated_uids: UIDs that passed anatomy validation
     - rejected_volumes: UIDs that were filtered out, with reasons
-    - Clear guidance to proceed even if 0 volumes match (so the doctor can select manually in UI)
+    - Clear guidance to wait at HITL if 0 volumes match so the doctor can select manually
 
     You MUST use the validated_uids list for all downstream steps.
     """
@@ -161,7 +165,7 @@ async def validate_population_anatomy(
                 "DO NOT STOP execution or raise a pipeline error! Instead: "
                 "(1) Note in your scratchpad/summary in the agent execution tab that 0 matching studies were automatically found. "
                 "(2) Proceed directly to Step 5 (if available) and Step 6 (generate_targets). "
-                "When generate_targets runs, it will pause at the Human-in-the-Loop UI review gate, allowing the doctor to view the 0 cohort, manually select volumes from the dataviewer if desired, or stop the workflow themselves."
+                "When generate_targets runs, it will remain at the Human-in-the-Loop UI review gate until the doctor selects and labels at least one volume. Never hand off a 0-size cohort."
             ),
             "validated_uids": [],
             "rejected_volumes": [],
@@ -262,7 +266,7 @@ async def validate_population_anatomy(
             f"DO NOT STOP execution or raise a pipeline error! Instead: "
             f"(1) Raise a scratchpad flag with level='warning' (or mention in your execution summary) that 0 matching studies were automatically found for this anatomy. "
             f"(2) Proceed directly to Step 5 (if available) and Step 6 (generate_targets). "
-            f"When generate_targets runs, it will pause at the Human-in-the-Loop UI review gate, allowing the doctor to view the 0 cohort, manually select volumes from the dataviewer if desired, or stop the workflow themselves."
+            f"When generate_targets runs, it will remain at the Human-in-the-Loop UI review gate until the doctor selects and labels at least one volume. Never hand off a 0-size cohort."
         )
     elif rejected:
         result["status"] = "success"

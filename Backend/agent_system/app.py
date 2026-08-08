@@ -63,6 +63,7 @@ from services.session_service import (
 )
 from services.best_effort import drain_best_effort, initialize_best_effort
 from services.pipeline_monitor import PipelineMonitor, raise_for_fatal_tool_failure
+from services.population_handoff import require_population_handoff
 from clients.backend_client import BackendClient
 from agents.execution_agents.segmentation.progressive import (
     artifact_key_for_pair,
@@ -379,6 +380,8 @@ async def run_pipeline(session: Session) -> None:
                         await session.execution_monitor.on_agent_active(src)
 
                     case BaseChatMessage(source=src):
+                        if src == "study_population_planner_agent":
+                            require_population_handoff(workspace_folder)
                         logger.info("━" * 60)
                         pipeline_logger.info(
                             f"💬 [{src}] ({type(event).__name__}): {event.content}"
@@ -392,11 +395,15 @@ async def run_pipeline(session: Session) -> None:
                         await session.execution_monitor.on_agent_active(src)
 
         except asyncio.CancelledError:
+            cancellation_token.cancel()
             await session.execution_monitor.on_pipeline_error(
                 Exception("Pipeline Cancelled")
             )
             raise
         except Exception as e:
+            # A consumer-side error does not automatically stop GraphFlow's
+            # participant tasks. Propagate every terminal error immediately.
+            cancellation_token.cancel()
             logger.error(f"here, {e} occured, check in this method")
             logger.error(e)
             await session.execution_monitor.on_pipeline_error(e)
