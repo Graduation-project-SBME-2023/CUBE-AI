@@ -11,6 +11,7 @@ const { sortStudyInstances, formatDate } = utils;
  * @param {*} param0
  */
 function PanelStudyBrowser({
+  commandsManager,
   servicesManager,
   getImageSrc,
   getStudiesForPatientByMRN,
@@ -34,7 +35,36 @@ function PanelStudyBrowser({
   const [displaySets, setDisplaySets] = useState([]);
   const [thumbnailImageSrcMap, setThumbnailImageSrcMap] = useState({});
 
-  const onDoubleClickThumbnailHandler = displaySetInstanceUID => {
+  const onDoubleClickThumbnailHandler = async displaySetInstanceUID => {
+    const displaySet = displaySetService.getDisplaySetByUID(displaySetInstanceUID);
+    const isLoadedSegmentation =
+      displaySet?.isOverlayDisplaySet &&
+      displaySet?.isLoaded &&
+      ['SEG', 'RTSTRUCT'].includes(displaySet.Modality);
+
+    if (isLoadedSegmentation) {
+      try {
+        // Populates referencedDisplaySetInstanceUID for derived display sets.
+        // Loaded masks should be hydrated over their source images instead of
+        // replacing the active viewport with the SEG/RT display set.
+        displaySet.getReferenceDisplaySet?.();
+        await commandsManager.runCommand('loadSegmentationDisplaySetsForViewport', {
+          displaySets: [displaySet],
+          viewportId: activeViewportId,
+        });
+        return;
+      } catch (error) {
+        console.warn(error);
+        uiNotificationService.show({
+          title: 'Mask Loading',
+          message: 'The selected mask could not be displayed over its referenced images.',
+          type: 'error',
+          duration: 3000,
+        });
+        return;
+      }
+    }
+
     let updatedViewports = [];
     const viewportId = activeViewportId;
     try {
@@ -241,6 +271,7 @@ function PanelStudyBrowser({
 }
 
 PanelStudyBrowser.propTypes = {
+  commandsManager: PropTypes.object.isRequired,
   servicesManager: PropTypes.object.isRequired,
   dataSource: PropTypes.shape({
     getImageIdsForDisplaySet: PropTypes.func.isRequired,
