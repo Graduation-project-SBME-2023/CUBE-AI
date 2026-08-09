@@ -1,3 +1,12 @@
+import os
+import sys
+
+# Make Backend/ importable (storage_paths lives there) before any local import.
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.abspath(os.path.join(current_dir, ".."))
+if root_dir not in sys.path:
+    sys.path.append(root_dir)
+
 import asyncio
 from contextlib import asynccontextmanager
 
@@ -33,12 +42,6 @@ from autogen_agentchat.base import TaskResult
 import logging
 import aiofiles
 import json
-import os
-import sys
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.abspath(os.path.join(current_dir, ".."))
-sys.path.append(root_dir)
 
 from storage_paths import (
     HYPOTHESES_DIR,

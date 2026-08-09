@@ -12,6 +12,7 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/mcp:/app/Backend/mcp
       - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/lib/configs:/app/Backend/apps/radiology/lib/configs:ro
     environment:
+      PYTHONPATH: /app/Backend
       BACKEND_STORAGE_ROOT: /storage
       AGENTS_WORKSPACE_DIR: /storage/hypotheses
       GENERAL_DATA_DIR: /storage/data/medical
