@@ -30,6 +30,7 @@ from .utils import (
     parse_nrrd_data,
     ensure_required_patient_tags
 )
+from .naming import build_segmentation_series_description
 
 logger = logging.getLogger(__name__)
 
@@ -618,10 +619,10 @@ class SegmentationService:
                 series_instance_uid=seg_series_uid,
                 series_number=1001,
                 sop_instance_uid=seg_sop_uid,
-                # Target identity lives in SegmentLabel/target_label. Keep the
-                # human-readable SeriesDescription free of encoded model/time
-                # fields so no runtime code is tempted to parse provenance.
-                series_description=f"Segmentation: {target_label}",
+                series_description=build_segmentation_series_description(
+                    clean_model,
+                    target_label,
+                ),
                 instance_number=1,
                 manufacturer='Manufacturer Name',
                 manufacturer_model_name='MONAI Label Backend',
