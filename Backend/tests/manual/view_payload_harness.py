@@ -1,5 +1,5 @@
 """
-Frontend View Test Script
+Frontend View Test Harness
 =========================
 Emits realistic dummy payloads via WebSocket to test ModelingView and FeaturesView
 without running any agents or tools.

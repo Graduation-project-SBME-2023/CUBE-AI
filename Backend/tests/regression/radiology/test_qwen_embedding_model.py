@@ -1,14 +1,8 @@
 import json
 import os
 import struct
-import sys
 import tempfile
 import unittest
-from pathlib import Path
-
-
-RADIOLOGY_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(RADIOLOGY_DIR))
 
 from lib.configs.qwen_embedding_model import (  # noqa: E402
     QWEN_REQUIRED_FILES,

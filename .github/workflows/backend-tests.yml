@@ -1,0 +1,123 @@
+name: Backend tests
+
+on:
+  pull_request:
+    paths:
+      - "Backend/**"
+      - ".github/workflows/backend-tests.yml"
+  push:
+    branches:
+      - Release
+    paths:
+      - "Backend/**"
+      - ".github/workflows/backend-tests.yml"
+
+jobs:
+  deterministic-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: cubeai1/agents-app:latest
+    env:
+      BACKEND_STORAGE_ROOT: /tmp/cubeai-backend-tests
+      AGENTS_WORKSPACE_DIR: /tmp/cubeai-backend-tests/hypotheses
+      BACKEND_TEMP_DIR: /tmp/cubeai-backend-tests/temp
+      BACKEND_LOG_DIR: /tmp/cubeai-backend-tests/logs
+      PYTHONPATH: ${{ github.workspace }}/Backend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install test-only dependencies
+        run: python -m pip install -r Backend/requirements-test.txt
+
+      - name: Run deterministic backend suite
+        run: >-
+          mkdir -p Backend/test-results &&
+          python -m pytest
+          -c Backend/pytest.ini
+          Backend/tests/unit
+          Backend/tests/contracts
+          Backend/tests/pipeline
+          -m "unit or contract or pipeline"
+          --junitxml=Backend/test-results/backend-deterministic.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-deterministic-test-results
+          path: Backend/test-results/backend-deterministic.xml
+          if-no-files-found: warn
+
+  agent-regression-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: cubeai1/agents-app:latest
+    env:
+      BACKEND_STORAGE_ROOT: /tmp/cubeai-backend-tests
+      AGENTS_WORKSPACE_DIR: /tmp/cubeai-backend-tests/hypotheses
+      BACKEND_TEMP_DIR: /tmp/cubeai-backend-tests/temp
+      BACKEND_LOG_DIR: /tmp/cubeai-backend-tests/logs
+      PYTHONPATH: ${{ github.workspace }}/Backend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install test-only dependencies
+        run: python -m pip install -r Backend/requirements-test.txt
+
+      - name: Run agent regression suite
+        run: >-
+          mkdir -p Backend/test-results &&
+          python -m pytest
+          -c Backend/pytest.ini
+          Backend/tests/regression/agent_system
+          -m regression
+          --junitxml=Backend/test-results/backend-agent-regression.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-agent-regression-test-results
+          path: Backend/test-results/backend-agent-regression.xml
+          if-no-files-found: warn
+
+  radiology-regression-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: cubeai1/custom-monailabel:v1.0-cpu
+    env:
+      BACKEND_STORAGE_ROOT: /tmp/cubeai-radiology-tests
+      AGENTS_WORKSPACE_DIR: /tmp/cubeai-radiology-tests/hypotheses
+      BACKEND_TEMP_DIR: /tmp/cubeai-radiology-tests/temp
+      BACKEND_LOG_DIR: /tmp/cubeai-radiology-tests/logs
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install test-only dependencies
+        run: python -m pip install -r Backend/requirements-test.txt
+
+      - name: Run radiology regression suite
+        run: >-
+          mkdir -p Backend/test-results &&
+          python -m pytest
+          -c Backend/pytest.ini
+          Backend/tests/regression/radiology
+          -m radiology
+          --junitxml=Backend/test-results/backend-radiology-regression.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-radiology-regression-test-results
+          path: Backend/test-results/backend-radiology-regression.xml
+          if-no-files-found: warn

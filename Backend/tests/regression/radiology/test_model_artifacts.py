@@ -1,14 +1,8 @@
 import json
 import os
-import sys
 import tempfile
 import unittest
 import zipfile
-from pathlib import Path
-
-
-RADIOLOGY_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(RADIOLOGY_DIR))
 
 from lib.configs.model_artifacts import (  # noqa: E402
     NNINTERACTIVE_REQUIRED_FILES,
