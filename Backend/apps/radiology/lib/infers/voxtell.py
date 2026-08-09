@@ -164,6 +164,38 @@ class ImageProcessor:
         seg_final = sitk.DICOMOrient(seg_sitk, orig_orient)
         return seg_final
 
+    @staticmethod
+    def ras_affine_from_sitk(image):
+        """Return the RAS affine expected by MONAI Label's result writer.
+
+        SimpleITK stores physical geometry in DICOM LPS coordinates, while the
+        MONAI Label writer accepts a RAS affine and converts it back to LPS
+        before writing the NRRD.  Supplying this affine prevents the writer
+        from emitting a geometry-free 4-D identity header for a binary mask.
+        """
+        if image.GetDimension() != 3:
+            raise ValueError(
+                f"VoxTell output must be 3-D, received {image.GetDimension()} dimensions"
+            )
+
+        direction = np.asarray(image.GetDirection(), dtype=np.float64).reshape(3, 3)
+        spacing = np.asarray(image.GetSpacing(), dtype=np.float64)
+        origin = np.asarray(image.GetOrigin(), dtype=np.float64)
+        if (
+            not np.all(np.isfinite(direction))
+            or not np.all(np.isfinite(spacing))
+            or not np.all(np.isfinite(origin))
+            or np.any(spacing <= 0)
+            or abs(float(np.linalg.det(direction))) < 1e-6
+        ):
+            raise ValueError("VoxTell output contains invalid physical geometry")
+
+        affine_lps = np.eye(4, dtype=np.float64)
+        affine_lps[:3, :3] = direction @ np.diag(spacing)
+        affine_lps[:3, 3] = origin
+        lps_to_ras = np.diag([-1.0, -1.0, 1.0, 1.0])
+        return lps_to_ras @ affine_lps
+
 
 class MyVoxTellPredictor(VoxTellPredictor):
 
@@ -444,9 +476,14 @@ class voxtell(BasicInferTask):
         # 5. Convert orientation back to original DICOM space
         seg_final = ImageProcessor.convert_seg_to_orginal_orientation(voxtell_seg_np_ras, image_ras, orig_orient)
         seg_np = sitk.GetArrayFromImage(seg_final)
-        seg_np = seg_np.transpose(2, 1, 0)
-        seg_np = seg_np[None].astype(np.uint8)
+        seg_np = seg_np.transpose(2, 1, 0).astype(np.uint8)
         data["pred"] = torch.from_numpy(seg_np)
+        data["pred_meta_dict"] = {
+            "affine": torch.as_tensor(
+                ImageProcessor.ras_affine_from_sitk(seg_final),
+                dtype=torch.float64,
+            )
+        }
 
         # =====================================================================
         # POST-REQUEST CLEANUP (cleans activations, keeps the model loaded)
