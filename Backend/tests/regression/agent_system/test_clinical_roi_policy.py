@@ -41,15 +41,15 @@ class ClinicalRoiPolicyTests(unittest.TestCase):
     def test_shared_policy_encodes_organ_lesion_and_both_precedence(self):
         self.assertIn(ROI_IDENTITY_POLICY, CLINICAL_TARGET_POLICY)
         self.assertIn(
-            "one whole-organ target: `spleen`, pathology `null`",
+            'one whole-organ target: canonical_label="spleen", pathology=null',
             ROI_IDENTITY_POLICY,
         )
         self.assertIn(
-            "one pathological target: `spleen lesion`",
+            'one pathological target: canonical_label="spleen lesion"',
             ROI_IDENTITY_POLICY,
         )
         self.assertIn(
-            "`spleen` and `spleen lesion`",
+            'canonical_label="spleen" and canonical_label="spleen lesion"',
             ROI_IDENTITY_POLICY,
         )
         self.assertNotIn(

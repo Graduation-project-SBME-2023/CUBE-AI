@@ -86,7 +86,7 @@ class ClinicalRoiPolicyTests(unittest.TestCase):
     def test_whole_organ_lesion_and_both_scopes_are_representable(self):
         cases = [
             ("whole_organ", ["spleen"]),
-            ("pathology", ["spleen lesion"]),
+            ("whole_lesion", ["spleen lesion"]),
             ("both", ["spleen", "spleen lesion"]),
         ]
         for scope, labels in cases:
@@ -207,13 +207,15 @@ class ClinicalRoiPolicyTests(unittest.TestCase):
 
 
 class SegmentationContractTests(unittest.TestCase):
-    def test_voxtell_target_drops_enhancement_description(self):
+    def test_voxtell_target_uses_compact_clinical_identity(self):
         intent = ClinicalTargetIntent(
             target_id="brain_tumor",
-            canonical_label="enhancing tumor of brain",
+            canonical_label="brain tumor",
             anatomy="brain",
-            pathology="enhancing tumor of brain",
-            confidence=1.0,
+            pathology="tumor",
+            scope="whole_lesion",
+            evidence_span="brain tumor",
+            intent_confidence=1.0,
             rationale="The enhancing tumor is the feature-extraction ROI.",
         )
 
@@ -229,8 +231,7 @@ class SegmentationContractTests(unittest.TestCase):
                         mode="generate",
                         prompt="brain tumor",
                     ),
-                    selected_model="voxtell",
-                    confidence=1.0,
+                    match_confidence=1.0,
                     rationale="Generate the compact canonical target.",
                 )
             ],
@@ -238,15 +239,19 @@ class SegmentationContractTests(unittest.TestCase):
         plan = _compose_resolution_plan(
             ClinicalTargetIntentPlan(targets=[intent]),
             candidate,
+            "interactive",
+            ["voxtell"],
         )
 
         self.assertEqual(plan.targets[0].voxtell_prompt.prompt, "brain tumor")
 
     def test_intent_prompt_defines_compact_voxtell_target(self):
         self.assertIn(
-            'canonical_label="brain tumor", anatomy="brain", pathology="tumor"',
+            '"canonical_label": "brain tumor"',
             INTENT_SYSTEM_MESSAGE,
         )
+        self.assertIn('"anatomy": "brain"', INTENT_SYSTEM_MESSAGE)
+        self.assertIn('"pathology": "tumor"', INTENT_SYSTEM_MESSAGE)
 
     def test_descriptive_voxtell_cache_prompt_cannot_replace_compact_target(self):
         plan = TargetResolutionPlan(
@@ -256,19 +261,22 @@ class SegmentationContractTests(unittest.TestCase):
                 ResolvedTarget(
                     target_id="brain_tumor",
                     canonical_label="brain tumor",
+                    inference_prompt="brain tumor",
                     anatomy="brain",
                     pathology="tumor",
+                    scope="whole_lesion",
                     voxtell_prompt=VoxTellPromptDecision(
                         mode="cache",
                         cache_candidate_id="cache_descriptive",
                     ),
-                    confidence=1.0,
+                    intent_confidence=1.0,
+                    match_confidence=1.0,
                     reason="The cache phrase is descriptive.",
                 )
             ],
         )
 
-        with self.assertRaisesRegex(ValueError, "compact canonical label"):
+        with self.assertRaisesRegex(ValueError, "canonical label"):
             validate_candidate_references(
                 plan,
                 mask_candidates=[],
@@ -289,7 +297,9 @@ class SegmentationContractTests(unittest.TestCase):
                     canonical_label="renal tumor",
                     anatomy="kidney",
                     pathology="tumor",
-                    confidence=1.0,
+                    scope="whole_lesion",
+                    evidence_span="renal tumor",
+                    intent_confidence=1.0,
                     rationale=intent_rationale,
                 )
             ]
@@ -303,8 +313,7 @@ class SegmentationContractTests(unittest.TestCase):
                         mode="generate",
                         prompt="renal tumor",
                     ),
-                    selected_model="voxtell",
-                    confidence=0.99,
+                    match_confidence=0.99,
                     rationale=candidate_rationale,
                 )
             ],
@@ -317,7 +326,12 @@ class SegmentationContractTests(unittest.TestCase):
             "The generated prompt is clinically equivalent.",
         )
 
-        plan = _compose_resolution_plan(intent_plan, candidate_plan)
+        plan = _compose_resolution_plan(
+            intent_plan,
+            candidate_plan,
+            "interactive",
+            ["voxtell"],
+        )
 
         self.assertEqual(
             plan.targets[0].reason,
@@ -331,7 +345,12 @@ class SegmentationContractTests(unittest.TestCase):
             "C" * 1000,
         )
 
-        plan = _compose_resolution_plan(intent_plan, candidate_plan)
+        plan = _compose_resolution_plan(
+            intent_plan,
+            candidate_plan,
+            "interactive",
+            ["voxtell"],
+        )
         reason = plan.targets[0].reason
         expected = (
             f"Clinical intent: {'I' * 1000} "
@@ -357,7 +376,7 @@ class SegmentationContractTests(unittest.TestCase):
                 accepted_mask_candidate_ids=["mask_1"],
                 voxtell_prompt=prompt,
                 selected_model="voxtell",
-                confidence=0.59,
+                match_confidence=0.59,
                 rationale="Candidate looks similar.",
             )
 
@@ -366,7 +385,7 @@ class SegmentationContractTests(unittest.TestCase):
             accepted_mask_candidate_ids=["mask_1"],
             voxtell_prompt=prompt,
             selected_model="voxtell",
-            confidence=0.6,
+            match_confidence=0.6,
             rationale="Candidate is equivalent.",
         )
         self.assertEqual(decision.accepted_mask_candidate_ids, ["mask_1"])
@@ -420,8 +439,10 @@ class SegmentationPlannerTests(unittest.IsolatedAsyncioTestCase):
                                             "canonical_label": "spleen",
                                             "anatomy": "spleen",
                                             "pathology": None,
+                                            "scope": "whole_organ",
                                             "laterality": "unspecified",
-                                            "confidence": 1.0,
+                                            "evidence_span": "whole spleen",
+                                            "intent_confidence": 1.0,
                                             "rationale": "Whole-spleen ROI requested.",
                                         }
                                     ]
@@ -439,7 +460,6 @@ class SegmentationPlannerTests(unittest.IsolatedAsyncioTestCase):
                         SimpleNamespace(
                             content=json.dumps(
                                 {
-                                    "chosen_path": "interactive",
                                     "decisions": [
                                         {
                                             "target_id": "spleen",
@@ -449,8 +469,7 @@ class SegmentationPlannerTests(unittest.IsolatedAsyncioTestCase):
                                                 "cache_candidate_id": None,
                                                 "prompt": "spleen",
                                             },
-                                            "selected_model": "voxtell",
-                                            "confidence": 1.0,
+                                            "match_confidence": 1.0,
                                             "rationale": "Generate canonical prompt.",
                                         }
                                     ],
@@ -481,7 +500,7 @@ class SegmentationPlannerTests(unittest.IsolatedAsyncioTestCase):
 
 class SegmentationUtilityTests(unittest.TestCase):
     def test_short_explicit_instruction_is_preserved(self):
-        instruction = SegmentationModule._build_instruction(
+        instruction, roi_interpretation = SegmentationModule._build_instruction(
             {
                 "plan": {
                     "steps": [
@@ -497,9 +516,10 @@ class SegmentationUtilityTests(unittest.TestCase):
             }
         )
         self.assertEqual(instruction, "Left kidney lesion")
+        self.assertIsNone(roi_interpretation)
 
     def test_persisted_voxtell_command_prompt_is_canonicalized(self):
-        instruction = SegmentationModule._build_instruction(
+        instruction, roi_interpretation = SegmentationModule._build_instruction(
             {
                 "plan": {
                     "steps": [
@@ -520,6 +540,7 @@ class SegmentationUtilityTests(unittest.TestCase):
             instruction,
             'Run VoxTell with the prompt "spleen".',
         )
+        self.assertIsNone(roi_interpretation)
 
     def test_quoted_multipart_boundary_is_supported(self):
         body = (
@@ -953,7 +974,7 @@ class EmptySegmentationResultTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             volumes = workspace_subpath(workspace, "volumes")
-            volumes.mkdir()
+            volumes.mkdir(parents=True)
             reference = sitk.Image([5, 4, 3], sitk.sitkInt16)
             reference.SetSpacing((0.8, 0.9, 2.5))
             reference.SetOrigin((10.0, 20.0, -5.0))
@@ -1096,6 +1117,7 @@ class SegmentationRecoveryTests(unittest.TestCase):
                 path.write_bytes(b"test")
 
             manifest_path = workspace_subpath(workspace, "segmentation_manifest.json")
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
             manifest_path.write_text(
                 json.dumps(
                     {
@@ -1127,6 +1149,7 @@ class SegmentationRecoveryTests(unittest.TestCase):
             output_path = workspace_subpath(workspace, "outputs/segmentation_agent_output.json")
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"test")
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
             manifest_path.write_text(
                 json.dumps(
                     {

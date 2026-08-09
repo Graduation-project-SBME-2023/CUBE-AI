@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 
-BACKEND_DIR = Path(__file__).resolve().parents[2]
+BACKEND_DIR = Path(__file__).resolve().parents[3]
 AGENT_SYSTEM_DIR = BACKEND_DIR / "agent_system"
 for import_root in (str(BACKEND_DIR), str(AGENT_SYSTEM_DIR)):
     if import_root not in sys.path:

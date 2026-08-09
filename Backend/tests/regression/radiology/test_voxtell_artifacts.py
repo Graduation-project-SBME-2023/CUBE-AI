@@ -1,14 +1,8 @@
 import json
 import os
-import sys
 import tempfile
 import unittest
 import zipfile
-from pathlib import Path
-
-
-RADIOLOGY_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(RADIOLOGY_DIR))
 
 from lib.configs.voxtell_artifacts import (  # noqa: E402
     VOXTELL_REQUIRED_FILES,
@@ -62,8 +56,14 @@ class VoxTellArtifactsTest(unittest.TestCase):
     def test_truncated_checkpoint_is_removed_before_download(self):
         with tempfile.TemporaryDirectory() as models_dir:
             self.write_complete_snapshot(models_dir)
+            checkpoint_relative = next(
+                path
+                for path in VOXTELL_REQUIRED_FILES
+                if path.endswith("checkpoint_final.pth")
+            )
             checkpoint = os.path.join(
-                models_dir, "voxtell_v1.0", "fold_0", "checkpoint_final.pth"
+                models_dir,
+                *checkpoint_relative.split("/"),
             )
             with open(checkpoint, "rb+") as stream:
                 stream.truncate(10)
