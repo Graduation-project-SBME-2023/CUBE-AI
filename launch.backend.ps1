@@ -1,7 +1,15 @@
 #  =========================================
 #  OHIF-Standalone Backend-only launcher
 #  Double-click this file to launch
-#  (no frontend - use launch.ps1 for both)
+#
+#  - No frontend: use launch.ps1 for both.
+#  - No image updates: runs whatever images are already on this
+#    machine (--pull never). Use launch.ps1 when you actually
+#    want to fetch newer images.
+#  - Applies the storage changes: compose recreates only the
+#    containers whose spec changed, which is what makes the new
+#    Backend\storage mounts and BACKEND_STORAGE_ROOT / *_DIR env
+#    vars take effect.
 #  =========================================
 
 # Keep the window open if something goes wrong
@@ -149,15 +157,22 @@ else {
 #  === 6. Launch =================================
 
 Write-Warn "Starting backend Docker containers..."
-Write-Warn "First run may take several minutes."
+Write-Warn "Using the images already on this machine - nothing will be pulled or updated."
+Write-Warn "Only containers whose config changed (storage mounts, storage env vars)"
+Write-Warn "are recreated; everything else is left running as-is."
 Write-Host ""
 
+# --pull never      : never contact the registry, use the local image only.
+# (no --force-recreate) : compose recreates a container only when its spec
+#                     changed, so the storage volume/env edits land while
+#                     unrelated services keep their current containers.
 docker compose `
     -f $BackendCompose `
-    up
+    up `
+    --pull never
 
 if ($LASTEXITCODE -ne 0) {
-    Stop-Launch "docker compose exited with code $LASTEXITCODE. Check the output above for errors."
+    Stop-Launch "docker compose exited with code $LASTEXITCODE.`nIf it complains that an image is missing, that image was never pulled on this machine - run launch.ps1 (or 'docker compose -f `"$BackendCompose`" pull') once to fetch it."
 }
 
 #  === 7. Final Message =================================
