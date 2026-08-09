@@ -1,0 +1,171 @@
+#  =========================================
+#  OHIF-Standalone Backend-only launcher
+#  Double-click this file to launch
+#  (no frontend - use launch.ps1 for both)
+#  =========================================
+
+# Keep the window open if something goes wrong
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+function Write-OK {
+    param($m)
+    Write-Host "[OK] $m" -ForegroundColor Green
+}
+
+function Write-Warn {
+    param($m)
+    Write-Host "[!] $m" -ForegroundColor Yellow
+}
+
+function Stop-Launch {
+    param($m)
+    Write-Host "[ERROR] $m" -ForegroundColor Red
+    Write-Host ""
+    Read-Host "Press Enter to close"
+    exit 1
+}
+
+Write-Host ""
+Write-Host "  ========================================="
+Write-Host "  OHIF-Standalone Backend-only launcher"
+Write-Host "  ========================================="
+Write-Host ""
+
+# -- 1. Docker --------------------------------
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Stop-Launch "Docker is not installed. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ then re-run this script."
+}
+
+try {
+    $null = docker info 2>&1
+    if ($LASTEXITCODE -ne 0) { throw }
+}
+catch {
+    Stop-Launch "Docker Desktop is not running.`nPlease open Docker Desktop, wait until it shows 'Docker is running', then double-click this script again."
+}
+
+Write-OK "Docker is running."
+
+#  = 2. Ollama ==================================
+if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
+    Stop-Launch "Ollama is not installed. Download it from https://ollama.com/download then re-run this script."
+}
+
+$ollamaOk = $false
+
+try {
+    $resp = Invoke-WebRequest `
+        -Uri "http://localhost:11434" `
+        -UseBasicParsing `
+        -TimeoutSec 3 `
+        -ErrorAction SilentlyContinue
+
+    if ($resp.StatusCode -lt 500) {
+        $ollamaOk = $true
+    }
+}
+catch {}
+
+if (-not $ollamaOk) {
+    try {
+        $null = ollama list 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            $ollamaOk = $true
+        }
+    }
+    catch {}
+}
+
+if (-not $ollamaOk) {
+    Stop-Launch "Ollama does not appear to be running.`nOpen the Ollama app from your Start menu, wait a moment, then double-click this script again."
+}
+
+Write-OK "Ollama is running."
+
+#  === 3. Environment Variable ================================
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
+$env:COMPOSE_PROJECT_DIR = $ScriptDir
+
+Write-OK "COMPOSE_PROJECT_DIR set to: $ScriptDir"
+
+#  === 4. Backend Selection =================================
+Write-Host ""
+Write-Host "Select backend mode:"
+Write-Host "  1) GPU"
+Write-Host "  2) CPU"
+Write-Host ""
+
+:backendLoop while ($true) {
+    $BackendChoice = Read-Host "Choice [1-2]"
+
+    switch ($BackendChoice) {
+        "1" {
+            $BackendCompose = Join-Path $ScriptDir "Backend\docker-compose.backend.gpu.yml"
+            $BackendMode = "GPU"
+            break backendLoop
+        }
+
+        "2" {
+            $BackendCompose = Join-Path $ScriptDir "Backend\docker-compose.backend.cpu.yml"
+            $BackendMode = "CPU"
+            break backendLoop
+        }
+
+        default {
+            Write-Warn "Invalid selection."
+        }
+    }
+}
+
+Write-Host ""
+Write-OK "Selected backend: $BackendMode"
+Write-Warn "Frontend will NOT be started. Run launch.ps1 if you need the viewer."
+Write-Host ""
+
+#  === 5. Storage migration =================================
+# Relocates pre-restructure runtime data into Backend/storage. Silent no-op
+# once migrated, and on a fresh clone with nothing to move.
+$MigrateScript = Join-Path $ScriptDir "Backend\scripts\migrate_storage.py"
+$PythonBin = $null
+foreach ($candidate in @("python", "python3", "py")) {
+    if (Get-Command $candidate -ErrorAction SilentlyContinue) {
+        $PythonBin = $candidate
+        break
+    }
+}
+
+if ($PythonBin) {
+    & $PythonBin $MigrateScript --auto
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Launch "Storage migration failed. Your data has not been lost - see the error above.`nA rollback script was written to Backend\storage\_migrated-legacy\."
+    }
+}
+else {
+    Write-Warn "Python not found; skipping the storage migration check."
+    Write-Warn "If this is an upgrade from an older checkout, run Backend\scripts\migrate_storage.py --execute manually."
+}
+
+#  === 6. Launch =================================
+
+Write-Warn "Starting backend Docker containers..."
+Write-Warn "First run may take several minutes."
+Write-Host ""
+
+docker compose `
+    -f $BackendCompose `
+    up
+
+if ($LASTEXITCODE -ne 0) {
+    Stop-Launch "docker compose exited with code $LASTEXITCODE. Check the output above for errors."
+}
+
+#  === 7. Final Message =================================
+Write-Host ""
+Write-OK "Agents API:  http://localhost:8150"
+Write-OK "Control API: http://localhost:8001"
+Write-OK "MONAI Label: http://localhost:8000"
+Write-OK "Orthanc:     http://localhost:8043"
+Write-OK "Postgres:    localhost:5433"
+
+Read-Host "Press Enter to close"
