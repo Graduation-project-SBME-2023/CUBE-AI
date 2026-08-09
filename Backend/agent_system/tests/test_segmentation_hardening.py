@@ -609,6 +609,168 @@ class SegmentationUtilityTests(unittest.TestCase):
             self.assertEqual(aligned.GetOrigin(), reference.GetOrigin())
             self.assertEqual(aligned.GetDirection(), reference.GetDirection())
 
+    def test_fresh_same_size_mask_still_uses_physical_space_alignment(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp = Path(temp_dir)
+            reference_path = temp / "volume.nii.gz"
+            mask_path = temp / "mask.nii.gz"
+            output_path = temp / "aligned.nii.gz"
+
+            reference = sitk.Image([4, 3, 5], sitk.sitkInt16)
+            reference.SetOrigin((0.0, 0.0, 0.0))
+            reference.SetDirection(
+                (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+            )
+            sitk.WriteImage(reference, str(reference_path))
+
+            mask_array = np.zeros((5, 3, 4), dtype=np.uint8)
+            mask_array[4, 1, 2] = 1
+            mask = sitk.GetImageFromArray(mask_array)
+            mask.SetOrigin((0.0, 0.0, 4.0))
+            mask.SetDirection(
+                (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0)
+            )
+            sitk.WriteImage(mask, str(mask_path))
+
+            result = align_and_binarize_mask(
+                str(mask_path),
+                str(reference_path),
+                str(output_path),
+            )
+            aligned_array = sitk.GetArrayFromImage(sitk.ReadImage(str(output_path)))
+
+            self.assertEqual(result["alignment_mode"], "physical_resample")
+            self.assertEqual(int(aligned_array[0, 1, 2]), 1)
+            self.assertEqual(int(aligned_array[4, 1, 2]), 0)
+
+
+class SegmentationReuseAlignmentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_only_reused_masks_enable_index_order_compatibility(self):
+        for reused in (True, False):
+            with self.subTest(reused=reused):
+                module = SegmentationModule(session_id="session")
+                module._persist_processing_state = MagicMock()
+                module._workspace_volume_is_valid = MagicMock(return_value=True)
+                item = {
+                    "pair_id": "volume__spleen",
+                    "artifact_key": "mask-key",
+                    "volume_uid": "volume",
+                    "target_id": "spleen",
+                    "model": "voxtell",
+                    "source_segmentation_uid": "segmentation",
+                    "reused": reused,
+                    "is_empty_mask": False,
+                    "inference_result": None,
+                }
+                download = AsyncMock(
+                    return_value=(
+                        [
+                            {
+                                "pair_id": item["pair_id"],
+                                "geometry_adjusted": False,
+                                "geometry": None,
+                            }
+                        ],
+                        [],
+                    )
+                )
+                publisher = SimpleNamespace(publish_ready=AsyncMock())
+
+                with (
+                    patch(
+                        "agent_system.agents.execution_agents.segmentation.module."
+                        "download_and_pair_volumes",
+                        new=download,
+                    ),
+                    patch(
+                        "agent_system.agents.execution_agents.segmentation.module."
+                        "generate_gif_overlays",
+                        return_value=[
+                            {
+                                "gifPath": "overlays/mask-key.gif",
+                                "isEmptyMask": False,
+                            }
+                        ],
+                    ),
+                ):
+                    prepared = await module._prepare_pair_preview(
+                        item,
+                        workspace_dir="workspace",
+                        resolution_outcome=SimpleNamespace(),
+                        work_items=[item],
+                        run_id="run",
+                        publisher=publisher,
+                    )
+
+                requested_pair = download.await_args.args[1][0]
+                self.assertTrue(prepared)
+                self.assertEqual(
+                    requested_pair["preserve_index_order"],
+                    reused,
+                )
+
+
+class DicomSegGeometryAlignmentTests(unittest.TestCase):
+    @staticmethod
+    def _source_images(*, columns=4, rows=3, slices=2):
+        images = []
+        for z_index in range(slices):
+            dataset = Dataset()
+            dataset.Columns = columns
+            dataset.Rows = rows
+            dataset.PixelSpacing = [1.0, 1.0]
+            dataset.ImageOrientationPatient = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+            dataset.ImagePositionPatient = [0.0, 0.0, float(z_index)]
+            dataset.InstanceNumber = z_index + 1
+            images.append(dataset)
+        return images
+
+    @staticmethod
+    def _legacy_voxtell_header(*, columns=4, rows=3, slices=2):
+        return {
+            "dimension": 4,
+            "sizes": np.asarray([1, columns, rows, slices]),
+            "space directions": np.eye(4),
+            "space origin": np.zeros(4),
+        }
+
+    def test_voxtell_legacy_4d_header_uses_validated_source_index_grid(self):
+        mask = np.zeros((2, 3, 4), dtype=np.uint8)
+        mask[1, 1, 2] = 1
+
+        aligned, flips, details = (
+            SegmentationService._align_labelmap_axes_to_source_slices(
+                mask,
+                self._legacy_voxtell_header(),
+                self._source_images(),
+                allow_source_index_fallback=True,
+            )
+        )
+
+        self.assertTrue(np.array_equal(aligned, mask))
+        self.assertEqual(flips, {"x": False, "y": False, "z": False})
+        self.assertEqual(details["mode"], "source_index_grid_fallback")
+        self.assertTrue(details["geometry_adjusted"])
+        self.assertTrue(details["index_order_preserved"])
+        self.assertEqual(details["foreground_retention_ratio"], 1.0)
+
+    def test_invalid_nrrd_geometry_stays_rejected_without_voxtell_contract(self):
+        with self.assertRaisesRegex(ValueError, "NRRD physical geometry"):
+            SegmentationService._align_labelmap_axes_to_source_slices(
+                np.zeros((2, 3, 4), dtype=np.uint8),
+                self._legacy_voxtell_header(),
+                self._source_images(),
+            )
+
+    def test_voxtell_fallback_rejects_a_shape_mismatch(self):
+        with self.assertRaisesRegex(ValueError, "NRRD physical geometry"):
+            SegmentationService._align_labelmap_axes_to_source_slices(
+                np.zeros((3, 3, 4), dtype=np.uint8),
+                self._legacy_voxtell_header(),
+                self._source_images(),
+                allow_source_index_fallback=True,
+            )
+
 
 class PipelineFailureTests(unittest.IsolatedAsyncioTestCase):
     class _SessionService:

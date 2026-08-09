@@ -381,6 +381,12 @@ class SegmentationModule:
                     "target_id": item["target_id"],
                     "label_uid": item.get("source_segmentation_uid"),
                     "is_empty_mask": bool(item.get("is_empty_mask")),
+                    # Historical DICOM-SEG exports can carry a reversed affine
+                    # even though their voxel buffer is already in the source
+                    # volume's index order.  Only reused/pre-existing masks
+                    # need this compatibility mode; fresh inference keeps the
+                    # physical-space normalization path unchanged.
+                    "preserve_index_order": bool(item.get("reused")),
                 }
             ],
             download_volumes=not self._workspace_volume_is_valid(
@@ -502,6 +508,29 @@ class SegmentationModule:
             or pair_result.get("geometry_adjusted")
         )
         item["geometry"] = pair_result.get("geometry")
+        item["alignment_mode"] = pair_result.get("alignment_mode")
+        item["legacy_repair_applied"] = bool(
+            pair_result.get("legacy_repair_applied", False)
+        )
+        item["legacy_repair"] = pair_result.get("legacy_repair")
+        inference_alignment = item.get("inference_result") or {}
+        item["geometry_version"] = (
+            inference_alignment.get("geometry_version")
+            or pair_result.get("geometry_version")
+        )
+        item["z_axis_reversed"] = bool(
+            inference_alignment.get("z_axis_reversed", False)
+        )
+        item["x_axis_flipped"] = bool(
+            inference_alignment.get("x_axis_flipped", False)
+        )
+        item["y_axis_flipped"] = bool(
+            inference_alignment.get("y_axis_flipped", False)
+        )
+        item["axis_permutation"] = inference_alignment.get(
+            "axis_permutation"
+        )
+        item["slice_alignment"] = inference_alignment.get("slice_alignment")
 
         previews = await asyncio.to_thread(
             generate_gif_overlays,
@@ -703,6 +732,12 @@ class SegmentationModule:
                         "final_mask_shape",
                         "is_empty_mask",
                         "foreground_voxels",
+                        "z_axis_reversed",
+                        "x_axis_flipped",
+                        "y_axis_flipped",
+                        "axis_permutation",
+                        "slice_alignment",
+                        "geometry_version",
                     )
                 }
                 item["source_segmentation_uid"] = segmentation_uid or None
@@ -971,6 +1006,15 @@ class SegmentationModule:
                 item.setdefault("inference_job_id", inference_job_id)
                 item.setdefault("gif_path", None)
                 item.setdefault("reuse_candidate_uid", None)
+                item.setdefault("alignment_mode", None)
+                item.setdefault("legacy_repair_applied", False)
+                item.setdefault("legacy_repair", None)
+                item.setdefault("geometry_version", None)
+                item.setdefault("z_axis_reversed", False)
+                item.setdefault("x_axis_flipped", False)
+                item.setdefault("y_axis_flipped", False)
+                item.setdefault("axis_permutation", None)
+                item.setdefault("slice_alignment", None)
                 if item.get("mask_path"):
                     mask_path = (workspace / str(item["mask_path"])).resolve()
                     mask_path.relative_to(workspace)
@@ -1380,6 +1424,15 @@ class SegmentationModule:
                         "warning": None,
                         "geometry_adjusted": False,
                         "geometry": None,
+                        "alignment_mode": None,
+                        "legacy_repair_applied": False,
+                        "legacy_repair": None,
+                        "geometry_version": None,
+                        "z_axis_reversed": False,
+                        "x_axis_flipped": False,
+                        "y_axis_flipped": False,
+                        "axis_permutation": None,
+                        "slice_alignment": None,
                         "error_stage": None,
                         "error": None,
                         "error_details": None,
