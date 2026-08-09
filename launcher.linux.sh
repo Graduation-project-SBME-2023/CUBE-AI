@@ -103,7 +103,28 @@ info "Selected backend: $BACKEND_MODE"
 info "Selected frontend: $FRONTEND_MODE"
 echo
 
-# ── 6. Launch ────────────────────────────────
+# ── 6. Storage migration ─────────────────────
+# Relocates pre-restructure runtime data into Backend/storage. Silent no-op
+# once migrated, and on a fresh clone with nothing to move.
+if command -v python3 &>/dev/null; then
+  PYTHON_BIN="python3"
+elif command -v python &>/dev/null; then
+  PYTHON_BIN="python"
+else
+  PYTHON_BIN=""
+fi
+
+if [[ -n "$PYTHON_BIN" ]]; then
+  if ! "$PYTHON_BIN" "$COMPOSE_PROJECT_DIR/Backend/scripts/migrate_storage.py" --auto; then
+    abort "Storage migration failed. Your data has not been lost — see the error above.
+       A rollback script was written to Backend/storage/_migrated-legacy/."
+  fi
+else
+  warn "Python not found; skipping the storage migration check."
+  warn "If this is an upgrade from an older checkout, run Backend/scripts/migrate_storage.py --execute manually."
+fi
+
+# ── 7. Launch ────────────────────────────────
 if [[ "$FRONTEND_MODE" == "Docker" ]]; then
   warn "Starting Docker containers..."
   warn "First run may take several minutes."

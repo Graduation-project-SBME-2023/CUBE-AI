@@ -29,11 +29,12 @@ from typing import Any, Dict, List, Literal, Optional
 
 from . import mcp
 from pydantic import BaseModel, ConfigDict, Field
+from storage_paths import HYPOTHESES_DIR, workspace_subpath
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "../../agent_system/workspace")
-OUTPUTS_DIR = os.path.join(WORKSPACE_DIR, "outputs")
+WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", str(HYPOTHESES_DIR / "workspace_default"))
+OUTPUTS_DIR = str(workspace_subpath(WORKSPACE_DIR, "outputs"))
 
 OutputStatus = Literal["completed", "failed", "partial"]
 

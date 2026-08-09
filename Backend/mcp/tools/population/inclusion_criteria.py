@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Annotated
 from pydantic import Field
 from .. import mcp
+from storage_paths import workspace_subpath
 
 @mcp.tool()
 async def write_inclusion_criteria(
@@ -25,7 +26,7 @@ async def write_inclusion_criteria(
 
     # 1. Handle File Saving (Only if WORKSPACE_DIR exists)
     if workspace_dir:
-        json_path = Path(workspace_dir) / "config.json"
+        json_path = workspace_subpath(workspace_dir, "config.json")
         
         try:
             # Ensure the directory exists (creates if missing)

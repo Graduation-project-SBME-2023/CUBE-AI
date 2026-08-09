@@ -21,6 +21,7 @@ import shutil
 import gc
 import time
 import tempfile
+from storage_paths import TEMP_DIR
 import pickle
 import os
 
@@ -197,7 +198,9 @@ class ImageProcessor:
                 load_func = ImageProcessor.load_nrrd_file
             
             # Create temporary file with appropriate suffix
-            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:
+            temp_dir = TEMP_DIR / "radiology"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=temp_dir) as temp_file:
                 temp_file.write(data_bytes)
                 temp_path = temp_file.name
             
@@ -307,7 +310,7 @@ class StateManager:
     @staticmethod
     def save_state(state):
          # Get the temporary directory
-        temp_file_path = os.path.join(tempfile.gettempdir(), "inference_state.pkl")
+        temp_file_path = str(TEMP_DIR / "radiology" / "inference_state.pkl")
         with open(temp_file_path, "wb") as temp_file:
              # Serialize and save the state
             pickle.dump(state, temp_file)
@@ -348,7 +351,7 @@ class sam(BasicInferTask):
             self.annotated_image = None
             self.image_path = None
             self.inference_state = None
-            self.jpeg_filepath = "./jpeg_slice_files"
+            self.jpeg_filepath = str(TEMP_DIR / "radiology" / "jpeg_slices")
             # self.mask_data = None 
             self.current_volume_id = None   # track which volume is active
 

@@ -4,17 +4,15 @@ from fastapi import APIRouter, UploadFile, File, Query, HTTPException
 import shutil
 import json
 import os
+from storage_paths import workspace, ws_sub
 
 # We create a new router specifically for population/cohort tasks
 router = APIRouter(prefix="/populations", tags=["populations"])
 
 @router.post("/upload-targets")
 async def upload_targets(file: UploadFile = File(...), session_id: str = Query(None)):
-    workspace_dir = os.environ.get("WORKSPACE_DIR", "./workspace")
-    # If a session_id is provided, scope to that session's folder
-    if session_id:
-        workspace_dir = os.path.join(workspace_dir, session_id)
-    output_dir = os.path.join(workspace_dir, 'populations', 'targets')
+    target_session = session_id or "default"
+    output_dir = str(ws_sub(target_session, "populations/targets"))
     os.makedirs(output_dir, exist_ok=True)
 
     csv_path = os.path.join(output_dir, "targets.csv")
@@ -41,9 +39,8 @@ async def set_labelling_mode(
     if mode not in ("manual", "automatic"):
         raise HTTPException(status_code=400, detail="mode must be 'manual' or 'automatic'")
 
-    workspace_dir = os.environ.get("WORKSPACE_DIR", "./workspace")
-    session_workspace = os.path.join(workspace_dir, session_id)
-    config_path = os.path.join(session_workspace, "config.json")
+    session_workspace = str(workspace(session_id))
+    config_path = str(ws_sub(session_id, "config.json"))
 
     # Read existing config (may not exist yet — that's fine)
     config: dict = {}
@@ -56,7 +53,7 @@ async def set_labelling_mode(
 
     config["labelling_mode"] = mode
 
-    os.makedirs(session_workspace, exist_ok=True)
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4)
 

@@ -36,14 +36,15 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from storage_paths import CACHE_DIR
+
 logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
-DEFAULT_CACHE_DIR = Path(__file__).parent / ".knowledge_cache"
+DEFAULT_CACHE_DIR = CACHE_DIR / "literature"
 CACHE_DIR = DEFAULT_CACHE_DIR
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 NCBI_API_KEY: str = os.environ.get("NCBI_API_KEY", "")
 # Optional Semantic Scholar API key — free key raises limit from 100 to 1000 req/day.
@@ -126,6 +127,7 @@ def _get_cached(key: str, max_age_hours: int = 72) -> Optional[Any]:
 def _set_cache(key: str, data: Any) -> None:
     """Write data to local cache."""
     try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
         (CACHE_DIR / key).write_text(
             json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
         )
@@ -1551,7 +1553,7 @@ Focus: {primary_organ} — {primary_pathology} — {', '.join(concepts['modaliti
 ════════════════════════════════════════════════════════════════════════════════
 NOTE: This knowledge base was built dynamically from live queries to medical
 databases. Content reflects the current published literature and terminology.
-Cached for {cache_hours} hours. Delete .knowledge_cache/ to force refresh.
+Cached for {cache_hours} hours. Delete workspace cache/literature/ to force refresh.
 ════════════════════════════════════════════════════════════════════════════════
 """
 

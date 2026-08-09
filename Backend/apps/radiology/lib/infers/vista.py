@@ -13,6 +13,7 @@ from typing import Callable, Sequence
 import json
 import subprocess
 import os
+from storage_paths import MODELS_DIR, TEMP_DIR
 import nibabel as nib
 import logging
 
@@ -67,8 +68,9 @@ class VISTAPOINT3D(BasicInferTask):
             **kwargs,
         )
         self.target_spacing = target_spacing
-        self.models_path = os.getenv("MODELS_DIR")
-        self.output_dir = self.models_path + "/eval/vista"
+        self.models_path = os.getenv("MODELS_DIR", str(MODELS_DIR))
+        self.output_dir = str(TEMP_DIR / "vista")
+        os.makedirs(self.output_dir, exist_ok=True)
         self.BASE_PATH = os.getenv("MONAI_LABEL_APP_DIR") + "/vista3d"
 
 

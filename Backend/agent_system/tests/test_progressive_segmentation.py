@@ -11,6 +11,7 @@ from agent_system.agents.execution_agents.segmentation.progressive import (
     artifact_key_for_pair,
     build_segmentation_snapshot,
 )
+from storage_paths import workspace_subpath
 
 
 class _FakeSegmentationService:
@@ -168,7 +169,7 @@ class ProgressiveSnapshotTests(unittest.TestCase):
     def test_ready_and_failed_pairs_are_mutually_exclusive(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir) / "workspace_session"
-            overlays = workspace / "overlays"
+            overlays = workspace_subpath(workspace, "overlays")
             overlays.mkdir(parents=True)
             ready_pair = "volume__liver"
             ready_key = artifact_key_for_pair(ready_pair)
@@ -223,7 +224,7 @@ class ProgressiveSnapshotTests(unittest.TestCase):
     def test_empty_mask_remains_a_repairable_ready_preview(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir) / "workspace_session"
-            overlays = workspace / "overlays"
+            overlays = workspace_subpath(workspace, "overlays")
             overlays.mkdir(parents=True)
             pair_id = "volume__tumor"
             artifact_key = artifact_key_for_pair(pair_id)
@@ -261,7 +262,7 @@ class ProgressiveSnapshotTests(unittest.TestCase):
     def test_reviewed_snapshot_restores_rejected_and_modified_decisions(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir) / "workspace_session"
-            overlays = workspace / "overlays"
+            overlays = workspace_subpath(workspace, "overlays")
             overlays.mkdir(parents=True)
             items = []
             for index, (pair_id, status, review_status) in enumerate(

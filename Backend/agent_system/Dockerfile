@@ -38,6 +38,14 @@ RUN pip install --no-cache-dir numpy==1.26.4 pandas==2.1.4 pycaret==3.3.2 shap
 # Copy application source
 COPY ./Backend/agent_system ./Backend/agent_system
 COPY ./Backend/mcp ./Backend/mcp
+COPY ./Backend/storage_paths.py ./Backend/storage_paths.py
+
+ENV BACKEND_STORAGE_ROOT=/storage \
+    AGENTS_WORKSPACE_DIR=/storage/hypotheses \
+    BACKEND_TEMP_DIR=/storage/temp \
+    BACKEND_LOG_DIR=/storage/logs \
+    HF_HOME=/storage/cache/huggingface \
+    PYTHONPATH=/app/Backend
 
 # Default command
 CMD ["python", "./Backend/agent_system/app.py"]

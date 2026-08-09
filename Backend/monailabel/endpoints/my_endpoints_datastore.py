@@ -42,6 +42,11 @@ from monailabel.config import RBAC_USER, settings
 from monailabel.endpoints.user.auth import RBAC, User
 from monailabel.interfaces.utils.app import app_instance
 from monailabel.utils.others.generic import file_checksum, get_mime_type
+from storage_paths import (
+    MEDICAL_IMAGES_DIR,
+    MEDICAL_LABELS_DIR,
+    NNUNET_DIR as STORAGE_NNUNET_DIR,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +55,8 @@ router = APIRouter(
     tags=["Datastore"],
 )
 
-Radiology_path = Path("/apps/radiology")
-GENERAL_DATA_DIR = Radiology_path / "General_Data"
-LABEL_DATA_DIR = Radiology_path / "Labels"
+GENERAL_DATA_DIR = MEDICAL_IMAGES_DIR
+LABEL_DATA_DIR = MEDICAL_LABELS_DIR
 
 
 def download_image(image: str, check_only=False, check_sum=None):
@@ -171,9 +175,8 @@ async def api_download_labels(
     user: User = Depends(RBAC(settings.MONAI_LABEL_AUTH_ROLE_USER)),
 ):
     # Define directories and mapping file path
-    radiology_path = Path("/apps/radiology")
-    target_dir = radiology_path / "Labels"
-    mapping_path = radiology_path / "NN_Unet" / "instance_mapping.json"
+    target_dir = MEDICAL_LABELS_DIR
+    mapping_path = STORAGE_NNUNET_DIR / "mappings" / "instance_mapping.json"
 
     # Ensure the target directory exists
     os.makedirs(target_dir, exist_ok=True)
@@ -242,9 +245,8 @@ async def api_download_images(
     user: User = Depends(RBAC(settings.MONAI_LABEL_AUTH_ROLE_USER)),
 ):
     # Define directories and mapping file path
-    radiology_path = Path("/apps/radiology")
-    target_dir = radiology_path / "General_Data"
-    mapping_path = radiology_path / "NN_Unet" / "instance_mapping.json"
+    target_dir = MEDICAL_IMAGES_DIR
+    mapping_path = STORAGE_NNUNET_DIR / "mappings" / "instance_mapping.json"
 
     # Ensure the target directory exists
     os.makedirs(target_dir, exist_ok=True)
@@ -304,9 +306,9 @@ async def api_download_images(
 
 def prepare_instance_mapping(task_name, records):
     
-    NNUNET_DIR = Path(os.getenv("NNUNET_DIR", "/apps/radiology/NN_Unet"))
-    mapping_json_path = NNUNET_DIR / f"{task_name}_instance_mapping.json"
-    NNUNET_DIR.mkdir(parents=True, exist_ok=True)
+    NNUNET_DIR = STORAGE_NNUNET_DIR
+    mapping_json_path = NNUNET_DIR / "mappings" / f"{task_name}_instance_mapping.json"
+    mapping_json_path.parent.mkdir(parents=True, exist_ok=True)
 
 
     if mapping_json_path.exists():
@@ -354,8 +356,7 @@ def prepare_instance_mapping(task_name, records):
 
 
 def download_images(images: List[str]):
-    target_dir = os.getenv("GENERAL_DATA_DIR", "/apps/radiology/General_Data") + "/images"
-    target_dir = Path(target_dir)
+    target_dir = MEDICAL_IMAGES_DIR
     os.makedirs(target_dir, exist_ok=True)
 
     # download all, only stop the "already exists files" are in the target and nnunet folders
@@ -369,8 +370,7 @@ def download_images(images: List[str]):
 
 
 def download_labels(labels: List[str]):
-    target_dir = os.getenv("GENERAL_DATA_DIR", "/apps/radiology/General_Data") + "/labels"
-    target_dir = Path(target_dir)
+    target_dir = MEDICAL_LABELS_DIR
     os.makedirs(target_dir, exist_ok=True)
 
     for label in labels:
@@ -629,15 +629,13 @@ def create_dataset_json(task_dir, task_name, mapping, num_samples):
 
 def create_nnunet_dataset(task_name):
  
-    NNUNET_DIR = Path(os.getenv("NNUNET_DIR", "/apps/radiology/NN_Unet"))
-    GENERAL_DATA_DIR = Path(os.getenv("GENERAL_DATA_DIR", "/apps/radiology/General_Data"))
-
-    images_dir = GENERAL_DATA_DIR / "images"
-    labels_dir = GENERAL_DATA_DIR / "labels"
+    NNUNET_DIR = STORAGE_NNUNET_DIR
+    images_dir = MEDICAL_IMAGES_DIR
+    labels_dir = MEDICAL_LABELS_DIR
 
     logger.info(f"Creating nnUNet dataset for task: {task_name}")
     dirs = ensure_nnunet_dirs(NNUNET_DIR)
-    mapping_path = NNUNET_DIR / f"{task_name}_instance_mapping.json"
+    mapping_path = NNUNET_DIR / "mappings" / f"{task_name}_instance_mapping.json"
     mapping = load_instance_mapping(mapping_path)
     task_id = determine_task_id(dirs["raw"], task_name)
     task_dir, imagesTr, labelsTr = prepare_nnunet_task_dirs(dirs["raw"], task_id, task_name)

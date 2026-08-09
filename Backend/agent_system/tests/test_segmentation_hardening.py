@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+from storage_paths import workspace_subpath
 
 import httpx
 import numpy as np
@@ -951,7 +952,7 @@ class EmptySegmentationResultTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_result_creates_geometry_matched_local_mask(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
-            volumes = workspace / "volumes"
+            volumes = workspace_subpath(workspace, "volumes")
             volumes.mkdir()
             reference = sitk.Image([5, 4, 3], sitk.sitkInt16)
             reference.SetSpacing((0.8, 0.9, 2.5))
@@ -975,7 +976,7 @@ class EmptySegmentationResultTests(unittest.IsolatedAsyncioTestCase):
             )
 
             mask = sitk.ReadImage(
-                str(workspace / "masks" / "empty-mask-key.nii.gz")
+                str(workspace_subpath(workspace, "masks/empty-mask-key.nii.gz"))
             )
             self.assertEqual(len(successful), 1)
             self.assertEqual(skipped, [])
@@ -1087,14 +1088,14 @@ class SegmentationRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             workspace = root / "workspace_session"
-            mask_path = workspace / "masks" / "volume__liver.nii.gz"
-            volume_path = workspace / "volumes" / "volume.nii.gz"
-            output_path = workspace / "outputs" / "segmentation_agent_output.json"
+            mask_path = workspace_subpath(workspace, "masks/volume__liver.nii.gz")
+            volume_path = workspace_subpath(workspace, "volumes/volume.nii.gz")
+            output_path = workspace_subpath(workspace, "outputs/segmentation_agent_output.json")
             for path in (mask_path, volume_path, output_path):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"test")
 
-            manifest_path = workspace / "segmentation_manifest.json"
+            manifest_path = workspace_subpath(workspace, "segmentation_manifest.json")
             manifest_path.write_text(
                 json.dumps(
                     {
@@ -1122,8 +1123,8 @@ class SegmentationRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             workspace = root / "workspace_session"
-            manifest_path = workspace / "segmentation_manifest.json"
-            output_path = workspace / "outputs" / "segmentation_agent_output.json"
+            manifest_path = workspace_subpath(workspace, "segmentation_manifest.json")
+            output_path = workspace_subpath(workspace, "outputs/segmentation_agent_output.json")
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"test")
             manifest_path.write_text(

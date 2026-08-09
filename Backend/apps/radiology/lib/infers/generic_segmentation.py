@@ -2,6 +2,7 @@ import torch
 import logging
 import copy
 import os
+from storage_paths import TEMP_DIR
 import nibabel as nib
 from enum import Enum
 from typing import Any, Callable, Dict, Sequence, Tuple, Union
@@ -55,7 +56,7 @@ class GenericSegmentation(BasicInferTask):
         self.trainer_class = trainer_class
 
 
-        self.temp_path = "/temp"
+        self.temp_path = str(TEMP_DIR / "radiology")
 
         os.environ["nnUNet_raw"] = os.path.join(self.root_nnunet_dir, "nnUNet_raw")
         os.environ["nnUNet_preprocessed"] = os.path.join(self.root_nnunet_dir, "nnUNet_preprocessed")

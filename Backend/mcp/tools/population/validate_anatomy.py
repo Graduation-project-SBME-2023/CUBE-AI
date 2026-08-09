@@ -7,6 +7,7 @@ BEFORE proceeding to save the final cohort or run segmentation.
 """
 
 import os
+from storage_paths import workspace_subpath
 import json
 import httpx
 from typing import Annotated
@@ -80,7 +81,7 @@ async def _save_and_broadcast_cohort(validated_uids: list[str]) -> dict:
     config_updated = False
 
     if workspace_dir:
-        config_path = os.path.join(workspace_dir, "config.json")
+        config_path = str(workspace_subpath(workspace_dir, "config.json"))
         try:
             os.makedirs(workspace_dir, exist_ok=True)
             config_data = {}

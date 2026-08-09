@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from storage_paths import workspace_subpath
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,12 +62,12 @@ async def segmentation_tool(
         agent = SegmentationModule(session_id=session_id)
         try:
             await agent.initialize()
-            config_path = os.path.join(workspace_folder, "config.json")
+            config_path = str(workspace_subpath(workspace_folder, "config.json"))
             result = await agent.run(config_path, workspace_folder)
         finally:
             await agent.close()
 
-        outputs_dir = os.path.join(workspace_folder, "outputs")
+        outputs_dir = str(workspace_subpath(workspace_folder, "outputs"))
         os.makedirs(outputs_dir, exist_ok=True)
         output_data = {
             "agent_id": "segmentation_agent",
@@ -77,8 +78,8 @@ async def segmentation_tool(
             "outputs": {
                 "files": {
                     "manifest": result.get("manifest_path"),
-                    "volumes_dir": str(Path(workspace_folder) / "volumes"),
-                    "masks_dir": str(Path(workspace_folder) / "masks"),
+                    "volumes_dir": str(workspace_subpath(workspace_folder, "volumes")),
+                    "masks_dir": str(workspace_subpath(workspace_folder, "masks")),
                 },
                 "metrics": {
                     "segmentation_method": result.get("segmentation_method"),

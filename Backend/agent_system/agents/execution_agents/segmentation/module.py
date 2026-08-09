@@ -7,6 +7,7 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from storage_paths import workspace_subpath
 from typing import Any, Dict, List, Union
 from uuid import uuid4
 
@@ -238,7 +239,8 @@ class SegmentationModule:
         run_id: str,
     ) -> Path:
         plan = resolution_outcome.plan
-        manifest_path = Path(workspace_dir) / "segmentation_manifest.json"
+        manifest_path = workspace_subpath(workspace_dir, "segmentation_manifest.json")
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
         existing_created_at = None
         if manifest_path.exists():
             try:
@@ -281,7 +283,11 @@ class SegmentationModule:
             ],
             "pairs": work_items,
         }
-        temporary_path = manifest_path.with_suffix(".json.tmp")
+        temporary_path = workspace_subpath(
+            workspace_dir,
+            "temp_segmentations/segmentation_manifest.json.tmp",
+        )
+        temporary_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         temporary_path.replace(manifest_path)
         return manifest_path
@@ -345,7 +351,7 @@ class SegmentationModule:
 
     @staticmethod
     def _workspace_volume_is_valid(workspace_dir: str, volume_uid: str) -> bool:
-        path = Path(workspace_dir) / "volumes" / f"{volume_uid}.nii.gz"
+        path = workspace_subpath(workspace_dir, f"volumes/{volume_uid}.nii.gz")
         if not path.is_file() or path.stat().st_size <= 0:
             return False
         try:
@@ -930,7 +936,7 @@ class SegmentationModule:
         str,
         str,
     ] | None:
-        manifest_path = Path(workspace_dir) / "segmentation_manifest.json"
+        manifest_path = workspace_subpath(workspace_dir, "segmentation_manifest.json")
         if not manifest_path.exists():
             return None
         try:
@@ -1016,10 +1022,10 @@ class SegmentationModule:
                 item.setdefault("axis_permutation", None)
                 item.setdefault("slice_alignment", None)
                 if item.get("mask_path"):
-                    mask_path = (workspace / str(item["mask_path"])).resolve()
+                    mask_path = workspace_subpath(workspace, str(item["mask_path"]))
                     mask_path.relative_to(workspace)
                 if item.get("gif_path"):
-                    gif_path = (workspace / str(item["gif_path"])).resolve()
+                    gif_path = workspace_subpath(workspace, str(item["gif_path"]))
                     gif_path.relative_to(workspace)
                 if item.get("status") == "resolved":
                     item["status"] = "reusing" if item.get("reused") else "preparing"
@@ -1179,13 +1185,13 @@ class SegmentationModule:
                 pair_id = item["pair_id"]
                 artifact_key = ensure_artifact_key(item)
                 if pair_id in review["modified"]:
-                    temp_path = (
-                        Path(workspace_dir)
-                        / "temp_segmentations"
-                        / f"seg_{artifact_key}_modified.nii.gz"
+                    temp_path = workspace_subpath(
+                        workspace_dir,
+                        f"temp_segmentations/seg_{artifact_key}_modified.nii.gz",
                     )
-                    target_path = (
-                        Path(workspace_dir) / "masks" / f"{artifact_key}.nii.gz"
+                    target_path = workspace_subpath(
+                        workspace_dir,
+                        f"masks/{artifact_key}.nii.gz",
                     )
                     if temp_path.exists():
                         shutil.copy2(temp_path, target_path)
@@ -1266,7 +1272,7 @@ class SegmentationModule:
                 run_id,
                 checkpoint_stage,
             ) = checkpoint
-            manifest_path = Path(workspace_dir) / "segmentation_manifest.json"
+            manifest_path = workspace_subpath(workspace_dir, "segmentation_manifest.json")
             if checkpoint_stage == "reviewed":
                 logger.info("Resuming completed segmentation review checkpoint")
                 return self._build_result(

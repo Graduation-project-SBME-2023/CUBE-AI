@@ -1,2 +1,13 @@
 volumes/
 Documentation
+storage/
+agents_workspace/
+models/
+**/__pycache__/
+.pytest_cache/
+apps/radiology/General_Data/
+apps/radiology/Labels/
+apps/radiology/NN_Unet/
+apps/radiology/inference_jobs/
+apps/radiology/Data/
+apps/radiology/bin/

@@ -13,44 +13,27 @@ __pycache__/
 # .env  #TEMPORARY COMMENTED OUT FOR TESTING PURPOSES
 
 
-# models checkpoints
+# Backend runtime data lives under one generated-data boundary.
+Backend/storage/*
+!Backend/storage/README.md
+
+# Legacy source-owned model checkpoint locations
 Backend/apps/radiology/model/
 Backend/apps/radiology/sam2/checkpoints/sam2.1_hiera_large.pt
-**.pt
-**.pth
-Backend/models
 Backend/temp_labels/
 Backend/test_label.py
 
-# Workspace files
-Backend/agent_system/workspace_*/
-Backend/agent_system/workspace/
-Backend/agents_workspace
+# Legacy MAS memory remains excluded until its unrelated source cleanup.
 Backend/mas/memory/
-Backend/agent_system/agents/literature_review_agent/.knowledge_cache/
-Backend/agent_system/agents/literature_review_agent/literature_review_output
 
-# Saved Data - will change this after fixing the env variables for all data directories
-*.nii.gz
-**/workspace_*/
-# Logs
+# Non-backend tool and frontend logs remain outside this runtime-only change.
 **/*.log
-Backend/apps/radiology/logs/app.log
-
-Backend/agent_system/agents/literature_review_agent/.knowledge_cache
-Backend/agent_system/agents/literature_review_agent/literature_review_output
 Backend/agent_system/benchmarking/*.pdf
 Backend/agent_system/benchmarking/*.json
 Backend/agent_system/benchmarking/benchmarking_output
 Backend/agent_system/benchmarking/benchmark_results
 Backend/agent_system/benchmarking/execution_evaluation/runs
 Backend/apps/radiology/bin/
-Backend/apps/radiology/General_Data/
-Backend/apps/radiology/inference_jobs/
-Backend/apps/radiology/Labels/
-Backend/apps/radiology/Data/
-
-
 # Docker volumes
 Backend/volumes
 

@@ -40,6 +40,15 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.abspath(os.path.join(current_dir, ".."))
 sys.path.append(root_dir)
 
+from storage_paths import (
+    HYPOTHESES_DIR,
+    TEMP_DIR,
+    ensure_storage_layout,
+    workspace,
+    workspace_subpath,
+    ws_sub,
+)
+
 from socket_store import manager as ws_manager, send_ws_message
 from agents.planning_agents.planner import ClinicalPlanner
 from models.session import Session
@@ -125,7 +134,48 @@ class CoopCoepMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(CoopCoepMiddleware)
 
-agents_workspace_dir = os.environ.get("AGENTS_WORKSPACE_DIR", "/app/agents_workspace")
+ensure_storage_layout()
+agents_workspace_dir = str(HYPOTHESES_DIR)
+
+
+@app.get("/files/{workspace_name}/{logical_path:path}", name="legacy_workspace_file")
+def serve_workspace_file(workspace_name: str, logical_path: str):
+    """Serve legacy logical workspace URLs from the categorized layout."""
+    if not workspace_name.startswith("workspace_"):
+        raise HTTPException(status_code=404, detail="Workspace not found")
+
+    first = logical_path.replace("\\", "/").split("/", 1)[0]
+    allowed = {
+        "reports", "overlays", "features", "modeling", "outputs",
+        "populations", "volumes", "masks", "data",
+    }
+    if first not in allowed:
+        raise HTTPException(status_code=404, detail="Artifact category not found")
+
+    workspace_root = workspace(workspace_name)
+    normalized = logical_path.replace("\\", "/").strip("/")
+    physical_prefixes = (
+        "outputs/agents/", "outputs/literature/", "outputs/overlays/",
+        "outputs/features/", "outputs/modeling/", "outputs/reports/",
+        "data/populations/", "data/volumes/", "data/masks/",
+    )
+    if normalized.startswith(physical_prefixes):
+        target = (workspace_root / normalized).resolve()
+    else:
+        try:
+            target = workspace_subpath(workspace_root, normalized)
+        except ValueError as exc:
+            raise HTTPException(status_code=403, detail="Invalid artifact path") from exc
+
+    try:
+        target.relative_to(workspace_root.resolve())
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail="Artifact path escapes workspace") from exc
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return FileResponse(target)
+
+
 app.mount(
     "/files",
     StaticFiles(directory=agents_workspace_dir),
@@ -181,10 +231,7 @@ api_key = os.getenv("OLLAMA_API_KEY", "")
 
 
 async def run_planner(session: Session, message: str, do_lit_review: bool = True) -> None:
-    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    workspace_folder = os.path.join(
-        base_agents_workspace, f"workspace_{session.session_id}"
-    )
+    workspace_folder = str(workspace(session.session_id))
     os.makedirs(workspace_folder, exist_ok=True)
     planner = ClinicalPlanner(
         input_provider=lambda: ws_manager.wait_for_user_message(session.session_id),
@@ -211,10 +258,7 @@ async def run_planner(session: Session, message: str, do_lit_review: bool = True
 
 
 async def run_pipeline(session: Session) -> None:
-    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    original_workspace = os.path.join(
-        base_agents_workspace, f"workspace_{session.session_id}"
-    )
+    original_workspace = str(workspace(session.session_id))
     # On restart, session.workspace_folder is set to a new retry folder.
     # On first run it is None, so we fall back to the original.
     workspace_folder = getattr(session, "workspace_folder", None) or original_workspace
@@ -228,7 +272,7 @@ async def run_pipeline(session: Session) -> None:
 
     # Load planner state: hypothesis + task messages (if available)
     # Always read from the original workspace — that's where the planner wrote state.json
-    state_file = os.path.join(original_workspace, "state.json")
+    state_file = str(workspace_subpath(original_workspace, "state.json"))
     task_messages = []
     hypothesis = None
     try:
@@ -432,12 +476,10 @@ async def run_pipeline(session: Session) -> None:
 
 def _clean_workspace_population_state(session_id: str) -> None:
     try:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-        workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+        workspace_folder = str(workspace(session_id))
         if not os.path.exists(workspace_folder):
             return
-        config_path = os.path.join(workspace_folder, "config.json")
+        config_path = str(workspace_subpath(workspace_folder, "config.json"))
         if os.path.exists(config_path):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
@@ -448,10 +490,10 @@ def _clean_workspace_population_state(session_id: str) -> None:
                     json.dump(data, f, indent=4)
             except Exception:
                 pass
-        labels_path = os.path.join(workspace_folder, "populations", "cohort_labels.csv")
+        labels_path = str(workspace_subpath(workspace_folder, "populations/cohort_labels.csv"))
         if os.path.exists(labels_path):
             os.remove(labels_path)
-        targets_path = os.path.join(workspace_folder, "populations", "targets", "targets.csv")
+        targets_path = str(workspace_subpath(workspace_folder, "populations/targets/targets.csv"))
         if os.path.exists(targets_path):
             os.remove(targets_path)
     except Exception as e:
@@ -529,7 +571,7 @@ async def resume_hydrated_pipeline(session_id: str):
         return await session_service.resume_pipeline(
             session_id,
             run_pipeline,
-            workspace_root=os.environ.get("AGENTS_WORKSPACE_DIR", current_dir),
+            workspace_root=str(HYPOTHESES_DIR),
             reset_runtime_state=reset_runtime_state,
         )
     except SessionExecutionConflict as exc:
@@ -718,19 +760,15 @@ async def replay_logs(session_id: str):
         if log.msg_type in ('msg'): continue
         await ws_manager.send_ws_message(log.msg_type, log.payload, log.session_id, replaying=True)
 
-    workspace_root = os.environ.get(
-        "AGENTS_WORKSPACE_DIR",
-        os.path.abspath(os.path.join(current_dir, "..", "agents_workspace")),
-    )
-    workspace = os.path.join(workspace_root, f"workspace_{session_id}")
-    manifest_path = os.path.join(workspace, "segmentation_manifest.json")
+    workspace_dir = str(workspace(session_id))
+    manifest_path = str(ws_sub(session_id, "segmentation_manifest.json"))
     try:
         with open(manifest_path, "r", encoding="utf-8") as stream:
             manifest = json.load(stream)
         if manifest.get("stage") in {"awaiting_review", "reviewed"}:
             snapshot = build_snapshot_from_manifest(
                 manifest,
-                workspace,
+                workspace_dir,
                 os.environ.get("MAS_BASE_URL", "http://localhost:8150"),
             )
             if snapshot:
@@ -766,9 +804,7 @@ async def replay_logs(session_id: str):
 @app.get("/session/{session_id}/config")
 async def get_session_config(session_id: str):
     """Get the current configuration for a given session."""
-    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", os.path.abspath(os.path.join(current_dir, "..", "agents_workspace")))
-    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
-    config_path = os.path.join(workspace_folder, "config.json")
+    config_path = str(ws_sub(session_id, "config.json"))
     
     if not os.path.exists(config_path):
         return JSONResponse(content={"labelling_mode": "automatic"}, status_code=200)
@@ -787,14 +823,12 @@ async def get_plan_state(session_id: str):
     Get plan state, hypothesis, and task messages for a session.
     Used when recovering a session from hypothesis history.
     """
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+    workspace_folder = str(workspace(session_id))
 
     if not os.path.exists(workspace_folder):
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    state_file = os.path.join(workspace_folder, "state.json")
+    state_file = str(workspace_subpath(workspace_folder, "state.json"))
     result = {
         "session_id": session_id,
         "workspace_dir": workspace_folder,
@@ -898,11 +932,13 @@ async def compile_report(data: dict, request: Request):
         safe_name = f"{safe_name}.pdf"
 
     workspace_name = f"workspace_{session_id}"
-    workspace_folder = os.path.join(agents_workspace_dir, workspace_name)
-    reports_folder = os.path.join(workspace_folder, "reports")
+    workspace_folder = str(workspace(session_id))
+    reports_folder = str(workspace_subpath(workspace_folder, "reports"))
     os.makedirs(reports_folder, exist_ok=True)
 
-    with tempfile.TemporaryDirectory() as temp_dir:
+    latex_temp_root = TEMP_DIR / "latex"
+    latex_temp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=latex_temp_root) as temp_dir:
         tex_path = os.path.join(temp_dir, "document.tex")
         pdf_temp_path = os.path.join(temp_dir, "document.pdf")
 
@@ -1049,20 +1085,19 @@ _review_events: Dict[str, dict] = {}  # session_id -> {"event": Event, "result":
 # File: <workspace>/review_result.json
 
 def _review_disk_path(session_id: str) -> str:
-    base = os.environ.get("AGENTS_WORKSPACE_DIR", "/app/agents_workspace")
-    workspace = os.path.join(base, f"workspace_{session_id}")
-    return os.path.join(workspace, "review_result.json")
+    return str(ws_sub(session_id, "review_result.json"))
 
 
 def _review_draft_disk_path(session_id: str) -> str:
-    return os.path.join(os.path.dirname(_review_disk_path(session_id)), "review_draft.json")
+    return str(ws_sub(session_id, "review_draft.json"))
 
 
 def _persist_review_draft_to_disk(session_id: str, payload: dict) -> None:
     """Atomically persist in-progress review choices without resuming the agent."""
     path = _review_draft_disk_path(session_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    temporary_path = f"{path}.tmp"
+    temporary_path = str(ws_sub(session_id, "temp_segmentations/review_draft.json.tmp"))
+    os.makedirs(os.path.dirname(temporary_path), exist_ok=True)
     with open(temporary_path, "w", encoding="utf-8") as stream:
         json.dump(payload, stream)
     os.replace(temporary_path, path)
@@ -1134,10 +1169,8 @@ async def set_labelling_mode(
     if mode not in ["manual", "automatic"]:
         raise HTTPException(status_code=400, detail="mode must be 'manual' or 'automatic'")
 
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
-    config_path = os.path.join(workspace_folder, "config.json")
+    workspace_folder = str(workspace(session_id))
+    config_path = str(ws_sub(session_id, "config.json"))
     
     config_data = {}
     if os.path.exists(config_path):
@@ -1149,7 +1182,7 @@ async def set_labelling_mode(
 
     config_data["labelling_mode"] = mode
 
-    os.makedirs(workspace_folder, exist_ok=True)
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config_data, f, indent=4)
         
@@ -1174,10 +1207,8 @@ async def get_cohort_state(
     - cohort_approved flag
     - labelling_mode
     """
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
-    config_path = os.path.join(workspace_folder, "config.json")
+    workspace_folder = str(workspace(session_id))
+    config_path = str(ws_sub(session_id, "config.json"))
 
     config_data = {}
     if os.path.exists(config_path):
@@ -1190,7 +1221,7 @@ async def get_cohort_state(
     # Load cohort labels if available
     import csv as csv_mod
     labels = []
-    labels_path = os.path.join(workspace_folder, "populations", "cohort_labels.csv")
+    labels_path = str(ws_sub(session_id, "populations/cohort_labels.csv"))
     if os.path.exists(labels_path):
         try:
             with open(labels_path, "r", encoding="utf-8") as f:
@@ -1225,10 +1256,8 @@ async def update_cohort_list(
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
 
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
-    config_path = os.path.join(workspace_folder, "config.json")
+    workspace_folder = str(workspace(session_id))
+    config_path = str(ws_sub(session_id, "config.json"))
 
     config_data = {}
     if os.path.exists(config_path):
@@ -1242,7 +1271,7 @@ async def update_cohort_list(
     # Reset approval when the cohort list changes
     config_data["cohort_approved"] = False
 
-    os.makedirs(workspace_folder, exist_ok=True)
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(config_data, f, indent=4)
 
@@ -1285,15 +1314,13 @@ async def save_labels(data: dict):
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
 
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
-    populations_dir = os.path.join(workspace_folder, "populations")
+    workspace_folder = str(workspace(session_id))
+    populations_dir = str(ws_sub(session_id, "populations"))
     os.makedirs(populations_dir, exist_ok=True)
     labels_path = os.path.join(populations_dir, "cohort_labels.csv")
 
     # Reset approval when labels change
-    config_path = os.path.join(workspace_folder, "config.json")
+    config_path = str(ws_sub(session_id, "config.json"))
     config_data = {}
     if os.path.exists(config_path):
         try:
@@ -1338,10 +1365,8 @@ async def approve_cohort(data: dict):
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
 
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
-    config_path = os.path.join(workspace_folder, "config.json")
+    workspace_folder = str(workspace(session_id))
+    config_path = str(ws_sub(session_id, "config.json"))
 
     config_data = {}
     if os.path.exists(config_path):
@@ -1359,7 +1384,7 @@ async def approve_cohort(data: dict):
         )
 
     # Load labels and check that at least one volume has a valid label
-    labels_path = os.path.join(workspace_folder, "populations", "cohort_labels.csv")
+    labels_path = str(ws_sub(session_id, "populations/cohort_labels.csv"))
     labels_dict = {}
     if os.path.exists(labels_path):
         try:
@@ -1389,7 +1414,7 @@ async def approve_cohort(data: dict):
         )
 
     # Generate the sealed targets.csv
-    targets_dir = os.path.join(workspace_folder, "populations", "targets")
+    targets_dir = str(ws_sub(session_id, "populations/targets"))
     os.makedirs(targets_dir, exist_ok=True)
     targets_path = os.path.join(targets_dir, "targets.csv")
 
@@ -1433,13 +1458,9 @@ async def upload_targets(
     session_id: str = Query(..., description="The ID of the current session"),
     file: UploadFile = File(...)
 ):
-    # 1. Get the base workspace directory, matching your run_planner logic
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    
-    # 2. Construct the exact path based on the session_id
-    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
-    output_dir = os.path.join(workspace_folder, 'populations', 'targets')
+    # Resolve the categorized population-data folder for this session.
+    workspace_folder = str(workspace(session_id))
+    output_dir = str(ws_sub(session_id, "populations/targets"))
     # 3. Create all necessary folders if they don't exist
     try:
         os.makedirs(output_dir, exist_ok=True)
@@ -1492,10 +1513,7 @@ async def segmentation_review_draft(data: dict):
     if not isinstance(decisions, dict):
         raise HTTPException(status_code=400, detail="decisions must be an object")
 
-    manifest_path = os.path.join(
-        os.path.dirname(_review_draft_disk_path(session_id)),
-        "segmentation_manifest.json",
-    )
+    manifest_path = str(ws_sub(session_id, "segmentation_manifest.json"))
     try:
         with open(manifest_path, "r", encoding="utf-8") as stream:
             manifest = json.load(stream)
@@ -1591,10 +1609,8 @@ async def upload_modified_mask(
     target_id: str | None = Form(None),
     file: UploadFile = File(...)
 ):
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", current_dir)
-    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
-    output_dir = os.path.join(workspace_folder, 'temp_segmentations')
+    workspace_folder = str(workspace(session_id))
+    output_dir = str(ws_sub(session_id, "temp_segmentations"))
     
     try:
         os.makedirs(output_dir, exist_ok=True)
@@ -1610,15 +1626,11 @@ async def upload_modified_mask(
     file_path = os.path.join(output_dir, f"seg_{artifact_key}_modified.nii.gz")
     # The frontend mask matches the full DICOM volume space.
     # The workspace stores volumes in 'volumes/' and masks in 'masks/'.
-    base_volume_path = os.path.join(workspace_folder, "volumes", f"{series_instance_uid}.nii.gz")
-    original_mask_path = os.path.join(
-        workspace_folder, "masks", f"{artifact_key}.nii.gz"
-    )
+    base_volume_path = str(ws_sub(session_id, f"volumes/{series_instance_uid}.nii.gz"))
+    original_mask_path = str(ws_sub(session_id, f"masks/{artifact_key}.nii.gz"))
     legacy_pair_name_is_safe = "/" not in pair_id and "\\" not in pair_id
     if not os.path.exists(original_mask_path) and legacy_pair_name_is_safe:
-        original_mask_path = os.path.join(
-            workspace_folder, "masks", f"{pair_id}.nii.gz"
-        )
+        original_mask_path = str(ws_sub(session_id, f"masks/{pair_id}.nii.gz"))
     
     try:
         import nibabel as nib
@@ -1723,7 +1735,7 @@ async def upload_modified_mask(
         f"{os.path.basename(workspace_folder)}/{gif_path}"
     )
     overlay["updatedAt"] = os.stat(
-        os.path.join(workspace_folder, *gif_path.split("/"))
+        workspace_subpath(workspace_folder, gif_path)
     ).st_mtime_ns
 
     return {
@@ -1747,8 +1759,8 @@ async def get_segmentation_mask(
     frontend SegmentationReader.parseNrrdData() pipeline works without modification.
 
     Search order:
-      1. temp_segmentations/ – user-uploaded modified masks (highest priority)
-      2. masks/              – agent-generated masks
+      1. temp/segmentations/ – user-uploaded modified masks (highest priority)
+      2. data/masks/         – agent-generated masks
     """
     import io
     import numpy as np
@@ -1759,25 +1771,20 @@ async def get_segmentation_mask(
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"Required library missing: {e}")
 
-    base_agents_workspace = os.environ.get("AGENTS_WORKSPACE_DIR", os.path.dirname(os.path.abspath(__file__)))
-    workspace_folder = os.path.join(base_agents_workspace, f"workspace_{session_id}")
+    workspace_folder = str(workspace(session_id))
 
     # Search locations in priority order
     pair_id = f"{series_uid}__{target_id}" if target_id else series_uid
     artifact_key = artifact_key_for_pair(pair_id)
     candidates = [
-        os.path.join(workspace_folder, "temp_segmentations", f"seg_{artifact_key}_modified.nii.gz"),
-        os.path.join(workspace_folder, "masks", f"{artifact_key}.nii.gz"),
+        str(ws_sub(session_id, f"temp_segmentations/seg_{artifact_key}_modified.nii.gz")),
+        str(ws_sub(session_id, f"masks/{artifact_key}.nii.gz")),
     ]
     if "/" not in pair_id and "\\" not in pair_id:
         candidates.extend(
             [
-                os.path.join(
-                    workspace_folder,
-                    "temp_segmentations",
-                    f"seg_{pair_id}_modified.nii.gz",
-                ),
-                os.path.join(workspace_folder, "masks", f"{pair_id}.nii.gz"),
+                str(ws_sub(session_id, f"temp_segmentations/seg_{pair_id}_modified.nii.gz")),
+                str(ws_sub(session_id, f"masks/{pair_id}.nii.gz")),
             ]
         )
 
@@ -1792,9 +1799,7 @@ async def get_segmentation_mask(
     # by initializing an empty mask from the source volume geometry.
     is_empty_fallback = False
     if not nifti_path:
-        volume_path = os.path.join(
-            workspace_folder, "volumes", f"{series_uid}.nii.gz"
-        )
+        volume_path = str(ws_sub(session_id, f"volumes/{series_uid}.nii.gz"))
         if target_id and os.path.isfile(volume_path):
             nifti_path = volume_path
             is_empty_fallback = True

@@ -33,6 +33,7 @@ from typing import Any, Dict, Literal, Optional
 from . import mcp
 from pydantic import BaseModel, ConfigDict, Field
 from tool_logging import log_tool_state, ToolEvent, TextPayload
+from storage_paths import HYPOTHESES_DIR, workspace_subpath
 
 # ── Dynamic imports logic
 import sys
@@ -41,8 +42,8 @@ import httpx
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "../../agent_system/workspace")
-SCRATCHPAD_FILE = os.path.join("Backend/agent_system", WORKSPACE_DIR, "scratchpad.json")# SCRATCHPAD_FILE = os.path.join(WORKSPACE_DIR, "scratchpad.json")
+WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", str(HYPOTHESES_DIR / "workspace_default"))
+SCRATCHPAD_FILE = str(workspace_subpath(WORKSPACE_DIR, "scratchpad.json"))
 AgentStatus = Literal["in_progress", "done", "blocked", "failed"]
 FlagLevel = Literal["info", "warning", "error", "critical"]
 

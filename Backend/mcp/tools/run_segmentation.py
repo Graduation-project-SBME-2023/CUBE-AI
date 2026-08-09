@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Union
 from typing import Annotated
 from pydantic import Field
 import os
+from storage_paths import TEMP_DIR
 import asyncio
 import hashlib
 
@@ -322,7 +323,7 @@ async def run_segmentation(
         filename = f"seg_{series_instance_uid}_{clean_model}.nii.gz"
         current_file = Path(__file__)
         current_dir = current_file.parent.parent.parent
-        temp_dir = os.path.join(current_dir, "mas", "memory", "workspace", "temp_segmentations")
+        temp_dir = str(TEMP_DIR / "radiology" / "segmentations")
         os.makedirs(temp_dir, exist_ok=True)
         temp_file_path = os.path.join(temp_dir, filename)
         

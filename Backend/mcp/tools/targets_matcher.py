@@ -8,6 +8,7 @@ from tool_logging import ToolEvent, log_tool_state, TextPayload
 from .scratchpad import scratchpad_raise_flag, scratchpad_write_note
 import asyncio
 from service_urls import CONTROL_API_URL
+from storage_paths import workspace_subpath
 
 base_url = CONTROL_API_URL
 logger = logging.getLogger(__name__)
@@ -99,7 +100,7 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
     """
     from .population.cohort_labels import extract_cohort_labels
 
-    cohort_labels_path = os.path.join(workspace_dir, "populations", "cohort_labels.csv")
+    cohort_labels_path = str(workspace_subpath(workspace_dir, "populations/cohort_labels.csv"))
     if not os.path.exists(cohort_labels_path):
         print("[generate_targets] cohort_labels.csv not found — running extract_cohort_labels automatically...")
         extraction_result = await extract_cohort_labels()
@@ -171,7 +172,7 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
     if not valid_uids:
         msg = "0 valid target labels found in cohort. Proceeding with 0-size initial targets so the user can manually select volumes in the dataviewer UI."
         await scratchpad_raise_flag(level="warning", message=msg)
-        config_json_path = os.path.join(workspace_dir, "config.json")
+        config_json_path = str(workspace_subpath(workspace_dir, "config.json"))
         config["datasetlist"] = []
         with open(config_json_path, mode="w", encoding="utf-8") as f:
             json.dump(config, f, indent=4)
@@ -181,7 +182,7 @@ async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, conf
         return csv_path
 
     # Update config.json to only contain validated UIDs
-    config_json_path = os.path.join(workspace_dir, "config.json")
+    config_json_path = str(workspace_subpath(workspace_dir, "config.json"))
     config["datasetlist"] = valid_uids
     with open(config_json_path, mode="w", encoding="utf-8") as f:
         json.dump(config, f, indent=4)
@@ -230,11 +231,11 @@ async def generate_targets() -> str:
     if not workspace_dir:
         return json.dumps({"status": "error", "message": "WORKSPACE_DIR not set."})
 
-    output_dir = os.path.join(workspace_dir, "populations", "targets")
+    output_dir = str(workspace_subpath(workspace_dir, "populations/targets"))
     os.makedirs(output_dir, exist_ok=True)
     csv_path = os.path.join(output_dir, "targets.csv")
 
-    config_json_path = os.path.join(workspace_dir, "config.json")
+    config_json_path = str(workspace_subpath(workspace_dir, "config.json"))
     config: dict = {}
     datasetlist: list = []
     labelling_mode = "automatic"
@@ -263,9 +264,9 @@ async def generate_targets() -> str:
             return res
     else:
         print(f"[generate_targets] Manual mode — checking/initializing manual label workspace...")
-        cohort_labels_path = os.path.join(workspace_dir, "populations", "cohort_labels.csv")
+        cohort_labels_path = str(workspace_subpath(workspace_dir, "populations/cohort_labels.csv"))
         if not os.path.exists(cohort_labels_path):
-            os.makedirs(os.path.join(workspace_dir, "populations"), exist_ok=True)
+            os.makedirs(workspace_subpath(workspace_dir, "populations"), exist_ok=True)
             with open(cohort_labels_path, mode="w", newline="", encoding="utf-8") as f:
                 fieldnames = ["patient_id", "has_target_disease", "confidence", "requires_manual_review", "source_evidence"]
                 writer = csv.DictWriter(f, fieldnames=fieldnames)

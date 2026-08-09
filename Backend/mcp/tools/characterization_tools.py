@@ -1,4 +1,5 @@
 import os
+from .helpers.workspace import base_on_workspace_dir
 import json
 import nibabel as nib
 import numpy as np
@@ -97,7 +98,7 @@ async def _characterize_tumor_impl(
         plt.contour(mask[:, :, mid_slice], colors="r", linewidths=0.7)
         plt.title("Tumor Segmentation (Mid Slice)")
         visualization_path = os.path.join(
-            "./results/characterization_visuals",
+            base_on_workspace_dir("features/characterization_visuals"),
             f"tumor_vis_{os.path.basename(segmented_volume).replace('.nii.gz', '')}.png"
         )
         os.makedirs(os.path.dirname(visualization_path), exist_ok=True)
@@ -126,7 +127,7 @@ async def _characterize_tumor_impl(
         }
 
     # --- Save JSON ---
-    out_dir = "./results/characterization_reports"
+    out_dir = base_on_workspace_dir("features/characterization_reports")
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{os.path.basename(segmented_volume).replace('.nii.gz', '')}_report.json")
     with open(out_path, "w") as f:

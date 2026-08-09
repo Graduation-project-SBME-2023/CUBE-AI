@@ -33,6 +33,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import LearningCurveDisplay
 from sklearn.ensemble import VotingClassifier
 import joblib
+from storage_paths import HYPOTHESES_DIR, workspace_subpath
 
 class PyCaretClassificationTool:
     name = "pycaret_classification"
@@ -1068,10 +1069,10 @@ async def classification_modelling(
     # Hardcoded paths as per your original snippet
     # input_path = r'testing_folders\radiomic_features_label_1.csv'
     if not workspace_folder:
-        workspace_folder = os.path.join(Path(__file__).parent.parent, workspace_folder)
+        workspace_folder = str(HYPOTHESES_DIR / "workspace_default")
     # root_dir = Path(__file__).parent.parent
 
-    output_dir = os.path.join(workspace_folder, 'workspace', 'models')
+    output_dir = str(workspace_subpath(workspace_folder, "modeling"))
     target_column = "target"
 
     def run_classification_modeling():

@@ -2,6 +2,7 @@ import hashlib
 import os
 import pickle
 from pathlib import Path
+from storage_paths import MODELS_DIR
 
 from fastapi import APIRouter
 
@@ -10,7 +11,7 @@ router = APIRouter(prefix="/voxtell", tags=["VoxTell"])
 
 
 def _cache_path() -> Path:
-    model_dir = Path(os.environ.get("VOXTELL_DIR", "/models/voxtell_v1.1"))
+    model_dir = Path(os.environ.get("VOXTELL_DIR", str(MODELS_DIR / "voxtell_v1.1")))
     return model_dir / "text_embeddings_cache.pkl"
 
 

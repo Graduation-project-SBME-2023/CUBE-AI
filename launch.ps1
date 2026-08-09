@@ -123,7 +123,30 @@ Write-Host ""
 Write-OK "Selected backend: $BackendMode"
 Write-Host ""
 
-#  === 5. Launch =================================
+#  === 5. Storage migration =================================
+# Relocates pre-restructure runtime data into Backend/storage. Silent no-op
+# once migrated, and on a fresh clone with nothing to move.
+$MigrateScript = Join-Path $ScriptDir "Backend\scripts\migrate_storage.py"
+$PythonBin = $null
+foreach ($candidate in @("python", "python3", "py")) {
+    if (Get-Command $candidate -ErrorAction SilentlyContinue) {
+        $PythonBin = $candidate
+        break
+    }
+}
+
+if ($PythonBin) {
+    & $PythonBin $MigrateScript --auto
+    if ($LASTEXITCODE -ne 0) {
+        Stop-Launch "Storage migration failed. Your data has not been lost - see the error above.`nA rollback script was written to Backend\storage\_migrated-legacy\."
+    }
+}
+else {
+    Write-Warn "Python not found; skipping the storage migration check."
+    Write-Warn "If this is an upgrade from an older checkout, run Backend\scripts\migrate_storage.py --execute manually."
+}
+
+#  === 6. Launch =================================
 
 Write-Warn "Starting Docker containers..."
 Write-Warn "First run may take several minutes."
@@ -138,7 +161,7 @@ if ($LASTEXITCODE -ne 0) {
     Stop-Launch "docker compose exited with code $LASTEXITCODE. Check the output above for errors."
 }
 
-#  === 6. Final Message =================================
+#  === 7. Final Message =================================
 Write-Host ""
 Write-OK "Frontend: http://localhost"
 

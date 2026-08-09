@@ -1,4 +1,5 @@
 import os
+from storage_paths import workspace_subpath
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING, Dict, Any
 import aiofiles
@@ -95,7 +96,7 @@ def _parse_tool_content(content: Any) -> Dict[str, Any]:
 
 async def _read_agent_output_file(workspace_folder: str, agent_id: str) -> dict:
     """Read a persisted agent output JSON from the workspace outputs dir."""
-    output_path = os.path.join(workspace_folder, "outputs", f"{agent_id}_output.json")
+    output_path = str(workspace_subpath(workspace_folder, f"outputs/{agent_id}_output.json"))
     try:
         if os.path.exists(output_path):
             async with aiofiles.open(output_path, 'r') as f:

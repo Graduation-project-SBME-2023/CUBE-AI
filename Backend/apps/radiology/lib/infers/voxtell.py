@@ -18,6 +18,7 @@ import threading
 import platform
 import logging
 import tempfile
+from storage_paths import TEMP_DIR
 
 from contextlib import contextmanager
 
@@ -96,8 +97,8 @@ _CACHE_LOCK = threading.RLock()
 @contextmanager
 def _exclusive_cache_process_lock(cache_path: str):
     """Serialize cache writes across workers using a sidecar lock file."""
-    lock_path = f"{cache_path}.lock"
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    lock_path = TEMP_DIR / "radiology" / "voxtell-cache.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "a+b") as lock_stream:
         if os.name == "nt":
             import msvcrt
@@ -279,11 +280,13 @@ class MyVoxTellPredictor(VoxTellPredictor):
     def _save_cache_atomically(self) -> None:
         cache_dir = os.path.dirname(self.cache_output_path)
         os.makedirs(cache_dir, exist_ok=True)
+        temp_dir = TEMP_DIR / "radiology"
+        temp_dir.mkdir(parents=True, exist_ok=True)
         temp_path = None
         try:
             with tempfile.NamedTemporaryFile(
                 mode="wb",
-                dir=cache_dir,
+                dir=temp_dir,
                 prefix=".voxtell-cache-",
                 suffix=".tmp",
                 delete=False,

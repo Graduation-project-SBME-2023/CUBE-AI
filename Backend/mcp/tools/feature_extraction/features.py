@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .. import mcp
 from ..helpers.workspace import WorkspacePath, base_on_workspace_dir
+from storage_paths import CACHE_DIR, TEMP_DIR
 
 from tool_logging import ToolEvent, log_tool_state, TextPayload, ProgressPayload
 
@@ -643,7 +644,9 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
 
         all_features_by_target: dict[str, list[dict[str, Any]]] = {}
         features_by_subject: dict[str, dict[str, Any]] = {}
-        temp_dir = tempfile.mkdtemp(dir=output_dir)
+        radiology_temp_dir = TEMP_DIR / "radiology"
+        radiology_temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_dir = tempfile.mkdtemp(dir=radiology_temp_dir)
         start = time.time()
 
         # ADDED FOR UI ENHANCEMENT — Task 5: GPU detection (informational).
@@ -712,7 +715,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                         logger.debug(f"  [Task 3] Spatial check error for {subject_id}: {_sa_exc}")
 
                 # ADDED FOR UI ENHANCEMENT — Task 4: Cache directory.
-                _cache_dir = os.path.join(output_dir, ".cache")
+                _cache_dir = str(CACHE_DIR / "monailabel" / "feature-extraction")
 
                 for lbl in mask_labels_raw:
                     binary = (mask_array == lbl).astype(np.uint8)

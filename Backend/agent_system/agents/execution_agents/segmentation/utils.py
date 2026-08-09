@@ -17,6 +17,7 @@ import pydicom
 import logging
 from email import policy
 from email.parser import BytesParser
+from storage_paths import MEDICAL_IMAGES_DIR, MEDICAL_LABELS_DIR, TEMP_DIR, workspace_subpath
 
 logger = logging.getLogger(__name__)
 from PIL import Image
@@ -119,8 +120,10 @@ def parse_nrrd_data(nrrd_bytes):
     Parses NRRD data (raw bytes) and returns:
 
     """
+    temp_dir = TEMP_DIR / "radiology"
+    temp_dir.mkdir(parents=True, exist_ok=True)
     try:  
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".nrrd") as tmp:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".nrrd", dir=temp_dir) as tmp:
             tmp.write(nrrd_bytes)
             tmp_path = tmp.name
 
@@ -142,7 +145,7 @@ def parse_nrrd_data(nrrd_bytes):
         try:
             if nrrd_bytes.startswith(b'\x1f\x8b'):  # gzip magic number
                 decompressed = gzip.decompress(nrrd_bytes)
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".nrrd") as tmp:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".nrrd", dir=temp_dir) as tmp:
                     tmp.write(decompressed)
                     tmp_path = tmp.name
                 try:
@@ -555,12 +558,11 @@ async def download_and_pair_volumes(
     TASK_NAME = task_name
 
     # where MONAI actually saves files after the POST trigger
-    MONAI_BASE_DIR = Path("/app/Backend/apps")
-    MONAI_IMG_DIR   = MONAI_BASE_DIR / "radiology" / "General_Data"
-    MONAI_LABEL_DIR = MONAI_BASE_DIR / "radiology" / "labels"
+    MONAI_IMG_DIR = MEDICAL_IMAGES_DIR
+    MONAI_LABEL_DIR = MEDICAL_LABELS_DIR
 
-    FINAL_DIR_IMG   = os.path.join(workspace_dir, "volumes")
-    FINAL_DIR_LABEL = os.path.join(workspace_dir, "masks")
+    FINAL_DIR_IMG = str(workspace_subpath(workspace_dir, "volumes"))
+    FINAL_DIR_LABEL = str(workspace_subpath(workspace_dir, "masks"))
 
     for d in [FINAL_DIR_IMG, FINAL_DIR_LABEL]:
         os.makedirs(d, exist_ok=True)
@@ -1284,9 +1286,9 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
                       after each GIF is saved, so callers can stream results
                       to the frontend one-by-one instead of waiting for the full batch.
     """
-    volumes_dir = os.path.join(workspace_dir, "volumes")
-    masks_dir = os.path.join(workspace_dir, "masks")
-    output_dir = os.path.join(workspace_dir, "overlays")
+    volumes_dir = str(workspace_subpath(workspace_dir, "volumes"))
+    masks_dir = str(workspace_subpath(workspace_dir, "masks"))
+    output_dir = str(workspace_subpath(workspace_dir, "overlays"))
     workspace_folder_name = os.path.basename(workspace_dir)
     os.makedirs(output_dir, exist_ok=True)
     generated_volumes = []
@@ -1326,7 +1328,7 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
             mask_path = (
                 mask_path_override
                 if os.path.isabs(mask_path_override)
-                else os.path.join(workspace_dir, mask_path_override)
+                else str(workspace_subpath(workspace_dir, mask_path_override))
             )
             # Older manifests may contain a stale relative path. Prefer the
             # canonical pair path when it exists so preview generation remains
@@ -1537,8 +1539,8 @@ def cleanup_discarded(
     - Keeps volumes for BOTH accepted and modified UIDs.
     - Keeps masks ONLY for accepted UIDs (modified masks are removed to be re-downloaded).
     """
-    volumes_dir = os.path.join(workspace_dir, "volumes")
-    masks_dir = os.path.join(workspace_dir, "masks")
+    volumes_dir = str(workspace_subpath(workspace_dir, "volumes"))
+    masks_dir = str(workspace_subpath(workspace_dir, "masks"))
     
     # we want to keep the NIfTI volume files for both accepted and modified
     accepted_keys = set(accepted_uids)

@@ -1,5 +1,6 @@
 import sys
 import os
+from storage_paths import workspace, ws_sub
 import logging
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -134,7 +135,7 @@ async def main():
     # agent = await FeatureExtractionAgent.create(client)
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     SERVER_PATH = os.path.join(BASE_DIR, "..", "..", "..", "mcp", "server.py")
-    workspace_dir = os.path.join(BASE_DIR, "..", "..", "workspace")
+    workspace_dir = str(workspace("dev-session"))
 
     agent = await FeatureExtractionAgent.create(
         workspace_folder=workspace_dir,
@@ -149,14 +150,14 @@ async def main():
         print(tool.name)
     await Console(
         agent.run_stream(
-            task="""Perform analysis, and find out the most important radiomics features for determining the health of the spleen. These are the inputs you'll need:
-            {
+            task=f"""Perform analysis, and find out the most important radiomics features for determining the health of the spleen. These are the inputs you'll need:
+            {{
                 "hypothesis": "What are the most important features for determining the health of the spleen?",
-                "image_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/volumes",
-                "mask_dir": "/Users/ibrahim/Local Folder/GP/CUBE.AI/Backend/agent_system/workspace/masks",
+                "image_dir": "{ws_sub('dev-session', 'volumes')}",
+                "mask_dir": "{ws_sub('dev-session', 'masks')}",
                 "target_column": "target",
                 "subject_id_column": "id",
-            }
+            }}
         """,
             cancellation_token=CancellationToken(),
         )

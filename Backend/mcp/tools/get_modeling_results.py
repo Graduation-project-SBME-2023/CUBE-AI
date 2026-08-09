@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
 from tool_logging import ToolEvent, log_tool_state, TextPayload
+from storage_paths import HYPOTHESES_DIR, workspace_subpath
 
 
 @mcp.tool()
@@ -28,18 +29,19 @@ def get_modeling_results() -> str:
         log_tool_state(start_event)
         # 1. Resolve Paths
         if not WORKSPACE_DIR:
-            WORKSPACE_DIR = os.path.join(Path(__file__).parent.parent.parent, "agent_system", "workspace")
+            WORKSPACE_DIR = str(HYPOTHESES_DIR / "workspace_default")
+        WORKSPACE_DIR = Path(WORKSPACE_DIR)
 
         # current_dir = Path(__file__).resolve().parent
         # logging_path = current_dir.parent.parent / "agent_system" / "workspace"
 
         # Map modes to specific files (or all of them)
         all_files = {
-            "features": WORKSPACE_DIR / "features" / "top_10_features.csv",
+            "features": workspace_subpath(WORKSPACE_DIR, "features/top_10_features.csv"),
             # "tuning": logging_path / "model_1_results.csv",
-            "evaluation": WORKSPACE_DIR / "models" / "models" / "model_1" / "independent_eval_results_model_1.csv",
-            "comparisons": WORKSPACE_DIR / "models" / "model_comparison_results.csv",
-            "summary": WORKSPACE_DIR / "models" / "model_summary.csv"
+            "evaluation": workspace_subpath(WORKSPACE_DIR, "models/models/model_1/independent_eval_results_model_1.csv"),
+            "comparisons": workspace_subpath(WORKSPACE_DIR, "models/model_comparison_results.csv"),
+            "summary": workspace_subpath(WORKSPACE_DIR, "models/model_summary.csv")
         }
 
         # Select which files to read based on the 'mode' argument

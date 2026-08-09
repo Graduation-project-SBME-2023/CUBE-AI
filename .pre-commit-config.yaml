@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: backend-storage-boundary
+        name: backend storage boundary
+        entry: pwsh -NoProfile -File Backend/scripts/check_storage_boundary.ps1
+        language: system
+        pass_filenames: false
+        always_run: true

@@ -1,0 +1,13 @@
+Backend/storage/
+Backend/agents_workspace/
+Backend/models/
+Backend/apps/radiology/General_Data/
+Backend/apps/radiology/Labels/
+Backend/apps/radiology/NN_Unet/
+Backend/apps/radiology/inference_jobs/
+Backend/apps/radiology/Data/
+Backend/apps/radiology/bin/
+**/__pycache__/
+**/.pytest_cache/
+**/node_modules/
+venv/

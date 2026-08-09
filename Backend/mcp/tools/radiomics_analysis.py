@@ -2,6 +2,8 @@ import nibabel as nib
 import numpy as np
 import pandas as pd
 import os
+from .helpers.workspace import base_on_workspace_dir
+from storage_paths import MEDICAL_IMAGES_DIR, MEDICAL_LABELS_DIR
 from scipy.stats import skew, kurtosis, entropy
 from skimage.feature import graycomatrix, graycoprops
 from skimage.measure import regionprops, label
@@ -464,9 +466,9 @@ def analyze_all(images_dir, masks_dir, results_dir):
 
 
 def main():
-    images_dir = r"D:\SBME\GP\Neuroblastoma\neuroblastoma_segmentation\data\nnUNet_raw\Dataset001_Neuroblastoma\imagesTr"
-    masks_dir = r"D:\SBME\GP\Neuroblastoma\neuroblastoma_segmentation\data\nnUNet_raw\Dataset001_Neuroblastoma\labelsTr"
-    results_dir = "./results/radiomics_analysis"
+    images_dir = str(MEDICAL_IMAGES_DIR)
+    masks_dir = str(MEDICAL_LABELS_DIR)
+    results_dir = base_on_workspace_dir("features/radiomics_analysis")
     os.makedirs(results_dir, exist_ok=True)
 
     df = analyze_all(images_dir, masks_dir, results_dir)

@@ -12,6 +12,7 @@
 
 import logging
 import os
+from storage_paths import MODELS_DIR
 from lib.configs.vista_labels import VISTA_CLASS_MAP
 from typing import Any, Dict, Optional, Union
 import zipfile
@@ -40,7 +41,7 @@ class VISTAPOINT3D(TaskConfig):
         # Labels — imported from vista_labels.py (single source of truth)
         self.labels = VISTA_CLASS_MAP
 
-        models_path = os.getenv("MODELS_DIR", self.model_dir)
+        models_path = os.getenv("MODELS_DIR", str(MODELS_DIR))
         self.path = [os.path.join(models_path, "vista.pt")]
 
 

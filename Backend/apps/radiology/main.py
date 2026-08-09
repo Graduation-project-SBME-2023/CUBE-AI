@@ -13,7 +13,10 @@ import torchvision
 import json
 import logging
 import os
+from storage_paths import MEDICAL_IMAGES_DIR, MODELS_DIR as STORAGE_MODELS_DIR, ensure_storage_layout
 from typing import Dict
+
+ensure_storage_layout()
 
 import lib.configs
 import lib.trainers
@@ -54,7 +57,7 @@ logger = logging.getLogger(__name__)
 class MyApp(MONAILabelApp):
     def __init__(self, app_dir, studies, conf):
         # self.model_dir = os.path.join(app_dir, "model")
-        self.model_dir = os.getenv("MODELS_DIR", "/models")
+        self.model_dir = os.getenv("MODELS_DIR", str(STORAGE_MODELS_DIR))
 
         configs = {}
         for c in get_class_names(lib.configs, "TaskConfig"):
@@ -425,8 +428,7 @@ def main():
         force=True,
     )
 
-    home = str(Path.home())
-    studies = f"{home}/Dataset/Radiology"
+    studies = str(MEDICAL_IMAGES_DIR)
 
     parser = argparse.ArgumentParser()
     parser.add_argument("-s", "--studies", default=studies)

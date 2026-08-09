@@ -23,12 +23,14 @@ from services.population_handoff import (
     population_handoff_issues,
     require_population_handoff,
 )
+from storage_paths import workspace_subpath
 
 
 def _write_ready_handoff(workspace: Path) -> None:
-    (workspace / "populations" / "targets").mkdir(parents=True)
-    (workspace / "outputs").mkdir()
-    (workspace / "config.json").write_text(
+    workspace_subpath(workspace, "populations/targets").mkdir(parents=True)
+    workspace_subpath(workspace, "outputs").mkdir(parents=True)
+    workspace_subpath(workspace, "config.json").parent.mkdir(parents=True, exist_ok=True)
+    workspace_subpath(workspace, "config.json").write_text(
         json.dumps(
             {
                 "anatomy_validated": True,
@@ -38,11 +40,11 @@ def _write_ready_handoff(workspace: Path) -> None:
         ),
         encoding="utf-8",
     )
-    (workspace / "populations" / "targets" / "targets.csv").write_text(
+    workspace_subpath(workspace, "populations/targets/targets.csv").write_text(
         "id,name,target\nvolume-1,patient-1,1\n",
         encoding="utf-8",
     )
-    (workspace / "scratchpad.json").write_text(
+    workspace_subpath(workspace, "scratchpad.json").write_text(
         json.dumps(
             {
                 "agents": {
@@ -55,7 +57,7 @@ def _write_ready_handoff(workspace: Path) -> None:
         ),
         encoding="utf-8",
     )
-    (workspace / "outputs" / f"{POPULATION_AGENT_ID}_output.json").write_text(
+    workspace_subpath(workspace, f"outputs/{POPULATION_AGENT_ID}_output.json").write_text(
         json.dumps({"agent_id": POPULATION_AGENT_ID, "status": "completed"}),
         encoding="utf-8",
     )
@@ -65,7 +67,8 @@ class PopulationHandoffContractTests(unittest.TestCase):
     def test_rejects_candidate_only_config_from_failed_run(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
-            (workspace / "config.json").write_text(
+            workspace_subpath(workspace, "config.json").parent.mkdir(parents=True)
+            workspace_subpath(workspace, "config.json").write_text(
                 json.dumps(
                     {
                         "candidate_datasetlist": ["candidate-uid"],
@@ -87,11 +90,11 @@ class PopulationHandoffContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             _write_ready_handoff(workspace)
-            config_path = workspace / "config.json"
+            config_path = workspace_subpath(workspace, "config.json")
             config = json.loads(config_path.read_text(encoding="utf-8"))
             config["datasetlist"] = []
             config_path.write_text(json.dumps(config), encoding="utf-8")
-            (workspace / "populations" / "targets" / "targets.csv").write_text(
+            workspace_subpath(workspace, "populations/targets/targets.csv").write_text(
                 "id,name,target\n",
                 encoding="utf-8",
             )
@@ -114,7 +117,8 @@ class PopulationAgentRetryTests(unittest.IsolatedAsyncioTestCase):
     async def test_incomplete_final_response_is_suppressed_and_retried(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
-            (workspace / "config.json").write_text(
+            workspace_subpath(workspace, "config.json").parent.mkdir(parents=True)
+            workspace_subpath(workspace, "config.json").write_text(
                 json.dumps({"candidate_datasetlist": ["candidate-uid"]}),
                 encoding="utf-8",
             )
