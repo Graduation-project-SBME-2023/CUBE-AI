@@ -20,10 +20,11 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import mcp  # same import pattern as scratchpad
+from storage_paths import HYPOTHESES_DIR, workspace_subpath
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "../../../agent_system/workspace")
+WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", str(HYPOTHESES_DIR / "workspace_default"))
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -200,7 +201,7 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
     try:
         import random
 
-        output_dir = os.path.join(WORKSPACE_DIR, 'modeling')
+        output_dir = str(workspace_subpath(WORKSPACE_DIR, "modeling"))
         target_column = 'target'
 
         os.makedirs(output_dir, exist_ok=True)
@@ -526,7 +527,7 @@ async def pycaret_run_regression_inference(params: RunRegressionInferenceInput) 
             r2_score,
         )
 
-        output_dir = os.path.join(WORKSPACE_DIR, 'modeling') or os.path.dirname(params.input_path) or "."
+        output_dir = str(workspace_subpath(WORKSPACE_DIR, "modeling"))
         os.makedirs(output_dir, exist_ok=True)
         log_file = os.path.join(output_dir, "pycaret_regression_inference.log")
         _setup_logging(log_file, verbose=params.verbose)

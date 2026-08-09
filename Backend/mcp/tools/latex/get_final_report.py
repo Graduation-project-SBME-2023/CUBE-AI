@@ -1,8 +1,10 @@
 import os
 import json
+from pathlib import Path
 from typing import Annotated
 from pydantic import Field
 from .. import mcp
+from storage_paths import HYPOTHESES_DIR, workspace_subpath
 
 #TODO the path of the generated report is fixed, this needs to be dynamic
 
@@ -18,8 +20,8 @@ async def get_final_report(
     """
 
     # Go one level up (parent folder), then into memory/workspace/
-    workspace_dir = os.environ.get("WORKSPACE_DIR")
-    file_path = workspace_dir / report_filename
+    workspace_dir = Path(os.environ.get("WORKSPACE_DIR", str(HYPOTHESES_DIR / "workspace_default")))
+    file_path = workspace_subpath(workspace_dir, f"reports/{report_filename}")
 
     if not file_path.exists():
         # Returning a clear error string is often better than raising an Exception 

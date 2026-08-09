@@ -360,7 +360,7 @@ async def initialize_training(
         if not records:
             raise HTTPException(status_code=404, detail="No records found for the given task")
         
-        logger.info(f"2. Download images and labels to General_Data and Labels directory")
+        logger.info("2. Download images and labels to storage/data/medical")
         download_images([record["volume_series_instance_uid"] for record in records])
         download_labels([record["label_series_instance_uid"] for record     in records])
 

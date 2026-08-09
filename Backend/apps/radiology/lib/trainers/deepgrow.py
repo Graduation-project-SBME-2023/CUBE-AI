@@ -43,6 +43,7 @@ from monai.transforms import (
 
 from monailabel.interfaces.datastore import Datastore
 from monailabel.tasks.train.basic_train import BasicTrainTask, Context
+from storage_paths import CACHE_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ class Deepgrow(BasicTrainTask):
     def pre_process(self, request, datastore: Datastore):
         self.cleanup(request)
 
-        cache_dir = self.get_cache_dir(request)
+        cache_dir = CACHE_DIR / "monailabel"
         output_dir = os.path.join(cache_dir, f"deepgrow_{self.dimension}D_train")
         logger.info(f"Preparing Dataset for Deepgrow-{self.dimension}D:: {output_dir}")
 
@@ -98,7 +99,7 @@ class Deepgrow(BasicTrainTask):
 
     def cleanup(self, request):
         # run_id = request["run_id"]
-        output_dir = os.path.join(pathlib.Path.home(), ".cache", "monailabel", f"deepgrow_{self.dimension}D_train")
+        output_dir = CACHE_DIR / "monailabel" / f"deepgrow_{self.dimension}D_train"
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir, ignore_errors=True)
 

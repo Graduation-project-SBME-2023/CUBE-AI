@@ -13,11 +13,12 @@ import os
 
 from . import mcp
 from tool_logging import ToolEvent, log_tool_state, TextPayload
+from storage_paths import HYPOTHESES_DIR, workspace_subpath
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "../../agent_system/workspace")
+WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", str(HYPOTHESES_DIR / "workspace_default"))
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
@@ -47,7 +48,7 @@ async def read_literature_context() -> str:
     Returns:
         str: JSON with 'knowledge_base', 'sources_guide', and 'hypothesis' fields.
     """
-    lit_path = os.path.join(WORKSPACE_DIR, "literature_context.json")
+    lit_path = str(workspace_subpath(WORKSPACE_DIR, "literature_context.json"))
 
     payload = TextPayload(message=f'Reading literature context.')
     start_event = ToolEvent('tool_started', 'text', payload)

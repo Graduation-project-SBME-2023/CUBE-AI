@@ -3,6 +3,7 @@ from typing import Annotated
 from pydantic import Field
 import httpx
 import os
+from storage_paths import workspace_subpath
 from service_urls import CONTROL_API_URL
 
 base_url = CONTROL_API_URL
@@ -99,7 +100,7 @@ async def search_volumes_by_description(
 
     # 2. Handle File Saving (Only if WORKSPACE_DIR exists)
     if workspace_dir:
-        json_path = Path(workspace_dir) / "config.json"
+        json_path = workspace_subpath(workspace_dir, "config.json")
 
         try:
             # Ensure the directory exists

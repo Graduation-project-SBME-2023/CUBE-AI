@@ -10,6 +10,7 @@ from .. import mcp
 from pydantic import Field
 from typing import Annotated
 from tool_logging import ToolEvent, log_tool_state, TextPayload
+from storage_paths import HYPOTHESES_DIR, TEMP_DIR, workspace_subpath
 
 @mcp.tool()
 async def latex_to_pdf(
@@ -29,7 +30,9 @@ async def latex_to_pdf(
     in your LaTeX source to embed them.
     """
     try:
-        with tempfile.TemporaryDirectory() as temp:
+        latex_temp_root = TEMP_DIR / "latex"
+        latex_temp_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=latex_temp_root) as temp:
             payload = TextPayload(message='Generating pdf...')
             start_event = ToolEvent('tool_started', 'text', payload)
             log_tool_state(start_event)
@@ -109,12 +112,11 @@ async def latex_to_pdf(
 
         workspace_folder = os.environ.get("WORKSPACE_DIR")
         if not workspace_folder:
-            current_dir = os.getcwd()
-            target_dir = os.path.abspath(os.path.join(current_dir, "Backend", "agent_system/workspace"))
-            final_folder = os.path.join(target_dir, "reports")
+            target_dir = str(HYPOTHESES_DIR / "workspace_default")
+            final_folder = str(workspace_subpath(target_dir, "reports"))
             workspace_folder_name = os.path.basename(target_dir)
         else:
-            final_folder = os.path.join(workspace_folder, "reports")
+            final_folder = str(workspace_subpath(workspace_folder, "reports"))
             workspace_folder_name = os.path.basename(workspace_folder)
 
         os.makedirs(final_folder, exist_ok=True)

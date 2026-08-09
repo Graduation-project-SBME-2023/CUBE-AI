@@ -2,6 +2,7 @@ import json
 import logging
 import shutil
 from pathlib import Path
+from storage_paths import workspace_subpath
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ def _remove_path(path: Path) -> bool:
 
 
 def _reset_scratchpad(workspace: Path, agent_id: str) -> bool:
-    scratchpad_path = workspace / "scratchpad.json"
+    scratchpad_path = workspace_subpath(workspace, "scratchpad.json")
     if not scratchpad_path.exists():
         return False
 
@@ -103,7 +104,7 @@ def _reset_scratchpad(workspace: Path, agent_id: str) -> bool:
 
 def _reset_population_config(workspace: Path) -> bool:
     """Keep the user-selected labelling mode but remove population run state."""
-    config_path = workspace / "config.json"
+    config_path = workspace_subpath(workspace, "config.json")
     if not config_path.exists():
         return False
     try:
@@ -125,7 +126,7 @@ def _reset_population_config(workspace: Path) -> bool:
 
 def _has_resumable_segmentation_checkpoint(workspace: Path) -> bool:
     """Return true when pair processing or review can resume safely."""
-    manifest_path = workspace / "segmentation_manifest.json"
+    manifest_path = workspace_subpath(workspace, "segmentation_manifest.json")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if (
@@ -136,8 +137,8 @@ def _has_resumable_segmentation_checkpoint(workspace: Path) -> bool:
         for item in manifest["pairs"]:
             if not isinstance(item, dict) or item.get("status") != "ready":
                 continue
-            volume_path = workspace / "volumes" / f"{item['volume_uid']}.nii.gz"
-            mask_path = (workspace / str(item.get("mask_path") or "")).resolve()
+            volume_path = workspace_subpath(workspace, f"volumes/{item['volume_uid']}.nii.gz")
+            mask_path = workspace_subpath(workspace, str(item.get("mask_path") or ""))
             mask_path.relative_to(workspace)
             if not volume_path.is_file() or not mask_path.is_file():
                 return False
@@ -176,7 +177,7 @@ def reset_interrupted_agent(
 
     removed: list[str] = []
     for relative in artifacts:
-        target = (workspace / relative).resolve()
+        target = workspace_subpath(workspace, relative)
         try:
             target.relative_to(workspace)
         except ValueError as exc:

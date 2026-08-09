@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from storage_paths import workspace_subpath
+
 import httpx
 
 from .ws_client_sender import send_ws_message_remote
@@ -34,7 +36,7 @@ def artifact_candidates(
 ) -> list[Path]:
     """Return hashed and legacy artifact paths, in preference order."""
     workspace = Path(workspace_dir).resolve()
-    directory = (workspace / subdirectory).resolve()
+    directory = workspace_subpath(workspace, subdirectory)
     if directory.parent != workspace:
         raise ValueError(f"Unsafe segmentation artifact directory: {subdirectory}")
     artifact_key = ensure_artifact_key(item)
@@ -74,11 +76,11 @@ def preview_from_item(
         existing = existing_artifact_path(workspace_dir, "overlays", item, ".gif")
         if existing is None:
             return None
-        gif_path = existing.relative_to(Path(workspace_dir)).as_posix()
+        gif_path = f"overlays/{existing.name}"
         item["gif_path"] = gif_path
     workspace = Path(workspace_dir).resolve()
-    overlays = (workspace / "overlays").resolve()
-    absolute = (workspace / gif_path).resolve()
+    overlays = workspace_subpath(workspace, "overlays")
+    absolute = workspace_subpath(workspace, gif_path)
     try:
         absolute.relative_to(overlays)
     except ValueError:

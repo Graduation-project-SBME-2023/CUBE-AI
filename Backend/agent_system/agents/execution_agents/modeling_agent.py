@@ -1,5 +1,6 @@
 import sys
 import os
+from storage_paths import workspace
 import logging
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -102,10 +103,8 @@ async def main(client=None):
     # Initialize the agent using the factory method
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     SERVER_PATH = os.path.join(BASE_DIR, '..', '..', '..', 'mcp', 'server.py')
-    agents_base_ws_dir = Path(os.environ.get("AGENTS_WORKSPACE_DIR"))
-    workspace_dir = str(agents_base_ws_dir / "workspace_4a4b06a4-5487-4512-932a-20cbdf28ff49")
-
-    session_id = "4a4b06a4-5487-4512-932a-20cbdf28ff49"
+    session_id = "dev-session"
+    workspace_dir = str(workspace(session_id))
 
     agent = await ModelingAgent.create(workspace_folder=workspace_dir, mcp_server_path=SERVER_PATH, session_id=session_id, model_client=client)
 

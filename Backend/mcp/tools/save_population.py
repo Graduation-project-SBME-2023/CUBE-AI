@@ -4,6 +4,7 @@ from . import mcp
 import json
 import os
 from tool_logging import ToolEvent, log_tool_state, TextPayload
+from storage_paths import workspace_subpath
 
 @mcp.tool()
 async def save_final_output(data: dict):
@@ -24,7 +25,7 @@ async def save_final_output(data: dict):
 
     workspace_dir = os.environ.get("WORKSPACE_DIR")
 
-    json_path = Path(workspace_dir) / "config.json"
+    json_path = workspace_subpath(workspace_dir, "config.json")
     patient_count = len(data['patient_ids'])
     study_count = len(data['datasetlist'])
 

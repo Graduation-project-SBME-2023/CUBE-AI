@@ -1,5 +1,6 @@
 import glob
 import os
+from storage_paths import HYPOTHESES_DIR, TEMP_DIR, workspace_subpath
 import re
 import logging
 import json
@@ -354,7 +355,9 @@ class PyRadiomicsFeatureExtractionTool:
                 logger.info(f"Found {len(mask_labels)} unique labels in masks: {mask_labels}")
             
             # Create a temporary directory for extracted masks by label
-            temp_dir = tempfile.mkdtemp(dir=output_dir)
+            radiology_temp_dir = TEMP_DIR / "radiology"
+            radiology_temp_dir.mkdir(parents=True, exist_ok=True)
+            temp_dir = tempfile.mkdtemp(dir=radiology_temp_dir)
             logger.info(f"Created temporary directory for masks: {temp_dir}")
             
             # Process each image-mask pair
@@ -2228,11 +2231,11 @@ async def extract_radiomic_features(
                 return [value]
         return value
     if not workspace_folder:
-        workspace_folder = os.path.join(Path(__file__).parent.parent, 'workspace')
-    output_dir = os.path.join(workspace_folder, 'features')
-    image_dir = os.path.join(workspace_folder, 'volumes')
-    mask_dir = os.path.join(workspace_folder, 'masks')
-    targets_csv = os.path.join(workspace_folder, 'populations', 'targets', 'targets.csv')
+        workspace_folder = str(HYPOTHESES_DIR / "workspace_default")
+    output_dir = str(workspace_subpath(workspace_folder, "features"))
+    image_dir = str(workspace_subpath(workspace_folder, "volumes"))
+    mask_dir = str(workspace_subpath(workspace_folder, "masks"))
+    targets_csv = str(workspace_subpath(workspace_folder, "populations/targets/targets.csv"))
     target_column = 'target'
 
     feature_classes = safe_parse(feature_classes)
@@ -2286,10 +2289,10 @@ async def analyze_feature_importance(
         top_features_str = str(top_features)
         
     if workspace_folder:
-        output_dir = os.path.join(workspace_folder, 'features')
+        output_dir = str(workspace_subpath(workspace_folder, "features"))
     else:
         root_dir = Path(__file__).parent.parent
-        output_dir = os.path.join(root_dir, 'workspace', 'features')
+        output_dir = str(workspace_subpath(HYPOTHESES_DIR / "workspace_default", "features"))
     target_column = 'target'
 
     def run_analysis():

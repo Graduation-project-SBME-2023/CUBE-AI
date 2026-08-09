@@ -2,6 +2,7 @@ import torch
 import pickle
 import os
 import tempfile
+from storage_paths import MODELS_DIR, TEMP_DIR
 
 from contextlib import contextmanager
 from transformers import AutoTokenizer, AutoModel
@@ -10,20 +11,20 @@ from lib.configs.qwen_embedding_model import ensure_qwen_embedding_model
 from lib.configs.voxtell_supported_labels import VOXTELL_SUPPORTED_LABELS
 
 # Container paths (mounted via docker-compose volumes)
-TEXT_MODEL_PATH = os.environ.get("TEXT_MODEL_PATH", "/models/qwen3-4b-embedding")
+TEXT_MODEL_PATH = os.environ.get("TEXT_MODEL_PATH", str(MODELS_DIR / "qwen3-4b-embedding"))
 
 # Validate the required tokenizer, index, and weight files. This runs before
 # the cache builder loads the model and resumes any interrupted download.
 ensure_qwen_embedding_model(TEXT_MODEL_PATH)
-VOXTELL_DIR     = os.environ.get("VOXTELL_DIR",     "/models/voxtell_v1.1")
+VOXTELL_DIR = os.environ.get("VOXTELL_DIR", str(MODELS_DIR / "voxtell_v1.1"))
 CACHE_OUTPUT_PATH = os.path.join(VOXTELL_DIR, "text_embeddings_cache.pkl")
 
 
 @contextmanager
 def exclusive_cache_process_lock(cache_path: str):
     """Serialize cache updates with the same sidecar used at inference time."""
-    lock_path = f"{cache_path}.lock"
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    lock_path = TEMP_DIR / "radiology" / "voxtell-cache.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     with open(lock_path, "a+b") as lock_stream:
         if os.name == "nt":
             import msvcrt
@@ -65,11 +66,13 @@ def load_exact_cache(cache_path: str) -> dict:
 def save_cache_atomically(cache_path: str, cache: dict) -> None:
     cache_dir = os.path.dirname(cache_path)
     os.makedirs(cache_dir, exist_ok=True)
+    temp_dir = TEMP_DIR / "radiology"
+    temp_dir.mkdir(parents=True, exist_ok=True)
     temp_path = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="wb",
-            dir=cache_dir,
+            dir=temp_dir,
             prefix=".voxtell-cache-",
             suffix=".tmp",
             delete=False,

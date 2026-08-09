@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import csv
 from pathlib import Path
+from storage_paths import workspace_subpath
 
 
 POPULATION_AGENT_ID = "study_population_planner_agent"
@@ -21,7 +22,7 @@ def population_handoff_issues(workspace_folder: str | Path) -> list[str]:
     workspace = Path(workspace_folder)
     issues: list[str] = []
 
-    config_path = workspace / "config.json"
+    config_path = workspace_subpath(workspace, "config.json")
     config: dict | None = None
     if not config_path.is_file():
         issues.append("config.json is missing")
@@ -47,7 +48,7 @@ def population_handoff_issues(workspace_folder: str | Path) -> list[str]:
         if config.get("cohort_approved") is not True:
             issues.append("doctor cohort approval has not completed")
 
-    targets_path = workspace / "populations" / "targets" / "targets.csv"
+    targets_path = workspace_subpath(workspace, "populations/targets/targets.csv")
     if not targets_path.is_file():
         issues.append("generate_targets has not produced populations/targets/targets.csv")
     else:
@@ -58,7 +59,7 @@ def population_handoff_issues(workspace_folder: str | Path) -> list[str]:
         except (OSError, csv.Error) as exc:
             issues.append(f"targets.csv is unreadable: {exc}")
 
-    scratchpad_path = workspace / "scratchpad.json"
+    scratchpad_path = workspace_subpath(workspace, "scratchpad.json")
     if not scratchpad_path.is_file():
         issues.append("scratchpad.json is missing")
     else:
@@ -73,7 +74,7 @@ def population_handoff_issues(workspace_folder: str | Path) -> list[str]:
         except (AttributeError, OSError, json.JSONDecodeError) as exc:
             issues.append(f"scratchpad.json is unreadable: {exc}")
 
-    output_path = workspace / "outputs" / f"{POPULATION_AGENT_ID}_output.json"
+    output_path = workspace_subpath(workspace, f"outputs/{POPULATION_AGENT_ID}_output.json")
     if not output_path.is_file():
         issues.append("population structured output is missing")
     else:

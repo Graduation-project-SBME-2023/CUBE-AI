@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, Tuple
 from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel
+from storage_paths import MEDICAL_IMAGES_DIR, MEDICAL_LABELS_DIR, NNUNET_DIR
 
 router = APIRouter(
     prefix="/NN_UNet",
@@ -15,12 +16,11 @@ router = APIRouter(
 )
 
 # Base folders (adjust these as needed)
-radiology_path = os.getenv("MONAI_LABEL_RADIOLOGY_PATH", "/apps/radiology")
-radiology_path = Path(radiology_path)
-BASE_PATH = radiology_path / "NN_Unet"
-LABELS_PATH = radiology_path / "Labels"
-GENERAL_DATA_PATH = radiology_path / "General_Data"
-MAPPING_FILE = BASE_PATH / "instance_mapping.json"
+BASE_PATH = NNUNET_DIR
+LABELS_PATH = MEDICAL_LABELS_DIR
+GENERAL_DATA_PATH = MEDICAL_IMAGES_DIR
+MAPPING_FILE = BASE_PATH / "mappings" / "instance_mapping.json"
+MAPPING_FILE.parent.mkdir(parents=True, exist_ok=True)
 
 # Ensure nnUNet main folders exist
 NNUNET_RAW = BASE_PATH / "nnUNet_raw"

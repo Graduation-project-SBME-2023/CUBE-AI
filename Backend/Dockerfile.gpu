@@ -88,13 +88,25 @@ COPY ./reader.py \
      /usr/local/lib/python3.10/dist-packages/pydicom_seg/reader.py
 COPY ./segmentation_dataset.py \
      /usr/local/lib/python3.10/dist-packages/pydicom_seg/segmentation_dataset.py
+COPY ./storage_paths.py /apps/radiology/storage_paths.py
 
 # ------------------------------------------------------------
 # 4. Environment variables
 # ------------------------------------------------------------
-ENV nnUNet_preprocessed=/NN_Unet/nnUNet_preprocessed \
-    nnUNet_results=/NN_Unet/nnUNet_results \
-    nnUNet_raw=/NN_Unet/nnUNet_raw \
+ENV BACKEND_STORAGE_ROOT=/storage \
+    AGENTS_WORKSPACE_DIR=/storage/hypotheses \
+    GENERAL_DATA_DIR=/storage/data/medical \
+    NNUNET_DIR=/storage/data/nnunet \
+    nnUnet_folders=/storage/data/nnunet \
+    MODELS_DIR=/storage/models \
+    INFERENCE_JOB_DIR=/storage/jobs/inference \
+    HF_HOME=/storage/cache/huggingface \
+    BACKEND_TEMP_DIR=/storage/temp \
+    BACKEND_LOG_DIR=/storage/logs \
+    TMPDIR=/storage/temp/radiology \
+    nnUNet_preprocessed=/storage/data/nnunet/nnUNet_preprocessed \
+    nnUNet_results=/storage/data/nnunet/nnUNet_results \
+    nnUNet_raw=/storage/data/nnunet/nnUNet_raw \
     DATABASE_URL=postgresql://workflow_user:password@postgres:5432/workflow_db \
     PYTHONPATH=/apps/radiology \
     # NVIDIA runtime hints (can also be set in compose)
@@ -108,4 +120,4 @@ EXPOSE 8000
 
 # Default entrypoint: run DB migrations then start the server.
 # The compose file can still override this if needed.
-CMD ["sh", "-c", "alembic -c /alembic/alembic.ini upgrade head && if [ ! -f /models/voxtell_v1.1/text_embeddings_cache.pkl ]; then python /apps/radiology/voxtell_cache_builder.py; fi && python /monailabel/server_start.py"]
+CMD ["sh", "-c", "alembic -c /alembic/alembic.ini upgrade head && if [ ! -f /storage/models/voxtell_v1.1/text_embeddings_cache.pkl ]; then python /apps/radiology/voxtell_cache_builder.py; fi && python /monailabel/server_start.py"]

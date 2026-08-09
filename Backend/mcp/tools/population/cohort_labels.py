@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any
 from pydantic import Field
 from .. import mcp
+from storage_paths import workspace_subpath
 
 
 def _normalize_patient_ids(pid: str | None) -> set[str]:
@@ -148,7 +149,7 @@ async def extract_cohort_labels() -> dict:
         return {"status": "error", "message": "WORKSPACE_DIR environment variable is not set."}
 
     # ── 1. Load criteria and dataset list from config.json ──────────────────────
-    config_json_path = os.path.join(workspace_dir, "config.json")
+    config_json_path = str(workspace_subpath(workspace_dir, "config.json"))
     inclusion_criteria: list = []
     exclusion_criteria: list = []
     datasetlist: list = []
@@ -204,7 +205,7 @@ async def extract_cohort_labels() -> dict:
             print(f"Failed to fetch available patients: {e}")
 
     if not available_cases and not volume_patient_meta:
-        populations_dir = os.path.join(workspace_dir, "populations")
+        populations_dir = str(workspace_subpath(workspace_dir, "populations"))
         os.makedirs(populations_dir, exist_ok=True)
         output_csv = os.path.join(populations_dir, "cohort_labels.csv")
         with open(output_csv, "w", newline="", encoding="utf-8") as f:
@@ -225,8 +226,8 @@ async def extract_cohort_labels() -> dict:
         }
 
     # ── 3. Locate clinical data (workspace first, then MCP fallback) ────────────
-    clinical_json_path = os.path.join(workspace_dir, "clinical_data.json")
-    clinical_csv_path = os.path.join(workspace_dir, "clinical_data.csv")
+    clinical_json_path = str(workspace_subpath(workspace_dir, "clinical_data.json"))
+    clinical_csv_path = str(workspace_subpath(workspace_dir, "clinical_data.csv"))
 
     # Temporary fallback relative to the mcp directory (mounted in docker)
     mcp_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -442,7 +443,7 @@ async def extract_cohort_labels() -> dict:
                 print(f"[extract_cohort_labels] Orphan volume {uid} (patient: {best_pid}) — added as unlabeled entry.")
 
     # ── 7. Write cohort_labels.csv ───────────────────────────────────────────────
-    populations_dir = os.path.join(workspace_dir, "populations")
+    populations_dir = str(workspace_subpath(workspace_dir, "populations"))
     os.makedirs(populations_dir, exist_ok=True)
     output_csv = os.path.join(populations_dir, "cohort_labels.csv")
 

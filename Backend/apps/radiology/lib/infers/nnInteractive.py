@@ -25,6 +25,7 @@ from monai.data import MetaTensor
 from monailabel.interfaces.tasks.infer_v2 import InferType
 import torch
 import tempfile
+from storage_paths import MODELS_DIR
 import re
 import shutil
 from pathlib import Path
@@ -71,7 +72,7 @@ class NNINTERACTIVE(BasicInferTask):
             **kwargs,
         )
         self.target_spacing = target_spacing
-        self.BASE_PATH = Path(os.getenv("MODELS_DIR", "/models"))
+        self.BASE_PATH = Path(os.getenv("MODELS_DIR", str(MODELS_DIR)))
         self.DATA_PATH = Path("/apps/radiology")
         self.session=None
 

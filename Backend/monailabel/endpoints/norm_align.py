@@ -4,6 +4,7 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 import logging
+from storage_paths import MEDICAL_IMAGES_DIR, MEDICAL_LABELS_DIR
 logger = logging.getLogger(__name__)
 
 
@@ -20,10 +21,8 @@ router = APIRouter(
 )
 
 # Define data paths using pathlib for cross-platform compatibility
-radiology_path = os.getenv("MONAI_LABEL_APP_DIR", "/apps/radiology")
-radiology_path = Path(radiology_path)
-DATA_FOLDER = radiology_path / "General_Data"  # Folder containing medical imaging data
-LABEL_FOLDER = radiology_path / "Labels"  # Folder containing segmentation labels
+DATA_FOLDER = MEDICAL_IMAGES_DIR
+LABEL_FOLDER = MEDICAL_LABELS_DIR
 
 
 def get_nifti_attributes(nifti_file: str) -> tuple:

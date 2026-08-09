@@ -1,5 +1,6 @@
 import sys
 import os
+from storage_paths import workspace_subpath
 from collections.abc import AsyncGenerator, Sequence
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -176,7 +177,7 @@ class PopulationPlannerAgent(AssistantAgent):
         # Only add extract_cohort_labels if mode is automatic
         try:
             if workspace_folder:
-                config_path = os.path.join(workspace_folder, "config.json")
+                config_path = str(workspace_subpath(workspace_folder, "config.json"))
                 import json
                 if os.path.exists(config_path):
                     with open(config_path, "r", encoding="utf-8") as f:

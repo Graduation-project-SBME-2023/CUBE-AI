@@ -6,14 +6,23 @@ services:
     ports:
       - "8150:8150"
     volumes:
-      - ${COMPOSE_PROJECT_DIR}/Backend/agents_workspace:/app/agents_workspace
+      - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
+      - ${COMPOSE_PROJECT_DIR}/Backend/storage_paths.py:/app/Backend/storage_paths.py:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/agent_system:/app/Backend/agent_system
       - ${COMPOSE_PROJECT_DIR}/Backend/mcp:/app/Backend/mcp
-      - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/General_Data:/app/Backend/apps/radiology/General_Data
-      - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/labels:/app/Backend/apps/radiology/labels
       - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/lib/configs:/app/Backend/apps/radiology/lib/configs:ro
     environment:
-      AGENTS_WORKSPACE_DIR: /app/agents_workspace
+      BACKEND_STORAGE_ROOT: /storage
+      AGENTS_WORKSPACE_DIR: /storage/hypotheses
+      GENERAL_DATA_DIR: /storage/data/medical
+      NNUNET_DIR: /storage/data/nnunet
+      nnUnet_folders: /storage/data/nnunet
+      MODELS_DIR: /storage/models
+      INFERENCE_JOB_DIR: /storage/jobs/inference
+      HF_HOME: /storage/cache/huggingface
+      BACKEND_TEMP_DIR: /storage/temp
+      BACKEND_LOG_DIR: /storage/logs
+      TMPDIR: /storage/temp/radiology
       OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
       MONAI_URL: http://monailabel:8000
       CONTROL_API_URL: http://control-api:8001
@@ -38,9 +47,22 @@ services:
     environment:
       CONTROL_API_PORT: 8001
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      BACKEND_STORAGE_ROOT: /storage
+      AGENTS_WORKSPACE_DIR: /storage/hypotheses
+      GENERAL_DATA_DIR: /storage/data/medical
+      NNUNET_DIR: /storage/data/nnunet
+      nnUnet_folders: /storage/data/nnunet
+      MODELS_DIR: /storage/models
+      INFERENCE_JOB_DIR: /storage/jobs/inference
+      HF_HOME: /storage/cache/huggingface
+      BACKEND_TEMP_DIR: /storage/temp
+      BACKEND_LOG_DIR: /storage/logs
+      TMPDIR: /storage/temp/radiology
     env_file:
       - .env
     volumes:
+      - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
+      - ${COMPOSE_PROJECT_DIR}/Backend/storage_paths.py:/apps/radiology/storage_paths.py:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/monailabel
     depends_on:
       postgres:
@@ -78,18 +100,32 @@ services:
       MONAI_LABEL_STUDIES: http://orthanc:8042/dicom-web
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ORTHANC_URL: http://orthanc:8042
-      MODELS_DIR: /models
-      NNUNET_DIR: /NN_Unet
-      GENERAL_DATA_DIR: /General_Data
+      BACKEND_STORAGE_ROOT: /storage
+      AGENTS_WORKSPACE_DIR: /storage/hypotheses
+      GENERAL_DATA_DIR: /storage/data/medical
+      NNUNET_DIR: /storage/data/nnunet
+      nnUnet_folders: /storage/data/nnunet
+      MODELS_DIR: /storage/models
+      INFERENCE_JOB_DIR: /storage/jobs/inference
+      HF_HOME: /storage/cache/huggingface
+      BACKEND_TEMP_DIR: /storage/temp
+      BACKEND_LOG_DIR: /storage/logs
+      TMPDIR: /storage/temp/radiology
+      TEXT_MODEL_PATH: /storage/models/qwen3-4b-embedding
+      VOXTELL_DIR: /storage/models/voxtell_v1.1
+      VISTA_CONFIG_SOURCE_DIR: /config/vista
+      nnUNet_raw: /storage/data/nnunet/nnUNet_raw
+      nnUNet_preprocessed: /storage/data/nnunet/nnUNet_preprocessed
+      nnUNet_results: /storage/data/nnunet/nnUNet_results
       TORCH_CUDA_ARCH_LIST: "12.0"
     env_file:
       - .env
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/apps:/apps
       - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/monailabel
-      - ${COMPOSE_PROJECT_DIR}/Backend/models:/models
-      - nnUnet_folders:/NN_Unet
-      - General_Data:/General_Data
+      - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
+      - ${COMPOSE_PROJECT_DIR}/Backend/models/configs/vista:/config/vista:ro
+      - ${COMPOSE_PROJECT_DIR}/Backend/storage_paths.py:/apps/radiology/storage_paths.py:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/CustomNnUnetTrainer.py:/usr/local/lib/python3.10/dist-packages/nnunetv2/training/nnUNetTrainer/CustomNnUnetTrainer.py
       - ${COMPOSE_PROJECT_DIR}/Backend/alembic.ini:/alembic/alembic.ini
       - ${COMPOSE_PROJECT_DIR}/Backend/migrations:/alembic/migrations
@@ -156,5 +192,3 @@ services:
 volumes:
   postgres-db2:
   orthanc-db2:
-  nnUnet_folders:
-  General_Data:

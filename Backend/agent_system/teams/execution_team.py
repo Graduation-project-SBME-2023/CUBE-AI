@@ -4,11 +4,11 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+from storage_paths import LOGS_DIR
 
 
 def setup_logging():
-    root_dir = Path(__file__).parent.parent
-    log_dir = os.path.join(root_dir, "logs")
+    log_dir = LOGS_DIR / "agent-system"
     os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

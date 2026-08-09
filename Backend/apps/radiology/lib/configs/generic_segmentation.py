@@ -1,5 +1,6 @@
 import logging
 import os
+from storage_paths import NNUNET_DIR
 from typing import Any, Dict, Optional, Union
 
 from lib.infers.generic_segmentation import GenericSegmentation as InferGenericSegmentation
@@ -34,7 +35,7 @@ class GenericSegmentation(TaskConfig):
 
         # Dynamically set the root directory (go up two levels from the script's location)
  
-        self.root_nnunet_dir = os.getenv("nnUnet_folders", default="/NN_Unet")
+        self.root_nnunet_dir = os.getenv("nnUnet_folders", default=str(NNUNET_DIR))
         
         self.model_name = model_name
         self.plan_type=plan_type

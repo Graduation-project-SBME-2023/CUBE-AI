@@ -11,7 +11,7 @@
 
 ║    5. Context_Compiler_Agent→ Produces context.json + Markdown report        ║
 ║                                                                              ║
-║  Outputs (written to ./literature_review_output/):                           ║
+║  Outputs (written to workspace outputs/literature/):                         ║
 ║    • context.json          — structured context for downstream agents        ║
 ║    • literature_report.md  — human-readable synthesized review               ║
 ║    • ranked_papers.json    — all papers with relevance scores                ║
@@ -58,6 +58,9 @@ from typing import Any, Dict, List, Optional
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 if _current_dir not in sys.path:
     sys.path.insert(0, _current_dir)
+_backend_dir = str(Path(__file__).resolve().parents[3])
+if _backend_dir not in sys.path:
+    sys.path.insert(0, _backend_dir)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Dynamic Knowledge Builder
@@ -106,7 +109,12 @@ from autogen_ext.models.ollama import OllamaChatCompletionClient
 # Default fallback output dir — used only when run_literature_review() is
 # called without an explicit output_dir (e.g. standalone CLI usage).
 # NEVER mutated at module level; each call creates its own local path.
-_DEFAULT_OUTPUT_DIR = Path("./literature_review_output")
+from storage_paths import HYPOTHESES_DIR, workspace_subpath
+
+_DEFAULT_OUTPUT_DIR = workspace_subpath(
+    HYPOTHESES_DIR / "workspace_default",
+    "literature_review_output",
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1542,7 +1550,7 @@ async def run_literature_review(
         return _search_europe_pmc(query, max_results, domain_kws)
 
     def save_output(filename: str, content: str) -> str:
-        """Save a file to the literature_review_output directory."""
+        """Save a file to the workspace literature-output directory."""
         return _save_output(filename, content, _output_dir)
 
     # ── FunctionTool wrappers ─────────────────────────────────────────────────
@@ -1551,7 +1559,7 @@ async def run_literature_review(
     t_semantic  = FunctionTool(search_semantic_scholar, description="Search Semantic Scholar for cross-disciplinary papers.")
     t_europepmc = FunctionTool(search_europe_pmc,       description="Search Europe PMC for open-access life-science papers.")
     t_scorer    = FunctionTool(score_paper_relevance,   description="Score a paper's relevance vs. the PICO hypothesis (0-100).")
-    t_save      = FunctionTool(save_output,             description="Save a file to the literature_review_output directory.")
+    t_save      = FunctionTool(save_output,             description="Save a file to the workspace outputs/literature directory.")
 
     # ── Agent Definitions ─────────────────────────────────────────────────────
     pico_analyst = AssistantAgent(

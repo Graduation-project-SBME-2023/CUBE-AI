@@ -46,6 +46,7 @@ from ..clinical_roi_policy import (
 
 from agents.literature_review_agent.knowledge_builder import build_knowledge_base
 from agents.literature_review_agent.literature_review_agent import run_literature_review
+from storage_paths import LOGS_DIR, workspace_subpath
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TYPE ALIASES
@@ -232,8 +233,8 @@ class ClinicalPlanner:
         self._run_lock = asyncio.Lock()
 
         # ── Directory & Path Setup ──────────────────────────────────────
-        root_dir = Path(__file__).parent.parent.parent
-        log_dir = os.path.join(root_dir, "logs")
+        log_dir = LOGS_DIR / "agent-system"
+        log_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
         session_tag = str(session.session_id).replace("/", "_").replace("\\", "_")
         log_file = os.path.join(
@@ -242,7 +243,8 @@ class ClinicalPlanner:
         )
         self.log_path = Path(log_file)
 
-        self.state_path = Path(workspace_dir) / "state.json"
+        self.workspace_dir = Path(workspace_dir)
+        self.state_path = workspace_subpath(self.workspace_dir, "state.json")
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
 
         # ── Model Client ────────────────────────────────────────────────
@@ -867,7 +869,7 @@ class ClinicalPlanner:
                 lambda: build_knowledge_base(
                     pico,
                     progress_callback=progress_callback,
-                    cache_dir=self.state_path.parent / ".knowledge_cache",
+                    cache_dir=workspace_subpath(self.workspace_dir, ".knowledge_cache"),
                 ),
             )
         )
@@ -907,8 +909,7 @@ class ClinicalPlanner:
             generated_context: Optional additional context from the literature
                                review multi-agent pipeline.
         """
-        workspace_dir = self.state_path.parent
-        lit_context_path = workspace_dir / "literature_context.json"
+        lit_context_path = workspace_subpath(self.workspace_dir, "literature_context.json")
 
         context_data = {
             "knowledge_base": knowledge_base,
@@ -1144,8 +1145,8 @@ class ClinicalPlanner:
 
 
                     # Run multi-agent literature review pipeline
-                    workspace_dir = self.state_path.parent
-                    lit_output_dir = workspace_dir / "literature_review_output"
+                    workspace_dir = self.workspace_dir
+                    lit_output_dir = workspace_subpath(workspace_dir, "literature_review_output")
 
                     await self._send(
                         "lit_review_log",
@@ -1160,7 +1161,7 @@ class ClinicalPlanner:
                         model=getattr(self.client, "model", None)
                         or "deepseek-v3.1:671b-cloud",
                         output_dir=lit_output_dir,
-                        cache_dir=workspace_dir / ".knowledge_cache",
+                        cache_dir=workspace_subpath(workspace_dir, ".knowledge_cache"),
                         prebuilt_knowledge={
                             "knowledge_base": knowledge_base,
                             "sources_guide": sources_guide,

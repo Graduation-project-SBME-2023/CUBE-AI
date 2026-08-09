@@ -12,6 +12,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from storage_paths import JOBS_DIR, TEMP_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,8 @@ router = APIRouter(prefix="/inference-jobs", tags=["Inference Jobs"])
 
 _INSTANCE_ID = str(uuid4())
 _JOB_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
-_JOB_ROOT = Path(
-    os.environ.get("INFERENCE_JOB_DIR", "/apps/radiology/inference_jobs")
-).resolve()
+_JOB_ROOT = JOBS_DIR
+_JOB_TEMP_ROOT = TEMP_DIR / "radiology" / "inference_jobs"
 _SELF_URL = os.environ.get("MONAI_SELF_URL", "http://127.0.0.1:8000").rstrip("/")
 
 
@@ -55,10 +55,11 @@ def _validate_job_id(job_id: str) -> str:
 def _paths(job_id: str) -> tuple[Path, Path, Path]:
     _validate_job_id(job_id)
     _JOB_ROOT.mkdir(parents=True, exist_ok=True)
+    _JOB_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
     return (
         _JOB_ROOT / f"{job_id}.json",
         _JOB_ROOT / f"{job_id}.result",
-        _JOB_ROOT / f"{job_id}.result.tmp",
+        _JOB_TEMP_ROOT / f"{job_id}.result.tmp",
     )
 
 
@@ -75,7 +76,7 @@ def _read_job(job_id: str) -> dict | None:
 def _write_job(job_id: str, payload: dict) -> dict:
     metadata_path, _, _ = _paths(job_id)
     payload["updated_at"] = datetime.now(timezone.utc).isoformat()
-    temporary_path = metadata_path.with_suffix(".json.tmp")
+    temporary_path = _JOB_TEMP_ROOT / f"{job_id}.json.tmp"
     temporary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     temporary_path.replace(metadata_path)
     return payload
