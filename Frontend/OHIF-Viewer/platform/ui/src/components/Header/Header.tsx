@@ -47,13 +47,8 @@ function Header({
           )}
 
           <div className="flex items-center gap-3">
-              <img src="/assets/icon.png" alt="Icon" className="h-7 w-auto object-contain drop-shadow-[0_0_12px_rgba(90,204,230,0.3)] transition-transform hover:scale-105" />
-              <div className="flex flex-col justify-center mt-0.5">
-                  <span className="text-[14px] font-black tracking-widest text-[#e2f1f8] leading-none mb-1">
-                      CUBE<span className="text-[#5acce6]">.AI</span>
-                  </span>
-                  <span className="text-[8px] text-[#5acce6] font-bold leading-none tracking-widest uppercase">Radiology Platform</span>
-              </div>
+              <img src="/assets/full_cube.png" alt="Icon" className="h-7 w-auto object-contain drop-shadow-[0_0_12px_rgba(90,204,230,0.3)] transition-transform hover:scale-105" />
+              
           </div>
 
          
