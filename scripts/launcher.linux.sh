@@ -50,12 +50,12 @@ fi
 # ── 3. Environment variable ───────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-BACKEND_ENV="$PROJECT_ROOT/Backend/.env"
+BACKEND_ENV="$PROJECT_ROOT/deploy/.env"
 export COMPOSE_PROJECT_DIR="$PROJECT_ROOT"
 
 if [[ ! -f "$BACKEND_ENV" ]]; then
   abort "Backend environment file not found: $BACKEND_ENV
-       Copy Backend/.env.example to Backend/.env and try again."
+       Copy deploy/.env.example to deploy/.env and try again."
 fi
 
 info "COMPOSE_PROJECT_DIR set to: $COMPOSE_PROJECT_DIR"

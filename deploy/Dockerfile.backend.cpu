@@ -29,15 +29,15 @@ RUN pip install --no-cache-dir -U pip && \
         aiohttp \
         alembic
 
-COPY ./voxtell_requirements.txt /voxtell_requirements.txt
+COPY ./requirements/voxtell.txt /voxtell_requirements.txt
 RUN pip install --no-cache-dir -r /voxtell_requirements.txt
 
 # ------------------------------------------------------------
 # 3. Patched pydicom-seg sources
 # ------------------------------------------------------------
-COPY ./reader.py \
+COPY ./overrides/pydicom_seg/reader.py \
      /usr/local/lib/python3.10/dist-packages/pydicom_seg/reader.py
-COPY ./segmentation_dataset.py \
+COPY ./overrides/pydicom_seg/segmentation_dataset.py \
      /usr/local/lib/python3.10/dist-packages/pydicom_seg/segmentation_dataset.py
 COPY ./storage_paths.py /apps/radiology/storage_paths.py
 

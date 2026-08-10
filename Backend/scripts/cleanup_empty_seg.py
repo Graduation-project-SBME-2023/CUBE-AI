@@ -7,13 +7,13 @@ all-zero (empty mask), and optionally deletes those series from PACS.
 Usage
 -----
     # Dry-run (default) — lists empty SEG series, deletes nothing:
-    python cleanup_empty_seg.py
+    python Backend/scripts/cleanup_empty_seg.py
 
     # Actually delete empty SEG series:
-    python cleanup_empty_seg.py --delete
+    python Backend/scripts/cleanup_empty_seg.py --delete
 
     # Point at a different Orthanc instance:
-    python cleanup_empty_seg.py --url http://localhost:8042 --user orthanc --password orthanc --delete
+    python Backend/scripts/cleanup_empty_seg.py --url http://localhost:8042 --user orthanc --password orthanc --delete
 
 Dependencies: requests, pydicom, numpy  (all already in your requirements.txt)
 """

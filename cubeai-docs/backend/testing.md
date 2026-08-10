@@ -77,7 +77,7 @@ test requirements:
 
 ```powershell
 python -m pip install -r Backend/agent_system/requirements.txt
-python -m pip install -r Backend/requirements-test.txt
+python -m pip install -r Backend/requirements/test.txt
 ```
 
 Run only deterministic tests:
@@ -110,7 +110,7 @@ python -m pytest -c Backend/pytest.ini `
 |---|---|
 | `Backend/pytest.ini` | Test discovery, strict markers, asyncio behavior, and suite marker definitions. |
 | `Backend/conftest.py` | Canonical import order, temporary storage isolation, shared workspaces, fake MCP tool descriptors, agent-constructor capture, and automatic regression/radiology markers. |
-| `Backend/requirements-test.txt` | Test-only packages: pytest, asyncio support, coverage, mocks, timeouts, and HTTP mocking. |
+| `Backend/requirements/test.txt` | Test-only packages: pytest, asyncio support, coverage, mocks, timeouts, and HTTP mocking. |
 | `Backend/tests/run_tests.ps1` | Unified Docker/local runner, suite selection, JUnit reports, coverage, and integration-service URLs. |
 | `Backend/tests/support/mcp_loader.py` | Loads repository MCP tool modules privately without colliding with the installed `mcp` SDK or legacy `tools` package. |
 
@@ -210,4 +210,3 @@ backend instance you intend to exercise.
 - Every agent handoff should be asserted as a persisted schema or explicit
   contract.
 - Live service, LLM, GPU, and slow tests must carry their corresponding marker.
-

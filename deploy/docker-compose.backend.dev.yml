@@ -35,4 +35,4 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
       - ${COMPOSE_PROJECT_DIR}/Backend/storage_paths.py:/apps/radiology/storage_paths.py:ro
     env_file:
-      - ../Backend/.env
+      - .env

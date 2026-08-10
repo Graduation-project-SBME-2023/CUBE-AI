@@ -11,3 +11,6 @@ Backend/apps/radiology/bin/
 **/.pytest_cache/
 **/node_modules/
 venv/
+
+# Never send local deployment secrets to root-context Docker builds.
+**/.env

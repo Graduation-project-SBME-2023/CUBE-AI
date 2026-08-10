@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     ORTHANC_REQUEST_TIMEOUT: float = 30.0
 
     model_config = SettingsConfigDict(
-        env_file=(".env", "Backend/.env"),
+        env_file=("deploy/.env", "../deploy/.env", "../../deploy/.env"),
         env_file_encoding="utf-8",
     )
 

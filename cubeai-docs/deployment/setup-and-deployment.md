@@ -33,17 +33,17 @@ cd OHIF-Standalone
 
 ## 4. Setup the Environment File
 
-To ensure the backend containers can communicate properly, you need a `.env` file. We have already included the `.env` file directly in the repository for now since it is not public yet, so everything might work automatically! 
+To ensure the backend containers can communicate properly, you need `deploy/.env`. We have already included it directly in the repository for now since it is not public yet, so everything might work automatically!
 
-However, we also provide a `.env.example` as a fallback. If your `.env` is ever missing, run this command inside the `OHIF-Standalone` directory:
+However, we also provide `deploy/.env.example` as a fallback. If your environment file is missing, run this command inside the `OHIF-Standalone` directory:
 
 **Windows PowerShell:**
 ```powershell
-Copy-Item Backend/.env.example Backend/.env
+Copy-Item deploy/.env.example deploy/.env
 ```
 **macOS/Linux:**
 ```bash
-cp Backend/.env.example Backend/.env
+cp deploy/.env.example deploy/.env
 ```
 
 ## 5. Launch the Application
@@ -72,7 +72,7 @@ bash ./scripts/launcher.linux.sh
 
 ## Troubleshooting
 
-- **400 Bad Request / Chat stuck on Waiting:** Ensure you copied `Backend/.env.example` to `Backend/.env` as shown in step 4.
+- **400 Bad Request / Chat stuck on Waiting:** Ensure you copied `deploy/.env.example` to `deploy/.env` as shown in step 4.
 - **Docker errors:** Confirm Docker Desktop is open and says "Docker is running".
 - **Ollama errors:** Ensure you ran `ollama login` successfully.
 - **Stop the stack:** You can simply close the launcher window (or press `Ctrl+C` in the terminal) to stop the containers gracefully.

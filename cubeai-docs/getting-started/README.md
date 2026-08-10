@@ -84,14 +84,14 @@ $env:COMPOSE_PROJECT_DIR = (Get-Location).Path
 
 **With GPU (recommended):**
 ```bash
-docker compose --env-file Backend/.env \
+docker compose --env-file deploy/.env \
                -f deploy/docker-compose.backend.gpu.yml \
                -f deploy/docker-compose.backend.dev.yml up
 ```
 
 **CPU only:**
 ```bash
-docker compose --env-file Backend/.env \
+docker compose --env-file deploy/.env \
                -f deploy/docker-compose.backend.cpu.yml \
                -f deploy/docker-compose.backend.dev.yml up
 ```

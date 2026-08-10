@@ -2,6 +2,8 @@
 
 This guide explains how to run CUBE.AI in **Development Mode** (with hot-reload) and **Production Mode** (containerized, optimized).
 
+For a guided first installation, follow the [setup and deployment walkthrough](./setup-and-deployment.md).
+
 ---
 
 ## Prerequisites
@@ -28,14 +30,14 @@ Development mode provides hot-reload for both frontend and backend. Ideal for ac
 
 **GPU:**
 ```bash
-docker compose --env-file Backend/.env \
+docker compose --env-file deploy/.env \
                -f deploy/docker-compose.backend.gpu.yml \
                -f deploy/docker-compose.backend.dev.yml up
 ```
 
 **CPU:**
 ```bash
-docker compose --env-file Backend/.env \
+docker compose --env-file deploy/.env \
                -f deploy/docker-compose.backend.cpu.yml \
                -f deploy/docker-compose.backend.dev.yml up
 ```
@@ -63,7 +65,7 @@ Production mode builds the frontend into optimized static assets served by Nginx
 **CPU:**
 ```bash
 docker compose \
-  --env-file Backend/.env \
+  --env-file deploy/.env \
   -f deploy/docker-compose.frontend.prod.yml \
   -f deploy/docker-compose.backend.cpu.yml \
   up --build
@@ -72,7 +74,7 @@ docker compose \
 **GPU:**
 ```bash
 docker compose \
-  --env-file Backend/.env \
+  --env-file deploy/.env \
   -f deploy/docker-compose.frontend.prod.yml \
   -f deploy/docker-compose.backend.gpu.yml \
   up --build
@@ -127,7 +129,7 @@ docker compose restart agent-system
 
 ## Environment Variables
 
-The backend services are configured via `Backend/.env`. Key variables:
+The backend services are configured via `deploy/.env`. Key variables:
 
 | Variable | Description | Default |
 |---|---|---|

@@ -159,7 +159,7 @@ yarn build
 
 ### Docker (Production)
 ```bash
-docker compose --env-file Backend/.env -f deploy/docker-compose.frontend.prod.yml up --build
+docker compose --env-file deploy/.env -f deploy/docker-compose.frontend.prod.yml up --build
 ```
 
 ---

@@ -94,11 +94,11 @@ Write-OK "Ollama is running."
 #  === 3. Project paths =======================================
 $ScriptDir = $PSScriptRoot
 $ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..")).Path
-$BackendEnv = Join-Path $ProjectRoot "Backend\.env"
+$BackendEnv = Join-Path $ProjectRoot "deploy\.env"
 $env:COMPOSE_PROJECT_DIR = $ProjectRoot
 
 if (-not (Test-Path -LiteralPath $BackendEnv -PathType Leaf)) {
-    Stop-Launch "Backend environment file not found: $BackendEnv`nCopy Backend\.env.example to Backend\.env and try again."
+    Stop-Launch "Backend environment file not found: $BackendEnv`nCopy deploy\.env.example to deploy\.env and try again."
 }
 
 Write-OK "COMPOSE_PROJECT_DIR set to: $ProjectRoot"
