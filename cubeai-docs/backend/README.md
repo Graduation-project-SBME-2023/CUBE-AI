@@ -140,6 +140,7 @@ See [DataStore Guide](./datastore_api.md) for full API details.
 
 ## See Also
 
+- [Backend Testing](./testing.md) — Test suites, markers, and local/CI commands
 - [Generic Framework Guide](./generic_framework_guide.md) — Dynamic model creation in MONAI Label
 - [NnUNet Integration](./handle_nnunet.md) — Training and inference with nnUNetv2
 - [SAM2 Setup](./sam2_installation_guide.md) — Segment Anything Model 2 integration

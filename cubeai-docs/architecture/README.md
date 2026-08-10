@@ -4,6 +4,8 @@
 
 CUBE.AI is a modular, containerized platform that integrates multiple specialized services into a unified clinical research environment. All services communicate over a shared Docker network.
 
+For a visual, browser-based reference, open [the interactive architecture page](./arch.html).
+
 ---
 
 ## High-Level Component Diagram

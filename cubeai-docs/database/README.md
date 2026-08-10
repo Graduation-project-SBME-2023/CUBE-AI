@@ -12,7 +12,7 @@ CUBE.AI uses **PostgreSQL 15** as its primary database, managed via **SQLAlchemy
 | Port | `5432` |
 | Database | `workflow_db` |
 | User | `workflow_user` |
-| Password | Defined in `Backend/.env` |
+| Password | Defined in `deploy/.env` |
 
 **Connection string:**
 ```
@@ -165,7 +165,7 @@ The MONAI Label server exposes REST endpoints for workflow data management:
 To browse the database visually:
 
 1. Install [pgAdmin](https://www.pgadmin.org/)
-2. Connect with the credentials from `Backend/.env`
+2. Connect with the credentials from `deploy/.env`
 3. Navigate to: `Servers → PostgreSQL → workflow_db → Schemas → public → Tables`
 
 ---
@@ -174,10 +174,10 @@ To browse the database visually:
 
 ```bash
 # Backup
-docker exec -t postgres pg_dump -U workflow_user workflow_db > backup.sql
+docker exec -t postgres pg_dump -U workflow_user workflow_db > deploy/database/backup.sql
 
 # Restore
-docker exec -i postgres psql -U workflow_user workflow_db < backup.sql
+docker exec -i postgres psql -U workflow_user workflow_db < deploy/database/backup.sql
 ```
 
 ---

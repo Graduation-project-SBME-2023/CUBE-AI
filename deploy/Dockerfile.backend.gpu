@@ -60,9 +60,9 @@ RUN pip install --no-cache-dir -U pip && \
         aiohttp \
         alembic
 
-# voxtell_requirements.txt is copied into the image so we never
+# requirements/voxtell.txt is copied into the image so we never
 # need to bind-mount it just to install deps.
-COPY ./voxtell_requirements.txt /voxtell_requirements.txt
+COPY ./requirements/voxtell.txt /voxtell_requirements.txt
 # Pin setuptools<70 to preserve pkg_resources needed by girder_client
 RUN pip install --no-cache-dir --upgrade pip "setuptools<70" wheel ninja
 
@@ -84,9 +84,9 @@ RUN pip install --no-cache-dir \
 # ------------------------------------------------------------
 # 3. Patched pydicom-seg sources
 # ------------------------------------------------------------
-COPY ./reader.py \
+COPY ./overrides/pydicom_seg/reader.py \
      /usr/local/lib/python3.10/dist-packages/pydicom_seg/reader.py
-COPY ./segmentation_dataset.py \
+COPY ./overrides/pydicom_seg/segmentation_dataset.py \
      /usr/local/lib/python3.10/dist-packages/pydicom_seg/segmentation_dataset.py
 COPY ./storage_paths.py /apps/radiology/storage_paths.py
 

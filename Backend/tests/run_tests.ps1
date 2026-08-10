@@ -119,7 +119,7 @@ function Invoke-DockerSuite([string]$Name) {
     $coverageText = (Get-CoverageArguments $Name) -join " "
     $testCommand = (
         "mkdir -p Backend/test-results " +
-        "&& python -m pip install --quiet -r Backend/requirements-test.txt " +
+        "&& python -m pip install --quiet -r Backend/requirements/test.txt " +
         "&& python -m pytest -c Backend/pytest.ini $pathText " +
         "-m '$($definition.Marker)' --junitxml=$resultPath $coverageText"
     ).Trim()

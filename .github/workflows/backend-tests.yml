@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install test-only dependencies
-        run: python -m pip install -r Backend/requirements-test.txt
+        run: python -m pip install -r Backend/requirements/test.txt
 
       - name: Run deterministic backend suite
         run: >-
@@ -68,7 +68,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install test-only dependencies
-        run: python -m pip install -r Backend/requirements-test.txt
+        run: python -m pip install -r Backend/requirements/test.txt
 
       - name: Run agent regression suite
         run: >-
@@ -103,7 +103,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install test-only dependencies
-        run: python -m pip install -r Backend/requirements-test.txt
+        run: python -m pip install -r Backend/requirements/test.txt
 
       - name: Run radiology regression suite
         run: >-

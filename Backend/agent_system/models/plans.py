@@ -31,7 +31,7 @@ class ContextAugmentation(BaseModel):
 
 
 class TaskMessage(BaseModel):
-    """Structured task payload for each execution agent — per arch.html spec."""
+    """Structured task payload for each execution agent — per cubeai-docs/architecture/arch.html."""
     task_id: str = ""  # Unique task identifier
     phase: str = ""  # Pipeline phase (e.g. "cohort_discovery", "segmentation")
     agent_id: str = ""  # Target agent ID (matches STATIC_NODES id)

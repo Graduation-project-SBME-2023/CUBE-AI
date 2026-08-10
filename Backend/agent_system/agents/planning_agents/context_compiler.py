@@ -14,7 +14,8 @@ domain knowledge, the Context Compiler:
 Pipeline:
     knowledge_builder → (structured sections) → context_compiler → task messages
 
-This implements the "AOT Context Compiler" from arch.html.
+This implements the "AOT Context Compiler" from
+``cubeai-docs/architecture/arch.html``.
 """
 
 import json
