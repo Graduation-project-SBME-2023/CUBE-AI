@@ -41,7 +41,7 @@ Here's the revised section with your requested formatting:
 cd path/to/your/project
 ```
 
-Make sure this directory contains the `docker-compose.yml` file (in platform\app\\.recipes\OpenResty-Orthanc)
+Run the command from the repository root; the centralized recipe manifest is in `deploy/`.
 
 ---
 
@@ -50,7 +50,7 @@ Make sure this directory contains the `docker-compose.yml` file (in platform\app
 Run the following command to build and start the containers:
 
 ```bash
-docker compose up --build
+docker compose -f deploy/docker-compose.openresty-orthanc.yml up --build
 ```
 
 This will:

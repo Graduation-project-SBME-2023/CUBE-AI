@@ -33,7 +33,7 @@
     "dev:orthanc": "lerna run dev:orthanc --stream",
     "dev:dcm4chee": "lerna run dev:dcm4chee --stream",
     "dev:static": "lerna run dev:static --stream",
-    "orthanc:up": "docker-compose -f platform/app/.recipes/OpenResty-Orthanc/docker-compose.yml up",
+    "orthanc:up": "docker compose -f ../../deploy/docker-compose.openresty-orthanc.yml up",
     "preinstall": "node -e \"if (process.env.SKIP_PREINSTALL !== 'true') require('./preinstall')\"",
     "start": "yarn run dev",
     "test": "yarn run test:unit",

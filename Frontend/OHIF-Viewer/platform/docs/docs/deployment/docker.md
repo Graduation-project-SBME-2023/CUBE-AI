@@ -23,7 +23,7 @@ The docker image can be built from a terminal window as such:
 2. Issue the following Docker command. Note that what follows `-t` flag is the `{name}:{tag}` for the Docker image and is arbitrary when creating a local Docker image.
 
     ```sh
-    docker build . -t ohif-viewer-image
+    docker build -f ../../deploy/Dockerfile.frontend -t ohif-viewer-image .
     ```
 
 :::tip

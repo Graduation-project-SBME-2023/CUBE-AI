@@ -1,16 +1,7 @@
-#  =========================================
-#  OHIF-Standalone Backend-only launcher
+#  ====================================
+#  OHIF-Standalone Interactive launcher
 #  Double-click this file to launch
-#
-#  - No frontend: use launch.ps1 for both.
-#  - No image updates: runs whatever images are already on this
-#    machine (--pull never). Use launch.ps1 when you actually
-#    want to fetch newer images.
-#  - Applies the storage changes: compose recreates only the
-#    containers whose spec changed, which is what makes the new
-#    Backend\storage mounts and BACKEND_STORAGE_ROOT / *_DIR env
-#    vars take effect.
-#  =========================================
+#  ====================================
 
 # Keep the window open if something goes wrong
 $ErrorActionPreference = "Stop"
@@ -35,12 +26,12 @@ function Stop-Launch {
 }
 
 Write-Host ""
-Write-Host "  ========================================="
-Write-Host "  OHIF-Standalone Backend-only launcher"
-Write-Host "  ========================================="
+Write-Host "  ===================================="
+Write-Host "  OHIF-Standalone Interactive launcher"
+Write-Host "  ===================================="
 Write-Host ""
 
-# -- 1. Docker --------------------------------
+# ── 1. Docker ────────────────────────────────
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Stop-Launch "Docker is not installed. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ then re-run this script."
 }
@@ -91,11 +82,17 @@ if (-not $ollamaOk) {
 
 Write-OK "Ollama is running."
 
-#  === 3. Environment Variable ================================
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$env:COMPOSE_PROJECT_DIR = $ScriptDir
+#  === 3. Project paths =======================================
+$ScriptDir = $PSScriptRoot
+$ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..")).Path
+$BackendEnv = Join-Path $ProjectRoot "Backend\.env"
+$env:COMPOSE_PROJECT_DIR = $ProjectRoot
 
-Write-OK "COMPOSE_PROJECT_DIR set to: $ScriptDir"
+if (-not (Test-Path -LiteralPath $BackendEnv -PathType Leaf)) {
+    Stop-Launch "Backend environment file not found: $BackendEnv`nCopy Backend\.env.example to Backend\.env and try again."
+}
+
+Write-OK "COMPOSE_PROJECT_DIR set to: $ProjectRoot"
 
 #  === 4. Backend Selection =================================
 Write-Host ""
@@ -109,13 +106,13 @@ Write-Host ""
 
     switch ($BackendChoice) {
         "1" {
-            $BackendCompose = Join-Path $ScriptDir "Backend\docker-compose.backend.gpu.yml"
+            $BackendCompose = Join-Path $ProjectRoot "deploy\docker-compose.backend.gpu.yml"
             $BackendMode = "GPU"
             break backendLoop
         }
 
         "2" {
-            $BackendCompose = Join-Path $ScriptDir "Backend\docker-compose.backend.cpu.yml"
+            $BackendCompose = Join-Path $ProjectRoot "deploy\docker-compose.backend.cpu.yml"
             $BackendMode = "CPU"
             break backendLoop
         }
@@ -126,15 +123,16 @@ Write-Host ""
     }
 }
 
+$FrontendCompose = Join-Path $ProjectRoot "deploy\docker-compose.frontend.prod.yml"
+
 Write-Host ""
 Write-OK "Selected backend: $BackendMode"
-Write-Warn "Frontend will NOT be started. Run launch.ps1 if you need the viewer."
 Write-Host ""
 
 #  === 5. Storage migration =================================
 # Relocates pre-restructure runtime data into Backend/storage. Silent no-op
 # once migrated, and on a fresh clone with nothing to move.
-$MigrateScript = Join-Path $ScriptDir "Backend\scripts\migrate_storage.py"
+$MigrateScript = Join-Path $ProjectRoot "Backend\scripts\migrate_storage.py"
 $PythonBin = $null
 foreach ($candidate in @("python", "python3", "py")) {
     if (Get-Command $candidate -ErrorAction SilentlyContinue) {
@@ -156,31 +154,22 @@ else {
 
 #  === 6. Launch =================================
 
-Write-Warn "Starting backend Docker containers..."
-Write-Warn "Using the images already on this machine - nothing will be pulled or updated."
-Write-Warn "Only containers whose config changed (storage mounts, storage env vars)"
-Write-Warn "are recreated; everything else is left running as-is."
+Write-Warn "Starting Docker containers..."
+Write-Warn "First run may take several minutes."
 Write-Host ""
 
-# --pull never      : never contact the registry, use the local image only.
-# (no --force-recreate) : compose recreates a container only when its spec
-#                     changed, so the storage volume/env edits land while
-#                     unrelated services keep their current containers.
 docker compose `
+    --env-file $BackendEnv `
     -f $BackendCompose `
-    up `
-    --pull never
+    -f $FrontendCompose `
+    up
 
 if ($LASTEXITCODE -ne 0) {
-    Stop-Launch "docker compose exited with code $LASTEXITCODE.`nIf it complains that an image is missing, that image was never pulled on this machine - run launch.ps1 (or 'docker compose -f `"$BackendCompose`" pull') once to fetch it."
+    Stop-Launch "docker compose exited with code $LASTEXITCODE. Check the output above for errors."
 }
 
 #  === 7. Final Message =================================
 Write-Host ""
-Write-OK "Agents API:  http://localhost:8150"
-Write-OK "Control API: http://localhost:8001"
-Write-OK "MONAI Label: http://localhost:8000"
-Write-OK "Orthanc:     http://localhost:8043"
-Write-OK "Postgres:    localhost:5433"
+Write-OK "Frontend: http://localhost"
 
 Read-Host "Press Enter to close"

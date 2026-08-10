@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────
 #  OHIF-Standalone launcher  ·  Production / GPU
-#  Double-click this file (or: bash launch.sh)
+#  Double-click this file (or: bash scripts/launcher.linux.sh)
 # ─────────────────────────────────────────────
 set -euo pipefail
 
@@ -49,7 +49,15 @@ fi
 
 # ── 3. Environment variable ───────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export COMPOSE_PROJECT_DIR="$SCRIPT_DIR"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BACKEND_ENV="$PROJECT_ROOT/Backend/.env"
+export COMPOSE_PROJECT_DIR="$PROJECT_ROOT"
+
+if [[ ! -f "$BACKEND_ENV" ]]; then
+  abort "Backend environment file not found: $BACKEND_ENV
+       Copy Backend/.env.example to Backend/.env and try again."
+fi
+
 info "COMPOSE_PROJECT_DIR set to: $COMPOSE_PROJECT_DIR"
 
 # ── 4. Backend Selection ─────────────────────
@@ -61,12 +69,12 @@ while true; do
   read -rp "Choice [1-2]: " BACKEND_CHOICE
   case "$BACKEND_CHOICE" in
     1)
-      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/Backend/docker-compose.backend.gpu.yml"
+      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/deploy/docker-compose.backend.gpu.yml"
       BACKEND_MODE="GPU"
       break
       ;;
     2)
-      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/Backend/docker-compose.backend.cpu.yml"
+      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/deploy/docker-compose.backend.cpu.yml"
       BACKEND_MODE="CPU"
       break
       ;;
@@ -86,7 +94,7 @@ while true; do
   case "$FRONTEND_CHOICE" in
     1)
       FRONTEND_MODE="Docker"
-      FRONTEND_COMPOSE="$COMPOSE_PROJECT_DIR/Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml"
+      FRONTEND_COMPOSE="$COMPOSE_PROJECT_DIR/deploy/docker-compose.frontend.prod.yml"
       break
       ;;
     2)
@@ -130,6 +138,7 @@ if [[ "$FRONTEND_MODE" == "Docker" ]]; then
   warn "First run may take several minutes."
   echo
   docker compose \
+    --env-file "$BACKEND_ENV" \
     -f "$BACKEND_COMPOSE" \
     -f "$FRONTEND_COMPOSE" \
     up
@@ -146,7 +155,7 @@ npm install -g yarn"
 $FRONTEND_DIR"
   fi
   warn "Starting backend containers..."
-  docker compose -f "$BACKEND_COMPOSE" up -d
+  docker compose --env-file "$BACKEND_ENV" -f "$BACKEND_COMPOSE" up -d
   echo
   warn "Starting OHIF frontend with Yarn..."
   echo

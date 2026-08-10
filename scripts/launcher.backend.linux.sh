@@ -58,7 +58,15 @@ fi
 
 # ── 3. Environment variable ───────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export COMPOSE_PROJECT_DIR="$SCRIPT_DIR"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+BACKEND_ENV="$PROJECT_ROOT/Backend/.env"
+export COMPOSE_PROJECT_DIR="$PROJECT_ROOT"
+
+if [[ ! -f "$BACKEND_ENV" ]]; then
+  abort "Backend environment file not found: $BACKEND_ENV
+       Copy Backend/.env.example to Backend/.env and try again."
+fi
+
 info "COMPOSE_PROJECT_DIR set to: $COMPOSE_PROJECT_DIR"
 
 # ── 4. Backend Selection ─────────────────────
@@ -70,12 +78,12 @@ while true; do
   read -rp "Choice [1-2]: " BACKEND_CHOICE
   case "$BACKEND_CHOICE" in
     1)
-      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/Backend/docker-compose.backend.gpu.yml"
+      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/deploy/docker-compose.backend.gpu.yml"
       BACKEND_MODE="GPU"
       break
       ;;
     2)
-      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/Backend/docker-compose.backend.cpu.yml"
+      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/deploy/docker-compose.backend.cpu.yml"
       BACKEND_MODE="CPU"
       break
       ;;
@@ -86,7 +94,7 @@ while true; do
 done
 echo
 info "Selected backend: $BACKEND_MODE"
-warn "Frontend will NOT be started. Run launcher.linux.sh if you need the viewer."
+warn "Frontend will NOT be started. Run scripts/launcher.linux.sh if you need the viewer."
 echo
 
 # ── 5. Storage migration ─────────────────────
@@ -122,12 +130,13 @@ echo
 #                         changed, so the storage volume/env edits land while
 #                         unrelated services keep their current containers.
 if ! docker compose \
+  --env-file "$BACKEND_ENV" \
   -f "$BACKEND_COMPOSE" \
   up \
   --pull never; then
   abort "docker compose failed. Check the output above for errors.
        If it complains that an image is missing, that image was never pulled on
-       this machine - run launcher.linux.sh (or 'docker compose -f \"$BACKEND_COMPOSE\" pull')
+       this machine - run scripts/launcher.linux.sh (or 'docker compose --env-file \"$BACKEND_ENV\" -f \"$BACKEND_COMPOSE\" pull')
        once to fetch it."
 fi
 

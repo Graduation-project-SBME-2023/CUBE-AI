@@ -20,7 +20,7 @@
 
 
 # Stage 1: Build the application
-# docker build -t ohif/viewer:latest .
+# docker build -f deploy/Dockerfile.frontend -t ohif/viewer:latest Frontend/OHIF-Viewer
 FROM node:20-slim as json-copier
 
 RUN mkdir /usr/src/app

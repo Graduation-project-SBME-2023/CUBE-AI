@@ -1,13 +1,13 @@
 services:
   ohif_viewer:
     build:
-      context: ./../../../../
-      dockerfile: ./platform/app/.recipes/OpenResty-Orthanc/dockerfile
+      context: ../Frontend/OHIF-Viewer
+      dockerfile: ../../deploy/Dockerfile.openresty-orthanc
     image: webapp:latest
     container_name: webapp
     volumes:
-      - ./config/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
-      - ./logs/nginx:/var/logs/nginx
+      - ../Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/config/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - ../Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/logs/nginx:/var/logs/nginx
     ports:
       - '443:443'
       - '80:80'
@@ -23,8 +23,8 @@ services:
     ports:
       - 8043:8042
     volumes:
-      - ./config/orthanc.json:/etc/orthanc/orthanc.json:ro
-      - ./volumes/orthanc-db/:/var/lib/orthanc/db/
+      - ../Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/config/orthanc.json:/etc/orthanc/orthanc.json:ro
+      - ../Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/volumes/orthanc-db/:/var/lib/orthanc/db/
     restart: unless-stopped
 
   monailabel:
@@ -34,8 +34,8 @@ services:
     ports:
       - '8000:8000'
     volumes:
-      - ./apps:/apps
-      - ./monailabel:/usr/local/lib/python3.10/dist-packages/monailabel
+      - ../Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/apps:/apps
+      - ../Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/monailabel:/usr/local/lib/python3.10/dist-packages/monailabel
     environment:
       - nnUNet_preprocessed=/apps/radiology/nnunet/nnUNet_preprocessed
       - nnUNet_results=/apps/radiology/nnunet/nnUNet_results
@@ -68,8 +68,8 @@ services:
     image: postgres:latest
     container_name: postgres
     volumes:
-      # make sure backup.sql exists *here* on your host, next to this compose file
-      - ./backup.sql:/docker-entrypoint-initdb.d/backup.sql
+      # Keep using the recipe's bundled database seed after centralizing this manifest.
+      - ../Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/backup.sql:/docker-entrypoint-initdb.d/backup.sql
       - postgres-db:/var/lib/postgresql/data
     ports:
       - '5433:5432'

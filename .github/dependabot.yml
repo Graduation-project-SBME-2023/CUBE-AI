@@ -244,10 +244,10 @@ updates:
       prefix: "deps(ohif)"
 
   # -------------------------------------------------------------------
-  # 4. Docker — Base image updates (Dockerfile.gpu / Dockerfile.cpu)
+  # 4. Docker — Base image updates (centralized deployment Dockerfiles)
   # -------------------------------------------------------------------
   - package-ecosystem: "docker"
-    directory: "/Backend"                     # Location of Dockerfile.gpu and Dockerfile.cpu
+    directory: "/deploy"
     schedule:
       interval: "weekly"
       day: "monday"

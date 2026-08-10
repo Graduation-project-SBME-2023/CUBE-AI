@@ -2,7 +2,7 @@
 """Migrate legacy source-adjacent runtime data into Backend/storage.
 
 Cross-platform port of ``migrate_storage.ps1`` so the same migration runs from
-``launcher.linux.sh`` and ``launch.ps1``.  PowerShell is not available on the
+``scripts/launcher.linux.sh`` and ``scripts/launch.ps1``.  PowerShell is not available on the
 Linux/macOS machines collaborators use, but Python already is.
 
 Modes

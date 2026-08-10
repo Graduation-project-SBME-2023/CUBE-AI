@@ -104,8 +104,8 @@ jobs:
       - name: Build & push CPU image
         uses: docker/build-push-action@v5
         with:
-          context: ./Backend          # adjust if your Dockerfile
-          file: ./Backend/Dockerfile.cpu   # lives elsewhere
+          context: ./Backend
+          file: ./deploy/Dockerfile.backend.cpu
           platforms: linux/amd64,linux/arm64
           push: true
           # Two tags: versioned + "latest-cpu"
@@ -151,7 +151,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./Backend
-          file: ./Backend/Dockerfile.gpu
+          file: ./deploy/Dockerfile.backend.gpu
           platforms: linux/amd64
           push: true
           tags: |

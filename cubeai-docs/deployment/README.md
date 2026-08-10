@@ -28,14 +28,16 @@ Development mode provides hot-reload for both frontend and backend. Ideal for ac
 
 **GPU:**
 ```bash
-docker compose -f Backend/docker-compose.backend.gpu.yml \
-               -f Backend/docker-compose.backend.dev.yml up
+docker compose --env-file Backend/.env \
+               -f deploy/docker-compose.backend.gpu.yml \
+               -f deploy/docker-compose.backend.dev.yml up
 ```
 
 **CPU:**
 ```bash
-docker compose -f Backend/docker-compose.backend.cpu.yml \
-               -f Backend/docker-compose.backend.dev.yml up
+docker compose --env-file Backend/.env \
+               -f deploy/docker-compose.backend.cpu.yml \
+               -f deploy/docker-compose.backend.dev.yml up
 ```
 
 The dev overlay (`docker-compose.backend.dev.yml`) mounts the source code as a volume, so changes to Python files trigger automatic restarts.
@@ -61,16 +63,18 @@ Production mode builds the frontend into optimized static assets served by Nginx
 **CPU:**
 ```bash
 docker compose \
-  -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml \
-  -f Backend/docker-compose.backend.cpu.yml \
+  --env-file Backend/.env \
+  -f deploy/docker-compose.frontend.prod.yml \
+  -f deploy/docker-compose.backend.cpu.yml \
   up --build
 ```
 
 **GPU:**
 ```bash
 docker compose \
-  -f Frontend/OHIF-Viewer/docker-compose.frontend.prod.yml \
-  -f Backend/docker-compose.backend.gpu.yml \
+  --env-file Backend/.env \
+  -f deploy/docker-compose.frontend.prod.yml \
+  -f deploy/docker-compose.backend.gpu.yml \
   up --build
 ```
 
@@ -138,13 +142,13 @@ The backend services are configured via `Backend/.env`. Key variables:
 
 ## All-in-One Launcher Scripts
 
-For convenience, launcher scripts are available in the project root:
+For convenience, launcher scripts are available in the root-level `scripts/` folder:
 
 | Script | OS | Description |
 |---|---|---|
-| `launch.ps1` | Windows | PowerShell launcher |
-| `launcher.linux.sh` | Linux/macOS | Bash launcher |
-| `launcher.windows.bat` | Windows | Batch launcher |
+| `scripts/launch.ps1` | Windows | PowerShell launcher |
+| `scripts/launcher.linux.sh` | Linux/macOS | Bash launcher |
+| `scripts/launcher.windows.bat` | Windows | Batch launcher |
 
 ---
 
