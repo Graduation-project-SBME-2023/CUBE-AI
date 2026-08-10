@@ -51,14 +51,14 @@ cp Backend/.env.example Backend/.env
 You are now ready to launch! You do not need to manually pull images or run complex docker commands. The interactive launcher script will automatically download any missing Docker images and start the entire stack.
 
 **On Windows:**
-Double-click the `launcher.windows.bat` file in the project folder, or run it from the terminal:
+Double-click `scripts/launcher.windows.bat`, or run it from the project root:
 ```powershell
-.\launcher.windows.bat
+.\scripts\launcher.windows.bat
 ```
 
 **On Linux/macOS:**
 ```bash
-./launcher.linux.sh
+bash ./scripts/launcher.linux.sh
 ```
 
 ### What to expect:

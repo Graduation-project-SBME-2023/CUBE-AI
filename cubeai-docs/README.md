@@ -64,7 +64,7 @@ $env:COMPOSE_PROJECT_DIR = (Get-Location).Path
 
 **3. Start the backend**
 ```bash
-docker compose -f Backend/docker-compose.backend.gpu.yml -f Backend/docker-compose.backend.dev.yml up
+docker compose --env-file Backend/.env -f deploy/docker-compose.backend.gpu.yml -f deploy/docker-compose.backend.dev.yml up
 ```
 
 **4. Start the frontend**

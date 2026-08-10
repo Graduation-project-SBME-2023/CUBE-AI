@@ -35,7 +35,7 @@ The core backend for the Research Playground. Built with **FastAPI** and **Pytho
 python ./Backend/agent_system/app.py
 
 # Inside Docker (automatic)
-# See Backend/agent_system/Dockerfile
+# See deploy/Dockerfile.agents
 ```
 
 ### Dependencies

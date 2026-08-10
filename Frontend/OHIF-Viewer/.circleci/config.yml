@@ -285,7 +285,7 @@ jobs:
               echo $IMAGE_VERSION
               echo $IMAGE_VERSION_FULL
               # Build our image, auth, and push
-              docker build --tag ohif/app:$IMAGE_VERSION_FULL --tag ohif/app:latest .
+              docker build --file deploy/Dockerfile.frontend --tag ohif/app:$IMAGE_VERSION_FULL --tag ohif/app:latest Frontend/OHIF-Viewer
               echo $DOCKER_PWD | docker login -u $DOCKER_LOGIN --password-stdin
               docker push ohif/app:$IMAGE_VERSION_FULL
               docker push ohif/app:latest
@@ -319,7 +319,7 @@ jobs:
               # Build our image, auth, and push
 
               echo "starting docker build"
-              docker build --tag ohif/app:$IMAGE_VERSION_FULL .
+              docker build --file deploy/Dockerfile.frontend --tag ohif/app:$IMAGE_VERSION_FULL Frontend/OHIF-Viewer
               echo $DOCKER_PWD | docker login -u $DOCKER_LOGIN --password-stdin
 
               echo "starting docker push"
