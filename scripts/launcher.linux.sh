@@ -141,7 +141,24 @@ if [[ "$FRONTEND_MODE" == "Docker" ]]; then
     --env-file "$BACKEND_ENV" \
     -f "$BACKEND_COMPOSE" \
     -f "$FRONTEND_COMPOSE" \
-    up
+    up --detach --wait --wait-timeout 3600
+  echo
+  # Print recent startup output once, then reserve the project-level message
+  # for the point at which Compose has confirmed every service is ready.
+  docker compose \
+    --env-file "$BACKEND_ENV" \
+    -f "$BACKEND_COMPOSE" \
+    -f "$FRONTEND_COMPOSE" \
+    logs --tail 20
+  echo
+  info "Frontend: http://localhost"
+  warn "Following container logs. Press Ctrl+C to stop viewing logs; containers will keep running."
+  echo
+  docker compose \
+    --env-file "$BACKEND_ENV" \
+    -f "$BACKEND_COMPOSE" \
+    -f "$FRONTEND_COMPOSE" \
+    logs --follow --tail 0
 else
   # ── Yarn checks ───────────────────────────
   if ! command -v yarn &>/dev/null; then
@@ -162,10 +179,8 @@ $FRONTEND_DIR"
   cd "$FRONTEND_DIR"
   yarn run dev
 fi
-echo
-info "Application available at:"
-if [[ "$FRONTEND_MODE" == "Docker" ]]; then
-  info "  Frontend: http://localhost"
-else
+if [[ "$FRONTEND_MODE" != "Docker" ]]; then
+  echo
+  info "Application available at:"
   info "  Frontend: http://localhost:3000"
 fi

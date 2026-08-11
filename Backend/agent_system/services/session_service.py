@@ -77,6 +77,27 @@ class SessionService:
         if callable(clear_queue):
             clear_queue(session_id)
 
+    @staticmethod
+    def _has_persisted_planning_state(session: Session) -> bool:
+        """Return True only when persistence contains actual planner output.
+
+        A new dashboard launch now saves the user's free-text hypothesis as a
+        draft before calling /plan. That draft has no PICO fields and must not
+        trip the overwrite guard. Structured hypotheses and plans remain
+        protected unless the caller explicitly requests a restart.
+        """
+        if session.plan is not None:
+            return True
+
+        hypothesis = session.hypothesis
+        if hypothesis is None:
+            return False
+
+        return hypothesis.state == "confirmed" or any(
+            bool(getattr(hypothesis, field, ""))
+            for field in ("population", "intervention", "comparison", "outcome")
+        )
+
     # ------------------------------------------------------------------
     # Task lifecycle — routes call these
     # ------------------------------------------------------------------
@@ -100,9 +121,7 @@ class SessionService:
                 f"Execution already running for session {session_id}"
             )
         if not planning_start_allowed(
-            has_persisted_state=(
-                session.hypothesis is not None or session.plan is not None
-            ),
+            has_persisted_state=self._has_persisted_planning_state(session),
             restart=restart,
         ):
             raise SessionPlanningConflict(

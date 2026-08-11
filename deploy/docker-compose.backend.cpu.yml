@@ -36,6 +36,12 @@ services:
     depends_on:
       application-api:
         condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://localhost:8150/client-config", timeout=3)']
+      interval: 5s
+      timeout: 4s
+      retries: 24
+      start_period: 10s
     restart: unless-stopped
 
   db-migrate:
@@ -217,6 +223,29 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+
+  # One-shot readiness announcer. Unlike Uvicorn's worker-level messages, this
+  # runs once only after every backend dependency is usable. Frontend compose
+  # files can extend its dependency list with their own services.
+  startup-complete:
+    image: cubeai1/application-api:v1.0
+    pull_policy: never
+    command:
+      - python
+      - -c
+      - 'print("Application startup complete. All containers are ready.", flush=True)'
+    depends_on:
+      agents:
+        condition: service_healthy
+      application-api:
+        condition: service_healthy
+      monailabel:
+        condition: service_healthy
+      orthanc:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
 volumes:
   postgres-db:

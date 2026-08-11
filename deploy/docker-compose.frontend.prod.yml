@@ -15,7 +15,14 @@ services:
       monailabel:
         condition: service_healthy
       agents:
-        condition: service_started
+        condition: service_healthy
       orthanc:
         condition: service_started
     restart: on-failure
+
+  # Extend the backend readiness announcer so the full-stack message waits for
+  # the viewer container too.
+  startup-complete:
+    depends_on:
+      ohif_viewer:
+        condition: service_started

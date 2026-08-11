@@ -133,7 +133,10 @@ if ! docker compose \
   --env-file "$BACKEND_ENV" \
   -f "$BACKEND_COMPOSE" \
   up \
-  --pull never; then
+  --pull never \
+  --detach \
+  --wait \
+  --wait-timeout 3600; then
   abort "docker compose failed. Check the output above for errors.
        If it complains that an image is missing, that image was never pulled on
        this machine - run scripts/launcher.linux.sh (or 'docker compose --env-file \"$BACKEND_ENV\" -f \"$BACKEND_COMPOSE\" pull')
@@ -142,9 +145,22 @@ fi
 
 # ── 7. Final message ─────────────────────────
 echo
+# Print recent startup output once, then reserve the project-level message
+# for the point at which Compose has confirmed every service is ready.
+docker compose \
+  --env-file "$BACKEND_ENV" \
+  -f "$BACKEND_COMPOSE" \
+  logs --tail 20
+echo
 info "Backend available at:"
 info "  Agents API:  http://localhost:8150"
 info "  Control API: http://localhost:8001"
 info "  MONAI Label: http://localhost:8000"
 info "  Orthanc:     http://localhost:8043"
 info "  Postgres:    localhost:5433"
+warn "Following container logs. Press Ctrl+C to stop viewing logs; containers will keep running."
+echo
+docker compose \
+  --env-file "$BACKEND_ENV" \
+  -f "$BACKEND_COMPOSE" \
+  logs --follow --tail 0
