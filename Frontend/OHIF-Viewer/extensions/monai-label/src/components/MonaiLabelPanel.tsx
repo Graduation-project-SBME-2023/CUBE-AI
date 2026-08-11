@@ -16,6 +16,9 @@ import MonaiSegmentation from './MonaiSegmentation';
 import SegmentationToolbox from './SegmentationToolbox';
 import AgentChat from './actions/AgentChat';
 import { getAgentsApiBaseUrl, getAppApiBaseUrl } from '../utils/runtimeUrls';
+import resolveInferenceSegmentLabels, {
+  synchronizeInferenceSegmentLabels,
+} from '../utils/resolveInferenceSegmentLabels';
 
 import { createReportAsync } from '@ohif/extension-default';
 import { servicesManager } from 'platform/app/src/App';
@@ -614,7 +617,8 @@ export default class MonaiLabelPanel extends Component {
     // Update instance variables
     this.updateInstanceVariables();
     const client_response = await this.client().info();
-    const labels = client_response.data.labels.slice(1);
+    const serverLabels = client_response.data.labels.slice(1);
+    const labels = resolveInferenceSegmentLabels(model, organName, serverLabels);
     console.log(labels);
     const onInfoLabelNames = labelNames;
     console.info('These are the predicted labels:', onInfoLabelNames);
@@ -698,6 +702,7 @@ export default class MonaiLabelPanel extends Component {
     // Try to find existing volume in cache
     const volumeLoadObject = await cache.getVolumeLoadObject(segmentationId);
     console.log('_update: the volume load object', volumeLoadObject);
+    const { segmentationService } = this.props.servicesManager.services;
 
     if (volumeLoadObject) {
       // Volume exists - update it
@@ -709,6 +714,7 @@ export default class MonaiLabelPanel extends Component {
       const { scalarData } = volume;
       console.log('data = ', data);
       scalarData.set(data);
+      synchronizeInferenceSegmentLabels(segmentationService, segmentationId, labels);
 
       triggerEvent(eventTarget, Enums.Events.SEGMENTATION_DATA_MODIFIED, {
         segmentationId,
@@ -721,8 +727,6 @@ export default class MonaiLabelPanel extends Component {
 
       try {
         // Use the segmentation service to properly create the segmentation
-        const { segmentationService } = this.props.servicesManager.services;
-
         // First, remove any existing segmentation with the same ID
         const existingSegmentations = segmentationService.getSegmentations();
         const existingSegmentation = existingSegmentations.find(

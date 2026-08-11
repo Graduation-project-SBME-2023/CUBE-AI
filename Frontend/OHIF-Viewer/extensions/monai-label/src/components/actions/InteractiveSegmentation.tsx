@@ -969,7 +969,7 @@ export default class InteractiveSegmentation extends BaseTab {
       organName = 'interactive';
     } else if (model === 'voxtell') {
       organName = this.voxtellTextPrompt?.trim()
-        ? this.voxtellTextPrompt.trim().replace(/\s+/g, '_')
+        ? this.voxtellTextPrompt.trim().replace(/\s+/g, ' ')
         : 'voxtell';
     } else {
       organName = this.state.currentLabel || '';
