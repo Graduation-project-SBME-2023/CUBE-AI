@@ -1,6 +1,6 @@
 
 # schemas/chat_session.py
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Optional
 from datetime import date, datetime
 from uuid import UUID
@@ -19,7 +19,7 @@ class ChatSessionBase(BaseModel):
     summary: Optional[str] = None
 
 class ChatSessionCreate(ChatSessionBase):
-    study_uid: Optional[List[str]] = []   # multiple studies
+    study_uid: Optional[List[str]] = Field(default_factory=list)   # multiple studies
 
 class ChatSessionUpdate(BaseModel):
     title: Optional[str] = None
@@ -28,6 +28,18 @@ class ChatSessionUpdate(BaseModel):
     study_uid: Optional[List[str]] = None
 
 class ChatSession(ChatSessionBase):
+    chat_id: UUID
+    started_at: datetime = None
+    last_activity: Optional[datetime] = None
+    studies: List[StudyRef] = []
+    messages: List[ChatMessage] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ChatSessionSummary(ChatSessionBase):
+    """Lightweight list item; message history is fetched separately."""
+
     chat_id: UUID
     started_at: datetime = None
     last_activity: Optional[datetime] = None

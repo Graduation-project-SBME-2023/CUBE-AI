@@ -10,6 +10,8 @@ export const getApiBaseUrl = (baseUrl: string | undefined | null, fallbackPort: 
   return getFallbackBaseUrl(fallbackPort);
 };
 
-export const getBackendApiBaseUrl = () => getApiBaseUrl(config?.MONAI_URL || config?.BACKEND_API, 8000);
+export const getBackendApiBaseUrl = () => getApiBaseUrl(config?.BACKEND_API, 8001);
+
+export const getInferenceApiBaseUrl = () => getApiBaseUrl(config?.INFERENCE_URL || config?.MONAI_URL, 8000);
 
 export const getAgentsApiBaseUrl = () => getApiBaseUrl(config?.AGENTS_API, 8150);

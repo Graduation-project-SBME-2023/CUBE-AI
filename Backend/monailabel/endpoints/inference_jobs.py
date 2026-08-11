@@ -12,6 +12,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from services.job_capacity import inference_capacity
 from storage_paths import JOBS_DIR, TEMP_DIR
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,29 @@ def _default_runtime() -> float:
 _DEFAULT_RUNTIME = _default_runtime()
 _tasks: dict[str, asyncio.Task] = {}
 _start_lock = asyncio.Lock()
+
+
+def interrupt_stale_jobs() -> None:
+    _JOB_ROOT.mkdir(parents=True, exist_ok=True)
+    for metadata_path in _JOB_ROOT.glob("*.json"):
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if payload.get("status") not in {"QUEUED", "RUNNING", "CANCELLING"}:
+                continue
+            payload.update(
+                {
+                    "status": "INTERRUPTED",
+                    "error": "Inference service restarted before the job completed",
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            metadata_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except (OSError, json.JSONDecodeError):
+            logger.warning("Unable to recover inference job metadata %s", metadata_path)
+
+
+interrupt_stale_jobs()
 
 
 class InferenceJobRequest(BaseModel):
@@ -127,44 +151,44 @@ async def _execute_job(request: InferenceJobRequest) -> None:
     metadata_path, result_path, result_tmp = _paths(request.job_id)
     del metadata_path
     job = _read_job(request.job_id) or {}
-    job.update(
-        {
-            "status": "RUNNING",
-            "owner_instance_id": _INSTANCE_ID,
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "attempt": int(job.get("attempt") or 0) + 1,
-            "error": None,
-        }
-    )
-    _write_job(request.job_id, job)
-
     try:
-        status_code, content_type = await asyncio.wait_for(
-            _stream_inference(request, result_tmp),
-            timeout=request.max_runtime_seconds,
-        )
-        if status_code != 200:
-            error_preview = result_tmp.read_bytes()[:500].decode("utf-8", errors="replace")
+        async with inference_capacity.execution():
             job.update(
                 {
-                    "status": "FAILED",
-                    "status_code": status_code,
-                    "error": f"MONAI inference returned HTTP {status_code}: {error_preview}",
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "status": "RUNNING",
+                    "owner_instance_id": _INSTANCE_ID,
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "attempt": int(job.get("attempt") or 0) + 1,
+                    "error": None,
                 }
             )
-            result_tmp.unlink(missing_ok=True)
-        else:
-            result_tmp.replace(result_path)
-            job.update(
-                {
-                    "status": "SUCCEEDED",
-                    "status_code": status_code,
-                    "content_type": content_type,
-                    "result_size": result_path.stat().st_size,
-                    "finished_at": datetime.now(timezone.utc).isoformat(),
-                }
+            _write_job(request.job_id, job)
+            status_code, content_type = await asyncio.wait_for(
+                _stream_inference(request, result_tmp),
+                timeout=request.max_runtime_seconds,
             )
+            if status_code != 200:
+                error_preview = result_tmp.read_bytes()[:500].decode("utf-8", errors="replace")
+                job.update(
+                    {
+                        "status": "FAILED",
+                        "status_code": status_code,
+                        "error": f"MONAI inference returned HTTP {status_code}: {error_preview}",
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                result_tmp.unlink(missing_ok=True)
+            else:
+                result_tmp.replace(result_path)
+                job.update(
+                    {
+                        "status": "SUCCEEDED",
+                        "status_code": status_code,
+                        "content_type": content_type,
+                        "result_size": result_path.stat().st_size,
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
     except asyncio.TimeoutError:
         result_tmp.unlink(missing_ok=True)
         job.update(
@@ -218,6 +242,13 @@ async def start_inference_job(request: InferenceJobRequest) -> dict:
         if task and not task.done():
             return existing or {"job_id": request.job_id, "status": "RUNNING"}
 
+        if not await inference_capacity.reserve():
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Inference queue is full",
+                headers={"Retry-After": "10"},
+            )
+
         now = datetime.now(timezone.utc).isoformat()
         job = existing or {
             "job_id": request.job_id,
@@ -239,6 +270,8 @@ async def start_inference_job(request: InferenceJobRequest) -> dict:
             _execute_job(request),
             name=f"inference-job:{request.job_id}",
         )
+        # Let the task enter the capacity context before cancellation is possible.
+        await asyncio.sleep(0)
         return job
 
 

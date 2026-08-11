@@ -25,29 +25,83 @@ services:
       BACKEND_LOG_DIR: /storage/logs
       TMPDIR: /storage/temp/radiology
       OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
+      APP_API_URL: http://application-api:8001
+      INFERENCE_API_URL: http://monailabel:8000
+      AGENTS_API_URL: http://agents:8150
       MONAI_URL: http://monailabel:8000
-      CONTROL_API_URL: http://control-api:8001
+      CONTROL_API_URL: http://application-api:8001
       ORTHANC_URL: http://orthanc:8042
+    env_file:
+      - .env
+    depends_on:
+      application-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db-migrate:
+    build:
+      context: ${COMPOSE_PROJECT_DIR}
+      dockerfile: deploy/Dockerfile.application-api
+    image: cubeai1/application-api:v1.0
+    pull_policy: build
+    command: alembic -c /app/alembic.ini upgrade head
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ORTHANC_URL: http://orthanc:8042
+      ORTHANC_USER: ${ORTHANC_USER:-orthanc}
+      ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:-orthanc}
     env_file:
       - .env
     depends_on:
       postgres:
         condition: service_healthy
-      monailabel:
-        condition: service_healthy
-      control-api:
-        condition: service_healthy
-    restart: unless-stopped
+    restart: "no"
 
-  control-api:
-    image: cubeai1/custom-monailabel:v1.0-gpu
-    container_name: control-api-backend
-    command: python /monailabel/control_server_start.py
+  db-seed:
+    build:
+      context: ${COMPOSE_PROJECT_DIR}
+      dockerfile: deploy/Dockerfile.application-api
+    image: cubeai1/application-api:v1.0
+    pull_policy: build
+    command: python -c "from seeders.all_seeders import all_seeders; all_seeders()"
+    working_dir: /app/monailabel
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ORTHANC_URL: http://orthanc:8042
+      ORTHANC_USER: ${ORTHANC_USER:-orthanc}
+      ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:-orthanc}
+    env_file:
+      - .env
+    depends_on:
+      db-migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  application-api:
+    build:
+      context: ${COMPOSE_PROJECT_DIR}
+      dockerfile: deploy/Dockerfile.application-api
+    image: cubeai1/application-api:v1.0
+    pull_policy: build
+    container_name: application-api-backend
     ports:
       - "8001:8001"
+    networks:
+      default:
+        aliases:
+          - control-api
     environment:
       CONTROL_API_PORT: 8001
+      APP_API_WORKERS: 2
+      APP_API_URL: http://application-api:8001
+      INFERENCE_API_URL: http://monailabel:8000
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DB_POOL_SIZE: 5
+      DB_MAX_OVERFLOW: 5
+      DB_POOL_TIMEOUT: 10
+      ORTHANC_URL: http://orthanc:8042
+      ORTHANC_USER: ${ORTHANC_USER:-orthanc}
+      ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:-orthanc}
       BACKEND_STORAGE_ROOT: /storage
       AGENTS_WORKSPACE_DIR: /storage/hypotheses
       GENERAL_DATA_DIR: /storage/data/medical
@@ -63,13 +117,11 @@ services:
       - .env
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
-      - ${COMPOSE_PROJECT_DIR}/Backend/storage_paths.py:/apps/radiology/storage_paths.py:ro
-      - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/monailabel
+      - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/app/monailabel
+      - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/lib/configs:/app/apps/radiology/lib/configs:ro
     depends_on:
-      postgres:
-        condition: service_healthy
-      monailabel:
-        condition: service_healthy
+      db-seed:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -95,11 +147,14 @@ services:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       MONAI_SERVER_PORT: 8000
+      APP_API_URL: http://application-api:8001
+      INFERENCE_API_URL: http://monailabel:8000
+      INFERENCE_MAX_CONCURRENCY: 1
+      INFERENCE_QUEUE_CAPACITY: 8
       MONAI_LABEL_APP_DIR: /apps/radiology
       MONAI_LABEL_APP_CONF: |
         {"models": "all"}
       MONAI_LABEL_STUDIES: http://orthanc:8042/dicom-web
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ORTHANC_URL: http://orthanc:8042
       BACKEND_STORAGE_ROOT: /storage
       AGENTS_WORKSPACE_DIR: /storage/hypotheses
@@ -128,12 +183,7 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/models/configs/vista:/config/vista:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/storage_paths.py:/apps/radiology/storage_paths.py:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/overrides/nnunetv2/CustomNnUnetTrainer.py:/usr/local/lib/python3.10/dist-packages/nnunetv2/training/nnUNetTrainer/CustomNnUnetTrainer.py
-      - ${COMPOSE_PROJECT_DIR}/Backend/alembic.ini:/alembic/alembic.ini
-      - ${COMPOSE_PROJECT_DIR}/Backend/migrations:/alembic/migrations
-    # CMD in Dockerfile.backend.gpu already runs migrations + server.
     depends_on:
-      postgres:
-        condition: service_healthy
       orthanc:
         condition: service_started
     healthcheck:

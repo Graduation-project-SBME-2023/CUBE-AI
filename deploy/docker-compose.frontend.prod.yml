@@ -10,6 +10,12 @@ services:
       - '443:443'
       - '80:80'
     depends_on:
-      - orthanc
-      - postgres
+      application-api:
+        condition: service_healthy
+      monailabel:
+        condition: service_healthy
+      agents:
+        condition: service_started
+      orthanc:
+        condition: service_started
     restart: on-failure

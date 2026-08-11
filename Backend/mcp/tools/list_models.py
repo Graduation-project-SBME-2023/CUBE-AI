@@ -12,7 +12,10 @@ from agent_system.agents.execution_agents.segmentation.model_catalog import (
 )
 from tool_logging import ToolEvent, log_tool_state, TextPayload
 
-base_url = os.environ.get("MONAI_URL", "http://localhost:8000")
+base_url = os.environ.get(
+    "INFERENCE_API_URL",
+    os.environ.get("MONAI_URL", "http://localhost:8000"),
+)
 
 @mcp.tool()
 async def list_models():

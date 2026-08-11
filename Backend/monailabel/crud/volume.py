@@ -94,26 +94,42 @@ async def delete_volume(db: AsyncSession, volume_uid: str):
         logger.error(error_msg)
         return False, error_msg
 
-async def get_volumes_by_study(db: AsyncSession, study_uid: str):
+async def get_volumes_by_study(
+    db: AsyncSession, study_uid: str, skip: int = 0, limit: int = 100
+):
     try:
-        result = await db.execute(select(Volume).where(Volume.study_uid == study_uid))
+        result = await db.execute(
+            select(Volume).where(Volume.study_uid == study_uid).offset(skip).limit(limit)
+        )
         return result.scalars().all()
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-async def search_volumes(db: AsyncSession, modality: str | None = None, keyword: str | None = None):
+async def search_volumes(
+    db: AsyncSession,
+    modality: str | None = None,
+    keyword: str | None = None,
+    skip: int = 0,
+    limit: int = 100,
+):
     try:
         query = select(Volume)
         if modality:
             query = query.where(Volume.modality.ilike(f"%{modality}%"))
         if keyword:
             query = query.where(Volume.series_description.ilike(f"%{keyword}%"))
-        result = await db.execute(query)
+        result = await db.execute(query.offset(skip).limit(limit))
         return result.scalars().all()
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
-async def search_volumes_by_description(db:AsyncSession, words_to_include: list[str], words_to_exclude: list[str] | None = None):
+async def search_volumes_by_description(
+    db: AsyncSession,
+    words_to_include: list[str],
+    words_to_exclude: list[str] | None = None,
+    skip: int = 0,
+    limit: int = 100,
+):
     """
     Search volumes by keywords in series_description AND body_part_examined.
     Returns a list of dicts with uid, series_description, body_part_examined,
@@ -147,7 +163,7 @@ async def search_volumes_by_description(db:AsyncSession, words_to_include: list[
                 for word in words_to_exclude
             ]
             query = query.where(not_(or_(*exclude_conditions)))
-        results = await db.execute(query)
+        results = await db.execute(query.offset(skip).limit(limit))
         rows = results.all()
         return [
             {
@@ -193,13 +209,18 @@ async def get_study_by_volume(db: AsyncSession, volume_series_instance_uid: str)
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 
-async def get_unique_series_descriptions(db: AsyncSession) -> list[str]:
+async def get_unique_series_descriptions(
+    db: AsyncSession, skip: int = 0, limit: int = 100
+) -> list[str]:
     try:
         # Select distinct descriptions and ignore any NULL values
         query = (
             select(Volume.series_description)
             .distinct()
             .where(Volume.series_description.is_not(None))
+            .order_by(Volume.series_description)
+            .offset(skip)
+            .limit(limit)
         )
         
         results = await db.execute(query)

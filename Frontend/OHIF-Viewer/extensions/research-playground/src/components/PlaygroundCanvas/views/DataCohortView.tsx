@@ -315,7 +315,7 @@ export default function DataCohortView({ populationData, segmentationData, sessi
         if (!isPlanApproved) return;
         setIsLoadingVolumes(true);
         try {
-            const res = await fetch(`${getBackendApiBaseUrl()}/volumes/?limit=1000`);
+            const res = await fetch(`${getBackendApiBaseUrl()}/volumes/?limit=100`);
             if (res.ok) {
                 const vols: OrthancVolume[] = await res.json();
                 setAllVolumes(vols);

@@ -9,6 +9,7 @@ import { UINotificationService } from '@ohif/core';
 import { utils } from '@ohif/core';
 import filtersMeta from '../WorkList/filtersMeta';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { getAppApiBaseUrl, getInferenceBaseUrl } from '../../utils/runtimeUrls';
 
 import {
   Icon,
@@ -214,7 +215,7 @@ function WorkflowDetailPage({
   useEffect(() => {
     const fetchAnnotationStatus = async () => {
       try {
-        const url = `http://localhost:8000/workflow/${encodeURIComponent(
+        const url = `${getAppApiBaseUrl()}/workflow/${encodeURIComponent(
           workflowName
         )}/filter-annotated`;
         const response = await fetch(url, {
@@ -374,7 +375,7 @@ function WorkflowDetailPage({
 
   const fetchTrainFlag = async (taskName, caseId) => {
     try {
-      const url = `http://localhost:8000/workflow/${encodeURIComponent(taskName)}/get-train?study_uid=${encodeURIComponent(caseId)}`;
+      const url = `${getAppApiBaseUrl()}/workflow/${encodeURIComponent(taskName)}/get-train?study_uid=${encodeURIComponent(caseId)}`;
       const response = await fetch(url);
       if (!response.ok) {
         throw new Error('Failed to fetch train flag');
@@ -424,7 +425,7 @@ function WorkflowDetailPage({
         study_uid: studyInstanceUid,
         train: trainFlag,
       }).toString();
-      const url = `http://localhost:8000/workflow/${encodeURIComponent(workflowDetails.workflowName)}/update-train?${queryParams}`;
+      const url = `${getAppApiBaseUrl()}/workflow/${encodeURIComponent(workflowDetails.workflowName)}/update-train?${queryParams}`;
       const response = await fetch(url, {
         method: 'POST',
         headers: {
@@ -485,7 +486,7 @@ function WorkflowDetailPage({
     }));
 
     try {
-      const response = await fetch('http://localhost:8000/workflow/delete-multiple', {
+      const response = await fetch(`${getAppApiBaseUrl()}/workflow/delete-multiple`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -603,7 +604,7 @@ function WorkflowDetailPage({
     setIsTraining(true);
 
     try {
-      const url = `http://localhost:8000/workflow/${encodeURIComponent(workflowName)}/train`;
+      const url = `${getAppApiBaseUrl()}/workflow/${encodeURIComponent(workflowName)}/train`;
       const fetchedWorkflowDataResponse = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -612,6 +613,33 @@ function WorkflowDetailPage({
       let fetchedData = await fetchedWorkflowDataResponse.json();
       if (!fetchedWorkflowDataResponse.ok) {
         throw new Error(`Error: ${fetchedWorkflowDataResponse.status}`);
+      }
+
+      const jobId = fetchedData.job_id;
+      if (!jobId) {
+        throw new Error('Training preparation did not return a job ID');
+      }
+      const deadline = Date.now() + 30 * 60 * 1000;
+      let preparationCompleted = false;
+      while (Date.now() < deadline) {
+        const jobResponse = await fetch(
+          `${getAppApiBaseUrl()}/workflow/training-jobs/${encodeURIComponent(jobId)}`
+        );
+        if (!jobResponse.ok) {
+          throw new Error(`Unable to read training job: ${jobResponse.status}`);
+        }
+        const job = await jobResponse.json();
+        if (job.status === 'SUCCEEDED') {
+          preparationCompleted = true;
+          break;
+        }
+        if (['FAILED', 'CANCELLED', 'INTERRUPTED', 'TIMED_OUT'].includes(job.status)) {
+          throw new Error(job.error || `Training preparation ${job.status.toLowerCase()}`);
+        }
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      if (!preparationCompleted) {
+        throw new Error('Training preparation timed out');
       }
 
       const queryParams = new URLSearchParams({
@@ -624,7 +652,7 @@ function WorkflowDetailPage({
       try {
         // Construct query string
 
-        const response = await fetch(`http://localhost:8000/create-model?${queryParams}`, {
+        const response = await fetch(`${getInferenceBaseUrl()}/create-model?${queryParams}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -648,7 +676,7 @@ function WorkflowDetailPage({
           const queryParams = new URLSearchParams({
             model_name: workflowDetails.workflowName,
           }).toString();
-          const response = await fetch(`http://localhost:8000/train/${workflowName}`, {
+          const response = await fetch(`${getInferenceBaseUrl()}/train/${workflowName}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',

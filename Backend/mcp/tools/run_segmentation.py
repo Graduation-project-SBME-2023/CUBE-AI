@@ -16,7 +16,10 @@ import hashlib
 
 logger = logging.getLogger(__name__)
 
-MONAI_LABEL_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
+MONAI_LABEL_URL = os.environ.get(
+    "INFERENCE_API_URL",
+    os.environ.get("MONAI_URL", "http://localhost:8000"),
+)
 INFERENCE_JOB_TIMEOUT_SECONDS = float(
     os.environ.get("SEGMENTATION_JOB_TIMEOUT_SECONDS", "1800")
 )

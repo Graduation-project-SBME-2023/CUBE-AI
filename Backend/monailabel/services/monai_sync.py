@@ -1,13 +1,18 @@
+import os
+
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from crud.model import upsert_model
 
-MONAI_URL = "http://localhost:8000/info/"
+MONAI_URL = os.environ.get(
+    "INFERENCE_API_URL",
+    os.environ.get("MONAI_URL", "http://monailabel:8000"),
+).rstrip("/")
 
 
 async def sync_models_from_monai(db: AsyncSession) -> dict:
     async with httpx.AsyncClient() as client:
-        response = await client.get(MONAI_URL, timeout=10.0)
+        response = await client.get(f"{MONAI_URL}/info/", timeout=10.0)
         response.raise_for_status()
         data = response.json()
 

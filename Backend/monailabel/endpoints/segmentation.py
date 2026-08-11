@@ -31,7 +31,9 @@ router = APIRouter(prefix="/segmentations", tags=["Segmentations"])
 # ----------------------------------------------------------------------
 @router.get("/", response_model=List[Segmentation])
 async def read_segmentations(
-    skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
 ):
     return await get_segmentations(db, skip=skip, limit=limit)
 
@@ -84,16 +86,26 @@ async def delete_segmentation_endpoint(label_uid: str, db: AsyncSession = Depend
 # Get segmentations by volume UID
 # ----------------------------------------------------------------------
 @router.get("/by-volume/{volume_uid}", response_model=List[Segmentation])
-async def read_segmentations_by_volume(volume_uid: str, db: AsyncSession = Depends(get_db)):
-    return await get_segmentations_by_volume(db, volume_uid)
+async def read_segmentations_by_volume(
+    volume_uid: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_segmentations_by_volume(db, volume_uid, skip=skip, limit=limit)
 
 
 # ----------------------------------------------------------------------
 # Get segmentations by model_name
 # ----------------------------------------------------------------------
 @router.get("/by-model/{model_name}", response_model=List[Segmentation])
-async def read_segmentations_by_model(model_name: str, db: AsyncSession = Depends(get_db)):
-    return await get_segmentations_by_model(db, model_name)
+async def read_segmentations_by_model(
+    model_name: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_segmentations_by_model(db, model_name, skip=skip, limit=limit)
 
 
 # ----------------------------------------------------------------------
@@ -101,7 +113,9 @@ async def read_segmentations_by_model(model_name: str, db: AsyncSession = Depend
 # ----------------------------------------------------------------------
 @router.get("/unvalidated/", response_model=List[Segmentation])
 async def read_unvalidated_segmentations(
-    skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
 ):
     return await get_unvalidated_segmentations(db, skip=skip, limit=limit)
 
@@ -113,8 +127,8 @@ async def read_unvalidated_segmentations(
 async def search_segmentations_endpoint(
     segmentation_type: Optional[str] = Query(None, description="Filter by segmentation type"),
     method: Optional[str] = Query(None, description="Filter by method"),
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     return await search_segmentations(

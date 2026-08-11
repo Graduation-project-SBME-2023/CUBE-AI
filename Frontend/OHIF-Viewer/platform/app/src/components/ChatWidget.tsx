@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import websocketService from "../utils/WebsocketService";
-import { getAgentsBaseUrl, getMonaiBaseUrl } from "../utils/runtimeUrls";
+import { getAgentsBaseUrl, getAppApiBaseUrl } from "../utils/runtimeUrls";
 type Message = {
   id: string;
   role: "user" | "assistant" | "system";
@@ -47,9 +47,14 @@ const CustomChatWidget: React.FC = () => {
   // --- Backend calls ---
   const fetchChatSessions = async () => {
     try {
-      const r = await fetch(`${getMonaiBaseUrl()}/chat_sessions/`);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const data = await r.json();
+      const data: any[] = [];
+      for (let skip = 0; ; skip += 100) {
+        const r = await fetch(`${getAppApiBaseUrl()}/chat_sessions/?skip=${skip}&limit=100`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const page = await r.json();
+        data.push(...page);
+        if (page.length < 100) break;
+      }
       const mapped: ChatSession[] = (data || []).map((s: any) => ({
         chat_id: String(s.chat_id),
         title: s.title || `Chat ${s.chat_id}`,
@@ -66,9 +71,16 @@ const CustomChatWidget: React.FC = () => {
 
   const fetchMessagesForSession = async (chat_id: string) => {
     try {
-      const res = await fetch(`${getMonaiBaseUrl()}/chat_messages/${chat_id}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const msgs: any[] = await res.json();
+      const msgs: any[] = [];
+      for (let skip = 0; ; skip += 100) {
+        const res = await fetch(
+          `${getAppApiBaseUrl()}/chat_messages/${chat_id}?skip=${skip}&limit=100`
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const page = await res.json();
+        msgs.push(...page);
+        if (page.length < 100) break;
+      }
       setSessions((prev) =>
         prev.map((s) =>
           s.chat_id === chat_id
@@ -92,7 +104,7 @@ const CustomChatWidget: React.FC = () => {
   const createNewSession = async (title?: string) => {
     try {
       const payload = { title: title || `chat ${sessions.length + 1}` };
-      const r = await fetch(`${getMonaiBaseUrl()}/chat_sessions/`, {
+      const r = await fetch(`${getAppApiBaseUrl()}/chat_sessions/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -112,7 +124,7 @@ const CustomChatWidget: React.FC = () => {
       };
 
       // Save initial system message to backend
-      await fetch(`${getMonaiBaseUrl()}/chat_messages/${newSession.chat_id}`, {
+      await fetch(`${getAppApiBaseUrl()}/chat_messages/${newSession.chat_id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: "system", text: newSession.messages[0].text }),
@@ -129,7 +141,7 @@ const CustomChatWidget: React.FC = () => {
 
   const updateSessionLastActivity = async (chat_id: string) => {
     try {
-      await fetch(`${getMonaiBaseUrl()}/chat_sessions/${chat_id}`, {
+      await fetch(`${getAppApiBaseUrl()}/chat_sessions/${chat_id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ last_activity: new Date().toISOString() }),
@@ -144,7 +156,7 @@ const CustomChatWidget: React.FC = () => {
 
   const deleteSession = async (chat_id: string) => {
     try {
-      await fetch(`${getMonaiBaseUrl()}/chat_sessions/${chat_id}`, { method: "DELETE" });
+      await fetch(`${getAppApiBaseUrl()}/chat_sessions/${chat_id}`, { method: "DELETE" });
     } catch (err) {
       console.warn("Failed to delete session", err);
     }
@@ -189,7 +201,7 @@ const CustomChatWidget: React.FC = () => {
     );
 
     // Save to backend
-    await fetch(`${getMonaiBaseUrl()}/chat_messages/${sessionId}`, {
+    await fetch(`${getAppApiBaseUrl()}/chat_messages/${sessionId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ role: "user", text }),
@@ -263,7 +275,7 @@ const CustomChatWidget: React.FC = () => {
 
       // 4. Save in backend
       try {
-        await fetch(`${getMonaiBaseUrl()}/chat_messages/${currentSessionId}`, {
+        await fetch(`${getAppApiBaseUrl()}/chat_messages/${currentSessionId}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ role: "assistant", text: assistantMsg.text }),

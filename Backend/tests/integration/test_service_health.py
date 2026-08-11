@@ -9,6 +9,7 @@ import pytest
 RUN_INTEGRATION = os.environ.get("RUN_BACKEND_INTEGRATION") == "1"
 AGENTS_BASE_URL = os.environ.get("AGENTS_BASE_URL", "http://localhost:8150")
 CONTROL_BASE_URL = os.environ.get("CONTROL_BASE_URL", "http://localhost:8001")
+APP_BASE_URL = os.environ.get("APP_BASE_URL", CONTROL_BASE_URL)
 MONAI_BASE_URL = os.environ.get("MONAI_BASE_URL", "http://localhost:8000")
 ORTHANC_BASE_URL = os.environ.get("ORTHANC_BASE_URL", "http://localhost:8043")
 
@@ -23,7 +24,9 @@ ORTHANC_BASE_URL = os.environ.get("ORTHANC_BASE_URL", "http://localhost:8043")
     ("url", "expected_status"),
     [
         (f"{AGENTS_BASE_URL}/openapi.json", 200),
-        (f"{CONTROL_BASE_URL}/health", 200),
+        (f"{APP_BASE_URL}/health/live", 200),
+        (f"{APP_BASE_URL}/health/ready", 200),
+        (f"{APP_BASE_URL}/health", 200),
         (f"{MONAI_BASE_URL}/info/", 200),
         (f"{ORTHANC_BASE_URL}/system", 200),
     ],

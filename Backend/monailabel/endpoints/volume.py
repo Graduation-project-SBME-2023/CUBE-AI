@@ -121,7 +121,11 @@ async def read_volume(volume_series_instance_uid: str, db: AsyncSession = Depend
     return db_volume
 
 @router.get("/", response_model=list[Volume])
-async def read_volumes(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+async def read_volumes(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
     volumes = await get_volumes(db, skip=skip, limit=limit)
     return volumes  
 
@@ -155,17 +159,24 @@ async def delete_volume_endpoint(volume_series_instance_uid: str, db: AsyncSessi
     return {"detail": "Volume deleted successfully"}
 
 @router.get("/by_study/{study_uid}", response_model=list[Volume])
-async def read_volumes_by_study(study_uid: str, db: AsyncSession = Depends(get_db)):
-    volumes = await get_volumes_by_study(db, study_uid)
+async def read_volumes_by_study(
+    study_uid: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    volumes = await get_volumes_by_study(db, study_uid, skip=skip, limit=limit)
     return volumes
 
 @router.get("/search/", response_model=list[Volume])
 async def search_volumes_endpoint(
     modality: str | None = None,
     keyword: str | None = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db)
 ):
-    return await search_volumes(db, modality, keyword)
+    return await search_volumes(db, modality, keyword, skip=skip, limit=limit)
 
 @router.get("/count/{study_uid}")
 async def count_volumes(study_uid: str, db: AsyncSession = Depends(get_db)):
@@ -191,6 +202,8 @@ async def search_volumes_description_endpoint(
         None, 
         description="List of words to exclude. Pass multiple times like: ?words_to_exclude=contrast"
     ),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -200,15 +213,19 @@ async def search_volumes_description_endpoint(
     return await search_volumes_by_description(
         db=db, 
         words_to_include=words_to_include, 
-        words_to_exclude=words_to_exclude
+        words_to_exclude=words_to_exclude,
+        skip=skip,
+        limit=limit,
     )
     
 @router.get("/descriptions/unique/", response_model=list[str])
 async def get_unique_descriptions_endpoint(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Retrieve a list of all unique volume series descriptions available in the database.
     Useful for populating dropdown menus or showing users available search terms.
     """
-    return await get_unique_series_descriptions(db=db)
+    return await get_unique_series_descriptions(db=db, skip=skip, limit=limit)

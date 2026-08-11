@@ -22,8 +22,14 @@ from storage_paths import MEDICAL_IMAGES_DIR, MEDICAL_LABELS_DIR, TEMP_DIR, work
 logger = logging.getLogger(__name__)
 from PIL import Image
 
-MONAI_URL = os.environ.get("MONAI_URL", "http://localhost:8000")
-CONTROL_API_URL = os.environ.get("CONTROL_API_URL", MONAI_URL)
+MONAI_URL = os.environ.get(
+    "INFERENCE_API_URL",
+    os.environ.get("MONAI_URL", "http://localhost:8000"),
+)
+CONTROL_API_URL = os.environ.get(
+    "APP_API_URL",
+    os.environ.get("CONTROL_API_URL", "http://localhost:8001"),
+)
 ORTHANC_URL = os.environ.get("ORTHANC_URL", "http://localhost:8043")
 
 # Geometry provenance written into every DICOM-SEG created by the fixed path.

@@ -1,5 +1,5 @@
 # app/routers/async_hypothesis.py
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from typing import List
@@ -23,7 +23,11 @@ async def create_hypothesis_endpoint(chat_id: UUID, hypothesis_in: HypothesisCre
     return await create_hypothesis(db, chat_id, hypothesis_in)
 
 @router.get("/", response_model=List[HypothesisOut])
-async def list_hypotheses(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+async def list_hypotheses(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
     return await get_all_hypotheses(db, skip, limit)
 
 @router.get("/{hypothesis_id}", response_model=HypothesisOut)

@@ -1,6 +1,6 @@
 # endpoints/Wslog.py
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
@@ -15,8 +15,12 @@ async def create_ws_log(data: WSLogCreate, db: AsyncSession = Depends(get_db)):
     return await wslog_crud.create_ws_log(db, data)
 
 @router.get("/", response_model=list[WSLog])
-async def get_all_logs(db: AsyncSession = Depends(get_db)):
-    return await wslog_crud.get_all_logs(db)
+async def get_all_logs(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    return await wslog_crud.get_all_logs(db, skip=skip, limit=limit)
 
 @router.get("/filter", response_model=list[WSLog]) 
 async def get_logs(
@@ -24,18 +28,26 @@ async def get_logs(
     msg_type: str | None = None,
     json_key: str | None = None,
     json_value: str | None = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     return await wslog_crud.get_logs(db, session_id=session_id, msg_type=msg_type,
-                                     json_key=json_key, json_value=json_value)
+                                     json_key=json_key, json_value=json_value,
+                                     skip=skip, limit=limit)
 
 @router.get("/{log_id}", response_model=WSLog)
 async def get_ws_log(log_id: UUID, db: AsyncSession = Depends(get_db)):
     return await wslog_crud.get_ws_log(db, log_id)
 
 @router.get("/session/{session_id}", response_model=list[WSLog])
-async def get_logs_by_session(session_id: UUID, db: AsyncSession = Depends(get_db)):
-    return await wslog_crud.get_logs(db, session_id=session_id)
+async def get_logs_by_session(
+    session_id: UUID,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    return await wslog_crud.get_logs(db, session_id=session_id, skip=skip, limit=limit)
 
 @router.put("/{log_id}", response_model=WSLog)
 async def update_ws_log(log_id: UUID, data: WSLogUpdate, db: AsyncSession = Depends(get_db)):

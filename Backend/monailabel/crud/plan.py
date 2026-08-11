@@ -113,9 +113,13 @@ async def get_all_plans(db: AsyncSession, skip: int = 0, limit: int = 100):
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
 
-async def get_plans_for_hypothesis(db: AsyncSession, hypothesis_id: UUID):
+async def get_plans_for_hypothesis(
+    db: AsyncSession, hypothesis_id: UUID, skip: int = 0, limit: int = 100
+):
     try:
-        result = await db.execute(select(Plan).where(Plan.hypothesis_id == hypothesis_id))
+        result = await db.execute(
+            select(Plan).where(Plan.hypothesis_id == hypothesis_id).offset(skip).limit(limit)
+        )
         plans = result.scalars().all()
         return plans
     except SQLAlchemyError as e:

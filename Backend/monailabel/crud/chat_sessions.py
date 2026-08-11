@@ -6,10 +6,10 @@ from fastapi import HTTPException
 from models import chat_sessions as models
 from models.study import Study
 from schemas import chat_sessions as schemas
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import noload, selectinload
 from uuid import UUID 
 def ensure_last_activity(session):
-    if session or session.last_activity is None:
+    if session and session.last_activity is None:
         session.last_activity = session.started_at
     return session
 
@@ -64,11 +64,19 @@ async def get_chat_session(db: AsyncSession, chat_id: UUID):
 # ---------------------------
 # GET ALL CHAT SESSIONS
 # ---------------------------
-async def get_chat_sessions(db: AsyncSession, study_UID: str = None, active_only: bool = False):
+async def get_chat_sessions(
+    db: AsyncSession,
+    study_UID: str = None,
+    active_only: bool = False,
+    skip: int = 0,
+    limit: int = 50,
+):
     try:
         query = select(models.ChatSession).options(
-                    selectinload(models.ChatSession.messages),
-                    selectinload(models.ChatSession.studies)
+                    selectinload(models.ChatSession.studies),
+                    noload(models.ChatSession.messages),
+                    noload(models.ChatSession.hypothesis),
+                    noload(models.ChatSession.ws_logs),
                 )
 
         # Filter by study_UID (through the association)
@@ -77,9 +85,16 @@ async def get_chat_sessions(db: AsyncSession, study_UID: str = None, active_only
         if active_only:
             query = query.where(models.ChatSession.is_active == True)
 
+        query = query.order_by(
+            models.ChatSession.last_activity.desc().nullslast()
+        ).offset(skip).limit(limit)
+
         result = await db.execute(query)
         # Use unique() first, then extract ChatSession objects manually
         sessions = [row[0] for row in result.unique().all()]  
+        for session in sessions:
+            # Preserve the existing response shape without loading every message row.
+            session.__dict__["messages"] = []
         return [ensure_last_activity(s) for s in sessions]
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")

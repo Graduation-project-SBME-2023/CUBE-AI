@@ -35,7 +35,11 @@ async def read_radiomics_by_label(label_uid: str, db: AsyncSession = Depends(get
 # List All Radiomics Entries (Paginated)
 # ----------------------------------------------------------------------
 @router.get("/", response_model=List[Radiomics])
-async def read_radiomics_list(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+async def read_radiomics_list(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
     radiomics_list = await crud.get_radiomics_list(db, skip=skip, limit=limit)
     return radiomics_list
 
@@ -66,8 +70,8 @@ async def delete_radiomics_entry(radiomics_id: UUID, db: AsyncSession = Depends(
 async def search_radiomics_entries(
     feature_key: Optional[str] = Query(None, description="Search by feature key"),
     feature_value: Optional[str] = Query(None, description="Search by feature value"),
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     results = await crud.search_radiomics(

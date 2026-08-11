@@ -87,7 +87,10 @@ class SegmentationService:
         client: httpx.AsyncClient | None = None,
     ):
 
-        self.monai_url = monai_url or os.environ.get("MONAI_URL", "http://localhost:8000")
+        self.monai_url = monai_url or os.environ.get(
+            "INFERENCE_API_URL",
+            os.environ.get("MONAI_URL", "http://localhost:8000"),
+        )
         self.orthanc_url = orthanc_url or os.environ.get("ORTHANC_URL", "http://localhost:8043")
         self.client = client or httpx.AsyncClient()
         self._owns_client = client is None
@@ -744,7 +747,7 @@ class SegmentationService:
                 return False
 
             sync_response = await self.client.post(
-                f"{self.monai_url}/sync/orthanc-webhook",
+                f"{os.environ.get('APP_API_URL', os.environ.get('CONTROL_API_URL', 'http://localhost:8001')).rstrip('/')}/sync/orthanc-webhook",
                 json={
                     "change_type": "stable_series",
                     "resource_id": orthanc_series_id,

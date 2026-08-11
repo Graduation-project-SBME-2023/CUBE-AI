@@ -86,21 +86,31 @@ async def delete_study(db: AsyncSession, study_uid: str):
         logger.error(error_msg)
         return False, error_msg
 
-async def get_studies_by_patient(db: AsyncSession, patient_id: UUID):
+async def get_studies_by_patient(
+    db: AsyncSession, patient_id: UUID, skip: int = 0, limit: int = 100
+):
     try:
-        result = await db.execute(select(Study).where(Study.patient_id == patient_id))
+        result = await db.execute(
+            select(Study).where(Study.patient_id == patient_id).offset(skip).limit(limit)
+        )
         return result.scalars().all()
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     
-async def search_studies(db: AsyncSession, modality: str | None = None, keyword: str | None = None):
+async def search_studies(
+    db: AsyncSession,
+    modality: str | None = None,
+    keyword: str | None = None,
+    skip: int = 0,
+    limit: int = 100,
+):
     try:
         query = select(Study)
         if modality:
             query = query.where(Study.modality.ilike(f"%{modality}%"))
         if keyword:
             query = query.where(Study.description.ilike(f"%{keyword}%"))
-        result = await db.execute(query)
+        result = await db.execute(query.offset(skip).limit(limit))
         return result.scalars().all()
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")

@@ -11,7 +11,10 @@ import requests
 from pathlib import Path
 
 
-BACKEND_SYNC_URL = "http://localhost:8000/models/sync"
+BACKEND_SYNC_URL = os.environ.get(
+    "APP_API_URL",
+    os.environ.get("CONTROL_API_URL", "http://application-api:8001"),
+).rstrip("/") + "/models/sync"
 
 logger = logging.getLogger(__name__)
 

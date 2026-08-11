@@ -21,13 +21,11 @@ RUN pip install --no-cache-dir -U pip && \
     pip install --no-cache-dir \
         batchgenerators \
         acvl-utils \
-        asyncpg \
         nnunetv2 \
         nnInteractive \
         "pydicom==2.4.4" \
-        psycopg2-binary \
         aiohttp \
-        alembic
+        httpx
 
 COPY ./requirements/voxtell.txt /voxtell_requirements.txt
 RUN pip install --no-cache-dir -r /voxtell_requirements.txt
@@ -58,7 +56,6 @@ ENV BACKEND_STORAGE_ROOT=/storage \
     nnUNet_preprocessed=/storage/data/nnunet/nnUNet_preprocessed \
     nnUNet_results=/storage/data/nnunet/nnUNet_results \
     nnUNet_raw=/storage/data/nnunet/nnUNet_raw \
-    DATABASE_URL=postgresql://workflow_user:password@postgres:5432/workflow_db \
     PYTHONPATH=/apps/radiology \
     PATH=/apps/radiology/bin:${PATH}
 # ------------------------------------------------------------
@@ -66,4 +63,4 @@ ENV BACKEND_STORAGE_ROOT=/storage \
 # ------------------------------------------------------------
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic -c /alembic/alembic.ini upgrade head && if [ ! -s \"$VOXTELL_DIR/text_embeddings_cache.pkl\" ]; then python /apps/radiology/voxtell_cache_builder.py; fi && python /monailabel/server_start.py"]
+CMD ["sh", "-c", "if [ ! -s \"$VOXTELL_DIR/text_embeddings_cache.pkl\" ]; then python /apps/radiology/voxtell_cache_builder.py; fi && python /monailabel/server_start.py"]

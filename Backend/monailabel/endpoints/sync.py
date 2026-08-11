@@ -1,7 +1,7 @@
 import logging
 
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from core.database import get_db, AsyncSessionLocal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -44,6 +44,15 @@ async def manual_full_sync(background_tasks: BackgroundTasks):
     Manually trigger a full sync of all Orthanc data.
     Runs in the background and returns immediately.
     """
+    try:
+        async with create_orthanc_session() as session:
+            async with session.get(f"{ORTHANC_URL}/statistics") as response:
+                if response.status != 200:
+                    raise HTTPException(status_code=503, detail="Orthanc is unavailable")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Orthanc is unavailable") from exc
     background_tasks.add_task(run_full_sync_background)
     return {
         "status": "accepted",
@@ -85,11 +94,9 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
             },
             "synced": studies_count == orthanc_stats.get("CountStudies", 0) if orthanc_stats else None
         }
-    except Exception as e:
-        return {
-            "error": str(e),
-            "message": "Failed to get sync status"
-        }
+    except Exception as exc:
+        logger.warning("Unable to read Orthanc sync status: %s", exc)
+        raise HTTPException(status_code=503, detail="Orthanc is unavailable") from exc
 
 
 # ----------------- BACKGROUND TASKS -----------------

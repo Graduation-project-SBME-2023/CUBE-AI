@@ -1,6 +1,6 @@
 
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from schemas import chat_sessions as schemas
 from crud import chat_sessions as crud
@@ -26,10 +26,12 @@ async def create_chat_session(data: schemas.ChatSessionCreate, db: AsyncSession 
 # GET ALL CHAT SESSIONS
 # ---------------------------------------------------------
 
-@router.get("/", response_model=list[schemas.ChatSession])
+@router.get("/", response_model=list[schemas.ChatSessionSummary])
 async def get_chat_sessions(
     study_UID: str | None = None,
     active_only: bool = False,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -38,7 +40,13 @@ async def get_chat_sessions(
     - study_UID (get sessions related to a specific study)
     - active_only=True (get only active sessions)
     """
-    return await crud.get_chat_sessions(db, study_UID=study_UID, active_only=active_only)
+    return await crud.get_chat_sessions(
+        db,
+        study_UID=study_UID,
+        active_only=active_only,
+        skip=skip,
+        limit=limit,
+    )
 # ---------------------------------------------------------
 # GET CHAT SESSION BY ID
 # ---------------------------------------------------------

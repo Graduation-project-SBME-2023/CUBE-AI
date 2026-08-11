@@ -15,7 +15,7 @@ import SegmentationReader from '../utils/SegmentationReader';
 import MonaiSegmentation from './MonaiSegmentation';
 import SegmentationToolbox from './SegmentationToolbox';
 import AgentChat from './actions/AgentChat';
-import { getAgentsApiBaseUrl } from '../utils/runtimeUrls';
+import { getAgentsApiBaseUrl, getAppApiBaseUrl } from '../utils/runtimeUrls';
 
 import { createReportAsync } from '@ohif/extension-default';
 import { servicesManager } from 'platform/app/src/App';
@@ -1024,7 +1024,7 @@ export default class MonaiLabelPanel extends Component {
 
       try {
         const response = await fetch(
-          'http://localhost:8000/workflow/update-uids',
+          `${getAppApiBaseUrl()}/workflow/update-uids`,
           {
             method: 'POST',
             headers: {

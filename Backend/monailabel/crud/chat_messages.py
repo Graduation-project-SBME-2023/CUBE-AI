@@ -37,7 +37,7 @@ async def create_chat_message(db: AsyncSession, chat_id: UUID, message: ChatMess
 # -------------------------
 # GET ALL MESSAGES IN SESSION
 # -------------------------
-async def get_chat_messages(db: AsyncSession, chat_id: UUID):
+async def get_chat_messages(db: AsyncSession, chat_id: UUID, skip: int = 0, limit: int = 50):
     try:
         # Check session exists
         result = await db.execute(select(ChatSession).filter(ChatSession.chat_id == chat_id))
@@ -49,6 +49,8 @@ async def get_chat_messages(db: AsyncSession, chat_id: UUID):
             select(ChatMessage)
             .filter(ChatMessage.chat_id == chat_id)
             .order_by(ChatMessage.timestamp.asc())
+            .offset(skip)
+            .limit(limit)
         )
         messages = result.scalars().all()
         return messages
@@ -111,12 +113,16 @@ async def delete_chat_message(db: AsyncSession, message_id: UUID):
 # -------------------------
 # GET MESSAGES BY ROLE
 # -------------------------
-async def get_chat_messages_by_role(db: AsyncSession, chat_id: UUID, role: str):
+async def get_chat_messages_by_role(
+    db: AsyncSession, chat_id: UUID, role: str, skip: int = 0, limit: int = 50
+):
     try:
         result = await db.execute(
             select(ChatMessage)
             .filter(ChatMessage.chat_id == chat_id, ChatMessage.role == role)
             .order_by(ChatMessage.timestamp.asc())
+            .offset(skip)
+            .limit(limit)
         )
         messages = result.scalars().all()
         if not messages:

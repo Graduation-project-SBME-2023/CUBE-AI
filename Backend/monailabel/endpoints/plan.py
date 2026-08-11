@@ -1,5 +1,5 @@
 # app/routers/async_plan.py
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
@@ -49,7 +49,11 @@ async def create_plan_with_steps_endpoint(
   
 
 @router.get("/", response_model=List[PlanOut])
-async def list_plans(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+async def list_plans(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
     return await get_all_plans(db, skip, limit)
 
 @router.get("/{plan_id}", response_model=PlanOut)
@@ -69,8 +73,13 @@ async def read_plan_with_steps(plan_id: UUID, db: AsyncSession = Depends(get_db)
     )
 
 @router.get("/by-hypothesis/{hypothesis_id}", response_model=List[PlanWithStepsOut])
-async def read_plan_by_hypothesis(hypothesis_id: UUID, db: AsyncSession = Depends(get_db)):
-    plans = await get_plans_for_hypothesis(db, hypothesis_id)
+async def read_plan_by_hypothesis(
+    hypothesis_id: UUID,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    plans = await get_plans_for_hypothesis(db, hypothesis_id, skip=skip, limit=limit)
     results = []
     for plan in plans:
         steps_result = await db.execute(

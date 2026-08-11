@@ -12,8 +12,8 @@ from services.timeout_policy import CONTROL_HTTP_TIMEOUT
 logger = logging.getLogger(__name__)
 
 BASE_URL = os.environ.get(
-    "CONTROL_API_URL",
-    os.environ.get("MONAI_URL", "http://localhost:8000"),
+    "APP_API_URL",
+    os.environ.get("CONTROL_API_URL", "http://localhost:8001"),
 ).rstrip("/")
 DEFAULT_TIMEOUT = CONTROL_HTTP_TIMEOUT
 class BackendClient:
