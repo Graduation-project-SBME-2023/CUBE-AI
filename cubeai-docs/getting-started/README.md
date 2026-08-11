@@ -97,10 +97,11 @@ docker compose --env-file deploy/.env \
 ```
 
 This will start:
-- 🗃️ **Orthanc** — DICOM server at `http://localhost:8042`
-- 🤖 **MONAI Label** — Segmentation AI at `http://localhost:8000`
-- 🗄️ **PostgreSQL** — Database at `localhost:5432`
-- 🧠 **Agent System** — Research pipeline at `http://localhost:8100`
+- 🗃️ **Orthanc** — DICOM server at `http://localhost:8043`
+- **Application API** — CRUD, chat, workflow, and sync at `http://localhost:8001`
+- 🤖 **MONAI Inference** — Segmentation and training at `http://localhost:8000`
+- 🗄️ **PostgreSQL** — Database at `localhost:5433`
+- 🧠 **Agent System** — Research pipeline at `http://localhost:8150`
 
 Wait until you see all services report `ready` or similar startup messages.
 
@@ -126,8 +127,9 @@ The frontend will be available at **[http://localhost:3000](http://localhost:300
 |---|---|---|
 | OHIF Viewer | http://localhost:3000 | Study list page loads |
 | Orthanc Web UI | http://localhost:8043 | Orthanc dashboard |
-| MONAI Label API | http://localhost:8000/api/v1/info | JSON with server info |
-| Agent System | http://localhost:8100/health | `{"status": "ok"}` |
+| Application API | http://localhost:8001/health/ready | `ready` status after migrations |
+| MONAI Inference API | http://localhost:8000/info/ | JSON with server info |
+| Agent System | http://localhost:8150/health | `{"status": "ok"}` |
 
 ---
 

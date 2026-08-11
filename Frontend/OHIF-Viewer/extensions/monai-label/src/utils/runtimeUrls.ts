@@ -10,6 +10,16 @@ export const getAgentsApiBaseUrl = () => {
 
   return (
     normalizeBaseUrl(runtimeConfig?.AGENTS_API) ||
-    `${window.location.protocol}//${window.location.hostname}:8150`
+    '/agents'
   );
+};
+
+export const getAppApiBaseUrl = () => {
+  const runtimeConfig = (
+    window as Window & {
+      config?: { APP_API?: string; BACKEND_API?: string };
+    }
+  ).config;
+
+  return normalizeBaseUrl(runtimeConfig?.APP_API || runtimeConfig?.BACKEND_API) || '/api';
 };

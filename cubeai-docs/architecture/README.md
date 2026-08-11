@@ -1,152 +1,54 @@
-# 🏗️ System Architecture
+# System Architecture
 
-## Overview
+The production architecture uses one public origin and separates PostgreSQL work from GPU inference. The decision and benchmark evidence are documented in [load-test-decision.md](./load-test-decision.md).
 
-Architecture decision: [contention load test and service-split evaluation](./load-test-decision.md).
-
-CUBE.AI is a modular, containerized platform that integrates multiple specialized services into a unified clinical research environment. All services communicate over a shared Docker network.
-
-For a visual, browser-based reference, open [the interactive architecture page](./arch.html).
-
----
-
-## High-Level Component Diagram
-
-```
-┌───────────────────────────────────────────────────────────────┐
-│                        USER BROWSER                           │
-│                                                               │
-│   ┌────────────────────────────────────────────────────────┐  │
-│   │              OHIF Viewer (React App)                   │  │
-│   │                                                        │  │
-│   │  ┌──────────────┐  ┌──────────────────────────────┐   │  │
-│   │  │  Study List  │  │   Research Playground        │   │  │
-│   │  │  (Worklist)  │  │   (Canvas + Chat Sidebar)    │   │  │
-│   │  └──────────────┘  └──────────────────────────────┘   │  │
-│   │                              │                          │  │
-│   │                     WebSocket + REST                    │  │
-│   └──────────────────────────────┼─────────────────────────┘  │
-└──────────────────────────────────┼────────────────────────────┘
-                                   │
-           ┌───────────────────────┼────────────────────────┐
-           │              BACKEND SERVICES                   │
-           │                                                 │
-           │  ┌──────────────────────────────────────────┐   │
-           │  │       Agent System  (FastAPI)            │   │
-           │  │   WebSocket · REST · Task Manager        │   │
-           │  │   Multi-Agent LLM Pipeline               │   │
-           │  └──────────┬───────────────────────────────┘   │
-           │             │                                    │
-           │  ┌──────────▼──────────┐  ┌────────────────┐   │
-           │  │  MONAI Label        │  │   Orthanc      │   │
-           │  │  (Segmentation AI)  │  │  (DICOM PACS)  │   │
-           │  └──────────┬──────────┘  └────────┬───────┘   │
-           │             │                       │            │
-           │  ┌──────────▼───────────────────────▼───────┐   │
-           │  │           PostgreSQL Database             │   │
-           │  └──────────────────────────────────────────┘   │
-           └─────────────────────────────────────────────────┘
-                                   │
-           ┌───────────────────────▼────────────────────────┐
-           │                  Ollama (LLM Runtime)           │
-           │           deepseek-v3.1:671b-cloud              │
-           └─────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    Browser["Browser / OHIF"] --> Nginx["Nginx :80/:443"]
+    Nginx -->|/api| App["Application API :8001"]
+    Nginx -->|/agents and /ws| Agents["Agents Backend :8150"]
+    Nginx -->|/inference| Inference["MONAI Inference :8000"]
+    Nginx -->|/pacs| Orthanc["Orthanc HTTP :8042 / DICOM :4242"]
+    Agents --> App
+    Agents --> Inference
+    App --> Postgres["PostgreSQL :5432"]
+    App --> Orthanc
+    App --> Inference
+    Inference --> Orthanc
+    Inference --> Storage["Models / nnUNet / job volumes"]
 ```
 
----
+## Service ownership and ports
 
-## Services & Ports
+| Service | Internal port | Production ingress | Responsibility |
+|---|---:|---|---|
+| OHIF + Nginx | `80/443` | Public | UI and same-origin routing |
+| Application API | `8001` | `/api/*` | PostgreSQL CRUD, chat, workflow metadata, Orthanc sync |
+| Agents Backend | `8150` | `/agents/*`, `/ws` | Agent planning/execution, MCP, population workflows, events |
+| MONAI Inference | `8000` | `/inference/*` | Model loading, inference, dataset preparation and training jobs |
+| Orthanc | `8042`, DICOM `4242` | `/pacs/*` | PACS and DICOMweb |
+| PostgreSQL | `5432` | None | Single system of record |
 
-| Service | Technology | Default Port | Role |
-|---|---|---|---|
-| **OHIF Viewer** | React + Vite | `3000` (dev) / `80` (prod) | Clinical imaging UI |
-| **Agent System** | FastAPI + WebSocket | `8100` | LLM research pipeline backend |
-| **MONAI Label** | FastAPI | `8000` | AI-assisted segmentation |
-| **Orthanc** | C++ DICOM | `8042` (API) / `8043` (Web) | DICOM PACS server |
-| **PostgreSQL** | PostgreSQL 15 | `5432` | Persistent database |
-| **Ollama** | Ollama runtime | `11434` | Local/cloud LLM inference |
+Development publishes `8001`, `8150`, `8000`, host `8043→8042`, and host `5433→5432`. Production uses `docker-compose.backend.prod.yml`, which removes every published backend port; only Nginx publishes `80/443`.
 
----
+## Important boundaries
 
-## Data Flow
+- Only the Application API receives `DATABASE_URL` and registers database routers.
+- MONAI does not run Alembic or seed the database. One-shot `db-migrate` and `db-seed` services run before the Application API.
+- Inference and training jobs share a bounded queue. Default concurrency is one running job plus eight queued jobs.
+- Application health depends on PostgreSQL, not MONAI or Orthanc. Inference or PACS failures affect only the operations that require them.
+- PostgreSQL remains the only application datastore; MongoDB is not part of this architecture.
 
-### 1. DICOM Study Ingestion
-```
-External Source → Orthanc DICOM API (port 4242)
-                → Orthanc stores in volume
-                → Webhook fires → Agent System notified
-                → PostgreSQL study record created
-```
+## Request flow
 
-### 2. AI-Assisted Segmentation
-```
-User selects study in OHIF → MONAI Label Panel opens
-→ Inference request to MONAI Label (/infer endpoint)
-→ nnUNet model runs segmentation
-→ Segmentation mask returned as DICOM-SEG / NIfTI
-→ OHIF renders overlay
-```
+1. Browser CRUD and chat calls use `/api` and reach port `8001`.
+2. Browser model operations use `/inference` and reach port `8000`.
+3. Agents persist state through `APP_API_URL` and submit inference through `INFERENCE_API_URL`.
+4. Orthanc sends stable-series webhooks to the Application API.
+5. Workflow training starts on `8001`, returns a job ID, and executes dataset preparation on `8000` without giving MONAI database access.
 
-### 3. Automated Research Pipeline
-```
-User opens Research Playground → Chat sidebar initiates session
-→ WebSocket connects to Agent System
-→ User describes research question
-→ Hypothesis Architect agent creates hypothesis
-→ Pipeline Architect generates execution plan (nodes/edges)
-→ Canvas renders interactive node graph
-→ User approves → Pipeline executes:
-    Study Population Planner → Segmentation → Feature Extraction
-    → Modeling → Result Reporter → LaTeX Report Generator
-→ PDF report generated & downloadable
-```
+## Verification
 
----
-
-## Technology Stack
-
-| Layer | Technologies |
-|---|---|
-| **Frontend** | React 18, TypeScript, ReactFlow, Socket.IO Client, OHIF Extensions |
-| **Backend API** | FastAPI, Python 3.11, SQLAlchemy, Alembic, asyncio |
-| **AI/ML** | MONAI Label, nnUNetv2, PyRadiomics, PyCaret, scikit-learn |
-| **LLM Integration** | Ollama, LiteLLM, deepseek-v3.1 |
-| **Database** | PostgreSQL 15, asyncpg |
-| **DICOM** | Orthanc, DICOMweb, dicom-web |
-| **Infrastructure** | Docker, Docker Compose, Nginx |
-| **Communication** | REST, WebSocket (Socket.IO), Orthanc Webhooks |
-
----
-
-## Key Design Decisions
-
-### Multi-Agent Architecture
-Rather than a single monolithic AI model, CUBE.AI uses a **pipeline of specialized agents**, each responsible for one research step. This enables:
-- Parallel execution of independent steps
-- Transparent intermediate outputs (visible in the canvas)
-- Easy extension by adding new agent types
-
-### WebSocket-First for Research Pipeline
-The Research Playground communicates exclusively via **WebSocket** to enable real-time streaming of:
-- Agent status updates
-- Execution logs per node
-- Plan updates (dynamic re-planning)
-
-### Shared Workspace Pattern
-All agents share a **workspace directory** on disk:
-```
-agents_workspace/
-  {session_id}/
-    scratchpad.json       ← shared cross-agent state
-    outputs/
-      {agent_id}_output.json  ← structured agent output
-    reports/              ← generated LaTeX/PDF files
-```
-
----
-
-## See Also
-
-- [Deployment Guide](../deployment/README.md) — How to run all services
-- [Agent System](../agent-system/README.md) — Deep-dive into the AI pipeline
-- [API Reference](../api-reference/README.md) — All REST/WebSocket endpoints
+- Contract tests enforce router ownership and bounded chat-session responses.
+- Integration tests cover service health and the same-origin HTTP routes.
+- Load and contention tests live in `Backend/tests/load`.

@@ -877,8 +877,8 @@ async def get_session_chat_messages(session_id: str):
     """
     async with httpx.AsyncClient() as client:
         monai_url = os.environ.get(
-            "CONTROL_API_URL",
-            os.environ.get("MONAI_URL", "http://localhost:8000"),
+            "APP_API_URL",
+            os.environ.get("CONTROL_API_URL", "http://localhost:8001"),
         )
         try:
             response = await client.get(

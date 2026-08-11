@@ -51,14 +51,12 @@ RUN pip install --no-cache-dir -U pip && \
         # original Dockerfile deps
         batchgenerators \
         acvl-utils \
-        asyncpg \
         nnunetv2 \
         nnInteractive \
         "pydicom==2.4.4" \
         # previously installed via compose command at startup
-        psycopg2-binary \
         aiohttp \
-        alembic
+        httpx
 
 # requirements/voxtell.txt is copied into the image so we never
 # need to bind-mount it just to install deps.
@@ -107,7 +105,6 @@ ENV BACKEND_STORAGE_ROOT=/storage \
     nnUNet_preprocessed=/storage/data/nnunet/nnUNet_preprocessed \
     nnUNet_results=/storage/data/nnunet/nnUNet_results \
     nnUNet_raw=/storage/data/nnunet/nnUNet_raw \
-    DATABASE_URL=postgresql://workflow_user:password@postgres:5432/workflow_db \
     PYTHONPATH=/apps/radiology \
     # NVIDIA runtime hints (can also be set in compose)
     NVIDIA_VISIBLE_DEVICES=all \
@@ -118,6 +115,5 @@ ENV BACKEND_STORAGE_ROOT=/storage \
 # ------------------------------------------------------------
 EXPOSE 8000
 
-# Default entrypoint: run DB migrations then start the server.
-# The compose file can still override this if needed.
-CMD ["sh", "-c", "alembic -c /alembic/alembic.ini upgrade head && if [ ! -s \"$VOXTELL_DIR/text_embeddings_cache.pkl\" ]; then python /apps/radiology/voxtell_cache_builder.py; fi && python /monailabel/server_start.py"]
+# Database migrations are owned by the one-shot application-api migration service.
+CMD ["sh", "-c", "if [ ! -s \"$VOXTELL_DIR/text_embeddings_cache.pkl\" ]; then python /apps/radiology/voxtell_cache_builder.py; fi && python /monailabel/server_start.py"]

@@ -1,5 +1,5 @@
 from services.monai_sync import sync_models_from_monai
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from schemas.model import Model, ModelCreate, ModelUpdate
 from crud.model import delete_model, get_model, get_models, create_model, update_model
@@ -13,7 +13,7 @@ async def read_model(model_id: UUID, db: AsyncSession = Depends(get_db)):
     return db_model
 
 @router.get("/", response_model=list[Model])
-async def read_models(skip: int = 0, limit: int = 100,
+async def read_models(skip: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=100),
                       db: AsyncSession = Depends(get_db)):
     models = await get_models(db, skip=skip, limit=limit)
     return models

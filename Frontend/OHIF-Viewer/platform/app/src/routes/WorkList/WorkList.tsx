@@ -7,7 +7,7 @@ import qs from 'query-string';
 import isEqual from 'lodash.isequal';
 import { useTranslation } from 'react-i18next';
 import { UIModalService, UINotificationService } from '@ohif/core';
-import { getMonaiBaseUrl } from '../../utils/runtimeUrls';
+import { getAppApiBaseUrl } from '../../utils/runtimeUrls';
 
 import filtersMeta from './filtersMeta.js';
 import { useAppConfig } from '@state';
@@ -172,7 +172,7 @@ function WorkList({
     );
 
     try {
-      const url = `${getMonaiBaseUrl()}/workflow/${encodeURIComponent(
+      const url = `${getAppApiBaseUrl()}/workflow/${encodeURIComponent(
         selectedWorkflow.workflowName
       )}/add`;
       const response = await fetch(url, {

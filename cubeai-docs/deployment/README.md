@@ -93,11 +93,12 @@ Once all services are up, navigate to **http://localhost**.
 | Service | URL |
 |---|---|
 | OHIF Viewer | `http://localhost` (prod) / `http://localhost:3000` (dev) |
-| Agent System API | `http://localhost:8100` |
+| Application API | `http://localhost:8001` (dev) / `http://localhost/api` (prod) |
+| Agent System API | `http://localhost:8150` (dev) / `http://localhost/agents` (prod) |
 | MONAI Label API | `http://localhost:8000` |
 | Orthanc Web UI | `http://localhost:8043` |
-| Orthanc DICOM API | `http://localhost:8042` |
-| PostgreSQL | `localhost:5432` |
+| Orthanc HTTP API | `http://localhost:8043` (dev) / `http://localhost/pacs` (prod) |
+| PostgreSQL | `localhost:5433` (dev only) |
 
 ---
 

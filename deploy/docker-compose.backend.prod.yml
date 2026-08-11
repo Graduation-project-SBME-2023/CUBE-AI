@@ -1,0 +1,12 @@
+# Production override: Nginx/OHIF is the only published ingress.
+services:
+  agents:
+    ports: !reset []
+  application-api:
+    ports: !reset []
+  monailabel:
+    ports: !reset []
+  orthanc:
+    ports: !reset []
+  postgres:
+    ports: !reset []

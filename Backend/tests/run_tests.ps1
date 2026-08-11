@@ -57,6 +57,7 @@ $Suites = [ordered]@{
         Environment = @{
             RUN_BACKEND_INTEGRATION = "1"
             AGENTS_BASE_URL = "http://host.docker.internal:8150"
+            APP_BASE_URL = "http://host.docker.internal:8001"
             CONTROL_BASE_URL = "http://host.docker.internal:8001"
             MONAI_BASE_URL = "http://host.docker.internal:8000"
             ORTHANC_BASE_URL = "http://host.docker.internal:8043"

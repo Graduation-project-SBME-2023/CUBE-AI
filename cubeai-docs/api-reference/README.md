@@ -8,9 +8,10 @@ This document covers all REST and WebSocket APIs exposed by CUBE.AI backend serv
 
 | Service | Base URL | Auth |
 |---|---|---|
-| Agent System | `http://localhost:8100` | None (dev) |
-| MONAI Label | `http://localhost:8000/api/v1` | None (dev) |
-| Orthanc | `http://localhost:8042` | Basic Auth (`orthanc:orthanc`) |
+| Application API | `http://localhost:8001` (dev), `/api` (prod) | Existing deployment policy |
+| Agent System | `http://localhost:8150` (dev), `/agents` (prod) | Existing deployment policy |
+| MONAI Inference | `http://localhost:8000` (dev), `/inference` (prod) | Existing deployment policy |
+| Orthanc | `http://localhost:8043` (dev), `/pacs` (prod) | Basic Auth (`orthanc:orthanc`) |
 
 ---
 
@@ -91,12 +92,12 @@ Returns the compiled PDF file.
 
 ## Agent System WebSocket API
 
-Connect via **Socket.IO** to `ws://localhost:8100`.
+Connect to the FastAPI WebSocket at `ws://localhost:8150/ws` in development or `/ws` on the production origin.
 
 ### Connection
 ```javascript
 import { io } from 'socket.io-client';
-const socket = io('http://localhost:8100');
+const socket = new WebSocket('ws://localhost:8150/ws');
 ```
 
 ### Events — Client → Server
@@ -200,9 +201,9 @@ POST /monailabel/initialize-inference-task?model_name=tumor
 
 ---
 
-## Workflow Data API (MONAI Label)
+## Workflow Data API (Application API)
 
-Base URL: `http://localhost:8000/api/v1`
+Base URL: `http://localhost:8001` in development or `/api` through Nginx
 
 ### Workflow Management
 

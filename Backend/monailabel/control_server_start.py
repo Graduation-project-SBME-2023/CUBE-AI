@@ -9,5 +9,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=int(os.environ.get("CONTROL_API_PORT", "8001")),
         reload=False,
-        workers=1,
+        workers=int(os.environ.get("APP_API_WORKERS", "2")),
     )

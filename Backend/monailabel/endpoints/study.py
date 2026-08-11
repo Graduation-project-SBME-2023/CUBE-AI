@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from schemas.study import StudyRead, StudyCreate, StudyUpdate
 from crud.study import delete_study, get_studies_by_patient, get_study, get_studies, create_study, search_studies, search_studies, update_study
@@ -12,7 +12,11 @@ async def read_study(study_uid: str, db: AsyncSession = Depends(get_db)):
     return db_study
 
 @router.get("/", response_model=list[StudyRead])
-async def read_studies(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+async def read_studies(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
     studies = await get_studies(db, skip=skip, limit=limit)
     return studies
 
@@ -49,12 +53,19 @@ async def delete_study_endpoint(study_uid: str, db: AsyncSession = Depends(get_d
 async def search_studies_endpoint(
     modality: str | None = None,
     keyword: str | None = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db)
 ):
-    return await search_studies(db, modality, keyword)
+    return await search_studies(db, modality, keyword, skip=skip, limit=limit)
 @router.get("/by_patient/{patient_id}", response_model=list[StudyRead])
-async def read_studies_by_patient(patient_id: UUID, db: AsyncSession = Depends(get_db)):
-    studies = await get_studies_by_patient(db, patient_id)
+async def read_studies_by_patient(
+    patient_id: UUID,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    studies = await get_studies_by_patient(db, patient_id, skip=skip, limit=limit)
     return studies
 
 

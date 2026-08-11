@@ -1,6 +1,6 @@
 # 
 # app/routers/plan_step.py
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from typing import List
@@ -34,13 +34,22 @@ async def create_step(
 
 
 @router.get("/", response_model=List[PlanStepOut])
-async def list_steps(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+async def list_steps(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
     return await get_all_steps(db, skip, limit)
 
 
 @router.get("/plan/{plan_id}", response_model=List[PlanStepOut])
-async def list_steps_for_plan(plan_id: UUID, db: AsyncSession = Depends(get_db)):
-    return await get_steps_for_plan(db, plan_id)
+async def list_steps_for_plan(
+    plan_id: UUID,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_steps_for_plan(db, plan_id, skip=skip, limit=limit)
 
 
 @router.get("/{step_id}", response_model=PlanStepOut)

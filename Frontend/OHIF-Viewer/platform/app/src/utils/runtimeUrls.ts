@@ -8,13 +8,24 @@ const normalizeBaseUrl = (value?: string) => {
   return '';
 };
 
-const fallbackBaseUrl = (port: number) => `${window.location.protocol}//${window.location.hostname}:${port}`;
+const sameOriginWebSocketUrl = (path: string) =>
+  `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}${path}`;
 
-export const getMonaiBaseUrl = () =>
-  normalizeBaseUrl(getEnv()?.REACT_APP_MONAI_URL) || fallbackBaseUrl(8000);
+export const getAppApiBaseUrl = () =>
+  normalizeBaseUrl(getEnv()?.REACT_APP_APP_API_URL) ||
+  normalizeBaseUrl(getEnv()?.REACT_APP_BACKEND_API) ||
+  '/api';
+
+export const getInferenceBaseUrl = () =>
+  normalizeBaseUrl(getEnv()?.REACT_APP_INFERENCE_URL) ||
+  normalizeBaseUrl(getEnv()?.REACT_APP_MONAI_URL) ||
+  '/inference';
+
+// Compatibility name for MONAI-specific components only.
+export const getMonaiBaseUrl = getInferenceBaseUrl;
 
 export const getAgentsBaseUrl = () =>
-  normalizeBaseUrl(getEnv()?.REACT_APP_AGENTS_URL) || fallbackBaseUrl(8150);
+  normalizeBaseUrl(getEnv()?.REACT_APP_AGENTS_URL) || '/agents';
 
 export const getAgentsWsUrl = () => {
   const envUrl = normalizeBaseUrl(getEnv()?.REACT_APP_AGENTS_WS_URL);
@@ -22,5 +33,5 @@ export const getAgentsWsUrl = () => {
     return envUrl;
   }
 
-  return `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:8150/ws`;
+  return sameOriginWebSocketUrl('/ws');
 };

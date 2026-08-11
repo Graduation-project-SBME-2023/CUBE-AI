@@ -78,12 +78,16 @@ async def get_step(db: AsyncSession, step_id: UUID) -> PlanStep:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
  
  
-async def get_steps_for_plan(db: AsyncSession, plan_id: UUID) -> list[PlanStep]:
+async def get_steps_for_plan(
+    db: AsyncSession, plan_id: UUID, skip: int = 0, limit: int = 100
+) -> list[PlanStep]:
     try:
         result = await db.execute(
             _step_query()
             .where(PlanStep.plan_id == plan_id)
             .order_by(PlanStep.order)
+            .offset(skip)
+            .limit(limit)
         )
         return result.scalars().all()
     except SQLAlchemyError as e:

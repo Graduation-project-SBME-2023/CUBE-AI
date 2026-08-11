@@ -53,6 +53,8 @@ async def get_logs(
     msg_type: str = None,
     json_key: str = None,
     json_value: str = None,
+    skip: int = 0,
+    limit: int | None = 100,
 ):
     try:
         query = select(WSLogModel)
@@ -74,7 +76,9 @@ async def get_logs(
                     WSLogModel.payload.has_key(json_key)  # noqa
                 )
 
-        query = query.order_by(WSLogModel.created_at.asc())
+        query = query.order_by(WSLogModel.created_at.asc()).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
 
         result = await db.execute(query)
         return result.scalars().all()
@@ -147,10 +151,13 @@ async def delete_ws_log(db: AsyncSession, log_id: UUID):
 # ---------------------------
 # GET ALL LOGS
 # ---------------------------
-async def get_all_logs(db: AsyncSession):
+async def get_all_logs(db: AsyncSession, skip: int = 0, limit: int = 100):
     try:
         result = await db.execute(
-            select(WSLogModel).order_by(WSLogModel.created_at.desc())
+            select(WSLogModel)
+            .order_by(WSLogModel.created_at.desc())
+            .offset(skip)
+            .limit(limit)
         )
         return result.scalars().all()
 
@@ -161,7 +168,7 @@ async def get_all_logs(db: AsyncSession):
 # ---------------------------
 async def delete_logs_by_session(db: AsyncSession, session_id: UUID):
     try:
-        logs = await get_logs(db, session_id=session_id)
+        logs = await get_logs(db, session_id=session_id, limit=None)
 
         for log in logs:
             await db.delete(log)

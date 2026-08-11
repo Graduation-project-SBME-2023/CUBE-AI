@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,15 +24,25 @@ async def create_patient(patient: schemas.PatientCreate, db: AsyncSession = Depe
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/", response_model=list[schemas.Patient])
-async def read_patients(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+async def read_patients(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
     patients = await crud.get_patients(db, skip=skip, limit=limit)
     for p in patients:
         p.age = calculate_age(p.birth_date)
     return patients
 
 @router.get("/search", response_model=list[schemas.Patient])
-async def search_patients(name: str | None = None, gender: str | None = None, db: AsyncSession = Depends(get_db)):
-    patients= await crud.search_patients(db, name, gender)
+async def search_patients(
+    name: str | None = None,
+    gender: str | None = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    patients = await crud.search_patients(db, name, gender, skip=skip, limit=limit)
     name = name.strip().replace('"', '') if name else None
 
     for p in patients:

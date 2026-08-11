@@ -1,7 +1,12 @@
-from fastapi import FastAPI
+import asyncio
+import time
+from contextlib import asynccontextmanager, suppress
+
+from fastapi import FastAPI, Request, Response
 from sqlalchemy import text
 
-from core.database import AsyncSessionLocal
+from core.database import AsyncSessionLocal, engine
+from core.metrics import install_sql_metrics, monitor_event_loop_lag, observe_http, render_metrics
 from endpoints import (
     Taskmessage,
     Wslog,
@@ -16,11 +21,28 @@ from endpoints import (
     segmentation,
     steps,
     study,
+    sync,
     volume,
+    workflow,
 )
 
 
-control_app = FastAPI(title="CUBE.AI Control API", version="1.0.0")
+install_sql_metrics(engine)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    lag_task = asyncio.create_task(monitor_event_loop_lag(), name="event-loop-lag-monitor")
+    try:
+        yield
+    finally:
+        lag_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await lag_task
+        await engine.dispose()
+
+
+control_app = FastAPI(title="CUBE.AI Application API", version="1.1.0", lifespan=lifespan)
 
 for router in (
     patient.router,
@@ -37,12 +59,49 @@ for router in (
     Taskmessage.router,
     contextaugmentation.router,
     Wslog.router,
+    workflow.router,
+    sync.router,
 ):
     control_app.include_router(router)
 
 
-@control_app.get("/health")
-async def health() -> dict[str, str]:
+@control_app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    started = time.perf_counter()
+    response = None
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", request.url.path)
+        observe_http(
+            request.method,
+            route_path,
+            response.status_code if response is not None else 500,
+            time.perf_counter() - started,
+        )
+
+
+@control_app.get("/health/live")
+async def liveness() -> dict[str, str]:
+    return {"status": "alive"}
+
+
+@control_app.get("/health/ready")
+async def readiness() -> dict[str, str]:
     async with AsyncSessionLocal() as session:
         await session.execute(text("SELECT 1"))
+        revision = (await session.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
+    return {"status": "ready", "migration": revision}
+
+
+@control_app.get("/health")
+async def health() -> dict[str, str]:
+    await readiness()
     return {"status": "healthy"}
+
+
+@control_app.get("/metrics", include_in_schema=False)
+async def metrics() -> Response:
+    return Response(render_metrics(engine), media_type="text/plain; version=0.0.4")

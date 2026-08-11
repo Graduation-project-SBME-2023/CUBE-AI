@@ -227,11 +227,16 @@ const ChatSidebar = ({
 
     // No scoped session — fetch the full global list (used when no externalSessionId)
     try {
-      const r = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/`);
-      if (!r.ok) {
-        throw new Error(`HTTP ${r.status}`);
+      const data = [];
+      for (let skip = 0; ; skip += 100) {
+        const r = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/?skip=${skip}&limit=100`);
+        if (!r.ok) {
+          throw new Error(`HTTP ${r.status}`);
+        }
+        const page = await r.json();
+        data.push(...page);
+        if (page.length < 100) break;
       }
-      const data = await r.json();
       const mapped = (data || []).map(s => ({
         chat_id: s.chat_id,
         title: s.title || `Chat ${s.chat_id}`,
@@ -262,11 +267,18 @@ const ChatSidebar = ({
       return;
     }
     try {
-      const res = await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chat_id}`);
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
+      const msgs = [];
+      for (let skip = 0; ; skip += 100) {
+        const res = await fetch(
+          `${getBackendApiBaseUrl()}/chat_messages/${chat_id}?skip=${skip}&limit=100`
+        );
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const page = await res.json();
+        msgs.push(...page);
+        if (page.length < 100) break;
       }
-      const msgs = await res.json();
       const dbMessages = msgs.map(m => ({
         id: `db_${m.message_id}`,
         role: m.role,

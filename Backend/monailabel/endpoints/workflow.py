@@ -1,11 +1,15 @@
-from fastapi import APIRouter, HTTPException, Depends, Query, Path
+from fastapi import APIRouter, HTTPException, Depends, Query, Path, status
 from pydantic import BaseModel
-from endpoints.my_endpoints_datastore import download_images, download_labels, prepare_instance_mapping, create_nnunet_dataset
 import asyncpg
+import httpx
 import logging
+import time
 from typing import Optional, List
 import os
-from monailabel.interfaces.utils.app import app_instance
+from uuid import uuid4
+
+from core.database import engine
+from core.metrics import observe_pool_acquire, observe_sql_query
 
 
 logger = logging.getLogger(__name__)
@@ -17,8 +21,10 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# Database connection settings
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://workflow_user:password@postgres:5432/workflow_db").replace("+asyncpg", "")
+INFERENCE_API_URL = os.getenv(
+    "INFERENCE_API_URL",
+    os.getenv("MONAI_URL", "http://monailabel:8000"),
+).rstrip("/")
 
 
 # Define the Pydantic model for validation
@@ -61,9 +67,39 @@ class AnnotationFilterRequest(BaseModel):
     task_name: str
 
 
-# Database Connection Pool
+class InstrumentedWorkflowConnection:
+    """Expose the legacy asyncpg API while using the Application API pool."""
+
+    def __init__(self, connection):
+        self._connection = connection
+
+    async def _measure(self, operation, *args):
+        started = time.perf_counter()
+        try:
+            return await operation(*args)
+        finally:
+            observe_sql_query(time.perf_counter() - started)
+
+    async def execute(self, *args):
+        return await self._measure(self._connection.execute, *args)
+
+    async def fetch(self, *args):
+        return await self._measure(self._connection.fetch, *args)
+
+    async def fetchval(self, *args):
+        return await self._measure(self._connection.fetchval, *args)
+
+    def transaction(self):
+        return self._connection.transaction()
+
+
+# Reuse the configured SQLAlchemy/asyncpg pool instead of opening a connection per request.
 async def get_db_connection():
-    return await asyncpg.connect(DATABASE_URL)
+    started = time.perf_counter()
+    async with engine.connect() as pooled_connection:
+        observe_pool_acquire(time.perf_counter() - started)
+        raw_connection = await pooled_connection.get_raw_connection()
+        yield InstrumentedWorkflowConnection(raw_connection.driver_connection)
 
 
 @router.post("/{task_name}/add", summary="Add a new workflow record for a specific task")
@@ -195,8 +231,6 @@ async def filter_study_uid_by_task_name(
     except Exception as e:
         logger.error(f"Filter error: {e}")
         raise HTTPException(status_code=500, detail="Filter operation failed")
-    finally:
-        await conn.close()
 
 
 @router.post(
@@ -249,8 +283,6 @@ async def filter_workflow_data(
     except Exception as e:
         logger.error(f"Filter error: {e}")
         raise HTTPException(status_code=500, detail="Filter operation failed")
-    finally:
-        await conn.close()
 
 
 @router.post("/add", summary="Add a new task to workflow")
@@ -270,11 +302,15 @@ async def add_task_to_workflow(data: ListWorkflowRequest, conn=Depends(get_db_co
 
 
 @router.get("/", summary="Fetch all records from _workflow")
-async def get_all_workflow(conn=Depends(get_db_connection)):
+async def get_all_workflow(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    conn=Depends(get_db_connection),
+):
     try:
         # Query to fetch all rows from workflow
-        query = "SELECT * FROM workflow"
-        records = await conn.fetch(query)
+        query = "SELECT * FROM workflow ORDER BY task_name OFFSET $1 LIMIT $2"
+        records = await conn.fetch(query, skip, limit)
 
         # Return the records as a list of dictionaries
         return [dict(record) for record in records]
@@ -345,40 +381,74 @@ async def get_train_flag(
         raise HTTPException(status_code=500, detail="Failed to fetch train flag")
 
 
-@router.post("/{task_name}/train", summary="Start nnUNet training for a specific workflow")
+@router.post(
+    "/{task_name}/train",
+    summary="Start nnUNet training for a specific workflow",
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def initialize_training(
     task_name: str = Path(..., description="Task name to start training for"), conn=Depends(get_db_connection)
 ):
     try:
-        logger.info(f"Starting nnUNet training for task: {task_name}")
-        logger.info(f"Steps: 1. Fetch correct studies.")
         query = """
         SELECT study_uid, volume_series_instance_uid, label_series_instance_uid, modality, train FROM workflow_details WHERE task_name = $1
         """
         records = await conn.fetch(query, task_name)
-        # records = [{"study_uid": "1.2.3", "volume_series_instance_uid": "4.5.6", "label_series_instance_uid": "7.8.9", "modality": "CT", "train": T}, ...]
         if not records:
             raise HTTPException(status_code=404, detail="No records found for the given task")
-        
-        logger.info("2. Download images and labels to storage/data/medical")
-        download_images([record["volume_series_instance_uid"] for record in records])
-        download_labels([record["label_series_instance_uid"] for record     in records])
 
-        logger.info(f"3. Modify/Create Instance_mapping.json")
-        instance_map = prepare_instance_mapping(task_name, records)
+        job_id = uuid4().hex
+        payload = {
+            "job_id": job_id,
+            "task_name": task_name,
+            "records": [dict(record) for record in records],
+        }
+        timeout = httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(f"{INFERENCE_API_URL}/training-jobs/", json=payload)
+        if response.status_code == 429:
+            raise HTTPException(
+                status_code=429,
+                detail="Inference queue is full",
+                headers={"Retry-After": response.headers.get("Retry-After", "10")},
+            )
+        response.raise_for_status()
+        job = response.json()
+        return {"job_id": job_id, "task_name": task_name, "status": job["status"]}
+    except HTTPException:
+        raise
+    except httpx.HTTPError as exc:
+        logger.error("Inference service unavailable while starting training: %s", exc)
+        raise HTTPException(status_code=503, detail="Inference service is unavailable") from exc
+    except Exception as exc:
+        logger.exception("Error starting nnUNet training for %s", task_name)
+        raise HTTPException(status_code=500, detail="Failed to initialize nnUNet training") from exc
 
-        logger.info(f"4. Datastore/process whatever it does")
-        # supposedly aligns lbls and images via z positions by reading the dicom-seg files
-        # not sure if we need it, shouldn't the niftii conversion when downloadin do that already?
-        task_dir, dataset_json_path = create_nnunet_dataset(task_name)
+
+@router.get("/training-jobs/{job_id}", summary="Get training job status")
+async def get_training_job(job_id: str):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(f"{INFERENCE_API_URL}/training-jobs/{job_id}")
+        if response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Training job not found")
+        response.raise_for_status()
+        return response.json()
+    except HTTPException:
+        raise
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="Inference service is unavailable") from exc
 
 
-        logger.info(f"5. Normalize & Align the files")
-        logger.info(f"6. Create nnUnet training task")
-        logger.info(f"7. Create Model")
-        logger.info(f"8. Start training - can be called from frontend, uses monai's default /train endpoint")
-        return {"message": "Training initialized", "task_name": task_name}
-
-    except Exception as e:
-        logger.error(f"Error starting nnUNet training: {e}")
-        raise HTTPException(status_code=500, detail="Failed to initialize nnUNet training")
+@router.delete("/training-jobs/{job_id}", summary="Cancel or purge a training job")
+async def cancel_training_job(job_id: str, purge: bool = Query(False)):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.delete(
+                f"{INFERENCE_API_URL}/training-jobs/{job_id}",
+                params={"purge": str(purge).lower()},
+            )
+        response.raise_for_status()
+        return response.json()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=503, detail="Inference service is unavailable") from exc

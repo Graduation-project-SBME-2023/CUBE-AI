@@ -1,6 +1,6 @@
 -- Orthanc Lua script to notify MONAI/FastAPI when resources change.
 
-local WEBHOOK_URL = 'http://monailabel:8000/sync/orthanc-webhook'
+local WEBHOOK_URL = 'http://application-api:8001/sync/orthanc-webhook'
 local JSON_HEADERS = { ['Content-Type'] = 'application/json' }
 
 local function main_tag(resource, tag_name, fallback)

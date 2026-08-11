@@ -113,20 +113,27 @@ async def delete_segmentation(db: AsyncSession, label_uid: str):
 
 
 # Get by volume UID
-async def get_segmentations_by_volume(db: AsyncSession, volume_uid: str) -> List[Segmentation]:
+async def get_segmentations_by_volume(
+    db: AsyncSession, volume_uid: str, skip: int = 0, limit: int = 100
+) -> List[Segmentation]:
     try:
         result = await db.execute(
-            select(Segmentation).where(Segmentation.volume_series_instance_uid == volume_uid)
+            select(Segmentation)
+            .where(Segmentation.volume_series_instance_uid == volume_uid)
+            .offset(skip)
+            .limit(limit)
         )
         return result.scalars().all()
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
 # Get by model_name
-async def get_segmentations_by_model(db: AsyncSession, model_name: str) -> List[Segmentation]:
+async def get_segmentations_by_model(
+    db: AsyncSession, model_name: str, skip: int = 0, limit: int = 100
+) -> List[Segmentation]:
     try:
         result = await db.execute(
-            select(Segmentation).where(Segmentation.name == model_name)
+            select(Segmentation).where(Segmentation.name == model_name).offset(skip).limit(limit)
         )
         return result.scalars().all()
     except SQLAlchemyError as e:

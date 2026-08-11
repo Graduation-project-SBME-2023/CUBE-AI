@@ -118,13 +118,20 @@ async def delete_patient(db: AsyncSession, patient_id: UUID):
 
 # ---------------------------
 # find a patient by name, gender
-async def search_patients(db: AsyncSession, name: Optional[str] = None, gender: Optional[str] = None, age: Optional[int] = None):
+async def search_patients(
+    db: AsyncSession,
+    name: Optional[str] = None,
+    gender: Optional[str] = None,
+    age: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 100,
+):
     query = select(Patient)
     if name:
         query = query.where(Patient.name.ilike(f"%{name}%"))
     if gender:
         query = query.where(Patient.gender == gender)
 
-    result = await db.execute(query)
+    result = await db.execute(query.offset(skip).limit(limit))
     return result.scalars().all()
 

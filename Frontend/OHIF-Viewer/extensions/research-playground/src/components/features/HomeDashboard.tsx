@@ -101,7 +101,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
     const fetchHistory = async () => {
       setLoadingHistory(true);
       try {
-        const response = await fetch(`${getBackendApiBaseUrl()}/hypotheses/?skip=0&limit=1000`);
+        const response = await fetch(`${getBackendApiBaseUrl()}/hypotheses/?skip=0&limit=100`);
         if (response.ok) {
           const data = await response.json();
           const sorted = [...data].sort((a, b) => {
