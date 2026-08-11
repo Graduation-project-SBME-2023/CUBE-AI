@@ -49,7 +49,7 @@ services:
       context: ${COMPOSE_PROJECT_DIR}
       dockerfile: deploy/Dockerfile.application-api
     image: cubeai1/application-api:v1.0
-    pull_policy: build
+    pull_policy: if_not_present
     command: alembic -c /app/alembic.ini upgrade head
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -68,7 +68,7 @@ services:
       context: ${COMPOSE_PROJECT_DIR}
       dockerfile: deploy/Dockerfile.application-api
     image: cubeai1/application-api:v1.0
-    pull_policy: build
+    pull_policy: if_not_present
     command: python -c "from seeders.all_seeders import all_seeders; all_seeders()"
     working_dir: /app/monailabel
     environment:
@@ -88,7 +88,7 @@ services:
       context: ${COMPOSE_PROJECT_DIR}
       dockerfile: deploy/Dockerfile.application-api
     image: cubeai1/application-api:v1.0
-    pull_policy: build
+    pull_policy: if_not_present
     container_name: application-api-backend
     ports:
       - "8001:8001"
@@ -255,7 +255,18 @@ services:
     command:
       - python
       - -c
-      - 'print("Application startup complete. All containers are ready.", flush=True)'
+      - |
+        g='\033[92m'; b='\033[1m'; c='\033[96m'; r='\033[0m'; line='━'*52
+        print(f'\n{g}{b}┏{line}┓{r}')
+        print(f'{g}{b}┃{"  🚀  CUBE.AI  —  Backend Stack Ready  🚀  ":^52}┃{r}')
+        print(f'{g}{b}┣{line}┫{r}')
+        print(f'{g}┃  {c}✔  Postgres         {g}healthy{" "*24}┃{r}')
+        print(f'{g}┃  {c}✔  Orthanc          {g}started{" "*24}┃{r}')
+        print(f'{g}┃  {c}✔  Application API  {g}healthy{" "*24}┃{r}')
+        print(f'{g}┃  {c}✔  MonaiLabel       {g}healthy{" "*24}┃{r}')
+        print(f'{g}┃  {c}✔  Agents           {g}healthy{" "*24}┃{r}')
+        print(f'{g}{b}┗{line}┛{r}\n')
+
     depends_on:
       agents:
         condition: service_healthy
