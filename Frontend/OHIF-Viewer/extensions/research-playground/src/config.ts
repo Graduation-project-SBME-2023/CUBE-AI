@@ -1,9 +1,19 @@
 // Centralized runtime endpoints — prefer environment variables
 const processEnv = typeof process !== 'undefined' ? process.env : undefined;
-const defaultAppApiUrl = '/api';
-const defaultInferenceUrl = '/inference';
-const defaultAgentsBaseUrl = '/agents';
-const defaultAgentsWsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
+const usesDirectServicePorts =
+  processEnv?.NODE_ENV === 'development' || ['3000', '3001'].includes(window.location.port);
+const defaultAppApiUrl = usesDirectServicePorts
+  ? `${window.location.protocol}//${window.location.hostname}:8001`
+  : '/api';
+const defaultInferenceUrl = usesDirectServicePorts
+  ? `${window.location.protocol}//${window.location.hostname}:8000`
+  : '/inference';
+const defaultAgentsBaseUrl = usesDirectServicePorts
+  ? `${window.location.protocol}//${window.location.hostname}:8150`
+  : '/agents';
+const defaultAgentsWsUrl = usesDirectServicePorts
+  ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:8150/ws`
+  : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
 
 export const BACKEND_API =
   processEnv?.REACT_APP_APP_API_URL ||
@@ -11,12 +21,14 @@ export const BACKEND_API =
   defaultAppApiUrl;
 
 export const AGENTS_API =
+  processEnv?.REACT_APP_AGENTS_URL ||
   processEnv?.REACT_APP_AGENTS_API ||
   (processEnv?.REACT_APP_AGENTS_PORT
     ? `${window.location.protocol}//${window.location.hostname}:${processEnv.REACT_APP_AGENTS_PORT}`
     : defaultAgentsBaseUrl);
 
 export const AGENTS_WS =
+  processEnv?.REACT_APP_AGENTS_WS_URL ||
   processEnv?.REACT_APP_AGENTS_WS ||
   (processEnv?.REACT_APP_AGENTS_WS_PORT
     ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:${processEnv.REACT_APP_AGENTS_WS_PORT}/ws`

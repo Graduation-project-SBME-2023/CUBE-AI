@@ -1159,7 +1159,7 @@ class ClinicalPlanner:
                     await run_literature_review(
                         pico=self._extract_pico_from_hypothesis(),
                         model=getattr(self.client, "model", None)
-                        or "deepseek-v3.1:671b-cloud",
+                        or "gpt-oss:120b-cloud",
                         output_dir=lit_output_dir,
                         cache_dir=workspace_subpath(workspace_dir, ".knowledge_cache"),
                         prebuilt_knowledge={

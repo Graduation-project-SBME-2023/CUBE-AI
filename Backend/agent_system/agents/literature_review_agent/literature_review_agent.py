@@ -126,7 +126,7 @@ class OllamaClient(OllamaChatCompletionClient):
     Wrapper around OllamaChatCompletionClient with sane defaults.
     Swap DEFAULT_MODEL to any tag pulled in your local Ollama instance.
     """
-    DEFAULT_MODEL = "deepseek-v3.1:671b-cloud"
+    DEFAULT_MODEL = "gpt-oss:120b-cloud"
     DEFAULT_CTX   = 32_768  # larger context for multi-paper synthesis
 
     def __init__(

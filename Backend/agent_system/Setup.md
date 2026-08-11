@@ -51,7 +51,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 ```
 
 then run it once to ensure it is listening on the default port. Select the model that is used by our agents app, and text it at least once so that it is registered.
-We use the `deepseek-v3.1:671b-cloud` model by default.
+We use the `gpt-oss:120b-cloud` model by default.
 
 ---
 
