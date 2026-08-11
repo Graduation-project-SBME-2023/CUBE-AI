@@ -1159,6 +1159,37 @@ class SegmentationService extends PubSubService {
     }
   };
 
+  public unhydrateSegmentation = (segmentationId: string, suppressEvents = false): void => {
+    const segmentation = this.getSegmentation(segmentationId);
+
+    if (!segmentation) {
+      return;
+    }
+
+    const toolGroupIds = this.getToolGroupIdsWithSegmentation(segmentationId);
+
+    toolGroupIds.forEach(toolGroupId => {
+      const representationUIDs = (
+        this.getSegmentationRepresentationsForToolGroup(toolGroupId) || []
+      )
+        .filter(representation => representation.segmentationId === segmentationId)
+        .map(representation => representation.segmentationRepresentationUID);
+
+      if (representationUIDs.length) {
+        this.removeSegmentationRepresentationFromToolGroup(toolGroupId, representationUIDs);
+      }
+    });
+
+    segmentation.hydrated = false;
+    this._setDisplaySetIsHydrated(segmentationId, false);
+
+    if (!suppressEvents) {
+      this._broadcastEvent(this.EVENTS.SEGMENTATION_UPDATED, {
+        segmentation,
+      });
+    }
+  };
+
   private _setDisplaySetIsHydrated(displaySetUID: string, isHydrated: boolean): void {
     const { displaySetService } = this.servicesManager.services;
     const displaySet = displaySetService.getDisplaySetByUID(displaySetUID);

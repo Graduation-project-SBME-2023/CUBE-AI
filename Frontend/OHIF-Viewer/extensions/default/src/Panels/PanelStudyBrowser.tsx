@@ -18,8 +18,12 @@ function PanelStudyBrowser({
   requestDisplaySetCreationForStudy,
   dataSource,
 }) {
-  const { hangingProtocolService, displaySetService, uiNotificationService } =
-    servicesManager.services;
+  const {
+    hangingProtocolService,
+    displaySetService,
+    segmentationService,
+    uiNotificationService,
+  } = servicesManager.services;
   const navigate = useNavigate();
 
   // Normally you nest the components so the tree isn't so deep, and the data
@@ -34,35 +38,66 @@ function PanelStudyBrowser({
   const [studyDisplayList, setStudyDisplayList] = useState([]);
   const [displaySets, setDisplaySets] = useState([]);
   const [thumbnailImageSrcMap, setThumbnailImageSrcMap] = useState({});
+  const maskLoadPromisesRef = useRef(new Map());
 
-  const onDoubleClickThumbnailHandler = async displaySetInstanceUID => {
+  const loadMaskFromThumbnail = async displaySetInstanceUID => {
     const displaySet = displaySetService.getDisplaySetByUID(displaySetInstanceUID);
-    const isLoadedSegmentation =
-      displaySet?.isOverlayDisplaySet &&
-      displaySet?.isLoaded &&
-      ['SEG', 'RTSTRUCT'].includes(displaySet.Modality);
+    const isSegmentation =
+      displaySet?.isOverlayDisplaySet && ['SEG', 'RTSTRUCT'].includes(displaySet.Modality);
 
-    if (isLoadedSegmentation) {
-      try {
+    if (!isSegmentation) {
+      return false;
+    }
+
+    if (displaySet.isHydrated) {
+      segmentationService.unhydrateSegmentation(displaySetInstanceUID);
+      return true;
+    }
+
+    let loadPromise = maskLoadPromisesRef.current.get(displaySetInstanceUID);
+
+    if (!loadPromise) {
+      loadPromise = (async () => {
         // Populates referencedDisplaySetInstanceUID for derived display sets.
-        // Loaded masks should be hydrated over their source images instead of
+        // Masks should be hydrated over their source images instead of
         // replacing the active viewport with the SEG/RT display set.
         displaySet.getReferenceDisplaySet?.();
         await commandsManager.runCommand('loadSegmentationDisplaySetsForViewport', {
           displaySets: [displaySet],
           viewportId: activeViewportId,
         });
-        return;
-      } catch (error) {
-        console.warn(error);
-        uiNotificationService.show({
-          title: 'Mask Loading',
-          message: 'The selected mask could not be displayed over its referenced images.',
-          type: 'error',
-          duration: 3000,
-        });
-        return;
+      })();
+      maskLoadPromisesRef.current.set(displaySetInstanceUID, loadPromise);
+    }
+
+    try {
+      await loadPromise;
+    } catch (error) {
+      console.warn(error);
+      uiNotificationService.show({
+        title: 'Mask Loading',
+        message: 'The selected mask could not be displayed over its referenced images.',
+        type: 'error',
+        duration: 3000,
+      });
+    } finally {
+      if (maskLoadPromisesRef.current.get(displaySetInstanceUID) === loadPromise) {
+        maskLoadPromisesRef.current.delete(displaySetInstanceUID);
       }
+    }
+
+    return true;
+  };
+
+  const onClickThumbnailHandler = displaySetInstanceUID => {
+    loadMaskFromThumbnail(displaySetInstanceUID).catch(error => {
+      console.warn(error);
+    });
+  };
+
+  const onDoubleClickThumbnailHandler = async displaySetInstanceUID => {
+    if (await loadMaskFromThumbnail(displaySetInstanceUID)) {
+      return;
     }
 
     let updatedViewports = [];
@@ -259,6 +294,7 @@ function PanelStudyBrowser({
       tabs={tabs}
       servicesManager={servicesManager}
       activeTabName={activeTabName}
+      onClickThumbnail={onClickThumbnailHandler}
       onDoubleClickThumbnail={onDoubleClickThumbnailHandler}
       activeDisplaySetInstanceUIDs={activeDisplaySetInstanceUIDs}
       expandedStudyInstanceUIDs={expandedStudyInstanceUIDs}

@@ -3,7 +3,7 @@ import { metaData, cache, triggerEvent, eventTarget } from '@cornerstonejs/core'
 import { adaptersSEG, Enums } from '@cornerstonejs/adapters';
 
 import { SOPClassHandlerId } from './id';
-import { dicomlabToRGB } from './utils/dicomlabToRGB';
+import { getSegmentRGBColor } from './utils/dicomlabToRGB';
 
 const sopClassUids = ['1.2.840.10008.5.1.4.1.1.66.4'];
 
@@ -110,28 +110,30 @@ function _load(segDisplaySet, servicesManager, extensionManager, headers) {
 
   // We don't want to fire multiple loads, so we'll wait for the first to finish
   // and also return the same promise to any other callers.
-  loadPromises[SOPInstanceUID] = new Promise(async (resolve, reject) => {
-    if (!segDisplaySet.segments || Object.keys(segDisplaySet.segments).length === 0) {
-      await _loadSegments({
-        extensionManager,
-        servicesManager,
-        segDisplaySet,
-        headers,
-      });
-    }
+  loadPromises[SOPInstanceUID] = (async () => {
+    try {
+      if (!segDisplaySet.segments || Object.keys(segDisplaySet.segments).length === 0) {
+        await _loadSegments({
+          extensionManager,
+          servicesManager,
+          segDisplaySet,
+          headers,
+        });
+      }
 
-    const suppressEvents = true;
-    segmentationService
-      .createSegmentationForSEGDisplaySet(segDisplaySet, null, suppressEvents)
-      .then(() => {
-        segDisplaySet.loading = false;
-        resolve();
-      })
-      .catch(error => {
-        segDisplaySet.loading = false;
-        reject(error);
-      });
-  });
+      const suppressEvents = true;
+      await segmentationService.createSegmentationForSEGDisplaySet(
+        segDisplaySet,
+        null,
+        suppressEvents
+      );
+      segDisplaySet.loading = false;
+    } catch (error) {
+      segDisplaySet.loading = false;
+      delete loadPromises[SOPInstanceUID];
+      throw error;
+    }
+  })();
 
   return loadPromises[SOPInstanceUID];
 }
@@ -176,7 +178,7 @@ async function _loadSegments({ extensionManager, servicesManager, segDisplaySet,
 
   results.segMetadata.data.forEach((data, i) => {
     if (i > 0) {
-      data.rgba = dicomlabToRGB(data.RecommendedDisplayCIELabValue);
+      data.rgba = getSegmentRGBColor(data.RecommendedDisplayCIELabValue, i);
     }
   });
 
