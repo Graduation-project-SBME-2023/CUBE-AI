@@ -18,11 +18,17 @@ def ensure_last_activity(session):
 # ---------------------------
 async def create_chat_session(db: AsyncSession, data: schemas.ChatSessionCreate):
     try:
+        # Use one application timestamp for both columns. If started_at is
+        # left to PostgreSQL's CURRENT_TIMESTAMP while last_activity is
+        # generated here first, last_activity can be a few milliseconds
+        # earlier and violate chat_sessions_check.
+        started_at = datetime.now(timezone.utc)
         new_session = models.ChatSession(
             title=data.title,
             is_active=data.is_active,
             summary=data.summary,
-            last_activity=datetime.now(timezone.utc),
+            started_at=started_at,
+            last_activity=started_at,
         )
 
         if data.study_uid:

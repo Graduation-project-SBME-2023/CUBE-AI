@@ -66,15 +66,18 @@ class BackendClient:
     def _parse_hypothesis(cls, data: dict) -> ClinicalHypothesis:
         return ClinicalHypothesis(
             id=str(data.get("id", "")),
-            state=data.get("state", "not_confirmed"),
-            title=data.get("title", ""),
-            population=data.get("population", ""),
-            intervention=data.get("intervention", ""),
-            outcome=data.get("outcome", ""),
-            clinical_context=data.get("clinical_context", ""),
-            relationship_type=data.get("relationship_type", ""),
-            comparison=data.get("comparison", ""),
-            hypothesis=data.get("hypothesis", ""),
+            state=data.get("state") or "not_confirmed",
+            title=data.get("title") or "",
+            # Draft hypotheses are persisted before the planning agent fills
+            # the PICO fields, so the application API legitimately returns
+            # null for these optional database columns.
+            population=data.get("population") or "",
+            intervention=data.get("intervention") or "",
+            outcome=data.get("outcome") or "",
+            clinical_context=data.get("clinical_context") or "",
+            relationship_type=data.get("relationship_type") or "",
+            comparison=data.get("comparison") or "",
+            hypothesis=data.get("hypothesis") or "",
             # These fields are not persisted in monailabel hypothesis schema.
             question="",
             message=None,
@@ -514,6 +517,16 @@ class BackendClient:
     @classmethod
     async def save_log(cls, log: WS_Log) -> WS_Log:
         """Save a ws log whenever the socket store sends any message."""
+        # Local-only frontend chats are deliberately not backed by a
+        # chat_sessions row, so attempting to persist their messages would
+        # violate ws_log_session_id_fkey and generate a noisy HTTP 500.
+        if not cls._is_valid_uuid(log.session_id):
+            logger.debug(
+                "Skipping ws log persistence for non-persisted session %r",
+                log.session_id,
+            )
+            return log
+
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.post(

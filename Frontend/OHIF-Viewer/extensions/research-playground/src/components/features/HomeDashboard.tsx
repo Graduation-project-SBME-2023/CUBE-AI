@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Bot, Box, Clock, List, Search, Trash2, Settings, AlertTriangle, Check, ChevronDown, Book, Sliders, Dna, Activity, BrainCircuit, LayoutList } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bot, Box, Clock, List, Search, Trash2, Settings, AlertTriangle, Check, ChevronDown, Book, Sliders, Dna, Activity, BrainCircuit, LayoutList, Loader2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../ui/Card';
 import { getBackendApiBaseUrl, getAgentsApiBaseUrl } from '../../utils/apiBase';
@@ -20,15 +20,9 @@ const EXAMPLE_HYPOTHESES = [
   }
 ];
 
-const makeFallbackSessionId = () => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-};
-
 const RECENT_HISTORY_LIMIT = 10;
 const ALL_HISTORY_PAGE_SIZE = 12;
+const SESSION_CREATE_ATTEMPTS = 2;
 
 interface HomeDashboardProps {
   onNavigate?: (path: string, options?: any) => void;
@@ -49,6 +43,8 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
   const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error' | 'not_configured'>('loading');
   const [isCustomModel, setIsCustomModel] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
+  const [isStartingResearch, setIsStartingResearch] = useState(false);
+  const [sessionStartError, setSessionStartError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const navigate = useNavigate();
 
@@ -114,14 +110,17 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
         // whether a next page exists without changing the API response shape.
         const limit = showAllHistory ? pageSize + 1 : pageSize;
         const response = await fetch(
-          `${getBackendApiBaseUrl()}/hypotheses/?skip=${skip}&limit=${limit}`
+          `${getBackendApiBaseUrl()}/hypotheses/?skip=${skip}&limit=${limit}`,
+          { cache: 'no-store' }
         );
-        if (response.ok) {
-          const data = await response.json();
-          if (!cancelled) {
-            setHistory(data.slice(0, pageSize));
-            setHasNextHistoryPage(showAllHistory && data.length > pageSize);
-          }
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (!cancelled) {
+          setHistory(data.slice(0, pageSize));
+          setHasNextHistoryPage(showAllHistory && data.length > pageSize);
         }
       } catch (err) {
         console.error('Failed to fetch history:', err);
@@ -147,7 +146,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
   }, [hypothesis]);
 
   const handleSearch = async () => {
-    if (!hypothesis.trim()) {
+    if (!hypothesis.trim() || isStartingResearch) {
       return;
     }
 
@@ -157,20 +156,61 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
       return;
     }
 
+    setIsStartingResearch(true);
+    setSessionStartError(null);
+
     try {
       const payload = { title: `${hypothesis.substring(0, 30)}...` };
-      const response = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      let response: Response | null = null;
+      for (let attempt = 1; attempt <= SESSION_CREATE_ATTEMPTS; attempt += 1) {
+        try {
+          response = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+        } catch (error) {
+          if (attempt === SESSION_CREATE_ATTEMPTS) throw error;
+          continue;
+        }
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        if (response.ok || response.status < 500) break;
+      }
+
+      if (!response?.ok) {
+        throw new Error(response ? `HTTP ${response.status}` : 'No response from application API');
       }
 
       const data = await response.json();
       const sessionId = String(data.chat_id);
+
+      // Persist a draft immediately. Previously the hypothesis row was only
+      // created after the planning agent replied, so interrupted/local-only
+      // launches never appeared in Recent Hypotheses.
+      const hypothesisResponse = await fetch(
+        `${getBackendApiBaseUrl()}/hypotheses/?chat_id=${encodeURIComponent(sessionId)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: hypothesis.trim().slice(0, 255),
+            hypothesis: hypothesis.trim(),
+            state: 'not_confirmed',
+          }),
+        }
+      );
+
+      if (!hypothesisResponse.ok) {
+        // Roll back the just-created empty session so retrying does not leave
+        // an orphaned history entry.
+        try {
+          await fetch(`${getBackendApiBaseUrl()}/chat_sessions/${sessionId}`, {
+            method: 'DELETE',
+          });
+        } catch (_) {/* best-effort rollback */}
+        throw new Error(`Could not persist hypothesis (HTTP ${hypothesisResponse.status})`);
+      }
+
       // Persist the Literature Review preference so it survives navigation away and back via history
       try {
         localStorage.setItem(`cube_session_prefs_${sessionId}`, JSON.stringify({ includeLitReview }));
@@ -185,18 +225,11 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
       });
     } catch (err) {
       console.error('Failed to create session:', err);
-      const fallbackId = makeFallbackSessionId();
-      try {
-        localStorage.setItem(`cube_session_prefs_${fallbackId}`, JSON.stringify({ includeLitReview }));
-      } catch (_) {/* ignore storage errors */ }
-      navigate('/playground', {
-        state: {
-          hypothesis,
-          sessionId: fallbackId,
-          sendInitialMessage: true,
-          includeLitReview,
-        },
-      });
+      setSessionStartError(
+        'Could not save the research session. Check the application API and try again.'
+      );
+    } finally {
+      setIsStartingResearch(false);
     }
   };
 
@@ -378,7 +411,10 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
               className="min-h-[72px] max-h-[200px] w-full resize-none overflow-y-auto bg-transparent py-5 pl-14 pr-4 text-lg text-white placeholder-[#566a84] focus:outline-none"
               placeholder="Enter your research question or hypothesis..."
               value={hypothesis}
-              onChange={e => setHypothesis(e.target.value)}
+              onChange={e => {
+                setHypothesis(e.target.value);
+                if (sessionStartError) setSessionStartError(null);
+              }}
               onKeyDown={e => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -486,13 +522,24 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
                 <button
                   onClick={handleSearch}
                   className="flex items-center gap-2 rounded-xl px-6 py-2.5 font-bold shadow-lg transition-all duration-300 bg-[#5acce6] text-black hover:bg-[#4ab8d4] hover:shadow-[0_0_20px_rgba(90,204,230,0.4)] hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none"
-                  disabled={!hypothesis.trim() || modelStatus === 'loading'}
+                  disabled={!hypothesis.trim() || modelStatus === 'loading' || isStartingResearch}
                 >
-                  Start Research
-                  <ArrowRight size={18} className="transition-transform hover:translate-x-1" />
+                  {isStartingResearch ? 'Creating Session...' : 'Start Research'}
+                  {isStartingResearch ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <ArrowRight size={18} className="transition-transform hover:translate-x-1" />
+                  )}
                 </button>
             </div>
           </div>
+
+          {sessionStartError && (
+            <div className="mx-4 mb-3 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-left text-sm text-red-300">
+              <AlertTriangle size={16} className="shrink-0" />
+              <span>{sessionStartError}</span>
+            </div>
+          )}
 
         </div>
       </div>
