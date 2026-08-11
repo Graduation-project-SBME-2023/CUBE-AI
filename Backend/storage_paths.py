@@ -162,7 +162,6 @@ def ensure_storage_layout() -> None:
     source_candidates = [
         Path(configured_source) if configured_source else None,
         _BACKEND_DIR / "models" / "configs" / "vista",
-        _BACKEND_DIR / "apps" / "radiology" / "models" / "configs" / "vista",
     ]
     for source_dir in source_candidates:
         if source_dir is None or not source_dir.is_dir():
