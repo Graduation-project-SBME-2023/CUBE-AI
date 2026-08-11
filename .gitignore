@@ -61,6 +61,7 @@ Backend/testing_voxtell.py
 Backend/test-results/
 Backend/coverage.xml
 Backend/htmlcov/
+Backend/tests/load/results/
 Backend/voxtell_v1.0
 Backend/voxtell_v1.1
 Backend/agent_system/tools/pycaret_classification_tool.py

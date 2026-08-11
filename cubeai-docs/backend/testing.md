@@ -198,6 +198,11 @@ backend instance you intend to exercise.
 | `manual/upload_pdf_smoke.py` | Sends one LaTeX PDF WebSocket-output event. Example: `python Backend/tests/manual/upload_pdf_smoke.py`. |
 | `manual/endpoint_load_test.py` | Concurrent GET/POST load generator with latency CSV. Example: `python Backend/tests/manual/endpoint_load_test.py --url http://localhost:8000/info/ --requests 20 --concurrency 4 --log load-results.csv`. |
 
+For a staged, whole-system load test with per-service thresholds and JSON
+results, use `Backend/tests/load/run.ps1`. See `Backend/tests/load/README.md`
+for smoke, load, and stress profiles. The whole-system suite is read-only and covers the OHIF
+frontend, agent API, control API, MONAI Label, and Orthanc DICOMweb.
+
 ## Isolation and quality rules
 
 - Unit, contract, and pipeline tests must not contact Ollama, databases,
