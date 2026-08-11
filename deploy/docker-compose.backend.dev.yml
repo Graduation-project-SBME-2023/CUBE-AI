@@ -29,7 +29,7 @@ services:
       nnUNet_results: /storage/data/nnunet/nnUNet_results
     command: >-
       sh -c "alembic -c /alembic/alembic.ini upgrade head &&
-      if [ ! -f /models/voxtell_v1.1/text_embeddings_cache.pkl ]; then python /apps/radiology/voxtell_cache_builder.py; fi &&
+      if [ ! -s "$${VOXTELL_DIR}/text_embeddings_cache.pkl" ]; then python /apps/radiology/voxtell_cache_builder.py; fi &&
       python /monailabel/server_start.py"
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage

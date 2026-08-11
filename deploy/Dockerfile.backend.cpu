@@ -66,4 +66,4 @@ ENV BACKEND_STORAGE_ROOT=/storage \
 # ------------------------------------------------------------
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic -c /alembic/alembic.ini upgrade head && python /apps/radiology/voxtell_cache_builder.py && python /monailabel/server_start.py"]
+CMD ["sh", "-c", "alembic -c /alembic/alembic.ini upgrade head && if [ ! -s \"$VOXTELL_DIR/text_embeddings_cache.pkl\" ]; then python /apps/radiology/voxtell_cache_builder.py; fi && python /monailabel/server_start.py"]

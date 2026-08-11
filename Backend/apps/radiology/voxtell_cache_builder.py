@@ -13,9 +13,6 @@ from lib.configs.voxtell_supported_labels import VOXTELL_SUPPORTED_LABELS
 # Container paths (mounted via docker-compose volumes)
 TEXT_MODEL_PATH = os.environ.get("TEXT_MODEL_PATH", str(MODELS_DIR / "qwen3-4b-embedding"))
 
-# Validate the required tokenizer, index, and weight files. This runs before
-# the cache builder loads the model and resumes any interrupted download.
-ensure_qwen_embedding_model(TEXT_MODEL_PATH)
 VOXTELL_DIR = os.environ.get("VOXTELL_DIR", str(MODELS_DIR / "voxtell_v1.1"))
 CACHE_OUTPUT_PATH = os.path.join(VOXTELL_DIR, "text_embeddings_cache.pkl")
 
@@ -90,6 +87,20 @@ def save_cache_atomically(cache_path: str, cache: dict) -> None:
 # Keep the pre-generated cache aligned with the VoxTell model configuration.
 TARGET_ORGANS = list(VOXTELL_SUPPORTED_LABELS)
 
+# A normal container restart must not load the 7.5 GB Qwen model when the
+# persisted cache already covers every supported prompt.
+cached_embeddings = load_exact_cache(CACHE_OUTPUT_PATH)
+missing_prompts = [
+    prompt
+    for prompt in TARGET_ORGANS
+    if prompt.lower().strip() not in cached_embeddings
+]
+if not missing_prompts:
+    print(f"VoxTell cache is complete at {CACHE_OUTPUT_PATH}; skipping Qwen loading.")
+    raise SystemExit(0)
+
+# Validate or resume the tokenizer and weights only when entries are missing.
+ensure_qwen_embedding_model(TEXT_MODEL_PATH)
 print("Loading Qwen3-4B directly to GPU to generate permanent cache...")
 tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_PATH, padding_side='left', local_files_only=True)
 # Use bfloat16 — QuantoConfig int4 is incompatible with this container's transformers version.
@@ -97,7 +108,7 @@ tokenizer = AutoTokenizer.from_pretrained(TEXT_MODEL_PATH, padding_side='left', 
 text_backbone = AutoModel.from_pretrained(
     TEXT_MODEL_PATH,
     device_map="cuda",
-    torch_dtype=torch.bfloat16,
+    dtype=torch.bfloat16,
     local_files_only=True,
 )
 text_backbone.eval()
