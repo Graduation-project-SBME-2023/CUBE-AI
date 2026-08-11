@@ -27,6 +27,9 @@ const makeFallbackSessionId = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+const RECENT_HISTORY_LIMIT = 10;
+const ALL_HISTORY_PAGE_SIZE = 12;
+
 interface HomeDashboardProps {
   onNavigate?: (path: string, options?: any) => void;
   onBack?: () => void;
@@ -38,6 +41,8 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
   const [history, setHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [showAllHistory, setShowAllHistory] = useState(false);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [hasNextHistoryPage, setHasNextHistoryPage] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<any | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showModelSettings, setShowModelSettings] = useState(false);
@@ -98,27 +103,40 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchHistory = async () => {
       setLoadingHistory(true);
       try {
-        const response = await fetch(`${getBackendApiBaseUrl()}/hypotheses/?skip=0&limit=100`);
+        const pageSize = showAllHistory ? ALL_HISTORY_PAGE_SIZE : RECENT_HISTORY_LIMIT;
+        const skip = showAllHistory ? historyPage * ALL_HISTORY_PAGE_SIZE : 0;
+        // Fetch one extra item for the paged view so the UI can determine
+        // whether a next page exists without changing the API response shape.
+        const limit = showAllHistory ? pageSize + 1 : pageSize;
+        const response = await fetch(
+          `${getBackendApiBaseUrl()}/hypotheses/?skip=${skip}&limit=${limit}`
+        );
         if (response.ok) {
           const data = await response.json();
-          const sorted = [...data].sort((a, b) => {
-            const aTime = new Date(a.date ?? a.updated_at ?? a.created_at ?? 0).getTime();
-            const bTime = new Date(b.date ?? b.updated_at ?? b.created_at ?? 0).getTime();
-            return bTime - aTime;
-          });
-          setHistory(showAllHistory ? sorted : sorted.slice(0, 10));
+          if (!cancelled) {
+            setHistory(data.slice(0, pageSize));
+            setHasNextHistoryPage(showAllHistory && data.length > pageSize);
+          }
         }
       } catch (err) {
         console.error('Failed to fetch history:', err);
       } finally {
-        setLoadingHistory(false);
+        if (!cancelled) {
+          setLoadingHistory(false);
+        }
       }
     };
     fetchHistory();
-  }, [showAllHistory]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showAllHistory, historyPage]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -486,7 +504,10 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
             {showAllHistory ? 'All Hypotheses' : 'Recent Hypotheses'}
           </h2>
           <button
-            onClick={() => setShowAllHistory(prev => !prev)}
+            onClick={() => {
+              setHistoryPage(0);
+              setShowAllHistory(prev => !prev);
+            }}
             className="flex items-center gap-1 text-xs text-[#566a84] transition-colors hover:text-[#5acce6]"
           >
             {showAllHistory ? 'Show Recent' : 'View All'} <ArrowRight size={12} />
@@ -520,6 +541,27 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
             ))
           )}
         </div>
+        {showAllHistory && (historyPage > 0 || hasNextHistoryPage) && (
+          <div className="mt-8 flex items-center justify-center gap-4">
+            <button
+              type="button"
+              onClick={() => setHistoryPage(page => Math.max(0, page - 1))}
+              disabled={historyPage === 0 || loadingHistory}
+              className="flex items-center gap-1 rounded-lg border border-[#2e445c] bg-[#10151a] px-3 py-2 text-sm text-[#91b9cd] transition-colors hover:border-[#5acce6] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ArrowLeft size={14} /> Previous
+            </button>
+            <span className="text-sm text-[#566a84]">Page {historyPage + 1}</span>
+            <button
+              type="button"
+              onClick={() => setHistoryPage(page => page + 1)}
+              disabled={!hasNextHistoryPage || loadingHistory}
+              className="flex items-center gap-1 rounded-lg border border-[#2e445c] bg-[#10151a] px-3 py-2 text-sm text-[#91b9cd] transition-colors hover:border-[#5acce6] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next <ArrowRight size={14} />
+            </button>
+          </div>
+        )}
         </div>
       </div>
       {/* Delete Confirmation Modal */}

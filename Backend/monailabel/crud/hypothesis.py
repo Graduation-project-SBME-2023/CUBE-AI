@@ -59,7 +59,12 @@ async def get_hypothesis_by_chat(db: AsyncSession, chat_id: UUID):
 
 async def get_all_hypotheses(db: AsyncSession, skip: int = 0, limit: int = 100):
     try:
-        result = await db.execute(select(Hypothesis).offset(skip).limit(limit))
+        result = await db.execute(
+            select(Hypothesis)
+            .order_by(Hypothesis.created_at.desc(), Hypothesis.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
         return result.scalars().all()
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
