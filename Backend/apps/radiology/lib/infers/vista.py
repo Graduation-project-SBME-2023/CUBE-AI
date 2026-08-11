@@ -132,6 +132,11 @@ class VISTAPOINT3D(BasicInferTask):
         config['bundle_root'] = self.models_path
         config['checkpointloader']['load_path'] = self.path[0]
         config['metadata_path'] = self.models_path + '/configs/vista/metadata.json'
+        # The bundle default writes below bundle_root/eval, but this adapter
+        # reads generated masks from the backend's runtime temp boundary.
+        # Keep both sides on the same path so a successful MONAI run cannot
+        # fall through with an unassigned output tensor.
+        config['output_dir'] = self.output_dir
 
         config = convert_to_serializable(config)
 
@@ -184,16 +189,20 @@ class VISTAPOINT3D(BasicInferTask):
         output_path = os.path.join(self.output_dir, f"{basename}/{basename}{file_ending}")
         logger.info(f"output_path: {output_path}")
 
-        if os.path.exists(output_path):
-            outputs = nib.load(output_path).get_fdata()
-            outputs = torch.from_numpy(outputs)
-            logger.info(f"outputs shape: {outputs.shape}")
-            # see unique values in the outputs
-            unique_values = torch.unique(outputs)
-            # make class 255 to 0
-            outputs[outputs == 255] = 0
-            logger.info(f"Unique values in outputs: {unique_values}")
-            # shutil.rmtree(output_dir)
+        if not os.path.exists(output_path):
+            raise RuntimeError(
+                "VISTA inference completed without producing its expected output: "
+                f"{output_path}"
+            )
+
+        outputs = nib.load(output_path).get_fdata()
+        outputs = torch.from_numpy(outputs)
+        logger.info(f"outputs shape: {outputs.shape}")
+        # see unique values in the outputs
+        unique_values = torch.unique(outputs)
+        # make class 255 to 0
+        outputs[outputs == 255] = 0
+        logger.info(f"Unique values in outputs: {unique_values}")
 
         data[self.output_label_key] = outputs
 
