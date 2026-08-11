@@ -1987,5 +1987,12 @@ async def recover_session(session_id: str, restart: bool = False):
 
 if __name__ == "__main__":
     import uvicorn
+    from startup_logging import uvicorn_log_config
 
-    uvicorn.run("app:app", host="0.0.0.0", port=8150, reload=True)
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=8150,
+        reload=True,
+        log_config=uvicorn_log_config("Agents API"),
+    )

@@ -176,7 +176,10 @@ docker compose `
     --env-file $BackendEnv `
     -f $BackendCompose `
     up `
-    --pull never
+    --pull never `
+    --detach `
+    --wait `
+    --wait-timeout 3600
 
 if ($LASTEXITCODE -ne 0) {
     Stop-Launch "docker compose exited with code $LASTEXITCODE.`nIf it complains that an image is missing, that image was never pulled on this machine - run scripts\launch.ps1 (or 'docker compose --env-file `"$BackendEnv`" -f `"$BackendCompose`" pull') once to fetch it."
@@ -184,10 +187,29 @@ if ($LASTEXITCODE -ne 0) {
 
 #  === 7. Final Message =================================
 Write-Host ""
+
+# Show the end of each service's startup output before the single project-level
+# readiness message. --tail 0 below prevents these lines from being repeated.
+docker compose `
+    --env-file $BackendEnv `
+    -f $BackendCompose `
+    logs `
+    --tail 20
+
+Write-Host ""
 Write-OK "Agents API:  http://localhost:8150"
 Write-OK "Control API: http://localhost:8001"
 Write-OK "MONAI Label: http://localhost:8000"
 Write-OK "Orthanc:     http://localhost:8043"
 Write-OK "Postgres:    localhost:5433"
+Write-Warn "Following container logs. Press Ctrl+C to stop viewing logs; containers will keep running."
+Write-Host ""
+
+docker compose `
+    --env-file $BackendEnv `
+    -f $BackendCompose `
+    logs `
+    --follow `
+    --tail 0
 
 Read-Host "Press Enter to close"

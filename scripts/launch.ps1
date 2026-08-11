@@ -162,7 +162,10 @@ docker compose `
     --env-file $BackendEnv `
     -f $BackendCompose `
     -f $FrontendCompose `
-    up
+    up `
+    --detach `
+    --wait `
+    --wait-timeout 3600
 
 if ($LASTEXITCODE -ne 0) {
     Stop-Launch "docker compose exited with code $LASTEXITCODE. Check the output above for errors."
@@ -170,6 +173,27 @@ if ($LASTEXITCODE -ne 0) {
 
 #  === 7. Final Message =================================
 Write-Host ""
+
+# Show the end of each service's startup output before the single project-level
+# readiness message. --tail 0 below prevents these lines from being repeated.
+docker compose `
+    --env-file $BackendEnv `
+    -f $BackendCompose `
+    -f $FrontendCompose `
+    logs `
+    --tail 20
+
+Write-Host ""
 Write-OK "Frontend: http://localhost"
+Write-Warn "Following container logs. Press Ctrl+C to stop viewing logs; containers will keep running."
+Write-Host ""
+
+docker compose `
+    --env-file $BackendEnv `
+    -f $BackendCompose `
+    -f $FrontendCompose `
+    logs `
+    --follow `
+    --tail 0
 
 Read-Host "Press Enter to close"
