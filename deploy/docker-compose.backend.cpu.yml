@@ -142,7 +142,7 @@ services:
     ports:
       - 8043:8042
     volumes:
-      - ${COMPOSE_PROJECT_DIR}/Backend/config/orthanc.json:/etc/orthanc/orthanc.json:ro
+      - ${COMPOSE_PROJECT_DIR}/Backend/orthanc/orthanc.json:/etc/orthanc/orthanc.json:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/orthanc/lua:/etc/orthanc/lua
       - orthanc-db:/var/lib/orthanc/db/
     restart: unless-stopped

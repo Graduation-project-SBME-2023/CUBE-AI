@@ -120,4 +120,4 @@ EXPOSE 8000
 
 # Default entrypoint: run DB migrations then start the server.
 # The compose file can still override this if needed.
-CMD ["sh", "-c", "alembic -c /alembic/alembic.ini upgrade head && if [ ! -f /storage/models/voxtell_v1.1/text_embeddings_cache.pkl ]; then python /apps/radiology/voxtell_cache_builder.py; fi && python /monailabel/server_start.py"]
+CMD ["sh", "-c", "alembic -c /alembic/alembic.ini upgrade head && if [ ! -s \"$VOXTELL_DIR/text_embeddings_cache.pkl\" ]; then python /apps/radiology/voxtell_cache_builder.py; fi && python /monailabel/server_start.py"]
