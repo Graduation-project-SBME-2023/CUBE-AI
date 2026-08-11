@@ -32,7 +32,7 @@ interface FormState {
 
 const DEFAULTS: FormState = {
     provider: 'ollama',
-    model: 'deepseek-v3.1:671b-cloud',
+    model: 'gpt-oss:120b-cloud',
     api_key: '',
     base_url: '',
     azure_endpoint: '',
@@ -215,7 +215,7 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
                     </div>
 
                     {/* Model */}
-                    <Field label="Model" placeholder={form.provider === 'openai' ? 'gpt-4o' : form.provider === 'azure_openai' ? 'gpt-4o' : 'deepseek-v3.1:671b-cloud'} value={form.model} onChange={v => update('model', v)} />
+                    <Field label="Model" placeholder={form.provider === 'openai' ? 'gpt-4o' : form.provider === 'azure_openai' ? 'gpt-4o' : 'gpt-oss:120b-cloud'} value={form.model} onChange={v => update('model', v)} />
 
                     {/* API Key */}
                     <div>

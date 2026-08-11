@@ -24,3 +24,12 @@ def test_chat_message_history_is_bounded():
     assert "limit: int = Query(50, ge=1, le=100)" in endpoint_source
     assert ".offset(skip)" in crud_source
     assert ".limit(limit)" in crud_source
+
+
+def test_new_chat_sessions_have_a_persisted_activity_timestamp():
+    crud_source = (BACKEND_ROOT / "monailabel" / "crud" / "chat_sessions.py").read_text(encoding="utf-8")
+    create_section = crud_source[
+        crud_source.index("async def create_chat_session"):crud_source.index("async def get_chat_session")
+    ]
+
+    assert "last_activity=datetime.now(timezone.utc)" in create_section

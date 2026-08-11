@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import HTTPException
 from models import chat_sessions as models
 from models.study import Study
@@ -22,6 +22,7 @@ async def create_chat_session(db: AsyncSession, data: schemas.ChatSessionCreate)
             title=data.title,
             is_active=data.is_active,
             summary=data.summary,
+            last_activity=datetime.now(timezone.utc),
         )
 
         if data.study_uid:

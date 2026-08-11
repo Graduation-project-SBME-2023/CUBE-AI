@@ -1,8 +1,10 @@
 import asyncio
+import os
 import time
 from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from core.database import AsyncSessionLocal, engine
@@ -43,6 +45,21 @@ async def lifespan(_app: FastAPI):
 
 
 control_app = FastAPI(title="CUBE.AI Application API", version="1.1.0", lifespan=lifespan)
+_cors_origins = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001",
+    ).split(",")
+    if origin.strip()
+]
+control_app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 for router in (
     patient.router,
