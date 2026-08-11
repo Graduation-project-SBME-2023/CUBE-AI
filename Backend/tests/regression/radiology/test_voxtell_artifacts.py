@@ -37,7 +37,11 @@ class VoxTellArtifactsTest(unittest.TestCase):
 
             self.assertIn("voxtell_v1.1/plans.json", missing)
             self.assertIn("voxtell_v1.1/fold_0/checkpoint_final.pth", missing)
-            self.assertIn("embeddings/voxtell_v1.1/text_embeddings.npz", missing)
+            self.assertIn("voxtell_v1.1/fold_0/INFO.txt", missing)
+
+    def test_legacy_v1_and_npz_embeddings_are_not_required(self):
+        self.assertFalse(any(path.startswith("voxtell_v1.0/") for path in VOXTELL_REQUIRED_FILES))
+        self.assertFalse(any(path.startswith("embeddings/") for path in VOXTELL_REQUIRED_FILES))
 
     def test_incomplete_snapshot_is_downloaded_and_verified(self):
         with tempfile.TemporaryDirectory() as models_dir:

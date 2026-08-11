@@ -11,9 +11,6 @@ VOXTELL_REQUIRED_FILES = (
     "voxtell_v1.1/plans.json",
     "voxtell_v1.1/fold_0/INFO.txt",
     "voxtell_v1.1/fold_0/checkpoint_final.pth",
-    "voxtell_v1.0/plans.json",
-    "embeddings/voxtell_v1.1/labels.json",
-    "embeddings/voxtell_v1.1/text_embeddings.npz",
 )
 
 
@@ -59,7 +56,7 @@ def ensure_voxtell_artifacts(
     downloader: Optional[Callable[..., str]] = None,
     log: Callable[[str], None] = print,
 ) -> str:
-    """Ensure v1.0, v1.1, and precomputed embeddings are fully downloaded."""
+    """Ensure the VoxTell v1.1 artifacts used by inference are downloaded."""
     incomplete = find_incomplete_voxtell_files(models_dir)
     if not incomplete:
         log(f"VoxTell model artifacts are complete at {models_dir}")
@@ -87,9 +84,9 @@ def ensure_voxtell_artifacts(
     downloader(
         repo_id=VOXTELL_REPO,
         allow_patterns=[
-            "voxtell_v1.0/*",
-            "voxtell_v1.1/*",
-            "embeddings/*",
+            "voxtell_v1.1/plans.json",
+            "voxtell_v1.1/fold_0/INFO.txt",
+            "voxtell_v1.1/fold_0/checkpoint_final.pth",
         ],
         local_dir=models_dir,
     )

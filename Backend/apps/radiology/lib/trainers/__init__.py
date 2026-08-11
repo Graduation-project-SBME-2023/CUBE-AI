@@ -15,6 +15,5 @@ from .localization_vertebra import LocalizationVertebra
 from .segmentation_spleen import SegmentationSpleen
 from .sam import sam
 from .generic_segmentation import GenericSegmentation
-from .vista import VISTAPOINT3D 
 from .nnInteractive import NNINTERACTIVE
 from .voxtell import voxtell
