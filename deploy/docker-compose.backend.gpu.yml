@@ -37,11 +37,17 @@ services:
       application-api:
         condition: service_healthy
     healthcheck:
-      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://localhost:8150/client-config", timeout=3)']
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          'import urllib.request; urllib.request.urlopen("http://localhost:8150/client-config", timeout=3)',
+        ]
       interval: 5s
       timeout: 4s
       retries: 24
-      start_period: 10s
+      start_period: 180s
     restart: unless-stopped
 
   db-migrate:
