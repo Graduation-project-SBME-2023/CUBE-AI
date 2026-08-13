@@ -13,12 +13,11 @@ from typing import Callable, Sequence
 import json
 import subprocess
 import os
+import sys
 from storage_paths import MODELS_DIR, TEMP_DIR
 import nibabel as nib
 import logging
 
-
-from monai.inferers import Inferer
 
 from monailabel.tasks.infer.basic_infer import BasicInferTask
 from monai.data import MetaTensor
@@ -26,7 +25,6 @@ from monailabel.interfaces.tasks.infer_v2 import InferType
 import torch
 import tempfile
 import re
-import shutil
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -69,9 +67,15 @@ class VISTAPOINT3D(BasicInferTask):
         )
         self.target_spacing = target_spacing
         self.models_path = os.getenv("MODELS_DIR", str(MODELS_DIR))
-        self.output_dir = str(TEMP_DIR / "vista")
-        os.makedirs(self.output_dir, exist_ok=True)
-        self.BASE_PATH = os.getenv("MONAI_LABEL_APP_DIR") + "/vista3d"
+        self.temp_root = TEMP_DIR / "vista"
+        self.temp_root.mkdir(parents=True, exist_ok=True)
+        app_dir = Path(
+            os.environ.get(
+                "MONAI_LABEL_APP_DIR",
+                Path(__file__).resolve().parents[2],
+            )
+        )
+        self.base_path = app_dir / "vista3d"
 
 
     def is_valid(self) -> bool:
@@ -95,7 +99,16 @@ class VISTAPOINT3D(BasicInferTask):
 
         logger.info(f"Updated Points: {data['Points']['points']}")
     
-    def run_monai_inference(self,config_path, image_path, mode, label_index=None, point=None,point_labels=None):
+    def run_monai_inference(
+        self,
+        config_path,
+        image_path,
+        mode,
+        output_dir,
+        label_index=None,
+        point=None,
+        point_labels=None,
+    ):
         """
         Updates the `input_dict` field in the MONAI inference.json file and runs inference.
 
@@ -136,16 +149,37 @@ class VISTAPOINT3D(BasicInferTask):
         # reads generated masks from the backend's runtime temp boundary.
         # Keep both sides on the same path so a successful MONAI run cannot
         # fall through with an unassigned output tensor.
-        config['output_dir'] = self.output_dir
+        config['output_dir'] = output_dir
 
         config = convert_to_serializable(config)
 
-        with open(config_path, "w") as f:
-            json.dump(config, f, indent=4)
-
-        # Run the MONAI inference command from the target directory
-        command = f'python -m monai.bundle run --config_file "{config_path}"'
-        subprocess.run(command, shell=True, check=True, cwd=self.BASE_PATH)
+        temp_config_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.temp_root,
+                prefix="vista-inference-",
+                suffix=".json",
+                delete=False,
+            ) as stream:
+                temp_config_path = stream.name
+                json.dump(config, stream, indent=2)
+            subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "monai.bundle",
+                    "run",
+                    "--config_file",
+                    temp_config_path,
+                ],
+                check=True,
+                cwd=self.base_path,
+            )
+        finally:
+            if temp_config_path and os.path.exists(temp_config_path):
+                os.unlink(temp_config_path)
 
     def run_inferer(self, data, convert_to_batch=True, device="cuda"):
 
@@ -165,38 +199,36 @@ class VISTAPOINT3D(BasicInferTask):
         logger.info("Running MONAI VISTA Inference...")
         config_path = os.path.join(self.models_path, "configs", "vista", "inference.json")
 
-        self.run_monai_inference(
-            config_path=config_path,
-            image_path=data[self.input_key],
-            mode=data.get("Mode"),
-            label_index=data["Class"],
-            point=points,
-            point_labels=point_labels
-        )
-        
-        if device.startswith("cuda"):
-            torch.cuda.empty_cache()
-
-        logger.info(f"input_key path: {data[self.input_key]}")
-
-        file_ending = "_trans.nii.gz"
-        basename = (    
-            os.path.basename(data[self.input_key])
-        )
-        basename = re.sub(r"\.nii\.gz$", "", basename)
-        logger.info(f"basename: {basename}")
-
-        output_path = os.path.join(self.output_dir, f"{basename}/{basename}{file_ending}")
-        logger.info(f"output_path: {output_path}")
-
-        if not os.path.exists(output_path):
-            raise RuntimeError(
-                "VISTA inference completed without producing its expected output: "
-                f"{output_path}"
+        with tempfile.TemporaryDirectory(
+            dir=self.temp_root,
+            prefix="vista-output-",
+        ) as output_dir:
+            self.run_monai_inference(
+                config_path=config_path,
+                image_path=data[self.input_key],
+                mode=data.get("Mode"),
+                output_dir=output_dir,
+                label_index=data["Class"],
+                point=points,
+                point_labels=point_labels,
             )
 
-        outputs = nib.load(output_path).get_fdata()
-        outputs = torch.from_numpy(outputs)
+            basename = re.sub(
+                r"\.nii\.gz$",
+                "",
+                os.path.basename(data[self.input_key]),
+            )
+            output_path = Path(output_dir) / basename / f"{basename}_trans.nii.gz"
+            logger.info("VISTA output path: %s", output_path)
+            if not output_path.is_file():
+                raise RuntimeError(
+                    "VISTA inference completed without producing its expected output: "
+                    f"{output_path}"
+                )
+            outputs = torch.from_numpy(nib.load(output_path).get_fdata())
+
+        if device.startswith("cuda"):
+            torch.cuda.empty_cache()
         logger.info(f"outputs shape: {outputs.shape}")
         # see unique values in the outputs
         unique_values = torch.unique(outputs)

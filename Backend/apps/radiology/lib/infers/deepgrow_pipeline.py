@@ -11,6 +11,7 @@
 
 import logging
 import os
+import threading
 from typing import Callable, Sequence
 
 import numpy as np
@@ -79,6 +80,7 @@ class InferDeepgrowPipeline(BasicInferTask):
         self.max_random_points = max_random_points
         self.random_point_density = random_point_density
         self.output_largest_cc = output_largest_cc
+        self._shape_lock = threading.Lock()
 
     def pre_transforms(self, data=None) -> Sequence[Callable]:
         t = [
@@ -120,11 +122,16 @@ class InferDeepgrowPipeline(BasicInferTask):
         request["foreground"] = foreground
         request["slices"] = slices
 
-        # TODO:: fix multi-thread issue
-        self.model_size = (label.shape[0], self.model_size[-2], self.model_size[-1])
-        logger.info(f"Model Size: {self.model_size}")
-
-        result_file, j = super().__call__(request)
+        # ``pre_transforms`` reads ``self.model_size``. Serialize the 2D stage
+        # so concurrent volumes cannot overwrite each other's slice count.
+        with self._shape_lock:
+            self.model_size = (
+                label.shape[0],
+                self.model_size[-2],
+                self.model_size[-1],
+            )
+            logger.info("Model Size: %s", self.model_size)
+            result_file, j = super().__call__(request)
         result_json.update(j)
         return result_file, result_json
 

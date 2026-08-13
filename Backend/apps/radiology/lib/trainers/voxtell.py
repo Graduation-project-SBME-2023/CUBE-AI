@@ -12,8 +12,7 @@
 import logging
 
 import torch
-from monai.apps.deepedit.transforms import NormalizeLabelsInDatasetd
-from monai.inferers import SlidingWindowInferer, SliceInferer
+from monai.inferers import SliceInferer
 from monai.losses import DiceLoss
 from monailabel.tasks.train.basic_train import BasicTrainTask, Context
 

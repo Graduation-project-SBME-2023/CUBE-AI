@@ -9,11 +9,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .deepedit import DeepEdit
-from .deepgrow import Deepgrow
-from .localization_vertebra import LocalizationVertebra
-from .segmentation_spleen import SegmentationSpleen
-from .sam import sam
-from .generic_segmentation import GenericSegmentation
-from .nnInteractive import NNINTERACTIVE
-from .voxtell import voxtell
+from importlib import import_module
+
+_EXPORTS = {
+    "DeepEdit": ("deepedit", "DeepEdit"),
+    "Deepgrow": ("deepgrow", "Deepgrow"),
+    "LocalizationVertebra": ("localization_vertebra", "LocalizationVertebra"),
+    "SegmentationSpleen": ("segmentation_spleen", "SegmentationSpleen"),
+    "sam": ("sam", "sam"),
+    "GenericSegmentation": ("generic_segmentation", "GenericSegmentation"),
+    "NNINTERACTIVE": ("nnInteractive", "NNINTERACTIVE"),
+    "voxtell": ("voxtell", "voxtell"),
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name):
+    try:
+        module_name, class_name = _EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(name) from exc
+    value = getattr(import_module(f"{__name__}.{module_name}"), class_name)
+    globals()[name] = value
+    return value

@@ -13,21 +13,15 @@ from typing import Callable, Sequence
 import os
 import inspect
 import nibabel as nib
-from typing import Optional, Tuple
+from typing import Optional
 import numpy as np
 from nnInteractive.inference.inference_session import nnInteractiveInferenceSession
-import time
-
-from monai.inferers import Inferer
 
 from monailabel.tasks.infer.basic_infer import BasicInferTask
-from monai.data import MetaTensor
 from monailabel.interfaces.tasks.infer_v2 import InferType
 import torch
 import tempfile
-from storage_paths import MODELS_DIR
-import re
-import shutil
+from storage_paths import MODELS_DIR, TEMP_DIR
 from pathlib import Path
 import SimpleITK as sitk
 import logging
@@ -36,15 +30,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
-def convert_to_serializable(obj):
-    if isinstance(obj, MetaTensor):
-        return obj.tolist()
-    elif isinstance(obj, dict):
-        return {k: convert_to_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_to_serializable(item) for item in obj]
-    return obj
 
 class NNINTERACTIVE(BasicInferTask):
     """
@@ -73,7 +58,8 @@ class NNINTERACTIVE(BasicInferTask):
         )
         self.target_spacing = target_spacing
         self.BASE_PATH = Path(os.getenv("MODELS_DIR", str(MODELS_DIR)))
-        self.DATA_PATH = Path("/apps/radiology")
+        self.output_dir = TEMP_DIR / "radiology" / "nninteractive"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         self.session=None
 
 
@@ -217,13 +203,16 @@ class NNINTERACTIVE(BasicInferTask):
 
         os.makedirs(output_path, exist_ok=True)
 
-        basename = os.path.basename(volume_path)
-        basename = re.sub(r"\.nii\.gz$", "", basename)
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        output_file = os.path.join(output_path, f"{basename}_seg_{timestamp}.nii.gz")
+        with tempfile.NamedTemporaryFile(
+            dir=output_path,
+            prefix="nninteractive-seg-",
+            suffix=".nii.gz",
+            delete=False,
+        ) as stream:
+            output_file = stream.name
 
         nib.save(seg_img, output_file)
-        print(f"Segmentation result saved as {output_file}")
+        logger.info("Segmentation result saved as %s", output_file)
 
         return session, output_file
 
@@ -235,7 +224,7 @@ class NNINTERACTIVE(BasicInferTask):
 
         self.session, output_path=self.nnInteractive_segmentation(
             volume_path=data[self.input_key],
-            output_path=os.path.join(self.DATA_PATH,"Data","output"),
+            output_path=str(self.output_dir),
             model_path=os.path.join(self.BASE_PATH,"nnInteractive_v1.0"),
             point_interactions=point_interactions,
             new_object=bool(data.get('resetInteractions', False)),
@@ -245,25 +234,16 @@ class NNINTERACTIVE(BasicInferTask):
         if device.startswith("cuda"):
             torch.cuda.empty_cache()
 
-
-        file_ending = ".nii.gz"
-        basename = (
-            os.path.basename(data[self.input_key])
-        )
-        basename = re.sub(r"\.nii\.gz$", "", basename)
-        print("basename", basename)
-
-        # output_path = os.path.join(self.BASE_PATH, "Data", "output","segmentation_result.nii.gz")
-
         if os.path.exists(output_path):
-            outputs = nib.load(output_path).get_fdata()
-            outputs = torch.from_numpy(outputs)
+            try:
+                outputs = torch.from_numpy(nib.load(output_path).get_fdata())
+            finally:
+                os.unlink(output_path)
             unique_values = torch.unique(outputs)
             logger.info(f"[INFO] Unique values in mask: {unique_values}")
             data[self.output_label_key] = outputs
         else:
-            logger.error(f"Expected output file not found: {output_path}")
-            data[self.output_label_key] = None
+            raise RuntimeError(f"Expected nnInteractive output file not found: {output_path}")
 
         return data
 
