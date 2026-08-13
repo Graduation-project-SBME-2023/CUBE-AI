@@ -113,14 +113,15 @@ const buildReviewStatus = (
     // The draft is the user's newest choice. A replayed manifest can still
     // contain the older accepted value until the review is consumed, or
     // forever for an already-completed historical hypothesis.
-    // Default is 'accepted'. Only explicit user choices (rejected / modified /
-    // re-accepted) are stored in the draft. If a volume has no draft entry it
-    // was never touched, so it correctly stays 'accepted'.
-    next[reviewKey] = isSavedReviewChoice(draft[reviewKey])
+    // Empty masks cannot be accepted. Keep a modified decision because the
+    // interactive editor may have replaced the empty mask; otherwise reject
+    // empty masks even when an older draft or manifest says "accepted".
+    const savedStatus = isSavedReviewChoice(draft[reviewKey])
       ? draft[reviewKey]
       : isSavedReviewChoice(volume.reviewStatus)
         ? volume.reviewStatus
         : 'accepted';
+    next[reviewKey] = volume.isEmptyMask && savedStatus !== 'modified' ? 'rejected' : savedStatus;
   });
   return next;
 };
@@ -267,7 +268,10 @@ function ReviewView({
   );
 
   const handleToggle = useCallback(
-    (uid: string, status: 'accepted' | 'rejected' | 'modified') => {
+    (uid: string, status: 'accepted' | 'rejected' | 'modified', isEmptyMask = false) => {
+      if (status === 'accepted' && isEmptyMask) {
+        return;
+      }
       setReviewStatus(current => {
         const next = { ...current, [uid]: status };
 
@@ -277,7 +281,9 @@ function ReviewView({
         if (reviewDraftStorageKey && typeof window !== 'undefined') {
           try {
             window.localStorage.setItem(reviewDraftStorageKey, JSON.stringify(next));
-          } catch (_) {}
+          } catch (_) {
+            // Continue with in-memory state when browser storage is unavailable.
+          }
         }
         persistReviewDraft(next);
         return next;
@@ -289,14 +295,16 @@ function ReviewView({
   const handleAcceptAll = useCallback(() => {
     const s: Record<string, ReviewStatus> = {};
     volumes.forEach(v => {
-      s[v.pairId || v.seriesInstanceUid] = 'accepted';
+      s[v.pairId || v.seriesInstanceUid] = v.isEmptyMask ? 'rejected' : 'accepted';
     });
     setReviewStatus(s);
     persistReviewDraft(s);
     if (reviewDraftStorageKey && typeof window !== 'undefined') {
       try {
         window.localStorage.setItem(reviewDraftStorageKey, JSON.stringify(s));
-      } catch (_) {}
+      } catch (_) {
+        // Continue with in-memory state when browser storage is unavailable.
+      }
     }
   }, [persistReviewDraft, volumes, reviewDraftStorageKey]);
 
@@ -310,7 +318,9 @@ function ReviewView({
     if (reviewDraftStorageKey && typeof window !== 'undefined') {
       try {
         window.localStorage.setItem(reviewDraftStorageKey, JSON.stringify(s));
-      } catch (_) {}
+      } catch (_) {
+        // Continue with in-memory state when browser storage is unavailable.
+      }
     }
   }, [persistReviewDraft, volumes, reviewDraftStorageKey]);
 
@@ -608,17 +618,19 @@ function ReviewView({
                           <X size={14} />
                         </button>
                         <button
-                          onClick={() => handleToggle(reviewKey, 'accepted')}
-                          disabled={isReviewLocked}
+                          onClick={() => handleToggle(reviewKey, 'accepted', volume.isEmptyMask)}
+                          disabled={isReviewLocked || volume.isEmptyMask}
                           style={{
                             padding: '3px',
                             borderRadius: '4px',
                             border: 'none',
-                            cursor: isReviewLocked ? 'not-allowed' : 'pointer',
+                            cursor:
+                              isReviewLocked || volume.isEmptyMask ? 'not-allowed' : 'pointer',
                             background: isAccepted ? '#6fe5b8' : 'transparent',
                             color: isAccepted ? '#000' : '#9ca3af',
-                            opacity: isReviewLocked ? 0.5 : 1,
+                            opacity: isReviewLocked || volume.isEmptyMask ? 0.5 : 1,
                           }}
+                          title={volume.isEmptyMask ? 'Empty masks cannot be accepted' : 'Accept'}
                         >
                           <Check
                             size={14}
