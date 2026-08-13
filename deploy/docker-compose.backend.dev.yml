@@ -27,10 +27,10 @@ services:
       nnUNet_preprocessed: /storage/data/nnunet/nnUNet_preprocessed
       nnUNet_results: /storage/data/nnunet/nnUNet_results
     command: >-
-      sh -c "if [ ! -s "$${VOXTELL_DIR}/text_embeddings_cache.pkl" ]; then python /apps/radiology/voxtell_cache_builder.py; fi &&
+      sh -c "if [ ! -s "$${VOXTELL_DIR}/text_embeddings_cache.pkl" ]; then python /apps/radiology/scripts/build_voxtell_cache.py; fi &&
       python /monailabel/server_start.py"
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
-      - ${COMPOSE_PROJECT_DIR}/Backend/storage_paths.py:/apps/radiology/storage_paths.py:ro
+      - ${COMPOSE_PROJECT_DIR}/Backend/storage_paths.py:/monailabel/storage_paths.py:ro
     env_file:
       - .env

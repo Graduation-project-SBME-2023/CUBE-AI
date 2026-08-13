@@ -28,6 +28,7 @@ Backend/storage/
 |   `-- nnunet/{nnUNet_raw,nnUNet_preprocessed,nnUNet_results,mappings}/
 |-- models/                           # weights, embeddings, and runtime configs
 |-- jobs/inference/                   # job metadata and results
+|-- state/radiology/                  # persistent dynamic-model definitions
 |-- cache/{huggingface,monailabel,literature}/
 |-- logs/{agent-system,radiology,nginx}/
 |-- temp/{radiology,vista,latex}/
@@ -36,7 +37,8 @@ Backend/storage/
 
 ## Lifecycle
 
-- Durable: `hypotheses/*/{state,data,outputs}`, `data/`, `models/`, and `jobs/`.
+- Durable: `hypotheses/*/{state,data,outputs}`, `data/`, `models/`, `jobs/`,
+  and `state/`.
 - Disposable: global `cache/` and `temp/`, and each workspace's `cache/` and
   `temp/` directories.
 - `_migrated-legacy/` preserves conflicts and ownerless files. Review it before
@@ -53,4 +55,5 @@ process and `/storage` in containers). Derived locations are defined once in
 `AGENTS_WORKSPACE_DIR`, `GENERAL_DATA_DIR`, `NNUNET_DIR`, `MODELS_DIR`, and
 `INFERENCE_JOB_DIR` may override individual deployment paths. Runtime logs and
 temporary files may be redirected with `BACKEND_LOG_DIR` and
-`BACKEND_TEMP_DIR`.
+`BACKEND_TEMP_DIR`. Dynamic radiology workflow state may be redirected with
+`RADIOLOGY_STATE_DIR`.

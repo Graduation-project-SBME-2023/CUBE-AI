@@ -22,9 +22,8 @@ import lib.trainers
 from monailabel.interfaces.config import TaskConfig
 from monailabel.interfaces.tasks.infer_v2 import InferTask
 from monailabel.interfaces.tasks.train import TrainTask
-from monailabel.utils.others.generic import download_file, strtobool
+from monailabel.utils.others.generic import strtobool
 from monai.networks.nets import UNet
-from pathlib import Path
 import gdown
 from lib.configs.model_artifacts import ensure_model_archive
 

@@ -1,7 +1,7 @@
 # VOXTELL_SUPPORTED_LABELS — catalog of anatomical structures with KNOWN support.
 #
 # PURPOSE OF THIS FILE:
-#   1. voxtell_cache_builder.py uses this list to pre-warm the cache at container start.
+#   1. scripts/build_voxtell_cache.py uses this list to pre-warm the cache.
 #   2. utils.py / check_voxtell_label_availability() uses this list to detect known vs. unknown labels.
 #   3. Unknown labels are accepted by VoxTell via dynamic embedding at inference time (N/A quality).
 #

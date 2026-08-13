@@ -23,10 +23,9 @@ import time
 import tempfile
 from storage_paths import TEMP_DIR
 import pickle
-import os
 
 
-from monai.inferers import Inferer, SlidingWindowInferer, SliceInferer
+from monai.inferers import SlidingWindowInferer
 from monailabel.interfaces.tasks.infer_v2 import InferType
 from monailabel.tasks.infer.basic_infer import BasicInferTask
 

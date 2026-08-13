@@ -9,20 +9,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 from typing import Any, Callable, Sequence, Tuple, Union
 
 import torch
 from lib.transforms.transforms import CacheObjectd, VertebraLocalizationSegmentation
 from monai.inferers import Inferer, SlidingWindowInferer
 from monai.transforms import (
-    Activationsd,
-    AsDiscreted,
+    Compose,
     CropForegroundd,
     EnsureChannelFirstd,
     EnsureTyped,
     GaussianSmoothd,
     KeepLargestConnectedComponentd,
     LoadImaged,
+    Invertd,
     ScaleIntensityd,
     ScaleIntensityRanged,
     Spacingd,
@@ -31,6 +32,8 @@ from monai.transforms import (
 from monailabel.interfaces.tasks.infer_v2 import InferType
 from monailabel.tasks.infer.basic_infer import BasicInferTask
 from monailabel.transform.post import Restored
+
+logger = logging.getLogger(__name__)
 
 
 class LocalizationVertebra(BasicInferTask):
@@ -97,14 +100,51 @@ class LocalizationVertebra(BasicInferTask):
         )
 
     def inverse_transforms(self, data=None) -> Union[None, Sequence[Callable]]:
-        return []  # Self-determine from the list of pre-transforms provided
+        # ``run_invert_transforms`` performs the inversion after reducing the
+        # 25-channel logits to a single discrete label map.
+        return []
+
+    def run_invert_transforms(self, data, pre_transforms, names):
+        """Restore a one-channel mask instead of 25 full-resolution logits.
+
+        The default MONAI Label order restores every class channel before
+        argmax. For a CT volume this can require gigabytes of RAM and minutes
+        of CPU interpolation. Argmax is equivalent before softmax, and nearest
+        interpolation preserves the resulting integer vertebra labels.
+        """
+        prediction = data[self.output_label_key]
+        if prediction.ndim != 4:
+            raise RuntimeError(
+                "Vertebra localization expected CxDxHxW logits; "
+                f"received shape {tuple(prediction.shape)}"
+            )
+
+        data[self.output_label_key] = torch.argmax(
+            prediction,
+            dim=0,
+            keepdim=True,
+        ).to(device="cpu", dtype=torch.float32)
+        del prediction
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        logger.info(
+            "Restoring one-channel vertebra mask with nearest interpolation"
+        )
+        inverter = Invertd(
+            keys=self.output_label_key,
+            transform=Compose(pre_transforms),
+            orig_keys=self.input_key,
+            nearest_interp=True,
+            to_tensor=True,
+            device="cpu",
+        )
+        return inverter(data)
 
     def post_transforms(self, data=None) -> Sequence[Callable]:
         return [
-            # Otherwise a rather big GPU (>45GB) is needed
+            # Prediction is already discretized before inverse resampling.
             EnsureTyped(keys="pred", device=torch.device("cpu")),
-            Activationsd(keys="pred", softmax=True),
-            AsDiscreted(keys="pred", argmax=True),
             KeepLargestConnectedComponentd(keys="pred"),
             Restored(keys="pred", ref_image="image_cached"),
             VertebraLocalizationSegmentation(keys="pred", result="result"),

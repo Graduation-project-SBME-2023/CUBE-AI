@@ -12,7 +12,6 @@
 import logging
 import os
 from typing import Any, Dict, Optional, Union
-import torch
 
 import lib.infers
 import lib.trainers

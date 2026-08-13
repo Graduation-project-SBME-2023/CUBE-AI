@@ -280,13 +280,13 @@ class MyVoxTellPredictor(VoxTellPredictor):
     def _save_cache_atomically(self) -> None:
         cache_dir = os.path.dirname(self.cache_output_path)
         os.makedirs(cache_dir, exist_ok=True)
-        temp_dir = TEMP_DIR / "radiology"
-        temp_dir.mkdir(parents=True, exist_ok=True)
         temp_path = None
         try:
             with tempfile.NamedTemporaryFile(
                 mode="wb",
-                dir=temp_dir,
+                # Keep the staged file on the destination filesystem so
+                # os.replace remains atomic across container volume mounts.
+                dir=cache_dir,
                 prefix=".voxtell-cache-",
                 suffix=".tmp",
                 delete=False,

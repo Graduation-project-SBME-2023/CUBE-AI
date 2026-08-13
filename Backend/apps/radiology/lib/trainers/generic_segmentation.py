@@ -1,15 +1,20 @@
-import os
-import subprocess
-import logging
-from monailabel.tasks.train.basic_train import BasicTrainTask, Context
-from monailabel.interfaces.utils.app import app_instance
-from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
-import shutil
-from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+from __future__ import annotations
 
-import requests
+import logging
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
+import requests
+from monailabel.interfaces.utils.app import app_instance
+from monailabel.tasks.train.basic_train import BasicTrainTask, Context
+from nnunetv2.inference.predict_from_raw_data import nnUNetPredictor
+
+from radiology_app.integrations.nnunet import (
+    configure_nnunet_environment,
+    resolve_dataset,
+)
 
 BACKEND_SYNC_URL = os.environ.get(
     "APP_API_URL",
@@ -20,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 
 class GenericSegmentation(BasicTrainTask):
-    def __init__(  # change
+    """Train a workflow-defined model through the nnUNet command-line tools."""
+
+    def __init__(
         self,
         model_dir,
         model_name,
@@ -32,200 +39,139 @@ class GenericSegmentation(BasicTrainTask):
         description="Train and infer using nnUNet for segmentation",
         **kwargs,
     ):
-        # Initialize the nnUNet Trainer Task.
-        # :param model_dir: Path to the model directory
-        # :param task_name: Name of the nnUNet task (e.g., TaskXXX_MyTask)
-        # :param fold: Fold to train (default: 0)
-        # :param trainer_class: Trainer class name in nnUNet
-        # :param plans_file: Name of the nnUNet plans file
         self.labels = labels
         self.model_name = model_name
         self.fold = fold
         self.trainer_class = trainer_class
         self.model_dir = model_dir
         self.plan_type = plan_type
-        self.root_nnunet_dir = root_nnunet_dir
-
-        os.environ["nnUNet_raw"] = os.path.join(self.root_nnunet_dir, "nnUNet_raw")
-        os.environ["nnUNet_preprocessed"] = os.path.join(self.root_nnunet_dir, "nnUNet_preprocessed")
-        os.environ["nnUNet_results"] = os.path.join(self.root_nnunet_dir, "nnUNet_results")
-
-        logger.info(f"nnUNet_raw: {os.environ['nnUNet_raw']}")
-        logger.info(f"nnUNet_preprocessed: {os.environ['nnUNet_preprocessed']}")
-        logger.info(f"nnUNet_results: {os.environ['nnUNet_results']}")
-
-        # Extract the dataset name from the model name
-        self.task_name = self.get_data_name_from_model_name(self.model_name)
-
-
-        # Extract the numeric part from the task name
-        self.task_id = ''.join(filter(str.isdigit, self.task_name))
-
+        self.nnunet_paths = configure_nnunet_environment(root_nnunet_dir)
+        self.task_name, self.task_id = resolve_dataset(
+            self.nnunet_paths.raw,
+            self.model_name,
+        )
+        logger.info(
+            "nnUNet paths: raw=%s; preprocessed=%s; results=%s",
+            self.nnunet_paths.raw,
+            self.nnunet_paths.preprocessed,
+            self.nnunet_paths.results,
+        )
         super().__init__(model_dir, description, config={"multi_gpu": False}, **kwargs)
 
-    # get data name from nnUnet directory by extracting the numeric part from the task name
-    def get_data_name_from_model_name(self, model_name):
-        """
-        Search for the full dataset name in the nnUNet_raw directory using only the model name.
-        Example: If model_name = "blastoma", and dataset folder is "Dataset200_blastoma",
-        this function returns "Dataset200_blastoma".
-        """
-        nnunet_raw_dir = os.environ.get("nnUNet_raw")
-        print(f"nnUNet_raw directory: {nnunet_raw_dir}")
-        if not nnunet_raw_dir or not os.path.exists(nnunet_raw_dir):
-            raise FileNotFoundError(f"nnUNet_raw directory not found: {nnunet_raw_dir}")
-
-        # Search for a directory that ends with the given model name
-        for dir_name in os.listdir(nnunet_raw_dir):
-            if dir_name.endswith(f"_{model_name}"):  # Match DatasetXXX_{model_name}
-                return dir_name  # Return full dataset name
-
-        raise ValueError(f"No dataset found for model name: {model_name} in {nnunet_raw_dir}")
-
     def network(self, context: Context):
-        # nnUNet handles network creation internally, so this is not overridden.
-        return None  # nnUNet internally initializes its network via the trainer.
+        return None
 
     def optimizer(self, context: Context):
-        # Optimizer is managed internally by nnUNet, so it is not overridden.
-        return None  # nnUNet Trainer handles the optimizer.
+        return None
 
     def loss_function(self, context: Context):
-        # Loss function is managed internally by nnUNet, so it is not overridden.
-        return None  # nnUNet Trainer handles the loss function.
+        return None
 
-
-    def preprocess_dataset(self):
-        logger.info("Starting nnUNet Dataset Preprocessing")
-
-        # Check if preprocessing is already done
-        preprocessed_data_path = os.path.join(os.environ["nnUNet_preprocessed"], self.task_name)
-
-        # Build the nnUNet preprocessing command
-        command = [    # change
+    def preprocess_dataset(self) -> Path:
+        logger.info("Starting nnUNet preprocessing for %s", self.task_name)
+        command = [
             "nnUNetv2_plan_and_preprocess",
-            "-d", self.task_id,
+            "-d",
+            self.task_id,
             "--verify_dataset_integrity",
-            "-np", "3"
+            "-np",
+            "3",
         ]
-
-        logger.info(f"Running command: {' '.join(command)}")
-
+        logger.info("Running command: %s", " ".join(command))
         try:
             subprocess.run(command, check=True)
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Preprocessing failed with error: {e}")
-            raise RuntimeError(f"Preprocessing failed for dataset {self.task_name} error: {e}")
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(
+                f"Preprocessing failed for dataset {self.task_name}"
+            ) from exc
 
-        logger.info(f"Preprocessed data saved to: {preprocessed_data_path}")
+        output = self.nnunet_paths.preprocessed / self.task_name
+        logger.info("Preprocessed data saved to: %s", output)
+        return output
 
-        return preprocessed_data_path
-    
-    
-      
-
-
-    def notify_backend_sync(self):
+    def notify_backend_sync(self) -> None:
         try:
             response = requests.post(BACKEND_SYNC_URL, timeout=15)
             response.raise_for_status()
-            logger.info(f"Backend sync triggered: {response.json()}")
-        except Exception as e:
-            # Non-fatal — log and continue, don't break MONAI
-            logger.warning(f"Backend sync notification failed: {e}")
+            logger.info("Backend sync triggered: %s", response.json())
+        except (requests.RequestException, ValueError) as exc:
+            # Synchronization is advisory and must not invalidate training.
+            logger.warning("Backend sync notification failed: %s", exc)
 
-    def train(self, rank: int, world_size: int, request, datalist):
-        # Train the model using the nnUNet CLI.
-        logger.info("Starting nnUNet Training")
-
-
-        # Ensure preprocessing is complete
+    def train(self, rank: int, world_size: int, request, datalist) -> None:
+        logger.info("Starting nnUNet training for %s", self.task_name)
         self.preprocess_dataset()
-
-        # Run the nnUNet training command
         command = [
             "nnUNetv2_train",
-             self.task_id,
-             str(self.plan_type),
-             str(self.fold),
-            "-tr", self.trainer_class,
+            self.task_id,
+            str(self.plan_type),
+            str(self.fold),
+            "-tr",
+            self.trainer_class,
         ]
+        logger.info("Running command: %s", " ".join(command))
         try:
             subprocess.run(command, check=True)
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Training failed: {e}")
-            return  # prevent crashing
-        except MemoryError as e:
-            logger.error("Out of memory during training. Reducing resources.")
-            return  # gracefully exit on OOM
-        check_point_path = os.path.join(
-        os.environ["nnUNet_results"],
-        self.task_name,
-        f"{self.trainer_class}__nnUNetPlans__{self.plan_type}",
-        f"fold_{self.fold}",
-        "checkpoint_best.pth"
-    )
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(f"Training failed for {self.task_name}") from exc
 
-    #     # move checkpoint_best.pth to model_dir and give it name model.pth
-    #     # TODO: check if the this is the correct place to move checkpoint to it
+        trained_model_dir = (
+            self.nnunet_paths.results
+            / self.task_name
+            / f"{self.trainer_class}__nnUNetPlans__{self.plan_type}"
+        )
+        checkpoint = trained_model_dir / f"fold_{self.fold}" / "checkpoint_best.pth"
+        if not checkpoint.is_file():
+            raise FileNotFoundError(
+                f"nnUNet training completed without checkpoint: {checkpoint}"
+            )
 
-        logger.info("saving checkpoint to model_dir")
-
-        shutil.copy(check_point_path, os.path.join(self.model_dir, f"pretrained_{self.model_name}.pt"))
-
-        logger.info("nnUNet Training Completed")
-
+        destination = Path(self.model_dir) / f"pretrained_{self.model_name}.pt"
+        shutil.copy2(checkpoint, destination)
+        logger.info("Published nnUNet checkpoint: %s", destination)
         self.initialize_inferer()
 
-    def initialize_inferer(self):
-        logger.info("Initializing Inference Task")
+    def initialize_inferer(self) -> None:
+        logger.info("Refreshing inference task for %s", self.model_name)
         instance = app_instance()
         try:
-            message = instance.initialize_inference_task(self.model_name)
-            logger.info(f"Inference task initialized: {self.model_name}")
-            self.notify_backend_sync()
-        except Exception as e:
-            logger.error(f"Failed to initialize inference task: {e}")
-            raise RuntimeError(f"Failed to initialize inference task for model {self.model_name}")
+            instance.initialize_inference_task(self.model_name)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to initialize inference task for model {self.model_name}"
+            ) from exc
+        self.notify_backend_sync()
 
     def val_inferer(self, context: Context):
-        # Inference logic for nnUNet.
-
-        logger.info("Setting up nnUNet Predictor for Validation")
-
-        # Initialize the nnUNet Predictor
         predictor = nnUNetPredictor(
-            tile_step_size=0.5,  # Overlap size during sliding window inference
+            tile_step_size=0.5,
             device=context.device,
             verbose=True,
             verbose_preprocessing=True,
             allow_tqdm=True,
         )
-
-        # Load the trained model
         predictor.initialize_from_trained_model_folder(
-            os.path.join(os.environ["nnUNet_results"], self.task_name, self.trainer_class),
+            str(
+                self.nnunet_paths.results
+                / self.task_name
+                / f"{self.trainer_class}__nnUNetPlans__{self.plan_type}"
+            ),
             use_folds=(self.fold,),
             checkpoint_name="checkpoint_best.pth",
         )
-
         return predictor
 
     def train_pre_transforms(self, context: Context):
-        # nnUNet handles its own preprocessing. This is not needed.
-        return None  # nnUNet handles preprocessing internally during training.
+        return None
 
     def train_post_transforms(self, context: Context):
-        # nnUNet handles its own postprocessing. This is not needed.
-        return None  # nnUNet handles postprocessing internally.
+        return None
 
     def val_pre_transforms(self, context: Context):
-        # nnUNet handles its own validation preprocessing.
-        return None  # nnUNet handles preprocessing internally during validation.
+        return None
 
     def val_post_transforms(self, context: Context):
-        # nnUNet handles its own validation postprocessing.
-        return None  # nnUNet handles postprocessing internally
-    
+        return None
+
     def pre_process(self, request, datastore):
         return None

@@ -60,6 +60,12 @@ LOGS_DIR: Final[Path] = _resolve_configured_path(
 TEMP_DIR: Final[Path] = _resolve_configured_path(
     os.environ.get("BACKEND_TEMP_DIR", BACKEND_STORAGE_ROOT / "temp")
 )
+RADIOLOGY_STATE_DIR: Final[Path] = _resolve_configured_path(
+    os.environ.get(
+        "RADIOLOGY_STATE_DIR",
+        BACKEND_STORAGE_ROOT / "state" / "radiology",
+    )
+)
 
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _STATE_FILES = {
@@ -152,6 +158,7 @@ def ensure_storage_layout() -> None:
         TEMP_DIR / "radiology",
         TEMP_DIR / "vista",
         TEMP_DIR / "latex",
+        RADIOLOGY_STATE_DIR,
         BACKEND_STORAGE_ROOT / "_migrated-legacy",
     ):
         path.mkdir(parents=True, exist_ok=True)
@@ -186,6 +193,7 @@ __all__ = [
     "CACHE_DIR",
     "LOGS_DIR",
     "TEMP_DIR",
+    "RADIOLOGY_STATE_DIR",
     "workspace",
     "workspace_subpath",
     "ws_sub",

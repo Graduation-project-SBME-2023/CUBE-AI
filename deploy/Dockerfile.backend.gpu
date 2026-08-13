@@ -86,7 +86,7 @@ COPY ./overrides/pydicom_seg/reader.py \
      /usr/local/lib/python3.10/dist-packages/pydicom_seg/reader.py
 COPY ./overrides/pydicom_seg/segmentation_dataset.py \
      /usr/local/lib/python3.10/dist-packages/pydicom_seg/segmentation_dataset.py
-COPY ./storage_paths.py /apps/radiology/storage_paths.py
+COPY ./storage_paths.py /monailabel/storage_paths.py
 
 # ------------------------------------------------------------
 # 4. Environment variables
@@ -105,7 +105,7 @@ ENV BACKEND_STORAGE_ROOT=/storage \
     nnUNet_preprocessed=/storage/data/nnunet/nnUNet_preprocessed \
     nnUNet_results=/storage/data/nnunet/nnUNet_results \
     nnUNet_raw=/storage/data/nnunet/nnUNet_raw \
-    PYTHONPATH=/apps/radiology \
+    PYTHONPATH=/apps/radiology:/monailabel \
     # NVIDIA runtime hints (can also be set in compose)
     NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility
@@ -116,4 +116,4 @@ ENV BACKEND_STORAGE_ROOT=/storage \
 EXPOSE 8000
 
 # Database migrations are owned by the one-shot application-api migration service.
-CMD ["sh", "-c", "if [ ! -s \"$VOXTELL_DIR/text_embeddings_cache.pkl\" ]; then python /apps/radiology/voxtell_cache_builder.py; fi && python /monailabel/server_start.py"]
+CMD ["sh", "-c", "if [ ! -s \"$VOXTELL_DIR/text_embeddings_cache.pkl\" ]; then python /apps/radiology/scripts/build_voxtell_cache.py; fi && python /monailabel/server_start.py"]

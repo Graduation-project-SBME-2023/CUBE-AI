@@ -12,7 +12,6 @@
 import logging
 import os
 from typing import Any, Dict, Optional, Union
-import torch
 
 import lib.infers
 import lib.trainers
@@ -27,15 +26,7 @@ from monailabel.tasks.activelearning.epistemic import Epistemic
 from monailabel.tasks.scoring.dice import Dice
 from monailabel.tasks.scoring.epistemic import EpistemicScoring
 from monailabel.tasks.scoring.sum import Sum
-from monailabel.utils.others.generic import download_file, strtobool
-# voxtell dependencies
-import gc
-import ctypes
-import torch
-import numpy as np
-from typing import List, Union
-
-import urllib.request
+from monailabel.utils.others.generic import strtobool
 from lib.configs.qwen_embedding_model import ensure_qwen_embedding_model
 from lib.configs.voxtell_artifacts import ensure_voxtell_artifacts
 from lib.configs.voxtell_supported_labels import VOXTELL_SUPPORTED_LABELS
