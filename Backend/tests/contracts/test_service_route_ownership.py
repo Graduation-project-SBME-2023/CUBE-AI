@@ -3,7 +3,8 @@ from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 MONAI_SERVER = BACKEND_ROOT / "monailabel" / "server.py"
-APPLICATION_SERVER = BACKEND_ROOT / "monailabel" / "control_server.py"
+APPLICATION_ROOT = BACKEND_ROOT / "application_api"
+APPLICATION_SERVER = APPLICATION_ROOT / "main.py"
 
 
 def test_monai_registers_only_heavy_processing_routers():
@@ -57,6 +58,53 @@ def test_application_api_owns_database_workflow_and_sync_routes():
     assert required <= registered
     assert "training_jobs.router" not in registered
     assert 'title="CUBE.AI Application API"' in source
+
+
+def test_database_source_tree_is_owned_only_by_application_api():
+    monai_root = BACKEND_ROOT / "monailabel"
+    forbidden_directories = ("core", "crud", "models", "schemas", "seeders")
+
+    assert all(not (monai_root / name).exists() for name in forbidden_directories)
+    assert (APPLICATION_ROOT / "db" / "base.py").is_file()
+    assert (APPLICATION_ROOT / "db" / "session.py").is_file()
+    assert (APPLICATION_ROOT / "db" / "models").is_dir()
+    assert (APPLICATION_ROOT / "repositories").is_dir()
+    assert (APPLICATION_ROOT / "migrations" / "versions").is_dir()
+    assert (APPLICATION_ROOT / "alembic.ini").is_file()
+    assert not (BACKEND_ROOT / "migrations").exists()
+    assert not (BACKEND_ROOT / "alembic.ini").exists()
+
+    monai_source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in monai_root.rglob("*.py")
+    )
+    assert "DATABASE_URL" not in monai_source
+    assert "sqlalchemy" not in monai_source.lower()
+    assert "application_api" not in monai_source
+
+
+def test_application_image_owns_alembic_and_database_dependencies():
+    repository_root = BACKEND_ROOT.parent
+    dockerfile = (repository_root / "deploy" / "Dockerfile.application-api").read_text(encoding="utf-8")
+    compose_files = (
+        repository_root / "deploy" / "docker-compose.backend.cpu.yml",
+        repository_root / "deploy" / "docker-compose.backend.gpu.yml",
+    )
+    alembic_config = (APPLICATION_ROOT / "alembic.ini").read_text(encoding="utf-8")
+
+    assert "COPY Backend/application_api /app/application_api" in dockerfile
+    assert "COPY Backend/monailabel" not in dockerfile
+    assert "script_location = %(here)s/migrations" in alembic_config
+
+    for compose_file in compose_files:
+        compose = compose_file.read_text(encoding="utf-8")
+        monai_start = compose.index("\n  monailabel:")
+        monai_end = compose.index("\n  orthanc:", monai_start)
+        monai_service = compose[monai_start:monai_end]
+
+        assert "/app/application_api/alembic.ini" in compose
+        assert "python -m application_api.seeders" in compose
+        assert "DATABASE_URL" not in monai_service
 
 
 def test_application_service_url_never_falls_back_to_monai():

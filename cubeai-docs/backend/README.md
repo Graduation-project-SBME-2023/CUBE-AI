@@ -1,6 +1,6 @@
 # 🔧 Backend Documentation
 
-The backend is composed of four main services, each running in its own Docker container.
+The backend is composed of five main services, each running in its own Docker container.
 
 ---
 
@@ -9,9 +9,10 @@ The backend is composed of four main services, each running in its own Docker co
 | Service | Role | Source |
 |---|---|---|
 | [Agent System](../agent-system/README.md) | Multi-agent LLM research pipeline | `Backend/agent_system/` |
+| Application API | PostgreSQL CRUD, chat, workflow metadata, and Orthanc synchronization | `Backend/application_api/` |
 | MONAI Label | AI-assisted segmentation server + nnUNet | `Backend/monailabel/` |
 | Orthanc | DICOM PACS server | Docker image + config |
-| [PostgreSQL](../database/README.md) | Persistent database | Docker image + Alembic migrations |
+| [PostgreSQL](../database/README.md) | Persistent database | Docker image; schema owned by `Backend/application_api/` |
 
 ---
 
@@ -55,6 +56,8 @@ pip install numpy==1.26.4 pandas==2.1.4 pycaret==3.3.2
 ## MONAI Label
 
 MONAI Label provides the AI-assisted segmentation capabilities. It runs as a standalone server using the **Radiology app** configuration.
+
+It does not import SQLAlchemy models, receive `DATABASE_URL`, or apply database migrations. Database-backed operations are exposed by the Application API on port `8001`.
 
 **Port:** `8000`
 
@@ -120,6 +123,8 @@ PostgreSQL stores all structured application data including:
 
 **Managed via:** Alembic migrations  
 **ORM:** SQLAlchemy (async)
+
+The Application API exclusively owns the ORM models, repositories, seeders, and Alembic migration history under `Backend/application_api/`.
 
 See the full [Database Documentation](../database/README.md).
 

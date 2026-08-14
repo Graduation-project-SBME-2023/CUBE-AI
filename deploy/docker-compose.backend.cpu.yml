@@ -58,7 +58,7 @@ services:
       dockerfile: deploy/Dockerfile.application-api
     image: cubeai1/application-api:v1.0
     pull_policy: build
-    command: alembic -c /app/alembic.ini upgrade head
+    command: alembic -c /app/application_api/alembic.ini upgrade head
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ORTHANC_URL: http://orthanc:8042
@@ -77,8 +77,8 @@ services:
       dockerfile: deploy/Dockerfile.application-api
     image: cubeai1/application-api:v1.0
     pull_policy: build
-    command: python -c "from seeders.all_seeders import all_seeders; all_seeders()"
-    working_dir: /app/monailabel
+    command: python -m application_api.seeders
+    working_dir: /app
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ORTHANC_URL: http://orthanc:8042
@@ -105,7 +105,7 @@ services:
         aliases:
           - control-api
     environment:
-      CONTROL_API_PORT: 8001
+      APP_API_PORT: 8001
       APP_API_WORKERS: 2
       APP_API_URL: http://application-api:8001
       INFERENCE_API_URL: http://monailabel:8000
@@ -131,7 +131,7 @@ services:
       - .env
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
-      - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/app/monailabel
+      - ${COMPOSE_PROJECT_DIR}/Backend/application_api:/app/application_api
       - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/lib/configs:/app/apps/radiology/lib/configs:ro
     depends_on:
       db-seed:

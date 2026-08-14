@@ -49,7 +49,7 @@ class BackendClient:
 
     @classmethod
     def _build_hypothesis_payload(cls, hypothesis: ClinicalHypothesis) -> dict:
-        # Match monailabel.schemas.hypothesis.HypothesisCreate exactly.
+        # Match application_api.schemas.hypothesis.HypothesisCreate exactly.
         return {
             "title": hypothesis.title or "Untitled Hypothesis",
             "population": cls._stringify(hypothesis.population),

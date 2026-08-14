@@ -42,7 +42,7 @@ def test_gpt_oss_is_the_frontend_model_fallback():
 
 def test_application_api_allows_only_configured_development_origins():
     application_api = (
-        REPOSITORY_ROOT / "Backend" / "monailabel" / "control_server.py"
+        REPOSITORY_ROOT / "Backend" / "application_api" / "main.py"
     ).read_text(encoding="utf-8")
 
     assert '"CORS_ORIGINS"' in application_api

@@ -2,8 +2,8 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app:/app/monailabel \
-    CONTROL_API_PORT=8001 \
+    PYTHONPATH=/app \
+    APP_API_PORT=8001 \
     APP_API_WORKERS=2
 
 WORKDIR /app
@@ -23,11 +23,9 @@ RUN pip install --no-cache-dir \
     sqlalchemy \
     "uvicorn[standard]"
 
-COPY Backend/monailabel /app/monailabel
+COPY Backend/application_api /app/application_api
 COPY Backend/apps/radiology/lib/configs /app/apps/radiology/lib/configs
-COPY Backend/alembic.ini /app/alembic.ini
-COPY Backend/migrations /app/migrations
 
 EXPOSE 8001
 
-CMD ["python", "/app/monailabel/control_server_start.py"]
+CMD ["python", "-m", "application_api.start"]
