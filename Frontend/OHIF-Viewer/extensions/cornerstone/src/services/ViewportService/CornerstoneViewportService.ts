@@ -493,6 +493,10 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
 
     const viewportInfo = this.getViewportInfo(viewport.id);
     const displaySetOptions = viewportInfo.getDisplaySetOptions();
+    const orientation = viewportInfo.getOrientation();
+    const isReformattedPlane =
+      orientation === csEnums.OrientationAxis.CORONAL ||
+      orientation === csEnums.OrientationAxis.SAGITTAL;
 
     // Todo: use presentations states
     const volumesProperties = volumeInputArray.map((volumeInput, index) => {
@@ -530,6 +534,13 @@ class CornerstoneViewportService extends PubSubService implements IViewportServi
     });
 
     this.setPresentations(viewport, presentations);
+
+    // Coronal and sagittal MPR views sample between the acquired axial slices.
+    // Use the higher-quality linear path instead of VTK's fast-linear default to
+    // reduce stair stepping in anisotropic studies. Keep axial/acquisition unchanged.
+    if (isReformattedPlane) {
+      viewport.setProperties({ interpolationType: csEnums.InterpolationType.LINEAR });
+    }
 
     // load any secondary displaySets
     const displaySetInstanceUIDs = this.viewportsDisplaySets.get(viewport.id);
