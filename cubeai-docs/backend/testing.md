@@ -159,7 +159,7 @@ python -m pytest -c Backend/pytest.ini `
 
 | File | Function |
 |---|---|
-| `integration/test_service_health.py` | Opt-in HTTP checks for agents, control API, MONAI Label, and Orthanc. It runs only when `RUN_BACKEND_INTEGRATION=1`. |
+| `integration/test_service_health.py` | Opt-in HTTP checks for agents, Application API, MONAI Label, and Orthanc. It runs only when `RUN_BACKEND_INTEGRATION=1`. |
 
 ### Consolidated agent regression tests
 
@@ -201,7 +201,7 @@ backend instance you intend to exercise.
 For a staged, whole-system load test with per-service thresholds and JSON
 results, use `Backend/tests/load/run.ps1`. See `Backend/tests/load/README.md`
 for smoke, load, and stress profiles. The whole-system suite is read-only and covers the OHIF
-frontend, agent API, control API, MONAI Label, and Orthanc DICOMweb.
+frontend, agent API, Application API, MONAI Label, and Orthanc DICOMweb.
 
 ## Isolation and quality rules
 

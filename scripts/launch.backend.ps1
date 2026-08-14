@@ -198,7 +198,7 @@ docker compose `
 
 Write-Host ""
 Write-OK "Agents API:  http://localhost:8150"
-Write-OK "Control API: http://localhost:8001"
+Write-OK "Application API: http://localhost:8001"
 Write-OK "MONAI Label: http://localhost:8000"
 Write-OK "Orthanc:     http://localhost:8043"
 Write-OK "Postgres:    localhost:5433"

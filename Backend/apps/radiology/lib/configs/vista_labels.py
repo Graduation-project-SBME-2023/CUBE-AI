@@ -8,7 +8,7 @@ Contains:
                        outputs in its NIfTI segmentation mask (e.g. liver=5).
                        Used by:
                          • apps/radiology/lib/configs/vista.py  (self.labels)
-                         • monailabel/seeders/model.py           (params_schema.Class.mapping)
+                         • application_api/seeders/model.py     (params_schema.Class.mapping)
 
 To add, remove, or rename a VISTA label — edit ONLY this file.
 """

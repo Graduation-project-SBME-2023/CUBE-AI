@@ -1,5 +1,7 @@
 # README: Data Management with PostgreSQL, Monai Label, and OHIF
 
+> **Legacy reference:** Do not install or register PostgreSQL routes inside MONAI Label. The current implementation lives under `Backend/application_api/`, is exposed on port `8001`, and owns the Alembic migrations described in [README.md](./README.md). The MONAI-specific steps below are retained only as historical context.
+
 ## Step 1: Install PostgreSQL
 
 1. Download PostgreSQL from [this link](https://www.postgresql.org/download/).

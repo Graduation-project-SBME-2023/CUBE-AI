@@ -154,7 +154,7 @@ docker compose \
 echo
 info "Backend available at:"
 info "  Agents API:  http://localhost:8150"
-info "  Control API: http://localhost:8001"
+info "  Application API: http://localhost:8001"
 info "  MONAI Label: http://localhost:8000"
 info "  Orthanc:     http://localhost:8043"
 info "  Postgres:    localhost:5433"
