@@ -55,7 +55,9 @@ services:
       context: ${COMPOSE_PROJECT_DIR}
       dockerfile: deploy/Dockerfile.application-api
     image: cubeai1/application-api:v1.0
-    pull_policy: if_not_present
+    # This image is built from the current checkout. Reusing an older local tag can
+    # omit newly added migration files such as application_api/alembic.ini.
+    pull_policy: build
     command: alembic -c /app/application_api/alembic.ini upgrade head
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -74,7 +76,7 @@ services:
       context: ${COMPOSE_PROJECT_DIR}
       dockerfile: deploy/Dockerfile.application-api
     image: cubeai1/application-api:v1.0
-    pull_policy: if_not_present
+    pull_policy: build
     command: python -m application_api.seeders
     working_dir: /app
     environment:
@@ -94,7 +96,7 @@ services:
       context: ${COMPOSE_PROJECT_DIR}
       dockerfile: deploy/Dockerfile.application-api
     image: cubeai1/application-api:v1.0
-    pull_policy: if_not_present
+    pull_policy: build
     container_name: application-api-backend
     ports:
       - "8001:8001"
