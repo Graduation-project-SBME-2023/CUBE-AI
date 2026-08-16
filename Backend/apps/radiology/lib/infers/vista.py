@@ -142,9 +142,13 @@ class VISTAPOINT3D(BasicInferTask):
                 "label_prompt": [label_index],
             }
 
+        metadata_path = Path(self.models_path) / "configs" / "vista" / "metadata.json"
+        if not metadata_path.is_file():
+            raise FileNotFoundError(f"VISTA metadata config does not exist: {metadata_path}")
+
         config['bundle_root'] = self.models_path
         config['checkpointloader']['load_path'] = self.path[0]
-        config['metadata_path'] = self.models_path + '/configs/vista/metadata.json'
+        config['metadata_path'] = str(metadata_path)
         # The bundle default writes below bundle_root/eval, but this adapter
         # reads generated masks from the backend's runtime temp boundary.
         # Keep both sides on the same path so a successful MONAI run cannot
@@ -173,6 +177,10 @@ class VISTAPOINT3D(BasicInferTask):
                     "run",
                     "--config_file",
                     temp_config_path,
+                    # The bundle CLI resolves its default metadata file relative
+                    # to the temporary config before evaluating metadata_path.
+                    "--meta_file",
+                    str(metadata_path),
                 ],
                 check=True,
                 cwd=self.base_path,
