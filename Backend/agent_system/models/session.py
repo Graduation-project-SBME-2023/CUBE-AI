@@ -13,6 +13,7 @@ class SessionState(Enum):
     IDLE = auto()
     PLANNING = auto()
     READY = auto()
+    QUEUED = auto()
     RUNNING = auto()
     PAUSED = auto()
     COMPLETED = auto()

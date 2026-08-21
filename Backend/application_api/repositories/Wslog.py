@@ -13,11 +13,14 @@ from application_api.schemas.Wslog import *
 # ---------------------------
 async def create_ws_log(db: AsyncSession, data: WSLogCreate):
     try:
-        log = WSLogModel(
-            session_id=data.session_id,
-            msg_type=data.msg_type,
-            payload=data.payload
-        )
+        values = {
+            "session_id": data.session_id,
+            "msg_type": data.msg_type,
+            "payload": data.payload,
+        }
+        if data.uuid is not None:
+            values["uuid"] = data.uuid
+        log = WSLogModel(**values)
 
         db.add(log)
         await db.commit()
@@ -76,7 +79,10 @@ async def get_logs(
                     WSLogModel.payload.has_key(json_key)  # noqa
                 )
 
-        query = query.order_by(WSLogModel.created_at.asc()).offset(skip)
+        query = query.order_by(
+            WSLogModel.created_at.asc(),
+            WSLogModel.uuid.asc(),
+        ).offset(skip)
         if limit is not None:
             query = query.limit(limit)
 

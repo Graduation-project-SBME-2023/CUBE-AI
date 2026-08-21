@@ -18,6 +18,7 @@ from system_prompts.system_messages import MODELING_AGENT_SYSTEM_PROMPT
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
 from tools.classification_tool import classification_modelling
 from autogen_core.tools import FunctionTool
+from services.resource_tools import guard_named_tools
 from services.timeout_policy import MCP_COMPUTE_READ_SECONDS
 
 modelling_classification_tool = classification_modelling
@@ -66,6 +67,15 @@ class ModelingAgent(AssistantAgent):
                              'write_agent_output', 'browse_workspace']
         
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
+        final_mcp_tools = guard_named_tools(
+            final_mcp_tools,
+            {
+                "pycaret_train_classifier": ("cpu_heavy",),
+                "pycaret_run_inference": ("cpu_heavy",),
+            },
+            session_id=str(session_id),
+            agent_id="modeling_agent",
+        )
         # modelling_classification_tool_wrapper = FunctionTool(
         #     func=classification_modelling,
         #     description="""

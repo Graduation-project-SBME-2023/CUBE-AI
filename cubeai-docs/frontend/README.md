@@ -13,7 +13,7 @@ The frontend is a customized **OHIF Viewer** built with React 18 and TypeScript.
 | Vite | Build tool & dev server |
 | Yarn | Package manager |
 | ReactFlow | Node-graph canvas for Research Playground |
-| Socket.IO Client | WebSocket communication with Agent System |
+| Browser WebSocket API | Session-scoped communication with Agent System |
 | OHIF Extensions | Custom panels and viewers |
 
 ---
@@ -98,15 +98,26 @@ Conversational interface that:
 
 ### WebsocketService
 
-**File:** `platform/app/src/utils/WebsocketService.js`
+**File:** `platform/app/src/utils/WebsocketService.ts`
 
-Singleton service that manages the Socket.IO connection:
+Singleton service that manages the native WebSocket connection. A session ID is
+required before it opens a socket:
 ```javascript
-websocketService.connect();
+websocketService.connect(sessionId);
 websocketService.isConnected();
-websocketService.emit('START_WORKFLOW', payload);
-websocketService.on('plan', handlePlan);
+websocketService.sendMessage({ type: 'user', payload: { text } });
+const unsubscribe = websocketService.subscribe(handleEvent);
 ```
+
+The service adds `session_id` and `message_id`, rejects cross-session outgoing
+messages, drops cross-session incoming events, deduplicates `event_id`, and uses
+bounded reconnect and pending-message buffers.
+
+The Research Playground also consumes `resource_status` events. While an agent
+is queued for CPU or GPU capacity, the canvas displays `WAITING_FOR_RESOURCE`
+with the resource names and queue position. This is a computational wait, so the
+chat input remains locked until the active pipeline reaches a genuine user-input
+or review state.
 
 ### PlanTransformationUtils
 

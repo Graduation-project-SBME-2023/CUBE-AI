@@ -829,6 +829,54 @@ class PipelineFailureTests(unittest.IsolatedAsyncioTestCase):
             AgentStatus.FAILED,
         )
 
+    async def test_resource_wait_status_is_visible_and_cleared_on_acquire(self):
+        monitor, service = self._monitor()
+
+        await monitor.on_resource_status(
+            {
+                "agent": "segmentation_agent",
+                "state": "WAITING_FOR_RESOURCE",
+                "resources": ["gpu_segmentation", "cpu_heavy"],
+                "queue_position": 2,
+            }
+        )
+
+        agent = monitor.agents["segmentation_agent"]
+        self.assertEqual(agent.status, AgentStatus.WAITING_FOR_RESOURCE)
+        self.assertEqual(agent.resources, ["gpu_segmentation", "cpu_heavy"])
+        self.assertEqual(agent.queue_position, 2)
+        self.assertTrue(service.broadcasts)
+
+        await monitor.on_resource_status(
+            {
+                "agent": "segmentation_agent",
+                "state": "ACQUIRED",
+                "resources": ["gpu_segmentation", "cpu_heavy"],
+            }
+        )
+
+        self.assertEqual(agent.status, AgentStatus.RUNNING)
+        self.assertIsNone(agent.resources)
+        self.assertIsNone(agent.queue_position)
+
+    async def test_pipeline_error_clears_resource_wait_metadata(self):
+        monitor, _service = self._monitor()
+        await monitor.on_resource_status(
+            {
+                "agent": "feature_extraction_agent",
+                "state": "WAITING_FOR_RESOURCE",
+                "resources": ["cpu_heavy"],
+                "queue_position": 1,
+            }
+        )
+
+        await monitor.on_pipeline_error(RuntimeError("pipeline stopped"))
+
+        agent = monitor.agents["feature_extraction_agent"]
+        self.assertEqual(agent.status, AgentStatus.FAILED)
+        self.assertIsNone(agent.resources)
+        self.assertIsNone(agent.queue_position)
+
     async def test_structured_failure_is_fatal_but_partial_is_not(self):
         failed_monitor, _service = self._monitor()
         await failed_monitor.on_agent_active("segmentation_agent")
