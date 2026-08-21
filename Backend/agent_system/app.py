@@ -88,6 +88,7 @@ from services.session_service import (
 from services.best_effort import drain_best_effort, initialize_best_effort
 from services.pipeline_monitor import PipelineMonitor, raise_for_fatal_tool_failure
 from services.population_handoff import require_population_handoff
+from services.resource_scheduler import resource_scheduler
 from clients.backend_client import BackendClient
 from agents.execution_agents.segmentation.progressive import (
     artifact_key_for_pair,
@@ -128,6 +129,7 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        await resource_scheduler.shutdown()
         await ws_manager.shutdown()
         await drain_best_effort(timeout_seconds=2.0)
 
@@ -257,6 +259,21 @@ def serve_static_pdf(file_path: str):
 
 # Single shared service — the only stateful object routes need to know about
 session_service = SessionService(ws_manager=ws_manager)
+
+
+async def _publish_resource_status(payload: dict) -> None:
+    session_id = str(payload.get("session_id") or "")
+    session = session_service.get_session(session_id)
+    if session and session.execution_monitor:
+        await session.execution_monitor.on_resource_status(payload)
+    await ws_manager.send_ws_message(
+        "resource_status",
+        payload,
+        session_id=session_id,
+    )
+
+
+resource_scheduler.set_notifier(_publish_resource_status)
 
 api_key = os.getenv("OLLAMA_API_KEY", "")
 
@@ -663,6 +680,7 @@ async def get_status(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     capacity = await session_service.execution_capacity.status(session_id)
     planning_capacity = await session_service.planning_capacity.status(session_id)
+    resource_capacity = await resource_scheduler.status(session_id)
     return {
         "session_id": session_id,
         "state": session.state.name,
@@ -675,6 +693,7 @@ async def get_status(session_id: str):
         ),
         "execution_capacity": capacity,
         "planning_capacity": planning_capacity,
+        "resource_capacity": resource_capacity,
     }
 
 
@@ -684,6 +703,7 @@ async def websocket_status():
         "active_connections": ws_manager.connection_count(),
         "active_sessions": len(ws_manager.connections_by_session),
         "input_queues": len(ws_manager.message_queues),
+        "resource_capacity": await resource_scheduler.status(),
     }
 
 
