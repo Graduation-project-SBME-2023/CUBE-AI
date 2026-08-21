@@ -78,7 +78,13 @@ python Backend/apps/radiology/scripts/run_local.py \
 - `radiology_app/integrations/` owns third-party integration utilities.
 - `lib/` remains the MONAI model plug-in layer containing configs, inferers,
   trainers, transforms, and active-learning tasks.
+- `vista3d/configs/` contains the VISTA bundle configuration copied into the
+  runtime model directory during startup.
+- `pydicom_seg/` contains patched package modules copied into backend images.
 - `scripts/` contains executable maintenance and local-development commands.
+
+`lib/trainers/CustomNnUnetTrainer.py` is mounted into the nnUNet package by
+Docker Compose so nnUNet can discover the custom trainer by class name.
 
 Dynamic workflow definitions are stored under
 `$RADIOLOGY_STATE_DIR/workflows.json`, defaulting to
