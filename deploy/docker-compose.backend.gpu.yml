@@ -194,9 +194,9 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/apps:/apps
       - ${COMPOSE_PROJECT_DIR}/Backend/monailabel:/monailabel
       - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
-      - ${COMPOSE_PROJECT_DIR}/Backend/models/configs/vista:/config/vista:ro
+      - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/vista3d/configs:/config/vista:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/storage_paths.py:/monailabel/storage_paths.py:ro
-      - ${COMPOSE_PROJECT_DIR}/Backend/overrides/nnunetv2/CustomNnUnetTrainer.py:/usr/local/lib/python3.10/dist-packages/nnunetv2/training/nnUNetTrainer/CustomNnUnetTrainer.py
+      - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/lib/trainers/CustomNnUnetTrainer.py:/usr/local/lib/python3.10/dist-packages/nnunetv2/training/nnUNetTrainer/CustomNnUnetTrainer.py:ro
     depends_on:
       orthanc:
         condition: service_started
