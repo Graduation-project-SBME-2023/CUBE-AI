@@ -61,6 +61,7 @@ def log_tool_state(event: ToolEvent):
     try:
         requests.post(
             "http://localhost:8150/events",
+            headers={"X-Internal-Token": os.environ.get("WS_INTERNAL_TOKEN", "")},
             json=asdict(event),
             timeout=1,
         )
@@ -77,6 +78,7 @@ def log_pdf_tool_view(event: Dict):
     try:
         requests.post(
             "http://localhost:8150/events",
+            headers={"X-Internal-Token": os.environ.get("WS_INTERNAL_TOKEN", "")},
             json=payload,
             timeout=1,
         )

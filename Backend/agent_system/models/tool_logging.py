@@ -45,7 +45,12 @@ class ToolEvent(BaseModel):
     source: str  # tool name or agent
     content_type: ContentType
     content: ContentPayload
-    session_id: str | None = None
+    session_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+    )
     timestamp: datetime = Field(default_factory=datetime.now)
 
 

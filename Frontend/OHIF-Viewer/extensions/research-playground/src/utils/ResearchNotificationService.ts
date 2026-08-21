@@ -289,9 +289,8 @@ class ResearchNotificationService {
       return;
     }
 
-    console.log('[ResearchNotificationService] Starting, connecting to:', websocketService['url']);
-    
-    websocketService.connect();
+    console.log('[ResearchNotificationService] Starting for:', websocketService.getUrl());
+
     this.wsUnsubscribe = websocketService.subscribe(this.handleWebSocketMessage);
     this.wsStatusUnsubscribe = websocketService.onStatusChange(this.handleWebSocketStatusChange);
 
