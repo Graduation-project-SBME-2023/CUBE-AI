@@ -144,6 +144,12 @@ function ResearchPlaygroundInner() {
   // also marked historical after the status check below; do not infer history
   // solely from sendInitialMessage because a running session can be reopened.
   const isHistoricalNavigation = Boolean(routeState.isHistorical || routeState.archived);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    websocketService.connect(String(sessionId));
+    return () => websocketService.disconnect();
+  }, [sessionId]);
   const activePhaseRef = useRef(activePhase);
   const viewedPhaseIdsRef = useRef<Set<string>>(new Set());
   const waitingPhaseIdsRef = useRef<Set<string>>(new Set());
@@ -415,6 +421,8 @@ function ResearchPlaygroundInner() {
                 );
                 const liveState = String(liveStatus?.state || '').toUpperCase();
                 const executionActive = Boolean(liveStatus?.execution_active);
+                const executionQueued =
+                    String(liveStatus?.execution_capacity?.state || '').toUpperCase() === 'QUEUED';
                 const requiresManualResume =
                     !sendInitialMessage &&
                     statuses.length > 0 &&
@@ -428,6 +436,7 @@ function ResearchPlaygroundInner() {
                     setRestoredMode('results');
                 } else if (
                     requiresManualResume ||
+                    executionQueued ||
                     hasProgress ||
                     ['RUNNING', 'PAUSED', 'FAILED', 'CANCELLED'].includes(liveState)
                 ) {
@@ -485,10 +494,17 @@ function ResearchPlaygroundInner() {
   useEffect(() => {
     // Wait for both: views mounted AND mode resolved before replaying
     if (!sessionId || !viewsReady || !restoredModeReady) return;
+    const replaySessionId = String(sessionId);
+    const abortController = new AbortController();
+    let cancelled = false;
+    const replayGeneration = websocketService.startReplayCapture();
+
     const replay = async () => {
-      websocketService.startReplayCapture();
       try {
-        await replaySessionLogs(sessionId);
+        const replayEvents = await replaySessionLogs(replaySessionId, abortController.signal);
+        if (cancelled || websocketService.getSessionId() !== replaySessionId) return;
+
+        websocketService.dispatchReplay(replayEvents);
         // Log history can contain older status broadcasts. Apply the current
         // persisted snapshot last so replay cannot roll the UI backwards.
         if (Array.isArray(hydratedExecutionState?.agents)) {
@@ -500,15 +516,25 @@ function ResearchPlaygroundInner() {
           });
         }
       } catch (err) {
-        console.error('[ResearchPlayground] Failed to replay logs:', err);
+        if (!cancelled && (err as any)?.name !== 'AbortError') {
+          console.error('[ResearchPlayground] Failed to replay logs:', err);
+        }
       } finally {
-        websocketService.stopReplayCapture();
+        websocketService.stopReplayCapture(replayGeneration);
         // Replayed events populate the views, but must never be presented as
         // a new update.  Future live events for an active session may alert.
-        updateStateRef.current.isHydrating = false;
+        if (!cancelled && updateStateRef.current.sessionId === replaySessionId) {
+          updateStateRef.current.isHydrating = false;
+        }
       }
     };
     replay();
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+      websocketService.stopReplayCapture(replayGeneration);
+    };
   }, [hydratedExecutionState, sessionId, viewsReady, restoredModeReady]);
 
   // ── Plan-driven sidebar: listen for pipeline plan events ───────────────────
@@ -920,8 +946,12 @@ function ResearchPlaygroundInner() {
 }
 
 export default function ResearchPlayground() {
+  const location = useLocation();
+  const routeState = (location.state || {}) as ResearchRouteState;
+  const sessionKey = String(routeState.sessionId || routeState.session_id || 'no-session');
+
   return (
-    <ResearchProvider>
+    <ResearchProvider key={sessionKey}>
       <ResearchPlaygroundInner />
     </ResearchProvider>
   );

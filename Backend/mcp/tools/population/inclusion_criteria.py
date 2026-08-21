@@ -61,7 +61,8 @@ async def write_inclusion_criteria(
     try:
         async with httpx.AsyncClient() as broadcast_client:
             await broadcast_client.post(
-                "http://localhost:8150/ws-broadcast", 
+                "http://localhost:8150/ws-broadcast",
+                headers={"X-Internal-Token": os.environ.get("WS_INTERNAL_TOKEN", "")},
                 json={
                     "type": "population_output",
                     "payload": {
