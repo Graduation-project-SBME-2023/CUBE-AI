@@ -28,7 +28,7 @@ class ExecutionCapacity:
         queue_capacity: int | None = None,
     ) -> None:
         self.max_concurrency = max_concurrency or _positive_int(
-            "PIPELINE_MAX_CONCURRENCY", 1
+            "PIPELINE_MAX_CONCURRENCY", 4
         )
         self.queue_capacity = queue_capacity or _positive_int(
             "PIPELINE_QUEUE_CAPACITY", 8

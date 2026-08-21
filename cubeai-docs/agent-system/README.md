@@ -180,6 +180,7 @@ Each server event uses this envelope:
 | `state_update` | `{state}` | Session lifecycle state |
 | `run_queued` | `{queue_position}` | Pipeline is waiting for capacity |
 | `planning_queued` | `{queue_position}` | Planning is waiting for capacity |
+| `resource_status` | `{state, resources, operation, queue_position}` | A heavy stage is waiting, acquired, or released |
 | `msg` | string or object | Chat message from an agent |
 | `protocol_error` | `{reason}` | Rejected client WebSocket message |
 
@@ -199,6 +200,39 @@ control events.
 Without Redis, routing and capacity queues are process-local. Run exactly one
 Agent System worker. A later multi-worker deployment must add a shared broker and
 distributed admission control before increasing the worker count.
+
+### Resource-Aware Concurrency
+
+Up to `PIPELINE_MAX_CONCURRENCY` sessions may execute at once, but expensive
+stages acquire process-local resource leases before doing work:
+
+- `gpu_segmentation` covers MONAI segmentation and defaults to one concurrent job.
+- `cpu_heavy` covers radiomics, PyCaret, and VoxTell cache-miss embedding and
+  defaults to one concurrent job.
+- A VoxTell cache miss acquires CPU and GPU atomically, so it cannot deadlock with
+  another stage.
+- Leases are released before segmentation review waits, allowing other sessions
+  to use the hardware while a user reviews results.
+
+Waiting agents use the `WAITING_FOR_RESOURCE` status. The wait queue is bounded,
+cancellation-safe, and resource-aware: an unrelated CPU job may proceed while a
+GPU job is blocked, but a later conflicting job cannot overtake an earlier one.
+
+Configure the scheduler with:
+
+```dotenv
+PIPELINE_MAX_CONCURRENCY=4
+RESOURCE_GPU_SEGMENTATION_CAPACITY=1
+RESOURCE_CPU_HEAVY_CAPACITY=1
+RESOURCE_WAIT_QUEUE_CAPACITY=32
+CPU_HEAVY_THREADS=4
+VOXTELL_CPU_THREADS=4
+```
+
+Keep both resource capacities at `1` until profiling proves the host has enough
+VRAM and CPU headroom. Increasing pipeline concurrency permits overlap between
+lightweight and differently constrained stages; it does not make heavy stages
+run simultaneously.
 
 ---
 

@@ -14,6 +14,7 @@ from system_prompts.system_messages import FEATURE_EXTRACTION_AGENT_SYSTEM_PROMP
 
 # from tools.feature_extraction_tools import extract_radiomic_features, analyze_feature_importance
 from autogen_core.tools import FunctionTool
+from services.resource_tools import guard_named_tools
 from services.timeout_policy import MCP_COMPUTE_READ_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,15 @@ class FeatureExtractionAgent(AssistantAgent):
             "browse_workspace",
         ]
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
+        final_mcp_tools = guard_named_tools(
+            final_mcp_tools,
+            {
+                "radiomics_extract_features": ("cpu_heavy",),
+                "radiomics_analyze_importance": ("cpu_heavy",),
+            },
+            session_id=str(session_id),
+            agent_id="feature_extraction_agent",
+        )
         name = "feature_extraction_agent"
         # tools = [feature_extraction_tool_wrapper, feature_importance_tool_wrapper, *final_mcp_tools]
         tools = final_mcp_tools

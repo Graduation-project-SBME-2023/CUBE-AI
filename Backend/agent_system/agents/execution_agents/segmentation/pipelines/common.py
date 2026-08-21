@@ -13,6 +13,14 @@ from ..logging_config import emit_tool_event
 logger = logging.getLogger(__name__)
 
 
+def resources_for_segmentation_item(work_item: dict) -> tuple[str, ...]:
+    resources = ["gpu_segmentation"]
+    model = str(work_item.get("model") or "").strip().lower()
+    if model == "voxtell" and not bool(work_item.get("cache_hit")):
+        resources.append("cpu_heavy")
+    return tuple(resources)
+
+
 class SegmentationPipelineError(RuntimeError):
     def __init__(
         self,
