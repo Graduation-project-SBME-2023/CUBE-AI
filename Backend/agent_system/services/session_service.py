@@ -16,6 +16,7 @@ from .execution_state import (
 )
 from .resume_recovery import reset_interrupted_agent
 from .best_effort import schedule_best_effort
+from .execution_capacity import ExecutionAdmission, ExecutionCapacity
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,10 @@ class SessionExecutionConflict(RuntimeError):
 
 class SessionPlanningConflict(RuntimeError):
     """Raised when a non-explicit planning request targets existing work."""
+
+
+class SessionCapacityExceeded(RuntimeError):
+    """Raised when all execution slots and queue positions are occupied."""
 
 
 class SessionService:
@@ -52,10 +57,22 @@ class SessionService:
         always traceable without crashing.
     """
 
-    def __init__(self, ws_manager):
+    def __init__(
+        self,
+        ws_manager,
+        execution_capacity: ExecutionCapacity | None = None,
+        planning_capacity: ExecutionCapacity | None = None,
+    ):
         self.store = SessionStore()
         self.tasks = TaskManager()
         self.ws = ws_manager
+        self.execution_capacity = execution_capacity or ExecutionCapacity()
+        self.planning_capacity = planning_capacity or ExecutionCapacity.from_environment(
+            "PLANNING_MAX_CONCURRENCY",
+            "PLANNING_QUEUE_CAPACITY",
+            default_max_concurrency=2,
+            default_queue_capacity=16,
+        )
         self._resume_locks: dict[str, asyncio.Lock] = {}
 
     # ------------------------------------------------------------------
@@ -76,6 +93,67 @@ class SessionService:
         clear_queue = getattr(self.ws, "clear_message_queue", None)
         if callable(clear_queue):
             clear_queue(session_id)
+
+    async def _schedule_execution(
+        self,
+        session: Session,
+        executor,
+        *,
+        restart: bool,
+        admission: ExecutionAdmission | None = None,
+    ) -> ExecutionAdmission:
+        admission = admission or await self.execution_capacity.reserve(
+            session.session_id
+        )
+        if not admission.accepted:
+            raise SessionCapacityExceeded(
+                "Pipeline capacity is full; retry after a running or queued session finishes"
+            )
+
+        initial_state = (
+            SessionState.QUEUED if admission.queued else SessionState.RUNNING
+        )
+        if admission.queued:
+            await self.update_state(session, SessionState.QUEUED)
+            await self._ws_send(
+                "run_queued",
+                {"queue_position": admission.queue_position},
+                session_id=session.session_id,
+            )
+
+        async def admitted_executor(active_session: Session) -> None:
+            try:
+                await self.execution_capacity.wait_for_turn(active_session.session_id)
+                if active_session.cancel_event.is_set():
+                    raise asyncio.CancelledError()
+                await self.update_state(active_session, SessionState.RUNNING)
+                await self._ws_send(
+                    "run_status",
+                    {"state": "RUNNING", "current_agent": None},
+                    session_id=active_session.session_id,
+                )
+                await executor(active_session)
+            finally:
+                await self.execution_capacity.release(active_session.session_id)
+
+        try:
+            if restart:
+                await self.tasks.restart_execution(
+                    session,
+                    admitted_executor,
+                    initial_state=initial_state,
+                )
+            else:
+                await self.tasks.start_execution(
+                    session,
+                    admitted_executor,
+                    initial_state=initial_state,
+                )
+        except BaseException:
+            await self.execution_capacity.release(session.session_id)
+            raise
+
+        return admission
 
     @staticmethod
     def _has_persisted_planning_state(session: Session) -> bool:
@@ -109,7 +187,7 @@ class SessionService:
         planner,
         *,
         restart: bool = False,
-    ) -> None:
+    ) -> ExecutionAdmission:
         logger.info(f"[{session_id}] Starting planning")
         session = await self.store.get_or_create_async(session_id)
         if session.planning_task and not session.planning_task.done():
@@ -158,11 +236,45 @@ class SessionService:
                 )
                 raise
 
-        self.tasks.start_planning(
-            session,
-            message,
-            planner_with_failure_notification,
-        )
+        admission = await self.planning_capacity.reserve(session_id)
+        if not admission.accepted:
+            raise SessionCapacityExceeded(
+                "Planning capacity is full; retry after another planning session finishes"
+            )
+
+        initial_state = SessionState.QUEUED if admission.queued else SessionState.PLANNING
+        if admission.queued:
+            await self.update_state(session, SessionState.QUEUED)
+            await self._ws_send(
+                "planning_queued",
+                {"queue_position": admission.queue_position},
+                session_id=session_id,
+            )
+
+        async def admitted_planner(
+            active_session: Session,
+            starting_message: str,
+        ) -> None:
+            try:
+                await self.planning_capacity.wait_for_turn(active_session.session_id)
+                if active_session.cancel_event.is_set():
+                    raise asyncio.CancelledError()
+                await self.update_state(active_session, SessionState.PLANNING)
+                await planner_with_failure_notification(active_session, starting_message)
+            finally:
+                await self.planning_capacity.release(active_session.session_id)
+
+        try:
+            self.tasks.start_planning(
+                session,
+                message,
+                admitted_planner,
+                initial_state=initial_state,
+            )
+        except BaseException:
+            await self.planning_capacity.release(session_id)
+            raise
+        return admission
 
     async def start_execution(
         self,
@@ -170,7 +282,7 @@ class SessionService:
         executor,
         *,
         restart: bool = False,
-    ) -> None:
+    ) -> ExecutionAdmission:
         logger.info(f"[{session_id}] Starting execution")
         session = await self.store.get_or_create_async(session_id)
 
@@ -214,9 +326,11 @@ class SessionService:
         session.resume_agent_statuses = {}
         if restart:
             self._clear_session_input(session_id)
-            await self.tasks.restart_execution(session, executor)
-        else:
-            await self.tasks.start_execution(session, executor)
+        return await self._schedule_execution(
+            session,
+            executor,
+            restart=restart,
+        )
 
     async def resume_pipeline(
         self,
@@ -266,6 +380,13 @@ class SessionService:
                     "The first incomplete plan step has no executable module or ID"
                 )
 
+            admission = await self.execution_capacity.reserve(session_id)
+            if not admission.accepted:
+                raise SessionCapacityExceeded(
+                    "Pipeline capacity is full; retry after a running or queued "
+                    "session finishes"
+                )
+
             try:
                 if reset_runtime_state is not None:
                     await reset_runtime_state(session_id, interrupted_agent)
@@ -276,16 +397,22 @@ class SessionService:
                     interrupted_agent,
                 )
             except (OSError, RuntimeError, ValueError) as exc:
+                await self.execution_capacity.release(session_id)
                 raise SessionExecutionConflict(
                     f"Could not safely clear interrupted artifacts for "
                     f"{interrupted_agent}: {exc}"
                 ) from exc
 
-            persisted = await BackendClient.update_plan_step(
-                interrupted_step_id,
-                {"status": "PENDING"},
-            )
+            try:
+                persisted = await BackendClient.update_plan_step(
+                    interrupted_step_id,
+                    {"status": "PENDING"},
+                )
+            except Exception:
+                await self.execution_capacity.release(session_id)
+                raise
             if persisted is None:
+                await self.execution_capacity.release(session_id)
                 raise SessionExecutionConflict(
                     f"Could not persist the reset of {interrupted_agent}; "
                     "execution was not started"
@@ -336,8 +463,12 @@ class SessionService:
             )
 
             self._clear_session_input(session_id)
-            await self.tasks.restart_execution(session, executor)
-            await self.update_state(session, SessionState.RUNNING)
+            admission = await self._schedule_execution(
+                session,
+                executor,
+                restart=True,
+                admission=admission,
+            )
             logger.info(
                 "[%s] Manually resumed pipeline from %s",
                 session_id,
@@ -345,7 +476,8 @@ class SessionService:
             )
             return {
                 "session_id": session_id,
-                "status": "resume_started",
+                "status": "queued" if admission.queued else "resume_started",
+                "queue_position": admission.queue_position,
                 "interrupted_agent": interrupted_agent,
                 "cleared_artifacts": cleared_artifacts,
             }
@@ -353,19 +485,41 @@ class SessionService:
     def pause(self, session_id: str) -> None:
         logger.info(f"[{session_id}] Pausing")
         session = self.store.require(session_id)
+        if session.state == SessionState.QUEUED:
+            raise SessionExecutionConflict(
+                "A queued execution cannot be paused; stop it to leave the queue"
+            )
         self.tasks.pause(session)
         asyncio.create_task(self._sync_state(session))
 
     def resume(self, session_id: str) -> None:
         logger.info(f"[{session_id}] Resuming")
         session = self.store.require(session_id)
+        if session.state == SessionState.QUEUED:
+            raise SessionExecutionConflict(
+                "Queued work cannot be resumed because it has not started"
+            )
         self.tasks.resume(session)
         asyncio.create_task(self._sync_state(session))
 
     def stop(self, session_id: str) -> None:
         logger.info(f"[{session_id}] Stopping")
         session = self.store.require(session_id)
+        queued_execution = (
+            session.state == SessionState.QUEUED
+            and session.execution_task is not None
+            and not session.execution_task.done()
+        )
+        queued_planning = (
+            session.state == SessionState.QUEUED
+            and session.planning_task is not None
+            and not session.planning_task.done()
+        )
         self.tasks.stop(session)
+        if queued_execution:
+            asyncio.create_task(self.execution_capacity.release(session_id))
+        if queued_planning:
+            asyncio.create_task(self.planning_capacity.release(session_id))
         self._clear_session_input(session_id)
         asyncio.create_task(self._sync_state(session))
 
@@ -373,7 +527,7 @@ class SessionService:
         logger.info(f"[{session_id}] Restarting execution")
         session = await self.store.require_async(session_id)
         self._clear_session_input(session_id)
-        await self.tasks.restart_execution(session, executor)
+        await self._schedule_execution(session, executor, restart=True)
 
     # ------------------------------------------------------------------
     # State updates — planners / executors call these
@@ -765,7 +919,11 @@ class SessionService:
                 ),
                 name=f"tool-log:{agent}",
             )
-        await self._ws_send(log.get("type"), log.get("payload"), log.get("session_id"))
+        await self._ws_send(
+            log.get("type"),
+            log.get("payload"),
+            session.session_id,
+        )
 
     async def update_tool_views(self, session, agent, msg_type, payload):
         step = next(

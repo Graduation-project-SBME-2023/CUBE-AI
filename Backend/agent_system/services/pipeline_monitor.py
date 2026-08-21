@@ -292,11 +292,44 @@ class PipelineMonitor:
         if self._last_active and self._last_active != source:
             await self._mark_completed(self._last_active)
 
-        if agent.status in (AgentStatus.PENDING, AgentStatus.FAILED):
+        if agent.status in (
+            AgentStatus.PENDING,
+            AgentStatus.FAILED,
+            AgentStatus.WAITING_FOR_RESOURCE,
+        ):
             agent.status = AgentStatus.RUNNING
-            agent.started_at = datetime.now()
+            if agent.started_at is None:
+                agent.started_at = datetime.now()
+            agent.resources = None
+            agent.queue_position = None
             self._last_active = source
             await self._broadcast()
+
+    async def on_resource_status(self, payload: dict[str, Any]) -> None:
+        source = str(payload.get("agent") or "")
+        if source not in self.agents:
+            return
+
+        agent = self.agents[source]
+        state = str(payload.get("state") or "").upper()
+        if self._last_active and self._last_active != source:
+            await self._mark_completed(self._last_active)
+
+        if agent.started_at is None:
+            agent.started_at = datetime.now()
+        self._last_active = source
+
+        if state == "WAITING_FOR_RESOURCE":
+            agent.status = AgentStatus.WAITING_FOR_RESOURCE
+            agent.resources = [str(value) for value in payload.get("resources", [])]
+            agent.queue_position = payload.get("queue_position")
+        elif state == "ACQUIRED":
+            agent.status = AgentStatus.RUNNING
+            agent.resources = None
+            agent.queue_position = None
+        else:
+            return
+        await self._broadcast()
 
     async def on_tool_result(
         self,
@@ -334,6 +367,8 @@ class PipelineMonitor:
             agent.status = AgentStatus.FAILED
             agent.finished_at = datetime.now()
             agent.error = content[:300]
+            agent.resources = None
+            agent.queue_position = None
             self._last_active = source
             await self._broadcast()
 
@@ -359,18 +394,28 @@ class PipelineMonitor:
 
     async def on_pipeline_error(self, error: Exception):
         """Mark whatever was running as failed."""
-        if self._last_active and self.agents[self._last_active].status == AgentStatus.RUNNING:
+        if self._last_active and self.agents[self._last_active].status in {
+            AgentStatus.RUNNING,
+            AgentStatus.WAITING_FOR_RESOURCE,
+        }:
             agent = self.agents[self._last_active]
             agent.status = AgentStatus.FAILED
             agent.finished_at = datetime.now()
             agent.error = str(error)
+            agent.resources = None
+            agent.queue_position = None
         await self._broadcast()
 
     async def _mark_completed(self, name: str) -> None:
         agent = self.agents[name]
-        if agent.status == AgentStatus.RUNNING:
+        if agent.status in {
+            AgentStatus.RUNNING,
+            AgentStatus.WAITING_FOR_RESOURCE,
+        }:
             agent.status = AgentStatus.COMPLETED
             agent.finished_at = datetime.now()
+            agent.resources = None
+            agent.queue_position = None
 
     async def on_tool_event(self, event: ToolEvent) -> None:
         agent = event.source
@@ -394,6 +439,8 @@ class PipelineMonitor:
                 "started_at": a.started_at.isoformat() if a.started_at else None,
                 "finished_at": a.finished_at.isoformat() if a.finished_at else None,
                 "error": a.error,
+                "resources": a.resources,
+                "queue_position": a.queue_position,
             }
             for a in self.agents.values()
         ]

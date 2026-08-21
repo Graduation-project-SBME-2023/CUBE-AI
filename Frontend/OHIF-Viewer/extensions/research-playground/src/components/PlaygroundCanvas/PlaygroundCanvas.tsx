@@ -412,7 +412,9 @@ export default function PlaygroundCanvas({
 
   useEffect(() => {
     registerAllLogRenderers();
-    websocketService.connect();
+    if (session_id) {
+      websocketService.connect(String(session_id));
+    }
 
     const unsubscribeMsg = websocketService.subscribe((data: any) => {
       const { type, payload } = data;
@@ -602,7 +604,7 @@ export default function PlaygroundCanvas({
       unsubscribeMsg();
       unsubscribeStatus();
     };
-  }, [appendToolEventToNode, applyBackendPlan, updateCurrentAgent, updateNodeData, updatePipelineAgentStatuses]);
+  }, [appendToolEventToNode, applyBackendPlan, session_id, updateCurrentAgent, updateNodeData, updatePipelineAgentStatuses]);
 
   useEffect(() => {
     if (autoStartPlanning && initialHypothesis && session_id && !hasInitiatedPlan.current) {
@@ -621,6 +623,15 @@ export default function PlaygroundCanvas({
           });
           if (!response.ok) {
             console.error('Failed to initiate planning session');
+            return;
+          }
+          const responseBody = await response.json().catch(() => ({}));
+          if (responseBody?.status === 'queued') {
+            websocketService.dispatchLocal({
+              type: 'msg',
+              payload: `Planning is queued${responseBody?.queue_position ? ` at position ${responseBody.queue_position}` : ''}. It will start when planning capacity is available.`,
+              session_id: session_id,
+            });
           }
         } catch (error) {
           console.error('Error contacting planner API:', error);
@@ -631,20 +642,6 @@ export default function PlaygroundCanvas({
     }
   }, [autoStartPlanning, includeLitReview, initialHypothesis, session_id]);
 
-  const sendPlanToBackend = useCallback(
-    (nodesData: FlowNode[], edgesData: FlowEdge[]) => {
-      websocketService.sendMessage({
-        type: 'PLAN_UPDATE',
-        nodes: nodesData,
-        edges: edgesData,
-        mode,
-        session_id,
-        timestamp: new Date().toISOString(),
-      });
-    },
-    [mode, session_id]
-  );
-
   const handleNodesChange = useCallback(
     (updatedNodes: FlowNode[]) => {
       const isUserStructuralEdit = updatedNodes.length !== nodes.length; // rough heuristic, ideally check for actual structural changes
@@ -654,11 +651,8 @@ export default function PlaygroundCanvas({
         setCountdown(null);
       }
       setNodes(updatedNodes);
-      if (mode === 'planning' || mode === 'generated' || mode === 'manual') {
-        sendPlanToBackend(updatedNodes, edges);
-      }
     },
-    [mode, edges, sendPlanToBackend, nodes.length]
+    [mode, nodes.length]
   );
 
   const startExecution = async () => {
@@ -699,6 +693,8 @@ export default function PlaygroundCanvas({
         return;
       }
 
+      const responseBody = await response.json().catch(() => ({}));
+      const wasQueued = responseBody?.status === 'queued';
       restartRequestedRef.current = false;
       onClearTabData?.();
       setMode('executing');
@@ -710,7 +706,9 @@ export default function PlaygroundCanvas({
 
       websocketService.dispatchLocal({
         type: 'msg',
-        payload: 'Pipeline execution has started. You can track the progress of each agent on the canvas.',
+        payload: wasQueued
+          ? `Pipeline execution is queued${responseBody?.queue_position ? ` at position ${responseBody.queue_position}` : ''}. It will start when resources are available.`
+          : 'Pipeline execution has started. You can track the progress of each agent on the canvas.',
         session_id: session_id,
       });
     } catch (error) {
@@ -777,9 +775,6 @@ export default function PlaygroundCanvas({
     setRequiresRecoveryResume(false);
     setNodes(createInitialNodes(initialHypothesis));
     setEdges(INITIAL_EDGES);
-    if (websocketService.isConnected()) {
-      websocketService.sendMessage({ type: 'RESET_WORKFLOW' });
-    }
   };
 
   const handleDrop = (event: React.DragEvent) => {
@@ -810,7 +805,6 @@ export default function PlaygroundCanvas({
 
     const updatedNodes = nodes.concat(newNode);
     setNodes(updatedNodes);
-    sendPlanToBackend(updatedNodes, edges);
   };
 
   const handleDragOver = (event: React.DragEvent) => {

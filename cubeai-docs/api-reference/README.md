@@ -92,79 +92,75 @@ Returns the compiled PDF file.
 
 ## Agent System WebSocket API
 
-Connect to the FastAPI WebSocket at `ws://localhost:8150/ws` in development or `/ws` on the production origin.
+Connect to the native FastAPI WebSocket at `ws://localhost:8150/ws` in
+development or `/ws` on the production origin. The `session_id` query
+parameter is mandatory and binds the socket for its lifetime.
 
 ### Connection
 ```javascript
-import { io } from 'socket.io-client';
-const socket = new WebSocket('ws://localhost:8150/ws');
+const sessionId = '3d1df5d1-8ff5-46f5-8ac6-f6c5dc44f35a';
+const socket = new WebSocket(
+  `ws://localhost:8150/ws?session_id=${encodeURIComponent(sessionId)}`
+);
 ```
 
 ### Events — Client → Server
 
 #### Send Chat Message
 ```javascript
-socket.emit('message', {
-  content: "Analyze CT features in brain tumor patients"
-});
+socket.send(JSON.stringify({
+  type: 'user',
+  message_id: crypto.randomUUID(),
+  session_id: sessionId,
+  payload: { text: 'Analyze CT features in brain tumor patients' }
+}));
 ```
 
-#### Start Workflow Execution
-```javascript
-socket.emit('START_WORKFLOW', {
-  session_id: "abc123"
-});
-```
-
-#### Reset Workflow
-```javascript
-socket.emit('RESET_WORKFLOW', {});
-```
+Start, restart, pause, resume, and stop the workflow through the corresponding
+REST endpoints. Unsupported WebSocket control events are ignored.
 
 ---
 
 ### Events — Server → Client
 
-#### Plan Ready
 ```javascript
-socket.on('plan', (data) => {
-  // data.steps = [{name, description, status, matched_module}, ...]
+socket.addEventListener('message', event => {
+  const message = JSON.parse(event.data);
+  if (message.session_id !== sessionId) return;
+  console.log(message.type, message.payload);
 });
 ```
 
-#### Plan Updated
-```javascript
-socket.on('PLAN_UPDATE', (data) => {
-  // Same structure as 'plan'
-});
+Every server message contains `version`, `event_id`, `sequence`, `session_id`,
+`run_id`, `type`, `payload`, `timestamp`, and `replaying`. Clients should ignore
+events for another session and deduplicate by `event_id`.
+
+The current no-Redis deployment supports one Agent System worker. WebSocket
+registries and execution queues are process-local, so multiple workers require a
+shared event broker and distributed capacity controller.
+
+#### Heavy-Resource Status
+
+Heavy stages emit `resource_status` messages with `state` equal to
+`WAITING_FOR_RESOURCE`, `ACQUIRED`, or `RELEASED`:
+
+```json
+{
+  "type": "resource_status",
+  "payload": {
+    "session_id": "abc123",
+    "agent": "segmentation_agent",
+    "operation": "segmentation_agent.infer:pair-1",
+    "resources": ["gpu_segmentation", "cpu_heavy"],
+    "state": "WAITING_FOR_RESOURCE",
+    "queue_position": 1
+  }
+}
 ```
 
-#### Node Status Update
-```javascript
-socket.on('node', (data) => {
-  // data = { id: "step_1", status: "running"|"done"|"error", logs: "..." }
-});
-```
-
-```javascript
-socket.on('NODE_UPDATE', (data) => {
-  // Same structure as 'node'
-});
-```
-
-#### Chat Message
-```javascript
-socket.on('message', (data) => {
-  // data = { role: "assistant", content: "..." }
-});
-```
-
-#### Error
-```javascript
-socket.on('error', (data) => {
-  // data = { message: "..." }
-});
-```
+`GET /status/{session_id}` includes that session's active and waiting leases in
+`resource_capacity`. `GET /ws-status` exposes the global resource-capacity
+snapshot for operations and diagnostics.
 
 ---
 
