@@ -1,92 +1,75 @@
-# 🧠 CUBE.AI — Centralized Documentation Hub
+# CUBE.AI documentation
 
-> **CUBE.AI** is a full-stack, AI-powered clinical research platform built on top of OHIF Viewer, Orthanc DICOM server, MONAI Label, and a multi-agent research pipeline backed by LLMs. This folder is the **single source of truth** for all project documentation.
+CUBE.AI is a medical-imaging research platform built around a customized OHIF Viewer. It integrates Orthanc DICOM storage, PostgreSQL application metadata, MONAI Label inference and training, and an LLM-driven multi-agent radiomics pipeline.
 
----
+This directory is the human-facing source of truth for the project. Start with the system overview, then follow the subsystem guide relevant to your work.
 
-## 📚 Documentation Sections
+## Documentation map
 
-| Section | Description |
+| Section | Use it for |
 |---|---|
-| [🏗️ Architecture](./architecture/README.md) | System overview, component diagram, and data flow |
-| [🚀 Getting Started](./getting-started/README.md) | Quick start, prerequisites, and first-run guide |
-| [⚙️ Deployment](./deployment/README.md) | Dev & production deployment with Docker |
-| [🔧 Backend](./backend/README.md) | Backend services: MONAI Label, Orthanc, PostgreSQL, Agent System |
-| [🎨 Frontend](./frontend/README.md) | OHIF Viewer extensions, Research Playground, UI components |
-| [🤖 Agent System](./agent-system/README.md) | Multi-agent AI pipeline, agent I/O contracts, agent descriptions |
-| [🗄️ Database](./database/README.md) | PostgreSQL schema, Alembic migrations, data models |
-| [📡 API Reference](./api-reference/README.md) | REST API endpoints for all backend services |
-| [🔬 Research Playground](./research-playground/README.md) | Canvas-based research pipeline UI and WebSocket protocol |
-| [📝 Changelog & Refactoring](./changelog/README.md) | Notable refactors, version notes, and code evolution |
+| [System overview](./system-overview.md) | Product capabilities, repository map, service ownership, runtime flows, storage, and verification |
+| [Architecture](./architecture/README.md) | Deployment topology, ports, ingress, data boundaries, and architectural decisions |
+| [Getting started](./getting-started/README.md) | First-time configuration and local startup |
+| [Deployment](./deployment/README.md) | Development and production Compose combinations |
+| [Backend](./backend/README.md) | Application API, agent system, MONAI/radiology, Orthanc, and PostgreSQL |
+| [Frontend](./frontend/README.md) | OHIF customizations, worklist/workflows, assisted segmentation, and Research Playground |
+| [Agent system](./agent-system/README.md) | Planning/execution pipeline, session isolation, scheduling, and agent contracts |
+| [Database](./database/README.md) | SQLAlchemy models, repositories, Alembic migrations, and seed data |
+| [API reference](./api-reference/README.md) | REST and WebSocket contracts |
+| [Research Playground](./research-playground/README.md) | User workflow, canvas phases, and live event handling |
+| [Backend testing](./backend/testing.md) | Test suites, markers, dependencies, and CI behavior |
+| [Changelog and refactoring](./changelog/README.md) | Significant design changes and migration notes |
 
----
+Codex-specific repository context is kept in [`.codex/`](../.codex/README.md) and is discovered through [`AGENTS.md`](../AGENTS.md).
 
-## 🗺️ Project At a Glance
+## System at a glance
 
-```
-CUBE.AI Platform
-│
-├── Frontend  (React / OHIF Viewer)
-│   ├── Research Playground  ← AI pipeline canvas + chat
-│   ├── OHIF Viewer          ← DICOM visualization
-│   └── Workflow UI          ← Annotation & training workflows
-│
-├── Backend
-│   ├── Agent System         ← Multi-agent LLM research pipeline (FastAPI + WebSocket)
-│   ├── MONAI Label          ← AI-assisted segmentation server
-│   ├── Orthanc              ← DICOM PACS server
-│   └── PostgreSQL           ← Persistent data store (Alembic migrations)
-│
-└── Infrastructure
-    ├── Docker Compose       ← Full stack orchestration
-    └── Ollama               ← Local LLM runtime
+```text
+OHIF browser client
+    |
+    +-- Application API ---- PostgreSQL metadata
+    +-- Agent System ------- LLM planning and research execution
+    +-- MONAI Label -------- segmentation, data preparation, and training
+    +-- Orthanc ------------ DICOM and DICOMweb
 ```
 
----
+The processes share a product, not ownership:
 
-## ⚡ Quick Start
+- The **Application API** is the only service that directly accesses PostgreSQL.
+- **MONAI Label** owns inference and training but has no database credentials.
+- The **Agent System** orchestrates session-scoped research pipelines and calls the other services over HTTP.
+- **Orthanc** owns DICOM objects; PostgreSQL stores searchable application metadata about them.
+- **OpenResty** is the production ingress and maps `/api`, `/agents`, `/inference`, `/pacs`, and `/ws` to internal services.
+- Generated files live under `Backend/storage/`; source code must resolve them through `Backend/storage_paths.py`.
 
-**1. Clone the repository**
+## Quick start
+
+1. Copy `deploy/.env.example` to `deploy/.env` and review the values.
+2. Start Docker Desktop and Ollama.
+3. Use the repository launcher:
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File scripts/launch.ps1
+```
+
 ```bash
-git clone https://github.com/Graduation-project-SBME-2023/OHIF-Standalone.git
-cd OHIF-Standalone
-git checkout demoV2.0
+# Linux/macOS
+bash scripts/launcher.linux.sh
 ```
 
-**2. Set the required environment variable**
-```bash
-# macOS / Linux
-export COMPOSE_PROJECT_DIR="$(pwd)"
+The launcher sets `COMPOSE_PROJECT_DIR`, checks dependencies, lets you choose CPU or GPU, migrates legacy storage safely, starts the stack, and waits for health checks. The production UI is available at `http://localhost`.
 
-# Windows (PowerShell)
-$env:COMPOSE_PROJECT_DIR = (Get-Location).Path
-```
+For a source-mounted backend and frontend development server, follow [Getting started](./getting-started/README.md).
 
-**3. Start the backend**
-```bash
-docker compose --env-file deploy/.env -f deploy/docker-compose.backend.gpu.yml -f deploy/docker-compose.backend.dev.yml up
-```
+## Project context
 
-**4. Start the frontend**
-```bash
-cd Frontend/OHIF-Viewer
-yarn install && yarn run dev
-# App available at http://localhost:3000
-```
+This platform was built as a graduation project by the SBME 2023 cohort at Cairo University's Systems and Biomedical Engineering department. Its major clinical-research capabilities are:
 
-> For full deployment options see [Deployment Guide](./deployment/README.md).
+- DICOM management and viewing through Orthanc and OHIF.
+- Assisted and automated segmentation through MONAI Label, nnUNet, VISTA, and interactive tools.
+- Cohort construction, radiomics feature extraction, machine-learning modeling, and report generation through the agent pipeline.
+- Annotation workflows and training-job management from the viewer.
 
----
-
-## 🏆 Team & Project Context
-
-This platform was built as a **Graduation Project** by the **SBME 2023 cohort** at Cairo University's Systems & Biomedical Engineering department. It provides clinicians and researchers with an integrated environment for:
-
-- 📂 **DICOM management** via Orthanc
-- 🔬 **AI-assisted segmentation** via MONAI Label + nnUNet
-- 🧪 **Automated radiomics research** via the multi-agent pipeline
-- 📊 **LaTeX report generation** from study results
-
----
-
-*Last updated: June 2026*
+Last verified against the repository: August 2026.
