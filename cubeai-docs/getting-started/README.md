@@ -1,115 +1,110 @@
-# 🚀 Getting Started
+# Getting started
 
-This guide walks you through setting up CUBE.AI for the first time on your local machine.
-
----
+This guide covers a first local CUBE.AI setup. Use the guided launchers for the normal full stack; use the manual commands when actively developing source code.
 
 ## Prerequisites
 
-Before you begin, make sure you have the following installed:
-
-| Tool | Version | Notes |
+| Tool | Version | Needed for |
 |---|---|---|
-| **Docker** | 24+ | Required for all backend services |
-| **Docker Compose** | v2+ | Bundled with Docker Desktop |
-| **Node.js** | 18+ | For frontend development |
-| **Yarn** | 1.22+ | Frontend package manager |
-| **Ollama** | Latest | LLM runtime (for the agent pipeline) |
-| **Python** | 3.11.3 | Only needed for local agent dev |
-| **Git** | Any | For cloning the repository |
+| Docker and Docker Compose | Docker 24+ / Compose v2+ | All backend services and production frontend |
+| Ollama | Current supported release | Default LLM provider for the Agent System |
+| Node.js and Yarn Classic | Node 18+ / Yarn 1.22+ | Frontend development; production builds with Node 20 |
+| Python | 3.11.3 recommended | Local agent development, tests, and storage migration |
+| Git | Current supported release | Source checkout |
 
----
+GPU mode additionally requires an NVIDIA GPU, compatible drivers, and NVIDIA Container Toolkit. CPU mode works without CUDA but is slower for inference.
 
-## Step 1 — Install Ollama
+## 1. Configure Ollama
 
-The Agent System requires Ollama to run LLM inference locally or via cloud.
+Install and start Ollama, then verify it responds:
 
-**macOS / Linux:**
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-```
-
-**Windows:**  
-Download the installer from [https://ollama.com/download](https://ollama.com/download) and follow the prompts.
-
-**Verify installation:**
 ```bash
 ollama --version
+ollama list
 ```
 
-**Pull the required model:**
+The default configured agent model is `gpt-oss:120b-cloud`. Cloud-hosted Ollama models may require login:
+
 ```bash
-# Log in (needed for cloud models)
 ollama login
-
-# Pull the model used by the agent pipeline
-ollama pull deepseek-v3.1:671b-cloud
-
-# Verify it responds
-ollama run deepseek-v3.1:671b-cloud
-# Type a test message, then exit with /bye
+ollama pull gpt-oss:120b-cloud
+ollama run gpt-oss:120b-cloud
 ```
 
----
+The Research Playground can also configure an OpenAI or Azure OpenAI-compatible provider through the Agent System client settings. Ollama is what the launchers check by default.
 
-## Step 2 — Clone the Repository
+## 2. Clone and configure
 
 ```bash
 git clone https://github.com/Graduation-project-SBME-2023/OHIF-Standalone.git
 cd OHIF-Standalone
-git checkout demoV2.0
 ```
 
----
+Create the local environment file from the tracked template:
 
-## Step 3 — Configure Environment Variables
+```powershell
+# Windows
+Copy-Item deploy/.env.example deploy/.env
+```
 
-The Docker Compose files use `COMPOSE_PROJECT_DIR` to resolve volume paths.
-
-**macOS / Linux:**
 ```bash
-export COMPOSE_PROJECT_DIR="$(pwd)"
+# Linux/macOS
+cp deploy/.env.example deploy/.env
 ```
 
-**Windows (PowerShell):**
+Review `deploy/.env` before startup. Change development passwords and provider settings as needed. Never commit the populated file or paste its secrets into logs or issues.
+
+## 3. Recommended full-stack startup
+
+### Windows
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/launch.ps1
+```
+
+The launcher prompts for CPU or GPU, sets `COMPOSE_PROJECT_DIR`, runs the safe legacy-storage migration, starts the backend and production frontend, waits for health, and follows logs. Open `http://localhost` when ready.
+
+For backend only, using images already present locally:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/launch.backend.ps1
+```
+
+### Linux or macOS
+
+```bash
+bash scripts/launcher.linux.sh
+```
+
+This launcher prompts for CPU/GPU and Docker/development frontend modes. For backend only:
+
+```bash
+bash scripts/launcher.backend.linux.sh
+```
+
+## 4. Manual development startup
+
+Set the absolute repository root because Compose uses it for bind mounts:
+
 ```powershell
 $env:COMPOSE_PROJECT_DIR = (Get-Location).Path
 ```
 
-> 💡 Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, or PowerShell profile) so it persists across sessions.
-
----
-
-## Step 4 — Start the Backend
-
-**With GPU (recommended):**
 ```bash
-docker compose --env-file deploy/.env \
-               -f deploy/docker-compose.backend.gpu.yml \
-               -f deploy/docker-compose.backend.dev.yml up
+export COMPOSE_PROJECT_DIR="$(pwd)"
 ```
 
-**CPU only:**
-```bash
-docker compose --env-file deploy/.env \
-               -f deploy/docker-compose.backend.cpu.yml \
-               -f deploy/docker-compose.backend.dev.yml up
+Start one backend base plus the development override:
+
+```powershell
+# CPU
+docker compose --env-file deploy/.env -f deploy/docker-compose.backend.cpu.yml -f deploy/docker-compose.backend.dev.yml up
+
+# GPU
+docker compose --env-file deploy/.env -f deploy/docker-compose.backend.gpu.yml -f deploy/docker-compose.backend.dev.yml up
 ```
 
-This will start:
-- 🗃️ **Orthanc** — DICOM server at `http://localhost:8043`
-- **Application API** — CRUD, chat, workflow, and sync at `http://localhost:8001`
-- 🤖 **MONAI Inference** — Segmentation and training at `http://localhost:8000`
-- 🗄️ **PostgreSQL** — Database at `localhost:5433`
-- 🧠 **Agent System** — Research pipeline at `http://localhost:8150`
-
-Wait until you see all services report `ready` or similar startup messages.
-
----
-
-## Step 5 — Start the Frontend
-
-Open a new terminal window:
+In a second terminal, start the Webpack development server:
 
 ```bash
 cd Frontend/OHIF-Viewer
@@ -117,58 +112,61 @@ yarn install
 yarn run dev
 ```
 
-The frontend will be available at **[http://localhost:3000](http://localhost:3000)**.
+Open `http://localhost:3000`.
 
----
+## 5. Verify services
 
-## Step 6 — Verify Everything is Running
-
-| Service | URL | Expected Response |
+| Service | Development URL | Expected result |
 |---|---|---|
-| OHIF Viewer | http://localhost:3000 | Study list page loads |
-| Orthanc Web UI | http://localhost:8043 | Orthanc dashboard |
-| Application API | http://localhost:8001/health/ready | `ready` status after migrations |
-| MONAI Inference API | http://localhost:8000/info/ | JSON with server info |
-| Agent System | http://localhost:8150/health | `{"status": "ok"}` |
+| OHIF development server | `http://localhost:3000` | Worklist loads |
+| Application API | `http://localhost:8001/health/ready` | `status: ready` plus an Alembic revision |
+| Agent System | `http://localhost:8150/client-config` | Current client configuration JSON |
+| MONAI Label | `http://localhost:8000/info/` | Server/model information JSON |
+| Orthanc | `http://localhost:8043/system` | Orthanc system information JSON |
+| PostgreSQL | `localhost:5433` | Accepts configured credentials |
 
----
+In production, use `http://localhost`, `/api/health/ready`, `/agents/client-config`, `/inference/info/`, and `/pacs/system` through the same origin. PostgreSQL and backend ports can be hidden by the production backend overlay.
 
-## Loading Your First DICOM Study
+## 6. Load a DICOM study
 
-1. Open the **Orthanc Web UI** at `http://localhost:8043`
-2. Log in with credentials: `orthanc` / `orthanc` (default)
-3. Click **Upload** and select a DICOM file or ZIP of DICOM series
-4. Navigate to `http://localhost:3000` — your study should appear in the worklist
+1. Open Orthanc Explorer at `http://localhost:8043` in development.
+2. Sign in with the credentials configured in `deploy/.env`.
+3. Upload a DICOM file or archive.
+4. Wait for the series to become stable. Orthanc notifies the Application API, which synchronizes metadata to PostgreSQL.
+5. Refresh the OHIF worklist and open the study.
 
----
+Do not use identifiable patient data in shared development or test environments without the required clinical-data controls.
 
-## Running Your First Research Pipeline
+## 7. Run a research pipeline
 
-1. Open the worklist at `http://localhost:3000`
-2. Select a study that has been successfully uploaded
-3. Click **Open in Research Playground** (or navigate to the playground from the study viewer)
-4. In the **Chat Sidebar**, describe your research question:
-   > *"Analyze the correlation between tumor volume and patient age in this cohort."*
-5. Watch the **Canvas** populate with agent nodes as the pipeline is planned
-6. Review the plan, then click **Execute**
-7. Monitor agent progress in the node graph and view the final PDF report
+1. Open the Research Playground from the viewer or worklist.
+2. Describe the population, modality, ROI, comparison, and outcome clearly.
+3. Review the proposed hypothesis and pipeline.
+4. Resolve cohort or segmentation review pauses.
+5. Start execution and watch node/resource events.
+6. Inspect feature/model outputs and download the report.
 
----
+`WAITING_FOR_RESOURCE` means GPU or CPU-heavy work is queued. It is not a request for user input.
 
-## Common First-Run Issues
+## Troubleshooting
 
-| Problem | Solution |
+| Problem | Check |
 |---|---|
-| Docker containers fail to start | Run `docker compose down -v` then retry |
-| Frontend can't connect to backend | Ensure `COMPOSE_PROJECT_DIR` is set correctly |
-| Ollama model not found | Run `ollama pull deepseek-v3.1:671b-cloud` |
-| MONAI Label crashes on startup | Check GPU drivers; use CPU compose file instead |
-| No studies appear in OHIF | Upload via Orthanc UI first |
+| Launcher cannot find `.env` | Copy `deploy/.env.example` to `deploy/.env` |
+| Bind-mount path errors | Ensure `COMPOSE_PROJECT_DIR` is the absolute repository root; launchers set it automatically |
+| Agent health takes a long time | Cold imports may take more than two minutes; Compose allows a 180-second start period |
+| Agent model fails | Confirm Ollama is running, the model exists, and client settings use a reachable base URL |
+| MONAI fails in GPU mode | Check drivers and Container Toolkit, then try the CPU compose file |
+| Studies do not appear | Check Orthanc logs, the stable-series webhook, and Application API sync status |
+| Frontend cannot reach a service | Distinguish direct development ports from production same-origin prefixes |
+| Database is not ready | Inspect `db-migrate`, `db-seed`, `postgres`, then `application-api` logs |
 
----
+Avoid `docker compose down -v` as a generic fix: `-v` removes named PostgreSQL and Orthanc volumes and can destroy local data. Use it only for a deliberate full reset with backups.
 
-## Next Steps
+## Next steps
 
-- 📖 [Architecture Overview](../architecture/README.md) — Understand how everything connects
-- ⚙️ [Deployment Guide](../deployment/README.md) — Production setup
-- 🤖 [Agent System](../agent-system/README.md) — Deep dive into the AI pipeline
+- [System overview](../system-overview.md)
+- [Architecture](../architecture/README.md)
+- [Deployment](../deployment/README.md)
+- [Backend testing](../backend/testing.md)
+- [Agent System](../agent-system/README.md)
