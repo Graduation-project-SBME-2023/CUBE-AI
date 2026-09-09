@@ -234,7 +234,7 @@ services:
     restart: unless-stopped
 
   orthanc:
-    image: jodogne/orthanc-plugins
+    image: jodogne/orthanc-plugins:1.12.10
     hostname: orthanc
     container_name: orthanc-backend
     ports:
