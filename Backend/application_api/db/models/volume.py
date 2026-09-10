@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy.sql import func
 from application_api.db.base import Base
 
 class Volume(Base):
@@ -12,5 +13,5 @@ class Volume(Base):
     series_description = Column(String, nullable=True)
     modality = Column(String, nullable=True)
     num_slices = Column(Integer, nullable=True)
-    created_at = Column(DateTime, nullable=True)  # ISO format date-time
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())  # ISO format date-time
     

@@ -75,11 +75,11 @@ async def create_plan_with_steps(
         await db.flush()
 
         # create steps
-        for order, step in enumerate(plan_in.steps, start=1):
+        for step_order, step in enumerate(plan_in.steps, start=1):
             new_step = PlanStep(
                 id=uuid4(),
                 plan_id=new_plan.id,
-                order=order,
+                step_order=step_order,
                 **step.dict()
             )
             db.add(new_step)
@@ -164,9 +164,9 @@ async def update_plan_with_steps(
 
             received_ids = set()
 
-            for order, step in enumerate(plan_in.steps, start=1):
+            for step_order, step in enumerate(plan_in.steps, start=1):
 
-                step_dict = step.model_dump(exclude_unset=True, exclude={"order"})
+                step_dict = step.model_dump(exclude_unset=True, exclude={"step_order"})
 
                 # update existing step
                 if "id" in step_dict and str(step_dict["id"]) in existing_steps:
@@ -178,14 +178,14 @@ async def update_plan_with_steps(
                         if field != "id":
                             setattr(step_obj, field, value)
 
-                    step_obj.order = order
+                    step_obj.step_order = step_order
 
                 else:
                     # create new step
                     new_step = PlanStep(
                         id=uuid4(),
                         plan_id=plan_id,
-                        order=order,
+                        step_order=step_order,
                         **step_dict
                     )
                     db.add(new_step)

@@ -161,6 +161,16 @@ history, or neither.
 **Fix:** Run the verification below, then write one reconciliation migration that makes the DB match
 whichever side (ORM or DDL) is intended, and update the other side to match.
 
+**Status:** partially landed. `b2c3d4e5f6a1` took the constraint/index half (D-4/D-5/D-6/D-26).
+`c9d0e1f2a3b4` ("schema drift: column types, dead columns, reserved-word rename") takes the
+column-level half for the Part A F1–F9 set: it drops `hypotheses."column"`, renames
+`plan_steps."order"` → `step_order`, converts the seven naive timestamp columns to `timestamptz`,
+converts six `json` columns to `jsonb`, and makes `created_at` `NOT NULL DEFAULT now()` on the six
+Orthanc-synced tables — inspecting each column's live type via `information_schema` first so it is
+safe against databases that drifted toward the ORM shape through the old seeder `create_all()`.
+The ORM models were updated in the same change. Remaining drift not in the F1–F9 set (e.g. the
+`orthanc_*_id` `nullable=False` tightening) still needs its own follow-up.
+
 ---
 
 ### D-4 — `chat_study_association` has no primary key
@@ -1069,6 +1079,32 @@ router = APIRouter(prefix="/sync", tags=["orthanc"], dependencies=[Depends(verif
 Set the corresponding `Content-Type`/custom header in `on-stable-series.lua`'s `JSON_HEADERS`. Full
 PHI-route authentication is a larger design decision (API keys, OAuth, session cookies) that should be
 scoped as its own task rather than folded into this fix.
+
+#### PHI storage decision
+
+`patients.name` and `patients.birth_date` are direct PHI mirrored verbatim from Orthanc and stored
+in plaintext (`repositories/orthanc_sync.py:83-95,448`). This is a **deliberate, retained
+deployment decision**, not an accident of the sync path:
+
+- The viewer and the patient-browser UI display `name`, and `birth_date` is used to derive the
+  patient's age at query time (`api/routes/patient.py:calculate_age`). Neither is used as an
+  identity key — identity is `orthanc_patient_id` alone (D-6).
+- Keeping the raw values (rather than replacing `birth_date` with a pre-computed `age_years` and
+  dropping `name`) keeps the Postgres row a faithful 1:1 mirror of the Orthanc resource, which the
+  reconciliation work in Phase 6 (D-11–D-18) depends on, and avoids a lossy transform on the write
+  path.
+- The mitigation for the exposure is therefore **access control, not schema minimisation**: the
+  webhook shared secret above plus PHI-route authentication (tracked as its own task), and the
+  operational controls in D-29/D-31 (untracked credentials, GA PostgreSQL).
+
+If a future deployment has a stricter data-minimisation requirement, the alternative is a
+follow-up migration that adds `patients.age_years int` (populated from `PatientBirthDate` +
+`StudyDate` at sync time) and drops `birth_date`, and a separate decision on pseudonymising
+`name`. That is explicitly **out of scope** here and must not be done silently.
+
+The `birth_date` column itself is still normalised by the F1–F9 schema pass: it is now
+`timestamptz` (was `date`) and nullable, matching the sync code that stores `NULL` when
+`PatientBirthDate` is absent or unparseable.
 
 ---
 

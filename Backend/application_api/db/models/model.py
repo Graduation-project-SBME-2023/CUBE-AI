@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, DateTime, JSON, text, UUID
+from sqlalchemy import Column, Integer, String, DateTime, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.sql import func
 from application_api.db.base import Base
 
 class Model(Base):
@@ -17,19 +19,19 @@ class Model(Base):
 
     modality = Column(String, nullable=False)  # "CT", "MRI", "any"
 
-    anatomy = Column(JSON, nullable=True)  # ["spleen", "liver"]
+    anatomy = Column(JSONB, nullable=True)  # ["spleen", "liver"]
 
     # performance per label (Dice, etc.)
-    labels = Column(JSON, nullable=True)
+    labels = Column(JSONB, nullable=True)
 
     # so it contain any parameters needed for the model execution
-    params_schema = Column(JSON, nullable=True)
+    params_schema = Column(JSONB, nullable=True)
 
     description = Column(String, nullable=True)
 
-    config = Column(JSON, nullable=True)
+    config = Column(JSONB, nullable=True)
 
     dimension = Column(Integer, nullable=True)
-    
 
-    created_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
