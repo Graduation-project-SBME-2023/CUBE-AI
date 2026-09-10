@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+from sqlalchemy.sql import func
 from application_api.db.base import Base
 
 class Segmentation(Base):
@@ -22,4 +23,4 @@ class Segmentation(Base):
     method = Column(String, nullable=True)
 
     name = Column(String, ForeignKey('models.name'), nullable=True)
-    created_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

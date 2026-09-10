@@ -13,7 +13,7 @@ class PlanStepBase(BaseModel):
 
 
 class PlanStepCreate(PlanStepBase):
-    pass  # order and id are auto-generated
+    pass  # step_order and id are auto-generated
     # Optionally dispatch a TaskMessage at creation time
     task_message: Optional[TaskMessageCreate] = None
 
@@ -22,7 +22,7 @@ class PlanStepUpdate(BaseModel):
     description: Optional[str] = None
     module: Optional[str] = None
     status: Optional[str] = None
-    order: Optional[int] = None  # optional for reordering
+    step_order: Optional[int] = None  # optional for reordering
     logs: Optional[list] = None
     instructions: Optional[dict] = None
     task_message: Optional[TaskMessageUpdate] = None
@@ -34,7 +34,7 @@ class PlanStepStatusUpdate(BaseModel):
 class PlanStepOut(PlanStepBase):
     id: UUID
     plan_id: UUID
-    order: int
+    step_order: int
     task_message: Optional[TaskMessageRead] = None
 
     model_config = ConfigDict(from_attributes=True)

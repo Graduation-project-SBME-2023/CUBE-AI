@@ -27,7 +27,6 @@ class Hypothesis(Base):
     population = Column(Text)
     intervention = Column(Text)
     hypothesis = Column(Text)
-    column= Column(Text)
     comparison = Column(Text)
     outcome = Column(Text)
     clinical_context = Column(Text)
