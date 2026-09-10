@@ -17,9 +17,12 @@ window.config = {
       configuration: {
         friendlyName: 'Orthanc Server',
         name: 'Orthanc',
-        wadoUriRoot: 'http://127.0.0.1/pacs/dicom-web',
-        qidoRoot: 'http://127.0.0.1/pacs/dicom-web',
-        wadoRoot: 'http://127.0.0.1/pacs/dicom-web',
+        // Relative roots: the browser resolves them against whatever origin
+        // served the app (localhost / 127.0.0.1 / a real hostname), so the
+        // DICOMweb calls stay same-origin and no CORS config is needed.
+        wadoUriRoot: '/pacs/dicom-web',
+        qidoRoot: '/pacs/dicom-web',
+        wadoRoot: '/pacs/dicom-web',
         qidoSupportsIncludeField: true,
         supportsReject: true,
         imageRendering: 'wadors',
