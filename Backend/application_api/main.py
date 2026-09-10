@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import time
 from contextlib import asynccontextmanager, suppress
@@ -8,7 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from application_api.db.session import AsyncSessionLocal, engine
+from application_api.core.config import settings
 from application_api.core.metrics import install_sql_metrics, monitor_event_loop_lag, observe_http, render_metrics
+from application_api.repositories.orthanc_sync import sync_all_from_orthanc
 from application_api.api.routes import (
     Taskmessage,
     Wslog,
@@ -28,19 +31,45 @@ from application_api.api.routes import (
     workflow,
 )
 
+logger = logging.getLogger(__name__)
 
 install_sql_metrics(engine)
+
+
+async def _periodic_reconciliation(interval_seconds: float) -> None:
+    """Run sync_all_from_orthanc on a timer.
+
+    This is the reconciliation backstop for the Lua webhook (D-11/D-18):
+    the webhook is fire-and-forget and can lose an event if application-api
+    is restarting when it fires, and nothing else in the system ever
+    re-derives the database from Orthanc's actual state. sync_all_from_orthanc
+    is idempotent, so running it repeatedly is safe.
+    """
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            async with AsyncSessionLocal() as db:
+                await sync_all_from_orthanc(db)
+        except Exception:
+            logger.exception("Periodic Orthanc reconciliation pass failed")
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     lag_task = asyncio.create_task(monitor_event_loop_lag(), name="event-loop-lag-monitor")
+    reconciliation_task = asyncio.create_task(
+        _periodic_reconciliation(settings.RECONCILIATION_INTERVAL_SECONDS),
+        name="orthanc-reconciliation",
+    )
     try:
         yield
     finally:
         lag_task.cancel()
+        reconciliation_task.cancel()
         with suppress(asyncio.CancelledError):
             await lag_task
+        with suppress(asyncio.CancelledError):
+            await reconciliation_task
         await engine.dispose()
 
 
@@ -109,8 +138,12 @@ async def liveness() -> dict[str, str]:
 async def readiness() -> dict[str, str]:
     async with AsyncSessionLocal() as session:
         await session.execute(text("SELECT 1"))
-        revision = (await session.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
-    return {"status": "ready", "migration": revision}
+        # alembic_version holds one row per head; .scalar_one() would raise
+        # as soon as the chain branches without a merge revision in place.
+        revisions = (
+            await session.execute(text("SELECT version_num FROM alembic_version"))
+        ).scalars().all()
+    return {"status": "ready", "migration": ",".join(sorted(revisions))}
 
 
 @app.get("/health")

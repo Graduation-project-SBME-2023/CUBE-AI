@@ -158,11 +158,16 @@ Write-Warn "Starting Docker containers..."
 Write-Warn "First run may take several minutes."
 Write-Host ""
 
+# --build: application-api/db-migrate/db-seed have a `build:` section and
+# are meant to always run the current checkout's code. Without it, `up` can
+# reuse an already-built local image tag and silently run stale
+# migrations/code instead of what's on disk (see database_audit.md D-33).
 docker compose `
     --env-file $BackendEnv `
     -f $BackendCompose `
     -f $FrontendCompose `
     up `
+    --build `
     --detach `
     --wait `
     --wait-timeout 3600

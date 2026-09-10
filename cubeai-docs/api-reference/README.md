@@ -11,7 +11,7 @@ This document covers all REST and WebSocket APIs exposed by CUBE.AI backend serv
 | Application API | `http://localhost:8001` (dev), `/api` (prod) | Existing deployment policy |
 | Agent System | `http://localhost:8150` (dev), `/agents` (prod) | Existing deployment policy |
 | MONAI Inference | `http://localhost:8000` (dev), `/inference` (prod) | Existing deployment policy |
-| Orthanc | `http://localhost:8043` (dev), `/pacs` (prod) | Basic Auth (`orthanc:orthanc`) |
+| Orthanc | `http://localhost:8043` (dev), `/pacs` (prod) | Disabled by default (`AuthenticationEnabled: false` in `Backend/orthanc/orthanc.json`) — see `cubeai-docs/backend/database_audit.md` finding D-30/P-3 before exposing this beyond the docker-compose network |
 
 ---
 
@@ -199,13 +199,15 @@ POST /monailabel/initialize-inference-task?model_name=tumor
 
 ## Workflow Data API (Application API)
 
-Base URL: `http://localhost:8001` in development or `/api` through Nginx
+Base URL: `http://localhost:8001` in development or `/api` through Nginx. Owned entirely by the
+Application API (`Backend/application_api/api/routes/workflow.py`) — MONAI Label never receives
+`DATABASE_URL` and does not expose these routes.
 
 ### Workflow Management
 
-#### Create Workflow
+#### Register a New Workflow
 ```http
-POST /workflow/list_workflow/add
+POST /workflow/add
 Content-Type: application/json
 
 { "task_name": "BrainTumor" }
@@ -213,42 +215,45 @@ Content-Type: application/json
 
 #### List All Workflows
 ```http
-GET /workflow/list_workflow
+GET /workflow/?skip=0&limit=100
 ```
 
 #### Delete Workflow
 ```http
-DELETE /workflow/list_workflow/delete
+DELETE /workflow/delete
 Content-Type: application/json
 
 { "task_name": "BrainTumor" }
 ```
 
+Cascades to every `workflow_details` row for that `task_name`.
+
 ---
 
 ### Study Assignment
 
-#### Add Study to Workflow
+#### Add a Study/Series to a Workflow
 ```http
-POST /workflow/add
+POST /workflow/{task_name}/add
 Content-Type: application/json
 
 {
-  "case_id": "PATIENT_001",
+  "study_uid": "1.2.3.4",
   "task_name": "BrainTumor",
   "series_instance_uid": "1.2.3.4.5",
   "instance_uid": null,
   "train": false
 }
 ```
+The `task_name` in the body must match the path parameter, or the request is rejected with 400.
 
-#### Update Study UIDs
+#### Update Series/Instance UIDs
 ```http
 POST /workflow/update-uids
 Content-Type: application/json
 
 {
-  "case_id": "PATIENT_001",
+  "study_uid": "1.2.3.4",
   "task_name": "BrainTumor",
   "series_instance_uid": "1.2.3.4.5",
   "instance_uid": "1.2.3.4.5.6",
@@ -256,61 +261,115 @@ Content-Type: application/json
 }
 ```
 
-#### Get Studies in Workflow
+#### Get Study UIDs in a Workflow
 ```http
-POST /workflow/filter
-Content-Type: application/json
-
-{ "task_name": "BrainTumor" }
+POST /workflow/{task_name}/filter-uid
 ```
 
 **Response:**
 ```json
-["PATIENT_001", "PATIENT_002", "PATIENT_003"]
+["1.2.3.4", "1.2.3.4.9", "1.2.3.4.12"]
 ```
 
-#### Get Annotation Status
+#### Get Full Workflow Data
 ```http
-POST /workflow/filter-annotated
-Content-Type: application/json
-
-{ "task_name": "BrainTumor" }
+POST /workflow/{task_name}/filter
 ```
 
 **Response:**
 ```json
 {
-  "PATIENT_001": true,
-  "PATIENT_002": false
+  "study_uid": ["1.2.3.4"],
+  "series_instance_uid": ["1.2.3.4.5"],
+  "instance_uid": ["1.2.3.4.5.6"],
+  "modality": ["CT"]
 }
 ```
 
+#### Get Annotation Status
+```http
+POST /workflow/{task_name}/filter-annotated
+```
+
+**Response:**
+```json
+{
+  "1.2.3.4": true,
+  "1.2.3.4.9": false
+}
+```
+
+#### Update / Get Train Flag
+```http
+POST /workflow/{task_name}/update-train?study_uid=1.2.3.4&train=true
+GET  /workflow/{task_name}/get-train?study_uid=1.2.3.4
+```
+
+#### Start nnUNet Training
+```http
+POST /workflow/{task_name}/train
+```
+Returns `202 Accepted` with a `job_id`; poll `GET /workflow/training-jobs/{job_id}` for status.
+Proxies to MONAI Label's inference service (`INFERENCE_API_URL`) — the Application API never runs
+the training itself.
+
 ---
 
-### Data Transfer
+## Orthanc Sync API (Application API)
 
-#### Download Images from PACS
+Base URL: `http://localhost:8001` in development or `/api` through Nginx. This is the boundary
+between Orthanc (the PACS) and the `patients`/`studies`/`volume_series`/`segmentations` tables — see
+`cubeai-docs/database/README.md` and `cubeai-docs/backend/database_audit.md` for the full
+consistency model and its known gaps.
+
+#### Trigger a Full Reconciliation Sync
 ```http
-POST /datastore/images?task_name=BrainTumor
-Content-Type: application/json
+POST /sync/sync-all
+```
+Runs in the background; returns immediately. Also runs automatically on a timer from the
+Application API's startup lifespan (`RECONCILIATION_INTERVAL_SECONDS`, default 300s) — this endpoint
+is for forcing an out-of-cycle pass, not the only way sync happens.
 
-["series_uid_1", "series_uid_2"]
+#### Check Sync Status
+```http
+GET /sync/sync-status
 ```
 
-#### Download Labels from PACS
+**Response:**
+```json
+{
+  "database": { "patients": 12, "studies": 20, "volumes": 45, "segmentations": 8 },
+  "orthanc": { "patients": 12, "studies": 20, "series": 53, "instances": 9120 },
+  "synced": true
+}
+```
+`synced` compares both study counts and total series counts (volumes + segmentations combined)
+against Orthanc's own statistics.
+
+#### Orthanc Webhook Receiver
 ```http
-POST /datastore/labels?task_name=BrainTumor
+POST /sync/orthanc-webhook
+X-Webhook-Token: <ORTHANC_WEBHOOK_TOKEN, if configured>
 Content-Type: application/json
 
-["instance_uid_1", "instance_uid_2"]
+{ "change_type": "stable_series", "resource_id": "<orthanc-internal-id>", "level": "series" }
 ```
+Called by `Backend/orthanc/lua/on-stable-series.lua` on `OnStableSeries` / `OnStableStudy` /
+`OnDeletedPatient` / `OnDeletedStudy` / `OnDeletedSeries`. If `ORTHANC_WEBHOOK_TOKEN` is set in the
+Application API's environment, the same value must be set in the Lua script's `WEBHOOK_TOKEN`
+constant, or every call is rejected with 401.
 
 ---
 
 ## Orthanc REST API
 
-Base URL: `http://localhost:8042`  
-Auth: Basic `orthanc:orthanc`
+Base URL: `http://localhost:8042` (or `http://localhost:8043` from the host, per the compose port
+mapping).
+Auth: disabled by default (`AuthenticationEnabled: false`) — see
+`cubeai-docs/backend/database_audit.md` findings D-30 and P-1/P-3 before relying on this in any
+environment reachable from outside the docker-compose network. If authentication is enabled, note
+that the agent system's and MONAI Label's Orthanc clients currently send no credentials at all and
+must be updated in the same change.
 
 ### Upload DICOM
 ```http

@@ -1,12 +1,9 @@
 """Async PostgreSQL engine and request-scoped session dependency."""
 
-import time
-
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from application_api.core.config import settings
-from application_api.core.metrics import observe_pool_acquire
 
 
 engine = create_async_engine(
@@ -16,6 +13,13 @@ engine = create_async_engine(
     pool_size=settings.DB_POOL_SIZE,
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_timeout=settings.DB_POOL_TIMEOUT,
+    # Recycle connections periodically so a stale connection behind a NAT or
+    # idle-connection-killing proxy is replaced proactively instead of only
+    # being caught (with an extra round trip) by pool_pre_ping.
+    pool_recycle=1800,
+    # A server-side statement timeout stops a single runaway query from
+    # holding a pool connection indefinitely.
+    connect_args={"server_settings": {"statement_timeout": "30000"}},
 )
 
 AsyncSessionLocal = sessionmaker(
@@ -28,8 +32,11 @@ AsyncSessionLocal = sessionmaker(
 
 
 async def get_db():
+    # Do not eagerly acquire a pooled connection here: SQLAlchemy checks
+    # one out lazily on first use. Acquiring one unconditionally meant every
+    # request opened a transaction — even ones that never touch the
+    # database — and, combined with routes that hold the session open across
+    # a slow Orthanc call, made the pool the de facto request-concurrency
+    # ceiling for the whole API.
     async with AsyncSessionLocal() as session:
-        started = time.perf_counter()
-        await session.connection()
-        observe_pool_acquire(time.perf_counter() - started)
         yield session

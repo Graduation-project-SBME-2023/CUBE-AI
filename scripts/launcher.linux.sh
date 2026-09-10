@@ -137,11 +137,14 @@ if [[ "$FRONTEND_MODE" == "Docker" ]]; then
   warn "Starting Docker containers..."
   warn "First run may take several minutes."
   echo
+  # --build: application-api/db-migrate/db-seed have a `build:` section and
+  # are meant to always run the current checkout's code, not a stale cached
+  # local image tag (see database_audit.md D-33).
   docker compose \
     --env-file "$BACKEND_ENV" \
     -f "$BACKEND_COMPOSE" \
     -f "$FRONTEND_COMPOSE" \
-    up --detach --wait --wait-timeout 3600
+    up --build --detach --wait --wait-timeout 3600
   echo
   # Print recent startup output once, then reserve the project-level message
   # for the point at which Compose has confirmed every service is ready.
@@ -172,7 +175,7 @@ npm install -g yarn"
 $FRONTEND_DIR"
   fi
   warn "Starting backend containers..."
-  docker compose --env-file "$BACKEND_ENV" -f "$BACKEND_COMPOSE" up -d
+  docker compose --env-file "$BACKEND_ENV" -f "$BACKEND_COMPOSE" up --build -d
   echo
   warn "Starting OHIF frontend with Yarn..."
   echo

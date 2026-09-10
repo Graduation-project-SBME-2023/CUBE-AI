@@ -1,8 +1,10 @@
 import logging
+import secrets
 
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, Header, HTTPException
 from application_api.db.session import get_db, AsyncSessionLocal
+from application_api.core.config import settings
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -25,6 +27,18 @@ router = APIRouter(prefix="/sync", tags=["orthanc"])
 logger = logging.getLogger(__name__)
 
 
+# ----------------- Webhook authentication (D-30) -----------------
+# Orthanc's Lua hook is the only caller. If ORTHANC_WEBHOOK_TOKEN is set,
+# require it on every webhook call so an unauthenticated request cannot
+# delete rows by supplying an arbitrary resource_id. Set the same value in
+# the Lua script's JSON_HEADERS (see Backend/orthanc/lua/on-stable-series.lua).
+async def verify_webhook_token(x_webhook_token: str | None = Header(default=None)) -> None:
+    if settings.ORTHANC_WEBHOOK_TOKEN is None:
+        return
+    if not x_webhook_token or not secrets.compare_digest(x_webhook_token, settings.ORTHANC_WEBHOOK_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid or missing webhook token")
+
+
 # ----------------- Pydantic Payload -----------------
 
 class OrthancWebhookPayload(BaseModel):
@@ -38,7 +52,7 @@ class OrthancWebhookPayload(BaseModel):
 
 # ----------------- MANUAL FULL SYNC -----------------
 
-@router.post("/sync-all")
+@router.post("/sync-all", dependencies=[Depends(verify_webhook_token)])
 async def manual_full_sync(background_tasks: BackgroundTasks):
     """
     Manually trigger a full sync of all Orthanc data.
@@ -79,6 +93,20 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
             async with session.get(f"{ORTHANC_URL}/statistics") as resp:
                 orthanc_stats = await resp.json() if resp.status == 200 else {}
 
+        db_series_count = (volumes_count or 0) + (segs_count or 0)
+        orthanc_series_count = orthanc_stats.get("CountSeries")
+        orthanc_studies_count = orthanc_stats.get("CountStudies")
+
+        # Compare studies AND series (volumes + segmentations combined),
+        # not just studies — a study-only comparison can read "synced" while
+        # entire series are missing underneath it.
+        synced = None
+        if orthanc_stats:
+            synced = (
+                studies_count == orthanc_studies_count
+                and db_series_count == orthanc_series_count
+            )
+
         return {
             "database": {
                 "patients": patients_count or 0,
@@ -92,7 +120,7 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
                 "series": orthanc_stats.get("CountSeries", "unknown"),
                 "instances": orthanc_stats.get("CountInstances", "unknown")
             },
-            "synced": studies_count == orthanc_stats.get("CountStudies", 0) if orthanc_stats else None
+            "synced": synced,
         }
     except Exception as exc:
         logger.warning("Unable to read Orthanc sync status: %s", exc)
@@ -192,7 +220,7 @@ async def process_webhook_background(change_type: str, resource_id: str, level: 
 
 # ----------------- ORTHANC WEBHOOK -----------------
 
-@router.post("/orthanc-webhook")
+@router.post("/orthanc-webhook", dependencies=[Depends(verify_webhook_token)])
 async def orthanc_webhook(payload: OrthancWebhookPayload, background_tasks: BackgroundTasks):
     """
     Webhook endpoint that responds immediately and processes in background.
