@@ -55,13 +55,7 @@ services:
       application-api:
         condition: service_healthy
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          'import urllib.request; urllib.request.urlopen("http://localhost:8150/client-config", timeout=3)',
-        ]
+      test: [ "CMD", "python", "-c", 'import urllib.request; urllib.request.urlopen("http://localhost:8150/client-config", timeout=3)' ]
       interval: 5s
       timeout: 4s
       retries: 24
@@ -155,13 +149,7 @@ services:
       db-seed:
         condition: service_completed_successfully
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          'import urllib.request; urllib.request.urlopen("http://localhost:8001/health", timeout=3)',
-        ]
+      test: [ "CMD", "python", "-c", 'import urllib.request; urllib.request.urlopen("http://localhost:8001/health", timeout=3)' ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -170,6 +158,13 @@ services:
   monailabel:
     # GPU image — amd64 only, CUDA toolkit included
     image: cubeai1/custom-monailabel:v1.0-gpu
+    # Override the image's stale baked CMD (it still runs `alembic ... upgrade head`
+    # against a /alembic mount this branch removed — DB migrations are now owned by
+    # the one-shot db-migrate service). Mirrors deploy/Dockerfile.backend.gpu CMD.
+    command:
+      - sh
+      - -c
+      - if [ ! -s "$$VOXTELL_DIR/text_embeddings_cache.pkl" ]; then python /apps/radiology/scripts/build_voxtell_cache.py; fi && python /monailabel/server_start.py
     container_name: monailabel-backend
     runtime: nvidia
     shm_size: 8G
@@ -223,13 +218,7 @@ services:
       orthanc:
         condition: service_started
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          'import urllib.request; urllib.request.urlopen("http://localhost:8000/info/", timeout=3)',
-        ]
+      test: [ "CMD", "python", "-c", 'import urllib.request; urllib.request.urlopen("http://localhost:8000/info/", timeout=3)' ]
       interval: 30s
       timeout: 10s
       retries: 10
@@ -239,8 +228,8 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              capabilities: [gpu]
-              device_ids: ["0"] # RTX 3060 — adjust as needed
+              capabilities: [ gpu ]
+              device_ids: [ "0" ] # RTX 3060 — adjust as needed
     restart: unless-stopped
 
   orthanc:
@@ -270,7 +259,7 @@ services:
     env_file:
       - .env
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
       interval: 5s
       timeout: 5s
       retries: 10
