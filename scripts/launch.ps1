@@ -167,8 +167,27 @@ docker compose `
     --wait `
     --wait-timeout 3600
 
-if ($LASTEXITCODE -ne 0) {
-    Stop-Launch "docker compose exited with code $LASTEXITCODE. Check the output above for errors."
+$ComposeExit = $LASTEXITCODE
+
+# `docker compose up --wait` returns a non-zero code whenever a run-to-completion
+# service exits - even with code 0. This stack has three such one-shots: db-migrate,
+# db-seed, and startup-complete (the readiness announcer). startup-complete is wired
+# to start only after every backend and viewer dependency reports healthy, so its
+# exit code - not the aggregate --wait code - is the real readiness signal.
+$StartupId = docker compose `
+    --env-file $BackendEnv `
+    -f $BackendCompose `
+    -f $FrontendCompose `
+    ps -aq startup-complete | Select-Object -First 1
+
+if ($StartupId) {
+    $StartupExit = [int](docker inspect --format '{{.State.ExitCode}}' $StartupId)
+    if ($StartupExit -ne 0) {
+        Stop-Launch "Stack did not come up cleanly: readiness check (startup-complete) exited with code $StartupExit. Check the output above for errors."
+    }
+}
+elseif ($ComposeExit -ne 0) {
+    Stop-Launch "docker compose exited with code $ComposeExit. Check the output above for errors."
 }
 
 #  === 7. Final Message =================================
