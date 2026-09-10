@@ -6,6 +6,10 @@ services:
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/config/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ${COMPOSE_PROJECT_DIR}/Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/logs/nginx:/var/logs/nginx
+      # Override the app-config.js baked into the image (its DICOMweb roots point
+      # at http://127.0.0.1, which is cross-origin from http://localhost and gets
+      # blocked by CORS). This copy uses relative, same-origin roots.
+      - ${COMPOSE_PROJECT_DIR}/Frontend/OHIF-Viewer/platform/app/public/config/docker_openresty-orthanc.js:/var/www/html/app-config.js:ro
     ports:
       - '443:443'
       - '80:80'
