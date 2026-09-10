@@ -1,3 +1,4 @@
+from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -173,14 +174,18 @@ async def get_all_logs(db: AsyncSession, skip: int = 0, limit: int = 100):
 # DELETE LOGS BY SESSION
 # ---------------------------
 async def delete_logs_by_session(db: AsyncSession, session_id: UUID):
+    """Delete every WSLog row for a session in one statement.
+
+    Previously fetched every row unbounded (get_logs(..., limit=None)) and
+    issued one DELETE per row through the ORM identity map — an N-statement
+    delete for what is a single WHERE-clause operation.
+    """
     try:
-        logs = await get_logs(db, session_id=session_id, limit=None)
-
-        for log in logs:
-            await db.delete(log)
-
+        result = await db.execute(
+            sa_delete(WSLogModel).where(WSLogModel.session_id == session_id)
+        )
         await db.commit()
-        return {"detail": "All session logs deleted"}
+        return {"detail": "All session logs deleted", "deleted": result.rowcount or 0}
 
     except SQLAlchemyError as e:
         await db.rollback()

@@ -125,7 +125,16 @@ warn "Only containers whose config changed (storage mounts, storage env vars)"
 warn "are recreated; everything else is left running as-is."
 echo
 
-# --pull never          : never contact the registry, use the local image only.
+# --pull never          : never contact the registry for the pre-built
+#                         images - use whatever is on this machine already.
+# --build               : application-api/db-migrate/db-seed have a `build:`
+#                         section and are meant to always run the current
+#                         checkout's code; without it, `up` can reuse an
+#                         already-built local image tag and silently run
+#                         stale migrations/code (database_audit.md D-33).
+#                         --build only affects services that declare
+#                         `build:`, so the "nothing pulled" behavior for the
+#                         rest is unaffected.
 # (no --force-recreate) : compose recreates a container only when its spec
 #                         changed, so the storage volume/env edits land while
 #                         unrelated services keep their current containers.
@@ -134,6 +143,7 @@ if ! docker compose \
   -f "$BACKEND_COMPOSE" \
   up \
   --pull never \
+  --build \
   --detach \
   --wait \
   --wait-timeout 3600; then

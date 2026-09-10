@@ -7,8 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
 from application_api.db.models.patient import Patient
+from application_api.db.models.study import Study
+from application_api.db.models.volume import Volume
+from application_api.db.models.segmentation import Segmentation
 from application_api.schemas.patient import PatientCreate, PatientUpdate
-from application_api.services.orthanc_client import delete_orthanc_resource
+from application_api.services.orthanc_client import cleanup_orthanc_resources_after_db_delete
 
 logger = logging.getLogger(__name__)
 
@@ -88,33 +91,74 @@ async def update_patient(db: AsyncSession, patient_id: UUID, data: PatientUpdate
 
 async def delete_patient(db: AsyncSession, patient_id: UUID):
     """
-    Delete patient from both Orthanc and database.
+    Delete patient from both the database and Orthanc.
     Returns (success: bool, error_message: str | None)
+
+    Database-first (see repositories/volume.py:delete_volume for the full
+    rationale). A patient delete cascades in the DB through studies ->
+    volume_series -> segmentations; every Orthanc id in that subtree is
+    collected before the delete so PACS cleanup is complete.
     """
     result = await db.execute(select(Patient).where(Patient.patient_id == patient_id))
     patient = result.scalar_one_or_none()
-    
+
     if not patient:
         return False, "Patient not found"
-    
+
     orthanc_patient_id = patient.orthanc_patient_id
-    deleted_from_orthanc, error_msg = await delete_orthanc_resource(
-        "patients",
-        orthanc_patient_id,
+
+    study_result = await db.execute(
+        select(Study.study_uid, Study.orthanc_study_id).where(Study.patient_id == patient_id)
     )
-    if not deleted_from_orthanc:
-        return False, error_msg
-    
-    # Delete from database
+    studies = study_result.all()
+    study_orthanc_ids = [row.orthanc_study_id for row in studies]
+
+    volume_orthanc_ids: list[str | None] = []
+    seg_orthanc_ids: list[str | None] = []
+    if studies:
+        study_uids = [row.study_uid for row in studies]
+        volume_result = await db.execute(
+            select(Volume.volume_series_instance_uid, Volume.orthanc_series_id).where(
+                Volume.study_uid.in_(study_uids)
+            )
+        )
+        volumes = volume_result.all()
+        volume_orthanc_ids = [row.orthanc_series_id for row in volumes]
+
+        if volumes:
+            volume_uids = [row.volume_series_instance_uid for row in volumes]
+            seg_result = await db.execute(
+                select(Segmentation.orthanc_series_id).where(
+                    Segmentation.volume_series_instance_uid.in_(volume_uids)
+                )
+            )
+            seg_orthanc_ids = [row[0] for row in seg_result.all()]
+
     try:
-        await db.delete(patient)
+        await db.delete(patient)  # cascades to studies -> volume_series -> segmentations
         await db.commit()
-        return True, None
     except SQLAlchemyError as e:
         await db.rollback()
         error_msg = f"Database error: {str(e)}"
         logger.error(error_msg)
         return False, error_msg
+
+    await cleanup_orthanc_resources_after_db_delete(
+        "series",
+        [*volume_orthanc_ids, *seg_orthanc_ids],
+        context=f"DB delete of patient {patient_id}",
+    )
+    await cleanup_orthanc_resources_after_db_delete(
+        "studies",
+        study_orthanc_ids,
+        context=f"DB delete of patient {patient_id}",
+    )
+    await cleanup_orthanc_resources_after_db_delete(
+        "patients",
+        [orthanc_patient_id],
+        context=f"DB delete of patient {patient_id}",
+    )
+    return True, None
 
 # ---------------------------
 # find a patient by name, gender
@@ -122,7 +166,6 @@ async def search_patients(
     db: AsyncSession,
     name: Optional[str] = None,
     gender: Optional[str] = None,
-    age: Optional[int] = None,
     skip: int = 0,
     limit: int = 100,
 ):

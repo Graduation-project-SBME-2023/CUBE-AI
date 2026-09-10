@@ -128,6 +128,8 @@ services:
       ORTHANC_URL: http://orthanc:8042
       ORTHANC_USER: ${ORTHANC_USER:-orthanc}
       ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:-orthanc}
+      ORTHANC_WEBHOOK_TOKEN: ${ORTHANC_WEBHOOK_TOKEN:-}
+      RECONCILIATION_INTERVAL_SECONDS: ${RECONCILIATION_INTERVAL_SECONDS:-300}
       BACKEND_STORAGE_ROOT: /storage
       AGENTS_WORKSPACE_DIR: /storage/hypotheses
       GENERAL_DATA_DIR: /storage/data/medical
@@ -143,7 +145,6 @@ services:
       - .env
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
-      - ${COMPOSE_PROJECT_DIR}/Backend/application_api:/app/application_api
       - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/lib/configs:/app/apps/radiology/lib/configs:ro
     depends_on:
       db-seed:
@@ -241,15 +242,21 @@ services:
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/orthanc/orthanc.json:/etc/orthanc/orthanc.json:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/orthanc/lua:/etc/orthanc/lua:ro
-      - orthanc-db2:/var/lib/orthanc/db/
+      # Same volume name as docker-compose.backend.cpu.yml: previously this
+      # was orthanc-db2, a DIFFERENT named volume than the CPU stack, so
+      # switching between CPU and GPU profiles silently presented an empty
+      # PACS archive instead of the same data.
+      - orthanc-db:/var/lib/orthanc/db/
     restart: unless-stopped
 
   postgres:
-    image: postgres:18rc1-alpine3.22
+    image: postgres:18-alpine
     container_name: postgres-backend
     volumes:
       - ${COMPOSE_PROJECT_DIR}/deploy/database/backup.sql:/docker-entrypoint-initdb.d/backup.sql
-      - postgres-db2:/var/lib/postgresql/data
+      # Same volume name as docker-compose.backend.cpu.yml (see the orthanc
+      # comment above for why this must match, not use a "-2" suffix).
+      - postgres-db:/var/lib/postgresql/data
     ports:
       - "5433:5432"
     environment:
@@ -300,5 +307,5 @@ services:
     restart: "no"
 
 volumes:
-  postgres-db2:
-  orthanc-db2:
+  postgres-db:
+  orthanc-db:

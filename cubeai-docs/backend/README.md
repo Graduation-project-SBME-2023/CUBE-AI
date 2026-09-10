@@ -90,16 +90,21 @@ Backend/apps/radiology/sam2/checkpoints/
 Orthanc is the DICOM PACS server that stores and serves medical imaging data.
 
 **Ports:**
-- `8042` — REST API + DICOMweb
-- `8043` — Web UI
-- `4242` — DICOM protocol (C-STORE, C-FIND, etc.)
+- `8042` (container) / `8043` (published to the host) — REST API, DICOMweb, and the built-in web UI (all on the same port)
+- `4242` — DICOM protocol (C-STORE, C-FIND, etc.) — not published to the host in any compose file
 
-**Web UI credentials (default):** `orthanc` / `orthanc`
+**Authentication:** disabled by default (`AuthenticationEnabled: false` in
+`Backend/orthanc/orthanc.json`). The `RegisteredUsers` entry in that file (`test`/`test`) is inert
+while auth is disabled and does **not** match the `orthanc`/`orthanc` credentials the application
+services send — enabling auth requires reconciling both. See
+`cubeai-docs/backend/database_audit.md` findings D-30 and P-1/P-3 before relying on this outside the
+docker-compose network; the agent system and MONAI Label currently send no Orthanc credentials at
+all and must be updated in the same change that enables auth.
 
 ### Useful Commands
 
 ```bash
-# Upload a DICOM file
+# Upload a DICOM file (credentials below are accepted but not required while auth is disabled)
 curl -u orthanc:orthanc -X POST http://localhost:8042/instances \
      -H "Content-Type: application/dicom" \
      --data-binary @path/to/file.dcm

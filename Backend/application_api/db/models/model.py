@@ -10,7 +10,7 @@ class Model(Base):
         server_default=text('gen_random_uuid()')
     )
 
-    name = Column(String, nullable=False)
+    name = Column(String, nullable=False, unique=True)
 
     # automatic / interactive
     type = Column(String, nullable=False)

@@ -213,6 +213,18 @@ def upgrade():
     print("Migration completed successfully!")
 
 def downgrade():
+    # This downgrade collapses every UUID primary key back to the literal
+    # integer 1 ("USING 1" below), destroying row identity for every table
+    # it touches and making the subsequent foreign-key recreation fail on
+    # any database with more than one row per table. There is no safe
+    # automated reversal of the UUID conversion; restore from a pre-upgrade
+    # backup instead of downgrading past this revision.
+    raise NotImplementedError(
+        "Downgrading past 6664d514406c is destructive (it collapses every "
+        "converted UUID primary key to a single shared value) and is "
+        "intentionally disabled. Restore from a backup taken before this "
+        "revision was applied instead."
+    )
     # Drop new tables first
     op.drop_table('plan_steps')
     op.drop_table('plans')

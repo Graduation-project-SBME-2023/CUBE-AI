@@ -4,9 +4,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.future import select
 from application_api.db.models.study import Study
+from application_api.db.models.volume import Volume
+from application_api.db.models.segmentation import Segmentation
 from application_api.schemas.study import StudyCreate, StudyUpdate
 from fastapi import HTTPException
-from application_api.services.orthanc_client import delete_orthanc_resource
+from application_api.services.orthanc_client import cleanup_orthanc_resources_after_db_delete
 
 logger = logging.getLogger(__name__)
 
@@ -58,33 +60,60 @@ async def update_study(db: AsyncSession, study_uid: str, updates: StudyUpdate):
 
 async def delete_study(db: AsyncSession, study_uid: str):
     """
-    Delete study from both Orthanc and database.
+    Delete study from both the database and Orthanc.
     Returns (success: bool, error_message: str | None)
+
+    Database-first (see repositories/volume.py:delete_volume for the full
+    rationale). A study delete cascades in the DB to volume_series and, from
+    there, to segmentations — every one of those rows' Orthanc series ids
+    is collected before the delete so PACS cleanup covers the whole subtree,
+    not just the study resource itself.
     """
     result = await db.execute(select(Study).where(Study.study_uid == study_uid))
     study = result.scalar_one_or_none()
-    
+
     if not study:
         return False, "Study not found"
-    
+
     orthanc_study_id = study.orthanc_study_id
-    deleted_from_orthanc, error_msg = await delete_orthanc_resource(
-        "studies",
-        orthanc_study_id,
+
+    volume_result = await db.execute(
+        select(Volume.volume_series_instance_uid, Volume.orthanc_series_id)
+        .where(Volume.study_uid == study_uid)
     )
-    if not deleted_from_orthanc:
-        return False, error_msg
-    
-    # Delete from database
+    volumes = volume_result.all()
+    volume_orthanc_ids = [row.orthanc_series_id for row in volumes]
+
+    seg_orthanc_ids: list[str | None] = []
+    if volumes:
+        volume_uids = [row.volume_series_instance_uid for row in volumes]
+        seg_result = await db.execute(
+            select(Segmentation.orthanc_series_id).where(
+                Segmentation.volume_series_instance_uid.in_(volume_uids)
+            )
+        )
+        seg_orthanc_ids = [row[0] for row in seg_result.all()]
+
     try:
-        await db.delete(study)
+        await db.delete(study)  # cascades to volume_series -> segmentations
         await db.commit()
-        return True, None
     except SQLAlchemyError as e:
         await db.rollback()
         error_msg = f"Database error: {str(e)}"
         logger.error(error_msg)
         return False, error_msg
+
+    await cleanup_orthanc_resources_after_db_delete(
+        "series",
+        [*volume_orthanc_ids, *seg_orthanc_ids],
+        context=f"DB delete of study {study_uid}",
+    )
+    await cleanup_orthanc_resources_after_db_delete(
+        "studies",
+        [orthanc_study_id],
+        context=f"DB delete of study {study_uid}",
+    )
+    return True, None
 
 async def get_studies_by_patient(
     db: AsyncSession, patient_id: UUID, skip: int = 0, limit: int = 100

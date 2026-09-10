@@ -134,6 +134,8 @@ services:
       ORTHANC_URL: http://orthanc:8042
       ORTHANC_USER: ${ORTHANC_USER:-orthanc}
       ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:-orthanc}
+      ORTHANC_WEBHOOK_TOKEN: ${ORTHANC_WEBHOOK_TOKEN:-}
+      RECONCILIATION_INTERVAL_SECONDS: ${RECONCILIATION_INTERVAL_SECONDS:-300}
       BACKEND_STORAGE_ROOT: /storage
       AGENTS_WORKSPACE_DIR: /storage/hypotheses
       GENERAL_DATA_DIR: /storage/data/medical
@@ -149,7 +151,6 @@ services:
       - .env
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
-      - ${COMPOSE_PROJECT_DIR}/Backend/application_api:/app/application_api
       - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/lib/configs:/app/apps/radiology/lib/configs:ro
     depends_on:
       db-seed:
@@ -253,7 +254,7 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:18rc1-alpine3.22
+    image: postgres:18-alpine
     container_name: postgres-backend
     volumes:
       - ${COMPOSE_PROJECT_DIR}/deploy/database/backup.sql:/docker-entrypoint-initdb.d/backup.sql

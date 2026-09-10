@@ -1,10 +1,8 @@
 # app/crud/async_hypothesis.py
 from fastapi import HTTPException
-from psycopg2 import IntegrityError
-from psycopg2 import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from uuid import uuid4, UUID
 
 from application_api.db.models.hypothesis import Hypothesis
