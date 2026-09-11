@@ -16,36 +16,116 @@ if [[ "$(uname)" == "Darwin" ]] && [[ "$TERM_PROGRAM" == "" ]]; then
   osascript -e 'tell application "Terminal" to activate' 2>/dev/null || true
 fi
 
+# Bounds a command with a hard timeout so a stuck call (e.g. 'ollama list' or
+# 'docker info' while their backend is still starting up) can never freeze
+# this whole launcher. Falls back to running unbounded if no timeout tool is
+# available (plain macOS without coreutils).
+with_timeout() {
+  local secs="$1"; shift
+  if command -v timeout &>/dev/null; then
+    timeout "$secs" "$@"
+  elif command -v gtimeout &>/dev/null; then
+    gtimeout "$secs" "$@"
+  else
+    "$@"
+  fi
+}
+
 echo
 echo "  OHIF-Standalone Interactive launcher"
 echo "  ─────────────────────────────────────────"
 echo -e "${NC}"
 
 # ── 1. Docker ────────────────────────────────
+# Don't make the user open Docker by hand - start it here and wait.
 if ! command -v docker &>/dev/null; then
   abort "Docker is not installed. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ then re-run this script."
 fi
 
-if ! docker info &>/dev/null; then
-  abort "Docker Desktop is not running.
-       Please open Docker Desktop, wait until it shows 'Docker is running', then double-click this script again."
+start_docker() {
+  case "$(uname)" in
+    Darwin)
+      open -a Docker 2>/dev/null || open -a "Docker Desktop" 2>/dev/null || true
+      ;;
+    *)
+      # Docker Desktop for Linux first, then the system daemon.
+      if command -v systemctl &>/dev/null; then
+        systemctl --user start docker-desktop 2>/dev/null \
+          || sudo systemctl start docker 2>/dev/null || true
+      else
+        sudo service docker start 2>/dev/null || true
+      fi
+      ;;
+  esac
+}
+
+# Launch the Docker app whenever its process isn't already running - even if
+# the engine already answers (e.g. a lingering daemon) - so the app actually
+# opens instead of silently relying on a background engine.
+docker_app_running() {
+  case "$(uname)" in
+    Darwin) pgrep -x Docker &>/dev/null || pgrep -f "Docker Desktop" &>/dev/null ;;
+    *)      pgrep -f "Docker Desktop" &>/dev/null || pgrep -x dockerd &>/dev/null ;;
+  esac
+}
+
+if ! docker_app_running; then
+  warn "Docker app is not running - launching it..."
+  start_docker
+fi
+
+if ! with_timeout 10 docker info &>/dev/null; then
+  warn "Waiting for the Docker engine to come up (up to 180s)..."
+  waited=0
+  while ! with_timeout 10 docker info &>/dev/null; do
+    if (( waited >= 180 )); then
+      abort "Docker did not become ready within 180 seconds.
+       Start Docker manually, wait until it reports 'Docker is running', then re-run this script."
+    fi
+    if (( waited % 15 == 0 )); then
+      warn "  ...still waiting on Docker (${waited}s elapsed)"
+    fi
+    sleep 3
+    waited=$((waited + 3))
+  done
 fi
 info "Docker is running."
 
 # ── 2. Ollama ────────────────────────────────
+# Same idea: if Ollama isn't answering, start it ourselves - the macOS app when
+# present, otherwise a headless 'ollama serve' in the background.
 if ! command -v ollama &>/dev/null; then
   abort "Ollama is not installed. Download it from https://ollama.com/download then re-run this script."
 fi
 
-# Try the HTTP health endpoint first; fall back to 'ollama list'
-if curl -sf http://localhost:11434 &>/dev/null || ollama list &>/dev/null 2>&1; then
-  info "Ollama is running."
-else
-  abort "Ollama does not appear to be running.
-       On macOS:  open the Ollama app from your Applications folder.
-       On Linux:  run 'ollama serve' in a separate terminal.
-       Then double-click this script again."
+ollama_ready() {
+  curl -sf --max-time 3 http://localhost:11434 &>/dev/null && return 0
+  with_timeout 5 ollama list &>/dev/null
+}
+
+if ! ollama_ready; then
+  warn "Ollama is not responding - starting it now..."
+  if [[ "$(uname)" == "Darwin" ]] && open -a Ollama 2>/dev/null; then
+    :
+  else
+    nohup ollama serve >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+  fi
+  warn "Waiting for Ollama to accept connections (up to 60s)..."
+  waited=0
+  while ! ollama_ready; do
+    if (( waited >= 60 )); then
+      abort "Ollama did not become ready within 60 seconds.
+       Start it manually (run 'ollama serve' or open the Ollama app), then re-run this script."
+    fi
+    if (( waited % 10 == 0 )); then
+      warn "  ...still waiting on Ollama (${waited}s elapsed)"
+    fi
+    sleep 3
+    waited=$((waited + 3))
+  done
 fi
+info "Ollama is running."
 
 # ── 3. Environment variable ───────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -60,29 +140,10 @@ fi
 
 info "COMPOSE_PROJECT_DIR set to: $COMPOSE_PROJECT_DIR"
 
-# ── 4. Backend Selection ─────────────────────
-echo "Select backend mode:"
-echo "  1) GPU"
-echo "  2) CPU"
-echo
-while true; do
-  read -rp "Choice [1-2]: " BACKEND_CHOICE
-  case "$BACKEND_CHOICE" in
-    1)
-      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/deploy/docker-compose.backend.gpu.yml"
-      BACKEND_MODE="GPU"
-      break
-      ;;
-    2)
-      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/deploy/docker-compose.backend.cpu.yml"
-      BACKEND_MODE="CPU"
-      break
-      ;;
-    *)
-      warn "Invalid selection."
-      ;;
-  esac
-done
+# ── 4. Backend compose (GPU only) ────────────
+# The CPU backend variant has been removed - this stack is GPU-only.
+BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/deploy/docker-compose.backend.gpu.yml"
+BACKEND_MODE="GPU"
 
 # ── 5. Frontend Selection ────────────────────
 echo "Select frontend mode:"
