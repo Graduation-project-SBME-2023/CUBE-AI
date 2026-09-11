@@ -3,9 +3,9 @@
 #  Double-click this file to launch
 #
 #  - No frontend: use launch.ps1 for both.
-#  - No image updates: runs whatever images are already on this
-#    machine (--pull never). Use launch.ps1 when you actually
-#    want to fetch newer images.
+#  - No image updates: reuses whatever images are already on this
+#    machine (--pull missing) and only pulls one that's missing entirely.
+#    Use launch.ps1 when you actually want to fetch newer images.
 #  - Applies the storage changes: compose recreates only the
 #    containers whose spec changed, which is what makes the new
 #    Backend\storage mounts and BACKEND_STORAGE_ROOT / *_DIR env
@@ -34,6 +34,34 @@ function Stop-Launch {
     exit 1
 }
 
+# Runs an external command and bounds it with a hard timeout, killing it if it
+# doesn't finish - 'docker info' and especially 'ollama list' can hang
+# indefinitely while their backend is still starting up, which would otherwise
+# freeze this whole launcher with no error and no output.
+function Test-ProcessSucceeds {
+    param(
+        [Parameter(Mandatory)] [string] $FileName,
+        [string] $Arguments = "",
+        [int] $TimeoutMs = 5000
+    )
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $FileName
+        $psi.Arguments = $Arguments
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        if ($proc.WaitForExit($TimeoutMs)) {
+            return ($proc.ExitCode -eq 0)
+        }
+        try { $proc.Kill() } catch {}
+        return $false
+    }
+    catch { return $false }
+}
+
 Write-Host ""
 Write-Host "  ========================================="
 Write-Host "  OHIF-Standalone Backend-only launcher"
@@ -41,52 +69,107 @@ Write-Host "  ========================================="
 Write-Host ""
 
 # -- 1. Docker --------------------------------
+# Don't make the user open Docker Desktop by hand - start it here and wait.
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Stop-Launch "Docker is not installed. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ then re-run this script."
 }
 
-try {
-    $null = docker info 2>&1
-    if ($LASTEXITCODE -ne 0) { throw }
+function Test-DockerReady {
+    return Test-ProcessSucceeds -FileName "docker" -Arguments "info" -TimeoutMs 10000
 }
-catch {
-    Stop-Launch "Docker Desktop is not running.`nPlease open Docker Desktop, wait until it shows 'Docker is running', then double-click this script again."
+
+# Launch the Docker Desktop app whenever its process isn't already running -
+# even if the engine already answers (e.g. a lingering WSL daemon) - so the
+# app actually opens instead of silently relying on a background engine.
+$dockerAppRunning = $null -ne (Get-Process -Name "Docker Desktop" -ErrorAction SilentlyContinue)
+if (-not $dockerAppRunning) {
+    $dockerExe = @(
+        (Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Docker\Docker\Docker Desktop.exe"),
+        (Join-Path $env:LOCALAPPDATA "Docker\Docker Desktop.exe")
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+
+    if ($dockerExe) {
+        Write-Warn "Docker Desktop is not open - launching it..."
+        Start-Process -FilePath $dockerExe | Out-Null
+    }
+    elseif (-not (Test-DockerReady)) {
+        # No Docker Desktop install found and the engine isn't reachable either;
+        # try the CLI-managed engine (Docker CE / WSL) as a last resort.
+        Start-Process -FilePath "com.docker.cli" -ArgumentList "engine start" -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+    }
+}
+
+if (-not (Test-DockerReady)) {
+    Write-Warn "Waiting for the Docker engine to come up (up to 180s)..."
+    $startTime = Get-Date
+    $deadline = $startTime.AddSeconds(180)
+    $nextHeartbeat = $startTime.AddSeconds(15)
+    while (-not (Test-DockerReady)) {
+        $now = Get-Date
+        if ($now -gt $deadline) {
+            Stop-Launch "Docker did not become ready within 180 seconds.`nOpen Docker Desktop manually, wait until it shows 'Docker is running', then re-run this script."
+        }
+        if ($now -gt $nextHeartbeat) {
+            Write-Warn "  ...still waiting on Docker ($([int]($now - $startTime).TotalSeconds)s elapsed)"
+            $nextHeartbeat = $now.AddSeconds(15)
+        }
+        Start-Sleep -Seconds 3
+    }
 }
 
 Write-OK "Docker is running."
 
 #  = 2. Ollama ==================================
+# Same idea: if Ollama isn't answering, start it ourselves. Prefer the desktop
+# app when it's installed, otherwise run a headless 'ollama serve'.
 if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
     Stop-Launch "Ollama is not installed. Download it from https://ollama.com/download then re-run this script."
 }
 
-$ollamaOk = $false
-
-try {
-    $resp = Invoke-WebRequest `
-        -Uri "http://localhost:11434" `
-        -UseBasicParsing `
-        -TimeoutSec 3 `
-        -ErrorAction SilentlyContinue
-
-    if ($resp.StatusCode -lt 500) {
-        $ollamaOk = $true
-    }
-}
-catch {}
-
-if (-not $ollamaOk) {
+function Test-OllamaReady {
     try {
-        $null = ollama list 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            $ollamaOk = $true
-        }
+        $resp = Invoke-WebRequest `
+            -Uri "http://localhost:11434" `
+            -UseBasicParsing `
+            -TimeoutSec 3 `
+            -ErrorAction SilentlyContinue
+
+        if ($resp.StatusCode -lt 500) { return $true }
     }
     catch {}
+
+    # 'ollama list' can hang for a while if the server is mid-startup; bound it
+    # so a stuck call can never freeze the launcher.
+    return Test-ProcessSucceeds -FileName "ollama" -Arguments "list" -TimeoutMs 5000
 }
 
-if (-not $ollamaOk) {
-    Stop-Launch "Ollama does not appear to be running.`nOpen the Ollama app from your Start menu, wait a moment, then double-click this script again."
+if (-not (Test-OllamaReady)) {
+    Write-Warn "Ollama is not responding - starting it now..."
+
+    $ollamaApp = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama app.exe"
+    if (Test-Path -LiteralPath $ollamaApp) {
+        Start-Process -FilePath $ollamaApp | Out-Null
+    }
+    else {
+        Start-Process -FilePath "ollama" -ArgumentList "serve" -WindowStyle Hidden | Out-Null
+    }
+
+    Write-Warn "Waiting for Ollama to accept connections (up to 60s)..."
+    $startTime = Get-Date
+    $deadline = $startTime.AddSeconds(60)
+    $nextHeartbeat = $startTime.AddSeconds(10)
+    while (-not (Test-OllamaReady)) {
+        $now = Get-Date
+        if ($now -gt $deadline) {
+            Stop-Launch "Ollama did not become ready within 60 seconds.`nStart it manually (run 'ollama serve' or open the Ollama app), then re-run this script."
+        }
+        if ($now -gt $nextHeartbeat) {
+            Write-Warn "  ...still waiting on Ollama ($([int]($now - $startTime).TotalSeconds)s elapsed)"
+            $nextHeartbeat = $now.AddSeconds(10)
+        }
+        Start-Sleep -Seconds 3
+    }
 }
 
 Write-OK "Ollama is running."
@@ -103,37 +186,13 @@ if (-not (Test-Path -LiteralPath $BackendEnv -PathType Leaf)) {
 
 Write-OK "COMPOSE_PROJECT_DIR set to: $ProjectRoot"
 
-#  === 4. Backend Selection =================================
-Write-Host ""
-Write-Host "Select backend mode:"
-Write-Host "  1) GPU"
-Write-Host "  2) CPU"
-Write-Host ""
-
-:backendLoop while ($true) {
-    $BackendChoice = Read-Host "Choice [1-2]"
-
-    switch ($BackendChoice) {
-        "1" {
-            $BackendCompose = Join-Path $ProjectRoot "deploy\docker-compose.backend.gpu.yml"
-            $BackendMode = "GPU"
-            break backendLoop
-        }
-
-        "2" {
-            $BackendCompose = Join-Path $ProjectRoot "deploy\docker-compose.backend.cpu.yml"
-            $BackendMode = "CPU"
-            break backendLoop
-        }
-
-        default {
-            Write-Warn "Invalid selection."
-        }
-    }
-}
+#  === 4. Backend compose (GPU only) =======================
+# The CPU backend variant has been removed - this stack is GPU-only.
+$BackendCompose = Join-Path $ProjectRoot "deploy\docker-compose.backend.gpu.yml"
+$BackendMode = "GPU"
 
 Write-Host ""
-Write-OK "Selected backend: $BackendMode"
+Write-OK "Backend mode: $BackendMode"
 Write-Warn "Frontend will NOT be started. Run scripts\launch.ps1 if you need the viewer."
 Write-Host ""
 
@@ -163,14 +222,18 @@ else {
 #  === 6. Launch =================================
 
 Write-Warn "Starting backend Docker containers..."
-Write-Warn "Using the images already on this machine - nothing will be pulled or updated."
+Write-Warn "Images already on this machine are reused as-is; only ones missing entirely are pulled."
 Write-Warn "Only containers whose config changed (storage mounts, storage env vars)"
 Write-Warn "are recreated; everything else is left running as-is."
 Write-Host ""
 
-# --pull never      : never contact the registry for the pre-built images
-#                     (agents, monailabel, orthanc, postgres) - use whatever
-#                     is on this machine already.
+# --pull missing    : reuse the pre-built images (agents, monailabel, orthanc,
+#                     postgres) already on this machine as-is; only pull one
+#                     that isn't present at all (e.g. first run, or an image
+#                     that was since removed). Never re-pulls/updates an image
+#                     that's already here - `--pull never` used to be here,
+#                     but that hard-fails with "No such image" the moment any
+#                     required image hasn't been pulled yet.
 # --build           : application-api/db-migrate/db-seed have a `build:`
 #                     section (pull_policy: build) and are meant to always
 #                     run the current checkout's code; without --build,
@@ -186,7 +249,7 @@ docker compose `
     --env-file $BackendEnv `
     -f $BackendCompose `
     up `
-    --pull never `
+    --pull missing `
     --build `
     --detach `
     --wait `

@@ -256,7 +256,10 @@ services:
       - ${COMPOSE_PROJECT_DIR}/deploy/database/backup.sql:/docker-entrypoint-initdb.d/backup.sql
       # Same volume name as docker-compose.backend.cpu.yml (see the orthanc
       # comment above for why this must match, not use a "-2" suffix).
-      - postgres-db:/var/lib/postgresql/data
+      # PostgreSQL 18 stores clusters below a major-version directory (for
+      # example /var/lib/postgresql/18/docker). Mount the parent directory so
+      # that layout survives container recreation and supports pg_upgrade.
+      - postgres-db:/var/lib/postgresql
     ports:
       - "5433:5432"
     environment:
