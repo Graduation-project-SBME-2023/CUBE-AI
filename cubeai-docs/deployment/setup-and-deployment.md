@@ -62,11 +62,9 @@ bash ./scripts/launcher.linux.sh
 ```
 
 ### What to expect:
-1. The script will verify that Docker and Ollama are running.
-2. It will ask you a single question: **Do you want to run the Backend in GPU mode or CPU mode?**
-   - Type `1` for GPU (recommended if you have an NVIDIA GPU).
-   - Type `2` for CPU.
-3. The script will automatically pull the production images for both the Frontend and the Backend. *(Note: The first run may take several minutes as it downloads the images).*
+1. The script checks whether Docker and Ollama are installed. If either is missing, it lists every missing prerequisite with its official installation link and stops before attempting deployment.
+2. If they are installed but inactive, the script starts Docker and Ollama and waits for both services to become ready. If automatic startup fails, it explains how to start them manually.
+3. The script starts the GPU backend and automatically pulls the production images for both the Frontend and the Backend. *(Note: The first run may take several minutes as it downloads the images).*
 4. Once everything says "started", open your browser and navigate to:
    **`http://localhost`**
 
