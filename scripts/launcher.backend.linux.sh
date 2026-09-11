@@ -46,12 +46,29 @@ echo "  OHIF-Standalone Backend-only launcher"
 echo "  ─────────────────────────────────────────"
 echo -e "${NC}"
 
-# ── 1. Docker ────────────────────────────────
-# Don't make the user open Docker by hand - start it here and wait.
+# Check every required application before trying to start either one so a new
+# user gets the complete installation list in a single run.
+missing_prerequisites=()
 if ! command -v docker &>/dev/null; then
-  abort "Docker is not installed. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ then re-run this script."
+  missing_prerequisites+=("Docker: https://docs.docker.com/engine/install/")
+fi
+if ! command -v ollama &>/dev/null; then
+  missing_prerequisites+=("Ollama: https://ollama.com/download")
 fi
 
+if (( ${#missing_prerequisites[@]} > 0 )); then
+  warn "The following required software is not installed or is not available in PATH:"
+  for prerequisite in "${missing_prerequisites[@]}"; do
+    echo "  - $prerequisite"
+  done
+  abort "Install the missing software, start it once to finish setup, then re-run this script. If it is already installed, open a new terminal so PATH is refreshed."
+fi
+
+info "Docker is installed."
+info "Ollama is installed."
+
+# ── 1. Docker ────────────────────────────────
+# Don't make the user open Docker by hand - start it here and wait.
 start_docker() {
   case "$(uname)" in
     Darwin)
@@ -104,13 +121,14 @@ info "Docker is running."
 # ── 2. Ollama ────────────────────────────────
 # Same idea: if Ollama isn't answering, start it ourselves - the macOS app when
 # present, otherwise a headless 'ollama serve' in the background.
-if ! command -v ollama &>/dev/null; then
-  abort "Ollama is not installed. Download it from https://ollama.com/download then re-run this script."
-fi
-
+# The HTTP port is the only signal that actually matters: it's exactly what
+# the agents container talks to (OLLAMA_BASE_URL=http://host.docker.internal:11434).
+# 'ollama list' is deliberately NOT used here - on some installs it silently
+# launches the app/server as a side effect just by being invoked, and on
+# others it can exit 0 even when nothing is actually listening, so its exit
+# code is not a trustworthy readiness signal either way.
 ollama_ready() {
-  curl -sf --max-time 3 http://localhost:11434 &>/dev/null && return 0
-  with_timeout 5 ollama list &>/dev/null
+  curl -sf --max-time 3 http://localhost:11434 &>/dev/null
 }
 
 if ! ollama_ready; then

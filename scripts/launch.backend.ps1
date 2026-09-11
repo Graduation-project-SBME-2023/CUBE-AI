@@ -68,12 +68,29 @@ Write-Host "  OHIF-Standalone Backend-only launcher"
 Write-Host "  ========================================="
 Write-Host ""
 
-# -- 1. Docker --------------------------------
-# Don't make the user open Docker Desktop by hand - start it here and wait.
+# Check every required application before trying to start either one so a new
+# user gets the complete installation list in a single run.
+$missingPrerequisites = @()
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    Stop-Launch "Docker is not installed. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ then re-run this script."
+    $missingPrerequisites += "Docker Desktop: https://www.docker.com/products/docker-desktop/"
+}
+if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
+    $missingPrerequisites += "Ollama: https://ollama.com/download"
 }
 
+if ($missingPrerequisites.Count -gt 0) {
+    Write-Warn "The following required software is not installed or is not available in PATH:"
+    foreach ($prerequisite in $missingPrerequisites) {
+        Write-Host "  - $prerequisite" -ForegroundColor Yellow
+    }
+    Stop-Launch "Install the missing software, open it once to finish setup, then re-run this script. If it is already installed, restart this terminal so PATH is refreshed."
+}
+
+Write-OK "Docker is installed."
+Write-OK "Ollama is installed."
+
+# -- 1. Docker --------------------------------
+# Don't make the user open Docker Desktop by hand - start it here and wait.
 function Test-DockerReady {
     return Test-ProcessSucceeds -FileName "docker" -Arguments "info" -TimeoutMs 10000
 }
@@ -123,11 +140,13 @@ Write-OK "Docker is running."
 #  = 2. Ollama ==================================
 # Same idea: if Ollama isn't answering, start it ourselves. Prefer the desktop
 # app when it's installed, otherwise run a headless 'ollama serve'.
-if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
-    Stop-Launch "Ollama is not installed. Download it from https://ollama.com/download then re-run this script."
-}
-
 function Test-OllamaReady {
+    # The HTTP port is the only signal that actually matters: it's exactly
+    # what the agents container talks to (OLLAMA_BASE_URL=http://host.docker.internal:11434).
+    # 'ollama list' is NOT used here - on some installs it silently launches
+    # the app/server as a side effect just by being invoked, and on others it
+    # can exit 0 even when nothing is actually listening, so its exit code is
+    # not a trustworthy readiness signal either way.
     try {
         $resp = Invoke-WebRequest `
             -Uri "http://localhost:11434" `
@@ -139,9 +158,7 @@ function Test-OllamaReady {
     }
     catch {}
 
-    # 'ollama list' can hang for a while if the server is mid-startup; bound it
-    # so a stuck call can never freeze the launcher.
-    return Test-ProcessSucceeds -FileName "ollama" -Arguments "list" -TimeoutMs 5000
+    return $false
 }
 
 if (-not (Test-OllamaReady)) {
