@@ -23,6 +23,33 @@ def test_index_migration_uses_the_volume_model_table_name():
     assert '"volumes"' not in migration
 
 
+def test_legacy_gender_constraint_name_bypasses_naming_convention():
+    migration = (
+        APPLICATION_ROOT
+        / "migrations"
+        / "versions"
+        / "db570196426f_remove_gender_check_constraint.py"
+    ).read_text(encoding="utf-8")
+
+    # The initial SQL migration created patients_gender_check verbatim. Without
+    # op.f(), Alembic's current naming convention expands it to the nonexistent
+    # ck_patients_patients_gender_check during upgrade or downgrade.
+    assert migration.count('op.f("patients_gender_check")') == 2
+
+
+def test_uuid_conversion_drops_naming_convention_foreign_keys():
+    migration = (
+        APPLICATION_ROOT
+        / "migrations"
+        / "versions"
+        / "6664d514406c_create_hypothesis_plan_plan_step_tables.py"
+    ).read_text(encoding="utf-8")
+
+    assert "fk_chat_messages_chat_id_chat_sessions" in migration
+    assert "fk_chat_study_association_chat_id_chat_sessions" in migration
+    assert "pk_chat_messages" in migration
+
+
 def test_alembic_env_registers_relationship_models_for_autogenerate():
     """
     There is no standalone monailabel/models/__init__.py seeder registry

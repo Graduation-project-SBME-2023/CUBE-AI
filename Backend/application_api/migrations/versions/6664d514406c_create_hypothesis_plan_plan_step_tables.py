@@ -25,7 +25,9 @@ def upgrade():
     
     # Chat-related FKs
     op.execute("ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_chat_id_fkey")
+    op.execute("ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS fk_chat_messages_chat_id_chat_sessions")
     op.execute("ALTER TABLE chat_study_association DROP CONSTRAINT IF EXISTS chat_study_association_chat_id_fkey")
+    op.execute("ALTER TABLE chat_study_association DROP CONSTRAINT IF EXISTS fk_chat_study_association_chat_id_chat_sessions")
     
     # Patient-related FKs
     op.execute("ALTER TABLE studies DROP CONSTRAINT IF EXISTS studies_patient_id_fkey")
@@ -97,7 +99,8 @@ def upgrade():
         WHERE cm.chat_id::text = m.old_id;
     """)
     
-    op.execute("ALTER TABLE chat_messages DROP CONSTRAINT chat_messages_pkey")
+    op.execute("ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS chat_messages_pkey")
+    op.execute("ALTER TABLE chat_messages DROP CONSTRAINT IF EXISTS pk_chat_messages")
     op.drop_column('chat_messages', 'message_id')
     op.drop_column('chat_messages', 'chat_id')
     op.alter_column('chat_messages', 'message_id_new', new_column_name='message_id')
