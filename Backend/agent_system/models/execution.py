@@ -7,7 +7,6 @@ from datetime import datetime
 class AgentStatus(str, Enum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
-    WAITING_FOR_RESOURCE = "WAITING_FOR_RESOURCE"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
 
@@ -19,5 +18,3 @@ class AgentState:
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     error: Optional[str] = None
-    resources: Optional[list[str]] = None
-    queue_position: Optional[int] = None

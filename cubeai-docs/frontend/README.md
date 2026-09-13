@@ -113,12 +113,6 @@ The service adds `session_id` and `message_id`, rejects cross-session outgoing
 messages, drops cross-session incoming events, deduplicates `event_id`, and uses
 bounded reconnect and pending-message buffers.
 
-The Research Playground also consumes `resource_status` events. While an agent
-is queued for CPU or GPU capacity, the canvas displays `WAITING_FOR_RESOURCE`
-with the resource names and queue position. This is a computational wait, so the
-chat input remains locked until the active pipeline reaches a genuine user-input
-or review state.
-
 ### PlanTransformationUtils
 
 **File:** `platform/app/src/utils/PlanTransformationUtils.ts`

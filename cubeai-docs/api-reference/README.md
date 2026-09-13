@@ -139,29 +139,6 @@ The current no-Redis deployment supports one Agent System worker. WebSocket
 registries and execution queues are process-local, so multiple workers require a
 shared event broker and distributed capacity controller.
 
-#### Heavy-Resource Status
-
-Heavy stages emit `resource_status` messages with `state` equal to
-`WAITING_FOR_RESOURCE`, `ACQUIRED`, or `RELEASED`:
-
-```json
-{
-  "type": "resource_status",
-  "payload": {
-    "session_id": "abc123",
-    "agent": "segmentation_agent",
-    "operation": "segmentation_agent.infer:pair-1",
-    "resources": ["gpu_segmentation", "cpu_heavy"],
-    "state": "WAITING_FOR_RESOURCE",
-    "queue_position": 1
-  }
-}
-```
-
-`GET /status/{session_id}` includes that session's active and waiting leases in
-`resource_capacity`. `GET /ws-status` exposes the global resource-capacity
-snapshot for operations and diagnostics.
-
 ---
 
 ## MONAI Label API
