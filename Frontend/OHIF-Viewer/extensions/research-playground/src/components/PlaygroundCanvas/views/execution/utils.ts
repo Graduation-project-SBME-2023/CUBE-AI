@@ -20,29 +20,6 @@ export function useExecutionMessages() {
         const msg = payload as ScratchpadMessage;
         setMessages(prev => [...prev, msg]);
       }
-
-      if (type === 'resource_status') {
-        const state = String(payload?.state || '').toUpperCase();
-        if (!['WAITING_FOR_RESOURCE', 'ACQUIRED'].includes(state)) return;
-        const resources = Array.isArray(payload?.resources)
-          ? payload.resources.join(' + ').replace(/_/g, ' ')
-          : 'compute resources';
-        const queuePosition = payload?.queue_position
-          ? ` (queue ${payload.queue_position})`
-          : '';
-        const msg: ScratchpadMessage = {
-          type: 'agent_status',
-          agent_id: String(payload?.agent || 'pipeline'),
-          role: 'resource_scheduler',
-          content:
-            state === 'WAITING_FOR_RESOURCE'
-              ? `Waiting for ${resources}${queuePosition}`
-              : `Resource acquired: ${resources}`,
-          timestamp: payload?.timestamp || new Date().toISOString(),
-          status: state,
-        };
-        setMessages(prev => [...prev, msg]);
-      }
       
       // Support granular types if they come directly
       if (['agent_registered', 'agent_note', 'agent_flag', 'agent_status', 'agent_summary'].includes(type)) {

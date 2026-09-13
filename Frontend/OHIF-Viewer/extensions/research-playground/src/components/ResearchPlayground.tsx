@@ -43,7 +43,6 @@ const WAITING_MESSAGES: Record<string, string> = {
   WAITING_FOR_REVIEW: 'Agent is waiting for user review',
   WAITING_FOR_USER_REVIEW: 'Agent is waiting for user review',
   WAITING_FOR_LABELS: 'Waiting for user to upload labels',
-  WAITING_FOR_RESOURCE: 'Waiting for compute resources',
   WAITING_FOR_USER_INPUT: 'Agent is waiting for user input',
 };
 
@@ -665,29 +664,6 @@ function ResearchPlaygroundInner() {
         if (outputForAgent) clearPhaseIndicator(outputForAgent.phase);
       }
 
-      if (type === 'resource_status') {
-        const agentName = String(payload?.agent || '');
-        const state = String(payload?.state || '').toUpperCase();
-        const outputForAgent = Object.values(OUTPUT_EVENT_AGENTS).find(
-          item => item.agent === agentName
-        );
-        if (outputForAgent && state === 'WAITING_FOR_RESOURCE') {
-          const resources = Array.isArray(payload?.resources)
-            ? payload.resources.join(' + ').replace(/_/g, ' ')
-            : 'compute resources';
-          const position = payload?.queue_position
-            ? ` (queue ${payload.queue_position})`
-            : '';
-          showPhaseIndicator(
-            outputForAgent.phase,
-            `Waiting for ${resources}${position}`,
-            true
-          );
-        } else if (outputForAgent && state === 'ACQUIRED') {
-          clearPhaseIndicator(outputForAgent.phase);
-        }
-      }
-
       if (type === 'pipeline_agent_status' || type === 'Pipeline_agent_status') {
         // Execution has started — unlock the Data & Population tab
         setIsPlanApproved(true);
@@ -695,13 +671,12 @@ function ResearchPlaygroundInner() {
         const allDone = agents.length > 0 && agents.every((a: any) =>
           ['COMPLETED', 'DONE'].includes(String(a?.status || '').toUpperCase())
         );
-        const anyUserWaiting = agents.some((a: any) => {
-          const status = String(a?.status || '').toUpperCase();
-          return status.startsWith('WAITING') && status !== 'WAITING_FOR_RESOURCE';
-        });
+        const anyWaiting = agents.some((a: any) =>
+          String(a?.status || '').toUpperCase().startsWith('WAITING')
+        );
         // Lock chat while actively running; unlock when all done or paused for input
         if (!updateStateRef.current.isHydrating && !updateStateRef.current.isHistorical) {
-          setIsAgentExecuting(!allDone && !anyUserWaiting);
+          setIsAgentExecuting(!allDone && !anyWaiting);
         }
 
         // ── Progressive sidebar unlock ──────────────────────────────────────
