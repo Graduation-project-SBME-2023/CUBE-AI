@@ -62,7 +62,6 @@ async def _wait_for_cohort_approval(workspace_dir: str, config_path: str, csv_pa
                 async with httpx.AsyncClient(timeout=5.0) as client:
                     await client.post(
                         f'{os.environ.get("MAS_BASE_URL", "http://localhost:8150").rstrip("/")}/ws-broadcast',
-                        headers={"X-Internal-Token": os.environ.get("WS_INTERNAL_TOKEN", "")},
                         json={
                             "type": "agent_waiting_for_user_input",
                             "payload": {

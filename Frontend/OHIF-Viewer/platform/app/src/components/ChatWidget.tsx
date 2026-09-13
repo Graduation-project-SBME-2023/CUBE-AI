@@ -208,8 +208,7 @@ const CustomChatWidget: React.FC = () => {
     });
 
     // Send via WebSocket
-    websocketService.connect(sessionId);
-    websocketService.sendMessage({ type: "user", payload: text, session_id: sessionId });
+    websocketService.sendMessage({ type: "user", payload: text });
 
     setInput("");
     setIsTyping(true);
@@ -224,13 +223,9 @@ const CustomChatWidget: React.FC = () => {
 
   useEffect(() => {
     fetchChatSessions();
-  }, []);
+    websocketService.connect();
 
-  useEffect(() => {
-    if (activeSessionId) {
-      websocketService.connect(activeSessionId);
-    }
-  }, [activeSessionId]);
+  }, []);
 
 
   const sortedSessions = [...sessions].sort((a, b) => (b.last_activity || 0) - (a.last_activity || 0));
@@ -251,7 +246,6 @@ const CustomChatWidget: React.FC = () => {
       const currentSessionId = activeSessionIdRef.current ?? sessions[0]?.chat_id;
 
       if (!currentSessionId) return;
-      if (String(data.session_id || '') !== String(currentSessionId)) return;
 
       // Safely handle text vs object payloads
       const textContent = typeof payload === "string"

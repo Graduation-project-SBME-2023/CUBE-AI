@@ -150,55 +150,26 @@ agents_workspace/
 
 ## WebSocket Protocol
 
-The Agent System exposes a native FastAPI WebSocket endpoint. Every connection
-must be bound to one session with `/ws?session_id=<id>`. Server events are sent
-only to sockets registered for that session; multiple tabs may intentionally
-share the same session stream.
-
-Each server event uses this envelope:
-
-```json
-{
-  "version": 1,
-  "event_id": "uuid",
-  "sequence": 42,
-  "session_id": "session-uuid",
-  "run_id": null,
-  "type": "pipeline_agent_status",
-  "payload": {},
-  "timestamp": "2026-08-21T12:00:00Z",
-  "replaying": false
-}
-```
+The Agent System exposes a **Socket.IO WebSocket** endpoint that the frontend connects to.
 
 ### Events (Server → Client)
 
 | Event | Payload | Description |
 |---|---|---|
 | `plan` | `{steps: [...]}` | Pipeline plan ready |
-| `pipeline_agent_status` | `{agents: [...]}` | Pipeline agent states |
-| `state_update` | `{state}` | Session lifecycle state |
-| `run_queued` | `{queue_position}` | Pipeline is waiting for capacity |
-| `planning_queued` | `{queue_position}` | Planning is waiting for capacity |
-| `msg` | string or object | Chat message from an agent |
-| `protocol_error` | `{reason}` | Rejected client WebSocket message |
+| `PLAN_UPDATE` | `{steps: [...]}` | Plan was revised |
+| `node` | `{id, status, logs}` | Agent node status update |
+| `NODE_UPDATE` | `{id, status, logs}` | Agent node update |
+| `message` | `{role, content}` | Chat message from agent |
+| `error` | `{message}` | Error notification |
 
 ### Events (Client → Server)
 
 | Event | Payload | Description |
 |---|---|---|
-| `user` | `{text}` or string | Queue user input for the bound session |
-| `user_input` | `{text}` or string | Alias for `user` |
-| `chat_input` | `{message}` or string | Alias for `user` |
-
-Client messages should include a unique `message_id`; duplicate IDs are ignored
-within the same session and acknowledged with `client_message_ack`. Pipeline
-start, pause, resume, and stop commands use REST endpoints rather than WebSocket
-control events.
-
-Without Redis, routing and capacity queues are process-local. Run exactly one
-Agent System worker. A later multi-worker deployment must add a shared broker and
-distributed admission control before increasing the worker count.
+| `START_WORKFLOW` | `{session_id}` | Begin pipeline execution |
+| `RESET_WORKFLOW` | `{}` | Reset to planning mode |
+| `message` | `{content}` | User chat message |
 
 ---
 
