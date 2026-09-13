@@ -10,7 +10,6 @@ class WSLogBase(BaseModel):
 
 
 class WSLogCreate(BaseModel):
-    uuid: Optional[UUID] = None
     session_id: UUID
     msg_type: Optional[str] = None
     payload: Optional[Any] = None

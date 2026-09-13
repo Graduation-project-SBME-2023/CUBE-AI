@@ -13,7 +13,7 @@ The frontend is a customized **OHIF Viewer** built with React 18 and TypeScript.
 | Vite | Build tool & dev server |
 | Yarn | Package manager |
 | ReactFlow | Node-graph canvas for Research Playground |
-| Browser WebSocket API | Session-scoped communication with Agent System |
+| Socket.IO Client | WebSocket communication with Agent System |
 | OHIF Extensions | Custom panels and viewers |
 
 ---
@@ -98,20 +98,15 @@ Conversational interface that:
 
 ### WebsocketService
 
-**File:** `platform/app/src/utils/WebsocketService.ts`
+**File:** `platform/app/src/utils/WebsocketService.js`
 
-Singleton service that manages the native WebSocket connection. A session ID is
-required before it opens a socket:
+Singleton service that manages the Socket.IO connection:
 ```javascript
-websocketService.connect(sessionId);
+websocketService.connect();
 websocketService.isConnected();
-websocketService.sendMessage({ type: 'user', payload: { text } });
-const unsubscribe = websocketService.subscribe(handleEvent);
+websocketService.emit('START_WORKFLOW', payload);
+websocketService.on('plan', handlePlan);
 ```
-
-The service adds `session_id` and `message_id`, rejects cross-session outgoing
-messages, drops cross-session incoming events, deduplicates `event_id`, and uses
-bounded reconnect and pending-message buffers.
 
 ### PlanTransformationUtils
 

@@ -20,7 +20,6 @@ async def send_ws_message_remote(
     try:
         response = await request_client.post(
             f"{(base_url or BASE_URL).rstrip('/')}/ws-broadcast",
-            headers={"X-Internal-Token": os.environ.get("WS_INTERNAL_TOKEN", "")},
             json={
                 "type": msg_type,
                 "payload": payload,
