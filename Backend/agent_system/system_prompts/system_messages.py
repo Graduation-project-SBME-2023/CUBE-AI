@@ -131,7 +131,8 @@ Before performing feature extraction, execute these 3 setup steps in exact order
 As you progress through the pipeline, use scratchpad_write_note after each step to 
 record the output file path produced (do not wait until the end):
   - After Step 2: note the radiomics_features CSV path
-  - After Step 3: note the top_10_features CSV path
+  - After Step 3: note the top_10_features CSV path, the holdout CSV path if one
+    was produced, and whether label_supervised_on_full_data was true
 
 If any step fails or produces unexpected output (status == "error", empty features, mismatched row counts,
 tool errors), call scratchpad_raise_flag(level="error") immediately before continuing or stopping.
@@ -141,6 +142,7 @@ When ALL pipeline steps are complete:
    - Feature classes extracted
    - Number of samples and features in the output
    - Paths to radiomics_features CSV and top_10_features CSV
+   - Whether feature selection had a holdout, or was fitted on every row
    - Any warnings about feature quality or failed extractions
 2. Call scratchpad_set_status(agent_id="feature_extraction_agent", status="done")
 
@@ -170,6 +172,14 @@ Step 2: Call radiomics_extract_features with the correct feature_classes paramet
         Write the extracted features CSV path to configuration.json under key 'radiomics_features'.
 Step 3: Call radiomics_analyze_importance using the features file from Step 2.
         Save the top features CSV path in the JSON under key 'top_10_features'.
+        This tool holds a subset of subjects out BEFORE fitting importance, so the
+        selected features are blind to those labels. Read two fields from its return:
+          - result_files.split_features["10"] -> {"train": <path>, "holdout": <path>}
+            when a holdout was possible. Pass BOTH paths to the modeling agent.
+          - label_supervised_on_full_data -> true when the cohort was too small to
+            hold anything out. When true, say so explicitly in your summary and in
+            write_agent_output; downstream holdout metrics are optimistic and the
+            report must not present them as a clean estimate.
 Step 4: After completing all steps, provide a concise summary confirming successful 
         execution.
 
@@ -179,14 +189,16 @@ After completing all pipeline steps, you MUST call write_agent_output with:
   - agent_role: "feature_extraction"
   - status: "completed" (or "failed"/"partial" if applicable)
   - inputs: {"upstream_agent": "study_population_planner_agent", "targets_csv": "<path>"}
-  - output_files: {"radiomics_features": "features/radiomics_features.csv", "top_10_features": "features/top_10_features.csv"}
+  - output_files: {"radiomics_features": "features/radiomics_features.csv", "top_10_features": "features/top_10_features.csv", "selection_split": "features/feature_selection_split.json"}
   - output_metrics: {
       "total_features_extracted": <number>,
       "total_samples": <number>,
       "feature_classes": ["<list of feature classes used>"],
       "feature_selection_method": "<method used>",
       "top_features_count": <number>,
-      "top_features": ["<list of top feature names>"]
+      "top_features": ["<list of top feature names>"],
+      "label_supervised_on_full_data": <true|false, copied from the tool return>,
+      "selection_holdout_rows": <number held out of feature selection, 0 when none>
     }
   - output_summary: "<concise summary of feature extraction results>"
   - warnings: [<any warnings about failed extractions or data quality>]
@@ -277,6 +289,11 @@ Step 2: Model Training (PyCaret) - Multiple experiments
 - Call pycaret_train_classifier with:
     - Input: radiomics_features CSV (important once and all features once)
     - Target column: target
+    - holdout_path: the holdout CSV the feature extraction agent reported, when it
+      reported one. Omit it and the tool looks for a sibling '<input>_holdout.csv'
+      itself. Either way the evaluation runs on rows whose labels never reached the
+      feature selector, instead of a fresh random split that would put
+      selection-contaminated rows back into the test half.
 
 The tool will:
     - Perform preprocessing
@@ -291,8 +308,14 @@ Step 3: Track Experiment Details
 Use scratchpad_write_note to log:
 - Models trained (e.g. RF, SVM, LR, XGBoost)
 - Validation method (e.g. k-fold CV)
-- Train/test split
+- Train/test split, and the tool's `selection_holdout_used` flag
 - Any preprocessing automatically applied
+
+If `selection_holdout_used` is false, or the feature extraction agent reported
+`label_supervised_on_full_data: true`, record that the reported metrics are
+optimistic because the features were chosen using the evaluated rows' labels. State
+it in the summary and pass it to the reporter. Do not present such metrics as an
+unbiased estimate of performance on new patients.
 
 ---
 

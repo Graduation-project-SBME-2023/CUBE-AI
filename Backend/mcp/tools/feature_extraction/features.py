@@ -48,6 +48,8 @@ try:
 except ImportError:
     _HELPERS_AVAILABLE = False
 
+from .selection_split import detect_group_column, plan_selection_split
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -244,6 +246,22 @@ class AnalyzeImportanceInput(BaseModel):
     max_onehot_cardinality: int = Field(default=10)
     create_plots: bool = Field(default=True)
     top_n_plot: int = Field(default=30)
+    holdout_size: float = Field(
+        default=0.2,
+        description=(
+            "Fraction of subjects excluded from feature selection so their labels do "
+            "not leak into the selected set. Set to 0 to disable, which makes the "
+            "selection label-supervised on every row and is recorded as such."
+        ),
+    )
+    split_seed: int = Field(default=42, description="Seed for the selection holdout split.")
+    group_column: Optional[str] = Field(
+        default=None,
+        description=(
+            "Subject-identifying column so a patient's rows never straddle the split. "
+            "Auto-detected (subject_id, patient_id, ...) when omitted."
+        ),
+    )
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
@@ -1126,6 +1144,35 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             task_type = "regression"
         logger.info(f"Task type: {task_type}")
 
+        # ── Plan the selection holdout BEFORE anything is fitted ───────────
+        # Every importance method below fits on (X, y). Fitting on all rows leaks the
+        # holdout labels into the selected feature set, and PyCaret's later split
+        # cannot undo that. Plan the split here and fit only on `train_pos`.
+        group_column = params.group_column or detect_group_column(df.columns)
+        split = plan_selection_split(
+            n_rows=len(df),
+            labels=y.tolist(),
+            group_values=df[group_column].tolist() if group_column in df.columns else None,
+            group_column=group_column if group_column in df.columns else None,
+            task_type=task_type,
+            holdout_size=params.holdout_size,
+            seed=params.split_seed,
+        )
+        if split.label_supervised_on_full_data:
+            logger.warning(
+                "Feature selection is fitted on every row (%s). Reported holdout "
+                "metrics downstream are optimistic; this is recorded in the output.",
+                split.degraded_reason,
+            )
+        else:
+            logger.info(
+                "Selection holdout: %d of %d rows (%s, %d groups, seed=%d) excluded "
+                "from importance fitting.",
+                len(split.holdout_index), len(df), split.strategy,
+                split.n_groups, split.seed,
+            )
+        train_pos = split.train_index
+
         X_original = X.copy()
         cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
         encoding_mappings: dict = {}
@@ -1145,17 +1192,22 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
                     X[f"{col}_label"] = le.fit_transform(X[col].astype(str))
                     encoding_mappings[col] = {"method": "label", "mapping": dict(zip(le.classes_, range(len(le.classes_))))}
                 elif method == "target":
-                    tmp = pd.concat([X[[col]], y], axis=1)
+                    # Fitted on training rows only: a target encoding fitted on the
+                    # holdout writes those labels straight into a feature column.
+                    tmp = pd.concat([X[[col]], y], axis=1).iloc[train_pos]
                     means = tmp.groupby(col)[target_column].mean()
                     X[f"{col}_target"] = X[col].map(means)
-                    X[f"{col}_freq"]   = X[col].map(X[col].value_counts(normalize=True))
-                    encoding_mappings[col] = {"method": "target"}
+                    freqs = X[col].iloc[train_pos].value_counts(normalize=True)
+                    X[f"{col}_freq"]   = X[col].map(freqs)
+                    encoding_mappings[col] = {"method": "target", "fitted_on": "train"}
             X = X.drop(columns=cat_cols)
         elif params.encode_categorical == "none" and cat_cols:
             X = X.select_dtypes(include=[np.number])
 
         num_cols = X.select_dtypes(include=[np.number]).columns
-        X[num_cols] = X[num_cols].fillna(X[num_cols].median())
+        # Medians come from the training rows only; a median over the holdout is a
+        # summary of held-out data leaking back into every imputed cell.
+        X[num_cols] = X[num_cols].fillna(X[num_cols].iloc[train_pos].median())
         X = X.fillna(0)
 
         if encoding_mappings:
@@ -1163,7 +1215,15 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             with open(enc_path, "w") as fh:
                 json.dump(encoding_mappings, fh, indent=2, default=str)
 
-        logger.info(f"Feature matrix: {X.shape[0]} rows × {X.shape[1]} features")
+        # Everything that consumes labels fits on these; plots and exports still use
+        # the full X so the UI and the downstream CSVs keep every row.
+        X_fit = X.iloc[train_pos]
+        y_fit = y.iloc[train_pos]
+
+        logger.info(
+            f"Feature matrix: {X.shape[0]} rows × {X.shape[1]} features "
+            f"(importance fitted on {X_fit.shape[0]} row(s))"
+        )
 
         payload = ProgressPayload(current=1, total=TOTAL_STAGES, label="Loading & preprocessing data")
         log_tool_state(ToolEvent("tool_progress", "progress", payload))
@@ -1172,25 +1232,25 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         def _rf_importance(n):
             clf = (RandomForestClassifier if task_type == "classification"
                    else RandomForestRegressor)(n_estimators=100, random_state=42)
-            clf.fit(X, y)
+            clf.fit(X_fit, y_fit)
             imp = clf.feature_importances_
             idx = np.argsort(imp)[::-1][:n]
             return X.columns[idx].tolist(), imp
 
         def _f_test_importance(n):
             fn = f_classif if task_type == "classification" else f_regression
-            sel = SelectKBest(fn, k=min(n, X.shape[1])).fit(X, y)
+            sel = SelectKBest(fn, k=min(n, X.shape[1])).fit(X_fit, y_fit)
             return X.columns[sel.get_support()].tolist(), sel.scores_
 
         def _mutual_info_importance(n):
             fn = mutual_info_classif if task_type == "classification" else mutual_info_regression
-            sel = SelectKBest(fn, k=min(n, X.shape[1])).fit(X, y)
+            sel = SelectKBest(fn, k=min(n, X.shape[1])).fit(X_fit, y_fit)
             return X.columns[sel.get_support()].tolist(), sel.scores_
 
         def _rfe_importance(n):
             est = (RandomForestClassifier if task_type == "classification"
                    else RandomForestRegressor)(n_estimators=100, random_state=42)
-            sel = RFE(est, n_features_to_select=min(n, X.shape[1]), step=0.1).fit(X, y)
+            sel = RFE(est, n_features_to_select=min(n, X.shape[1]), step=0.1).fit(X_fit, y_fit)
             # Lower RFE rankings are better; negate them so the common
             # descending sort below retains the selected features first.
             return X.columns[sel.get_support()].tolist(), -sel.ranking_
@@ -1214,11 +1274,11 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         alternative_rankings: dict = {}
         stability_scores: list = []
         try:
-            if X.shape[0] >= 5 and X.shape[1] >= 2:
+            if X_fit.shape[0] >= 5 and X.shape[1] >= 2:
                 # ── ANOVA (F-test) ────────────────────────────────────────────────
                 try:
                     _fn_anova = f_classif if task_type == "classification" else f_regression
-                    _anova_scores = SelectKBest(_fn_anova, k="all").fit(X, y).scores_
+                    _anova_scores = SelectKBest(_fn_anova, k="all").fit(X_fit, y_fit).scores_
                     _anova_df = (
                         pd.DataFrame({"feature": X.columns, "importance": _anova_scores})
                         .sort_values("importance", ascending=False)
@@ -1235,7 +1295,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
                 # ── Mutual Information ────────────────────────────────────────────
                 try:
                     _fn_mi = mutual_info_classif if task_type == "classification" else mutual_info_regression
-                    _mi_scores = SelectKBest(_fn_mi, k="all").fit(X, y).scores_
+                    _mi_scores = SelectKBest(_fn_mi, k="all").fit(X_fit, y_fit).scores_
                     _mi_df = (
                         pd.DataFrame({"feature": X.columns, "importance": _mi_scores})
                         .sort_values("importance", ascending=False)
@@ -1279,10 +1339,14 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
                     if _vol_cols:
                         from sklearn.linear_model import LinearRegression as _LR
                         _vol_arr = X[_vol_cols].values
+                        _vol_arr_fit = X_fit[_vol_cols].values
                         X_resid = X.copy()
                         for _col in X.columns:
                             try:
-                                _lr = _LR().fit(_vol_arr, X[_col].values)
+                                # Residualisation is unsupervised, but fitting it on
+                                # every row still lets holdout structure shape the
+                                # feature the classifier below is scored on.
+                                _lr = _LR().fit(_vol_arr_fit, X_fit[_col].values)
                                 X_resid[_col] = X[_col].values - _lr.predict(_vol_arr)
                             except Exception:
                                 pass  # keep original values for this column
@@ -1290,7 +1354,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
                             RandomForestClassifier if task_type == "classification"
                             else RandomForestRegressor
                         )(n_estimators=50, random_state=42)
-                        _clf_vol.fit(X_resid, y)
+                        _clf_vol.fit(X_resid.iloc[train_pos], y_fit)
                         _vol_imp_df = (
                             pd.DataFrame({"feature": X.columns, "importance": _clf_vol.feature_importances_})
                             .sort_values("importance", ascending=False)
@@ -1454,6 +1518,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
 
         # ── Stage 8: Export top-N feature CSVs ─────────────────────────────
         selected_files: dict = {}
+        split_files: dict = {}
         for n in top_features_list:
             n = min(n, X.shape[1])
             if params.method == "rfe":
@@ -1471,6 +1536,22 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             out_path = os.path.join(output_dir, f"top_{n}_features.csv")
             out_df.to_csv(out_path, index=False)
             selected_files[str(n)] = out_path
+
+            # Companion files carrying the split that selection actually respected.
+            # Modeling picks the holdout up automatically (see the modeling tool's
+            # holdout_path auto-detection) so PyCaret evaluates on rows whose labels
+            # never reached the selector, instead of re-splitting at random.
+            if split.has_holdout:
+                train_path = os.path.join(output_dir, f"top_{n}_features_train.csv")
+                holdout_path = os.path.join(output_dir, f"top_{n}_features_holdout.csv")
+                out_df.iloc[split.train_index].to_csv(train_path, index=False)
+                out_df.iloc[split.holdout_index].to_csv(holdout_path, index=False)
+                split_files[str(n)] = {"train": train_path, "holdout": holdout_path}
+
+        split_manifest = split.to_manifest()
+        split_manifest_path = os.path.join(output_dir, "feature_selection_split.json")
+        with open(split_manifest_path, "w") as fh:
+            json.dump(split_manifest, fh, indent=2, default=str)
 
         # ADDED FOR UI ENHANCEMENT — Task 8: Sanitize chart_data before serialisation.
         # Recursively converts NaN/Infinity/numpy scalars to JSON-safe Python types.
@@ -1493,7 +1574,14 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             "result_files": {
                 "importance": importance_path,
                 "selected_features": selected_files,
+                "selection_split": split_manifest_path,
+                **({"split_features": split_files} if split_files else {}),
             },
+            # Whether the selected feature set is blind to the holdout labels. When
+            # True, every downstream holdout metric is optimistic by an unknown
+            # amount and the report must say so rather than imply a clean estimate.
+            "label_supervised_on_full_data": split.label_supervised_on_full_data,
+            "selection_split": split_manifest,
             # ADDED FOR UI ENHANCEMENT - Task 8: chart_data sanitised via _json_serializable.
             # NaN/inf/numpy scalars are replaced with None so React never sees invalid JSON.
             "chart_data": chart_data_safe,
