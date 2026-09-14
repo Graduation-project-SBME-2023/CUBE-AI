@@ -20,6 +20,7 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import mcp  # same import pattern as scratchpad
+from .holdout import resolve_selection_holdout
 from storage_paths import HYPOTHESES_DIR, workspace_subpath
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -58,6 +59,14 @@ class TrainRegressorInput(BaseModel):
 
     input_path: str = Field(
         ..., description="Path to input CSV file with training data."
+    )
+    holdout_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "CSV of rows excluded from feature selection, used as the evaluation set "
+            "instead of letting PyCaret re-split. Auto-detected from a sibling "
+            "'<input>_holdout.csv' when omitted."
+        ),
     )
     # output_dir: str = Field(
     #     ..., description="Directory where model artefacts and results will be saved."
@@ -268,6 +277,40 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
             if value is not None:
                 setup_kwargs[key] = value
 
+        # Honour the feature-selection holdout when one exists, so the evaluated rows
+        # are the rows whose labels never reached the selector. Without this, PyCaret
+        # re-splits at random and puts selection-contaminated rows back in the test
+        # half, which is the leak the split exists to prevent.
+        selection_holdout_path = resolve_selection_holdout(params.input_path, params.holdout_path)
+        selection_holdout_used = False
+        if selection_holdout_path:
+            try:
+                holdout_df = pd.read_csv(selection_holdout_path)
+                if target_column in holdout_df.columns and not holdout_df.empty:
+                    train_df = data
+                    if len(train_df) > len(holdout_df):
+                        merged = train_df.merge(
+                            holdout_df.drop_duplicates(), how="left", indicator=True
+                        )
+                        if (merged["_merge"] == "both").any():
+                            train_df = train_df[merged["_merge"].values == "left_only"]
+                    if not train_df.empty:
+                        setup_kwargs["data"] = train_df
+                        setup_kwargs["test_data"] = holdout_df
+                        setup_kwargs.pop("train_size", None)
+                        selection_holdout_used = True
+                        logging.info(
+                            "Using feature-selection holdout (%d row(s)) from %s; "
+                            "PyCaret will not re-split.",
+                            len(holdout_df), selection_holdout_path,
+                        )
+            except Exception as exc:
+                logging.warning(
+                    "Could not use selection holdout %s (%s); falling back to "
+                    "PyCaret's own split, which reintroduces selection leakage.",
+                    selection_holdout_path, exc,
+                )
+
         # ── Run setup with graceful fallback ────────────────────────────────
         def _try_setup(kwargs):
             try:
@@ -281,7 +324,15 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
                     return setup(**kwargs)
                 raise
             except Exception:
-                minimal = {"data": data, "target": target_column, "session_id": session_id}
+                minimal = {
+                    "data": kwargs.get("data", data),
+                    "target": target_column,
+                    "session_id": session_id,
+                }
+                # Never silently drop the selection holdout on the retry path; losing
+                # it here would reintroduce the leak with no signal in the output.
+                if kwargs.get("test_data") is not None:
+                    minimal["test_data"] = kwargs["test_data"]
                 logging.warning("Setup failed – retrying with minimal params.")
                 return setup(**minimal)
 
@@ -472,6 +523,11 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
             "model_summary": summary_path,
             "log_file": log_file,
             "created_files": created_files,
+            # True when evaluation ran on rows feature selection never saw. When
+            # False the holdout metrics are optimistic by an unknown amount, because
+            # the selected features were chosen using those rows' labels.
+            "selection_holdout_used": selection_holdout_used,
+            "selection_holdout_path": selection_holdout_path,
         }, indent=2)
 
     except Exception as exc:
