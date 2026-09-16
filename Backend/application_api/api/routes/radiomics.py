@@ -1,72 +1,79 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
+"""Radiomics routes"""
+
 from typing import List, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Query, Response
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.db.session import get_db
 from application_api.repositories import radiomics as crud
-from application_api.schemas.radiomics import RadiomicsCreate, Radiomics
+from application_api.schemas.radiomics import (
+    RadiomicsBatchResult,
+    RadiomicsBatchWrite,
+    RadiomicsFeatureOut,
+)
 
 router = APIRouter(prefix="/radiomics", tags=["Radiomics"])
-from uuid import UUID
-
-# ----------------------------------------------------------------------
-# Get Radiomics by ID
-# ----------------------------------------------------------------------
-@router.get("/{radiomics_id}", response_model=Radiomics)
-async def read_radiomics(radiomics_id: UUID, db: AsyncSession = Depends(get_db)):
-    db_radiomics = await crud.get_radiomics(db, radiomics_id)
-    if not db_radiomics:
-        raise HTTPException(status_code=404, detail="Radiomics entry not found")
-    return db_radiomics
 
 
-# ----------------------------------------------------------------------
-# Get Radiomics by Label UID
-# ----------------------------------------------------------------------
-@router.get("/by_label/{label_uid}", response_model=Radiomics)
-async def read_radiomics_by_label(label_uid: str, db: AsyncSession = Depends(get_db)):
-    db_radiomics = await crud.get_radiomics_by_label(db, label_uid)
-    if not db_radiomics:
-        raise HTTPException(status_code=404, detail="No radiomics entry found for this label UID")
-    return db_radiomics
-
-
-# ----------------------------------------------------------------------
-# List All Radiomics Entries (Paginated)
-# ----------------------------------------------------------------------
-@router.get("/", response_model=List[Radiomics])
-async def read_radiomics_list(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=100),
+@router.post("/run/{agent_run_id}/batch", response_model=RadiomicsBatchResult)
+async def record_radiomics_rows(
+    agent_run_id: UUID,
+    data: RadiomicsBatchWrite,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    radiomics_list = await crud.get_radiomics_list(db, skip=skip, limit=limit)
-    return radiomics_list
+    """Record extracted rows for a running feature-extraction run."""
+    result = await crud.record_features(db, agent_run_id, data)
+    response.status_code = 201 if result.created else 200
+    return result
 
 
-# ----------------------------------------------------------------------
-# Create a Radiomics Entry
-# ----------------------------------------------------------------------
-@router.post("/", response_model=Radiomics, status_code=status.HTTP_201_CREATED)
-async def create_radiomics_entry(radiomics: RadiomicsCreate, db: AsyncSession = Depends(get_db)):
-    return await crud.create_radiomics(db=db, radiomics=radiomics)
+@router.get("/session/{session_id}", response_model=List[RadiomicsFeatureOut])
+async def list_session_radiomics(
+    session_id: UUID,
+    agent_run_id: Optional[UUID] = None,
+    include_features: bool = False,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+):
+    return await crud.list_features(
+        db,
+        session_id=session_id,
+        agent_run_id=agent_run_id,
+        include_features=include_features,
+        skip=skip,
+        limit=limit,
+    )
 
 
-# ----------------------------------------------------------------------
-# Delete a Radiomics Entry
-# ----------------------------------------------------------------------
-@router.delete("/{radiomics_id}")
-async def delete_radiomics_entry(radiomics_id: UUID, db: AsyncSession = Depends(get_db)):
-    deleted = await crud.delete_radiomics(db, radiomics_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Radiomics entry not found")
-    return deleted
+@router.get("/run/{agent_run_id}/export")
+async def export_run_radiomics(agent_run_id: UUID, db: AsyncSession = Depends(get_db)):
+    """The per-mask feature table one run measured, as a generated CSV."""
+    return Response(
+        content=await crud.export_run_csv(db, agent_run_id),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="radiomics_features_{agent_run_id}.csv"'
+        },
+    )
 
 
-# ----------------------------------------------------------------------
-# Search / Filter Radiomics Entries
-# ----------------------------------------------------------------------
-@router.get("/search/", response_model=List[Radiomics])
+@router.get("/by_label/{label_uid}", response_model=List[RadiomicsFeatureOut])
+async def read_radiomics_by_label(
+    label_uid: str,
+    include_features: bool = True,
+    db: AsyncSession = Depends(get_db),
+):
+    """Every extraction of one SEG — one per segment and configuration."""
+    return await crud.list_features(
+        db, label_uid=label_uid, include_features=include_features, limit=1000
+    )
+
+
+@router.get("/search/", response_model=List[RadiomicsFeatureOut])
 async def search_radiomics_entries(
     feature_key: Optional[str] = Query(None, description="Search by feature key"),
     feature_value: Optional[str] = Query(None, description="Search by feature value"),
@@ -74,11 +81,20 @@ async def search_radiomics_entries(
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    results = await crud.search_radiomics(
-        db=db,
-        feature_key=feature_key,
-        feature_value=feature_value,
-        skip=skip,
-        limit=limit,
+    return await crud.search_radiomics(
+        db, feature_key=feature_key, feature_value=feature_value, skip=skip, limit=limit
     )
-    return results
+
+
+@router.get("/", response_model=List[RadiomicsFeatureOut])
+async def read_radiomics_list(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    return await crud.list_features(db, skip=skip, limit=limit)
+
+
+@router.get("/{radiomics_id}", response_model=RadiomicsFeatureOut)
+async def read_radiomics(radiomics_id: UUID, db: AsyncSession = Depends(get_db)):
+    return await crud.get_radiomics(db, radiomics_id)

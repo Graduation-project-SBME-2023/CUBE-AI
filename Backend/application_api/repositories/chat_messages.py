@@ -1,10 +1,11 @@
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import SQLAlchemyError
 from fastapi import HTTPException
 from sqlalchemy.future import select
 
 from application_api.db.models.chat_messages import ChatMessage
-from application_api.db.models.chat_sessions import ChatSession
+from application_api.db.models.chats import Chat
 from application_api.schemas.chat_messages import ChatMessageCreate
 from uuid import UUID
 
@@ -14,18 +15,53 @@ from uuid import UUID
 async def create_chat_message(db: AsyncSession, chat_id: UUID, message: ChatMessageCreate):
     try:
         # Ensure chat session exists
-        result = await db.execute(select(ChatSession).filter(ChatSession.chat_id == chat_id))
+        result = await db.execute(select(Chat).filter(Chat.chat_id == chat_id))
         session = result.scalars().first()
         if not session:
             raise HTTPException(status_code=404, detail="Chat session not found")
+
+        if message.message_id is not None:
+            existing = (
+                await db.execute(
+                    select(ChatMessage).filter(
+                        ChatMessage.message_id == message.message_id
+                    )
+                )
+            ).scalars().first()
+            if existing is not None:
+                same = (
+                    existing.chat_id == chat_id
+                    and existing.role == message.role
+                    and existing.text == message.text
+                )
+                if same:
+                    # Idempotent replay of a retried send.
+                    return existing
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Message {message.message_id} already exists with "
+                        "different content. A message id is an idempotency key, "
+                        "not a slot to overwrite."
+                    ),
+                )
 
         db_msg = ChatMessage(
             chat_id=chat_id,
             role=message.role,
             text=message.text,
-            extra_data=message.extra_data
+            extra_data=message.extra_data,
         )
+        if message.message_id is not None:
+            db_msg.message_id = message.message_id
         db.add(db_msg)
+
+        # The chat owns last_activity (it has a dedicated TOUCH endpoint and
+        # eight frontend readers), so a new message advances it here rather
+        # than leaving the UI to guess from the message timeline.
+        session.last_activity = datetime.now(timezone.utc)
+        db.add(session)
+
         await db.commit()
         await db.refresh(db_msg)
         return db_msg
@@ -40,7 +76,7 @@ async def create_chat_message(db: AsyncSession, chat_id: UUID, message: ChatMess
 async def get_chat_messages(db: AsyncSession, chat_id: UUID, skip: int = 0, limit: int = 50):
     try:
         # Check session exists
-        result = await db.execute(select(ChatSession).filter(ChatSession.chat_id == chat_id))
+        result = await db.execute(select(Chat).filter(Chat.chat_id == chat_id))
         session = result.scalars().first()
         if not session:
             raise HTTPException(status_code=404, detail="Chat session not found")
@@ -48,7 +84,7 @@ async def get_chat_messages(db: AsyncSession, chat_id: UUID, skip: int = 0, limi
         result = await db.execute(
             select(ChatMessage)
             .filter(ChatMessage.chat_id == chat_id)
-            .order_by(ChatMessage.timestamp.asc())
+            .order_by(ChatMessage.timestamp.asc(), ChatMessage.message_id.asc())
             .offset(skip)
             .limit(limit)
         )
@@ -120,7 +156,7 @@ async def get_chat_messages_by_role(
         result = await db.execute(
             select(ChatMessage)
             .filter(ChatMessage.chat_id == chat_id, ChatMessage.role == role)
-            .order_by(ChatMessage.timestamp.asc())
+            .order_by(ChatMessage.timestamp.asc(), ChatMessage.message_id.asc())
             .offset(skip)
             .limit(limit)
         )

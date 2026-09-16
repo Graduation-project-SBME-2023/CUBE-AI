@@ -6,6 +6,7 @@ from application_api.db.session import get_db
 from application_api.schemas.segmentation import (
     Segmentation,
     SegmentationCreate,
+    SegmentationOriginDeclaration,
     SegmentationUpdate,
 )
 from application_api.repositories.segmentation import (
@@ -19,6 +20,7 @@ from application_api.repositories.segmentation import (
     get_unvalidated_segmentations,
     search_segmentations,
     get_segmentation_stats,
+    declare_segmentation_origin,
 )
 
 router = APIRouter(prefix="/segmentations", tags=["Segmentations"])
@@ -83,6 +85,18 @@ async def delete_segmentation_endpoint(label_uid: str, db: AsyncSession = Depend
 
 
 # ----------------------------------------------------------------------
+# Declare how a mask was produced
+# ----------------------------------------------------------------------
+@router.post("/declare-origin", response_model=Segmentation)
+async def declare_segmentation_origin_endpoint(
+    declaration: SegmentationOriginDeclaration,
+    db: AsyncSession = Depends(get_db),
+):
+    """Record that this mask came from the assisted or the pipeline path."""
+    return await declare_segmentation_origin(db, declaration)
+
+
+# ----------------------------------------------------------------------
 # Get segmentations by volume UID
 # ----------------------------------------------------------------------
 @router.get("/by-volume/{volume_uid}", response_model=List[Segmentation])
@@ -109,7 +123,7 @@ async def read_segmentations_by_model(
 
 
 # ----------------------------------------------------------------------
-# Get unvalidated (no model_name)
+# Get unvalidated (no producing model in the catalog)
 # ----------------------------------------------------------------------
 @router.get("/unvalidated/", response_model=List[Segmentation])
 async def read_unvalidated_segmentations(
@@ -121,18 +135,26 @@ async def read_unvalidated_segmentations(
 
 
 # ----------------------------------------------------------------------
-# Search / filter by type or method
+# Search / filter by series description or generation method
 # ----------------------------------------------------------------------
 @router.get("/search/", response_model=List[Segmentation])
 async def search_segmentations_endpoint(
-    segmentation_type: Optional[str] = Query(None, description="Filter by segmentation type"),
-    method: Optional[str] = Query(None, description="Filter by method"),
+    series_description: Optional[str] = Query(
+        None, description="Filter by DICOM SeriesDescription"
+    ),
+    generation_method: Optional[str] = Query(
+        None, description="Filter by how the mask was generated"
+    ),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     return await search_segmentations(
-        db, segmentation_type=segmentation_type, method=method, skip=skip, limit=limit
+        db,
+        series_description=series_description,
+        generation_method=generation_method,
+        skip=skip,
+        limit=limit,
     )
 
 

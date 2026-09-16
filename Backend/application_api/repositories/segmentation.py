@@ -8,8 +8,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from application_api.db.models.model import Model
 from application_api.db.models.segmentation import Segmentation
-from application_api.schemas.segmentation import SegmentationCreate, SegmentationUpdate
+from application_api.db.models.volume import Volume
+from application_api.schemas.segmentation import (
+    SegmentationCreate,
+    SegmentationOriginDeclaration,
+    SegmentationUpdate,
+)
 from application_api.services.orthanc_client import cleanup_orthanc_resources_after_db_delete
 
 logger = logging.getLogger(__name__)
@@ -80,14 +86,7 @@ async def update_segmentation(
 
 # Delete
 async def delete_segmentation(db: AsyncSession, label_uid: str):
-    """
-    Delete segmentation from both the database and Orthanc.
-    Returns (success: bool, error_message: str | None)
-
-    Database-first (see delete_volume in repositories/volume.py for the
-    full rationale): commit the DB delete before attempting Orthanc
-    cleanup, so an Orthanc failure cannot leave a dangling DB row.
-    """
+    """Delete segmentation from both the database and Orthanc. Returns (success: bool, error_message: str | None)"""
     result = await db.execute(
         select(Segmentation).where(Segmentation.label_series_instance_uid == label_uid)
     )
@@ -119,6 +118,9 @@ async def delete_segmentation(db: AsyncSession, label_uid: str):
 async def get_segmentations_by_volume(
     db: AsyncSession, volume_uid: str, skip: int = 0, limit: int = 100
 ) -> List[Segmentation]:
+    """Masks of one volume, each with its final review decision."""
+    from sqlalchemy import text as sql_text
+
     try:
         result = await db.execute(
             select(Segmentation)
@@ -126,7 +128,41 @@ async def get_segmentations_by_volume(
             .offset(skip)
             .limit(limit)
         )
-        return result.scalars().all()
+        rows = list(result.scalars().all())
+        if rows:
+            decisions = await db.execute(
+                sql_text(
+                    """
+                    SELECT uid,
+                           CASE WHEN bool_or(positive) THEN max(positive_decision)
+                                WHEN bool_or(rejected) THEN 'rejected' END AS decision
+                    FROM (
+                        SELECT p.selected_segmentation_uid AS uid,
+                               true AS positive, false AS rejected,
+                               p.review_decision AS positive_decision
+                        FROM segmentation_pairs p
+                        JOIN segmentation_runs r ON r.segmentation_run_id = p.segmentation_run_id
+                        WHERE r.review_status = 'submitted'
+                          AND p.volume_series_instance_uid = :volume
+                          AND p.selected_segmentation_uid IS NOT NULL
+                        UNION ALL
+                        SELECT p.candidate_segmentation_uid, false, true, NULL
+                        FROM segmentation_pairs p
+                        JOIN segmentation_runs r ON r.segmentation_run_id = p.segmentation_run_id
+                        WHERE r.review_status = 'submitted'
+                          AND p.volume_series_instance_uid = :volume
+                          AND p.review_decision = 'rejected'
+                          AND p.candidate_segmentation_uid IS NOT NULL
+                    ) decided
+                    GROUP BY uid
+                    """
+                ),
+                {"volume": volume_uid},
+            )
+            by_uid = {row[0]: row[1] for row in decisions.all()}
+            for row in rows:
+                row.review_decision = by_uid.get(row.label_series_instance_uid)
+        return rows
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
@@ -136,17 +172,21 @@ async def get_segmentations_by_model(
 ) -> List[Segmentation]:
     try:
         result = await db.execute(
-            select(Segmentation).where(Segmentation.name == model_name).offset(skip).limit(limit)
+            select(Segmentation)
+            .join(Model, Model.model_id == Segmentation.model_id)
+            .where(Model.name == model_name)
+            .offset(skip)
+            .limit(limit)
         )
         return result.scalars().all()
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-# Get unvalidated: no model_name assigned (candidate for review)
+# Get unvalidated: no producing model in the catalog (candidate for review)
 async def get_unvalidated_segmentations(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[Segmentation]:
     try:
         result = await db.execute(
-            select(Segmentation).where(Segmentation.name == None).offset(skip).limit(limit)
+            select(Segmentation).where(Segmentation.model_id.is_(None)).offset(skip).limit(limit)
         )
         return result.scalars().all()
     except SQLAlchemyError as e:
@@ -156,18 +196,22 @@ async def get_unvalidated_segmentations(db: AsyncSession, skip: int = 0, limit: 
 # Search / filter by type or method
 async def search_segmentations(
     db: AsyncSession,
-    segmentation_type: Optional[str] = None,
-    method: Optional[str] = None,
+    series_description: Optional[str] = None,
+    generation_method: Optional[str] = None,
     skip: int = 0,
     limit: int = 100
 ) -> List[Segmentation]:
-    
+
     try:
         query = select(Segmentation)
-        if segmentation_type:
-            query = query.where(Segmentation.segmentation_type.ilike(f"%{segmentation_type}%"))
-        if method:
-            query = query.where(Segmentation.method.ilike(f"%{method}%"))
+        if series_description:
+            query = query.where(
+                Segmentation.series_description.ilike(f"%{series_description}%")
+            )
+        if generation_method:
+            query = query.where(
+                Segmentation.generation_method.ilike(f"%{generation_method}%")
+            )
         result = await db.execute(query.offset(skip).limit(limit))
         return result.scalars().all()
     except SQLAlchemyError as e:
@@ -175,39 +219,177 @@ async def search_segmentations(
 
 
 
-# Simple statistics: count per model_name, count per segmentation_type
+# Simple statistics: count per model name, count per origin
 #
-# Grouped result cardinality is bounded by the number of distinct
-# model/type values, but segmentation_type is free text written by the
-# sync path (see orthanc_sync.py), not a constrained enum, so nothing stops
-# it from accumulating pathologically many distinct values over time. The
-# LIMIT below is a defensive cap, not a correctness fix for the underlying
-# full-table scan — that needs an index on segmentation_type if this
-# endpoint's cost ever becomes a problem.
+# Grouped result cardinality is bounded by the number of distinct model
+# names and by `origin`'s three-value CHECK, so both groupings are now
+# genuinely small. The LIMIT below stays as a defensive cap.
 _STATS_GROUP_LIMIT = 1000
 
 
 async def get_segmentation_stats(db: AsyncSession):
     try:
-        # Count per model name
+        # Count per producing model name (joined through model_id — the
+        # denormalised `name` column was dropped by ).
         result_model = await db.execute(
             select(
-                Segmentation.name,
+                Model.name,
                 func.count(Segmentation.label_series_instance_uid)
-            ).group_by(Segmentation.name).limit(_STATS_GROUP_LIMIT)
+            )
+            .select_from(Segmentation)
+            .outerjoin(Model, Model.model_id == Segmentation.model_id)
+            .group_by(Model.name)
+            .limit(_STATS_GROUP_LIMIT)
         )
         counts_by_model = [{"model_name": m, "count": c} for m, c in result_model.all()]
 
-        # Count per segmentation_type
-        result_type = await db.execute(
+        result_origin = await db.execute(
             select(
-                Segmentation.segmentation_type,
+                Segmentation.origin,
                 func.count(Segmentation.label_series_instance_uid)
-            ).group_by(Segmentation.segmentation_type).limit(_STATS_GROUP_LIMIT)
+            ).group_by(Segmentation.origin).limit(_STATS_GROUP_LIMIT)
         )
-        counts_by_type = [{"segmentation_type": t, "count": c} for t, c in result_type.all()]
+        counts_by_origin = [{"origin": o, "count": c} for o, c in result_origin.all()]
 
-        return {"counts_by_model": counts_by_model, "counts_by_type": counts_by_type}
+        return {"counts_by_model": counts_by_model, "counts_by_origin": counts_by_origin}
 
     except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+# ----------------------------------------------------------------------
+# Origin declaration
+# ----------------------------------------------------------------------
+#
+# The Orthanc sync writes `origin='imported'` because it genuinely cannot
+# tell an assisted mask from a pipeline mask — both emit the identical
+# `dd/mm/yyyy - model - label` SeriesDescription. The producer declares its
+# own origin here, immediately after it STOWs.
+#
+# The declaration is idempotent and upserting: it may arrive before or after
+# the Lua stable-series hook has synced the row, so it creates the row when
+# absent and fills it in when present. Re-declaring the same origin is a
+# no-op; declaring a *different* origin over an already-declared one is 409,
+# never a silent overwrite.
+async def declare_segmentation_origin(
+    db: AsyncSession, declaration: SegmentationOriginDeclaration
+):
+    model_id = None
+    if declaration.model_name:
+        model_id = (
+            await db.execute(
+                select(Model.model_id).where(Model.name == declaration.model_name)
+            )
+        ).scalar_one_or_none()
+        if model_id is None:
+            logger.warning(
+                "Origin declaration for %s names model %r, which is not in the "
+                "catalog; recording the mask with model_id NULL rather than "
+                "inventing a catalog row.",
+                declaration.label_series_instance_uid,
+                declaration.model_name,
+            )
+
+    existing = (
+        await db.execute(
+            select(Segmentation).where(
+                Segmentation.label_series_instance_uid
+                == declaration.label_series_instance_uid
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing is None:
+        # Not synced yet. The producer knows both UIDs, so the row can be
+        # created here; the sync pass will fill in the DICOM-derived fields
+        # and will not touch `origin`.
+        volume_exists = (
+            await db.execute(
+                select(Volume.volume_series_instance_uid).where(
+                    Volume.volume_series_instance_uid
+                    == declaration.volume_series_instance_uid
+                )
+            )
+        ).scalar_one_or_none()
+        if volume_exists is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Source volume {declaration.volume_series_instance_uid} is not "
+                    "in the archive yet; re-declare after it syncs."
+                ),
+            )
+        existing = Segmentation(
+            label_series_instance_uid=declaration.label_series_instance_uid,
+            # The Orthanc series id is only known after the sync pass; it is
+            # NOT NULL in the archive, so the declaration seeds it with the
+            # DICOM UID and the sync pass replaces it with the real one.
+            orthanc_series_id=declaration.label_series_instance_uid,
+            volume_series_instance_uid=declaration.volume_series_instance_uid,
+            series_description=declaration.series_description or "Unknown",
+            origin=declaration.origin,
+        )
+        db.add(existing)
+    elif existing.origin not in ("imported", declaration.origin):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Segmentation {declaration.label_series_instance_uid} is already "
+                f"declared origin={existing.origin!r}; refusing to overwrite it "
+                f"with {declaration.origin!r}."
+            ),
+        )
+    else:
+        existing.origin = declaration.origin
+
+    if existing.volume_series_instance_uid != declaration.volume_series_instance_uid:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Segmentation {declaration.label_series_instance_uid} references "
+                f"volume {existing.volume_series_instance_uid}, not "
+                f"{declaration.volume_series_instance_uid}."
+            ),
+        )
+
+    if declaration.is_empty_mask is not None:
+        existing.is_empty_mask = declaration.is_empty_mask
+    if declaration.generation_method:
+        existing.generation_method = declaration.generation_method
+    if declaration.series_description:
+        existing.series_description = declaration.series_description
+    if declaration.provenance is not None:
+        existing.provenance = declaration.provenance
+    if model_id is not None:
+        existing.model_id = model_id
+
+    try:
+        await db.commit()
+        await db.refresh(existing)
+        return existing
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+async def set_segmentation_archive_status(
+    db: AsyncSession, label_uid: str, archive_status: str
+) -> Segmentation | None:
+    """Mark an archive row unavailable/quarantined instead of deleting it."""
+    seg = (
+        await db.execute(
+            select(Segmentation).where(
+                Segmentation.label_series_instance_uid == label_uid
+            )
+        )
+    ).scalar_one_or_none()
+    if seg is None:
+        return None
+    seg.archive_status = archive_status
+    try:
+        await db.commit()
+        await db.refresh(seg)
+        return seg
+    except SQLAlchemyError as e:
+        await db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
