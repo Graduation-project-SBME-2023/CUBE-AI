@@ -16,6 +16,13 @@ from endpoints.my_endpoints_datastore import (
     prepare_instance_mapping,
 )
 from services.job_capacity import inference_capacity
+from services.job_root import (
+    JobRootBusy,
+    JobRootLock,
+    JobStateConflict,
+    guard_terminal,
+    write_json_atomically,
+)
 from storage_paths import JOBS_DIR, TEMP_DIR
 
 
@@ -27,6 +34,15 @@ _JOB_ROOT = JOBS_DIR / "training"
 _TEMP_ROOT = TEMP_DIR / "radiology" / "training_jobs"
 _tasks: dict[str, asyncio.Task] = {}
 _start_lock = asyncio.Lock()
+_job_root_lock = JobRootLock(_JOB_ROOT)
+# Serialise per WORKFLOW as well as per job. Two jobs preparing the same
+# nnU-Net task write the same dataset directory and instance mapping; running
+# them concurrently interleaves two datasets into one.
+_workflow_locks: dict[str, asyncio.Lock] = {}
+
+
+def _workflow_lock(task_name: str) -> asyncio.Lock:
+    return _workflow_locks.setdefault(task_name, asyncio.Lock())
 
 
 class TrainingRecord(BaseModel):
@@ -66,12 +82,13 @@ def _read_job(job_id: str) -> dict | None:
         raise HTTPException(status_code=500, detail=f"Corrupt training job: {exc}") from exc
 
 
-def _write_job(job_id: str, payload: dict) -> dict:
+def _write_job(job_id: str, payload: dict, *, allow_terminal_change: bool = False) -> dict:
+    """Persist atomically, and never over a terminal outcome."""
     path = _metadata_path(job_id)
+    if not allow_terminal_change:
+        guard_terminal(_read_job(job_id), str(payload.get("status") or ""))
     payload["updated_at"] = datetime.now(timezone.utc).isoformat()
-    temporary = _TEMP_ROOT / f"{job_id}.json.tmp"
-    temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    temporary.replace(path)
+    write_json_atomically(path, _TEMP_ROOT / f"{job_id}.json.tmp", payload)
     return payload
 
 
@@ -98,7 +115,7 @@ def _prepare_training(request: TrainingJobRequest) -> dict:
 async def _execute(request: TrainingJobRequest) -> None:
     job = _read_job(request.job_id) or {}
     try:
-        async with inference_capacity.execution():
+        async with _workflow_lock(request.task_name), inference_capacity.execution():
             latest = _read_job(request.job_id) or job
             if latest.get("status") == "CANCELLING":
                 job.update(
@@ -155,11 +172,20 @@ async def _execute(request: TrainingJobRequest) -> None:
             }
         )
     finally:
-        _write_job(request.job_id, job)
+        # The executing task is what makes a job terminal.
+        _write_job(request.job_id, job, allow_terminal_change=True)
         _tasks.pop(request.job_id, None)
 
 
+def claim_job_root() -> JobRootLock:
+    if not _job_root_lock.held:
+        _job_root_lock.acquire()
+    return _job_root_lock
+
+
 def interrupt_stale_jobs() -> None:
+    """Only the owner of the training job root may recover it."""
+    claim_job_root()
     _JOB_ROOT.mkdir(parents=True, exist_ok=True)
     for path in _JOB_ROOT.glob("*.json"):
         try:
@@ -174,12 +200,17 @@ def interrupt_stale_jobs() -> None:
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
-            path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            write_json_atomically(
+                path, _TEMP_ROOT / f"{path.stem}.json.tmp", payload
+            )
         except (OSError, json.JSONDecodeError):
             logger.warning("Unable to recover training job metadata %s", path)
 
 
-interrupt_stale_jobs()
+try:
+    interrupt_stale_jobs()
+except JobRootBusy:
+    raise
 
 
 @router.post("/", status_code=status.HTTP_202_ACCEPTED)
@@ -243,5 +274,9 @@ async def cancel_or_purge_training_job(job_id: str, purge: bool = Query(False)) 
     if purge:
         _metadata_path(job_id).unlink(missing_ok=True)
         return {"job_id": job_id, "status": "PURGED"}
-    job.update({"status": "CANCELLED", "error": "Training job was cancelled"})
-    return _write_job(job_id, job)
+    try:
+        job.update({"status": "CANCELLED", "error": "Training job was cancelled"})
+        return _write_job(job_id, job)
+    except JobStateConflict:
+        # A finished training job keeps its outcome; cancelling it is a no-op.
+        return _read_job(job_id) or job

@@ -27,11 +27,6 @@ def _path(logical: str):
         "reports/manuscript.tex",
         "reports/draft.md",
         "reports/final_report.pdf",
-        # Literature output — logical "literature_review_output/" → physical "outputs/literature/"
-        "literature_review_output/context.json",
-        "literature_review_output/papers_page1.json",
-        "literature_review_output/review_summary.json",
-        "literature_review_output/other_file.json",
     ],
 )
 def test_k_retired_paths_raise(logical):
@@ -77,6 +72,13 @@ def test_j_retired_paths_still_raise(logical):
         "temp_segmentations/something.tmp",
         # A CSV named with "reports" in the name but not under reports/ is fine
         "outputs/modeling/reports_summary.csv",
+        # Literature output — logical "literature_review_output/" now maps to
+        # physical "temp/literature/" (disposable scratch); the durable copy
+        # lives in literature_reviews + literature_papers via the API.
+        "literature_review_output/context.json",
+        "literature_review_output/papers_page1.json",
+        "literature_review_output/review_summary.json",
+        "literature_review_output/other_file.json",
     ],
 )
 def test_non_retired_paths_pass(logical):

@@ -10,11 +10,12 @@
 
 local WEBHOOK_URL = 'http://application-api:8001/sync/orthanc-webhook'
 
--- Set this to the same value as ORTHANC_WEBHOOK_TOKEN in the application-api
--- environment to authenticate webhook calls (see database_audit.md D-30).
--- Leave empty to match an application-api deployment that has
+-- Read from the same ORTHANC_WEBHOOK_TOKEN the application-api validates
+-- against (see database_audit.md D-30), so the two never drift out of sync.
+-- Never hardcode a real token value here: this file is tracked in git.
+-- Empty/unset matches an application-api deployment that has
 -- ORTHANC_WEBHOOK_TOKEN unset (no auth enforced).
-local WEBHOOK_TOKEN = ''
+local WEBHOOK_TOKEN = os.getenv('ORTHANC_WEBHOOK_TOKEN') or ''
 
 local function webhook_headers()
     local headers = { ['Content-Type'] = 'application/json' }
