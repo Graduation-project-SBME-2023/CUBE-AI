@@ -13,8 +13,15 @@ class ChatMessage(Base):
         server_default=text('gen_random_uuid()')
     )
     
-    # Link to ChatSession
-    chat_id = Column(UUID(as_uuid=True), ForeignKey("chat_sessions.chat_id", ondelete="CASCADE"), nullable=False)
+    # Link to the owning chat, not the session. message_id is an
+    # idempotency key: it is preserved across migration, and a retry with
+    # conflicting content is a 409 rather than a second row.
+    chat_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("chats.chat_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
 
     # Explicit fields for easy querying
     role = Column(String(50), nullable=False)  # e.g., 'user', 'assistant', 'system'
@@ -25,5 +32,4 @@ class ChatMessage(Base):
 
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Relationship back to session
-    chat_session = relationship("ChatSession", back_populates="messages")
+    chat = relationship("Chat", back_populates="messages")
