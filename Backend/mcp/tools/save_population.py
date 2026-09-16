@@ -1,42 +1,20 @@
-from pathlib import Path
-from datetime import datetime
 from . import mcp
-import json
-import os
 from tool_logging import ToolEvent, log_tool_state, TextPayload
-from storage_paths import workspace_subpath
+from .helpers import domain_api
+
 
 @mcp.tool()
 async def save_final_output(data: dict):
-    """
-    Save the agent's final output to a JSON file.
-    
-    Arguments:
-        data -- A Python dict containing the agent's final output.
+    """Record the population agent's selected volumes as the cohort membership."""
+    datasetlist = [str(uid) for uid in (data.get("datasetlist") or [])]
+    try:
+        cohort = await domain_api.upsert_population_cohort()
+        cohort = await domain_api.set_cohort_members(cohort["cohort_id"], datasetlist)
+    except domain_api.DomainApiError as exc:
+        return {"status": "error", "message": f"The cohort was not recorded: {exc}"}
 
-    Returns:
-        A confirmation message with the saved file path.
-    """
-        
-    # current_dir = Path(__file__).resolve().parent
-    # json_path = current_dir.parent.parent / "agent_system" / "workspace" / "config.json"
-
-    # data['hypothesis'] = 'The radiomics features can detect weather the spleen is cancerous is not.'
-
-    workspace_dir = os.environ.get("WORKSPACE_DIR")
-
-    json_path = workspace_subpath(workspace_dir, "config.json")
-    patient_count = len(data['patient_ids'])
-    study_count = len(data['datasetlist'])
-
-    payload = TextPayload(message=f'Selected {study_count} volumes from {patient_count} patients.')
-    start_event = ToolEvent('tool_started', 'text', payload)
-    log_tool_state(start_event)
-    finished_event = ToolEvent('tool_finished', 'text', payload)
-    log_tool_state(finished_event)
-
-    # Ensure it's serializable
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
-
-    return {"status": "success", "file": json_path}
+    patients = {member["subject_key"] for member in cohort.get("members") or []}
+    payload = TextPayload(message=f"Selected {len(datasetlist)} volumes from {len(patients)} patients.")
+    log_tool_state(ToolEvent("tool_started", "text", payload))
+    log_tool_state(ToolEvent("tool_finished", "text", payload))
+    return {"status": "success", "cohort_id": cohort["cohort_id"]}

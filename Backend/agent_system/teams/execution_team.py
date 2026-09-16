@@ -47,9 +47,8 @@ from agents.execution_agents.modeling_agent import ModelingAgent
 from agents.execution_agents.result_reporter_agent import ResultReporterAgent
 from agents.execution_agents.reporter_agent import ReporterAgent
 
-# Import task message models and context compiler
-from models.plans import TaskMessage
-from agents.planning_agents.context_compiler import build_enriched_pipeline_prompt
+from agents.run_bound_agent import RunBoundAgent
+from services.run_context import PlannedRun
 
 logger = logging.getLogger(__name__)
 
@@ -68,137 +67,123 @@ AGENT_FACTORIES = {
 }
 
 class BasicPipelineBuilder(DiGraphBuilder):
+    """Builds the execution graph from the session's **approved runs**."""
 
-    def __init__(self, task_messages: Optional[List[TaskMessage]] = None):
+    def __init__(self, runs: Optional[List[PlannedRun]] = None):
         super().__init__()
-        self.task_messages = task_messages or []
+        self.runs: List[PlannedRun] = runs or []
+        self.entry_run: Optional[PlannedRun] = None
 
     @classmethod
     async def create(
         cls,
         workspace_folder=None,
-        task_messages: Optional[List[TaskMessage]] = None,
+        runs: Optional[List[PlannedRun]] = None,
         model_client=None,
         session_id=None,
-        start_agent_id: Optional[str] = None,
+        start_step_id: Optional[str] = None,
+        on_start=None,
+        on_finish=None,
+        on_failure=None,
     ):
         setup_logging()
 
-        # ── Step 1: Resolve the ordered list of agent IDs from the planner ───
-        #
-        # We iterate over task_messages (already ordered by the planner) and
-        # keep only agent IDs that are registered in AGENT_FACTORIES.  This
-        # guards against the LLM hallucinating unknown agent names while still
-        # honouring any custom ordering the planner chose.
-        planned_ids: List[str] = []
-        if task_messages:
-            for tm in task_messages:
-                if tm.agent_id in AGENT_FACTORIES and tm.agent_id not in planned_ids:
-                    planned_ids.append(tm.agent_id)
-
-        if not planned_ids:
-            logger.error("Planner supplied no valid task messages")
+        runs = list(runs or [])
+        unknown = [run.agent_type for run in runs if run.agent_type not in AGENT_FACTORIES]
+        if unknown:
+            # Admission already rejects these (the Application API validates
+            # `agent_type` against the mirrored list before approving), so
+            # reaching here means the two lists drifted. Fail loudly; never
+            # skip a step silently.
             raise ValueError(
-                "Cannot build execution pipeline: planner supplied no valid "
-                "task messages"
+                f"Approved plan names agent(s) with no implementation: {unknown!r}"
+            )
+        if not runs:
+            raise ValueError(
+                "Cannot build execution pipeline: the session has no approved "
+                "agent runs. Approve the plan first (A21)."
             )
 
-        if start_agent_id:
-            if start_agent_id not in planned_ids:
+        if start_step_id:
+            step_ids = [run.step_id for run in runs]
+            if start_step_id not in step_ids:
                 raise ValueError(
-                    f"Cannot resume from {start_agent_id!r}: agent is not in the "
-                    f"planned pipeline {planned_ids!r}"
+                    f"Cannot resume from step {start_step_id!r}: it is not in this "
+                    f"session's approved plan"
                 )
-            planned_ids = planned_ids[planned_ids.index(start_agent_id):]
-            task_messages = [
-                tm for tm in (task_messages or []) if tm.agent_id in planned_ids
-            ]
+            runs = runs[step_ids.index(start_step_id):]
 
         logger.info(
-            "Dynamic pipeline will run %d agent(s): %s",
-            len(planned_ids),
-            " → ".join(planned_ids),
+            "Execution graph: %d step(s): %s",
+            len(runs),
+            " -> ".join(f"{run.node_name}({run.agent_run_id[:8]})" for run in runs),
         )
 
-        # ── Step 2: Instantiate only the agents that are actually needed ──────
-        #
-        # Previously ALL six agents were initialised on every run.  Now we only
-        # pay the startup cost (MCP server subprocess, tool listing, etc.) for
-        # the agents the planner selected.  For a liver-segmentation hypothesis
-        # this means feature_extraction_agent and modeling_agent are never
-        # created at all.
-        raw_agents: dict = {}
-        for agent_id in planned_ids:
-            factory = AGENT_FACTORIES[agent_id]
-            logger.info("Initialising agent: %s", agent_id)
-            raw_agents[agent_id] = await factory(
+        raw_agents: dict[str, object] = {}
+        for run in runs:
+            factory = AGENT_FACTORIES[run.agent_type]
+            logger.info("Initialising %s for step %s", run.agent_type, run.step_id)
+            raw_agents[run.step_id] = await factory(
                 model_client=model_client,
                 workspace_folder=workspace_folder,
                 session_id=session_id,
+                node_name=run.node_name,
+                agent_run_id=run.agent_run_id,
+                step_id=run.step_id,
             )
 
-        # ── Step 3: Wrap agents with dynamic MessageFilterAgent ───────────────
-        #
-        # Wrapping rules:
-        #   - The FIRST agent receives the initial GraphFlow task prompt
-        #     directly, so it needs no filter.
-        #   - Every subsequent agent is wrapped so it sees ONLY the last
-        #     message from the agent that immediately precedes it in the plan.
-        #     The filter source is set to prev_id — the actual preceding agent's
-        #     name in this run's sequence — not a hardcoded string.
-        #
-        # This replaces the old fixed filter wiring where result_reporter_agent
-        # always waited for "modeling_agent" even when modeling was not in the
-        # plan, causing the reporter to never activate on segmentation studies.
-        wrapped: dict = {}  # agent_id → graph node (raw agent or wrapped)
+        async def _noop(*_args, **_kwargs):
+            return None
 
-        for i, agent_id in enumerate(planned_ids):
-            raw = raw_agents[agent_id]
-
-            if i == 0:
-                # First node — receives the initial task; no filter needed
-                wrapped[agent_id] = raw
-            else:
-                prev_id = planned_ids[i - 1]
-                wrapped[agent_id] = MessageFilterAgent(
-                    name=agent_id,
-                    wrapped_agent=raw,
+        nodes = []
+        for index, run in enumerate(runs):
+            inner = raw_agents[run.step_id]
+            if index > 0:
+                # Each step sees only the last message of the step before it —
+                # by NODE name, so two steps sharing an agent type stay
+                # distinct.
+                inner = MessageFilterAgent(
+                    name=run.node_name,
+                    wrapped_agent=inner,
                     filter=MessageFilterConfig(per_source=[
-                        PerSourceFilter(source=prev_id, position="last", count=1)
+                        PerSourceFilter(
+                            source=runs[index - 1].node_name, position="last", count=1
+                        )
                     ]),
                 )
+            nodes.append(
+                RunBoundAgent(
+                    name=run.node_name,
+                    wrapped_agent=inner,
+                    run=run,
+                    on_start=on_start or _noop,
+                    on_finish=on_finish or _noop,
+                    on_failure=on_failure or _noop,
+                )
+            )
 
-        # ── Step 4: Register nodes and build edges ────────────────────────────
-        builder = cls(task_messages=task_messages)
-        node_list = list(wrapped.values())
-
-        for node in node_list:
+        builder = cls(runs=runs)
+        builder.entry_run = runs[0]
+        for node in nodes:
             builder.add_node(node)
-
-        for i in range(len(node_list) - 1):
-            builder.add_edge(node_list[i], node_list[i + 1])
-
+        for index in range(len(nodes) - 1):
+            builder.add_edge(nodes[index], nodes[index + 1])
         return builder
 
     def get_pipeline_prompt(self, fallback_hypothesis: str = "") -> str:
-        """
-        Build the pipeline task prompt from stored task messages.
-        Falls back to the raw hypothesis string if no task messages are available.
-        """
-        if self.task_messages:
-            return build_enriched_pipeline_prompt(self.task_messages)
-        elif fallback_hypothesis:
-            return fallback_hypothesis
-        else:
-            return "Run the pipeline."
+        """The task the graph starts with."""
+        if self.entry_run is not None:
+            task_message = self.entry_run.task_message
+            if task_message.get("instructions"):
+                return str(task_message["instructions"])
+            description = str(self.entry_run.instructions.get("description") or "")
+            if description:
+                return description
+        return fallback_hypothesis or "Run the pipeline."
 
 
 async def main() -> None:
-    """
-    Local test entrypoint — runs the full default pipeline (all 6 agents).
-    This function is intentionally kept as a standalone test and is NOT
-    used by the production run path (app.py → session_service → run_pipeline).
-    """
+    """Local test entrypoint — runs the full default pipeline (all 6 agents). This function is intentionally kept as a standalone test and is NOT used by the production run path (app.py → session_service → run_pipeline)."""
     population_agent = await PopulationPlannerAgent.create()
     seg_agent = await SegmentationAgent.create()
     feat_agent = await FeatureExtractionAgent.create()

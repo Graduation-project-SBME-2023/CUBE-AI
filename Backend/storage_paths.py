@@ -82,7 +82,11 @@ _WORKSPACE_DIR_MAP = {
     "volumes": ("data", "volumes"),
     "masks": ("data", "masks"),
     "outputs": ("outputs", "agents"),
-    "literature_review_output": ("outputs", "literature"),
+    # Retired by V1 step K: the durable copy lives in literature_reviews +
+    # literature_papers (written via the Application API). This raw output
+    # is scratch the literature agent re-derives from PICO each run, so it
+    # belongs under temp/, not outputs/ (see storage_write_guard.py).
+    "literature_review_output": ("temp", "literature"),
     "overlays": ("outputs", "overlays"),
     "features": ("outputs", "features"),
     "modeling": ("outputs", "modeling"),

@@ -23,34 +23,31 @@ class MaskInventory:
 
 
 def is_reusable_mask_record(record: dict[str, Any]) -> bool:
-    """Return whether a database mask record is eligible for reuse.
-
-    New review-gated records must be finalized, stored in PACS, and non-empty.
-    Missing lifecycle fields are tolerated for legacy records, but explicit
-    negative states are never exposed to the planner as reusable inventory.
-    """
+    """Return whether a database mask record is eligible for reuse."""
     record_uid = str(record.get("label_series_instance_uid") or "").strip()
     if not record_uid:
         return False
 
-    review_status = str(record.get("review_status") or "").strip().casefold()
-    if review_status and review_status not in {
-        "accepted",
-        "approved",
-        "modified",
-    }:
+    archive_status = str(record.get("archive_status") or "available").strip().casefold()
+    if archive_status != "available":
         return False
 
-    pacs_status = str(record.get("pacs_status") or "").strip().casefold()
-    if pacs_status and pacs_status not in {"stored", "uploaded"}:
+    origin = str(record.get("origin") or "").strip().casefold()
+    review_decision = str(record.get("review_decision") or "").strip().casefold()
+    if origin == "assisted":
+        # No review gate on the assisted path; an explicit rejection still wins.
+        if review_decision == "rejected":
+            return False
+    elif origin == "pipeline":
+        if review_decision not in {"accepted", "modified"}:
+            return False
+    else:
         return False
 
     empty_value = record.get("is_empty_mask")
-    if (
-        empty_value is True
-        or empty_value == 1
-        or str(empty_value or "").strip().casefold() in {"true", "yes"}
-    ):
+    if empty_value is not False and empty_value != 0:
+        # True, 1, "true", None and "" all land here: only an explicit
+        # not-empty record is reusable.
         return False
 
     return True
@@ -60,7 +57,7 @@ def _record_label(record: dict[str, Any]) -> tuple[str, bool]:
     target_label = str(record.get("target_label") or "").strip()
     if target_label:
         return target_label, True
-    return str(record.get("segmentation_type") or "").strip(), False
+    return str(record.get("series_description") or "").strip(), False
 
 
 def build_mask_inventory(

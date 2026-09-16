@@ -72,15 +72,20 @@ from services.session_service import (
     SessionExecutionConflict,
     SessionPlanningConflict,
     SessionService,
+    load_runs,
 )
+from services.run_context import agent_type_of
 from services.best_effort import drain_best_effort, initialize_best_effort
 from services.pipeline_monitor import PipelineMonitor, raise_for_fatal_tool_failure
 from services.population_handoff import require_population_handoff
+from services import population_review
+from services.artifact_client import register_render, render_logical_key
 from clients.backend_client import BackendClient
 from agents.execution_agents.segmentation.progressive import (
     artifact_key_for_pair,
     build_snapshot_from_manifest,
 )
+from agents.execution_agents.segmentation.services import SegmentationService
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +143,10 @@ class CoopCoepMiddleware(BaseHTTPMiddleware):
 app.add_middleware(CoopCoepMiddleware)
 
 ensure_storage_layout()
+# A write to a retired workspace file raises from here on.
+from storage_write_guard import install_write_guard
+
+install_write_guard()
 agents_workspace_dir = str(HYPOTHESES_DIR)
 
 
@@ -261,42 +270,30 @@ async def run_planner(session: Session, message: str, do_lit_review: bool = True
 
 
 async def run_pipeline(session: Session) -> None:
-    original_workspace = str(workspace(session.session_id))
-    # On restart, session.workspace_folder is set to a new retry folder.
-    # On first run it is None, so we fall back to the original.
-    workspace_folder = getattr(session, "workspace_folder", None) or original_workspace
-    resume_from_agent = session.resume_from_agent
-    resume_agent_statuses = dict(session.resume_agent_statuses)
+    """Execute the session's approved plan."""
+    workspace_folder = str(workspace(session.session_id))
     os.makedirs(workspace_folder, exist_ok=True)
     pipeline_logger = logging.getLogger("Execution Pipeline")
 
     logging.getLogger("autogen_core").setLevel(logging.CRITICAL)
     logging.getLogger("autogen_core.events").setLevel(logging.CRITICAL)
 
-    # Load planner state: hypothesis + task messages (if available)
-    # Always read from the original workspace — that's where the planner wrote state.json
-    state_file = str(workspace_subpath(original_workspace, "state.json"))
-    task_messages = []
-    hypothesis = None
-    try:
-        if os.path.exists(state_file):
-            async with aiofiles.open(state_file, "r") as f:
-                content = await f.read()
-                if content.strip():
-                    planner_state = PlannerState.model_validate_json(content)
-                    task_messages = [step.task_message for step in planner_state.plan.steps if step.task_message is not None]
-                    hypothesis = planner_state.hypothesis.title
-                    logger.info(
-                        f"Loaded {len(task_messages)} task messages from planner state"
-                    )
-    except Exception as e:
-        logger.warning(f"Could not load planner state: {e}. Using raw hypothesis.")
+    runs = await load_runs(session.session_id)
+    if not runs:
+        raise RuntimeError(
+            f"Session {session.session_id} has no approved agent runs to execute"
+        )
 
-    if not hypothesis:
-        hypothesis = json.load(open(state_file)).get("hypothesis", {}).get("title")
+    resume_from_step_id = session.resume_from_step_id
+    session_row = await BackendClient.get_session(session.session_id) or {}
+    # The user's own words, which current keeps instead of overwriting (defect 1).
+    prompt = session_row.get("prompt") or ""
 
     pipeline_logger.info(
-        f"workspace_folder: {workspace_folder}, hypothesis: {hypothesis}"
+        "workspace_folder: %s, steps: %d, resume_from_step: %s",
+        workspace_folder,
+        len(runs),
+        resume_from_step_id or "-",
     )
 
     # Allow pause / cancel before heavy init
@@ -316,13 +313,13 @@ async def run_pipeline(session: Session) -> None:
     def make_pausable(client):
         original_create = client.create
         original_create_stream = client.create_stream
-        
+
         async def wrapped_create(*args, **kwargs):
             await session.pause_event.wait()
             if session.cancel_event.is_set():
                 raise asyncio.CancelledError()
             return await original_create(*args, **kwargs)
-            
+
         async def wrapped_create_stream(*args, **kwargs):
             await session.pause_event.wait()
             if session.cancel_event.is_set():
@@ -334,13 +331,22 @@ async def run_pipeline(session: Session) -> None:
         client.create_stream = wrapped_create_stream
         return client
 
+    # Node name -> agent_run_id, so a contract is checked on the run that
+    # produced it rather than on "the" agent.
+    run_by_node = {run.node_name: run.agent_run_id for run in runs}
+
     try:
+        session.execution_monitor = PipelineMonitor(session_service, session, runs=runs)
+
         graph_builder = await BasicPipelineBuilder.create(
             workspace_folder=workspace_folder,
-            task_messages=task_messages,
+            runs=runs,
             model_client=make_pausable(create_model_client_from_config()),
             session_id=session.session_id,
-            start_agent_id=resume_from_agent,
+            start_step_id=resume_from_step_id,
+            on_start=lambda run: session_service.claim_run(session, run),
+            on_finish=lambda run: session_service.finish_run(session, run),
+            on_failure=lambda run, error: session_service.fail_run(session, run, error),
         )
 
         graph_flow = GraphFlow(
@@ -348,26 +354,15 @@ async def run_pipeline(session: Session) -> None:
             graph=graph_builder.build(),
         )
 
-
-        # Build the pipeline prompt: use structured task messages if available,
-        # otherwise fall back to the raw hypothesis string
-        # task_prompt = graph_builder.get_pipeline_prompt(fallback_hypothesis=hypothesis)
-        task_prompt = (
-            graph_builder.get_pipeline_prompt(fallback_hypothesis=hypothesis)
-            if resume_from_agent
-            else hypothesis
-        )
+        task_prompt = graph_builder.get_pipeline_prompt(fallback_hypothesis=prompt)
         pipeline_logger.info(f"Pipeline prompt length: {len(task_prompt)} chars")
-
         pipeline_logger.info("Starting execution...")
 
-        session.execution_monitor = PipelineMonitor(
-            session_service,
-            session,
-            initial_statuses=resume_agent_statuses,
-        )
-
-        await session.execution_monitor._broadcast()
+        status = await BackendClient.get_agent_run_status(session.session_id)
+        if status is not None:
+            await ws_manager.send_ws_message(
+                "pipeline_agent_status", status, session_id=session.session_id
+            )
 
         try:
             async for event in graph_flow.run_stream(task=task_prompt, cancellation_token=cancellation_token):
@@ -377,18 +372,18 @@ async def run_pipeline(session: Session) -> None:
 
                 match event:
                     case TaskResult(messages=msgs):
-                        pipeline_logger.info("━" * 60)
-                        pipeline_logger.info("✅ TASK COMPLETE")
+                        pipeline_logger.info("=" * 60)
+                        pipeline_logger.info("TASK COMPLETE")
                         for msg in msgs:
                             pipeline_logger.info(f"  [{msg.source}] {msg.content}")
-                        pipeline_logger.info("━" * 60)
+                        pipeline_logger.info("=" * 60)
                         await session.execution_monitor.on_pipeline_complete()
                         await ws_manager.send_ws_message(
                             "run_finished", "run_finished", session_id=session.session_id
                         )
 
                     case ToolCallRequestEvent(source=src, content=content):
-                        pipeline_logger.info(f"🔧 [{src}] TOOL CALL REQUEST")
+                        pipeline_logger.info(f"[{src}] TOOL CALL REQUEST")
                         await session.execution_monitor.on_agent_active(src)
                         for call in content:
                             pipeline_logger.info(
@@ -396,7 +391,7 @@ async def run_pipeline(session: Session) -> None:
                             )
 
                     case ToolCallExecutionEvent(source=src, content=content):
-                        pipeline_logger.info(f"🔧 [{src}] TOOL CALL RESULT")
+                        pipeline_logger.info(f"[{src}] TOOL CALL RESULT")
                         for result in content:
                             failed = await session.execution_monitor.on_tool_result(
                                 src,
@@ -409,40 +404,44 @@ async def run_pipeline(session: Session) -> None:
                                 f"     Tool: {result.name}  Result: {result.content}"
                             )
                             raise_for_fatal_tool_failure(
-                                src,
+                                agent_type_of(src),
                                 result.name,
                                 failed,
                                 result.content,
                             )
 
                     case MemoryQueryEvent(source=src, content=content):
-                        pipeline_logger.info(f"🧠 [{src}] MEMORY QUERY: {content}")
+                        pipeline_logger.info(f"[{src}] MEMORY QUERY: {content}")
                         await session.execution_monitor.on_agent_active(src)
 
                     case UserInputRequestedEvent(source=src):
-                        pipeline_logger.info(f"⏳ [{src}] WAITING FOR USER INPUT")
+                        pipeline_logger.info(f"[{src}] WAITING FOR USER INPUT")
 
                     case ThoughtEvent(source=src, content=content):
-                        pipeline_logger.info(f"💭 [{src}] THOUGHT: {content}")
+                        pipeline_logger.info(f"[{src}] THOUGHT: {content}")
                         await session.execution_monitor.on_agent_active(src)
 
                     case BaseChatMessage(source=src):
-                        if src == "study_population_planner_agent":
-                            require_population_handoff(workspace_folder)
-                        logger.info("━" * 60)
+                        if agent_type_of(src) == "study_population_planner_agent":
+                            await require_population_handoff(
+                                session.session_id,
+                                run_by_node.get(src),
+                            )
                         pipeline_logger.info(
-                            f"💬 [{src}] ({type(event).__name__}): {event.content}"
+                            f"[{src}] ({type(event).__name__}): {event.content}"
                         )
                         await session.execution_monitor.on_agent_active(src)
 
                     case BaseAgentEvent(source=src):
-                        pipeline_logger.info(f"⚙️  [{src}] ({type(event).__name__})")
+                        pipeline_logger.info(f"[{src}] ({type(event).__name__})")
                         if hasattr(event, "content") and event.content:
                             pipeline_logger.info(f"   {event.content}")
                         await session.execution_monitor.on_agent_active(src)
 
         except asyncio.CancelledError:
             cancellation_token.cancel()
+            # A cancelled pipeline is interrupted, not failed: the interrupted
+            # run stays `running` so a resume continues the same run.
             await session.execution_monitor.on_pipeline_error(
                 Exception("Pipeline Cancelled")
             )
@@ -451,16 +450,14 @@ async def run_pipeline(session: Session) -> None:
             # A consumer-side error does not automatically stop GraphFlow's
             # participant tasks. Propagate every terminal error immediately.
             cancellation_token.cancel()
-            logger.error(f"here, {e} occured, check in this method")
-            logger.error(e)
+            logger.exception("Execution pipeline failed")
             await session.execution_monitor.on_pipeline_error(e)
             raise
 
     except (asyncio.CancelledError, Exception) as _top_exc:
-        # If the crash happened before execution_monitor was initialised (e.g. during
-        # BasicPipelineBuilder.create()), there is nothing to notify via the monitor.
-        # Broadcast run_stopped directly so the frontend knows execution ended.
-        if not hasattr(session, 'execution_monitor') or session.execution_monitor is None:
+        # A crash before the monitor exists (graph construction, for example)
+        # belongs to no run; tell the frontend the run ended.
+        if getattr(session, "execution_monitor", None) is None:
             logger.error(f"Pipeline crashed before monitor init: {_top_exc}")
             await ws_manager.send_ws_message(
                 "run_stopped",
@@ -477,35 +474,8 @@ async def run_pipeline(session: Session) -> None:
 # ----------------------------------------------------------------------
 
 
-def _clean_workspace_population_state(session_id: str) -> None:
-    try:
-        workspace_folder = str(workspace(session_id))
-        if not os.path.exists(workspace_folder):
-            return
-        config_path = str(workspace_subpath(workspace_folder, "config.json"))
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                data.pop("datasetlist", None)
-                data["cohort_approved"] = False
-                with open(config_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=4)
-            except Exception:
-                pass
-        labels_path = str(workspace_subpath(workspace_folder, "populations/cohort_labels.csv"))
-        if os.path.exists(labels_path):
-            os.remove(labels_path)
-        targets_path = str(workspace_subpath(workspace_folder, "populations/targets/targets.csv"))
-        if os.path.exists(targets_path):
-            os.remove(targets_path)
-    except Exception as e:
-        logger.warning(f"Failed to clean workspace population state for session {session_id}: {e}")
-
-
 @app.post("/plan")
 async def start_planning(request: PlanningRequest):
-    _clean_workspace_population_state(request.session_id)
     from functools import partial
     bound_planner = partial(run_planner, do_lit_review=request.do_lit_review)
     try:
@@ -522,6 +492,7 @@ async def start_planning(request: PlanningRequest):
 
 @app.post("/run")
 async def start_execution(request: SessionControlRequest):
+    """Approve the plan and execute it."""
     try:
         await session_service.start_execution(
             request.session_id,
@@ -560,6 +531,8 @@ async def resume_execution(request: SessionControlRequest):
 
 @app.post("/session/{session_id}/resume-pipeline")
 async def resume_hydrated_pipeline(session_id: str):
+    """Continue an interrupted pipeline. **Deletes nothing**."""
+
     async def reset_runtime_state(
         target_session_id: str,
         interrupted_agent: str,
@@ -574,7 +547,6 @@ async def resume_hydrated_pipeline(session_id: str):
         return await session_service.resume_pipeline(
             session_id,
             run_pipeline,
-            workspace_root=str(HYPOTHESES_DIR),
             reset_runtime_state=reset_runtime_state,
         )
     except SessionExecutionConflict as exc:
@@ -611,6 +583,9 @@ async def get_status(session_id: str):
         "execution_active": bool(
             session.execution_task and not session.execution_task.done()
         ),
+        # Per-step progress is durable now: it comes from `agent_runs`, not
+        # from what this process remembers.
+        "runs": await BackendClient.get_agent_run_status(session_id),
     }
 
 
@@ -757,45 +732,51 @@ async def list_providers():
 # ----------------------------------------------------------------------
 
 @app.get("/session/{session_id}/replay-logs")
-async def replay_logs(session_id: str):
-    logs: list[WS_Log] = await BackendClient.get_logs(session_id)
+async def replay_logs(session_id: str, after_event_id: int = 0):
+    """Replay a session's events from a cursor."""
+    logs: list[WS_Log] = await BackendClient.replay_logs(
+        session_id, after_event_id=after_event_id
+    )
+    last_event_id = after_event_id
     for log in logs:
-        if log.msg_type in ('msg'): continue
-        await ws_manager.send_ws_message(log.msg_type, log.payload, log.session_id, replaying=True)
+        last_event_id = log.event_id or last_event_id
+        if log.msg_type in ('msg'):
+            continue
+        await ws_manager.send_ws_message(
+            log.msg_type,
+            log.payload,
+            log.session_id,
+            replaying=True,
+            event_id=log.event_id,
+        )
+
+    if after_event_id == 0 and not logs:
+        # Nothing has ever happened in this session (fresh create/open) — no
+        # agent has run yet, so there is no segmentation batch to resume a
+        # review for. Skip the DB round trip entirely rather than always
+        # probing it on every session open.
+        return
 
     workspace_dir = str(workspace(session_id))
-    manifest_path = str(ws_sub(session_id, "segmentation_manifest.json"))
     try:
-        with open(manifest_path, "r", encoding="utf-8") as stream:
-            manifest = json.load(stream)
-        if manifest.get("stage") in {"awaiting_review", "reviewed"}:
+        batch = await population_review.current_batch(session_id)
+        if batch and batch["review_status"] != "not_ready":
+            # current this flow: rebuilt from segmentation_runs/pairs, including the
+            # doctor's draft decisions, which are rows now.
+            manifest = population_review.snapshot_manifest(batch)
             snapshot = build_snapshot_from_manifest(
                 manifest,
                 workspace_dir,
                 os.environ.get("MAS_BASE_URL", "http://localhost:8150"),
             )
             if snapshot:
-                draft = _load_review_draft_from_disk(session_id) or {}
-                draft_run_id = str(draft.get("run_id") or "")
-                manifest_run_id = str(manifest.get("run_id") or "")
-                decisions = draft.get("decisions")
-                if (
-                    isinstance(decisions, dict)
-                    and (not draft_run_id or draft_run_id == manifest_run_id)
-                ):
-                    for volume in snapshot.get("volumes", []):
-                        status = decisions.get(volume.get("pairId"))
-                        if status in {"accepted", "rejected", "modified"}:
-                            volume["reviewStatus"] = status
                 await ws_manager.send_ws_message(
                     "segmentation_output",
                     snapshot,
                     session_id,
                     replaying=True,
                 )
-    except FileNotFoundError:
-        pass
-    except (OSError, ValueError, json.JSONDecodeError):
+    except (population_review.DomainError, httpx.HTTPError, ValueError, KeyError):
         logger.warning(
             "Could not reconstruct segmentation snapshot for session %s",
             session_id,
@@ -806,19 +787,12 @@ async def replay_logs(session_id: str):
 
 @app.get("/session/{session_id}/config")
 async def get_session_config(session_id: str):
-    """Get the current configuration for a given session."""
-    config_path = str(ws_sub(session_id, "config.json"))
-    
-    if not os.path.exists(config_path):
-        return JSONResponse(content={"labelling_mode": "automatic"}, status_code=200)
-        
+    """The session's population configuration — read from its cohort."""
     try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            config_data = json.load(f)
-        return JSONResponse(content=config_data, status_code=200)
-    except Exception as e:
-        logger.error(f"Error reading config: {e}")
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        cohort = await population_review.get_cohort(session_id)
+    except population_review.DomainError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
+    return population_review.cohort_state(cohort)
 
 @app.get("/session/{session_id}/plan-state")
 async def get_plan_state(session_id: str):
@@ -911,14 +885,7 @@ async def get_hypothesis_history(limit: int = 20):
 
 @app.post("/reports/compile")
 async def compile_report(data: dict, request: Request):
-    """
-    Compile LaTeX text into a PDF inside the session workspace and return a public URL.
-
-    Expected body:
-      - session_id (str)
-      - latex_text (str)
-      - output_filename (str, optional)
-    """
+    """Compile LaTeX text into a PDF inside the session workspace and return a public URL."""
     session_id = str(data.get("session_id") or "").strip()
     latex_text = data.get("latex_text")
     output_filename = str(data.get("output_filename") or "final_report.pdf").strip()
@@ -1073,95 +1040,21 @@ async def ws_broadcast(data: dict):
     )
     return {"status": "ok"}
     
-# ── Review long-poll state ──────────────────────────────────────────────────
-# Keyed by session_id.  Each entry is a dict with two keys:
-#   "event"  – asyncio.Event set when a review arrives
-#   "result" – the review payload dict (populated before event.set())
-# A separate "ready:{session_id}" key stores a plain dict for reviews that
-# arrived before the module started polling (unchanged behaviour).
-_review_futures: Dict[str, asyncio.Future] = {}  # kept for ready-prefix entries
-_review_events: Dict[str, dict] = {}  # session_id -> {"event": Event, "result": dict|None}
+# ── Review wake-ups ──────────────────────────────────────────────────────────
+# The review itself is a row (segmentation_runs.review_status='submitted'); this
+# in-process event only wakes a waiting module sooner. A restart loses the event
+# and nothing else: the wait endpoint re-reads PostgreSQL.
+_review_events: Dict[str, asyncio.Event] = {}
+_review_futures: Dict[str, asyncio.Future] = {}
+REVIEW_RECHECK_SECONDS = float(os.environ.get("REVIEW_RECHECK_SECONDS", "5"))
 
 
-# ── Review disk-persistence helpers ──────────────────────────────────────────
-# Saves/loads the human-review result to disk so it survives Docker restarts.
-# File: <workspace>/review_result.json
+def _domain_http_error(exc: "population_review.DomainError") -> HTTPException:
+    return HTTPException(status_code=exc.status_code, detail=exc.detail)
 
-def _review_disk_path(session_id: str) -> str:
-    return str(ws_sub(session_id, "review_result.json"))
-
-
-def _review_draft_disk_path(session_id: str) -> str:
-    return str(ws_sub(session_id, "review_draft.json"))
-
-
-def _persist_review_draft_to_disk(session_id: str, payload: dict) -> None:
-    """Atomically persist in-progress review choices without resuming the agent."""
-    path = _review_draft_disk_path(session_id)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    temporary_path = str(ws_sub(session_id, "temp_segmentations/review_draft.json.tmp"))
-    os.makedirs(os.path.dirname(temporary_path), exist_ok=True)
-    with open(temporary_path, "w", encoding="utf-8") as stream:
-        json.dump(payload, stream)
-    os.replace(temporary_path, path)
-
-
-def _load_review_draft_from_disk(session_id: str) -> dict | None:
-    try:
-        path = _review_draft_disk_path(session_id)
-        if not os.path.isfile(path):
-            return None
-        with open(path, "r", encoding="utf-8") as stream:
-            payload = json.load(stream)
-        return payload if isinstance(payload, dict) else None
-    except (OSError, json.JSONDecodeError):
-        logger.warning(
-            "Could not load segmentation review draft for session %s",
-            session_id,
-            exc_info=True,
-        )
-        return None
-
-
-def _persist_review_to_disk(session_id: str, payload: dict) -> None:
-    """Write the review payload to disk so it survives a container restart."""
-    try:
-        path = _review_disk_path(session_id)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh)
-        logger.info(f"[Review] Persisted review to disk for session={session_id}: {path}")
-    except Exception as exc:
-        logger.error(f"[Review] Failed to persist review to disk for session={session_id}: {exc}")
-
-
-def _load_review_from_disk(session_id: str) -> dict | None:
-    """Load a persisted review result from disk (returns None if not found)."""
-    try:
-        path = _review_disk_path(session_id)
-        if not os.path.isfile(path):
-            return None
-        with open(path, "r", encoding="utf-8") as fh:
-            payload = json.load(fh)
-        logger.info(f"[Review] Loaded review from disk for session={session_id}: {path}")
-        return payload
-    except Exception as exc:
-        logger.error(f"[Review] Failed to load review from disk for session={session_id}: {exc}")
-        return None
-
-
-def _clear_review_from_disk(session_id: str) -> None:
-    """Delete the persisted review file once it has been consumed."""
-    try:
-        path = _review_disk_path(session_id)
-        if os.path.isfile(path):
-            os.remove(path)
-            logger.info(f"[Review] Cleared disk review for session={session_id}")
-    except Exception as exc:
-        logger.warning(f"[Review] Failed to clear disk review for session={session_id}: {exc}")
 
 # ----------------------------------------------------------------------
-# Population targets saving & mode endpoint
+# Population cohort endpoints (Interactive Subpages)
 # ----------------------------------------------------------------------
 
 @app.post("/populations/set-labelling-mode")
@@ -1171,114 +1064,42 @@ async def set_labelling_mode(
 ):
     if mode not in ["manual", "automatic"]:
         raise HTTPException(status_code=400, detail="mode must be 'manual' or 'automatic'")
-
-    workspace_folder = str(workspace(session_id))
-    config_path = str(ws_sub(session_id, "config.json"))
-    
-    config_data = {}
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-        except Exception:
-            pass
-
-    config_data["labelling_mode"] = mode
-
-    os.makedirs(os.path.dirname(config_path), exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config_data, f, indent=4)
-        
+    try:
+        await population_review.ensure_cohort(session_id, criteria={"labelling_mode": mode})
+    except population_review.DomainError as exc:
+        raise _domain_http_error(exc)
     return {"status": "success", "mode": mode}
 
-
-
-
-
-# ----------------------------------------------------------------------
-# Cohort Management Endpoints (Interactive Subpages)
-# ----------------------------------------------------------------------
 
 @app.get("/populations/cohort-state")
 async def get_cohort_state(
     session_id: str = Query(..., description="The ID of the current session"),
 ):
-    """
-    Returns the current cohort state for the interactive Population subpages:
-    - datasetlist from config.json
-    - labels from cohort_labels.csv
-    - cohort_approved flag
-    - labelling_mode
-    """
-    workspace_folder = str(workspace(session_id))
-    config_path = str(ws_sub(session_id, "config.json"))
-
-    config_data = {}
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-        except Exception:
-            pass
-
-    # Load cohort labels if available
-    import csv as csv_mod
-    labels = []
-    labels_path = str(ws_sub(session_id, "populations/cohort_labels.csv"))
-    if os.path.exists(labels_path):
-        try:
-            with open(labels_path, "r", encoding="utf-8") as f:
-                reader = csv_mod.DictReader(f)
-                for row in reader:
-                    labels.append(dict(row))
-        except Exception:
-            pass
-
-    return {
-        "datasetlist": config_data.get("datasetlist", []),
-        "labelling_mode": config_data.get("labelling_mode", "automatic"),
-        "cohort_approved": config_data.get("cohort_approved", False),
-        "inclusion_criteria": config_data.get("inclusion_criteria", []),
-        "exclusion_criteria": config_data.get("exclusion_criteria", []),
-        "labels": labels,
-    }
+    """The Population subpages' state, assembled from the cohort rows."""
+    try:
+        cohort = await population_review.get_cohort(session_id)
+    except population_review.DomainError as exc:
+        raise _domain_http_error(exc)
+    return population_review.cohort_state(cohort)
 
 
 @app.post("/populations/update-cohort-list")
-async def update_cohort_list(
-    data: dict,
-):
-    """
-    Updates the datasetlist in config.json with the user's include/exclude
-    selections from the Data Browser subpage.
-    Expects: { "session_id": "...", "datasetlist": ["uid1", "uid2", ...] }
-    """
+async def update_cohort_list(data: dict):
+    """Replace the draft cohort membership from the Data Browser subpage."""
     session_id = data.get("session_id")
-    new_datasetlist = data.get("datasetlist", [])
-
+    new_datasetlist = [str(uid) for uid in data.get("datasetlist", []) or []]
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
+    try:
+        cohort = await population_review.ensure_cohort(session_id)
+        cohort = await population_review._api(
+            "PUT",
+            f"/cohorts/{cohort['cohort_id']}/members",
+            json={"volume_series_instance_uids": new_datasetlist},
+        )
+    except population_review.DomainError as exc:
+        raise _domain_http_error(exc)
 
-    workspace_folder = str(workspace(session_id))
-    config_path = str(ws_sub(session_id, "config.json"))
-
-    config_data = {}
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-        except Exception:
-            pass
-
-    config_data["datasetlist"] = new_datasetlist
-    # Reset approval when the cohort list changes
-    config_data["cohort_approved"] = False
-
-    os.makedirs(os.path.dirname(config_path), exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config_data, f, indent=4)
-
-    # Broadcast the update so the Overview subpage refreshes
     try:
         await ws_manager.send_ws_message(
             "population_output",
@@ -1292,167 +1113,66 @@ async def update_cohort_list(
         )
     except Exception as e:
         logger.warning(f"Failed to broadcast cohort list update: {e}")
-
-    return {"status": "success", "count": len(new_datasetlist)}
+    return {"status": "success", "count": len(cohort.get("members") or [])}
 
 
 @app.post("/populations/save-labels")
 async def save_labels(data: dict):
-    """
-    Saves user label assignments from the Patient Labeling subpage.
-    Expects: {
-        "session_id": "...",
-        "labels": [
-            {"patient_id": "...", "has_target_disease": "true"/"false"/"",
-             "confidence": "...", "source_evidence": "..."},
-            ...
-        ]
-    }
-    """
-    import csv as csv_mod
-
+    """Record the doctor's labels from the Patient Labeling subpage."""
     session_id = data.get("session_id")
-    labels_list = data.get("labels", [])
-
+    labels_list = data.get("labels", []) or []
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
-
-    workspace_folder = str(workspace(session_id))
-    populations_dir = str(ws_sub(session_id, "populations"))
-    os.makedirs(populations_dir, exist_ok=True)
-    labels_path = os.path.join(populations_dir, "cohort_labels.csv")
-
-    # Reset approval when labels change
-    config_path = str(ws_sub(session_id, "config.json"))
-    config_data = {}
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-        except Exception:
-            pass
-    config_data["cohort_approved"] = False
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config_data, f, indent=4)
-
-    fieldnames = [
-        "patient_id", "has_target_disease", "confidence",
-        "requires_manual_review", "source_evidence"
-    ]
-    with open(labels_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv_mod.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for label in labels_list:
-            writer.writerow({
-                "patient_id": label.get("patient_id", ""),
-                "has_target_disease": label.get("has_target_disease", ""),
-                "confidence": label.get("confidence", ""),
-                "requires_manual_review": label.get("requires_manual_review", "False"),
-                "source_evidence": label.get("source_evidence", ""),
-            })
-
-    return {"status": "success", "saved_count": len(labels_list)}
+    try:
+        cohort = await population_review.get_cohort(session_id)
+        if cohort is None:
+            raise HTTPException(status_code=409, detail="The population cohort has not been defined yet")
+        writes = population_review.manual_label_writes(cohort, labels_list)
+        if writes:
+            await population_review._api(
+                "PATCH", f"/cohorts/{cohort['cohort_id']}/labels", json={"labels": writes}
+            )
+    except population_review.DomainError as exc:
+        raise _domain_http_error(exc)
+    return {"status": "success", "saved_count": len(writes)}
 
 
 @app.post("/populations/approve-cohort")
 async def approve_cohort(data: dict):
-    """
-    Validates and approves the final cohort. The pipeline will only proceed
-    to segmentation after this endpoint succeeds.
-    Expects: { "session_id": "..." }
-    Validates: At least one volume in the datasetlist has a valid label.
-    """
-    import csv as csv_mod
-
+    """The doctor's approval — freezes the cohort (one-way)."""
     session_id = data.get("session_id")
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
-
-    workspace_folder = str(workspace(session_id))
-    config_path = str(ws_sub(session_id, "config.json"))
-
-    config_data = {}
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-        except Exception:
-            pass
-
-    datasetlist = config_data.get("datasetlist", [])
-    if not datasetlist:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot approve: no volumes in the cohort. The population agent must discover volumes first."
-        )
-
-    # Load labels and check that at least one volume has a valid label
-    labels_path = str(ws_sub(session_id, "populations/cohort_labels.csv"))
-    labels_dict = {}
-    if os.path.exists(labels_path):
-        try:
-            with open(labels_path, "r", encoding="utf-8") as f:
-                reader = csv_mod.DictReader(f)
-                for row in reader:
-                    labels_dict[row.get("patient_id", "")] = row
-        except Exception:
-            pass
-
-    # Count volumes with valid labels (has_target_disease is "true" or "false", not empty)
-    labeled_count = 0
-    valid_targets = []
-    for uid in datasetlist:
-        label_info = labels_dict.get(uid)
-        if label_info:
-            htd = str(label_info.get("has_target_disease", "")).strip().lower()
-            if htd in ("true", "false"):
-                labeled_count += 1
-                target_val = 1 if htd == "true" else 0
-                valid_targets.append((uid, label_info.get("patient_id", uid), target_val))
-
-    if labeled_count == 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot approve: no volumes have valid labels. Please label at least one volume in the Patient Labeling tab."
-        )
-
-    # Generate the sealed targets.csv
-    targets_dir = str(ws_sub(session_id, "populations/targets"))
-    os.makedirs(targets_dir, exist_ok=True)
-    targets_path = os.path.join(targets_dir, "targets.csv")
-
-    with open(targets_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv_mod.writer(f)
-        writer.writerow(["id", "name", "target"])
-        for uid, name, target in valid_targets:
-            writer.writerow([uid, name, target])
-
-    # Update config: only labeled UIDs in the final datasetlist, mark approved
-    config_data["datasetlist"] = [uid for uid, _, _ in valid_targets]
-    config_data["cohort_approved"] = True
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config_data, f, indent=4)
-
-    logger.info(f"[CohortApproval] Session {session_id}: approved {labeled_count} labeled volumes out of {len(datasetlist)} total.")
-
-    # Broadcast approval so the pipeline can proceed
     try:
-        await ws_manager.send_ws_message(
-            "cohort_approval_status",
-            {
-                "status": "approved",
-                "labeled_count": labeled_count,
-                "total_count": len(datasetlist),
-            },
-            session_id=session_id,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to broadcast cohort approval: {e}")
+        cohort = await population_review.get_cohort(session_id)
+        if cohort is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot approve: no volumes in the cohort. The population agent must discover volumes first.",
+            )
+        result = await population_review._api("POST", f"/cohorts/{cohort['cohort_id']}/freeze")
+    except population_review.DomainError as exc:
+        raise _domain_http_error(exc)
 
+    event = result.get("event")
+    if event:
+        # Broadcast the event PostgreSQL already committed, with its cursor.
+        await ws_manager.send_ws_message(
+            event["msg_type"],
+            event["payload"],
+            session_id=session_id,
+            event_id=event["event_id"],
+        )
+    logger.info(
+        "[CohortApproval] Session %s: approved %s labeled volumes out of %s total.",
+        session_id,
+        result["labeled_count"],
+        result["total_count"],
+    )
     return {
         "status": "success",
-        "labeled_count": labeled_count,
-        "targets_path": targets_path,
+        "labeled_count": result["labeled_count"],
+        "cohort_id": cohort["cohort_id"],
     }
 
 
@@ -1461,28 +1181,18 @@ async def upload_targets(
     session_id: str = Query(..., description="The ID of the current session"),
     file: UploadFile = File(...)
 ):
-    # Resolve the categorized population-data folder for this session.
-    workspace_folder = str(workspace(session_id))
-    output_dir = str(ws_sub(session_id, "populations/targets"))
-    # 3. Create all necessary folders if they don't exist
+    """Labels from a doctor-uploaded targets file (read, never stored)."""
     try:
-        os.makedirs(output_dir, exist_ok=True)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create directories: {str(e)}")
-    
-    # 4. Define the final file path
-    csv_path = os.path.join(output_dir, "targets.csv")
-
-    # 5. Debug output to verify the absolute path
-    print(f"========== DEBUG: SAVING TARGETS CSV TO ==========")
-    print(os.path.abspath(csv_path))
-
-    # 6. Save the uploaded file securely
-    try:
-        with open(csv_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to write file: {str(e)}")
+        cohort = await population_review.get_cohort(session_id)
+        if cohort is None:
+            raise HTTPException(status_code=409, detail="The population cohort has not been defined yet")
+        writes, unmatched = population_review.uploaded_target_writes(cohort, await file.read())
+        if writes:
+            await population_review._api(
+                "PATCH", f"/cohorts/{cohort['cohort_id']}/labels", json={"labels": writes}
+            )
+    except population_review.DomainError as exc:
+        raise _domain_http_error(exc)
 
     active_session = session_service.get_session(session_id)
     if (
@@ -1500,89 +1210,154 @@ async def upload_targets(
         {"agent": "study_population_planner_agent"},
         session_id=session_id,
     )
-
     return {
-        "message": "Targets saved successfully", 
+        "message": "Targets recorded on the cohort",
         "session_id": session_id,
-        "path": os.path.abspath(csv_path)
+        "labeled_count": sum(1 for item in writes if item["has_target_disease"] is not None),
+        "unmatched_ids": unmatched[:100],
     }
+
+
+# ----------------------------------------------------------------------
+# Segmentation review
+# ----------------------------------------------------------------------
+
+async def _review_batch_or_404(session_id: str) -> dict:
+    batch = await population_review.current_batch(session_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Segmentation review is not available")
+    return batch
+
+
 @app.post("/segmentation-review/draft")
 async def segmentation_review_draft(data: dict):
-    """Persist UI review choices without resolving the agent's review wait."""
+    """Commit UI review choices durably without resolving the agent's wait."""
     session_id = str(data.get("session_id") or "")
     decisions = data.get("decisions")
     if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
         raise HTTPException(status_code=400, detail="A valid session_id is required")
     if not isinstance(decisions, dict):
         raise HTTPException(status_code=400, detail="decisions must be an object")
-
-    manifest_path = str(ws_sub(session_id, "segmentation_manifest.json"))
-    try:
-        with open(manifest_path, "r", encoding="utf-8") as stream:
-            manifest = json.load(stream)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Segmentation review is not available")
-    except (OSError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=500, detail="Could not load segmentation review") from exc
-
-    manifest_run_id = str(manifest.get("run_id") or "")
-    request_run_id = str(data.get("run_id") or "")
-    if request_run_id and manifest_run_id and request_run_id != manifest_run_id:
-        raise HTTPException(status_code=409, detail="Segmentation run has changed")
-
-    pair_ids = {
-        str(item.get("pair_id"))
-        for item in manifest.get("pairs", [])
-        if isinstance(item, dict) and item.get("pair_id")
-    }
-    unknown_pair_ids = set(map(str, decisions)) - pair_ids
-    if unknown_pair_ids:
-        raise HTTPException(status_code=400, detail="Review contains unknown segmentation pairs")
-
     allowed_statuses = {"accepted", "rejected", "modified"}
-    clean_decisions = {
-        str(pair_id): str(status)
-        for pair_id, status in decisions.items()
-        if str(status) in allowed_statuses
-    }
-    if len(clean_decisions) != len(decisions):
+    if any(str(status) not in allowed_statuses for status in decisions.values()):
         raise HTTPException(status_code=400, detail="Review contains an invalid status")
-
     try:
-        _persist_review_draft_to_disk(
-            session_id,
-            {"run_id": manifest_run_id, "decisions": clean_decisions},
+        batch = await _review_batch_or_404(session_id)
+        request_run_id = str(data.get("run_id") or "")
+        batch_run_id = str((batch.get("config") or {}).get("correlation_run_id") or "")
+        if request_run_id and batch_run_id and request_run_id != batch_run_id:
+            raise HTTPException(status_code=409, detail="Segmentation run has changed")
+        await population_review._api(
+            "PUT",
+            f"/segmentation-runs/{batch['segmentation_run_id']}/review/draft",
+            json={"decisions": {str(key): str(value) for key, value in decisions.items()}},
         )
-    except OSError as exc:
-        logger.error("Could not persist review draft for session %s", session_id, exc_info=True)
-        raise HTTPException(status_code=500, detail="Could not persist review draft") from exc
-
+    except population_review.DomainError as exc:
+        raise _domain_http_error(exc)
     return {"status": "ok"}
 
 
 @app.post("/segmentation-review")
 async def segmentation_review(data: dict):
-    session_id = data.get("session_id", "default")
-    review_payload = {
-        "accepted": data.get("accepted", []),
-        "rejected": data.get("rejected", []),
-        "modified": data.get("modified", []),
-    }
-    logger.info(f"[Review] Received triage for session={session_id}: {review_payload}")
+    """The one final review submission."""
+    from agents.execution_agents.segmentation.progressive import artifact_key_for_pair as _key
 
-    # Always persist to disk first so the result survives container restarts.
-    _persist_review_to_disk(session_id, review_payload)
+    session_id = str(data.get("session_id") or "")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    accepted = [str(item) for item in data.get("accepted", []) or []]
+    rejected = [str(item) for item in data.get("rejected", []) or []]
+    modified = [str(item) for item in data.get("modified", []) or []]
+    logger.info(
+        "[Review] Received triage for session=%s: %s accepted, %s rejected, %s modified",
+        session_id, len(accepted), len(rejected), len(modified),
+    )
 
-    # Resolve the waiting module if it's already polling via the event mechanism.
-    ev_entry = _review_events.get(session_id)
-    if ev_entry is not None:
-        ev_entry["result"] = review_payload
-        ev_entry["event"].set()
-        logger.info(f"[Review] Resolved waiting event for session={session_id}")
-    else:
-        # Store in memory so the module can pick it up if it reconnects before restart.
-        _review_futures[f"ready:{session_id}"] = review_payload  # plain dict, not future
-        logger.info(f"[Review] No active poller for session={session_id}. Stored as ready:{session_id} for later pickup.")
+    import hashlib
+    import json as _json
+
+    request_hash = hashlib.sha256(
+        _json.dumps(
+            {
+                "accepted": sorted(set(accepted)),
+                "rejected": sorted(set(rejected)),
+                "modified": sorted(set(modified)),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+    try:
+        batch = await _review_batch_or_404(session_id)
+        run_id = batch["segmentation_run_id"]
+        batch = await population_review._api(
+            "POST", f"/segmentation-runs/{run_id}/review/begin", json={"request_hash": request_hash}
+        )
+    except population_review.DomainError as exc:
+        raise _domain_http_error(exc)
+
+    selected: dict[str, str] = {}
+    if batch["review_status"] != "submitted" and modified:
+        pairs = {pair["pair_key"]: pair for pair in batch.get("pairs") or []}
+        volume_keys = {}
+        for pair in pairs.values():
+            volume_keys.setdefault(pair["volume_series_instance_uid"], []).append(pair["pair_key"])
+        targets = {target["target_key"]: target for target in batch.get("targets") or []}
+        service = SegmentationService()
+        try:
+            for raw_key in modified:
+                key = raw_key if raw_key in pairs else (volume_keys.get(raw_key) or [None])[0]
+                pair = pairs.get(key or "")
+                if pair is None:
+                    raise HTTPException(status_code=400, detail=f"Unknown segmentation pair {raw_key!r}")
+                temp_mask = ws_sub(session_id, f"temp_segmentations/seg_{_key(pair['pair_key'])}_modified.nii.gz")
+                if not os.path.isfile(temp_mask):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Pair {key!r} is marked modified but no edited mask was uploaded",
+                    )
+                published = await service.publish_modified_mask(
+                    volume_uid=pair["volume_series_instance_uid"],
+                    mask_path=str(temp_mask),
+                    target_label=(targets.get(pair["target_key"]) or {}).get("label") or pair["target_key"],
+                    pair_key=pair["pair_key"],
+                )
+                selected[key] = published["segmentation_series_uid"]
+        except Exception as exc:
+            try:
+                await population_review._api(
+                    "POST", f"/segmentation-runs/{run_id}/review/abort", json={"request_hash": request_hash}
+                )
+            except population_review.DomainError:
+                logger.exception("Could not return review %s to pending", run_id)
+            if isinstance(exc, HTTPException):
+                raise
+            logger.exception("Publishing edited masks failed for session %s", session_id)
+            raise HTTPException(
+                status_code=502,
+                detail=f"The edited mask could not be published to Orthanc: {exc}",
+            )
+        finally:
+            await service.close()
+
+    try:
+        result = await population_review._api(
+            "POST",
+            f"/segmentation-runs/{run_id}/review/complete",
+            json={"accepted": accepted, "rejected": rejected, "modified": modified, "selected": selected},
+        )
+    except population_review.DomainError as exc:
+        raise _domain_http_error(exc)
+
+    event = result.get("event")
+    if event:
+        await ws_manager.send_ws_message(
+            event["msg_type"], event["payload"], session_id=session_id, event_id=event["event_id"]
+        )
+    waiter = _review_events.get(session_id)
+    if waiter is not None:
+        waiter.set()
 
     active_session = session_service.get_session(session_id)
     if (
@@ -1600,7 +1375,6 @@ async def segmentation_review(data: dict):
         {"agent": "segmentation_agent"},
         session_id=session_id,
     )
-
     return {"status": "ok"}
 
 
@@ -1614,12 +1388,12 @@ async def upload_modified_mask(
 ):
     workspace_folder = str(workspace(session_id))
     output_dir = str(ws_sub(session_id, "temp_segmentations"))
-    
+
     try:
         os.makedirs(output_dir, exist_ok=True)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create directories: {str(e)}")
-    
+
     pair_id = (
         f"{series_instance_uid}__{target_id}"
         if target_id
@@ -1627,89 +1401,55 @@ async def upload_modified_mask(
     )
     artifact_key = artifact_key_for_pair(pair_id)
     file_path = os.path.join(output_dir, f"seg_{artifact_key}_modified.nii.gz")
-    # The frontend mask matches the full DICOM volume space.
-    # The workspace stores volumes in 'volumes/' and masks in 'masks/'.
     base_volume_path = str(ws_sub(session_id, f"volumes/{series_instance_uid}.nii.gz"))
     original_mask_path = str(ws_sub(session_id, f"masks/{artifact_key}.nii.gz"))
     legacy_pair_name_is_safe = "/" not in pair_id and "\\" not in pair_id
     if not os.path.exists(original_mask_path) and legacy_pair_name_is_safe:
         original_mask_path = str(ws_sub(session_id, f"masks/{pair_id}.nii.gz"))
-    
+
+    import nibabel as nib
+    import numpy as np
+
+    raw_bytes = await file.read()
+    actual_bytes = len(raw_bytes)
+    if os.path.exists(base_volume_path):
+        ref_nii = nib.load(base_volume_path)
+    elif os.path.exists(original_mask_path):
+        ref_nii = nib.load(original_mask_path)
+    else:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Neither the base volume nor the original mask exists for {pair_id}; "
+                "there is no reference grid to place the edited mask on."
+            ),
+        )
+    ref_shape = tuple(int(value) for value in ref_nii.shape[:3])
+    expected_voxels = int(np.prod(ref_shape))
+    dtype = {
+        expected_voxels: np.uint8,
+        expected_voxels * 2: np.uint16,
+        expected_voxels * 4: np.float32,
+    }.get(actual_bytes)
+    if dtype is None:
+        # An edited mask with a different grid is rejected, never re-shaped
+        # into something that merely has the right number of bytes.
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Edited mask size mismatch: the reference grid {ref_shape} holds "
+                f"{expected_voxels} voxels, but {actual_bytes} bytes were uploaded. "
+                "The mask must be edited on the source volume's own grid."
+            ),
+        )
     try:
-        import nibabel as nib
-        import numpy as np
-        import json
-        
-        # Read the raw byte array uploaded by the frontend
-        raw_bytes = await file.read()
-        actual_bytes = len(raw_bytes)
-        
-        # Try to load the base volume NIfTI for shape and affine
-        ref_nii = None
-        ref_shape = None
-        
-        if os.path.exists(base_volume_path):
-            ref_nii = nib.load(base_volume_path)
-            ref_shape = ref_nii.shape[:3]
-            logger.info(f"Using base volume for reference: shape={ref_shape}")
-        elif os.path.exists(original_mask_path):
-            ref_nii = nib.load(original_mask_path)
-            ref_shape = ref_nii.shape[:3]
-            logger.info(f"Using original mask for reference: shape={ref_shape}")
-        
-        # If neither file exists, try to infer shape from the frontend-provided dimensions
-        if ref_shape is None:
-            raise FileNotFoundError(
-                f"Neither base volume ({base_volume_path}) nor original mask ({original_mask_path}) found."
-            )
-        
-        # Check if the raw bytes match the reference shape
-        expected_voxels = int(np.prod(ref_shape))
-        
-        if actual_bytes == expected_voxels:
-            dtype = np.uint8
-        elif actual_bytes == expected_voxels * 2:
-            dtype = np.uint16
-        elif actual_bytes == expected_voxels * 4:
-            dtype = np.float32
-        else:
-            # The frontend volume may have a different shape than the stored mask
-            # (e.g., full 59 slices vs cropped 30 slices). 
-            # Try common dtypes against the raw byte count.
-            inferred_shape = None
-            for try_dtype, bpp in [(np.uint8, 1), (np.uint16, 2), (np.float32, 4)]:
-                total_voxels = actual_bytes // bpp
-                if actual_bytes % bpp == 0 and total_voxels > 0:
-                    # Assume X and Y match the reference, compute Z
-                    if ref_shape[0] * ref_shape[1] > 0:
-                        z_slices = total_voxels // (ref_shape[0] * ref_shape[1])
-                        if z_slices * ref_shape[0] * ref_shape[1] == total_voxels and z_slices > 0:
-                            inferred_shape = (ref_shape[0], ref_shape[1], z_slices)
-                            dtype = try_dtype
-                            logger.info(f"Inferred frontend volume shape: {inferred_shape} with dtype={try_dtype}")
-                            break
-            
-            if inferred_shape is None:
-                raise ValueError(
-                    f"Size mismatch: reference shape {ref_shape} ({expected_voxels} voxels), "
-                    f"received {actual_bytes} bytes. Could not infer frontend shape."
-                )
-            ref_shape = inferred_shape
-        
-        # Convert raw bytes to a flat array and reshape
-        flat_array = np.frombuffer(raw_bytes, dtype=dtype)
-        reshaped_array = flat_array.reshape(ref_shape, order='F')
-        
-        # Create a new NIfTI image with the modified data
-        affine = ref_nii.affine if ref_nii is not None else np.eye(4)
-        new_nii = nib.Nifti1Image(reshaped_array, affine)
-        nib.save(new_nii, file_path)
+        reshaped_array = np.frombuffer(raw_bytes, dtype=dtype).reshape(ref_shape, order="F")
+        nib.save(nib.Nifti1Image(reshaped_array, ref_nii.affine), file_path)
         logger.info(f"Saved modified mask: {file_path}, shape={ref_shape}, dtype={dtype}")
-        
     except Exception as e:
         logger.error(f"Failed to process and save modified mask: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to process mask: {str(e)}")
-    
+
     from agents.execution_agents.segmentation.utils import generate_gif_overlays
 
     overlay_results = await asyncio.to_thread(
@@ -1733,6 +1473,19 @@ async def upload_modified_mask(
 
     overlay = overlay_results[0]
     gif_path = str(overlay.get("gifPath") or f"overlays/{artifact_key}.gif")
+    # Catalogue the regenerated preview (a render is a cache entry).
+    await register_render(
+        session_id,
+        render_logical_key(pair_id, artifact_key),
+        gif_path,
+        metadata={
+            "schema_version": 1,
+            "pair_id": pair_id,
+            "volume_uid": series_instance_uid,
+            "target_id": target_id or None,
+            "source": "user_modified_mask",
+        },
+    )
     overlay["gifUrl"] = (
         f"{str(request.base_url).rstrip('/')}/files/"
         f"{os.path.basename(workspace_folder)}/{gif_path}"
@@ -1742,9 +1495,8 @@ async def upload_modified_mask(
     ).st_mtime_ns
 
     return {
-        "message": "Modified mask saved successfully", 
+        "message": "Modified mask saved successfully; it is published as a SEG when the review is submitted",
         "session_id": session_id,
-        "path": os.path.abspath(file_path),
         "status": "saved",
         "overlay": overlay,
     }
@@ -1756,15 +1508,7 @@ async def get_segmentation_mask(
     series_uid: str,
     target_id: str | None = Query(None),
 ):
-    """
-    Serve the agent-generated mask for a given session and series UID as an NRRD file.
-    The mask is converted from NIfTI (.nii.gz) to NRRD on-the-fly so the existing
-    frontend SegmentationReader.parseNrrdData() pipeline works without modification.
-
-    Search order:
-      1. temp/segmentations/ – user-uploaded modified masks (highest priority)
-      2. data/masks/         – agent-generated masks
-    """
+    """Serve the agent-generated mask for a given session and series UID as an NRRD file. The mask is converted from NIfTI (.nii.gz) to NRRD on-the-fly so the existing frontend SegmentationReader.parseNrrdData pipeline works without modification."""
     import io
     import numpy as np
 
@@ -1888,53 +1632,28 @@ async def get_segmentation_mask(
 
 @app.get("/segmentation-review/wait/{session_id}")
 async def wait_for_review(session_id: str, timeout: int = 3600):
-    """Long-poll endpoint: blocks until the frontend submits a review.
-
-    Uses a persistent asyncio.Event so that reconnecting clients re-attach to
-    the *same* event rather than creating a new Future every time.  This means
-    a review submitted during a brief reconnect window is never lost.
-    """
-    # ── Fast path: review already arrived before this poll ───────────────────
-    ready_key = f"ready:{session_id}"
-    # Also check disk so review results survive Docker restarts.
-    if ready_key not in _review_futures:
-        disk_result = _load_review_from_disk(session_id)
-        if disk_result is not None:
-            _review_futures[ready_key] = disk_result
-    if ready_key in _review_futures:
-        result = _review_futures.pop(ready_key)
-        # clean up event entry and disk file if present
-        _review_events.pop(session_id, None)
-        _clear_review_from_disk(session_id)
-        return result
-
-    # ── Also check the event store (review arrived while another poll was alive)
-    ev_entry = _review_events.get(session_id)
-    if ev_entry is not None and ev_entry["event"].is_set():
-        result = ev_entry["result"]
-        _review_events.pop(session_id, None)
-        _clear_review_from_disk(session_id)   # clean up disk file here too
-        return result
-
-    # ── Register / reuse a persistent event for this session ─────────────────
-    if session_id not in _review_events:
-        _review_events[session_id] = {"event": asyncio.Event(), "result": None}
-    ev_entry = _review_events[session_id]
-
-    try:
-        await asyncio.wait_for(asyncio.shield(ev_entry["event"].wait()), timeout=timeout)
-    except asyncio.TimeoutError:
-        # Connection timed out — return 408 so the client reconnects, but
-        # intentionally keep _review_events[session_id] alive so the next
-        # connection reuses the same event and result slot.
-        logger.debug(f"[Review] Long-poll timeout for session={session_id}. Client will reconnect.")
-        raise HTTPException(status_code=408, detail="Review timeout")
-
-    # Event was set — collect result and clean up
-    result = ev_entry["result"]
-    _review_events.pop(session_id, None)
-    _clear_review_from_disk(session_id)
-    return result
+    """Long-poll until this session's segmentation review is submitted."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + max(1, timeout)
+    waiter = _review_events.setdefault(session_id, asyncio.Event())
+    while True:
+        try:
+            batch = await population_review.current_batch(session_id)
+        except population_review.DomainError as exc:
+            raise _domain_http_error(exc)
+        if batch is not None and batch["review_status"] == "submitted":
+            _review_events.pop(session_id, None)
+            return population_review.review_payload(batch)
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            raise HTTPException(status_code=408, detail="Review timeout")
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(waiter.wait()), timeout=min(REVIEW_RECHECK_SECONDS, remaining)
+            )
+            waiter.clear()
+        except asyncio.TimeoutError:
+            pass
 
 # ----------------------------------------------------------------------
 # Session Recovery
@@ -1943,12 +1662,7 @@ async def wait_for_review(session_id: str, timeout: int = 3600):
 
 @app.post("/session/{session_id}/recover")
 async def recover_session(session_id: str, restart: bool = False):
-    """
-    Re-create an in-memory Session from persisted state after a process restart.
-
-    Hydration is read-only by default. A new pipeline is created only when the
-    caller explicitly passes ``restart=true``.
-    """
+    """Re-create an in-memory Session from persisted state after a process restart."""
     existing = session_service.get_session(session_id)
     if existing and existing.execution_task and not existing.execution_task.done():
         logger.info(

@@ -6,8 +6,12 @@ if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 
 from storage_paths import ensure_storage_layout
+from storage_write_guard import install_write_guard
 
 ensure_storage_layout()
+# A tool that writes a retired workspace file fails instead of creating a
+# second source of truth next to the table that replaced it.
+install_write_guard()
 
 from tools import mcp
 from fastapi import FastAPI
@@ -54,6 +58,7 @@ import tools.literature_context
 import tools.task_context
 from tools.modeling.classification import pycaret_train_classifier, pycaret_run_inference
 from tools.modeling.regression import pycaret_train_regressor, pycaret_run_regression_inference
+from tools.modeling.refit import pycaret_refit_model
 
 from tools.feature_extraction.features import radiomics_extract_features, radiomics_analyze_importance
 

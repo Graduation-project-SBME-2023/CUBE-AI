@@ -1,7 +1,13 @@
 import httpx
 import logging
 from datetime import datetime
-from models.plans import ClinicalHypothesis, StudyPlan, StudyStep
+from models.plans import (
+    ClinicalHypothesis,
+    ContextAugmentation,
+    StudyPlan,
+    StudyStep,
+    TaskMessage,
+)
 from models.logs import WS_Log
 import os
 import json
@@ -17,11 +23,7 @@ BASE_URL = os.environ.get(
 ).rstrip("/")
 DEFAULT_TIMEOUT = CONTROL_HTTP_TIMEOUT
 class BackendClient:
-    """
-    Async HTTP client for the backend REST API.
-    All methods are async — uses httpx instead of requests
-    to avoid blocking the event loop.
-    """
+    """Async HTTP client for the backend REST API. All methods are async — uses httpx instead of requests to avoid blocking the event loop."""
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -48,38 +50,39 @@ class BackendClient:
         return str(value)
 
     @classmethod
-    def _build_hypothesis_payload(cls, hypothesis: ClinicalHypothesis) -> dict:
-        # Match application_api.schemas.hypothesis.HypothesisCreate exactly.
+    def _build_intent_payload(cls, hypothesis: ClinicalHypothesis) -> dict:
+        """Versioned JSONB for sessions.intent. Never a copy of the prompt."""
         return {
+            "schema_version": 1,
+            "source": "planning_agent",
             "title": hypothesis.title or "Untitled Hypothesis",
             "population": cls._stringify(hypothesis.population),
             "intervention": cls._stringify(hypothesis.intervention),
             "comparison": cls._stringify(hypothesis.comparison),
             "outcome": cls._stringify(hypothesis.outcome),
-            "hypothesis": cls._stringify(hypothesis.hypothesis),
+            "statement": cls._stringify(hypothesis.hypothesis),
             "clinical_context": cls._stringify(hypothesis.clinical_context),
             "relationship_type": cls._stringify(hypothesis.relationship_type),
-            "state": cls._stringify(hypothesis.state) or "not_confirmed",
         }
 
     @classmethod
-    def _parse_hypothesis(cls, data: dict) -> ClinicalHypothesis:
+    def _parse_intent(cls, session: dict) -> ClinicalHypothesis:
+        """Rebuild the in-memory hypothesis from a session row."""
+        intent = session.get("intent") or {}
         return ClinicalHypothesis(
-            id=str(data.get("id", "")),
-            state=data.get("state") or "not_confirmed",
-            title=data.get("title") or "",
-            # Draft hypotheses are persisted before the planning agent fills
-            # the PICO fields, so the application API legitimately returns
-            # null for these optional database columns.
-            population=data.get("population") or "",
-            intervention=data.get("intervention") or "",
-            outcome=data.get("outcome") or "",
-            clinical_context=data.get("clinical_context") or "",
-            relationship_type=data.get("relationship_type") or "",
-            comparison=data.get("comparison") or "",
-            hypothesis=data.get("hypothesis") or "",
-            # These fields are not persisted in monailabel hypothesis schema.
-            question="",
+            id=str(session.get("session_id", "")),
+            state="not_confirmed"
+            if session.get("status") == "planning"
+            else "confirmed",
+            title=intent.get("title") or session.get("title") or "",
+            population=intent.get("population") or "",
+            intervention=intent.get("intervention") or "",
+            outcome=intent.get("outcome") or "",
+            clinical_context=intent.get("clinical_context") or "",
+            relationship_type=intent.get("relationship_type") or "",
+            comparison=intent.get("comparison") or "",
+            hypothesis=intent.get("statement") or "",
+            question=session.get("prompt") or "",
             message=None,
         )
 
@@ -98,348 +101,447 @@ class BackendClient:
     # ------------------------------------------------------------------
 
     @classmethod
+    def _require_uuid(cls, value, what: str) -> str:
+        """current rejects non-UUID session ids at every boundary."""
+        if not cls._is_valid_uuid(value):
+            raise ValueError(
+                f"{what} must be a UUID; got {value!r}. V1 does not accept "
+                "local-only session identifiers at the API boundary."
+            )
+        return str(value)
+
+    @classmethod
     async def update_session(cls, session_id: str, data: dict) -> dict | None:
-        pass
-        # Session management not yet implemented in DB
-        # async with httpx.AsyncClient() as client:
-        #     try:
-        #         response = await client.patch(
-        #             f"{BASE_URL}/sessions/{session_id}",
-        #             json=data,
-        #         )
-        #         response.raise_for_status()
-        #         return response.json()
-        #     except httpx.HTTPError as e:
-        #         logger.error(f"Failed to update session {session_id}: {e}")
-        #         return None
-
-    # ------------------------------------------------------------------
-    # Hypothesis
-    # ------------------------------------------------------------------
-
-    @classmethod
-    async def create_hypothesis(
-        cls, session_id: str, hypothesis: ClinicalHypothesis
-    ) -> ClinicalHypothesis | None:
-        if not cls._is_valid_uuid(session_id):
-            logger.warning(
-                "Skipping hypothesis persistence: session_id is not a UUID (%r)",
-                session_id,
-            )
-            return None
-
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            try:
-                response = await client.post(
-                    f"{BASE_URL}/hypotheses/",
-                    params={"chat_id": session_id},
-                    json=cls._build_hypothesis_payload(hypothesis),
-                )
-                response.raise_for_status()
-                return cls._parse_hypothesis(response.json())
-            except httpx.HTTPError as e:
-                logger.info(e)
-                logger.error(
-                    f"Failed to create hypothesis for session {session_id}: {type(e).__name__}: {e}"
-                )
-                return None
-
-    @classmethod
-    async def update_hypothesis(
-        cls, hypothesis: ClinicalHypothesis
-    ) -> ClinicalHypothesis | None:
-        if not cls._is_valid_uuid(hypothesis.id):
-            logger.warning(
-                "Skipping hypothesis update: hypothesis.id is not a UUID (%r)",
-                hypothesis.id,
-            )
-            return None
-
+        """PATCH /sessions/{id}."""
+        cls._require_uuid(session_id, "session_id")
+        payload = {k: v for k, v in data.items() if k != "prompt"}
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.patch(
-                    f"{BASE_URL}/hypotheses/{hypothesis.id}",
-                    json=cls._build_hypothesis_payload(hypothesis),
+                    f"{BASE_URL}/sessions/{session_id}",
+                    json=payload,
                 )
                 response.raise_for_status()
-                return cls._parse_hypothesis(response.json())
+                return response.json()
             except httpx.HTTPError as e:
-                logger.error(f"Failed to update hypothesis {hypothesis.id}: {type(e).__name__}: {e}")
+                logger.error(f"Failed to update session {session_id}: {e}")
                 return None
 
     @classmethod
-    async def get_hypothesis_by_chat(cls, session_id: str) -> ClinicalHypothesis | None:
-        if not cls._is_valid_uuid(session_id):
-            logger.warning(
-                "Skipping hypothesis fetch: session_id is not a UUID (%r)",
-                session_id,
-            )
-            return None
-
+    async def get_session(cls, session_id: str) -> dict | None:
+        cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
-                response = await client.get(
-                    f"{BASE_URL}/hypotheses/by-chat/{session_id}",
-                )
+                response = await client.get(f"{BASE_URL}/sessions/{session_id}")
                 if response.status_code == 404:
                     return None
                 response.raise_for_status()
-                return cls._parse_hypothesis(response.json())
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to fetch session {session_id}: {e}")
+                return None
+
+    @classmethod
+    async def set_session_status(cls, session_id: str, status: str) -> dict | None:
+        """Guarded transition — this is how pause becomes durable."""
+        cls._require_uuid(session_id, "session_id")
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            try:
+                response = await client.patch(
+                    f"{BASE_URL}/sessions/{session_id}/status/{status}"
+                )
+                response.raise_for_status()
+                return response.json()
             except httpx.HTTPError as e:
                 logger.error(
-                    f"Failed to fetch hypothesis for session {session_id}: {type(e).__name__}: {e}"
+                    f"Failed to set session {session_id} status to {status}: {e}"
                 )
                 return None
+
+    # ------------------------------------------------------------------
+    # Intent
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def save_intent(
+        cls, session_id: str, hypothesis: ClinicalHypothesis
+    ) -> ClinicalHypothesis | None:
+        """Persist the planner's structured reading of the prompt."""
+        cls._require_uuid(session_id, "session_id")
+        intent = cls._build_intent_payload(hypothesis)
+        has_pico = any(
+            intent.get(field) for field in ("population", "intervention", "outcome")
+        )
+        updated = await cls.update_session(
+            session_id,
+            {"intent": intent, "prompt_kind": "hypothesis" if has_pico else "general"},
+        )
+        if updated is None:
+            return None
+        return cls._parse_intent(updated)
+
+    @classmethod
+    async def get_intent(cls, session_id: str) -> ClinicalHypothesis | None:
+        session = await cls.get_session(session_id)
+        if session is None:
+            return None
+        return cls._parse_intent(session)
 
     # ------------------------------------------------------------------
     # Plan
     # ------------------------------------------------------------------
 
     @classmethod
-    async def create_plan(cls, plan: StudyPlan) -> StudyPlan | None:
-        if not cls._is_valid_uuid(plan.hypothesis_id):
-            logger.warning(
-                "Skipping plan persistence: hypothesis_id is not a UUID (%r)",
-                plan.hypothesis_id,
-            )
-            return None
-
-        payload = {
-            "state": plan.state,
-            "steps": [
+    def _step_payload(cls, plan: StudyPlan) -> dict:
+        """Map the in-memory plan onto the current draft contract."""
+        steps = []
+        for step in plan.steps:
+            instructions: dict[str, Any] = {}
+            if step.description:
+                instructions["description"] = step.description
+            if step.task_message is not None:
+                task_message = step.task_message
+                instructions["compiled"] = task_message.instructions
+                instructions["task_message"] = {
+                    "schema_version": 1,
+                    "source": "context_compiler",
+                    "task_id": task_message.task_id,
+                    "phase": task_message.phase,
+                    "agent_title": task_message.agent_title,
+                    "instructions": task_message.instructions,
+                    "hypothesis_summary": task_message.hypothesis_summary,
+                    "payload": task_message.payload or {},
+                    "context_augmentation": (
+                        task_message.context_augmentation.model_dump()
+                        if task_message.context_augmentation is not None
+                        else {}
+                    ),
+                }
+            steps.append(
                 {
                     "title": step.title,
-                    "description": step.description,
-                    "module": step.module,
-                    "status": step.status,
-                    "logs": step.logs,
-                    "instructions": {},
+                    "agent_type": step.module or "",
+                    "instructions": instructions,
                 }
-                for step in plan.steps
-            ],
-        }
+            )
+        return {"steps": steps}
 
+    @staticmethod
+    def _parse_task_message(instructions: dict) -> TaskMessage | None:
+        """Rebuild the compiled task message from the step definition."""
+        raw = (instructions or {}).get("task_message")
+        if not isinstance(raw, dict):
+            return None
+        augmentation = raw.get("context_augmentation") or {}
+        return TaskMessage(
+            task_id=str(raw.get("task_id") or ""),
+            phase=str(raw.get("phase") or ""),
+            agent_id=str(raw.get("agent_id") or ""),
+            agent_title=str(raw.get("agent_title") or ""),
+            instructions=str(raw.get("instructions") or ""),
+            hypothesis_summary=str(raw.get("hypothesis_summary") or ""),
+            payload=raw.get("payload") or {},
+            context_augmentation=ContextAugmentation(
+                **{
+                    field: str(augmentation.get(field) or "")
+                    for field in ContextAugmentation.model_fields
+                }
+            ),
+        )
+
+    @classmethod
+    def _parse_plan(cls, session_id: str, payload: dict) -> StudyPlan:
+        steps = []
+        for raw in sorted(
+            payload.get("steps") or [], key=lambda r: r.get("step_order", 0)
+        ):
+            instructions = raw.get("instructions") or {}
+            task_message = cls._parse_task_message(instructions)
+            if task_message is not None and not task_message.agent_id:
+                # The agent id is the step's own selector; it is not stored
+                # twice inside the task message.
+                task_message.agent_id = raw.get("agent_type") or ""
+            steps.append(
+                StudyStep(
+                    id=str(raw.get("step_id", "")),
+                    title=raw.get("title") or "",
+                    description=instructions.get("description", ""),
+                    module=raw.get("agent_type"),
+                    step_order=int(raw.get("step_order") or 0),
+                    task_message=task_message,
+                )
+            )
+        return StudyPlan(
+            id=str(payload.get("session_id", session_id)),
+            session_id=str(payload.get("session_id", session_id)),
+            steps=steps,
+            state="confirmed" if payload.get("approved_at") else "not_confirmed",
+        )
+
+    @classmethod
+    async def save_plan_draft(cls, session_id: str, plan: StudyPlan) -> StudyPlan | None:
+        """Replace the session's draft step list."""
+        cls._require_uuid(session_id, "session_id")
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            try:
+                response = await client.put(
+                    f"{BASE_URL}/plans/session/{session_id}/steps",
+                    json=cls._step_payload(plan),
+                )
+                response.raise_for_status()
+                return cls._parse_plan(session_id, response.json())
+            except httpx.HTTPError as e:
+                logger.error(
+                    f"Failed to save plan draft for session {session_id}: "
+                    f"{type(e).__name__}: {e}"
+                )
+                return None
+
+    @classmethod
+    async def approve_plan(cls, session_id: str) -> StudyPlan | None:
+        """One-way approval. A second call is a 409, never a silent no-op."""
+        cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.post(
-                    f"{BASE_URL}/plans/with_steps",
-                    params={"hypothesis_id": plan.hypothesis_id},
-                    json=payload,
+                    f"{BASE_URL}/plans/session/{session_id}/approve"
                 )
                 response.raise_for_status()
-                return StudyPlan(**response.json())
+                return cls._parse_plan(session_id, response.json())
             except httpx.HTTPError as e:
                 logger.error(
-                    f"Failed to create plan for hypothesis {plan.hypothesis_id}: {type(e).__name__}: {e}"
+                    f"Failed to approve plan for session {session_id}: "
+                    f"{type(e).__name__}: {e}"
                 )
                 return None
 
     @classmethod
-    async def update_plan(cls, plan: StudyPlan) -> StudyPlan | None:
-        if not cls._is_valid_uuid(plan.id):
-            logger.warning(
-                "Skipping plan update: plan.id is not a UUID (%r)",
-                plan.id,
-            )
-            return None
-
-        payload = {
-            "state": plan.state,
-            "steps": [
-                {
-                    "title": step.title,
-                    "description": step.description,
-                    "module": step.module,
-                    "status": step.status,
-                    "logs": step.logs,
-                    "instructions": {},
-                }
-                for step in plan.steps
-            ],
-        }
-
+    async def get_plan_by_session(cls, session_id: str) -> StudyPlan | None:
+        cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
-                response = await client.patch(
-                    f"{BASE_URL}/plans/{plan.id}/with_steps",
-                    json=payload,
-                )
-                response.raise_for_status()
-                return StudyPlan(**response.json())
-            except httpx.HTTPError as e:
-                logger.error(f"Failed to update plan with id {plan.id}: {type(e).__name__}: {e}")
-                return None
-
-    @classmethod
-    async def get_plan_by_hypothesis(cls, hypothesis_id: str) -> StudyPlan | None:
-        if not cls._is_valid_uuid(hypothesis_id):
-            logger.warning(
-                "Skipping plan fetch: hypothesis_id is not a UUID (%r)",
-                hypothesis_id,
-            )
-            return None
-
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            try:
-                response = await client.get(
-                    f"{BASE_URL}/plans/by-hypothesis/{hypothesis_id}",
-                )
+                response = await client.get(f"{BASE_URL}/plans/session/{session_id}")
                 if response.status_code == 404:
                     return None
                 response.raise_for_status()
-                payload = response.json()
-                if not payload:
-                    return None
-
-                if isinstance(payload, list):
-                    first_plan = payload[0]
-                else:
-                    first_plan = payload
-
-                return StudyPlan(**first_plan)
+                return cls._parse_plan(session_id, response.json())
             except httpx.HTTPError as e:
                 logger.error(
-                    f"Failed to fetch plan for hypothesis {hypothesis_id}: {type(e).__name__}: {e}"
+                    f"Failed to fetch plan for session {session_id}: "
+                    f"{type(e).__name__}: {e}"
                 )
                 return None
 
     # ------------------------------------------------------------------
-    # Plan Steps (execution sync)
+    # Plan Steps
     # ------------------------------------------------------------------
 
     @classmethod
-    async def update_plan_step(cls, step_id: str, data: dict) -> dict | None:
-        """Patch a single plan step's status and/or logs."""
+    async def get_plan_steps(cls, session_id: str) -> list[dict]:
+        """Fetch a session's steps in order."""
+        cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
-                response = await client.patch(
-                    f"{BASE_URL}/steps/{step_id}/status",
-                    json=data,
-                )
+                response = await client.get(f"{BASE_URL}/steps/session/{session_id}")
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
-                logger.error(f"Failed to update plan step {step_id}: {type(e).__name__}: {e}")
-                return None
-
-    @classmethod
-    async def get_plan_steps(cls, plan_id: str) -> list[dict]:
-        """Fetch all steps for a plan — used to recover execution state."""
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            try:
-                response = await client.get(
-                    f"{BASE_URL}/steps/plan/{plan_id}",
+                logger.error(
+                    f"Failed to fetch steps for session {session_id}: "
+                    f"{type(e).__name__}: {e}"
                 )
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPError as e:
-                logger.error(f"Failed to fetch steps for plan {plan_id}: {type(e).__name__}: {e}")
                 return []
 
     # ------------------------------------------------------------------
-    # Task Messages + Context Augmentation
+    # Agent runs — execution state, identity
     # ------------------------------------------------------------------
 
     @classmethod
-    async def save_task_message_by_step_id(
-        cls,
-        step_id: str,
-        task_message: dict[str, Any],
-    ) -> dict | None:
-        """Create/update task message for a step_id."""
-        if not cls._is_valid_uuid(step_id):
-            logger.warning(
-                "Skipping task message save: step_id is not a UUID (%r)", step_id
-            )
-            return None
-
-        payload = cls._build_task_message_payload(task_message)
-
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            try:
-                response = await client.post(
-                    f"{BASE_URL}/task-messages/step/{step_id}",
-                    json=payload,
-                )
-                if response.status_code == 409:
-                    response = await client.patch(
-                        f"{BASE_URL}/task-messages/step/{step_id}",
-                        json=payload,
-                    )
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPError as e:
-                logger.error(f"Failed to save task message for step {step_id}: {type(e).__name__}: {e}")
-                return None
-
-    @classmethod
-    async def get_task_message_by_step_id(cls, step_id: str) -> dict | None:
-        """Read task message by step_id."""
-        if not cls._is_valid_uuid(step_id):
-            logger.warning(
-                "Skipping task message read: step_id is not a UUID (%r)", step_id
-            )
-            return None
-
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            try:
-                response = await client.get(f"{BASE_URL}/task-messages/step/{step_id}")
-                if response.status_code == 404:
-                    return None
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPError as e:
-                logger.error(f"Failed to read task message for step {step_id}: {type(e).__name__}: {e}")
-                return None
-
-    @classmethod
-    async def save_context_augmentation_by_task_id(
-        cls,
-        task_id: str,
-        context_augmentation: dict[str, Any],
-    ) -> dict | None:
-        """Update context augmentation by task_id."""
-        payload = {
-            "knowledge_summary": context_augmentation.get("knowledge_summary", ""),
-            "literature_findings": context_augmentation.get("literature_findings", ""),
-            "methodology_guidance": context_augmentation.get(
-                "methodology_guidance", ""
-            ),
-            "terminology": context_augmentation.get("terminology", ""),
-            "sources_guide": context_augmentation.get("sources_guide", ""),
-        }
-
-        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            try:
-                response = await client.patch(
-                    f"{BASE_URL}/context-augmentations/task/{task_id}",
-                    json=payload,
-                )
-                response.raise_for_status()
-                return response.json()
-            except httpx.HTTPError as e:
-                logger.error(
-                    f"Failed to save context augmentation for task {task_id}: {type(e).__name__}: {e}"
-                )
-                return None
-
-    @classmethod
-    async def get_context_augmentation_by_task_id(cls, task_id: str) -> dict | None:
-        """Read context augmentation by task_id."""
+    async def get_agent_runs(cls, session_id: str) -> list[dict]:
+        """Every run of the session's approved plan, in step order."""
+        cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.get(
-                    f"{BASE_URL}/context-augmentations/task/{task_id}"
+                    f"{BASE_URL}/agent-runs/session/{session_id}"
                 )
-                if response.status_code == 404:
-                    return None
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
                 logger.error(
-                    f"Failed to read context augmentation for task {task_id}: {type(e).__name__}: {e}"
+                    f"Failed to fetch agent runs for session {session_id}: "
+                    f"{type(e).__name__}: {e}"
+                )
+                return []
+
+    @classmethod
+    async def get_agent_run(cls, agent_run_id: str) -> dict | None:
+        cls._require_uuid(agent_run_id, "agent_run_id")
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            response = await client.get(f"{BASE_URL}/agent-runs/{agent_run_id}")
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()
+
+    @classmethod
+    async def get_agent_run_status(cls, session_id: str) -> dict | None:
+        """The `pipeline_agent_status` view, rebuilt from the runs."""
+        cls._require_uuid(session_id, "session_id")
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            try:
+                response = await client.get(
+                    f"{BASE_URL}/agent-runs/session/{session_id}/status"
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(
+                    f"Failed to fetch run status for session {session_id}: "
+                    f"{type(e).__name__}: {e}"
                 )
                 return None
+
+    @classmethod
+    async def start_agent_run(
+        cls, agent_run_id: str, compiled_prompt: str, input_refs: dict[str, Any]
+    ) -> dict | None:
+        """Claim a run immediately before its step starts."""
+        cls._require_uuid(agent_run_id, "agent_run_id")
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            response = await client.post(
+                f"{BASE_URL}/agent-runs/{agent_run_id}/start",
+                json={"compiled_prompt": compiled_prompt, "input_refs": input_refs},
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @classmethod
+    async def complete_agent_run(
+        cls, agent_run_id: str, output_summary: dict[str, Any] | None = None
+    ) -> dict | None:
+        cls._require_uuid(agent_run_id, "agent_run_id")
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            try:
+                response = await client.post(
+                    f"{BASE_URL}/agent-runs/{agent_run_id}/complete",
+                    json={"output_summary": output_summary},
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(
+                    f"Failed to complete agent run {agent_run_id}: "
+                    f"{type(e).__name__}: {e}"
+                )
+                return None
+
+    @classmethod
+    async def write_agent_output(
+        cls, agent_run_id: str, output: dict[str, Any]
+    ) -> dict | None:
+        """Record a step's structured result on its run."""
+        cls._require_uuid(agent_run_id, "agent_run_id")
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            response = await client.put(
+                f"{BASE_URL}/agent-runs/{agent_run_id}/output", json=output
+            )
+            response.raise_for_status()
+            return response.json()
+
+    @classmethod
+    async def fail_agent_run(
+        cls,
+        agent_run_id: str,
+        code: str,
+        message: str,
+        details: dict[str, Any] | None = None,
+    ) -> dict | None:
+        cls._require_uuid(agent_run_id, "agent_run_id")
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            try:
+                response = await client.post(
+                    f"{BASE_URL}/agent-runs/{agent_run_id}/fail",
+                    json={
+                        "code": code,
+                        "message": message[:8000],
+                        "details": details,
+                    },
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(
+                    f"Failed to record failure for agent run {agent_run_id}: "
+                    f"{type(e).__name__}: {e}"
+                )
+                return None
+
+    # ------------------------------------------------------------------
+    # Population and segmentation review
+    # ------------------------------------------------------------------
+    # Unlike the best-effort readers above, these raise on transport failure:
+    # a cohort or review that cannot be read must stop the caller, never look
+    # like "nothing recorded yet".
+
+    @classmethod
+    async def _domain(cls, method: str, path: str, *, allow_404: bool = False, **kwargs):
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            response = await client.request(method, f"{BASE_URL}{path}", **kwargs)
+        if allow_404 and response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json() if response.content else None
+
+    @classmethod
+    async def get_population_cohort(cls, session_id: str) -> dict | None:
+        cls._require_uuid(session_id, "session_id")
+        return await cls._domain(
+            "GET", f"/cohorts/session/{session_id}/population", allow_404=True
+        )
+
+    @classmethod
+    async def get_cohort_analysis_rows(cls, cohort_id: str) -> list[dict]:
+        cls._require_uuid(cohort_id, "cohort_id")
+        return await cls._domain("GET", f"/cohorts/{cohort_id}/analysis-rows")
+
+    @classmethod
+    async def get_segmentation_batches(cls, session_id: str) -> list[dict]:
+        cls._require_uuid(session_id, "session_id")
+        return await cls._domain("GET", f"/segmentation-runs/session/{session_id}")
+
+    # ------------------------------------------------------------------
+    # Literature reviews — the planning-phase literature agent's durable output
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def create_literature_review(
+        cls,
+        session_id: str,
+        review_key: str,
+        query: dict,
+        result_summary: dict | None = None,
+    ) -> dict:
+        """Insert-or-read a literature review for this session/PICO."""
+        cls._require_uuid(session_id, "session_id")
+        return await cls._domain(
+            "POST",
+            "/literature-reviews/",
+            json={
+                "session_id": session_id,
+                "review_key": review_key,
+                "query": query,
+                "result_summary": result_summary,
+            },
+        )
+
+    @classmethod
+    async def add_literature_papers(cls, review_id: str, papers: list[dict]) -> dict:
+        """Batch-add papers to a review, deduplicating by PMID and DOI."""
+        cls._require_uuid(review_id, "review_id")
+        return await cls._domain(
+            "POST", f"/literature-reviews/{review_id}/papers", json=papers
+        )
 
     # ------------------------------------------------------------------
     # Hypothesis History
@@ -447,117 +549,89 @@ class BackendClient:
 
     @classmethod
     async def get_hypothesis_history(cls, limit: int = 20) -> list[dict]:
-        """Fetch hypothesis history: recent chat sessions with their hypotheses."""
+        """Recent research sessions, most recently updated first."""
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
-                sessions_resp = await client.get(
-                    f"{BASE_URL}/chat_sessions/",
-                    params={"active_only": False},
+                response = await client.get(
+                    f"{BASE_URL}/sessions/",
+                    params={"include_archived": True, "limit": min(limit, 100)},
                 )
-                if sessions_resp.status_code != 200:
-                    logger.error(
-                        f"Failed to fetch chat sessions: {sessions_resp.status_code}"
-                    )
-                    return []
-
-                sessions = sessions_resp.json()
-                history = []
-
-                def _parse_date(session_data):
-                    date_value = session_data.get("last_activity") or session_data.get("started_at")
-                    if not date_value:
-                        return 0
-                    try:
-                        return datetime.fromisoformat(date_value).timestamp()
-                    except Exception:
-                        return 0
-
-                sorted_sessions = sorted(
-                    sessions,
-                    key=_parse_date,
-                    reverse=True,
-                )
-
-                for session in sorted_sessions[:limit]:
-                    chat_id = session.get("chat_id")
-                    if not chat_id:
-                        continue
-
-                    title = session.get("title", "Untitled")
-                    try:
-                        hyp_resp = await client.get(
-                            f"{BASE_URL}/hypotheses/by-chat/{chat_id}"
-                        )
-                        if hyp_resp.status_code == 200:
-                            hypothesis = hyp_resp.json()
-                            title = hypothesis.get("title", title)
-                    except httpx.HTTPError:
-                        pass
-
-                    history.append(
-                        {
-                            "id": str(chat_id),
-                            "title": title,
-                            "date": session.get("last_activity")
-                            or session.get("started_at"),
-                            "status": "Completed"
-                            if session.get("is_active", True)
-                            else "Draft",
-                        }
-                    )
-                logger.info(f"Fetched hypothesis history: {len(history)} items")
-                return history
+                response.raise_for_status()
+                sessions = response.json()
             except httpx.HTTPError as e:
-                logger.error(f"Failed to fetch hypothesis history: {type(e).__name__}: {e}")
+                logger.error(
+                    f"Failed to fetch session history: {type(e).__name__}: {e}"
+                )
                 return []
+
+        history = []
+        for session in sessions[:limit]:
+            intent = session.get("intent") or {}
+            history.append(
+                {
+                    "id": str(session.get("session_id")),
+                    "title": intent.get("title")
+                    or session.get("title")
+                    or (session.get("prompt") or "Untitled")[:80],
+                    "prompt": session.get("prompt"),
+                    "prompt_kind": session.get("prompt_kind"),
+                    "date": session.get("updated_at") or session.get("created_at"),
+                    "status": session.get("status"),
+                }
+            )
+        logger.info(f"Fetched session history: {len(history)} items")
+        return history
 
     # ------------------------------------------------------------------
     # WS Stream Logs
     # ------------------------------------------------------------------
     @classmethod
     async def save_log(cls, log: WS_Log) -> WS_Log:
-        """Save a ws log whenever the socket store sends any message."""
-        # Local-only frontend chats are deliberately not backed by a
-        # chat_sessions row, so attempting to persist their messages would
-        # violate ws_log_session_id_fkey and generate a noisy HTTP 500.
-        if not cls._is_valid_uuid(log.session_id):
-            logger.debug(
-                "Skipping ws log persistence for non-persisted session %r",
-                log.session_id,
-            )
-            return log
+        """Persist one event and return it carrying its `event_id`."""
+        cls._require_uuid(log.session_id, "log.session_id")
 
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            try:
-                response = await client.post(
-                    f"{BASE_URL}/ws_logs/",
-                    json=log.model_dump(),
-                )
-                response.raise_for_status()
-                return WS_Log(**response.json())
-            except httpx.HTTPError as e:
-                logger.error(f"Failed to save ws log {log.msg_type}: {type(e).__name__}: {e}")
-                return log
+            response = await client.post(
+                f"{BASE_URL}/ws_logs/",
+                json={
+                    "session_id": log.session_id,
+                    "msg_type": log.msg_type,
+                    "payload": log.payload,
+                },
+            )
+            response.raise_for_status()
+            return WS_Log(**response.json())
 
     @classmethod
-    async def get_logs(cls, session_id: str) -> list[WS_Log]:
-        """Get all logs sent in a session."""
+    async def replay_logs(
+        cls, session_id: str, after_event_id: int = 0, limit: int = 2000
+    ) -> list[WS_Log]:
+        """Replay a session's events in `event_id` order from a cursor."""
+        cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.get(
                     f"{BASE_URL}/ws_logs/session/{session_id}",
+                    params={"after_event_id": after_event_id, "limit": limit},
                 )
                 response.raise_for_status()
-                data = response.json()
-                return [WS_Log(**item) for item in data]
+                return [WS_Log(**item) for item in response.json()]
             except httpx.HTTPError as e:
-                logger.error(f"Failed to retrieve ws logs for session {session_id}: {type(e).__name__}: {e}")
+                logger.error(
+                    f"Failed to replay ws logs for session {session_id}: "
+                    f"{type(e).__name__}: {e}"
+                )
                 return []
+
+    @classmethod
+    async def get_logs(cls, session_id: str) -> list[WS_Log]:
+        """Every event of a session, oldest first (replay from the beginning)."""
+        return await cls.replay_logs(session_id, after_event_id=0)
 
 
 if __name__ == "__main__":
 
-    async def hypothesis_test():
+    async def intent_test():
         from models.plans import ClinicalHypothesis
 
         client = BackendClient()
@@ -572,44 +646,12 @@ if __name__ == "__main__":
             question="Question",
             state="State",
         )
-
-        hypothesis = await client.create_hypothesis(
-            "cf8b8a59-317b-4d6c-960e-dd7e60b81bd2", hypothesis
-        )
-        print(hypothesis)
-
-    async def plan_test():
-        import time
-        from models.plans import StudyStep
-
-        client = BackendClient()
-        plan = await client.create_plan(
-            plan=StudyPlan(
-                hypothesis_id="21d5b06c-958d-4d78-b799-5ee3e6848f57",
-                study_goal="Study Goal",
-                steps=[
-                    StudyStep(
-                        title="Study Step 1",
-                        description="Study Step 1",
-                        module="Study Step 1",
-                    ),
-                    StudyStep(
-                        title="Study Step 2",
-                        description="Study Step 2",
-                        module="Study Step 2",
-                    ),
-                ],
+        print(
+            await client.save_intent(
+                "cf8b8a59-317b-4d6c-960e-dd7e60b81bd2", hypothesis
             )
         )
-        print(plan)
-
-        time.sleep(20)
-
-        plan.state = "confirmed"
-
-        updated_plan = await client.update_plan(plan=plan)
-        print(updated_plan)
 
     import asyncio
 
-    asyncio.run(hypothesis_test())
+    asyncio.run(intent_test())

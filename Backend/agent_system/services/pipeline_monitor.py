@@ -1,12 +1,14 @@
 import os
 from storage_paths import workspace_subpath
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING, Dict, Any
+from typing import Any, Dict, Optional, TYPE_CHECKING
 import aiofiles
 import json
 import logging
 
-from models.execution import AgentState, AgentStatus
+from clients.backend_client import BackendClient
+from models.execution import AgentState, AgentStatus  # noqa: F401 (kept for the segmentation publisher)
+from services.run_context import agent_type_of
 from models.tool_logging import ToolEvent
 
 from view_emitter import (
@@ -94,15 +96,34 @@ def _parse_tool_content(content: Any) -> Dict[str, Any]:
         return {"raw": str(content)[:2000]}
 
 
-async def _read_agent_output_file(workspace_folder: str, agent_id: str) -> dict:
-    """Read a persisted agent output JSON from the workspace outputs dir."""
-    output_path = str(workspace_subpath(workspace_folder, f"outputs/{agent_id}_output.json"))
-    try:
-        if os.path.exists(output_path):
-            async with aiofiles.open(output_path, 'r') as f:
-                return json.loads(await f.read())
-    except Exception:
-        pass
+async def _read_agent_output(session_id: str, agent_type: str) -> dict:
+    """Read an agent's structured output from its run."""
+    if not session_id or not agent_type:
+        return {}
+    for run in await BackendClient.get_agent_runs(session_id):
+        step = run.get("step") or {}
+        if step.get("agent_type") != agent_type:
+            continue
+        agent_output = (run.get("output_summary") or {}).get("agent_output")
+        if not agent_output:
+            continue
+        outputs = agent_output.get("outputs") or {}
+        return {
+            "agent_id": agent_type,
+            "agent_run_id": run.get("agent_run_id"),
+            "step_id": run.get("step_id"),
+            "step_order": step.get("step_order"),
+            "agent_role": agent_output.get("agent_role"),
+            "status": agent_output.get("status"),
+            "timestamp": agent_output.get("recorded_at"),
+            "inputs": agent_output.get("inputs") or {},
+            "outputs": outputs,
+            "errors": agent_output.get("errors") or [],
+            "warnings": [
+                item.get("message")
+                for item in (run.get("warnings") or {}).get("items", [])
+            ],
+        }
     return {}
 
 
@@ -110,6 +131,9 @@ async def _emit_tool_result_to_view(
         source: str, tool_name: str, content: str,
         session_id: str, workspace_folder: str
 ):
+    # `source` is the graph NODE name, which carries the step. Views and
+    # the UI speak in agent types, so translate once, here.
+    source = agent_type_of(source) or source
     parsed = _parse_tool_content(content)
     data, msg_type = None, None
 
@@ -117,7 +141,7 @@ async def _emit_tool_result_to_view(
     if "population" in source.lower() or "study_population" in source.lower():
         msg_type = "population_output"
         if tool_name == "write_agent_output":
-            agent_data = await _read_agent_output_file(workspace_folder, "study_population_planner_agent")
+            agent_data = await _read_agent_output(session_id, "study_population_planner_agent")
             payload = agent_data if agent_data else parsed
             data = payload
             await emit_population_output(payload, session_id)
@@ -134,7 +158,7 @@ async def _emit_tool_result_to_view(
     elif "segmentation" in source.lower():
         msg_type = "segmentation_output"
         if tool_name == "write_agent_output":
-            agent_data = await _read_agent_output_file(workspace_folder, "segmentation_agent")
+            agent_data = await _read_agent_output(session_id, "segmentation_agent")
             payload = agent_data if agent_data else parsed
             data = payload
             await emit_segmentation_output(payload, session_id)
@@ -150,21 +174,25 @@ async def _emit_tool_result_to_view(
     elif "feature_extraction" in source.lower():
         msg_type = "features_output"
         if tool_name == "write_agent_output":
-            agent_data = await _read_agent_output_file(workspace_folder, "feature_extraction_agent")
+            agent_data = await _read_agent_output(session_id, "feature_extraction_agent")
             payload = agent_data if agent_data else parsed
             data = payload
             await emit_features_output(payload, session_id)
 
         elif tool_name == "radiomics_extract_features":
-            # No chart_data from extraction — just counts and paths
+            # No chart_data from extraction — counts, and the Application API
+            # exports the rows are downloadable from.
             logger.info(f"Content: {content}, parsed: {parsed}")
             data = {
                 "tool": "radiomic_extraction",
                 "status": parsed.get("status", "success"),
-                "csv_paths": parsed.get("csv_paths", {}),
+                "agent_run_id": parsed.get("agent_run_id"),
+                "radiomics_rows": parsed.get("radiomics_rows"),
+                "exports": parsed.get("exports", {}),
                 "num_subjects": parsed.get("num_subjects"),
                 "num_features": parsed.get("num_features", {}),
                 "mask_labels": parsed.get("mask_labels", []),
+                "unlabeled_subject_ids": parsed.get("unlabeled_subject_ids", []),
                 "processing_time_seconds": parsed.get("processing_time_seconds"),
             }
             await emit_features_output(data, session_id)
@@ -177,8 +205,10 @@ async def _emit_tool_result_to_view(
                 "status": parsed.get("status", "success"),
                 "method": parsed.get("method"),
                 "feature_count": parsed.get("feature_count"),
-                "result_files": parsed.get("result_files", {}),
-                "target_column": parsed.get("target_column"),
+                # The frozen sets the modeling agent will read.
+                "feature_sets": parsed.get("feature_sets", []),
+                "exports": parsed.get("exports", {}),
+                "label_supervised_on_full_data": parsed.get("label_supervised_on_full_data"),
                 "task_type": parsed.get("task_type"),
                 # NEW — full chart payload for React components
                 "chart_data": parsed.get("chart_data"),
@@ -204,11 +234,17 @@ async def _emit_tool_result_to_view(
                 "tool": "classification",
                 "status": parsed.get("status", "completed"),
                 "experiment_name": exp_name,
-                "model_summary": parsed.get("model_summary"),
+                # current this flow: the comparison is rows; predictions are artifacts.
+                "comparison_key": parsed.get("comparison_key"),
+                "feature_set_id": parsed.get("feature_set_id"),
+                "selected_variant": parsed.get("selected_variant"),
+                "model_results": parsed.get("model_results", []),
                 "final_model_path": parsed.get("final_model_path"),
-                "created_files": parsed.get("created_files", []),
                 "individual_model_paths": parsed.get("individual_model_paths", {}),
                 "model_test_predictions": parsed.get("model_test_predictions", {}),
+                "exports": parsed.get("exports", {}),
+                "selection_holdout_used": parsed.get("selection_holdout_used"),
+                "generalisation_estimate": parsed.get("generalisation_estimate"),
                 # Full chart payload for React chart components
                 "chart_data": parsed.get("chart_data"),
             }
@@ -219,7 +255,7 @@ async def _emit_tool_result_to_view(
     elif "result_reporter" in source.lower():
         msg_type = "report_output"
         if tool_name == "write_agent_output":
-            agent_data = await _read_agent_output_file(workspace_folder, "result_reporter_agent")
+            agent_data = await _read_agent_output(session_id, "result_reporter_agent")
             payload = agent_data if agent_data else parsed
             data = payload
             await emit_report_output(payload, session_id)
@@ -235,7 +271,7 @@ async def _emit_tool_result_to_view(
     elif "latex" in source.lower() or "reporter" in source.lower():
         msg_type = "latex_output"
         if tool_name == "write_agent_output":
-            agent_data = await _read_agent_output_file(workspace_folder, "latex_reporter_agent")
+            agent_data = await _read_agent_output(session_id, "latex_reporter_agent")
             payload = agent_data if agent_data else parsed
             data = payload
             await emit_latex_output(payload, session_id)
@@ -251,52 +287,35 @@ async def _emit_tool_result_to_view(
 
 
 class PipelineMonitor:
-    AGENT_ORDER = [
-        "study_population_planner_agent",
-        "segmentation_agent",
-        "feature_extraction_agent",
-        "modeling_agent",
-        "result_reporter_agent",
-        "latex_reporter_agent",
-    ]
+    """The live view of a run, on top of the durable one."""
 
     def __init__(
         self,
         session_service: "SessionService",
         session: "Session",
-        initial_statuses: Optional[dict[str, str]] = None,
+        runs: Optional[list] = None,
     ):
         self.session_service = session_service
         self.session = session
-        self.agents: dict[str, AgentState] = {
-            name: AgentState(name=name) for name in self.AGENT_ORDER
-        }
-        for name, status in (initial_statuses or {}).items():
-            if name not in self.agents:
-                continue
-            normalized = str(status or "").strip().upper()
-            if normalized in {"COMPLETED", "DONE"}:
-                self.agents[name].status = AgentStatus.COMPLETED
-            elif normalized in {"FAILED", "ERROR"}:
-                self.agents[name].status = AgentStatus.FAILED
-
+        # Keyed by NODE name, so two steps sharing an agent type are two
+        # entries rather than one that overwrites the other.
+        self.runs = {run.node_name: run for run in (runs or [])}
         self._last_active: Optional[str] = None
 
+    @property
+    def current_agent(self) -> Optional[str]:
+        return agent_type_of(self._last_active) if self._last_active else None
+
     async def on_agent_active(self, source: str) -> None:
-        """Call when an agent start doing something"""
-        if source not in self.agents:
+        """Called when a node does something."""
+        if source not in self.runs:
             return
-
-        agent = self.agents[source]
-
-        if self._last_active and self._last_active != source:
-            await self._mark_completed(self._last_active)
-
-        if agent.status in (AgentStatus.PENDING, AgentStatus.FAILED):
-            agent.status = AgentStatus.RUNNING
-            agent.started_at = datetime.now()
-            self._last_active = source
-            await self._broadcast()
+        if self._last_active == source:
+            return
+        self._last_active = source
+        await self.session_service.update_current_agent(
+            self.session, self.runs[source]
+        )
 
     async def on_tool_result(
         self,
@@ -308,16 +327,15 @@ class PipelineMonitor:
         execution_error: bool = False,
     ) -> bool:
         """Inspect a tool result and return whether it represents a failure."""
-        if source not in self.agents:
+        if source not in self.runs:
             return bool(execution_error)
 
-        # Only flag as error if the JSON status field is actually "error" or "failed",
-        # not just because those words appear anywhere in the (potentially large) content.
+        # Only flag as error if the JSON status field is actually "error" or
+        # "failed", not just because those words appear in a large payload.
         is_error = bool(execution_error)
         try:
             parsed_check = json.loads(content) if content else {}
             if isinstance(parsed_check, list) and parsed_check:
-                # MCP-style list of content blocks — check the text inside
                 inner = parsed_check[0].get("text", "")
                 try:
                     parsed_check = json.loads(inner)
@@ -329,72 +347,34 @@ class PipelineMonitor:
         except Exception:
             pass
 
-        if is_error:
-            agent = self.agents[source]
-            agent.status = AgentStatus.FAILED
-            agent.finished_at = datetime.now()
-            agent.error = content[:300]
-            self._last_active = source
-            await self._broadcast()
-
         msg_type, data = await _emit_tool_result_to_view(
             source, tool_name, content,
             self.session.session_id, workspace_folder
         )
 
-        # A later request from this agent may demonstrate recovery. The failed
-        # result itself must not immediately reset the state to RUNNING.
         if not is_error:
             await self.on_agent_active(source)
-        # Only persist/broadcast to frontend when there is meaningful data to emit
         if msg_type is not None and data is not None:
-            await self.session_service.update_tool_views(self.session, source, msg_type, data)
+            await self.session_service.update_tool_views(
+                self.session, source, msg_type, data
+            )
         return is_error
 
     async def on_pipeline_complete(self):
-        """Mark the last running agent and pipeline as done."""
-        if self._last_active:
-            await self._mark_completed(self._last_active)
-        await self._broadcast()
+        """The graph finished. Every run closed itself as it ended."""
+        self._last_active = None
 
     async def on_pipeline_error(self, error: Exception):
-        """Mark whatever was running as failed."""
-        if self._last_active and self.agents[self._last_active].status == AgentStatus.RUNNING:
-            agent = self.agents[self._last_active]
-            agent.status = AgentStatus.FAILED
-            agent.finished_at = datetime.now()
-            agent.error = str(error)
-        await self._broadcast()
-
-    async def _mark_completed(self, name: str) -> None:
-        agent = self.agents[name]
-        if agent.status == AgentStatus.RUNNING:
-            agent.status = AgentStatus.COMPLETED
-            agent.finished_at = datetime.now()
+        """A failure outside any node (graph construction, cancellation)."""
+        await self.session_service.report_pipeline_error(self.session, error)
 
     async def on_tool_event(self, event: ToolEvent) -> None:
-        agent = event.source
-        msg_type = "tool_update"
         payload = event.model_dump(mode="json")
-        session_id = event.session_id
-
         log = {
-            "type": msg_type,
+            "type": "tool_update",
             "payload": payload,
-            "session_id": session_id,
+            "session_id": event.session_id,
         }
-        await self.session_service.update_agent_tool_logs(self.session, agent, log)
-        # send to both front and db via session_service
-
-    async def _broadcast(self):
-        agents = [
-            {
-                "name": a.name,
-                "status": a.status.value,
-                "started_at": a.started_at.isoformat() if a.started_at else None,
-                "finished_at": a.finished_at.isoformat() if a.finished_at else None,
-                "error": a.error,
-            }
-            for a in self.agents.values()
-        ]
-        await self.session_service.handle_pipeline_update(self.session, agents)
+        await self.session_service.update_agent_tool_logs(
+            self.session, event.source, log
+        )

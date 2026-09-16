@@ -6,7 +6,6 @@ from typing import List, Any, Dict
 from fastapi import WebSocket
 from clients.backend_client import BackendClient
 from models.logs import WS_Log
-from services.best_effort import schedule_best_effort
 from services.timeout_policy import WS_SEND_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
@@ -22,7 +21,14 @@ class ConnectionManager:
         self.message_queues: Dict[str, asyncio.Queue] = {}
 
     def _get_queue(self, session_id: str | None) -> asyncio.Queue:
-        key = session_id or "default"
+        # Callers pass the session id as either a `str` (from a parsed WS
+        # JSON payload) or a `UUID` (routes type PlanningRequest.session_id
+        # as UUID, and it flows unconverted into the in-memory Session
+        # dataclass, which — unlike Pydantic — never coerces it). Those hash
+        # differently, so without normalizing here, the planner's queue.get()
+        # and the WS handler's queue.put() land on two different queues and
+        # the wait never wakes up.
+        key = str(session_id) if session_id else "default"
         if key not in self.message_queues:
             self.message_queues[key] = asyncio.Queue()
         return self.message_queues[key]
@@ -47,7 +53,7 @@ class ConnectionManager:
 
     def clear_message_queue(self, session_id: str | None) -> int:
         """Discard input only when the owning session lifecycle is reset."""
-        key = session_id or "default"
+        key = str(session_id) if session_id else "default"
         queue = self.message_queues.pop(key, None)
         discarded = queue.qsize() if queue is not None else 0
         if discarded:
@@ -80,15 +86,46 @@ class ConnectionManager:
         message = await queue.get()
         return message
 
-    async def send_ws_message(self, msg_type: str, payload: Any, session_id: str = '', replaying: bool = False):
-        """
-        Called by the Planner/Agent to send updates to the UI.
-        """
+    async def send_ws_message(
+        self,
+        msg_type: str,
+        payload: Any,
+        session_id: str = '',
+        replaying: bool = False,
+        event_id: int | None = None,
+    ):
+        """Persist the event, then broadcast it carrying its `event_id`."""
+        # Snapshot before anything awaits: streaming tool output keeps
+        # appending to the same dict, and an event whose payload changed
+        # between being emitted and being persisted is not a record of what
+        # happened. (This is the hazard the legacy background-save path had;
+        # persisting first does not remove it, it moves it.)
+        payload = copy.deepcopy(payload)
+        # Callers routinely pass the session's UUID object rather than str;
+        # WS_Log and the outgoing envelope both require a plain string.
+        session_id = str(session_id) if session_id else session_id
+
+        if not replaying and event_id is None:
+            try:
+                saved = await BackendClient.save_log(
+                    WS_Log(msg_type=msg_type, payload=payload, session_id=session_id)
+                )
+                event_id = saved.event_id
+            except Exception as exc:
+                logger.error(
+                    "Event %s for session %s was not persisted and will not be "
+                    "replayable: %s",
+                    msg_type,
+                    session_id,
+                    exc,
+                )
+
         message_data = json.dumps({
             "type": msg_type,
             "payload": payload,
             "session_id": session_id,
             "replaying": replaying,
+            "event_id": event_id,
         }, default=str)
 
         dead_sockets = []
@@ -108,18 +145,6 @@ class ConnectionManager:
                 logger.error(f"Failed to send message: {e}")
                 dead_sockets.append(connection)
 
-        # if self.solely_connected_socket:
-        #     await self.solely_connected_socket.send_text(message_data)
-
-        # Log persistence is useful for replay, but it must never delay a live
-        # WebSocket message or a long-running tool heartbeat.
-        if not replaying:
-            log = WS_Log(msg_type=msg_type, payload=payload, session_id=session_id)
-            schedule_best_effort(
-                lambda _log=copy.deepcopy(log): BackendClient.save_log(_log),
-                name=f"save-ws-log:{msg_type}",
-            )
-
         # Cleanup broken connections
         for dead in dead_sockets:
             self.disconnect(dead)
@@ -131,8 +156,15 @@ manager = ConnectionManager()
 
 # --- Helper functions to maintain your existing import signature ---
 
-async def send_ws_message(msg_type: str, payload: Any, session_id: str | None = None):
-    await manager.send_ws_message(msg_type, payload, session_id=session_id)
+async def send_ws_message(
+    msg_type: str,
+    payload: Any,
+    session_id: str | None = None,
+    event_id: int | None = None,
+):
+    await manager.send_ws_message(
+        msg_type, payload, session_id=session_id, event_id=event_id
+    )
 
 
 async def wait_for_user_message(ws: WebSocket = None, session_id: str | None = None):

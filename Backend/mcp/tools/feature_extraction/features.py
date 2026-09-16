@@ -1,20 +1,8 @@
-"""
-Radiomics & Feature Analysis MCP Tools — updated to embed chart_data in return payload.
-
-CHANGES vs original:
-  - radiomics_analyze_importance now returns chart_data containing:
-      importance_bars   : [{feature, importance}]  (top top_n_plot)
-      cumulative        : [{n_features, cumulative_importance}]
-      correlation       : {labels:[str], matrix:[[float]]}  (top 20)
-      pca               : [{x, y, target}]
-      tsne              : [{x, y, target}]
-      task_type         : str
-      method            : str
-    These arrays drive the React chart components directly — no CSV fetching needed.
-"""
+"""Radiomics & Feature Analysis MCP Tools — updated to embed chart_data in return payload."""
 
 import asyncio
 import concurrent.futures
+import io
 import json
 import logging
 import os
@@ -29,6 +17,7 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import mcp
+from ..helpers import domain_api
 from ..helpers.workspace import WorkspacePath, base_on_workspace_dir
 from storage_paths import CACHE_DIR, TEMP_DIR
 
@@ -48,7 +37,19 @@ try:
 except ImportError:
     _HELPERS_AVAILABLE = False
 
-from .selection_split import detect_group_column, plan_selection_split
+from . import digests as provenance
+from .feature_set_builder import (
+    FEATURE_SET_SCHEMA_VERSION,
+    SUBJECT_KEY,
+    FeatureSetBuildError,
+    finite_or_none,
+    frame_from_csv,
+    matrix_from_frame,
+    quality_summary as build_quality_summary,
+    selection_document,
+    wide_table_from_rows,
+)
+from .selection_split import plan_selection_split
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -171,6 +172,22 @@ def _json_serializable(obj):
         pass
     return obj
 
+def _label_free_qc(X: pd.DataFrame, names: List[str], stability_scores: list) -> dict:
+    """`feature_sets.analysis` — label-free QC only."""
+    columns = [name for name in names if name in X.columns]
+    qc: dict = {"schema_version": FEATURE_SET_SCHEMA_VERSION, "feature_count": len(names)}
+    top = columns[:20]
+    if len(top) >= 2:
+        corr = X[top].corr()
+        qc["correlation"] = {
+            "labels": top,
+            "matrix": [[_safe(corr.iloc[r, c]) for c in range(len(top))] for r in range(len(top))],
+        }
+    wanted = set(columns)
+    qc["stability"] = [item for item in stability_scores if item.get("feature") in wanted][:50]
+    return _json_serializable(qc)
+
+
 def build_fusion_table(cohort_table, features_by_subject, organs, id_col, tgt_col):
     cohort_df = cohort_table.copy()
     cohort_df.rename(columns={id_col: "subject_id"}, inplace=True)
@@ -225,6 +242,8 @@ class ExtractFeaturesInput(BaseModel):
     resample: bool = Field(default=True)
     force_2d: bool = Field(default=False)
     n_workers: int = Field(default=1, ge=1)
+    # Deprecated and ignored since the database-backed flow: target labels come from the
+    # approved cohort's members, never from a targets.csv on disk.
     targets_csv: WorkspacePath = Field(default=None)
     id_column: Optional[str] = Field(default=None)
     target_column: Optional[str] = Field(default=None)
@@ -238,7 +257,13 @@ class ExtractFeaturesInput(BaseModel):
 class AnalyzeImportanceInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="ignore")
 
-    input_path: WorkspacePath = Field(...)
+    input_path: WorkspacePath = Field(
+        default=None,
+        description=(
+            "A generic CSV to select from. Omit it — the normal case — and the tool "
+            "selects from the radiomics rows this run recorded."
+        ),
+    )
     top_features: Union[int, str, List[Union[int, str]]] = Field(default="10")
     task_type: Optional[str] = Field(default=None)
     method: str = Field(default="rf")
@@ -258,8 +283,8 @@ class AnalyzeImportanceInput(BaseModel):
     group_column: Optional[str] = Field(
         default=None,
         description=(
-            "Subject-identifying column so a patient's rows never straddle the split. "
-            "Auto-detected (subject_id, patient_id, ...) when omitted."
+            "Ignored since V1 step I: the split is always grouped by subject_key, the "
+            "cohort's patient-level split group, so a patient's rows never straddle it."
         ),
     )
 
@@ -277,16 +302,7 @@ class AnalyzeImportanceInput(BaseModel):
     },
 )
 async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
-    """Extract radiomic features from medical images and segmentation masks using PyRadiomics.
-
-    IMPORTANT — two separate concepts:
-    - `feature_classes`: statistical/textural feature groups computed ON an image type.
-      Valid values: 'firstorder', 'shape', 'glcm', 'glrlm', 'glszm', 'gldm', 'ngtdm', 'shape2D'.
-      Do NOT put 'wavelet', 'LoG', 'Gradient', etc. here — those are image filter types.
-    - `image_types`: image pre-processing filters applied before feature extraction.
-      Valid values: 'Original', 'Wavelet', 'LoG', 'Gradient', 'Exponential', 'SquareRoot'.
-      Default is 'Original,Wavelet' which covers the most common use case.
-    """
+    """Extract radiomic features from medical images and segmentation masks using PyRadiomics."""
     import glob as _glob
     import yaml
 
@@ -299,7 +315,10 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
             "error_message": "PyRadiomics / SimpleITK not installed. Run: pip install pyradiomics simpleitk",
         }, indent=2)
 
-    output_dir = base_on_workspace_dir(params.output_dir) if params.output_dir else base_on_workspace_dir('features')
+    # The PyRadiomics parameter file and the tool log are disposable
+    # diagnostics: they live under temp/, and the measurements are
+    # rows in PostgreSQL. `output_dir` is accepted and ignored.
+    output_dir = str(TEMP_DIR / "feature-extraction" / (domain_api.agent_run_id() or "unbound"))
 
     # Resolve image_dir with auto-discovery fallback
     requested_image_dir = base_on_workspace_dir(params.image_dir) if params.image_dir else None
@@ -496,39 +515,30 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
 
         extractor = featureextractor.RadiomicsFeatureExtractor(params_file)
 
-        target_dict: dict = {}
-        targets_csv_path = params.targets_csv
-        if not (targets_csv_path and os.path.exists(targets_csv_path)):
-            targets_csv_path = base_on_workspace_dir('populations/targets/targets.csv')
+        # ── Extraction identity ────────────────────────────────────────
+        # The configuration digest covers the extractor version and every
+        # setting — the adaptive bin width included — so a changed setting is a
+        # different content-addressed row, never a reused earlier one.
+        import radiomics as _radiomics
 
-        if not (targets_csv_path and os.path.exists(targets_csv_path)):
-            return json.dumps({
-                "status": "error",
-                "error_message": (
-                    f"targets.csv not found at '{targets_csv_path}'. "
-                    "Feature extraction requires targets.csv to assign target labels for downstream importance analysis and modeling. "
-                    "Run generate_targets (after extract_cohort_labels) before running feature extraction."
-                ),
-            }, indent=2)
+        extractor_name = "pyradiomics"
+        extractor_version = str(getattr(_radiomics, "__version__", "unknown"))
+        extraction_configuration = {
+            "schema_version": 1,
+            "pyradiomics": pyrad_params,
+            # One reviewed pair is one target on one SEG segment.
+            "mask_label_policy": "pair_segment",
+            # A null feature value means the extractor returned NaN/Infinity.
+            "missing_value_policy": "non_finite_to_null",
+        }
+        extraction_config_digest = provenance.config_digest(
+            extractor_name, extractor_version, extraction_configuration
+        )
 
-        tdf = pd.read_csv(targets_csv_path)
-        if tdf.empty:
-            return json.dumps({
-                "status": "error",
-                "error_message": f"targets.csv at '{targets_csv_path}' is empty. Feature extraction requires valid target labels.",
-            }, indent=2)
-
-        id_col  = params.id_column or tdf.columns[0]
-        tgt_col = params.target_column or (target_column if target_column in tdf.columns else tdf.columns[-1])
-        if id_col not in tdf.columns or tgt_col not in tdf.columns:
-            return json.dumps({
-                "status": "error",
-                "error_message": (
-                    f"targets.csv must contain id column '{id_col}' and target column '{tgt_col}'. "
-                    f"Available columns: {tdf.columns.tolist()}"
-                ),
-            }, indent=2)
-
+        # ── Target labels: the approved cohort ────────────
+        # `populations/targets/targets.csv` is gone. The labels are the frozen
+        # cohort's labelled members, in ordinal order; a member with no label
+        # is pending/excluded, never a negative.
         def _normalise_id(value: Any) -> str:
             value = str(value).strip().casefold()
             for extension in (".nii.gz", ".nii"):
@@ -536,27 +546,39 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                     return value[:-len(extension)]
             return value
 
-        valid_targets = tdf.dropna(subset=[id_col, tgt_col])
-        if valid_targets.empty:
+        try:
+            # Unbound tools cannot record rows; fail before any extraction work.
+            run_id = domain_api.require_run()
+            cohort = await domain_api.require_population_cohort()
+        except domain_api.DomainApiError as exc:
+            return json.dumps({"status": "error", "error_message": str(exc)}, indent=2)
+        if not cohort.get("frozen_at"):
             return json.dumps({
                 "status": "error",
-                "error_message": f"targets.csv at '{targets_csv_path}' has no rows with both an ID and target label.",
+                "error_message": (
+                    "The population cohort has not been approved. Feature extraction "
+                    "requires the doctor-approved cohort's labels."
+                ),
+            }, indent=2)
+        analysis_rows = await domain_api.cohort_analysis_rows(cohort["cohort_id"])
+        if not analysis_rows:
+            return json.dumps({
+                "status": "error",
+                "error_message": "The approved cohort has no labelled volume.",
             }, indent=2)
 
-        # Build a normalised lookup so case and NIfTI extensions do not make
-        # otherwise valid labels disappear from the training table.
         target_dict = {
-            _normalise_id(row[id_col]): row[tgt_col]
-            for _, row in valid_targets.iterrows()
+            _normalise_id(row["volume_series_instance_uid"]): row["target"]
+            for row in analysis_rows
         }
-        # ALSO key by 'name' column (case_id / clinical_pid) if present,
-        # so NIfTI filename stems (e.g. 'case_00005') match the correct label.
-        if "name" in valid_targets.columns and "name" != id_col:
-            for _, row in valid_targets.iterrows():
-                name_val = _normalise_id(row["name"])
-                if name_val and name_val not in target_dict:
-                    target_dict[name_val] = row[tgt_col]
-        logger.info(f"Loaded {len(target_dict)} label keys from {targets_csv_path} (id_col={id_col!r}, tgt_col={tgt_col!r})")
+        cohort_id = str(cohort["cohort_id"])
+        subject_of_volume = {
+            str(row["volume_series_instance_uid"]): str(row["subject_key"])
+            for row in analysis_rows
+        }
+        logger.info(
+            "Loaded %d labelled cohort member(s) from cohort %s", len(target_dict), cohort_id
+        )
 
         image_files = sorted(_glob.glob(os.path.join(image_dir, params.image_pattern)))
         mask_files  = sorted(_glob.glob(os.path.join(mask_dir,  params.mask_pattern)))
@@ -583,48 +605,50 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         images_dict = {_extract_id(f): f for f in image_files}
         masks_dict  = {_extract_id(f): f for f in mask_files}
 
-        manifest_path = base_on_workspace_dir("segmentation_manifest.json")
-        pairs: dict[str, dict[str, str]] = {}
-        if manifest_path and os.path.isfile(manifest_path):
-            with open(manifest_path, "r", encoding="utf-8") as stream:
-                segmentation_manifest = json.load(stream)
-            for pair in segmentation_manifest.get("pairs", []):
-                if pair.get("status") != "ready":
-                    continue
-                if pair.get("review_status") not in ("accepted", "modified"):
-                    continue
-                subject_id = str(pair.get("volume_uid") or "")
-                target_id = str(pair.get("target_id") or "")
-                pair_id = str(pair.get("pair_id") or "")
-                mask_rel = str(pair.get("mask_path") or "")
-                image_path = images_dict.get(subject_id)
-                mask_path = base_on_workspace_dir(mask_rel) if mask_rel else None
-                if subject_id and target_id and pair_id and image_path and mask_path:
-                    if os.path.isfile(mask_path):
-                        pairs[pair_id] = {
-                            "image": image_path,
-                            "mask": mask_path,
-                            "subject_id": subject_id,
-                            "target_id": target_id,
-                        }
-            logger.info(
-                "Loaded %d reviewed segmentation mask(s) from %s",
-                len(pairs),
-                manifest_path,
-            )
-        else:
-            pairs = {
-                sid: {
-                    "image": images_dict[sid],
-                    "mask": masks_dict[sid],
-                    "subject_id": sid,
-                    "target_id": "roi",
-                }
-                for sid in images_dict if sid in masks_dict
+        # ── Reviewed masks: segmentation_pairs ─────
+        # Every radiomics row names the SEG and segment it measured (
+        # item 5), and a pipeline mask is not usable until its review decision
+        # is set. So only the accepted and modified pairs of a submitted review
+        # are measured. The old directory-matching fallback — masks with no SEG
+        # identity — is gone: it could only produce unattributable numbers.
+        pairs: dict[str, dict[str, Any]] = {}
+        for pair in await domain_api.reviewed_masks():
+            subject_id = str(pair.get("volume_series_instance_uid") or "")
+            target_id = str(pair.get("target_key") or "")
+            pair_id = str(pair.get("pair_key") or "")
+            label_uid = str(pair.get("selected_segmentation_uid") or "")
+            mask_rel = str((pair.get("quality") or {}).get("mask_path") or "")
+            image_path = images_dict.get(subject_id)
+            mask_path = base_on_workspace_dir(mask_rel) if mask_rel else None
+            if not (subject_id and target_id and pair_id and label_uid and image_path and mask_path):
+                logger.warning(
+                    "Reviewed pair %s has no image or mask on disk, or no selected SEG; skipping",
+                    pair_id or subject_id,
+                )
+                continue
+            if not os.path.isfile(mask_path):
+                logger.warning("Mask %s of reviewed pair %s is missing; skipping", mask_path, pair_id)
+                continue
+            pairs[pair_id] = {
+                "image": image_path,
+                "mask": mask_path,
+                "subject_id": subject_id,
+                "target_id": target_id,
+                "segmentation_pair_id": str(pair.get("pair_id") or ""),
+                "label_series_instance_uid": label_uid,
+                "segment_number": int(pair.get("segment_number") or 1),
             }
+        logger.info("Loaded %d reviewed segmentation mask(s)", len(pairs))
 
         if not pairs:
-            raise ValueError("No matching image-mask pairs found.")
+            return json.dumps({
+                "status": "error",
+                "error_message": (
+                    "No reviewed segmentation mask is available to measure. Feature "
+                    "extraction measures the accepted or modified masks of a submitted "
+                    "segmentation review; submit the review first."
+                ),
+            }, indent=2)
 
         paired_subject_count = len({files["subject_id"] for files in pairs.values()})
         unlabeled_subject_ids = sorted({
@@ -641,27 +665,22 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 "status": "error",
                 "error_message": (
                     "No image-mask pair could be matched to a target label. "
-                    "Check targets.csv identifiers or provide id_pattern/id_column."
+                    "Check that the image files are named by the cohort's volume UIDs, or provide id_pattern."
                 ),
                 "unlabeled_subject_ids": unlabeled_subject_ids,
             }, indent=2)
         if unlabeled_subject_ids:
             logger.warning("Skipping %s image-mask pair(s) with no target label: %s", len(unlabeled_subject_ids), unlabeled_subject_ids)
 
-        if mask_labels_raw is None:
-            found: set = set()
-            for mf in [files["mask"] for files in list(pairs.values())[:10]]:
-                try:
-                    arr = sitk.GetArrayFromImage(sitk.ReadImage(mf))
-                    for lbl in np.unique(arr):
-                        if lbl > 0:
-                            found.add(int(lbl))
-                except Exception:
-                    pass
-            mask_labels_raw = sorted(found) or [1]
-
-        all_features_by_target: dict[str, list[dict[str, Any]]] = {}
-        features_by_subject: dict[str, dict[str, Any]] = {}
+        # `mask_labels`, when given, only restricts which label values of a
+        # pair's mask file may be measured; the segment a row records is always
+        # the pair's own SEG segment.
+        requested_labels = set(mask_labels_raw) if mask_labels_raw else None
+        labels_used: set[int] = set()
+        radiomics_rows: list[dict[str, Any]] = []
+        row_targets: dict[tuple, str] = {}
+        attempted: set[tuple[str, str]] = set()
+        image_digests: dict[str, str] = {}
         radiology_temp_dir = TEMP_DIR / "radiology"
         radiology_temp_dir.mkdir(parents=True, exist_ok=True)
         temp_dir = tempfile.mkdtemp(dir=radiology_temp_dir)
@@ -718,6 +737,30 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 orig_image = sitk.ReadImage(files["image"])
                 orig_mask  = sitk.ReadImage(files["mask"])
                 mask_array = sitk.GetArrayFromImage(orig_mask)
+                attempted.add((subject_of_volume.get(subject_id, subject_id), target_id))
+                # Decoded content, not file bytes: a re-converted NIfTI
+                # of the same series digests identically.
+                if files["image"] not in image_digests:
+                    image_digests[files["image"]] = provenance.image_digest(orig_image)
+                content_image_digest = image_digests[files["image"]]
+
+                # One pair is one target on one SEG segment. A single-label
+                # mask file is that segment; a multi-label file is measured only
+                # on the label equal to the pair's segment number.
+                present_labels = sorted(int(value) for value in np.unique(mask_array) if value > 0)
+                if len(present_labels) == 1:
+                    label_plan = [(present_labels[0], files["segment_number"])]
+                elif files["segment_number"] in present_labels:
+                    label_plan = [(files["segment_number"], files["segment_number"])]
+                else:
+                    label_plan = []
+                    logger.warning(
+                        "  %s: mask labels %s do not identify segment %s of %s; skipping",
+                        subject_id, present_labels, files["segment_number"],
+                        files["label_series_instance_uid"],
+                    )
+                if requested_labels is not None:
+                    label_plan = [(lbl, seg) for lbl, seg in label_plan if lbl in requested_labels]
 
                 # ADDED FOR UI ENHANCEMENT — Task 3: Spatial alignment check.
                 # Compares affine matrices of volume and mask using nibabel.
@@ -735,7 +778,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 # ADDED FOR UI ENHANCEMENT — Task 4: Cache directory.
                 _cache_dir = str(CACHE_DIR / "monailabel" / "feature-extraction")
 
-                for lbl in mask_labels_raw:
+                for lbl, segment_number in label_plan:
                     binary = (mask_array == lbl).astype(np.uint8)
                     if binary.sum() == 0:
                         continue
@@ -769,9 +812,26 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                         # of re-running the expensive subprocess.
                         _features: Optional[dict] = None
                         _cache_key: str = ""
+                        content_segmentation_digest = provenance.segmentation_digest(
+                            binary,
+                            orig_mask,
+                            label_series_instance_uid=files["label_series_instance_uid"],
+                            segment_number=segment_number,
+                        )
+                        content_source_digest = provenance.source_digest(
+                            image_digest=content_image_digest,
+                            segmentation_digest=content_segmentation_digest,
+                            config_digest=extraction_config_digest,
+                            label_series_instance_uid=files["label_series_instance_uid"],
+                            segment_number=segment_number,
+                        )
                         if _HELPERS_AVAILABLE:
+                            # Content-addressed: a changed setting or intensity
+                            # misses; paths and file times are not the key.
                             _cache_key = get_cache_key(
-                                files["image"], tmp_mask_path, current_bin_width
+                                content_image_digest,
+                                content_segmentation_digest,
+                                extraction_config_digest,
                             )
                             _features = load_from_cache(_cache_dir, _cache_key)
                             if _features is not None:
@@ -814,34 +874,37 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                             if _HELPERS_AVAILABLE and _cache_key:
                                 save_to_cache(_cache_dir, _cache_key, _features)
 
-                        features = _features  # alias used by existing downstream code
-
-                        target_value = target_dict[_normalise_id(subject_id)]
-                        target_row = {
-                            "subject_id": subject_id,
-                            "target": target_value,
-                            **features,
+                        # One provenance row per measured segment. A
+                        # non-finite value becomes null, and the configuration's
+                        # missing_value_policy says what a null means.
+                        measured = {
+                            str(name): finite_or_none(value)
+                            for name, value in (_features or {}).items()
                         }
-                        all_features_by_target.setdefault(target_id, []).append(
-                            target_row
-                        )
-
-                        wide_row = features_by_subject.setdefault(
-                            subject_id,
-                            {
-                                "subject_id": subject_id,
-                                "target": target_value,
-                            },
-                        )
-                        feature_prefix = (
-                            target_id
-                            if len(mask_labels_raw) == 1
-                            else f"{target_id}_label_{lbl}"
-                        )
-                        for feature_name, feature_value in features.items():
-                            wide_row[
-                                f"{feature_prefix}__{feature_name}"
-                            ] = feature_value
+                        if not measured:
+                            logger.error(f"  {subject_id} label {lbl}: extractor returned no features")
+                            continue
+                        radiomics_rows.append({
+                            "label_series_instance_uid": files["label_series_instance_uid"],
+                            "source_volume_uid": subject_id,
+                            "segment_number": int(segment_number),
+                            "segmentation_pair_id": files["segmentation_pair_id"] or None,
+                            "features": measured,
+                            "extractor_name": extractor_name,
+                            "extractor_version": extractor_version,
+                            "configuration": extraction_configuration,
+                            "config_digest": extraction_config_digest,
+                            "image_digest": content_image_digest,
+                            "segmentation_digest": content_segmentation_digest,
+                            "source_digest": content_source_digest,
+                            "schema_version": 1,
+                        })
+                        row_targets[(
+                            files["label_series_instance_uid"],
+                            int(segment_number),
+                            content_source_digest,
+                        )] = target_id
+                        labels_used.add(int(lbl))
                     except concurrent.futures.TimeoutError:
                         logger.error(
                             f"  {subject_id} label {lbl}: extraction timed out after "
@@ -861,168 +924,136 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         payload = TextPayload(message='Feature Extraction...Done')
         log_tool_state(ToolEvent('tool_finished', 'text', payload))
 
-        csv_paths: dict = {}
-        num_features: dict = {}
+        if not radiomics_rows:
+            return json.dumps({
+                "status": "error",
+                "error_message": "No radiomic features were extracted from any reviewed mask.",
+                "paired_subjects": paired_subject_count,
+                "labeled_subjects": len(pairs),
+            }, indent=2)
 
-        for target_id, rows in all_features_by_target.items():
-            if not rows:
-                continue
-            df = pd.DataFrame(rows)
-            id_cols = [c for c in df.columns if c.lower() in ("id", "subject_id", "patientid")]
-            tgt_cols = [c for c in df.columns if c.lower() in ("target", "label", "outcome")]
-            feat_cols = sorted([c for c in df.columns if c not in id_cols + tgt_cols])
-            df = df[id_cols + tgt_cols + feat_cols]
-            csv_path = os.path.join(
-                output_dir, f"radiomic_features_target_{target_id}.csv"
-            )
-            df.to_csv(csv_path, index=False)
-            csv_paths[f"target_{target_id}"] = csv_path
-            num_features[target_id] = len(feat_cols)
+        # ── Record every row ─────────────────────────────────────────
+        # A PostgreSQL write failure fails the operation. There is no file
+        # to fall back to, and an extraction that leaves radiomics_features
+        # empty has not happened. Each batch is all-or-nothing and replays onto
+        # the content-addressed key, so a retry after a crash reuses rows.
+        recorded = {"created": 0, "reused": 0}
+        recorded_rows: list[dict[str, Any]] = []
+        try:
+            for offset in range(0, len(radiomics_rows), domain_api.RADIOMICS_BATCH_SIZE):
+                batch = radiomics_rows[offset: offset + domain_api.RADIOMICS_BATCH_SIZE]
+                result = await domain_api.record_radiomics_rows(batch)
+                recorded["created"] += int(result["created"])
+                recorded["reused"] += int(result["reused"])
+                ids = {
+                    (item["label_series_instance_uid"], int(item["segment_number"]), item["source_digest"]): item["id"]
+                    for item in result["rows"]
+                }
+                for row in batch:
+                    key = (row["label_series_instance_uid"], int(row["segment_number"]), row["source_digest"])
+                    recorded_rows.append({**row, "id": ids[key], "target_key": row_targets.get(key)})
+        except domain_api.DomainApiError as exc:
+            return json.dumps({
+                "status": "error",
+                "error_message": f"Radiomics rows could not be recorded: {exc}",
+                "recorded_before_failure": recorded,
+            }, indent=2)
+        radiomics_summary = {**recorded, "total": len(recorded_rows)}
 
-        default_csv_path = os.path.join(output_dir, "radiomics_features.csv")
-        cohort_table = valid_targets[[id_col, tgt_col]].copy()
-        organs = sorted(list({files["target_id"] for files in pairs.values()}))
-        default_feature_table = build_fusion_table(
-            cohort_table,
-            features_by_subject,
-            organs,
-            id_col,
-            tgt_col,
-        )
-        default_feature_table.to_csv(default_csv_path, index=False)
-        csv_paths["radiomics_features"] = default_csv_path
-
-        organ_tables_dir = os.path.join(output_dir, "organ_feature_tables")
-        os.makedirs(organ_tables_dir, exist_ok=True)
-        feature_columns_by_organ: dict[str, list[str]] = {}
-        for organ in organs:
-            organ_columns = sorted(
-                column
-                for column in default_feature_table.columns
-                if column.startswith(f"{organ}__")
-            )
-            feature_columns_by_organ[organ] = organ_columns
-            organ_table_path = os.path.join(organ_tables_dir, f"{organ}.csv")
-            default_feature_table[
-                ["subject_id", tgt_col, f"{organ}_present", *organ_columns]
-            ].to_csv(organ_table_path, index=False)
-            csv_paths[f"organ_{organ}"] = organ_table_path
-
-        audit = build_availability_audit(default_feature_table, organs)
-        available_pairs = {
-            (files["subject_id"], files["target_id"])
-            for files in pairs.values()
-        }
-        failed_mask = (
-            (audit["present"] == 0)
-            & audit.apply(
-                lambda row: (row["subject_id"], row["organ"]) in available_pairs,
-                axis=1,
-            )
-        )
-        audit.loc[failed_mask, "status"] = "extraction_failed_or_empty"
-        audit.loc[(audit["present"] == 0) & ~failed_mask, "status"] = "segmentation_missing"
-
-        # ADDED FOR UI ENHANCEMENT — Tasks 2 & 3: Write spatial_warning column.
-        # Maps each subject's warning message into the audit table as a new
-        # optional column.  Subjects with no warning get an empty string.
-        # This is additive — existing columns and row count are unchanged.
-        if spatial_warnings:
-            audit["spatial_warning"] = (
-                audit["subject_id"].map(spatial_warnings).fillna("")
-            )
-            logger.info(
-                f"[Tasks 2/3] Wrote spatial_warning column for "
-                f"{len(spatial_warnings)} subject(s)."
-            )
-
-        audit_path = os.path.join(output_dir, "organ_availability_audit.csv")
-        audit.to_csv(audit_path, index=False)
-        csv_paths["organ_availability_audit"] = audit_path
-
-        schema = {
-            "subject_id_column": "subject_id",
-            "target_column": tgt_col,
-            "source_target_column": tgt_col,
-            "target_resolution": pixel_spacing,
-            "targets_csv": str(targets_csv_path),
-            "organ_prefix_delimiter": "__",
-            "organs": organs,
-            "presence_columns": [f"{organ}_present" for organ in organs],
-            "feature_columns_by_organ": feature_columns_by_organ,
-        }
-        schema_path = os.path.join(output_dir, "feature_schema.json")
-        with open(schema_path, "w", encoding="utf-8") as stream:
-            json.dump(schema, stream, indent=2)
-        csv_paths["feature_schema"] = schema_path
-
-        missing_required = audit[audit["present"] == 0]
-        if params.require_all_organs and not missing_required.empty:
+        # ── Summary, from the rows exactly as selection will read them ──────
+        try:
+            table = wide_table_from_rows(recorded_rows, analysis_rows)
+        except FeatureSetBuildError as exc:
+            return json.dumps({
+                "status": "error",
+                "error_message": (
+                    f"Radiomics rows were recorded, but they cannot form a feature set: {exc}"
+                ),
+                "radiomics_rows": radiomics_summary,
+            }, indent=2)
+        frame = table.frame
+        audit_records: list[dict[str, Any]] = []
+        for record in frame.to_dict("records"):
+            for organ in table.organs:
+                present = int(record.get(f"{organ}_present", 0))
+                if present:
+                    status = "extracted"
+                elif (record[SUBJECT_KEY], organ) in attempted:
+                    status = "extraction_failed_or_empty"
+                else:
+                    status = "segmentation_missing"
+                audit_records.append({
+                    "subject_key": record[SUBJECT_KEY],
+                    "organ": organ,
+                    "present": present,
+                    "status": status,
+                    "spatial_warning": spatial_warnings.get(record[SUBJECT_KEY], ""),
+                })
+        missing_required = [item for item in audit_records if not item["present"]]
+        if params.require_all_organs and missing_required:
             return json.dumps({
                 "status": "error",
                 "error_message": (
                     f"{len(missing_required)} required patient-organ combinations are missing"
                 ),
-                "csv_paths": csv_paths,
-                "missing_patient_organs": missing_required.to_dict(orient="records"),
+                "radiomics_rows": radiomics_summary,
+                "missing_patient_organs": missing_required[:200],
             }, indent=2)
 
-        if not features_by_subject:
-            return json.dumps({
-                "status": "error",
-                "error_message": "No radiomic features were extracted from any matched image-mask pair.",
-                "paired_subjects": paired_subject_count,
-                "labeled_subjects": len(pairs),
-            }, indent=2)
-
-        # ADDED FOR UI ENHANCEMENT — Task 7: Build health summary dict.
-        # Purely additive — existing keys are preserved exactly. The summary
-        # block gives the UI instant quality metrics without CSV parsing.
-        _audit_failed = audit[audit["present"] == 0]
-        _vol_col = next(
-            (c for c in default_feature_table.columns if "voxelvolume" in c.lower()),
-            None,
-        )
-        _vol_range: list = []
-        if _vol_col:
-            try:
-                _vols = default_feature_table[_vol_col].dropna()
-                if not _vols.empty:
-                    _vol_range = [
-                        round(float(_vols.min()), 2),
-                        round(float(_vols.max()), 2),
-                    ]
-            except Exception:
-                pass
-
+        num_features = {
+            organ: len([
+                column for column in table.feature_columns
+                if column.startswith(f"{organ}__") or column.startswith(f"{organ}_label_")
+            ])
+            for organ in table.organs
+        }
+        volume_columns = [column for column in table.feature_columns if "voxelvolume" in column.lower()]
+        volume_range: list = []
+        if volume_columns:
+            volumes = pd.to_numeric(frame[volume_columns[0]], errors="coerce").dropna()
+            if not volumes.empty:
+                volume_range = [round(float(volumes.min()), 2), round(float(volumes.max()), 2)]
+        subjects_with_features = int(sum(
+            1 for record in frame.to_dict("records")
+            if any(record.get(f"{organ}_present") for organ in table.organs)
+        ))
         summary: dict = {
-            "total_patients": len(default_feature_table),
-            "successful_extractions": len(features_by_subject),
-            "failed_count": int(len(_audit_failed)),
-            "failed_patient_ids": _audit_failed["subject_id"].tolist()[:50],
+            "total_patients": int(len(frame)),
+            "successful_extractions": subjects_with_features,
+            "failed_count": len(missing_required),
+            "failed_patient_ids": [item["subject_key"] for item in missing_required][:50],
             "patients_with_spatial_warnings": list(spatial_warnings.keys()),
-            "volume_range": _vol_range,
+            "volume_range": volume_range,
             "extraction_params_used": {
                 "bin_width": current_bin_width,
                 "image_types": image_types,
                 "feature_classes": feature_classes or [],
+                "config_digest": extraction_config_digest,
+                "extractor": f"{extractor_name} {extractor_version}",
             },
             "gpu_available": gpu_available,
         }
 
         return json.dumps({
             "status": "success",
-            "csv_paths": csv_paths,
-            "num_subjects": len(features_by_subject),
+            "agent_run_id": run_id,
+            "cohort_id": cohort_id,
+            # The measurements are rows; this is their count, and the
+            # export below is generated from them on request.
+            "radiomics_rows": radiomics_summary,
+            "exports": {"radiomics_features": f"/radiomics/run/{run_id}/export"},
+            "num_subjects": subjects_with_features,
             "num_volume_target_pairs": len(pairs),
             "paired_subjects": paired_subject_count,
             "unlabeled_subject_ids": unlabeled_subject_ids,
             "num_features": num_features,
-            "mask_labels": mask_labels_raw,
-            "params_file": params_file,
+            "mask_labels": sorted(labels_used),
             "processing_time_seconds": round(processing_time, 2),
-            # ADDED FOR UI ENHANCEMENT — Task 7: optional summary block
             "summary": summary,
+            "next_step": (
+                "Call radiomics_analyze_importance with no input_path; it selects from "
+                "the rows this run recorded and freezes the feature sets."
+            ),
         }, indent=2)
 
     except Exception as exc:
@@ -1048,21 +1079,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
     },
 )
 async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
-    """Perform feature importance analysis. Returns chart_data for frontend rendering.
-
-    Returns:
-        str: JSON with keys:
-            - status, output_dir, task_type, method, feature_count, result_files
-            - chart_data: {
-                importance_bars : [{feature, importance}]  — top top_n_plot features
-                cumulative      : [{n_features, cumulative_pct}]  — full curve
-                correlation     : {labels:[str], matrix:[[float|null]]}  — top 20
-                pca             : [{x, y, target}]  — 2D PCA of top-N subset
-                tsne            : [{x, y, target}] | null
-                task_type       : str
-                method          : str
-              }
-    """
+    """Perform feature importance analysis. Returns chart_data for frontend rendering."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -1076,7 +1093,9 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
     from sklearn.manifold import TSNE
     from sklearn.preprocessing import LabelEncoder
 
-    output_dir = base_on_workspace_dir('features')
+    # Plots are rendered here and published as artifacts; nothing under this
+    # directory is authoritative.
+    output_dir = str(TEMP_DIR / "feature-selection" / (domain_api.agent_run_id() or "unbound"))
     os.makedirs(output_dir, exist_ok=True)
     log_file = os.path.join(output_dir, "feature_importance_analysis.log")
     _setup_logging(log_file)
@@ -1096,8 +1115,6 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
     TOTAL_STAGES = 8
 
     try:
-        if not os.path.exists(params.input_path):
-            raise ValueError(f"Input file not found: {params.input_path}")
         valid_methods = ("rf", "f_test", "mutual_info", "rfe")
         if params.method not in valid_methods:
             logger.warning(f"Unsupported method '{params.method}'. Falling back to 'rf'.")
@@ -1112,17 +1129,56 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             raise ValueError("top_features must contain at least one positive integer.")
 
         # ── Stage 1: Data loading & preprocessing ──────────────────────────
-        payload = TextPayload(message=f"Analysing feature importance for {os.path.basename(params.input_path)}...")
+        source_label = (
+            os.path.basename(params.input_path) if params.input_path else "this run's radiomics rows"
+        )
+        payload = TextPayload(message=f"Analysing feature importance for {source_label}...")
         log_tool_state(ToolEvent("tool_started", "text", payload))
 
-        df = pd.read_csv(params.input_path)
-        if target_column not in df.columns:
-            raise ValueError(f"target_column '{target_column}' not found in data.")
+        # ── Input: this run's radiomics rows, labelled from the cohort ──────
+        # . The label is the frozen cohort member's; a generic CSV's
+        # own label column is dropped, so only one copy of a label exists.
+        run_id = domain_api.require_run()
+        cohort = await domain_api.require_population_cohort()
+        if not cohort.get("frozen_at"):
+            raise ValueError(
+                "The population cohort has not been approved; feature selection needs "
+                "its frozen labels."
+            )
+        analysis_rows = await domain_api.cohort_analysis_rows(cohort["cohort_id"])
+        input_notes: list = []
+        radiomics_config_digests: list = []
+        if params.input_path:
+            if not os.path.exists(params.input_path):
+                raise ValueError(f"Input file not found: {params.input_path}")
+            with open(params.input_path, "rb") as fh:
+                input_bytes = fh.read()
+            df, input_notes = frame_from_csv(pd.read_csv(io.BytesIO(input_bytes)), analysis_rows)
+            source_feature_ids = None
+            # The exact input bytes are the source identity of a CSV-backed set.
+            source_digest = provenance.bytes_digest(input_bytes)
+            source_kind = "input_csv"
+        else:
+            recorded_rows = await domain_api.run_radiomics_rows(run_id)
+            if not recorded_rows:
+                raise ValueError(
+                    "This run has recorded no radiomics rows; call radiomics_extract_features first."
+                )
+            table = wide_table_from_rows(recorded_rows, analysis_rows)
+            df = table.frame
+            source_feature_ids = table.source_feature_ids
+            # Recomputed by the Application API from the rows' own digests.
+            source_digest = None
+            source_kind = "radiomics_features"
+            radiomics_config_digests = sorted(
+                {row["config_digest"] for row in recorded_rows if row.get("config_digest")}
+            )
+        subject_keys = df[SUBJECT_KEY].astype(str).tolist()
 
         X = df.drop(columns=[target_column])
         id_cols_to_drop = [
             c for c in X.columns
-            if c.lower() in ("id", "subject_id", "subjectid", "patientid", "patient_id", "case_id", "caseid", "name", "uid", "pat_id", "unnamed: 0")
+            if c.lower() in ("id", "subject_id", "subjectid", "subject_key", "ordinal", "patientid", "patient_id", "case_id", "caseid", "name", "uid", "pat_id", "unnamed: 0")
             or c.lower().endswith("_id")
         ]
         if id_cols_to_drop:
@@ -1148,12 +1204,20 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         # Every importance method below fits on (X, y). Fitting on all rows leaks the
         # holdout labels into the selected feature set, and PyCaret's later split
         # cannot undo that. Plan the split here and fit only on `train_pos`.
-        group_column = params.group_column or detect_group_column(df.columns)
+        # The split group is always the cohort's subject_key:
+        # a patient's rows never straddle the holdout, and the stored
+        # holdout_groups are subject keys the modeling export can split on.
+        if params.group_column and params.group_column != SUBJECT_KEY:
+            logger.warning(
+                "group_column=%r ignored: the selection split is grouped by subject_key.",
+                params.group_column,
+            )
+        group_column = SUBJECT_KEY
         split = plan_selection_split(
             n_rows=len(df),
             labels=y.tolist(),
-            group_values=df[group_column].tolist() if group_column in df.columns else None,
-            group_column=group_column if group_column in df.columns else None,
+            group_values=subject_keys,
+            group_column=group_column,
             task_type=task_type,
             holdout_size=params.holdout_size,
             seed=params.split_seed,
@@ -1210,10 +1274,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         X[num_cols] = X[num_cols].fillna(X[num_cols].iloc[train_pos].median())
         X = X.fillna(0)
 
-        if encoding_mappings:
-            enc_path = os.path.join(output_dir, "categorical_encodings.json")
-            with open(enc_path, "w") as fh:
-                json.dump(encoding_mappings, fh, indent=2, default=str)
+        # The encodings are recorded in each feature set's extraction_config.
 
         # Everything that consumes labels fits on these; plots and exports still use
         # the full X so the UI and the downstream CSVs keep every row.
@@ -1377,8 +1438,8 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         chart_data: dict = {"task_type": task_type, "method": params.method}
         # importance_df already sorted descending above; no re-sort needed here.
 
-        importance_path = os.path.join(output_dir, "feature_importance.csv")
-        importance_df.to_csv(importance_path, index=False)
+        # The ranking is label-derived: it goes back to the agent (chart_data,
+        # top_features) and is never stored as feature-set analysis.
 
         # ── Stage 3: Importance bars + cumulative curve ─────────────────────
         top_plot = importance_df.head(min(params.top_n_plot, len(importance_df)))
@@ -1516,42 +1577,114 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         payload = ProgressPayload(current=7, total=TOTAL_STAGES, label="Saving archival plot images")
         log_tool_state(ToolEvent("tool_progress", "progress", payload))
 
-        # ── Stage 8: Export top-N feature CSVs ─────────────────────────────
-        selected_files: dict = {}
-        split_files: dict = {}
+        # Retained figures are artifacts — bytes in PostgreSQL — so the report
+        # binds them by key instead of scanning the workspace.
+        selection_warnings: list = []
+        figures: list = []
+        figure_names = sorted(os.listdir(plots_dir)) if os.path.isdir(plots_dir) else []
+        for figure_name in figure_names:
+            if not figure_name.lower().endswith(".png"):
+                continue
+            with open(os.path.join(plots_dir, figure_name), "rb") as fh:
+                figure_bytes = fh.read()
+            if not figure_bytes:
+                continue
+            try:
+                artifact = await domain_api.publish_artifact(
+                    logical_key=f"features/{run_id}/{figure_name}",
+                    kind="figure_png",
+                    payload=figure_bytes,
+                    filename=figure_name,
+                    mime_type="image/png",
+                    metadata={
+                        "schema_version": 1,
+                        "producer": "radiomics_analyze_importance",
+                        "method": params.method,
+                    },
+                )
+            except domain_api.DomainApiError as exc:
+                if exc.status_code != 409:
+                    raise
+                # A replay rendered different bytes under the same key: the
+                # earlier figure stays (bytes are immutable) and this is said.
+                selection_warnings.append(f"{figure_name}: kept the earlier published figure ({exc})")
+                continue
+            figures.append({
+                "artifact_id": str(artifact["artifact_id"]),
+                "logical_key": artifact["logical_key"],
+                "display_filename": artifact.get("display_filename"),
+            })
+
+        # ── Stage 8: Freeze the feature sets ────────────────────
+        # One frozen set per requested top-N plus every feature
+        # ("all_features"), so modeling can train on both. Each carries the
+        # selection manifest; train/holdout are reconstructed from its
+        # holdout_groups at export time and never stored as CSVs.
+        split_manifest = split.to_manifest()
+        selection = selection_document(split_manifest)
+        base_config = {
+            "schema_version": FEATURE_SET_SCHEMA_VERSION,
+            "source": source_kind,
+            "radiomics_config_digests": radiomics_config_digests,
+            "selection_method": params.method,
+            "task_type": task_type,
+            "encode_categorical": params.encode_categorical,
+            "max_onehot_cardinality": params.max_onehot_cardinality,
+            "categorical_encodings": _json_serializable(encoding_mappings),
+            "holdout_size": params.holdout_size,
+            "split_seed": params.split_seed,
+            "group_column": SUBJECT_KEY,
+        }
+        candidate_sets: list = []
         for n in top_features_list:
             n = min(n, X.shape[1])
             if params.method == "rfe":
                 sel_feats, _ = _rfe_importance(n)
             else:
                 sel_feats = importance_df["feature"].iloc[:n].tolist()
+            candidate_sets.append((f"top_{n}", n, [str(name) for name in sel_feats]))
+        candidate_sets.append(("all_features", None, [str(name) for name in X.columns]))
 
-            cols_to_save = [c for c in sel_feats if c in df.columns]
-            encoded_only = [c for c in sel_feats if c not in df.columns]
-            out_df = df[cols_to_save + [target_column]].copy() if cols_to_save else pd.DataFrame({target_column: df[target_column]})
-            for col in encoded_only:
-                if col in X.columns:
-                    out_df[col] = X[col].values
-
-            out_path = os.path.join(output_dir, f"top_{n}_features.csv")
-            out_df.to_csv(out_path, index=False)
-            selected_files[str(n)] = out_path
-
-            # Companion files carrying the split that selection actually respected.
-            # Modeling picks the holdout up automatically (see the modeling tool's
-            # holdout_path auto-detection) so PyCaret evaluates on rows whose labels
-            # never reached the selector, instead of re-splitting at random.
-            if split.has_holdout:
-                train_path = os.path.join(output_dir, f"top_{n}_features_train.csv")
-                holdout_path = os.path.join(output_dir, f"top_{n}_features_holdout.csv")
-                out_df.iloc[split.train_index].to_csv(train_path, index=False)
-                out_df.iloc[split.holdout_index].to_csv(holdout_path, index=False)
-                split_files[str(n)] = {"train": train_path, "holdout": holdout_path}
-
-        split_manifest = split.to_manifest()
-        split_manifest_path = os.path.join(output_dir, "feature_selection_split.json")
-        with open(split_manifest_path, "w") as fh:
-            json.dump(split_manifest, fh, indent=2, default=str)
+        frozen_sets: list = []
+        for set_key, top_n, names in candidate_sets:
+            set_frame = pd.DataFrame({SUBJECT_KEY: subject_keys})
+            for name in names:
+                # A measured column keeps its measured values — a missing value
+                # stays missing, with its reason recorded. Encoded columns
+                # exist only in X.
+                source_column = df[name] if name in df.columns else X[name]
+                set_frame[name] = source_column.values
+            matrix, missing = matrix_from_frame(set_frame, names)
+            set_config = {**base_config, "top_n": top_n}
+            created = await domain_api.create_feature_set(
+                set_key,
+                {
+                    "cohort_id": str(cohort["cohort_id"]),
+                    "feature_names": names,
+                    "feature_matrix": matrix,
+                    "source_feature_ids": source_feature_ids,
+                    "selection": selection,
+                    "extraction_config": set_config,
+                    "analysis": _label_free_qc(X, names, stability_scores),
+                    "quality_summary": build_quality_summary(
+                        subjects=len(matrix),
+                        feature_count=len(names),
+                        missing_values=missing,
+                        notes=input_notes,
+                    ),
+                    "config_digest": provenance.document_digest(set_config),
+                    "source_digest": source_digest,
+                    "schema_version": FEATURE_SET_SCHEMA_VERSION,
+                },
+            )
+            frozen = await domain_api.freeze_feature_set(str(created["feature_set_id"]))
+            frozen_sets.append({
+                "set_key": set_key,
+                "feature_set_id": str(frozen["feature_set_id"]),
+                "feature_count": len(names),
+                "frozen_at": frozen.get("frozen_at"),
+                "label_supervised_on_full_data": selection["label_supervised_on_full_data"],
+            })
 
         # ADDED FOR UI ENHANCEMENT — Task 8: Sanitize chart_data before serialisation.
         # Recursively converts NaN/Infinity/numpy scalars to JSON-safe Python types.
@@ -1567,16 +1700,23 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
 
         return json.dumps({
             "status": "success",
-            "output_dir": output_dir,
+            "agent_run_id": run_id,
             "task_type": task_type,
             "method": params.method,
             "feature_count": int(X.shape[1]),
-            "result_files": {
-                "importance": importance_path,
-                "selected_features": selected_files,
-                "selection_split": split_manifest_path,
-                **({"split_features": split_files} if split_files else {}),
+            "source": source_kind,
+            # The frozen sets modeling reads by id.
+            "feature_sets": frozen_sets,
+            "exports": {
+                f"feature_set_{item['set_key']}": (
+                    f"/feature-sets/{item['feature_set_id']}/export"
+                    "?format=csv&include_subject_key=true"
+                )
+                for item in frozen_sets
             },
+            "figures": figures,
+            "top_features": importance_df["feature"].head(min(10, len(importance_df))).tolist(),
+            "warnings": selection_warnings,
             # Whether the selected feature set is blind to the holdout labels. When
             # True, every downstream holdout metric is optimistic by an unknown
             # amount and the report must say so rather than imply a clean estimate.

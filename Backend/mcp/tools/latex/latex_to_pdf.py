@@ -1,173 +1,193 @@
-import subprocess
-import tempfile
-import shutil
-import glob
-import sys
-import os
+"""Compile LaTeX report source to PDF."""
+
 import asyncio
 import json
-from .. import mcp
-from pydantic import Field
+import os
 from typing import Annotated
-from tool_logging import ToolEvent, log_tool_state, TextPayload
-from storage_paths import HYPOTHESES_DIR, TEMP_DIR, workspace_subpath
+
+import httpx
+from pydantic import Field
+
+from .. import mcp
+from tool_logging import TextPayload, ToolEvent, log_tool_state
+
+
+def _api_base() -> str:
+    """Application API base URL from environment (injected by the runner)."""
+    return os.environ.get("APPLICATION_API_URL", "http://localhost:8000").rstrip("/")
+
 
 @mcp.tool()
 async def latex_to_pdf(
-    latex_text: Annotated[str, Field(description="The complete LaTeX source code content, including the preamble and document body, to be compiled.")] ,
-    output_filename: Annotated[str, Field(description="The file name where the generated PDF should be saved, without the path (e.g., 'report.pdf').")],
-) -> str: 
-    """
-    Compiles LaTeX source code into a PDF document using pdflatex.
+    latex_text: Annotated[
+        str,
+        Field(
+            description=(
+                "The complete LaTeX source code content, including the preamble "
+                "and document body, to be compiled."
+            )
+        ),
+    ],
+    output_filename: Annotated[
+        str,
+        Field(
+            description=(
+                "The desired PDF filename (basename only, e.g. 'report.pdf'). "
+                "Used for the download Content-Disposition header."
+            )
+        ),
+    ],
+    report_id: Annotated[
+        str,
+        Field(
+            description=(
+                "The UUID of the ``reports`` row to publish to.  Create one first "
+                "via POST /reports/ with your agent_run_id and initial source_text."
+            )
+        ),
+    ],
+    expected_version: Annotated[
+        int,
+        Field(
+            description=(
+                "The ``source_version`` of the report row you read.  Used for "
+                "optimistic-concurrency: a stale version returns 409."
+            ),
+            ge=1,
+        ),
+    ] = 1,
+    image_keys: Annotated[
+        list[str],
+        Field(
+            description=(
+                "The list of image_key values referenced by \\\\includegraphics in "
+                "the LaTeX source.  Each key must be registered via "
+                "POST /reports/{report_id}/images before calling this tool."
+            )
+        ),
+    ] = [],
+) -> str:
+    """Compile LaTeX and publish to the reports table."""
+    log_tool_state(ToolEvent("tool_started", "text", TextPayload(message="Publishing report…")))
 
-    Use this tool in scenarios such as:
-    1. When you need to convert generated LaTeX content into a final, downloadable PDF file.
-    2. To save a formatted report or summary to the local file system.
+    api_base = _api_base()
+    publish_url = f"{api_base}/reports/{report_id}/publish"
+    payload = {
+        "latex_text": latex_text,
+        "expected_version": expected_version,
+        "image_keys": image_keys,
+    }
 
-    Images: Any .png or .jpg files found in the workspace (features/, modeling/,
-    outputs/ subdirectories) are automatically copied into the compilation
-    directory. Use \\includegraphics{filename.png} (basename only, no path)
-    in your LaTeX source to embed them.
-    """
     try:
-        latex_temp_root = TEMP_DIR / "latex"
-        latex_temp_root.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=latex_temp_root) as temp:
-            payload = TextPayload(message='Generating pdf...')
-            start_event = ToolEvent('tool_started', 'text', payload)
-            log_tool_state(start_event)
-            log_event = ToolEvent('tool_progress', 'text', payload)
-            log_tool_state(log_event)
-            tex_path = os.path.join(temp, "document.tex")
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            log_tool_state(
+                ToolEvent("tool_progress", "text", TextPayload(message="Compiling LaTeX…"))
+            )
+            resp = await client.post(publish_url, json=payload)
 
-            # ── Copy workspace images into the temp dir so \includegraphics works ──
-            workspace_folder = os.environ.get("WORKSPACE_DIR", "")
-            if workspace_folder and os.path.isdir(workspace_folder):
-                copied_images = []
-                for ext in ("*.png", "*.jpg", "*.jpeg"):
-                    for img_path in glob.glob(
-                        os.path.join(workspace_folder, "**", ext), recursive=True
-                    ):
-                        basename = os.path.basename(img_path)
-                        dest = os.path.join(temp, basename)
-                        # Avoid overwriting if two images share the same name
-                        if not os.path.exists(dest):
-                            shutil.copy2(img_path, dest)
-                            copied_images.append(basename)
-                if copied_images:
-                    payload = TextPayload(
-                        message=f"Copied {len(copied_images)} images into compilation directory."
-                    )
-                    log_tool_state(ToolEvent("tool_progress", "text", payload))
-
-            # Write LaTeX to .tex file
-            with open(tex_path, "w", encoding="utf-8") as f:
-                f.write(latex_text)
-
-            payload = TextPayload(message='Compiling...')
-            compiling_latex_event = ToolEvent('tool_progress', 'text', payload)
-            log_tool_state(compiling_latex_event)
-            # Compile using pdflatex
-            result = subprocess.run(
-                ["pdflatex", "-interaction=nonstopmode", tex_path],
-                cwd=temp,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=20.0
+        if resp.status_code == 200:
+            # Success: PDF bytes returned as application/pdf.
+            pdf_size = len(resp.content)
+            # Build a stable download URL via the agents file server.
+            agents_base = os.environ.get("AGENTS_BASE_URL", "").rstrip("/")
+            download_url = (
+                f"{agents_base}/reports/{report_id}/download"
+                if agents_base
+                else f"{api_base}/reports/{report_id}/download"
+            )
+            log_tool_state(
+                ToolEvent("tool_finished", "text", TextPayload(message="PDF published successfully."))
+            )
+            return json.dumps(
+                {
+                    "status": "success",
+                    "message": "Report published successfully (A19); PDF streamed, no file written.",
+                    "report_id": report_id,
+                    "new_version": expected_version + 1,
+                    "pdf_size_bytes": pdf_size,
+                    "download_url": download_url,
+                }
             )
 
-            # Check for compilation errors
-            if result.returncode != 0:
-                payload = TextPayload(message='LaTeX compilation failed.')
-                error_compilation_event = ToolEvent('error', 'text', payload)
-                log_tool_state(error_compilation_event)
+        # Non-200 — surface the error to the agent.
+        try:
+            detail = resp.json()
+        except Exception:
+            detail = resp.text[:2000]
+        log_tool_state(
+            ToolEvent("error", "text", TextPayload(message="Report publication failed."))
+        )
 
-                stdout = result.stdout.decode("utf-8", errors="ignore")
-                stderr = result.stderr.decode("utf-8", errors="ignore")
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "message": "LaTeX compilation failed",
-                        "stdout": stdout[-4000:],
-                        "stderr": stderr[-2000:],
-                    }
-                )
+        if resp.status_code == 409:
+            code = detail.get("code", "conflict") if isinstance(detail, dict) else "conflict"
+            return json.dumps(
+                {
+                    "status": "error",
+                    "code": code,
+                    "message": (
+                        detail.get("message", str(detail))
+                        if isinstance(detail, dict)
+                        else str(detail)
+                    ),
+                    "current_version": (
+                        detail.get("current_version") if isinstance(detail, dict) else None
+                    ),
+                }
+            )
 
-            # Read compiled PDF bytes
-            pdf_path = os.path.join(temp, "document.pdf")
-
-            if not os.path.exists(pdf_path):
-                payload = TextPayload(message='Possible LaTeX error.')
-                error_compilation_event = ToolEvent('error', 'text', payload)
-                log_tool_state(error_compilation_event)
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "message": "PDF was not generated. Possible LaTeX error.",
-                    }
-                )
-
-            with open(pdf_path, "rb") as f:
-                pdf_bytes = f.read()
-
-        workspace_folder = os.environ.get("WORKSPACE_DIR")
-        if not workspace_folder:
-            target_dir = str(HYPOTHESES_DIR / "workspace_default")
-            final_folder = str(workspace_subpath(target_dir, "reports"))
-            workspace_folder_name = os.path.basename(target_dir)
-        else:
-            final_folder = str(workspace_subpath(workspace_folder, "reports"))
-            workspace_folder_name = os.path.basename(workspace_folder)
-
-        os.makedirs(final_folder, exist_ok=True)
-        final_path = os.path.join(final_folder, output_filename)
-                
-        # Save final PDF
-        with open(final_path, "wb") as f:
-            f.write(pdf_bytes)
-        payload = TextPayload(message='PDF generated successfully.')
-        error_compilation_event = ToolEvent('tool_finished', 'text', payload)
-        log_tool_state(error_compilation_event)
-
-        public_name = output_filename if output_filename.endswith('.pdf') else f"{output_filename}.pdf"
-        # Build a public URL using env var AGENTS_BASE_URL when available.
-        agents_base = os.environ.get('AGENTS_BASE_URL')
-        if agents_base:
-            latex_pdf = agents_base.rstrip('/') + f"/files/{workspace_folder_name}/reports/{public_name}"
-        else:
-            # Fallback to a relative path that can be resolved by the orchestrator when serving files
-            latex_pdf = f"/files/{workspace_folder_name}/reports/{public_name}"
+        if resp.status_code == 422:
+            stdout = ""
+            stderr = ""
+            if isinstance(detail, dict):
+                stdout = detail.get("stdout", "")
+                stderr = detail.get("stderr", "")
+            return json.dumps(
+                {
+                    "status": "error",
+                    "code": "latex_compile_error",
+                    "message": (
+                        "LaTeX compilation failed.  The report source is unchanged (A19). "
+                        "Fix the LaTeX errors below and retry with the same expected_version."
+                    ),
+                    "stdout": stdout,
+                    "stderr": stderr,
+                }
+            )
 
         return json.dumps(
             {
-                "status": "success",
-                "message": "PDF generated successfully",
-                "latex_text": latex_text,
-                "pdf_path": final_path,
-                "latex_pdf": latex_pdf,
+                "status": "error",
+                "code": f"http_{resp.status_code}",
+                "message": str(detail)[:2000],
             }
         )
 
-    except Exception as e:
-        return json.dumps({"status": "error", "message": str(e)})
+    except httpx.TimeoutException:
+        return json.dumps(
+            {
+                "status": "error",
+                "code": "timeout",
+                "message": (
+                    "The publish request timed out.  The compilation may still be "
+                    "running; check the report source_version before retrying."
+                ),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return json.dumps({"status": "error", "message": str(exc)})
+
 
 if __name__ == "__main__":
-    # 1. Simple LaTeX content for testing
-    test_latex = r"""
-    \documentclass{article}
-    \title{Test Document}
-    \author{Python Script}
-    \date{\today}
-    \begin{document}
-    \maketitle
-    \section{Introduction}
-    This is a test PDF generated from Python code.
-    \end{document}
-    """
-
-    # 2. Run the async function
-    print("Starting PDF generation...")
-    result = asyncio.run(latex_to_pdf(test_latex, "test_doc.pdf"))
-    
-    # 3. Print result
+    # Minimal smoke-test (requires a running Application API and a known report_id).
+    result = asyncio.run(
+        latex_to_pdf(
+            latex_text=(
+                r"\documentclass{article}"
+                r"\begin{document}Hello, world!\end{document}"
+            ),
+            output_filename="test.pdf",
+            report_id="00000000-0000-0000-0000-000000000000",
+            expected_version=1,
+        )
+    )
     print(result)

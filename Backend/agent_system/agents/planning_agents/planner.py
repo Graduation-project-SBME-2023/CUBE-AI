@@ -1,15 +1,4 @@
-"""
-Clinical Planner Module
-
-Orchestrates the three-phase clinical research planning pipeline:
-    Phase 1 — Hypothesis Structuring (PICO format)
-    Phase 2 — Literature Review & Knowledge Building
-    Phase 3 — Dynamic Pipeline Planning (knowledge-informed)
-
-The ClinicalPlanner manages state persistence, agent orchestration, WebSocket
-communication, and the full lifecycle from initial user query to confirmed
-research plan with context-augmented task messages.
-"""
+"""Clinical Planner Module"""
 
 import sys
 import os
@@ -28,6 +17,7 @@ import yaml
 from autogen_agentchat.messages import TextMessage
 from autogen_core import CancellationToken
 
+from clients.backend_client import BackendClient
 from services.session_service import SessionService
 from models.plans import *
 from models.session import Session
@@ -170,33 +160,7 @@ def _fit_literature_payload(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ClinicalPlanner:
-    """
-    Three-phase clinical research planner.
-
-    Orchestrates the full planning lifecycle:
-        1. Hypothesis Structuring — Converts user observations into rigorous
-           PICO-formatted clinical hypotheses.
-        2. Literature Review — Builds domain knowledge base from PubMed and
-           other sources to inform pipeline decisions.
-        3. Pipeline Planning — Dynamically selects and configures execution
-           agents based on the confirmed hypothesis and literature evidence.
-
-    Thread-safety: Uses asyncio.Lock to prevent concurrent run() calls
-    for the same session.
-
-    Attributes:
-        input_provider (InputProvider): Async callable for user input collection.
-        output_handler (OutputCallback): Async callable for WebSocket/UI output.
-        client: LLM model client for agent communication.
-        agents (dict): Dictionary of planning agents (hypothesis_architect,
-                       pipeline_architect, user_proxy).
-        state (PlannerState): Current planner state with hypothesis, plan,
-                              knowledge base, and phase tracking.
-        session (Session): Current user session with persistent identifiers.
-        session_service (SessionService): Service for persisting session state.
-        db_state_store (PlannerDbStateStore): Database-backed state persistence.
-        log_path (Path): Path to the planner log file.
-    """
+    """Three-phase clinical research planner."""
 
     def __init__(
         self,
@@ -208,24 +172,7 @@ class ClinicalPlanner:
         session_service: SessionService,
         model_client: Any = None,
     ):
-        """
-        Initialize the ClinicalPlanner.
-
-        Args:
-            input_provider: Async callable that prompts the user and returns input.
-            output_callback: Async callable for sending structured messages to
-                             the frontend via WebSocket.
-            workspace_dir: Root directory for the planner workspace (state files,
-                           logs, literature output).
-            api_key: API key for the LLM model service.
-            session: Current user session object.
-            session_service: Service for persisting session state to the database.
-            model_client: Optional pre-configured LLM client. If None, creates
-                          a new client using the API key.
-
-        Raises:
-            OSError: If log or state directories cannot be created.
-        """
+        """Initialize the ClinicalPlanner."""
         self.input_provider = input_provider
         self.output_handler = output_callback
 
@@ -282,11 +229,7 @@ class ClinicalPlanner:
     # ══════════════════════════════════════════════════════════════════════
 
     def _clean_knowledge_for_ui(self, raw_text: str) -> str:
-        """
-        Convert the ASCII-boxed knowledge base into clean Markdown for the UI.
-        Removes box-drawing characters, trims lines, and converts ALL CAPS
-        section headers into Markdown headings (##).
-        """
+        """Convert the ASCII-boxed knowledge base into clean Markdown for the UI. Removes box-drawing characters, trims lines, and converts ALL CAPS section headers into Markdown headings (##)."""
         import re
         if not raw_text:
             return ""
@@ -316,26 +259,11 @@ class ClinicalPlanner:
         prompt: str = None,
         cancellation_token: Any = None,
     ) -> str:
-        """
-        Adapter that bridges the UserProxyAgent's input function to the
-        planner's input provider.
-
-        Args:
-            prompt: Optional prompt text (unused, passed through to provider).
-            cancellation_token: Optional cancellation token (unused).
-
-        Returns:
-            User input string from the input provider.
-        """
+        """Adapter that bridges the UserProxyAgent's input function to the planner's input provider."""
         return await self.input_provider()
 
     def _initialize_logging(self) -> None:
-        """
-        Set up dual logging handlers (file + stdout) for the planner.
-
-        Each planner instance owns a uniquely named logger and file handler so
-        concurrent sessions cannot leak records into one another's files.
-        """
+        """Set up dual logging handlers (file + stdout) for the planner."""
         os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
 
         file_handler = logging.FileHandler(self.log_path, encoding="utf-8")
@@ -348,11 +276,7 @@ class ClinicalPlanner:
         self.logger.propagate = True
 
     async def initialize(self) -> None:
-        """
-        Initialize the planner by loading persisted state from the database.
-
-        Should be called once after construction and before run().
-        """
+        """Initialize the planner by loading persisted state from the database."""
         await self._load_state()
 
     def close(self) -> None:
@@ -367,17 +291,7 @@ class ClinicalPlanner:
         data: Any,
         session_id: str = None,
     ) -> None:
-        """
-        Send a structured message to the frontend via the output callback.
-
-        For large payloads (lit_review_output), automatically truncates
-        oversized fields to prevent WebSocket connection drops.
-
-        Args:
-            type_: Message type identifier (e.g., "msg", "hypothesis", "plan").
-            data: Message payload (string, dict, or any serializable object).
-            session_id: Optional session ID override. Defaults to current session.
-        """
+        """Send a structured message to the frontend via the output callback."""
         # Check payload size for literature review output
         if type_ == "lit_review_output" and isinstance(data, dict):
             try:
@@ -405,22 +319,7 @@ class ClinicalPlanner:
     # ══════════════════════════════════════════════════════════════════════
 
     def _clean_json(self, text: str) -> str:
-        """
-        Extract JSON from LLM response, handling markdown code fences.
-
-        Handles several common LLM output patterns:
-            - ```json { ... } ```
-            - ``` { ... } ```
-            - Leading/trailing ```json or ```
-            - Raw JSON with no fences
-            - APPROVED text appended to JSON
-
-        Args:
-            text: Raw LLM response text.
-
-        Returns:
-            Cleaned JSON string ready for parsing.
-        """
+        """Extract JSON from LLM response, handling markdown code fences."""
         text = text.strip()
         text = text.replace("APPROVE", "")
 
@@ -448,24 +347,7 @@ class ClinicalPlanner:
 
     @staticmethod
     def _fix_invalid_json_escapes(text: str) -> str:
-        """
-        Fix invalid backslash escapes that break json.loads().
-
-        LLMs often embed LaTeX (\\documentclass, \\begin{table}) or Windows
-        paths (\\Users) in JSON string values. These are not valid JSON
-        escape sequences and cause ``Invalid \\escape`` errors.
-
-        Valid JSON escapes: \\" \\\\ \\/ \\b \\f \\n \\r \\t \\uXXXX
-
-        Any backslash NOT followed by one of those characters is doubled so
-        json.loads() will accept it.
-
-        Args:
-            text: JSON string that may contain invalid escapes.
-
-        Returns:
-            JSON string with invalid backslashes properly escaped.
-        """
+        """Fix invalid backslash escapes that break json.loads."""
         # ``\u`` is only a valid JSON escape when it is followed by exactly
         # four hexadecimal digits.  Treating every ``\u`` as valid leaves
         # common LaTeX commands such as ``\usepackage`` broken.
@@ -476,13 +358,7 @@ class ClinicalPlanner:
     # ══════════════════════════════════════════════════════════════════════
 
     async def _save_state(self) -> None:
-        """
-        Persist the current planner state to disk as JSON.
-
-        The state file is written atomically to the workspace directory.
-        Errors are logged but not raised — state persistence failures
-        are non-fatal to allow the pipeline to continue.
-        """
+        """Persist the current planner state to disk as JSON."""
         os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
         try:
             async with aiofiles.open(self.state_path, "w", encoding="utf-8") as f:
@@ -491,16 +367,7 @@ class ClinicalPlanner:
             self.logger.error("Save Error: %s", e)
 
     async def _load_state(self) -> None:
-        """
-        Load planner state from the database via the state store.
-
-        If no persisted state exists for the current session, a fresh
-        PlannerState is used. If loading fails, sets _state_load_failed
-        flag to prevent accidental overwrites.
-
-        Raises:
-            RuntimeError: If state loading fails critically (DB unreachable).
-        """
+        """Load planner state from the database via the state store."""
         try:
             db_state = await self.db_state_store.load_state(self.session.session_id)
             self.state = db_state
@@ -536,21 +403,7 @@ class ClinicalPlanner:
         response_content: str,
         log_prefix: str = "[Planner]",
     ) -> dict | None:
-        """
-        Robustly parse JSON from LLM responses with multiple fallback strategies.
-
-        Attempts, in order:
-            1. Direct JSON parsing after cleaning.
-            2. JSON parsing with escape fixes applied.
-            3. YAML fallback parsing for near-JSON content.
-
-        Args:
-            response_content: Raw response text from the LLM.
-            log_prefix: Prefix for log messages to identify the source agent.
-
-        Returns:
-            Parsed dictionary, or None if all parsing strategies fail.
-        """
+        """Robustly parse JSON from LLM responses with multiple fallback strategies."""
         clean_content = self._clean_json(response_content)
 
         for attempt, content in enumerate([
@@ -602,17 +455,7 @@ class ClinicalPlanner:
         return None
 
     async def _process_hypothesis_response(self, response_content: str) -> None:
-        """
-        Parse hypothesis JSON from the HypothesisArchitect and update state/UI.
-
-        Handles three response patterns:
-            - Full hypothesis with PICO fields → persists and emits to UI.
-            - Message-only response → forwards to chat.
-            - Parse failure → sends error message to chat.
-
-        Args:
-            response_content: Raw response text from the HypothesisArchitect.
-        """
+        """Parse hypothesis JSON from the HypothesisArchitect and update state/UI."""
         self.logger.info("[HypothesisArchitect]: %s...", response_content[:100])
 
         data = await self._parse_llm_json(
@@ -663,15 +506,7 @@ class ClinicalPlanner:
         await self._save_state()
 
     async def _process_pipeline_response(self, response_content: str) -> bool:
-        """
-        Parse pipeline plan JSON from the PipelineArchitect and update state/UI.
-
-        Extracts steps with instructions, persists the plan to the database,
-        and emits structured plan updates to the UI canvas.
-
-        Args:
-            response_content: Raw response text from the PipelineArchitect.
-        """
+        """Parse pipeline plan JSON from the PipelineArchitect and update state/UI."""
         self.logger.info("[PipelineArchitect]: %s...", response_content[:100])
 
         data = await self._parse_llm_json(
@@ -749,7 +584,7 @@ class ClinicalPlanner:
                     )
                     for s in steps
                 ]
-                self.state.plan.study_goal = self.state.hypothesis.title
+                self.state.plan.session_id = str(self.session.session_id)
 
             # Keep in-memory session coherent
             self.session.plan = self.state.plan
@@ -761,16 +596,18 @@ class ClinicalPlanner:
                     "name": s.title,
                     "description": s.description,
                     "module": s.module,
-                    "status": s.status,
+                    "status": s.run_status,
                 }
                 for s in self.state.plan.steps
             ]
             await self._send(
                 "pipeline_update",
                 {
-                    "study_goal": (
-                        self.state.plan.study_goal or self.state.hypothesis.title
-                    ),
+                    # The study goal is the hypothesis title, derived at
+                    # read time. It is not a stored plan column: removed
+                    # `plans.study_goal` because it was a second copy of a
+                    # value the session already owns.
+                    "study_goal": self.state.hypothesis.title,
                     "steps": ui_steps,
                 },
             )
@@ -778,9 +615,11 @@ class ClinicalPlanner:
             await self._send(
                 "plan",
                 {
-                    "study_goal": (
-                        self.state.plan.study_goal or self.state.hypothesis.title
-                    ),
+                    # The study goal is the hypothesis title, derived at
+                    # read time. It is not a stored plan column: removed
+                    # `plans.study_goal` because it was a second copy of a
+                    # value the session already owns.
+                    "study_goal": self.state.hypothesis.title,
                     "steps": ui_steps,
                 },
             )
@@ -803,16 +642,7 @@ class ClinicalPlanner:
     # ══════════════════════════════════════════════════════════════════════
 
     def _extract_pico_from_hypothesis(self) -> dict:
-        """
-        Extract a PICO dict from the confirmed hypothesis.
-
-        Maps ClinicalHypothesis model fields to the knowledge_builder's
-        expected PICO format.
-
-        Returns:
-            Dictionary with keys: population, intervention, comparison,
-            outcome, hypothesis, question.
-        """
+        """Extract a PICO dict from the confirmed hypothesis."""
         hyp = self.state.hypothesis
 
         def _to_str(val: Any) -> str:
@@ -831,29 +661,14 @@ class ClinicalPlanner:
         }
 
     async def _build_knowledge_base(self) -> tuple:
-        """
-        Run the knowledge builder (synchronous, CPU-bound) in a thread pool.
-
-        Executes the literature search, paper collection, and knowledge base
-        construction. Sends progress logs to the frontend via WebSocket.
-
-        Returns:
-            Tuple of (knowledge_base, sources_guide, papers, knowledge_sections).
-
-        Raises:
-            Exception: Propagated from build_knowledge_base — caught by caller.
-        """
+        """Run the knowledge builder (synchronous, CPU-bound) in a thread pool."""
         pico = self._extract_pico_from_hypothesis()
         self.logger.info("Building knowledge base with PICO: %s", pico)
 
         loop = asyncio.get_event_loop()
 
         def progress_callback(message: str) -> None:
-            """
-            Thread-safe bridge: schedule WebSocket send on the event loop.
-
-            Called from worker threads during knowledge base construction.
-            """
+            """Thread-safe bridge: schedule WebSocket send on the event loop."""
             asyncio.run_coroutine_threadsafe(
                 self._send(
                     "lit_review_log",
@@ -896,19 +711,7 @@ class ClinicalPlanner:
         sources_guide: str,
         generated_context: Any = None,
     ) -> None:
-        """
-        Save the literature review context to the workspace as a structured
-        JSON file for downstream agents.
-
-        The reporter agent reads this file via the read_literature_context
-        MCP tool to access domain knowledge for manuscript generation.
-
-        Args:
-            knowledge_base: Full domain knowledge text.
-            sources_guide: Bibliography and sources reference.
-            generated_context: Optional additional context from the literature
-                               review multi-agent pipeline.
-        """
+        """Save the literature review context to the workspace as a structured JSON file for downstream agents."""
         lit_context_path = workspace_subpath(self.workspace_dir, "literature_context.json")
 
         context_data = {
@@ -933,6 +736,65 @@ class ClinicalPlanner:
         except Exception as e:
             self.logger.error("Failed to save literature context: %s", e)
 
+    async def _persist_literature_review(
+        self,
+        pico: Dict[str, str],
+        knowledge_base: str,
+        sources_guide: str,
+        generated_context: dict,
+        papers: List[dict],
+    ) -> None:
+        """Write the durable copy of this planning-phase review through the
+        Application API (literature_reviews + literature_papers — V1-PLAN
+        §2.7 items 27/28). The workspace copy under temp/literature/ is
+        disposable scratch re-derived from the same PICO on every run."""
+        review = await BackendClient.create_literature_review(
+            session_id=str(self.session.session_id),
+            review_key=json.dumps(pico, sort_keys=True),
+            query=pico,
+            result_summary={
+                "knowledge_base": knowledge_base,
+                "sources_guide": sources_guide,
+                "context": generated_context or {},
+            },
+        )
+        review_id = review.get("literature_review_id") if review else None
+        if not review_id or not papers:
+            return
+
+        def _year(raw: Any) -> Optional[int]:
+            try:
+                value = int(str(raw).strip())
+            except (TypeError, ValueError):
+                return None
+            return value if 0 < value < 10000 else None
+
+        def _authors(raw: Any) -> Optional[List[str]]:
+            if isinstance(raw, list):
+                names = [str(a).strip() for a in raw if str(a).strip()]
+            else:
+                names = [a.strip() for a in str(raw or "").split(",") if a.strip()]
+            return names or None
+
+        payload = []
+        for paper in papers:
+            pmid = str(paper.get("pmid") or "").strip() or None
+            doi = str(paper.get("doi") or "").strip() or None
+            title = str(paper.get("title") or "").strip()
+            if not title or (pmid is None and doi is None):
+                continue
+            payload.append({
+                "pmid": pmid,
+                "doi": doi,
+                "title": title,
+                "authors": _authors(paper.get("authors")),
+                "year": _year(paper.get("year")),
+                "abstract": str(paper.get("abstract") or "").strip() or None,
+                "journal": str(paper.get("journal") or "").strip() or None,
+            })
+        if payload:
+            await BackendClient.add_literature_papers(review_id, payload)
+
     # ══════════════════════════════════════════════════════════════════════
     # RETRY LOGIC FOR LLM CALLS
     # ══════════════════════════════════════════════════════════════════════
@@ -945,13 +807,7 @@ class ClinicalPlanner:
         max_retries: int = 3,
         cancellation_token: Optional[CancellationToken] = None,
     ) -> Tuple[Any, List[Dict[str, str]]]:
-        """
-        Call an agent with exponential backoff retry logic,
-        maintaining a conversation history.
-
-        Returns:
-            (response, updated_history)
-        """
+        """Call an agent with exponential backoff retry logic, maintaining a conversation history."""
         # Build the full message list from history
         messages = []
         if history:
@@ -990,35 +846,7 @@ class ClinicalPlanner:
         do_lit_review: bool = True,
         cancellation_token: Optional[CancellationToken] = None,
     ) -> None:
-        """
-        Execute the full three-phase clinical research planning pipeline.
-
-        Phases:
-            1. Hypothesis Structuring — Converts user query to PICO hypothesis
-               using the HypothesisArchitect agent. Loops until confirmed.
-            2. Literature Review — Builds domain knowledge base from PubMed
-               and runs multi-agent literature review pipeline.
-            3. Pipeline Planning — Dynamically designs the research execution
-               plan using the PipelineArchitect agent and accepts ongoing
-               chat-based revisions while the planning task remains active.
-
-        After all phases complete, compiles context-augmented task messages
-        for downstream execution agents.
-
-        Thread-safety: Uses asyncio.Lock to prevent concurrent execution
-        for the same session.
-
-        Args:
-            start_query: Initial user query or clinical observation.
-            do_lit_review: If True, runs the literature review phase.
-                           If False, skips directly to pipeline planning.
-            cancellation_token: Optional token for cooperative cancellation
-                                of long-running operations.
-
-        Raises:
-            RuntimeError: If state loading fails.
-            Exception: Re-raised from agent calls if all retries exhausted.
-        """
+        """Execute the full three-phase clinical research planning pipeline."""
         # ── Concurrency Guard ─────────────────────────────────────────
         async with self._run_lock:
             await self._load_state()
@@ -1199,6 +1027,21 @@ class ClinicalPlanner:
                         generated_context=generated_context,
                     )
 
+                    # Durable copy: literature_reviews + literature_papers
+                    try:
+                        await self._persist_literature_review(
+                            self._extract_pico_from_hypothesis(),
+                            knowledge_base,
+                            sources_guide,
+                            generated_context,
+                            papers,
+                        )
+                    except Exception as e:
+                        self.logger.warning(
+                            "Failed to persist literature review to the database: %s",
+                            e,
+                        )
+
                     # Try to read generated literature report
                     report_md = ""
                     report_path = lit_output_dir / "literature_report.md"
@@ -1322,11 +1165,18 @@ class ClinicalPlanner:
                             raise ValueError(
                                 "Task message compiler produced an empty execution pipeline"
                             )
-                        await self.session_service.confirm_plan(self.session)
+                        # Persist the compiled task messages onto the DRAFT
+                        # steps first: they are part of the step definition
+                        # , and after approval every step is immutable
+                        # . Approval itself happens when the user starts
+                        # the run, which is also what creates the agent_runs
+                        # rows — so the plan stays editable through this
+                        # revision loop.
                         await self.session_service.save_task_messages_for_plan(
                             self.session,
                             task_messages,
                         )
+                        await self.session_service.confirm_plan(self.session)
                         task_summaries = [
                             {
                                 "task_id": tm.task_id,

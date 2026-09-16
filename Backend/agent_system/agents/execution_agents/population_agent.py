@@ -1,6 +1,5 @@
 import sys
 import os
-from storage_paths import workspace_subpath
 from collections.abc import AsyncGenerator, Sequence
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -16,6 +15,7 @@ from autogen_core.models import SystemMessage
 from autogen_agentchat.ui import Console
 from autogen_core import CancellationToken
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
+from clients.backend_client import BackendClient
 from services.population_handoff import population_handoff_issues
 from services.timeout_policy import MCP_STANDARD_READ_SECONDS
 from descriptions.models_descriptions import POPULATION_PLANNER_AGENT_DESCRIPTION
@@ -44,6 +44,8 @@ class PopulationPlannerAgent(AssistantAgent):
         system_message,
         max_tool_iterations,
         workspace_folder=None,
+        session_id=None,
+        agent_run_id=None,
     ):
         super().__init__(name=name,
                         model_client=model_client, 
@@ -52,6 +54,9 @@ class PopulationPlannerAgent(AssistantAgent):
                         system_message=system_message,
                         max_tool_iterations=max_tool_iterations)
         self._workspace_folder = workspace_folder
+        # The handoff is checked against THIS step's run.
+        self._session_id = session_id
+        self._agent_run_id = agent_run_id
         self._population_completion_retries = self.COMPLETION_RETRIES
 
     async def on_messages_stream(
@@ -77,13 +82,13 @@ class PopulationPlannerAgent(AssistantAgent):
             if final_response is None:
                 raise RuntimeError("Population planner did not produce a final response")
 
-            # Production always supplies a workspace. Keep the class usable by
-            # its legacy local harness, where no durable artifacts are expected.
-            if not self._workspace_folder:
+            # Production always binds a session and a run. Keep the class usable
+            # by its legacy local harness, where no durable records are expected.
+            if not self._session_id:
                 yield final_response
                 return
 
-            issues = population_handoff_issues(self._workspace_folder)
+            issues = await population_handoff_issues(self._session_id, self._agent_run_id)
             if not issues:
                 yield final_response
                 return
@@ -115,13 +120,13 @@ class PopulationPlannerAgent(AssistantAgent):
                         "until the doctor has selected and labeled at least one volume, "
                         "scratchpad_write_summary, "
                         "scratchpad_set_status(status='done'), then write_agent_output with "
-                        "status='completed'. Only finish after all artifacts exist."
+                        "status='completed'. Only finish after all of these are recorded."
                     ),
                 )
             ]
     
     @classmethod
-    async def create(cls, model_client = None, workspace_folder=None, session_id=None):
+    async def create(cls, model_client = None, workspace_folder=None, session_id=None, node_name=None, agent_run_id=None, step_id=None):
         model_client = OllamaClient() if not model_client else model_client
         mcp_server_path = os.path.abspath(
             os.path.join(current_dir, "..", "..", "..", "mcp", "server.py")
@@ -144,6 +149,8 @@ class PopulationPlannerAgent(AssistantAgent):
             "WORKSPACE_DIR": workspace_folder,
             "SESSION_ID": session_id,
             "AGENT_ID": "study_population_planner_agent",
+            "AGENT_RUN_ID": str(agent_run_id or ""),
+            "STEP_ID": str(step_id or ""),
             "MODEL_BASE_URL": base_url,
             "MODEL_NAME": model_name,
             "MODEL_API_KEY": api_key,
@@ -174,24 +181,32 @@ class PopulationPlannerAgent(AssistantAgent):
             'write_agent_output'
         ]
         
-        # Only add extract_cohort_labels if mode is automatic
-        try:
-            if workspace_folder:
-                config_path = str(workspace_subpath(workspace_folder, "config.json"))
-                import json
-                if os.path.exists(config_path):
-                    with open(config_path, "r", encoding="utf-8") as f:
-                        config_data = json.load(f)
-                        if config_data.get("labelling_mode") == "automatic":
-                            desired_tools.insert(3, 'extract_cohort_labels')
-        except Exception as e:
-            logger.error(f"Failed to read labelling_mode from config: {e}")
+        # Only add extract_cohort_labels if mode is automatic. Since current build
+        # this flow the labelling mode is `cohorts.criteria.labelling_mode`, set by
+        # the Population UI before the step starts — not `config.json`.
+        if session_id:
+            try:
+                cohort = await BackendClient.get_population_cohort(session_id)
+                # "automatic" is the default the Population UI shows when the
+                # doctor has not chosen, and a cohort the step has not created
+                # yet is exactly that case. An unreadable cohort is different:
+                # it falls through to the except below and the LLM adjudicator
+                # stays out of the tool list.
+                labelling_mode = ((cohort or {}).get("criteria") or {}).get(
+                    "labelling_mode", "automatic"
+                )
+                if labelling_mode == "automatic":
+                    desired_tools.insert(3, 'extract_cohort_labels')
+            except Exception as e:
+                logger.error(f"Failed to read labelling_mode from the cohort: {e}")
 
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         logger.info(f"Started population selection with available tools: {len(final_tools)}")
         for tool in final_tools:
             logger.info(f"Tool selected: {tool.name}")
-        name = "study_population_planner_agent"
+        # The node name identifies THIS step's execution; it falls
+        # back to the agent type for the standalone/dev entrypoints below.
+        name = node_name or "study_population_planner_agent"
         description = POPULATION_PLANNER_AGENT_DESCRIPTION
         system_message = f"{TASK_CONTEXT_BOOTSTRAP}\n\n{POPULATION_EXEC_SYSTEM_MESSAGE}"
         return cls(
@@ -202,6 +217,8 @@ class PopulationPlannerAgent(AssistantAgent):
             system_message = system_message,
             max_tool_iterations = 20,
             workspace_folder = workspace_folder,
+            session_id = session_id,
+            agent_run_id = str(agent_run_id) if agent_run_id else None,
         )
     
     @staticmethod

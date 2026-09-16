@@ -1,13 +1,4 @@
-"""
-Agent Factory Module for Clinical Research Pipeline
-
-This module creates the planning agents responsible for hypothesis formulation
-and pipeline orchestration in the clinical research automation system.
-
-Architecture:
-    Phase 1: Hypothesis Architect → Structures clinical question in PICO format
-    Phase 2: Pipeline Architect    → Designs optimal execution pipeline
-"""
+"""Agent Factory Module for Clinical Research Pipeline"""
 
 from typing import Dict, Callable, Awaitable, Any
 from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
@@ -25,16 +16,7 @@ def create_model_client(
     api_key: str,
     model: str = "gpt-oss:120b-cloud"
 ) -> OllamaChatCompletionClient:
-    """
-    Create an Ollama chat completion client with standard configuration.
-
-    Args:
-        api_key: Authentication key for the model service.
-        model: Model identifier string.
-
-    Returns:
-        Configured OllamaChatCompletionClient instance.
-    """
+    """Create an Ollama chat completion client with standard configuration."""
     return add_model_client_retries(OllamaChatCompletionClient(
         model=model,
         model_info={
@@ -63,7 +45,7 @@ AVAILABLE_AGENTS = [
         "capabilities": [
             "DICOM query/retrieve from Orthanc PACS",
             "Patient cohort selection with inclusion/exclusion criteria",
-            "Target label generation (targets.csv) for downstream ML",
+            "Target label generation (cohort member labels) for downstream ML",
             "Demographic analysis and sample size estimation",
         ],
         "when_needed": "Always needed when the study involves patient imaging data",
@@ -163,24 +145,7 @@ def create_planner_agents(
     model_client: Any,
     input_func: Callable[[], Awaitable[str]],
 ) -> Dict[str, Any]:
-    """
-    Factory function to instantiate planning agents.
-
-    Creates two specialized agents that work in sequence:
-      1. Hypothesis Architect — Structures the clinical hypothesis in full PICO format.
-      2. Pipeline Architect — Dynamically plans pipeline steps based on hypothesis
-         and domain knowledge.
-
-    Args:
-        model_client: The LLM client instance for agent communication.
-        input_func: Async callable for user input collection.
-
-    Returns:
-        Dictionary containing:
-            - "user_proxy": UserProxyAgent for human interaction.
-            - "hypothesis_architect": AssistantAgent for PICO hypothesis formulation.
-            - "pipeline_architect": AssistantAgent for pipeline design.
-    """
+    """Factory function to instantiate planning agents."""
 
     # Build formatted agent catalogue for prompt injection
     agent_catalogue = "\n".join([
@@ -394,8 +359,8 @@ For study_population_planner_agent:
    splenic lesions. Apply inclusion criteria: age >=18, portal venous phase CT, 
    slice thickness <=3mm. Exclude patients with prior splenectomy or non-diagnostic 
    image quality. Literature suggests minimum 50 patients per class for radiomics 
-   studies (Lambin et al., 2017). Generate targets.csv with columns: patient_id, 
-   volume_path, label (benign/malignant), histopathology_confirmed."
+   studies (Lambin et al., 2017). Record each volume's target label on the cohort (label benign/malignant, 
+   with histopathology confirmation as its provenance)."
 
 For segmentation_agent:
   "Preserve the explicitly requested extraction ROI. For whole-spleen radiomics,
