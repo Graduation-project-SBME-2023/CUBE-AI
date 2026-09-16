@@ -51,6 +51,36 @@ if (Test-Path -LiteralPath $modelsRoot) {
     } | ForEach-Object { $violations.Add($_.FullName) }
 }
 
+# Step K — retired workspace sub-paths (reports/ and outputs/literature/).
+# The pattern matches files under workspace_<id>/reports/ and workspace_<id>/outputs/literature/.
+$workspacesRoot = Join-Path $StorageRoot "hypotheses"
+if (Test-Path -LiteralPath $workspacesRoot) {
+    Get-ChildItem -LiteralPath $workspacesRoot -Directory -Force | Where-Object { $_.Name -like "workspace_*" } | ForEach-Object {
+        $ws = $_.FullName
+        # reports/*.md, reports/*.tex, reports/*.pdf — retired to reports.source_text /
+        @("*.md", "*.tex", "*.pdf") | ForEach-Object {
+            $reportsGlob = Join-Path $ws "reports" $_
+            Get-ChildItem -Path $reportsGlob -Force -ErrorAction SilentlyContinue | ForEach-Object {
+                $violations.Add($_.FullName + " [retired to reports.source_text by K]")
+            }
+        }
+        # outputs/literature/* — retired to literature_reviews + literature_papers
+        $litDir = Join-Path $ws "outputs\literature"
+        if (Test-Path -LiteralPath $litDir) {
+            Get-ChildItem -LiteralPath $litDir -Force -Recurse -File | ForEach-Object {
+                $violations.Add($_.FullName + " [retired to literature_reviews/papers by K]")
+            }
+        }
+        # legacy literature_review_output/ inside a workspace
+        $legacyLitDir = Join-Path $ws "literature_review_output"
+        if (Test-Path -LiteralPath $legacyLitDir) {
+            Get-ChildItem -LiteralPath $legacyLitDir -Force -Recurse -File | ForEach-Object {
+                $violations.Add($_.FullName + " [retired to literature_reviews/papers by K]")
+            }
+        }
+    }
+}
+
 $runtimeDirectoryNames = @(".knowledge_cache", "literature_review_output", "jpeg_slice_files", "results")
 Get-ChildItem -LiteralPath $BackendRoot -Directory -Recurse -Force | Where-Object {
     -not (Is-Under $_.FullName $StorageRoot) -and
@@ -61,7 +91,7 @@ Get-ChildItem -LiteralPath $BackendRoot -Directory -Recurse -Force | Where-Objec
 Get-ChildItem -LiteralPath $BackendRoot -File -Recurse -Force | Where-Object {
     if (Is-Under $_.FullName $StorageRoot) { return $false }
     if (Is-AllowedSourceArtifact $_.FullName) { return $false }
-    if ($_.FullName -match '[\\/](venv|node_modules|__pycache__|\.pytest_cache)[\\/]') { return $false }
+    if ($_.FullName -match '[\\\/](venv|node_modules|__pycache__|\.pytest_cache)[\\\/]') { return $false }
     return (
         $_.Name -like "*.nii.gz" -or $_.Extension -in @(".gif", ".pt", ".pth") -or
         $_.Name -like "execution_*.log"

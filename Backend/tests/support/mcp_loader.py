@@ -8,13 +8,19 @@ from types import ModuleType
 
 
 _PACKAGE_NAME = "_cubeai_test_mcp_tools"
-_TOOLS_DIR = Path(__file__).resolve().parents[2] / "mcp" / "tools"
+_MCP_DIR = Path(__file__).resolve().parents[2] / "mcp"
+_TOOLS_DIR = _MCP_DIR / "tools"
 
 
 def _ensure_private_tools_package() -> None:
     """Load Backend/mcp/tools under a private, non-conflicting name."""
     if _PACKAGE_NAME in sys.modules:
         return
+
+    # Backend/mcp is deliberately NOT added to sys.path: it contains a regular
+    # package named `tools`, and a regular package shadows the namespace
+    # package `agent_system/tools` no matter which comes first on the path.
+    # The tools resolve their siblings themselves (see `_app_api_url` in each).
 
     spec = importlib.util.spec_from_file_location(
         _PACKAGE_NAME,
