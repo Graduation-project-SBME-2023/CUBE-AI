@@ -26,5 +26,6 @@ class StudyUpdate(BaseModel):
 
 class StudyRead(StudyBase):
     orthanc_study_id: Optional[str] = None
+    archive_status: str = "available"
     model_config = ConfigDict(from_attributes=True)
 

@@ -1,40 +1,66 @@
-from pydantic import BaseModel, ConfigDict
+from typing import Any, Optional
 from uuid import UUID
-from typing import Optional
 
-from .Taskmessage import TaskMessageCreate, TaskMessageUpdate, TaskMessageRead
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from application_api.core.json_bounds import (
+    DOMAIN_JSON_MAX_BYTES,
+    JsonBoundsError,
+    check_json,
+)
+
+
 class PlanStepBase(BaseModel):
-    title: str
-    description: Optional[str] = None
-    module: Optional[str] = None
-    status: Optional[str] = "not_confirmed"
-    logs: Optional[list] = []
-    instructions: Optional[dict] = None
+    title: str = Field(min_length=1)
+    # The agent that runs this step. No catalog FK: agent implementations are
+    # code, and the service validates this against AGENT_FACTORIES before
+    # admission. The same key may appear in many steps — each executes
+    # separately, keyed by step_id.
+    agent_type: str = Field(min_length=1)
+    # The whole definition of what the step is supposed to do.
+    # folded the old free-text `description` in here under "description";
+    # this flow folded the compiled task message in under "task_message",
+    # which is where it always belonged — it is part of the step definition,
+    # not of the run that executes it.
+    instructions: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("instructions")
+    @classmethod
+    def _bounded(cls, value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return check_json(
+                value, max_bytes=DOMAIN_JSON_MAX_BYTES, what="plan step instructions"
+            )
+        except JsonBoundsError as exc:
+            raise ValueError(str(exc)) from exc
 
 
 class PlanStepCreate(PlanStepBase):
-    pass  # step_order and id are auto-generated
-    # Optionally dispatch a TaskMessage at creation time
-    task_message: Optional[TaskMessageCreate] = None
+    """step_order comes from list position; step_id is generated."""
+
 
 class PlanStepUpdate(BaseModel):
     title: Optional[str] = None
-    description: Optional[str] = None
-    module: Optional[str] = None
-    status: Optional[str] = None
-    step_order: Optional[int] = None  # optional for reordering
-    logs: Optional[list] = None
-    instructions: Optional[dict] = None
-    task_message: Optional[TaskMessageUpdate] = None
+    agent_type: Optional[str] = None
+    step_order: Optional[int] = Field(default=None, gt=0)
+    instructions: Optional[dict[str, Any]] = None
 
-class PlanStepStatusUpdate(BaseModel):
-    status: str
-    log: Optional[dict] = None  # single log entry to append
+    @field_validator("instructions")
+    @classmethod
+    def _bounded(cls, value):
+        if value is None:
+            return value
+        try:
+            return check_json(
+                value, max_bytes=DOMAIN_JSON_MAX_BYTES, what="plan step instructions"
+            )
+        except JsonBoundsError as exc:
+            raise ValueError(str(exc)) from exc
+
 
 class PlanStepOut(PlanStepBase):
-    id: UUID
-    plan_id: UUID
+    step_id: UUID
+    session_id: UUID
     step_order: int
-    task_message: Optional[TaskMessageRead] = None
 
     model_config = ConfigDict(from_attributes=True)

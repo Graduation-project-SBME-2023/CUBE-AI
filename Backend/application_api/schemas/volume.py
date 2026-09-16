@@ -28,5 +28,6 @@ class VolumeUpdate(BaseModel):
 
 class Volume(VolumeBase):
     orthanc_series_id: str | None = None
+    archive_status: str = "available"
 
     model_config = ConfigDict(from_attributes=True)

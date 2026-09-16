@@ -20,7 +20,9 @@ class PatientUpdate(BaseModel):
 class Patient(PatientBase):
     patient_id: UUID
     orthanc_patient_id: str | None = None
+    archive_status: str = "available"
     created_at: datetime | None = None  # ISO format date-time
+    updated_at: datetime | None = None
     age: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
