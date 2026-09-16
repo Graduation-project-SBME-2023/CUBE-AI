@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import unittest
+
+import httpx
 import pytest
 
 from agent_system.agents.execution_agents.segmentation import batch_store
@@ -120,3 +123,58 @@ def test_the_stage_the_module_reports_maps_onto_the_review_status():
     # "reviewed" is not something the module may set: only the review endpoint
     # moves a batch to submitted.
     assert "reviewed" not in batch_store._STAGE_REVIEW_STATUS
+
+
+class _FakeResponse:
+    status_code = 200
+
+
+class _FlakyClient:
+    """Fails with a transient network error `fail_count` times, then succeeds."""
+
+    def __init__(self, fail_count: int):
+        self.fail_count = fail_count
+        self.calls = 0
+
+    async def request(self, method, url, **kwargs):
+        self.calls += 1
+        if self.calls <= self.fail_count:
+            raise httpx.ReadError("connection reset")
+        return _FakeResponse()
+
+
+class BatchStoreRetryTests(unittest.IsolatedAsyncioTestCase):
+    """A dropped connection to the Application API must not crash the whole
+    segmentation run: every call through _request is idempotent by
+    construction (insert-or-read, or a checkpoint re-sync), so retrying a
+    transient network error is safe."""
+
+    def setUp(self):
+        self.sleeps: list[float] = []
+
+        async def _fake_sleep(delay):
+            self.sleeps.append(delay)
+
+        self._real_sleep = batch_store.asyncio.sleep
+        batch_store.asyncio.sleep = _fake_sleep
+
+    def tearDown(self):
+        batch_store.asyncio.sleep = self._real_sleep
+
+    async def test_a_transient_network_error_is_retried_not_fatal(self):
+        client = _FlakyClient(fail_count=2)
+        store = batch_store.SegmentationBatchStore("run-1", client=client)
+
+        response = await store._request("GET", "/segmentation-runs/run/run-1/segmentation")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(client.calls, 3)
+        self.assertEqual(len(self.sleeps), 2)
+
+    async def test_exhausting_retries_raises_the_transient_error(self):
+        store = batch_store.SegmentationBatchStore(
+            "run-1", client=_FlakyClient(fail_count=999)
+        )
+
+        with self.assertRaises(httpx.ReadError):
+            await store._request("GET", "/segmentation-runs/run/run-1/segmentation")

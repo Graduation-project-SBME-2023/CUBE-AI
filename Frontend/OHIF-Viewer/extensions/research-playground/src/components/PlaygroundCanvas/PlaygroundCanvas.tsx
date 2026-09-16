@@ -690,6 +690,34 @@ export default function PlaygroundCanvas({
         } catch (_) {
           // Keep the generic message when the server did not return JSON.
         }
+
+        // current runs each plan step exactly once (UNIQUE(agent_runs.step_id)), so
+        // a session whose steps have already started is *resumed*, not
+        // restarted — restarting would mean discarding committed results, which
+        // is what the legacy recovery did and what current removed. The backend says
+        // so with a 409; this follows that instruction instead of showing the
+        // user a dead end.
+        if (response.status === 409 && /resume/i.test(message)) {
+          try {
+            await resumeSessionPipeline(String(session_id));
+            restartRequestedRef.current = false;
+            setMode('executing');
+            modeRef.current = 'executing';
+            setIsPaused(false);
+            setHasStopped(false);
+            setRequiresRecoveryResume(false);
+            websocketService.dispatchLocal({
+              type: 'msg',
+              payload:
+                'Execution resumed from the first step that had not completed. Nothing already produced was discarded.',
+              session_id: session_id,
+            });
+            return;
+          } catch (resumeError) {
+            console.error('[PlaygroundCanvas] Resume after 409 failed:', resumeError);
+          }
+        }
+
         console.error('[PlaygroundCanvas] Execution request rejected:', response.status, message);
         websocketService.dispatchLocal({
           type: 'msg',

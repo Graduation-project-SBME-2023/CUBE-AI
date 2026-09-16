@@ -7,6 +7,7 @@ import logging
 import re
 import asyncio
 import copy
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Awaitable, Any, Optional, Tuple, List, Dict
@@ -191,8 +192,6 @@ class ClinicalPlanner:
         self.log_path = Path(log_file)
 
         self.workspace_dir = Path(workspace_dir)
-        self.state_path = workspace_subpath(self.workspace_dir, "state.json")
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
 
         # ── Model Client ────────────────────────────────────────────────
         if model_client is not None:
@@ -357,15 +356,6 @@ class ClinicalPlanner:
     # STATE PERSISTENCE
     # ══════════════════════════════════════════════════════════════════════
 
-    async def _save_state(self) -> None:
-        """Persist the current planner state to disk as JSON."""
-        os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
-        try:
-            async with aiofiles.open(self.state_path, "w", encoding="utf-8") as f:
-                await f.write(self.state.model_dump_json(indent=2))
-        except Exception as e:
-            self.logger.error("Save Error: %s", e)
-
     async def _load_state(self) -> None:
         """Load planner state from the database via the state store."""
         try:
@@ -503,8 +493,6 @@ class ClinicalPlanner:
             case {"message": str() as message}:
                 await self._send("msg", message)
 
-        await self._save_state()
-
     async def _process_pipeline_response(self, response_content: str) -> bool:
         """Parse pipeline plan JSON from the PipelineArchitect and update state/UI."""
         self.logger.info("[PipelineArchitect]: %s...", response_content[:100])
@@ -540,7 +528,6 @@ class ClinicalPlanner:
         if "steps" not in data and self.state.plan.steps:
             if data.get("message"):
                 await self._send("msg", data["message"])
-            await self._save_state()
             return True
 
         steps = data.get("steps")
@@ -634,7 +621,6 @@ class ClinicalPlanner:
         if "message" in data and data["message"]:
             await self._send("msg", data["message"])
 
-        await self._save_state()
         return bool(self.state.plan.steps)
 
     # ══════════════════════════════════════════════════════════════════════
@@ -701,7 +687,6 @@ class ClinicalPlanner:
         self.state.knowledge_base = knowledge_base
         self.state.sources_guide = sources_guide
         self.state.knowledge_sections = knowledge_sections
-        await self._save_state()
 
         return knowledge_base, sources_guide, papers, knowledge_sections
 
@@ -743,11 +728,13 @@ class ClinicalPlanner:
         sources_guide: str,
         generated_context: dict,
         papers: List[dict],
-    ) -> None:
+    ) -> Optional[str]:
         """Write the durable copy of this planning-phase review through the
         Application API (literature_reviews + literature_papers — V1-PLAN
         §2.7 items 27/28). The workspace copy under temp/literature/ is
-        disposable scratch re-derived from the same PICO on every run."""
+        disposable scratch re-derived from the same PICO on every run.
+        Returns the review id so the caller can attach the human-readable
+        report row (item 25 — `reports.literature_review_id`)."""
         review = await BackendClient.create_literature_review(
             session_id=str(self.session.session_id),
             review_key=json.dumps(pico, sort_keys=True),
@@ -760,7 +747,7 @@ class ClinicalPlanner:
         )
         review_id = review.get("literature_review_id") if review else None
         if not review_id or not papers:
-            return
+            return review_id
 
         def _year(raw: Any) -> Optional[int]:
             try:
@@ -794,6 +781,7 @@ class ClinicalPlanner:
             })
         if payload:
             await BackendClient.add_literature_papers(review_id, payload)
+        return review_id
 
     # ══════════════════════════════════════════════════════════════════════
     # RETRY LOGIC FOR LLM CALLS
@@ -929,19 +917,16 @@ class ClinicalPlanner:
                     # Update the in-memory history with auto-confirmation
                     chat_history.append({"role": "assistant", "content": "Hypothesis automatically confirmed."})
                     self.state.chat_history = chat_history
-                    await self._save_state()
                     break
                 else:
                     # Architect is asking clarifying questions (or parsing failed)
                     await self._process_hypothesis_response(content)
                     self.state.chat_history = chat_history
-                    await self._save_state()
                     # The loop continues to get user input
 
             # After confirmation, save the final history
             self.state.chat_history = chat_history
-            await self._save_state()
-            
+
             # Prepare the hypothesis dump for downstream phases
             hypothesis_dump = self.state.hypothesis.model_dump()
 
@@ -1028,8 +1013,9 @@ class ClinicalPlanner:
                     )
 
                     # Durable copy: literature_reviews + literature_papers
+                    review_id = None
                     try:
-                        await self._persist_literature_review(
+                        review_id = await self._persist_literature_review(
                             self._extract_pico_from_hypothesis(),
                             knowledge_base,
                             sources_guide,
@@ -1050,6 +1036,49 @@ class ClinicalPlanner:
                             report_md = report_path.read_text(encoding="utf-8")
                         except Exception:
                             pass
+
+                    # Human-readable report row (V1-PLAN item 25): the
+                    # planning-phase literature report hangs off the review,
+                    # never off an agent run. Published without a PDF.
+                    # `report_persisted` also gates the temp-dir cleanup below —
+                    # literature_report.md's content lives ONLY in this row (the
+                    # review's result_summary does not carry it), so a failed
+                    # write here must not be followed by deleting the one
+                    # remaining copy on disk.
+                    report_persisted = not report_md.strip()  # nothing to lose
+                    if review_id and report_md.strip():
+                        try:
+                            await BackendClient.create_report(
+                                session_id=str(self.session.session_id),
+                                source_text=report_md,
+                                literature_review_id=review_id,
+                                source_format="markdown",
+                                title=hypothesis_dump.get("title") or None,
+                            )
+                            report_persisted = True
+                        except Exception as e:
+                            self.logger.warning(
+                                "Failed to persist literature report row: %s",
+                                e,
+                            )
+
+                    # temp/literature/ is disposable scratch, re-derived from the
+                    # same PICO on every run (storage_paths.py) — everything in it
+                    # (context.json, ranked_papers.json, literature_report.md) has
+                    # already been read into memory above. Remove it only once
+                    # every durable copy that scratch fed is confirmed in
+                    # Postgres — the review AND the report row, not just the
+                    # review — so a partial failure never deletes the last copy
+                    # of something that isn't in the DB yet.
+                    if review_id and report_persisted:
+                        try:
+                            shutil.rmtree(lit_output_dir, ignore_errors=True)
+                        except Exception as e:
+                            self.logger.warning(
+                                "Failed to clean up literature scratch dir %s: %s",
+                                lit_output_dir,
+                                e,
+                            )
 
                     # ── Send Literature Output to Frontend ────────────
                     lit_payload: dict = {
@@ -1212,7 +1241,6 @@ class ClinicalPlanner:
                             {"reason": "task_compilation_failed"},
                         )
 
-                await self._save_state()
                 if pipeline_ready:
                     await self._send(
                         "planning_complete",

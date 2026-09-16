@@ -797,42 +797,21 @@ async def get_session_config(session_id: str):
 @app.get("/session/{session_id}/plan-state")
 async def get_plan_state(session_id: str):
     """
-    Get plan state, hypothesis, and task messages for a session.
-    Used when recovering a session from hypothesis history.
+    Get the session's hypothesis for recovery from history.
+
+    PostgreSQL is the source of truth (sessions.intent); there is no
+    workspace file to read. `task_messages` was never populated by any
+    writer and is kept in the response only for API-shape compatibility.
     """
-    workspace_folder = str(workspace(session_id))
+    hypothesis = await BackendClient.get_intent(session_id)
+    if hypothesis is None:
+        raise HTTPException(status_code=404, detail="Session not found")
 
-    if not os.path.exists(workspace_folder):
-        raise HTTPException(status_code=404, detail="Workspace not found")
-
-    state_file = str(workspace_subpath(workspace_folder, "state.json"))
-    result = {
+    return {
         "session_id": session_id,
-        "workspace_dir": workspace_folder,
-        "hypothesis": None,
+        "hypothesis": hypothesis.model_dump(),
         "task_messages": [],
     }
-
-    if os.path.exists(state_file):
-        try:
-            async with aiofiles.open(state_file, "r") as f:
-                content = await f.read()
-                if content.strip():
-                    state_data = json.loads(content)
-                    result["hypothesis"] = state_data.get("hypothesis")
-
-                    task_messages = state_data.get("task_messages", [])
-                    task_messages_json = state_data.get("task_messages_json", [])
-
-                    if task_messages_json:
-                        try:
-                            result["task_messages"] = json.loads(task_messages_json)
-                        except:
-                            result["task_messages"] = task_messages
-        except Exception as e:
-            logger.warning(f"Could not load plan state: {e}")
-
-    return result
 
 
 @app.get("/session/{session_id}/execution-state")

@@ -381,6 +381,7 @@ function ResearchPlaygroundInner() {
     // Load the persisted snapshot before mounting the canvas. This effect only
     // hydrates state; opening a session must never create an execution task.
     useEffect(() => {
+        let isMounted = true;
         const loadSessionState = async () => {
             if (!sessionId) return;
             try {
@@ -389,6 +390,9 @@ function ResearchPlaygroundInner() {
                     fetchSessionStatus(sessionKey),
                     fetchSessionExecutionState(sessionKey),
                 ]);
+
+                if (!isMounted) return;
+
                 setHydratedExecutionState(execData);
 
                 const agents = Array.isArray(execData?.agents) ? execData.agents : [];
@@ -420,6 +424,8 @@ function ResearchPlaygroundInner() {
                     statuses.length > 0 &&
                     !allDone &&
                     !executionActive;
+                
+                if (!isMounted) return;
                 setManualResumeRequired(requiresManualResume);
                 setRestoredPaused(requiresManualResume || liveState === 'PAUSED');
 
@@ -444,10 +450,13 @@ function ResearchPlaygroundInner() {
             } catch (err) {
                 console.error('[ResearchPlayground] Failed to hydrate session state:', err);
             } finally {
-                setRestoredModeReady(true);
+                if (isMounted) setRestoredModeReady(true);
             }
         };
         loadSessionState();
+        return () => {
+            isMounted = false;
+        };
     }, [sendInitialMessage, sessionId, showPhaseIndicator]);
 
   // Once we know the restored mode, sync isPlanApproved:
@@ -488,7 +497,19 @@ function ResearchPlaygroundInner() {
     const replay = async () => {
       websocketService.startReplayCapture();
       try {
-        await replaySessionLogs(sessionId);
+        // This effect runs once per fresh mount of the playground view — i.e.
+        // once per session entry, not once per socket reconnect. The
+        // websocket service is a page-lifetime singleton, so if this same
+        // session was already open earlier in this tab, its cursor/dedup
+        // state from that prior visit would otherwise suppress every event a
+        // brand-new set of component-local nodes/edges has never actually
+        // seen, leaving the canvas empty until a hard refresh reset the
+        // singleton. Reset that per-session bookkeeping before requesting a
+        // full replay so this mount always gets the complete session state.
+        if (typeof websocketService.resetSession === 'function') {
+          websocketService.resetSession(sessionId);
+        }
+        await replaySessionLogs(sessionId, 0);
         // Log history can contain older status broadcasts. Apply the current
         // persisted snapshot last so replay cannot roll the UI backwards.
         if (Array.isArray(hydratedExecutionState?.agents)) {

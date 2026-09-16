@@ -69,6 +69,11 @@ RADIOLOGY_STATE_DIR: Final[Path] = _resolve_configured_path(
 
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _STATE_FILES = {
+    # No writer maps to "state.json" any more (retired — see
+    # storage_write_guard.py's RETIRED_WORKSPACE_PATHS), but it stays mapped
+    # to state/state.json here so a future regression still resolves to the
+    # path the write guard blocks, rather than falling through to a new,
+    # unguarded top-level path.
     "state.json",
     "scratchpad.json",
     "config.json",
