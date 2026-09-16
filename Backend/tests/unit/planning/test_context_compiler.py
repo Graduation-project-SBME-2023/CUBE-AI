@@ -32,8 +32,10 @@ def _hypothesis() -> ClinicalHypothesis:
 
 
 def _plan() -> StudyPlan:
+    # removed `plans.study_goal`: the goal is the hypothesis title, derived
+    # at read time rather than stored as a second copy.
     return StudyPlan(
-        study_goal="Test a spleen radiomics classifier",
+        session_id="249b9571-f850-4b54-924f-73a19bbc4060",
         steps=[
             StudyStep(
                 id=f"step-{index}",

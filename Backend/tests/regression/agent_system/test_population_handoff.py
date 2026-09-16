@@ -1,10 +1,9 @@
-import json
+"""The population stage's durable completion contract."""
+
 import sys
-import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
-
+from unittest.mock import AsyncMock, patch
 
 BACKEND_DIR = Path(__file__).resolve().parents[3]
 AGENT_SYSTEM_DIR = BACKEND_DIR / "agent_system"
@@ -23,162 +22,228 @@ from services.population_handoff import (
     population_handoff_issues,
     require_population_handoff,
 )
-from storage_paths import workspace_subpath
+
+SESSION_ID = "11111111-1111-4111-8111-111111111111"
+RUN_ID = "22222222-2222-4222-8222-222222222222"
 
 
-def _write_ready_handoff(workspace: Path) -> None:
-    workspace_subpath(workspace, "populations/targets").mkdir(parents=True)
-    workspace_subpath(workspace, "outputs").mkdir(parents=True)
-    workspace_subpath(workspace, "config.json").parent.mkdir(parents=True, exist_ok=True)
-    workspace_subpath(workspace, "config.json").write_text(
-        json.dumps(
+def _ready_cohort(**overrides):
+    cohort = {
+        "cohort_id": "33333333-3333-4333-8333-333333333333",
+        "frozen_at": "2026-09-15T10:00:00+00:00",
+        "criteria": {"schema_version": 1, "labelling_mode": "automatic"},
+        "label_definition": {"schema_version": 1, "kind": "binary", "field": "has_target_disease"},
+        "selection_summary": {
+            "schema_version": 1,
+            "anatomy_validation": {"anatomy_validated": True},
+        },
+        "members": [
             {
-                "anatomy_validated": True,
-                "cohort_approved": True,
-                "datasetlist": ["volume-1"],
+                "volume_series_instance_uid": "volume-1",
+                "subject_key": "patient-1",
+                "ordinal": 1,
+                "label": {"has_target_disease": True},
+                "label_source": "manual_override",
             }
-        ),
-        encoding="utf-8",
-    )
-    workspace_subpath(workspace, "populations/targets/targets.csv").write_text(
-        "id,name,target\nvolume-1,patient-1,1\n",
-        encoding="utf-8",
-    )
-    workspace_subpath(workspace, "scratchpad.json").write_text(
-        json.dumps(
-            {
-                "agents": {
-                    POPULATION_AGENT_ID: {
-                        "status": "done",
-                        "summary": {"content": "Doctor approved one labeled volume."},
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    workspace_subpath(workspace, f"outputs/{POPULATION_AGENT_ID}_output.json").write_text(
-        json.dumps({"agent_id": POPULATION_AGENT_ID, "status": "completed"}),
-        encoding="utf-8",
-    )
+        ],
+    }
+    cohort.update(overrides)
+    return cohort
 
 
-class PopulationHandoffContractTests(unittest.TestCase):
-    def test_rejects_candidate_only_config_from_failed_run(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = Path(temp_dir)
-            workspace_subpath(workspace, "config.json").parent.mkdir(parents=True)
-            workspace_subpath(workspace, "config.json").write_text(
-                json.dumps(
-                    {
-                        "candidate_datasetlist": ["candidate-uid"],
-                        "anatomy_validated": False,
+def _ready_run(**overrides):
+    run = {
+        "agent_run_id": RUN_ID,
+        "status": "running",
+        "durable_notes": {"status": "done", "role": "population"},
+        "output_summary": {
+            "scratchpad_summary": {"content": "Doctor approved one labeled volume."},
+            "agent_output": {"status": "completed", "agent_role": "population"},
+        },
+    }
+    run.update(overrides)
+    return run
+
+
+def _fetchers(cohort=None, run=None):
+    return {
+        "fetch_cohort": AsyncMock(return_value=cohort),
+        "fetch_run": AsyncMock(return_value=run),
+    }
+
+
+class PopulationHandoffContractTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_complete_handoff_has_no_issues(self):
+        issues = await population_handoff_issues(
+            SESSION_ID, RUN_ID, **_fetchers(_ready_cohort(), _ready_run())
+        )
+        self.assertEqual(issues, [])
+        await require_population_handoff(
+            SESSION_ID, RUN_ID, **_fetchers(_ready_cohort(), _ready_run())
+        )
+
+    async def test_every_missing_record_is_reported(self):
+        cases = {
+            "the population cohort has not been recorded": (None, _ready_run()),
+            "validate_population_anatomy has not completed": (
+                _ready_cohort(selection_summary={"schema_version": 1}),
+                _ready_run(),
+            ),
+            "validated cohort is empty": (_ready_cohort(members=[]), _ready_run()),
+            "doctor cohort approval has not completed": (
+                _ready_cohort(frozen_at=None),
+                _ready_run(),
+            ),
+            "population scratchpad status is not done": (
+                _ready_cohort(),
+                _ready_run(durable_notes={"status": "in_progress"}),
+            ),
+            "population scratchpad summary is missing": (
+                _ready_cohort(),
+                _ready_run(output_summary={"agent_output": {"status": "completed"}}),
+            ),
+            "population structured output status is not completed": (
+                _ready_cohort(),
+                _ready_run(
+                    output_summary={
+                        "scratchpad_summary": {"content": "done"},
+                        "agent_output": {"status": "partial"},
                     }
                 ),
-                encoding="utf-8",
-            )
-
-            issues = population_handoff_issues(workspace)
-
-            self.assertTrue(any("validate_population_anatomy" in issue for issue in issues))
-            self.assertTrue(any("validated datasetlist" in issue for issue in issues))
-            self.assertTrue(any("generate_targets" in issue for issue in issues))
-            with self.assertRaisesRegex(RuntimeError, "Population handoff is incomplete"):
-                require_population_handoff(workspace)
-
-    def test_rejects_approved_but_empty_cohort(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = Path(temp_dir)
-            _write_ready_handoff(workspace)
-            config_path = workspace_subpath(workspace, "config.json")
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-            config["datasetlist"] = []
-            config_path.write_text(json.dumps(config), encoding="utf-8")
-            workspace_subpath(workspace, "populations/targets/targets.csv").write_text(
-                "id,name,target\n",
-                encoding="utf-8",
-            )
-
-            issues = population_handoff_issues(workspace)
-
-            self.assertTrue(any("datasetlist is empty" in issue for issue in issues))
-            self.assertTrue(any("no cohort rows" in issue for issue in issues))
-
-    def test_accepts_nonempty_doctor_approved_cohort(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = Path(temp_dir)
-            _write_ready_handoff(workspace)
-
-            self.assertEqual(population_handoff_issues(workspace), [])
-            require_population_handoff(workspace)
-
-
-class PopulationAgentRetryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_incomplete_final_response_is_suppressed_and_retried(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = Path(temp_dir)
-            workspace_subpath(workspace, "config.json").parent.mkdir(parents=True)
-            workspace_subpath(workspace, "config.json").write_text(
-                json.dumps({"candidate_datasetlist": ["candidate-uid"]}),
-                encoding="utf-8",
-            )
-            calls = []
-
-            async def fake_parent_stream(_agent, messages, _token):
-                calls.append(messages)
-                if len(calls) == 2:
-                    _write_ready_handoff(workspace)
-                yield Response(
-                    chat_message=TextMessage(
-                        source=POPULATION_AGENT_ID,
-                        content="" if len(calls) == 1 else "Population complete",
-                    )
+            ),
+        }
+        for expected, (cohort, run) in cases.items():
+            with self.subTest(expected):
+                issues = await population_handoff_issues(
+                    SESSION_ID, RUN_ID, **_fetchers(cohort, run)
                 )
-
-            agent = PopulationPlannerAgent.__new__(PopulationPlannerAgent)
-            agent._workspace_folder = str(workspace)
-            agent._population_completion_retries = 2
-
-            with patch.object(AssistantAgent, "on_messages_stream", fake_parent_stream):
-                events = [
-                    event
-                    async for event in agent.on_messages_stream(
-                        [TextMessage(source="user", content="Run population selection")],
-                        CancellationToken(),
+                self.assertTrue(
+                    any(expected in issue for issue in issues),
+                    f"{expected!r} not in {issues}",
+                )
+                with self.assertRaises(RuntimeError):
+                    await require_population_handoff(
+                        SESSION_ID, RUN_ID, **_fetchers(cohort, run)
                     )
-                ]
 
-            self.assertEqual(len(calls), 2)
-            self.assertEqual(len(events), 1)
-            self.assertIsInstance(events[0], Response)
-            self.assertEqual(events[0].chat_message.content, "Population complete")
-            self.assertIn("validate_population_anatomy", calls[1][0].content)
-            self.assertIn("at least one volume", calls[1][0].content)
+    async def test_an_approved_cohort_with_no_labelled_volume_is_not_a_handoff(self):
+        cohort = _ready_cohort(
+            members=[
+                {
+                    "volume_series_instance_uid": "volume-1",
+                    "subject_key": "patient-1",
+                    "ordinal": 1,
+                    "label": None,
+                    "label_source": "pending",
+                }
+            ]
+        )
+        issues = await population_handoff_issues(
+            SESSION_ID, RUN_ID, **_fetchers(cohort, _ready_run())
+        )
+        self.assertIn("the approved cohort has no labelled volume", issues)
+
+    async def test_a_step_with_no_run_can_verify_nothing(self):
+        issues = await population_handoff_issues(
+            SESSION_ID, None, **_fetchers(_ready_cohort(), _ready_run())
+        )
+        self.assertEqual(issues, ["the population step has no agent run; nothing can be verified"])
+
+
+class PopulationPlannerCompletionTests(unittest.IsolatedAsyncioTestCase):
+    """The planner may not finish before its handoff is durable."""
+
+    async def test_incomplete_final_response_is_suppressed_and_retried(self):
+        calls = []
+        state = {"complete": False}
+
+        async def fake_parent_stream(_agent, messages, _token):
+            calls.append(messages)
+            if len(calls) == 2:
+                state["complete"] = True
+            yield Response(
+                chat_message=TextMessage(
+                    source=POPULATION_AGENT_ID,
+                    content="" if len(calls) == 1 else "Population complete",
+                )
+            )
+
+        async def fake_issues(session_id, agent_run_id, **kwargs):
+            assert (session_id, agent_run_id) == (SESSION_ID, RUN_ID)
+            return [] if state["complete"] else ["doctor cohort approval has not completed"]
+
+        agent = PopulationPlannerAgent.__new__(PopulationPlannerAgent)
+        agent._workspace_folder = "/workspace"
+        agent._session_id = SESSION_ID
+        agent._agent_run_id = RUN_ID
+        agent._population_completion_retries = 2
+
+        with patch.object(AssistantAgent, "on_messages_stream", fake_parent_stream), patch(
+            "agents.execution_agents.population_agent.population_handoff_issues", fake_issues
+        ):
+            events = [
+                event
+                async for event in agent.on_messages_stream(
+                    [TextMessage(source="user", content="Run population selection")],
+                    CancellationToken(),
+                )
+            ]
+
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].chat_message.content, "Population complete")
+        self.assertIn("validate_population_anatomy", calls[1][0].content)
+        self.assertIn("at least one volume", calls[1][0].content)
 
     async def test_repeated_incomplete_responses_fail_before_graph_handoff(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            calls = 0
+        calls = 0
 
-            async def fake_parent_stream(_agent, _messages, _token):
-                nonlocal calls
-                calls += 1
-                yield Response(
-                    chat_message=TextMessage(source=POPULATION_AGENT_ID, content="")
-                )
+        async def fake_parent_stream(_agent, _messages, _token):
+            nonlocal calls
+            calls += 1
+            yield Response(chat_message=TextMessage(source=POPULATION_AGENT_ID, content=""))
 
-            agent = PopulationPlannerAgent.__new__(PopulationPlannerAgent)
-            agent._workspace_folder = temp_dir
-            agent._population_completion_retries = 1
+        async def always_incomplete(session_id, agent_run_id, **kwargs):
+            return ["doctor cohort approval has not completed"]
 
-            with patch.object(AssistantAgent, "on_messages_stream", fake_parent_stream):
-                with self.assertRaisesRegex(RuntimeError, "mandatory handoff"):
-                    async for _event in agent.on_messages_stream(
-                        [TextMessage(source="user", content="Run population selection")],
-                        CancellationToken(),
-                    ):
-                        pass
+        agent = PopulationPlannerAgent.__new__(PopulationPlannerAgent)
+        agent._workspace_folder = "/workspace"
+        agent._session_id = SESSION_ID
+        agent._agent_run_id = RUN_ID
+        agent._population_completion_retries = 1
 
-            self.assertEqual(calls, 2)
+        with patch.object(AssistantAgent, "on_messages_stream", fake_parent_stream), patch(
+            "agents.execution_agents.population_agent.population_handoff_issues",
+            always_incomplete,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "mandatory"):
+                async for _event in agent.on_messages_stream(
+                    [TextMessage(source="user", content="Run population selection")],
+                    CancellationToken(),
+                ):
+                    pass
+
+        self.assertEqual(calls, 2)
+
+    async def test_a_planner_with_no_session_is_the_local_harness_only(self):
+        """Production always binds a session; the legacy local entrypoint has
+        no durable records to check and must stay usable."""
+
+        async def fake_parent_stream(_agent, _messages, _token):
+            yield Response(chat_message=TextMessage(source=POPULATION_AGENT_ID, content="ok"))
+
+        agent = PopulationPlannerAgent.__new__(PopulationPlannerAgent)
+        agent._workspace_folder = None
+        agent._session_id = None
+        agent._agent_run_id = None
+        agent._population_completion_retries = 0
+
+        with patch.object(AssistantAgent, "on_messages_stream", fake_parent_stream):
+            events = [
+                event
+                async for event in agent.on_messages_stream([], CancellationToken())
+            ]
+        self.assertEqual(len(events), 1)
 
 
 if __name__ == "__main__":

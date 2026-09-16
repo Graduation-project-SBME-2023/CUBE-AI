@@ -20,6 +20,7 @@ from agents.planning_agents.planner import (
 )
 from models.plans import PlannerState, StudyPlan, StudyStep
 from models.session import Session
+from services import session_service as session_service_module
 from services.session_service import SessionExecutionConflict, SessionService
 
 
@@ -113,48 +114,114 @@ class PipelineRevisionFallbackTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ExecutionPlanGuardTests(unittest.IsolatedAsyncioTestCase):
-    async def test_rejects_session_without_plan(self):
+    """What may start a run, now that runs are rows."""
+
+    SESSION_ID = "33333333-3333-4333-8333-333333333333"
+
+    def _service(self, runs=None, approve=None):
         service = SessionService(_NoopWebSocketManager())
-        service.store.put(Session(session_id="missing-plan"))
+        service.tasks.start_execution = AsyncMock()
+        session_service_module.BackendClient.get_agent_runs = AsyncMock(
+            return_value=runs or []
+        )
+        session_service_module.BackendClient.approve_plan = AsyncMock(
+            return_value=approve
+        )
+        return service
 
-        with self.assertRaisesRegex(
-            SessionExecutionConflict,
-            "no confirmed executable pipeline plan",
-        ):
-            await service.start_execution("missing-plan", self._executor)
-
-    async def test_rejects_empty_confirmed_plan(self):
-        service = SessionService(_NoopWebSocketManager())
-        session = Session(session_id="empty-plan")
-        session.plan = StudyPlan(state="confirmed", steps=[])
-        service.store.put(session)
-
-        with self.assertRaisesRegex(
-            SessionExecutionConflict,
-            "no confirmed executable pipeline plan",
-        ):
-            await service.start_execution("empty-plan", self._executor)
-
-    async def test_rejects_unconfirmed_plan(self):
-        service = SessionService(_NoopWebSocketManager())
-        session = Session(session_id="draft-plan")
+    def _session(self, steps=None):
+        session = Session(session_id=self.SESSION_ID)
         session.plan = StudyPlan(
-            state="not_confirmed",
-            steps=[
+            session_id=self.SESSION_ID,
+            steps=steps
+            if steps is not None
+            else [
                 StudyStep(
                     title="Cohort",
                     description="Select the study cohort",
                     module="study_population_planner_agent",
+                    id="step-1",
+                    step_order=1,
                 )
             ],
         )
+        return session
+
+    @staticmethod
+    def _run(step_order, status, step_id=None):
+        return {
+            "agent_run_id": f"run-{step_order}",
+            "step_id": step_id or f"step-{step_order}",
+            "session_id": ExecutionPlanGuardTests.SESSION_ID,
+            "status": status,
+            "step": {
+                "step_id": step_id or f"step-{step_order}",
+                "step_order": step_order,
+                "agent_type": "study_population_planner_agent",
+                "title": "Cohort",
+                "instructions": {},
+            },
+        }
+
+    async def test_rejects_session_without_plan(self):
+        service = self._service()
+        service.store.put(Session(session_id=self.SESSION_ID))
+
+        with self.assertRaisesRegex(SessionExecutionConflict, "no plan to execute"):
+            await service.start_execution(self.SESSION_ID, self._executor)
+
+    async def test_rejects_plan_with_no_steps(self):
+        service = self._service()
+        service.store.put(self._session(steps=[]))
+
+        with self.assertRaisesRegex(SessionExecutionConflict, "no plan to execute"):
+            await service.start_execution(self.SESSION_ID, self._executor)
+
+    async def test_a_refused_approval_does_not_execute(self):
+        service = self._service(runs=[], approve=None)
+        service.store.put(self._session())
+
+        with self.assertRaisesRegex(SessionExecutionConflict, "could not be approved"):
+            await service.start_execution(self.SESSION_ID, self._executor)
+        service.tasks.start_execution.assert_not_awaited()
+
+    async def test_a_draft_plan_is_approved_and_then_executed(self):
+        service = SessionService(_NoopWebSocketManager())
+        service.tasks.start_execution = AsyncMock()
+        session = self._session()
         service.store.put(session)
 
-        with self.assertRaisesRegex(
-            SessionExecutionConflict,
-            "no confirmed executable pipeline plan",
-        ):
-            await service.start_execution("draft-plan", self._executor)
+        approved = StudyPlan(
+            session_id=self.SESSION_ID, steps=session.plan.steps, state="confirmed"
+        )
+        session_service_module.BackendClient.approve_plan = AsyncMock(
+            return_value=approved
+        )
+        # No runs before approval, one pending after.
+        session_service_module.BackendClient.get_agent_runs = AsyncMock(
+            side_effect=[[], [self._run(1, "pending")]]
+        )
+
+        await service.start_execution(self.SESSION_ID, self._executor)
+
+        session_service_module.BackendClient.approve_plan.assert_awaited_once()
+        service.tasks.start_execution.assert_awaited_once()
+        self.assertIsNone(session.resume_from_step_id)
+
+    async def test_a_completed_session_cannot_run_again(self):
+        service = self._service(runs=[self._run(1, "completed")])
+        service.store.put(self._session())
+
+        with self.assertRaisesRegex(SessionExecutionConflict, "requires a new session"):
+            await service.start_execution(self.SESSION_ID, self._executor)
+
+    async def test_an_interrupted_session_must_be_resumed_not_restarted(self):
+        service = self._service(runs=[self._run(1, "running")])
+        service.store.put(self._session())
+
+        with self.assertRaisesRegex(SessionExecutionConflict, "Resume it"):
+            await service.start_execution(self.SESSION_ID, self._executor)
+        service.tasks.start_execution.assert_not_awaited()
 
     @staticmethod
     async def _executor(_session):
