@@ -22,7 +22,7 @@ class WorkspacePathMappingTests(unittest.TestCase):
                 "volumes/series.nii.gz": workspace / "data" / "volumes" / "series.nii.gz",
                 "masks/mask.nii.gz": workspace / "data" / "masks" / "mask.nii.gz",
                 "outputs/agent_output.json": workspace / "outputs" / "agents" / "agent_output.json",
-                "literature_review_output/context.json": workspace / "outputs" / "literature" / "context.json",
+                "literature_review_output/context.json": workspace / "temp" / "literature" / "context.json",
                 "overlays/mask.gif": workspace / "outputs" / "overlays" / "mask.gif",
                 "features/features.csv": workspace / "outputs" / "features" / "features.csv",
                 "modeling/model.pkl": workspace / "outputs" / "modeling" / "model.pkl",

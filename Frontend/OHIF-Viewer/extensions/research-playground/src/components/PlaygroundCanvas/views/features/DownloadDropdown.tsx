@@ -1,11 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Download, ChevronDown, FileSpreadsheet } from 'lucide-react';
+import { BACKEND_API } from '../../../../config';
+import { ExportPaths } from './types';
 
 interface DownloadDropdownProps {
-  csvPaths?: Record<string, string>;
+  /** Application API paths; each download is generated from the database. */
+  exports?: ExportPaths;
 }
 
-export default function DownloadDropdown({ csvPaths }: DownloadDropdownProps) {
+function exportUrl(path: string): string {
+  return `${BACKEND_API.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+export default function DownloadDropdown({ exports }: DownloadDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -19,19 +26,27 @@ export default function DownloadDropdown({ csvPaths }: DownloadDropdownProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  if (!csvPaths || Object.keys(csvPaths).length === 0) return null;
+  if (!exports || Object.keys(exports).length === 0) {
+    return null;
+  }
 
-  const entries = Object.entries(csvPaths);
+  const entries = Object.entries(exports);
 
   return (
-    <div className="relative z-50" ref={dropdownRef}>
+    <div
+      className="relative z-50"
+      ref={dropdownRef}
+    >
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 rounded-lg border border-[#1f2d40] bg-[#0b1015] px-3 py-1.5 text-[11px] font-medium text-[#5acce6] transition-colors hover:bg-[#151a1f]"
       >
         <Download size={12} />
         Export Data
-        <ChevronDown size={12} className={`transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+        <ChevronDown
+          size={12}
+          className={`transition-transform ${isOpen ? 'rotate-180' : ''}`}
+        />
       </button>
 
       {isOpen && (
@@ -43,15 +58,18 @@ export default function DownloadDropdown({ csvPaths }: DownloadDropdownProps) {
             {entries.map(([label, path]) => (
               <a
                 key={label}
-                href={`/api/workspace/file?path=${encodeURIComponent(path)}`}
+                href={exportUrl(path)}
                 download
                 onClick={() => setIsOpen(false)}
                 className="flex items-start gap-2 rounded-lg p-2 transition-colors hover:bg-[#151a1f]"
               >
-                <FileSpreadsheet size={14} className="mt-0.5 shrink-0 text-[#6fe5b8]" />
-                <div className="flex flex-col min-w-0">
+                <FileSpreadsheet
+                  size={14}
+                  className="mt-0.5 shrink-0 text-[#6fe5b8]"
+                />
+                <div className="flex min-w-0 flex-col">
                   <span className="truncate text-[11px] font-medium text-[#91b9cd]">{label}</span>
-                  <span className="truncate font-mono text-[9px] text-[#3c5d80]">{path.split(/[/\\]/).pop()}</span>
+                  <span className="truncate font-mono text-[9px] text-[#3c5d80]">CSV export</span>
                 </div>
               </a>
             ))}

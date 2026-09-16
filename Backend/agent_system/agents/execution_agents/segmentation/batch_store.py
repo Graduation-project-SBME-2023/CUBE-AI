@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -13,6 +14,19 @@ logger = logging.getLogger(__name__)
 
 BATCH_KEY = "segmentation"
 CONFIG_SCHEMA_VERSION = 1
+
+# Every call this store makes is idempotent by construction (insert-or-read
+# by natural key, or a checkpoint sync that just re-asserts the same pair
+# state), so a transient connection drop is safe to retry rather than
+# crashing the whole segmentation run — see the identical convention in
+# services.py for MONAI calls.
+_TRANSIENT_NETWORK_ERRORS = (
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.TimeoutException,
+    httpx.RemoteProtocolError,
+)
+_RETRY_DELAYS_SECONDS = (0.5, 2.0)
 
 _PAIR_STATUS = {
     "pending": "pending",
@@ -148,12 +162,25 @@ class SegmentationBatchStore:
         self._client = client
 
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        if self._client is not None:
-            return await self._client.request(
-                method, f"{_app_api_base_url()}{path}", timeout=CONTROL_HTTP_TIMEOUT, **kwargs
-            )
-        async with httpx.AsyncClient(timeout=CONTROL_HTTP_TIMEOUT) as client:
-            return await client.request(method, f"{_app_api_base_url()}{path}", **kwargs)
+        url = f"{_app_api_base_url()}{path}"
+        for attempt, delay in enumerate((*_RETRY_DELAYS_SECONDS, None)):
+            try:
+                if self._client is not None:
+                    return await self._client.request(
+                        method, url, timeout=CONTROL_HTTP_TIMEOUT, **kwargs
+                    )
+                async with httpx.AsyncClient(timeout=CONTROL_HTTP_TIMEOUT) as client:
+                    return await client.request(method, url, **kwargs)
+            except _TRANSIENT_NETWORK_ERRORS as exc:
+                if delay is None:
+                    raise
+                logger.warning(
+                    "Segmentation checkpoint %s %s hit a transient network error "
+                    "(attempt %d): %s. Retrying in %.1fs.",
+                    method, path, attempt + 1, exc, delay,
+                )
+                await asyncio.sleep(delay)
+        raise AssertionError("unreachable")  # loop always returns or raises
 
     async def load(self) -> dict[str, Any] | None:
         response = await self._request(

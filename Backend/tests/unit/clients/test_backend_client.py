@@ -1,6 +1,7 @@
 import unittest
 
 from clients.backend_client import BackendClient
+from unittest import IsolatedAsyncioTestCase
 
 
 class BackendClientIntentTests(unittest.TestCase):
@@ -100,6 +101,23 @@ class BackendClientBoundaryTests(unittest.TestCase):
             ),
             "249b9571-f850-4b54-924f-73a19bbc4060",
         )
+
+
+class BackendClientReportTests(IsolatedAsyncioTestCase):
+    """`create_report` is the literature-review report row this session's
+    fix wires up (V1-PLAN item 25) — a report keyed by its literature review
+    rather than by an agent run."""
+
+    async def test_create_report_rejects_non_uuid_session_id(self):
+        """The same fail-loud boundary as every other write: a bad session
+        id must never silently become a local phantom write."""
+        with self.assertRaises(ValueError):
+            await BackendClient.create_report(
+                session_id="local-1234",
+                source_text="# Literature Review",
+                literature_review_id="249b9571-f850-4b54-924f-73a19bbc4060",
+                source_format="markdown",
+            )
 
 
 if __name__ == "__main__":

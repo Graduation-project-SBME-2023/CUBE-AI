@@ -9,12 +9,17 @@ import httpx
 from pydantic import Field
 
 from .. import mcp
+from service_urls import APP_API_URL
 from tool_logging import TextPayload, ToolEvent, log_tool_state
 
 
 def _api_base() -> str:
-    """Application API base URL from environment (injected by the runner)."""
-    return os.environ.get("APPLICATION_API_URL", "http://localhost:8000").rstrip("/")
+    """Application API base URL — the same resolution every other MCP tool
+    uses (service_urls.APP_API_URL). This used to read a nonexistent
+    APPLICATION_API_URL env var and default to :8000 (MONAI Label's port,
+    not the Application API's 8001), so it never reached a real service in
+    any Docker deployment — every call failed with a connection error."""
+    return APP_API_URL
 
 
 @mcp.tool()

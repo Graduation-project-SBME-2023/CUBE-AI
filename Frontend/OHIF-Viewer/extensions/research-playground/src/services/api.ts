@@ -39,9 +39,30 @@ export async function resumeSessionPipeline(sessionId: string) {
   return res.json();
 }
 
-export async function replaySessionLogs(sessionId: string) {
-  const res = await fetch(`${API_BASE}/session/${sessionId}/replay-logs`);
+/**
+ * Replay a session's events from a cursor.
+ *
+ * `afterEventId` is the last `ws_log.event_id` this client actually received,
+ * which the websocket service tracks. Replaying from 0 re-delivers the whole
+ * session; replaying from the cursor delivers only what was missed.
+ */
+export async function replaySessionLogs(sessionId: string, afterEventId = 0) {
+  const query = afterEventId > 0 ? `?after_event_id=${afterEventId}` : '';
+  const res = await fetch(`${API_BASE}/session/${sessionId}/replay-logs${query}`);
   return res.ok;
+}
+
+/**
+ * Per-step execution status, read from `agent_runs`.
+ *
+ * This is the durable record: it is the same in a fresh process as in the one
+ * that ran the pipeline, which is what makes a reconnect or a restart able to
+ * show real progress instead of assuming none.
+ */
+export async function fetchAgentRunStatus(sessionId: string) {
+  const res = await fetch(`${BACKEND_API}/agent-runs/session/${sessionId}/status`);
+  if (!res.ok) return null;
+  return res.json();
 }
 
 export async function compileLatexReport(

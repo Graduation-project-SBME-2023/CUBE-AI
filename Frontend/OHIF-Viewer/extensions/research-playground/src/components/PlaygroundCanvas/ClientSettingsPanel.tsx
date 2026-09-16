@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import config from '../../config';
 import { Settings, X, Save, RefreshCw, Eye, EyeOff } from 'lucide-react';
+import { fetchClientConfig, invalidateClientConfig } from '../../utils/clientConfigStore';
 
 const SettingsIcon: any = Settings;
 const XIcon: any = X;
@@ -61,13 +62,11 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
     const [isTesting, setIsTesting] = useState(false);
     const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
-    // Load current config on mount
-    const loadConfig = useCallback(async () => {
+    // Load current config, reusing the shared cache so opening this panel
+    // right after the dashboard's own status check doesn't re-fetch.
+    const loadConfig = useCallback(async (options: { force?: boolean } = {}) => {
         try {
-            const res = await fetch(`${API_BASE}/client-config`);
-            if (!res.ok) return;
-            const resData = await res.json();
-            const data = resData.config || resData; // Support both old and new format temporarily if needed
+            const data = await fetchClientConfig(options);
             setForm({
                 provider: data.provider || 'ollama',
                 model: data.model || '',
@@ -139,6 +138,7 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             const config = data.config || data;
+            invalidateClientConfig();
             setStatus({ ok: true, msg: `Saved: ${config.provider} / ${config.model}` });
             setDirtyFields(new Set());
         } catch (e: any) {
@@ -293,7 +293,7 @@ export default function ClientSettingsPanel({ isOpen, onClose }: ClientSettingsP
                         {!status && <span />}
                         <div className="flex gap-2">
                             <button
-                                onClick={loadConfig}
+                                onClick={() => loadConfig({ force: true })}
                                 className="px-3 py-1.5 bg-[#151a1f] text-gray-400 border border-[#3c5d80]/40 rounded-lg text-xs hover:text-white transition-colors flex items-center gap-1.5"
                             >
                                 <RefreshCwIcon size={12} /> Reset

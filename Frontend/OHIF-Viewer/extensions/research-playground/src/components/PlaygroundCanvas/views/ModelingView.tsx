@@ -34,15 +34,32 @@ interface ChartData {
     fold: number;
 }
 
+export interface ModelResultSummary {
+    model_result_id: string;
+    variant_key: string;
+    algorithm: string;
+    status: string;
+    selected: boolean;
+    model_file_name?: string | null;
+    predictions_artifact_id?: string | null;
+}
+
 export interface ModelingData {
     status: string;
     experiment_name?: string;
-    output_dir?: string;
+    /** The recorded comparison (model_results rows), not a results folder. */
+    comparison_key?: string;
+    feature_set_id?: string | null;
+    selected_variant?: string | null;
+    model_results?: ModelResultSummary[];
     final_model_path?: string;
     individual_model_paths?: Record<string, string>;
-    model_test_predictions?: string;
-    model_summary?: string;
-    created_files?: string[] | null;
+    /** Variant key → predictions artifact id. */
+    model_test_predictions?: Record<string, string>;
+    /** Application API download paths, relative to BACKEND_API. */
+    exports?: Record<string, string>;
+    selection_holdout_used?: boolean;
+    generalisation_estimate?: boolean;
     chart_data?: ChartData | null;
 }
 

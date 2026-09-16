@@ -18,6 +18,7 @@ import {
   getUpdatedViewportsForSegmentation,
   getTargetViewport,
 } from './utils/hydrationUtils';
+import { declareAssistedSegmentationOrigin } from './utils/declareSegmentationOrigin';
 
 const { datasetToBlob } = dcmjs.data;
 
@@ -407,6 +408,14 @@ const commandsModule = ({
       const { dataset: naturalizedReport } = generatedData;
       console.log("generatedData for naturalizedReport", naturalizedReport);
       await dataSource.store.dicom(naturalizedReport);
+      // The Orthanc sync cannot tell this mask apart from a pipeline mask —
+      // both emit the same SeriesDescription format — so declare the origin
+      // explicitly. Without this the row stays `imported` and is never
+      // offered back as reusable inventory.
+      await declareAssistedSegmentationOrigin(naturalizedReport, {
+        modelName: typeof isModel === 'string' ? isModel : undefined,
+        seriesDescription: SeriesDescription,
+      });
       // Add the information for where we stored it to the instance as well
       naturalizedReport.wadoRoot = dataSource.getConfig().wadoRoot;
       DicomMetadataStore.addInstances([naturalizedReport], true);

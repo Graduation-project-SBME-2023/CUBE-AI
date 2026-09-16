@@ -147,6 +147,24 @@ async def analysis_rows(db: AsyncSession, cohort_id: UUID) -> list[dict[str, Any
     return _analysis_rows(await get_cohort(db, cohort_id))
 
 
+def _label_conflict(rows: list[dict[str, Any]]) -> str | None:
+    """The first `subject_key` labelled with more than one distinct target, if
+    any. `subject_key` is the patient-level split group — two series of one
+    patient must never straddle a train/holdout boundary (`set_members`),
+    which also means one patient can never legitimately carry two different
+    outcomes. `feature_set_builder._subject_targets` rejects this same
+    conflict, but only after segmentation and radiomics extraction have
+    already run for the whole cohort; catching it here, at approval, fails
+    fast instead of burning that compute on a cohort that cannot freeze."""
+    targets: dict[str, Any] = {}
+    for row in sorted(rows, key=lambda item: item["ordinal"]):
+        key = row["subject_key"]
+        if key in targets and targets[key] != row["target"]:
+            return key
+        targets[key] = row["target"]
+    return None
+
+
 def analysis_rows_csv(rows: list[dict[str, Any]]) -> str:
     """A generated export for tools that consume a CSV. Never written to disk
     by the API and never authoritative."""
@@ -349,7 +367,8 @@ async def freeze_cohort(db: AsyncSession, cohort_id: UUID) -> tuple[Cohort, Any]
     run = await runs_repo.get_run(db, cohort.created_by_agent_run_id)
     session_id = run.session_id
     total = len(cohort.members)
-    labeled = len(_analysis_rows(cohort))
+    rows = _analysis_rows(cohort)
+    labeled = len(rows)
     if total == 0:
         raise await _abort(
             db,
@@ -369,6 +388,20 @@ async def freeze_cohort(db: AsyncSession, cohort_id: UUID) -> tuple[Cohort, Any]
                 detail=(
                     "Cannot approve: no volumes have valid labels. Please label at least "
                     "one volume in the Patient Labeling tab."
+                ),
+            ),
+        )
+    conflict = _label_conflict(rows)
+    if conflict is not None:
+        raise await _abort(
+            db,
+            HTTPException(
+                status_code=422,
+                detail=(
+                    f"Cannot approve: subject {conflict!r} has members labelled with "
+                    "different outcomes. One patient cannot belong to both classes — "
+                    "correct the conflicting label(s) in the Patient Labeling tab before "
+                    "approving this cohort."
                 ),
             ),
         )

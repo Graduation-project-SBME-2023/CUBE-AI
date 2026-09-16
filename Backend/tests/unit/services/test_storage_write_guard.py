@@ -37,6 +37,7 @@ def test_a_retired_path_is_recognised_with_the_table_that_replaced_it():
         "review_draft.json",
         "review_result.json",
         "scratchpad.json",
+        "state.json",
         "outputs/segmentation_agent_output.json",
         "temp_segmentations/segmentation_manifest.json.tmp",
     ],
@@ -53,7 +54,6 @@ def test_writing_a_retired_workspace_file_raises(logical):
         "volumes/volume-1.nii.gz",
         "masks/key.nii.gz",
         "overlays/key.gif",
-        "state.json",
         # NOTE: "reports/report.tex" was here before step K was implemented.
         # It is now retired by K (outputs/reports/*.tex → reports.source_text).
         # The K-specific test_write_guard_k.py verifies it raises correctly.

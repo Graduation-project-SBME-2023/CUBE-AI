@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Bot, Box, Clock, List, Search, Trash2, Settings,
 import { useNavigate } from 'react-router-dom';
 import Card from '../ui/Card';
 import { getBackendApiBaseUrl, getAgentsApiBaseUrl } from '../../utils/apiBase';
+import { fetchClientConfig, invalidateClientConfig } from '../../utils/clientConfigStore';
 import ClientSettingsPanel from '../PlaygroundCanvas/ClientSettingsPanel';
 
 const EXAMPLE_HYPOTHESES = [
@@ -23,6 +24,19 @@ const EXAMPLE_HYPOTHESES = [
 const RECENT_HISTORY_LIMIT = 10;
 const ALL_HISTORY_PAGE_SIZE = 12;
 const SESSION_CREATE_ATTEMPTS = 2;
+const TITLE_MAX_LENGTH = 60;
+
+// A pretty, word-boundary-aware truncation for card/session titles. Cuts on
+// a space near the limit rather than mid-word, and only adds an ellipsis
+// when text was actually cut off.
+function toDisplayTitle(text: string, maxLength: number = TITLE_MAX_LENGTH): string {
+  const trimmed = (text || '').trim().replace(/\s+/g, ' ');
+  if (trimmed.length <= maxLength) return trimmed;
+  const truncated = trimmed.slice(0, maxLength);
+  const lastSpace = truncated.lastIndexOf(' ');
+  const clean = lastSpace > maxLength * 0.6 ? truncated.slice(0, lastSpace) : truncated;
+  return `${clean.replace(/[.,;:!?]+$/, '')}…`;
+}
 
 interface HomeDashboardProps {
   onNavigate?: (path: string, options?: any) => void;
@@ -38,6 +52,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
   const [historyPage, setHistoryPage] = useState(0);
   const [hasNextHistoryPage, setHasNextHistoryPage] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<any | null>(null);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [modelStatus, setModelStatus] = useState<'loading' | 'ready' | 'error' | 'not_configured'>('loading');
@@ -48,12 +63,10 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const navigate = useNavigate();
 
-  const checkModelStatus = async () => {
+  const checkModelStatus = async (options: { force?: boolean } = {}) => {
     try {
-      const response = await fetch(`${getAgentsApiBaseUrl()}/client-config`);
-      const data = await response.json();
-      
-      const config = data.config;
+      const config = await fetchClientConfig(options);
+
       if (config && config.provider && config.model && (config.provider === 'ollama' || config.api_key)) {
         setModelStatus('ready');
       } else {
@@ -87,7 +100,8 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
           api_version: null
         })
       });
-      await checkModelStatus();
+      invalidateClientConfig();
+      await checkModelStatus({ force: true });
     } catch (error) {
       console.error('Failed to reset model config:', error);
       setModelStatus('error');
@@ -109,8 +123,11 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
         // Fetch one extra item for the paged view so the UI can determine
         // whether a next page exists without changing the API response shape.
         const limit = showAllHistory ? pageSize + 1 : pageSize;
+        // Research history is the session list. There is no `hypotheses`
+        // table any more — the user's prompt and the planner's structured
+        // reading of it both live on the session row.
         const response = await fetch(
-          `${getBackendApiBaseUrl()}/hypotheses/?skip=${skip}&limit=${limit}`,
+          `${getBackendApiBaseUrl()}/sessions/?skip=${skip}&limit=${limit}`,
           { cache: 'no-store' }
         );
         if (!response.ok) {
@@ -118,9 +135,22 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
         }
 
         const data = await response.json();
+        const mapped = (data || []).map((session: any) => ({
+          id: session.session_id,
+          session_id: session.session_id,
+          // Prefer the planner's title, fall back to the session title, and
+          // finally to the user's own words. Never a placeholder, and never
+          // the raw, untruncated prompt.
+          title: toDisplayTitle(
+            session.intent?.title || session.title || session.prompt || 'Untitled'
+          ),
+          prompt: session.prompt,
+          date: session.updated_at || session.created_at,
+          status: session.status,
+        }));
         if (!cancelled) {
-          setHistory(data.slice(0, pageSize));
-          setHasNextHistoryPage(showAllHistory && data.length > pageSize);
+          setHistory(mapped.slice(0, pageSize));
+          setHasNextHistoryPage(showAllHistory && mapped.length > pageSize);
         }
       } catch (err) {
         console.error('Failed to fetch history:', err);
@@ -160,11 +190,19 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
     setSessionStartError(null);
 
     try {
-      const payload = { title: `${hypothesis.substring(0, 30)}...` };
+      // A session is created WITH the user's own words. `prompt` is
+      // required and immutable, and the session's empty plan is created in the
+      // same transaction server-side. There is no second write to persist a
+      // draft hypothesis, and therefore no rollback path when that second
+      // write fails.
+      const payload = {
+        prompt: hypothesis.trim(),
+        title: toDisplayTitle(hypothesis),
+      };
       let response: Response | null = null;
       for (let attempt = 1; attempt <= SESSION_CREATE_ATTEMPTS; attempt += 1) {
         try {
-          response = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/`, {
+          response = await fetch(`${getBackendApiBaseUrl()}/sessions/`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -182,34 +220,22 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
       }
 
       const data = await response.json();
-      const sessionId = String(data.chat_id);
+      const sessionId = String(data.session_id);
 
-      // Persist a draft immediately. Previously the hypothesis row was only
-      // created after the planning agent replied, so interrupted/local-only
-      // launches never appeared in Recent Hypotheses.
-      const hypothesisResponse = await fetch(
-        `${getBackendApiBaseUrl()}/hypotheses/?chat_id=${encodeURIComponent(sessionId)}`,
+      // One chat to hold the conversation. A session may have many; this is
+      // its first. The chat id is NOT the session id.
+      const chatResponse = await fetch(
+        `${getBackendApiBaseUrl()}/chats/session/${encodeURIComponent(sessionId)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: hypothesis.trim().slice(0, 255),
-            hypothesis: hypothesis.trim(),
-            state: 'not_confirmed',
-          }),
+          body: JSON.stringify({ title: payload.title }),
         }
       );
-
-      if (!hypothesisResponse.ok) {
-        // Roll back the just-created empty session so retrying does not leave
-        // an orphaned history entry.
-        try {
-          await fetch(`${getBackendApiBaseUrl()}/chat_sessions/${sessionId}`, {
-            method: 'DELETE',
-          });
-        } catch (_) {/* best-effort rollback */}
-        throw new Error(`Could not persist hypothesis (HTTP ${hypothesisResponse.status})`);
+      if (!chatResponse.ok) {
+        throw new Error(`Could not create the session's chat (HTTP ${chatResponse.status})`);
       }
+      const chat = await chatResponse.json();
 
       // Persist the Literature Review preference so it survives navigation away and back via history
       try {
@@ -219,6 +245,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
         state: {
           hypothesis,
           sessionId,
+          chatId: String(chat.chat_id),
           sendInitialMessage: true,
           includeLitReview,
         },
@@ -234,7 +261,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
   };
 
   const handleProjectClick = (project: any) => {
-    const sessionId = project.chat_id || project.id || project.session_id;
+    const sessionId = project.session_id || project.id;
 
     // Restore the Literature Review preference that was saved when this session was first created
     let includeLitReviewRestored = true;
@@ -271,23 +298,29 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
     if (!itemToDelete) return;
     setIsDeleting(true);
     try {
-      // Deleting the chat session cascades and cleans up the hypothesis better
-      // Also fallback to hypotheses endpoint if chat_id is missing
-      const endpoint = itemToDelete.chat_id
-        ? `${getBackendApiBaseUrl()}/chat_sessions/${itemToDelete.chat_id}`
-        : `${getBackendApiBaseUrl()}/hypotheses/${itemToDelete.id}`;
-      const response = await fetch(endpoint, {
-        method: 'DELETE',
-      });
+      // Normal removal is archiving. A hard delete is refused while
+      // messages, events or a plan still reference the session — that history
+      // is provenance, not a cache.
+      const response = await fetch(
+        `${getBackendApiBaseUrl()}/sessions/${itemToDelete.session_id || itemToDelete.id}/archive`,
+        { method: 'POST' }
+      );
       if (response.ok) {
         setHistory(prev => prev.filter(item => item.id !== itemToDelete.id));
       } else {
-        console.error('Failed to delete hypothesis:', await response.text());
-        // Still remove it locally to allow user to bypass ghost entries
-        setHistory(prev => prev.filter(item => item.id !== itemToDelete.id));
+        // Do NOT hide a failed archive behind a local removal: the session is
+        // still there, and pretending otherwise is how a user loses track of a
+        // run that is still consuming resources.
+        console.error('Failed to archive session:', await response.text());
+        setArchiveError(
+          'Could not archive this research session. It is still in the database.'
+        );
       }
     } catch (err) {
-      console.error('Error deleting hypothesis:', err);
+      console.error('Error archiving session:', err);
+      setArchiveError(
+        'Could not archive this research session. Check the application API.'
+      );
     } finally {
       setIsDeleting(false);
       setItemToDelete(null);
@@ -541,6 +574,13 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
             </div>
           )}
 
+          {archiveError && (
+            <div className="mx-4 mb-3 flex items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-left text-sm text-red-300">
+              <AlertTriangle size={16} className="shrink-0" />
+              <span>{archiveError}</span>
+            </div>
+          )}
+
         </div>
       </div>
 
@@ -565,15 +605,15 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
           {loadingHistory ? (
             <div className="text-[#566a84]">Loading...</div>
           ) : history.length === 0 ? (
-            <div className="text-[#566a84]">No recent hypotheses</div>
+            <div className="text-[#566a84]">No recent research sessions</div>
           ) : (
             history.map(project => (
               <div key={project.id} className="relative group">
                 <Card
                   title={project.title}
-                  description={`Edited ${formatDate(project.date ?? project.updated_at ?? project.created_at)}`}
                   icon={<Bot size={24} className="text-[#5acce6] opacity-80" />}
-                  ctaText={project.status}
+                  status={project.status}
+                  metaText={`Edited ${formatDate(project.date ?? project.updated_at ?? project.created_at)}`}
                   onClick={() => handleProjectClick(project)}
                 />
                 <button
@@ -644,8 +684,8 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
           isOpen={showModelSettings} 
           onClose={() => {
               setShowModelSettings(false);
-              checkModelStatus(); // Refresh status after closing settings
-          }} 
+              checkModelStatus(); // Cache-aware: no-op unless the panel changed the config
+          }}
       />
     </div>
   );

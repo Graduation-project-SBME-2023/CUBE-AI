@@ -543,6 +543,33 @@ class BackendClient:
             "POST", f"/literature-reviews/{review_id}/papers", json=papers
         )
 
+    @classmethod
+    async def create_report(
+        cls,
+        session_id: str,
+        source_text: str,
+        *,
+        created_by_agent_run_id: str | None = None,
+        literature_review_id: str | None = None,
+        source_format: str = "latex",
+        title: str | None = None,
+    ) -> dict:
+        """Insert-or-read a report by its natural key (agent run or
+        literature review — exactly one of the two, R13)."""
+        cls._require_uuid(session_id, "session_id")
+        payload: dict[str, Any] = {
+            "session_id": session_id,
+            "source_text": source_text,
+            "source_format": source_format,
+        }
+        if created_by_agent_run_id is not None:
+            payload["created_by_agent_run_id"] = created_by_agent_run_id
+        if literature_review_id is not None:
+            payload["literature_review_id"] = literature_review_id
+        if title is not None:
+            payload["title"] = title
+        return await cls._domain("POST", "/reports/", json=payload)
+
     # ------------------------------------------------------------------
     # Hypothesis History
     # ------------------------------------------------------------------

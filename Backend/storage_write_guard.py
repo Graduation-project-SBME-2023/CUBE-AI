@@ -14,6 +14,12 @@ from storage_paths import HYPOTHESES_DIR
 RETIRED_WORKSPACE_PATHS: tuple[tuple[str, str, str], ...] = (
     # Step F — execution spine.
     ("state/scratchpad.json", "agent_runs.durable_notes/warnings/output_summary", "F"),
+    # state.json duplicated what PlannerDbStateStore already reconstructs from
+    # sessions.intent + plans/plan_steps/agent_runs; nothing read most of what
+    # it wrote (chat_history, knowledge_base, sources_guide,
+    # knowledge_sections), and the one field a caller did read (hypothesis)
+    # is available straight from the DB. Retired with no replacement file.
+    ("state/state.json", "sessions.intent + plans/plan_steps/agent_runs (PlannerDbStateStore)", "F"),
     ("outputs/agents/*_output.json", "agent_runs.output_summary", "F"),
     # Step H — population and segmentation review.
     ("state/config.json", "cohorts.criteria/label_definition/selection_summary", "H"),
