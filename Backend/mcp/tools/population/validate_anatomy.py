@@ -1,18 +1,11 @@
-"""
-Anatomy Validation Gate for the Population Agent.
-
-This tool checks that candidate volumes match the anatomical region specified
-in the research hypothesis. Call it AFTER search_volumes_by_description and
-BEFORE proceeding to save the final cohort or run segmentation.
-"""
+"""Anatomy Validation Gate for the Population Agent."""
 
 import os
-from storage_paths import workspace_subpath
-import json
 import httpx
 from typing import Annotated
 from pydantic import Field
 from .. import mcp
+from ..helpers import domain_api
 
 
 # ── Anatomy group mapping ───────────────────────────────────────────────────
@@ -69,36 +62,21 @@ def _resolve_anatomy_group(text: str) -> tuple[str | None, list[str]]:
     return None, []
 
 
-async def _save_and_broadcast_cohort(validated_uids: list[str]) -> dict:
-    """
-    Saves the validated cohort (even if empty 0-cohort) to config.json and
-    broadcasts it to the WebSocket so the frontend Population tab renders
-    the post-validation results.
-    """
-    workspace_dir = os.environ.get("WORKSPACE_DIR")
+async def _save_and_broadcast_cohort(
+    validated_uids: list[str],
+    validation: dict | None = None,
+) -> dict:
+    """Records the validated cohort (even an empty 0-cohort) as the population cohort's membership and broadcasts it so the Population tab renders the post-validation result."""
     session_id = os.environ.get("SESSION_ID")
-    config_path = None
-    config_updated = False
-
-    if workspace_dir:
-        config_path = str(workspace_subpath(workspace_dir, "config.json"))
-        try:
-            os.makedirs(workspace_dir, exist_ok=True)
-            config_data = {}
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as f:
-                    config_data = json.load(f)
-            config_data["datasetlist"] = validated_uids
-            config_data["anatomy_validated"] = True
-            # Any change to the validated cohort invalidates an earlier HITL
-            # approval. The approval endpoint will set this back to true only
-            # after at least one selected volume has a valid target label.
-            config_data["cohort_approved"] = False
-            with open(config_path, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, indent=4)
-            config_updated = True
-        except Exception as e:
-            print(f"[validate_population_anatomy] Error updating config.json: {e}")
+    cohort = await domain_api.upsert_population_cohort(
+        selection_summary={
+            "anatomy_validation": {
+                "anatomy_validated": True,
+                **(validation or {}),
+            }
+        }
+    )
+    await domain_api.set_cohort_members(cohort["cohort_id"], validated_uids)
 
     try:
         mas_base_url = os.environ.get("MAS_BASE_URL", "http://localhost:8150").rstrip("/")
@@ -112,7 +90,7 @@ async def _save_and_broadcast_cohort(validated_uids: list[str]) -> dict:
                         "status": "completed",
                         "count": len(validated_uids),
                         "uid_list": validated_uids,
-                        "saved_path": str(config_path) if config_path else "N/A"
+                        "cohort_id": cohort["cohort_id"],
                     },
                     "session_id": session_id
                 }
@@ -120,7 +98,7 @@ async def _save_and_broadcast_cohort(validated_uids: list[str]) -> dict:
     except Exception as exc:
         print(f"[validate_population_anatomy] WebSocket broadcast failed: {exc}")
 
-    return {"config_updated": config_updated, "saved_path": str(config_path) if config_path else "N/A"}
+    return {"cohort_updated": True, "cohort_id": cohort["cohort_id"]}
 
 
 @mcp.tool()
@@ -141,28 +119,16 @@ async def validate_population_anatomy(
         ))
     ],
 ) -> dict:
-    """
-    Validates that candidate volumes anatomically match the research hypothesis.
-
-    Call this AFTER search_volumes_by_description and BEFORE saving UIDs to config
-    or proceeding to segmentation. It checks each volume's body_part_examined and
-    series_description against the hypothesis body region and filters out
-    anatomically mismatched volumes.
-
-    Returns:
-    - validated_uids: UIDs that passed anatomy validation
-    - rejected_volumes: UIDs that were filtered out, with reasons
-    - Clear guidance to wait at HITL if 0 volumes match so the doctor can select manually
-
-    You MUST use the validated_uids list for all downstream steps.
-    """
+    """Validates that candidate volumes anatomically match the research hypothesis."""
     if not volume_details:
-        save_meta = await _save_and_broadcast_cohort([])
+        save_meta = await _save_and_broadcast_cohort(
+            [], {"hypothesis_body_region": hypothesis_body_region, "total_input": 0}
+        )
         return {
             "status": "success",
             "message": (
                 "No candidate volumes were returned by the search (0 cohort). "
-                "A 0-volume cohort has been saved to config.json and sent to the interactive UI. "
+                "A 0-volume cohort has been recorded and sent to the interactive UI. "
                 "DO NOT STOP execution or raise a pipeline error! Instead: "
                 "(1) Note in your scratchpad/summary in the agent execution tab that 0 matching studies were automatically found. "
                 "(2) Proceed directly to Step 5 (if available) and Step 6 (generate_targets). "
@@ -182,7 +148,15 @@ async def validate_population_anatomy(
     if not matched_group:
         # Cannot resolve anatomy — pass everything with a warning
         validated_uids = [v["uid"] for v in volume_details]
-        save_meta = await _save_and_broadcast_cohort(validated_uids)
+        save_meta = await _save_and_broadcast_cohort(
+            validated_uids,
+            {
+                "hypothesis_body_region": hypothesis_body_region,
+                "matched_anatomy_group": None,
+                "total_input": len(volume_details),
+                "warning": "anatomy region could not be resolved; no volume was filtered",
+            },
+        )
         return {
             "status": "warning",
             "message": (
@@ -241,7 +215,15 @@ async def validate_population_anatomy(
 
     # ── Save and Broadcast validated UIDs ───────────────────────────────
     validated_uids = [v["uid"] for v in validated]
-    save_meta = await _save_and_broadcast_cohort(validated_uids)
+    save_meta = await _save_and_broadcast_cohort(
+        validated_uids,
+        {
+            "hypothesis_body_region": hypothesis_body_region,
+            "matched_anatomy_group": matched_group,
+            "total_input": len(volume_details),
+            "rejected_volumes": rejected[:500],
+        },
+    )
 
     # ── Build response ──────────────────────────────────────────────────
     result = {
@@ -263,7 +245,7 @@ async def validate_population_anatomy(
             f"0 matching volumes found for anatomy ('{matched_group}'). "
             f"All {len(volume_details)} candidate volumes were filtered out because they belong to different body regions "
             f"({reasons_str}). "
-            f"A 0-volume cohort has been saved to config.json and sent to the interactive UI. "
+            f"A 0-volume cohort has been recorded and sent to the interactive UI. "
             f"DO NOT STOP execution or raise a pipeline error! Instead: "
             f"(1) Raise a scratchpad flag with level='warning' (or mention in your execution summary) that 0 matching studies were automatically found for this anatomy. "
             f"(2) Proceed directly to Step 5 (if available) and Step 6 (generate_targets). "

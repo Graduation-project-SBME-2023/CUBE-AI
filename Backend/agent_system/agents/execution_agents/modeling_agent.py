@@ -34,7 +34,7 @@ class ModelingAgent(AssistantAgent):
                          max_tool_iterations=max_tool_iterations)
 
     @classmethod
-    async def create(cls, model_client=None, workspace_folder=None, mcp_server_path=None, session_id=None):
+    async def create(cls, model_client=None, workspace_folder=None, mcp_server_path=None, session_id=None, node_name=None, agent_run_id=None, step_id=None):
         model_client = OllamaClient() if not model_client else model_client
         if not mcp_server_path:
             mcp_server_path = os.path.abspath(
@@ -48,7 +48,9 @@ class ModelingAgent(AssistantAgent):
         env.update({
             "WORKSPACE_DIR": workspace_folder,
             "SESSION_ID": session_id,
-            "AGENT_ID": "modeling_agent"
+            "AGENT_ID": "modeling_agent",
+            "AGENT_RUN_ID": str(agent_run_id or ""),
+            "STEP_ID": str(step_id or "")
         })
         mcp_server = StdioServerParams(
             command=sys.executable,
@@ -82,7 +84,9 @@ class ModelingAgent(AssistantAgent):
         # tools = [modelling_classification_tool_wrapper, *final_mcp_tools]
         tools = final_mcp_tools
 
-        name = "modeling_agent"
+        # The node name identifies THIS step's execution; it falls
+        # back to the agent type for the standalone/dev entrypoints below.
+        name = node_name or "modeling_agent"
         description = MODELING_AGENT_DESCRIPTION
         system_message = MODELING_AGENT_SYSTEM_PROMPT
         return cls(

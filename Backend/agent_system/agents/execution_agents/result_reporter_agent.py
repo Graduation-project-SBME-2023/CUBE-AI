@@ -50,7 +50,7 @@ class ResultReporterAgent(AssistantAgent):
         )
 
     @classmethod
-    async def create(cls, model_client=None, workspace_folder=None, session_id=None):
+    async def create(cls, model_client=None, workspace_folder=None, session_id=None, node_name=None, agent_run_id=None, step_id=None):
         model_client = OllamaClient() if not model_client else model_client
         mcp_server_path = os.path.abspath(
             os.path.join(current_dir, "..", "..", "..", "mcp", "server.py")
@@ -62,6 +62,8 @@ class ResultReporterAgent(AssistantAgent):
             "WORKSPACE_DIR": workspace_folder,
             "SESSION_ID": session_id,
             "AGENT_ID": "result_reporter_agent",
+            "AGENT_RUN_ID": str(agent_run_id or ""),
+            "STEP_ID": str(step_id or ""),
         })
         mcp_server = StdioServerParams(
             command=sys.executable,
@@ -89,7 +91,9 @@ class ResultReporterAgent(AssistantAgent):
         ]
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         # final_tools = mcp_tools
-        name = "result_reporter_agent"
+        # The node name identifies THIS step's execution; it falls
+        # back to the agent type for the standalone/dev entrypoints below.
+        name = node_name or "result_reporter_agent"
         description = RESULT_AGENT_DESCRIPTION
         system_message = f"{TASK_CONTEXT_BOOTSTRAP}\n\n{RESULT_AGENT_SYSTEM_PROMPT}"
         return cls(

@@ -1,53 +1,34 @@
+"""Reading execution progress off the durable record."""
+
 from collections.abc import Iterable, Mapping
 
-PENDING_STATUSES = {"", "PENDING", "NOT_CONFIRMED", "READY"}
-COMPLETED_STATUSES = {"COMPLETED", "DONE"}
-FAILED_STATUSES = {"FAILED", "ERROR", "CANCELLED", "CANCELED"}
-WAITING_STATUSES = {
-    "PAUSED",
-    "WAITING",
-    "WAITING_FOR_REVIEW",
-    "WAITING_FOR_USER_REVIEW",
-    "WAITING_FOR_LABELS",
-    "WAITING_FOR_USER_INPUT",
-}
+# The four agent_runs statuses. A human-in-the-loop wait is NOT one of them:
+# an agent waiting for a review is still running, and the wait is carried as a
+# ws_log event rather than as a fifth status nothing could transition out of.
+PENDING = "pending"
+RUNNING = "running"
+COMPLETED = "completed"
+FAILED = "failed"
 
 
-def normalize_step_status(value: object) -> str:
-    return str(value or "").strip().upper().replace(" ", "_")
+def run_statuses(runs: Iterable[Mapping[str, object]]) -> list[str]:
+    return [str(run.get("status") or PENDING).strip().lower() for run in runs]
 
 
-def step_statuses(steps: Iterable[Mapping[str, object]]) -> list[str]:
-    return [normalize_step_status(step.get("status")) for step in steps]
-
-
-def find_first_incomplete_step(
-    steps: Iterable[Mapping[str, object]],
+def find_first_incomplete_run(
+    runs: Iterable[Mapping[str, object]],
 ) -> Mapping[str, object] | None:
-    """Return the first persisted plan step that has not completed."""
-    for step in steps:
-        if normalize_step_status(step.get("status")) not in COMPLETED_STATUSES:
-            return step
+    """Where a resume continues. Nothing is deleted to make room for it."""
+    for run in runs:
+        if str(run.get("status") or PENDING).strip().lower() != COMPLETED:
+            return run
     return None
 
 
-def execution_has_started(steps: Iterable[Mapping[str, object]]) -> bool:
-    """
-    Return True once a persisted plan contains execution progress.
-
-    A plan whose steps are all pending/not-confirmed is safe to execute for the
-    first time. Any other persisted status requires explicit restart intent.
-    """
-    statuses = step_statuses(steps)
-    return bool(statuses) and any(status not in PENDING_STATUSES for status in statuses)
-
-
-def execution_start_allowed(
-    steps: Iterable[Mapping[str, object]],
-    *,
-    restart: bool,
-) -> bool:
-    return restart or not execution_has_started(steps)
+def execution_has_started(runs: Iterable[Mapping[str, object]]) -> bool:
+    """True once any run has left `pending`."""
+    statuses = run_statuses(runs)
+    return bool(statuses) and any(status != PENDING for status in statuses)
 
 
 def planning_start_allowed(*, has_persisted_state: bool, restart: bool) -> bool:
@@ -55,23 +36,17 @@ def planning_start_allowed(*, has_persisted_state: bool, restart: bool) -> bool:
 
 
 def infer_recovered_session_state(
-    steps: Iterable[Mapping[str, object]],
+    runs: Iterable[Mapping[str, object]],
 ) -> str:
-    """
-    Infer the safe in-memory state for a session hydrated from persistence.
-
-    Persisted RUNNING cannot mean that an asyncio task is still alive after a
-    process restart, so it is represented as PAUSED. Hydration must never imply
-    permission to create a replacement execution task.
-    """
-    statuses = step_statuses(steps)
+    """The safe in-memory state for a session hydrated from persistence."""
+    statuses = run_statuses(runs)
     if not statuses:
         return "READY"
-    if all(status in COMPLETED_STATUSES for status in statuses):
+    if all(status == COMPLETED for status in statuses):
         return "COMPLETED"
-    if any(status in FAILED_STATUSES for status in statuses):
+    if any(status == FAILED for status in statuses):
         return "FAILED"
-    if any(status in WAITING_STATUSES or status == "RUNNING" for status in statuses):
+    if any(status == RUNNING for status in statuses):
         return "PAUSED"
     if execution_has_started({"status": status} for status in statuses):
         return "PAUSED"

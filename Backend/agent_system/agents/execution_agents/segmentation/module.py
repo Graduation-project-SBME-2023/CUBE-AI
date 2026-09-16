@@ -1,14 +1,13 @@
 """Segmentation orchestration with agent-resolved clinical target identity."""
 
 import asyncio
-import json
 import logging
 import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from storage_paths import workspace_subpath
-from typing import Any, Dict, List, Union
+from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -50,6 +49,14 @@ from .resolution import (
     resolve_voxtell_prompt,
     select_newest_matching_mask,
 )
+from services.artifact_client import register_render, render_logical_key
+from .batch_store import (
+    BatchReconciliationRequired,
+    SegmentationBatchStore,
+    batch_config,
+    batch_targets,
+    work_items_from_batch,
+)
 from .services import SegmentationService
 from .utils import (
     MONAI_URL,
@@ -71,13 +78,18 @@ def resolve_mcp_server_path() -> Path:
 class SegmentationModule:
     def __init__(
         self,
-        config_path: str = "config.json",
         model_name: str = "gpt-oss:120b-cloud",
         session_id: str | None = None,
+        agent_run_id: str | None = None,
     ):
-        self.config_path = config_path
         self.model_name = model_name
         self.session_id = session_id
+        # The run this module's work belongs to: identity is the step's
+        # run, never the agent name.
+        self.agent_run_id = agent_run_id
+        # current this flow: the checkpoint is the `segmentation_runs` batch.
+        self.batch_store: SegmentationBatchStore | None = None
+        self.segmentation_run_id: str | None = None
         self.model_client = None
         self.discovery_tools = None
         self.UserProxyAgent = None
@@ -99,6 +111,10 @@ class SegmentationModule:
             {
                 "SESSION_ID": self.session_id or "",
                 "AGENT_ID": "segmentation_agent",
+                # Passed down so any tool this module reaches writes to the
+                # same `agent_runs` row.
+                "AGENT_RUN_ID": self.agent_run_id or os.environ.get("AGENT_RUN_ID", ""),
+                "STEP_ID": os.environ.get("STEP_ID", ""),
             }
         )
         server = StdioServerParams(
@@ -129,34 +145,55 @@ class SegmentationModule:
     async def _check_having_mask(self, volume_uid: str):
         return await check_having_mask(volume_uid, client=self.http_client)
 
-    @staticmethod
-    def _load_run_context(
-        input_data: Union[str, Dict[str, Any]],
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
-        if not isinstance(input_data, str):
+    async def _load_run_context(self) -> tuple[list[str], str, dict[str, Any]]:
+        """What this step segments and why — read from PostgreSQL."""
+        from clients.backend_client import BackendClient
+
+        cohort = await BackendClient.get_population_cohort(str(self.session_id))
+        if not cohort:
             raise ValueError(
-                "Segmentation requires the workspace config path so state can be loaded"
+                "The population planner has not recorded a cohort for this session."
             )
-        config_path = Path(input_data)
-        state_path = config_path.with_name(
-            config_path.name.replace("config", "state", 1)
-        )
-        with state_path.open("r", encoding="utf-8") as stream:
-            state = json.load(stream)
-        with config_path.open("r", encoding="utf-8") as stream:
-            config = json.load(stream)
-        return config, state
+        if not cohort.get("frozen_at"):
+            raise ValueError(
+                "The population cohort has not been approved. Segmentation runs only on "
+                "an approved cohort."
+            )
+        rows = await BackendClient.get_cohort_analysis_rows(str(cohort["cohort_id"]))
+        datasetlist = [str(row["volume_series_instance_uid"]) for row in rows]
+
+        run = await BackendClient.get_agent_run(str(self.agent_run_id)) or {}
+        step = run.get("step") or {}
+        instructions = step.get("instructions") or {}
+        task_message = dict(instructions.get("task_message") or {})
+        if not task_message.get("instructions") and instructions.get("description"):
+            task_message["instructions"] = instructions.get("description")
+        session = await BackendClient.get_session(str(self.session_id)) or {}
+        intent = session.get("intent") or {}
+        state = {
+            "plan": {
+                "steps": [
+                    {
+                        "module": step.get("agent_type") or "segmentation_agent",
+                        "task_message": task_message,
+                    }
+                ]
+            },
+            "hypothesis": {
+                "title": intent.get("title") or session.get("title") or "",
+                "hypothesis": intent.get("statement") or session.get("prompt") or "",
+                "population": intent.get("population") or "",
+                "clinical_context": intent.get("clinical_context") or "",
+                "roi_interpretation": intent.get("roi_interpretation"),
+            },
+        }
+        return datasetlist, str(cohort["cohort_id"]), state
 
     @staticmethod
     def _build_instruction(
         state: dict[str, Any],
     ) -> tuple[str, dict | None]:
-        """Return (instruction_text, locked_roi_interpretation).
-
-        The locked_roi_interpretation is the structured ROI object set by the
-        Clinical Planner. It is passed as authoritative context to Agent 1 so
-        the agent does not need to re-derive scope from the prose instruction.
-        """
+        """Return (instruction_text, locked_roi_interpretation)."""
         steps = state.get("plan", {}).get("steps", [])
         segmentation_step = next(
             (step for step in steps if step.get("module") == "segmentation_agent"),
@@ -229,68 +266,20 @@ class SegmentationModule:
             await asyncio.sleep(5)
         return None
 
-    @staticmethod
-    def _write_manifest(
+    async def _write_manifest(
+        self,
         workspace_dir: str,
         resolution_outcome,
         work_items: list[dict[str, Any]],
         *,
         stage: str,
         run_id: str,
-    ) -> Path:
-        plan = resolution_outcome.plan
-        manifest_path = workspace_subpath(workspace_dir, "segmentation_manifest.json")
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        existing_created_at = None
-        if manifest_path.exists():
-            try:
-                existing_created_at = json.loads(
-                    manifest_path.read_text(encoding="utf-8")
-                ).get("created_at")
-            except (OSError, json.JSONDecodeError):
-                existing_created_at = None
-        now = datetime.now(timezone.utc).isoformat()
-        payload = {
-            "schema_version": CURRENT_SCHEMA_VERSION,
-            "run_id": run_id,
-            "stage": stage,
-            "created_at": existing_created_at or now,
-            "updated_at": now,
-            "chosen_path": plan.chosen_path,
-            "resolution": {
-                "schema_version": CURRENT_SCHEMA_VERSION,
-                "policy_fingerprint": resolution_outcome.policy_fingerprint,
-                "intent_plan": resolution_outcome.intent_plan.model_dump(),
-                "candidate_plan": resolution_outcome.candidate_plan.model_dump(),
-                "final_plan": plan.model_dump(),
-            },
-            "targets": [
-                {
-                    "target_id": target.target_id,
-                    "canonical_label": target.canonical_label,
-                    "inference_prompt": target.inference_prompt,
-                    "anatomy": target.anatomy,
-                    "pathology": target.pathology,
-                    "scope": target.scope,
-                    "subregion": target.subregion,
-                    "laterality": target.laterality,
-                    "target_defining_modifiers": target.target_defining_modifiers,
-                    "intent_confidence": target.intent_confidence,
-                    "match_confidence": target.match_confidence,
-                    "reason": target.reason,
-                }
-                for target in plan.targets
-            ],
-            "pairs": work_items,
-        }
-        temporary_path = workspace_subpath(
-            workspace_dir,
-            "temp_segmentations/segmentation_manifest.json.tmp",
-        )
-        temporary_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        temporary_path.replace(manifest_path)
-        return manifest_path
+    ) -> str:
+        """Checkpoint every pair onto its `segmentation_pairs` row."""
+        if self.batch_store is None or not self.segmentation_run_id:
+            raise RuntimeError("The segmentation batch has not been created yet")
+        await self.batch_store.sync(self.segmentation_run_id, work_items, stage=stage)
+        return self.segmentation_run_id
 
     def _create_publisher(
         self,
@@ -307,14 +296,14 @@ class SegmentationModule:
             base_url=self.agent_base_url,
         )
 
-    def _persist_processing_state(
+    async def _persist_processing_state(
         self,
         workspace_dir: str,
         resolution_outcome: TargetResolutionOutcome,
         work_items: list[dict[str, Any]],
         run_id: str,
-    ) -> Path:
-        return self._write_manifest(
+    ) -> str:
+        return await self._write_manifest(
             workspace_dir,
             resolution_outcome,
             work_items,
@@ -344,7 +333,7 @@ class SegmentationModule:
                 "gif_path": None,
             }
         )
-        self._persist_processing_state(
+        await self._persist_processing_state(
             workspace_dir, resolution_outcome, work_items, run_id
         )
         await publisher.publish_failure()
@@ -373,7 +362,7 @@ class SegmentationModule:
         allow_reuse_fallback: bool = False,
     ) -> bool:
         item["status"] = "preparing"
-        self._persist_processing_state(
+        await self._persist_processing_state(
             workspace_dir, resolution_outcome, work_items, run_id
         )
         artifact_key = ensure_artifact_key(item)
@@ -442,6 +431,7 @@ class SegmentationModule:
                         "reused": False,
                         "reuse_candidate_uid": item.get("source_segmentation_uid"),
                         "source_segmentation_uid": None,
+                        "candidate_confirmed": False,
                         "source_method": None,
                         "source_model": None,
                         "source_description": None,
@@ -457,7 +447,7 @@ class SegmentationModule:
                         "error_details": None,
                     }
                 )
-                self._persist_processing_state(
+                await self._persist_processing_state(
                     workspace_dir, resolution_outcome, work_items, run_id
                 )
                 return False
@@ -544,6 +534,26 @@ class SegmentationModule:
             [item],
         )
         preview = previews[0] if previews else None
+        if preview is not None:
+            # The overlay stays on disk — it is browser-preview-only,
+            # referenced by no report and regenerable from the volume plus its
+            # mask — but it is CATALOGUED, so the session's artifacts are
+            # enumerable and the preview has an identity that is not a URL.
+            await register_render(
+                self.session_id or "",
+                render_logical_key(
+                    str(item.get("pair_id") or ""), str(artifact_key or "")
+                ),
+                str(preview.get("gifPath") or f"overlays/{artifact_key}.gif"),
+                agent_run_id=self.agent_run_id,
+                metadata={
+                    "schema_version": 1,
+                    "pair_id": item.get("pair_id"),
+                    "volume_uid": item.get("volume_uid"),
+                    "target_id": item.get("target_id") or None,
+                    "is_empty_mask": bool(preview.get("isEmptyMask")),
+                },
+            )
         if preview is None:
             await self._fail_pair(
                 item,
@@ -570,7 +580,7 @@ class SegmentationModule:
                     "error_details": None,
                 }
             )
-            self._persist_processing_state(
+            await self._persist_processing_state(
                 workspace_dir, resolution_outcome, work_items, run_id
             )
             await publisher.publish_ready()
@@ -587,7 +597,7 @@ class SegmentationModule:
                 "error_details": None,
             }
         )
-        self._persist_processing_state(
+        await self._persist_processing_state(
             workspace_dir, resolution_outcome, work_items, run_id
         )
         await publisher.publish_ready()
@@ -628,7 +638,7 @@ class SegmentationModule:
             if not item.get("reused") or item.get("status") in {"ready", "failed"}:
                 continue
             item["status"] = "reusing"
-            self._persist_processing_state(
+            await self._persist_processing_state(
                 workspace_dir, resolution_outcome, work_items, run_id
             )
             await self._prepare_pair_preview(
@@ -659,7 +669,7 @@ class SegmentationModule:
                 publisher=publisher,
             )
 
-        self._persist_processing_state(
+        await self._persist_processing_state(
             workspace_dir, resolution_outcome, work_items, run_id
         )
 
@@ -678,7 +688,7 @@ class SegmentationModule:
         async def on_pair_started(event: dict[str, Any]) -> None:
             item = item_by_pair[event["pair_id"]]
             item["status"] = "inferencing"
-            self._persist_processing_state(
+            await self._persist_processing_state(
                 workspace_dir, resolution_outcome, work_items, run_id
             )
 
@@ -755,7 +765,7 @@ class SegmentationModule:
                     else None
                 )
                 item["status"] = "inference_succeeded"
-                self._persist_processing_state(
+                await self._persist_processing_state(
                     workspace_dir, resolution_outcome, work_items, run_id
                 )
 
@@ -793,11 +803,16 @@ class SegmentationModule:
                     )
                     return
 
-                item["source_method"] = record.get("method")
+                # The archive row exists now, so the pair can name it (its FK
+                # requires a real SEG of the pair's own volume).
+                item["candidate_confirmed"] = True
+                item["source_method"] = record.get("generation_method") or record.get("method")
                 item["source_model"] = (
                     record.get("name") or record.get("model_name") or item["model"]
                 )
-                item["source_description"] = record.get("segmentation_type")
+                item["source_description"] = record.get("series_description") or record.get(
+                    "segmentation_type"
+                )
                 await self._prepare_pair_preview(
                     item,
                     workspace_dir=workspace_dir,
@@ -926,8 +941,8 @@ class SegmentationModule:
             "modified": convert(review.get("modified")),
         }
 
-    @staticmethod
-    def _load_checkpoint(
+    async def _load_checkpoint(
+        self,
         workspace_dir: str,
         datasetlist: list[str],
     ) -> tuple[
@@ -936,122 +951,72 @@ class SegmentationModule:
         str,
         str,
     ] | None:
-        manifest_path = workspace_subpath(workspace_dir, "segmentation_manifest.json")
-        if not manifest_path.exists():
+        """Continue this run's stored batch, if it has one."""
+        batch = await self.batch_store.load()
+        if batch is None:
             return None
-        try:
-            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-
-            # Reject checkpoints produced under a different schema version or
-            # policy fingerprint. Resuming a stale checkpoint could apply an
-            # old clinical interpretation to a new run.
-            stored_schema_version = payload.get("schema_version")
-            if stored_schema_version != CURRENT_SCHEMA_VERSION:
-                logger.info(
-                    "Ignoring segmentation checkpoint with schema_version=%r "
-                    "(current=%r); re-running target planning",
-                    stored_schema_version,
-                    CURRENT_SCHEMA_VERSION,
-                )
-                return None
-            resolution_block = payload.get("resolution") or {}
-            stored_fingerprint = resolution_block.get("policy_fingerprint")
-            if stored_fingerprint != CLINICAL_TARGET_POLICY_FINGERPRINT:
-                logger.info(
-                    "Ignoring segmentation checkpoint created under an old "
-                    "target policy (fingerprint mismatch); re-running target "
-                    "planning"
-                )
-                return None
-
-            stage = str(payload.get("stage") or "")
-            if stage not in {
-                "processing",
-                "awaiting_review",
-                "reviewed",
-            }:
-                return None
-            work_items = payload.get("pairs")
-            if not isinstance(work_items, list) or not work_items:
-                return None
-            if {str(item.get("volume_uid")) for item in work_items} != set(
-                datasetlist
-            ):
-                return None
-
-            seen_pair_ids: set[str] = set()
-            seen_sequence_indexes: set[int] = set()
-            workspace = Path(workspace_dir).resolve()
-            for fallback_index, item in enumerate(work_items):
-                pair_id = str(item.get("pair_id") or "")
-                if not pair_id or pair_id in seen_pair_ids:
-                    raise ValueError(f"Invalid or duplicate pair_id: {pair_id!r}")
-                seen_pair_ids.add(pair_id)
-                item.setdefault("artifact_key", artifact_key_for_pair(pair_id))
-                sequence_index = int(item.get("sequence_index", fallback_index))
-                if sequence_index in seen_sequence_indexes:
-                    raise ValueError(
-                        f"Duplicate segmentation sequence_index: {sequence_index}"
-                    )
-                seen_sequence_indexes.add(sequence_index)
-                item["sequence_index"] = sequence_index
-                item.setdefault("inference_result", None)
-                item_run_id = str(item.get("run_id") or payload.get("run_id") or "")
-                item["run_id"] = item_run_id
-                inference_job_id = artifact_key_for_pair(
-                    "|".join(
-                        (
-                            item_run_id,
-                            pair_id,
-                            str(item.get("model") or ""),
-                            str(item.get("inference_prompt") or ""),
-                        )
-                    )
-                )
-                item.setdefault("idempotency_key", inference_job_id)
-                item.setdefault("inference_job_id", inference_job_id)
-                item.setdefault("gif_path", None)
-                item.setdefault("reuse_candidate_uid", None)
-                item.setdefault("alignment_mode", None)
-                item.setdefault("legacy_repair_applied", False)
-                item.setdefault("legacy_repair", None)
-                item.setdefault("geometry_version", None)
-                item.setdefault("z_axis_reversed", False)
-                item.setdefault("x_axis_flipped", False)
-                item.setdefault("y_axis_flipped", False)
-                item.setdefault("axis_permutation", None)
-                item.setdefault("slice_alignment", None)
-                if item.get("mask_path"):
-                    mask_path = workspace_subpath(workspace, str(item["mask_path"]))
-                    mask_path.relative_to(workspace)
-                if item.get("gif_path"):
-                    gif_path = workspace_subpath(workspace, str(item["gif_path"]))
-                    gif_path.relative_to(workspace)
-                if item.get("status") == "resolved":
-                    item["status"] = "reusing" if item.get("reused") else "preparing"
-
-            outcome = TargetResolutionOutcome.model_validate(
-                {
-                    "schema_version": stored_schema_version,
-                    "plan": resolution_block["final_plan"],
-                    "intent_plan": resolution_block["intent_plan"],
-                    "candidate_plan": resolution_block["candidate_plan"],
-                    "policy_fingerprint": resolution_block["policy_fingerprint"],
-                }
+        config = batch.get("config") or {}
+        if config.get("segmentation_schema_version") != CURRENT_SCHEMA_VERSION:
+            raise BatchReconciliationRequired(
+                "The stored segmentation batch was created under schema "
+                f"{config.get('segmentation_schema_version')!r} (current "
+                f"{CURRENT_SCHEMA_VERSION!r}). It is immutable and cannot be continued "
+                "by this code; reconciliation is required."
             )
-            return (
-                outcome,
-                work_items,
-                str(payload["run_id"]),
-                stage,
+        if config.get("policy_fingerprint") != CLINICAL_TARGET_POLICY_FINGERPRINT:
+            raise BatchReconciliationRequired(
+                "The stored segmentation batch was resolved under a different clinical "
+                "target policy. Continuing it would apply an old interpretation; "
+                "reconciliation is required."
             )
-        except (KeyError, OSError, ValueError, json.JSONDecodeError) as exc:
-            logger.warning("Ignoring invalid segmentation checkpoint: %s", exc)
-            return None
+        work_items = work_items_from_batch(batch)
+        if not work_items:
+            raise BatchReconciliationRequired("The stored segmentation batch has no pairs")
+        if {str(item["volume_uid"]) for item in work_items} - set(datasetlist):
+            raise BatchReconciliationRequired(
+                "The stored segmentation batch names volumes outside the approved cohort"
+            )
+
+        correlation_run_id = str(config.get("correlation_run_id") or "")
+        workspace = Path(workspace_dir).resolve()
+        for fallback_index, item in enumerate(work_items):
+            pair_id = str(item["pair_id"])
+            item.setdefault("artifact_key", artifact_key_for_pair(pair_id))
+            item["sequence_index"] = int(item.get("sequence_index", fallback_index))
+            item.setdefault("inference_result", None)
+            item["run_id"] = str(item.get("run_id") or correlation_run_id)
+            item.setdefault("gif_path", None)
+            item.setdefault("reuse_candidate_uid", None)
+            item.setdefault("reused", False)
+            item.setdefault("is_empty_mask", False)
+            if item.get("mask_path"):
+                workspace_subpath(workspace, str(item["mask_path"])).relative_to(workspace)
+            if item.get("gif_path"):
+                workspace_subpath(workspace, str(item["gif_path"])).relative_to(workspace)
+            if item.get("status") == "resolved":
+                item["status"] = "reusing" if item.get("reused") else "preparing"
+
+        outcome = TargetResolutionOutcome.model_validate(
+            {
+                "schema_version": config["segmentation_schema_version"],
+                "plan": config["final_plan"],
+                "intent_plan": config["intent_plan"],
+                "candidate_plan": config["candidate_plan"],
+                "policy_fingerprint": config["policy_fingerprint"],
+            }
+        )
+        stage = {
+            "not_ready": "processing",
+            "pending": "awaiting_review",
+            "submitting": "awaiting_review",
+            "submitted": "reviewed",
+        }[batch["review_status"]]
+        self.segmentation_run_id = str(batch["segmentation_run_id"])
+        return outcome, work_items, correlation_run_id, stage
 
     @staticmethod
     def _build_result(
-        manifest_path: Path,
+        segmentation_run_id: str | None,
         plan,
         work_items: list[dict[str, Any]],
     ) -> dict[str, Any]:
@@ -1059,7 +1024,7 @@ class SegmentationModule:
             item for item in work_items if item["status"] in {"failed", "rejected"}
         ]
         accepted_count = sum(
-            item["review_status"] in {"accepted", "modified"}
+            item.get("review_status") in {"accepted", "modified"}
             for item in work_items
         )
         successful_count = len(work_items) - len(failures)
@@ -1071,7 +1036,7 @@ class SegmentationModule:
             status = "failed"
         return {
             "status": status,
-            "manifest_path": str(manifest_path),
+            "segmentation_run_id": segmentation_run_id,
             "segmentation_method": (
                 f"{plan.chosen_path}: {', '.join(plan.selected_models)}"
             ),
@@ -1079,11 +1044,11 @@ class SegmentationModule:
             "pair_count": len(work_items),
             "ready_count": sum(item["status"] == "ready" for item in work_items),
             "accepted_count": accepted_count,
-            "reused_count": sum(bool(item["reused"]) for item in work_items),
+            "reused_count": sum(bool(item.get("reused")) for item in work_items),
             "generated_count": sum(
-                not item["reused"]
+                not item.get("reused")
                 and (
-                    item["source_segmentation_uid"] is not None
+                    item.get("source_segmentation_uid") is not None
                     or bool(item.get("is_empty_mask"))
                 )
                 for item in work_items
@@ -1099,6 +1064,54 @@ class SegmentationModule:
             ],
         }
 
+    def _apply_submitted_review(
+        self,
+        workspace_dir: str,
+        batch: dict[str, Any],
+        work_items: list[dict[str, Any]],
+    ) -> None:
+        """Bring the in-memory items and the disposable mask files in line with the review PostgreSQL recorded."""
+        decisions = {
+            pair["pair_key"]: pair.get("review_decision")
+            for pair in batch.get("pairs") or []
+        }
+        accepted = [key for key, value in decisions.items() if value == "accepted"]
+        modified = [key for key, value in decisions.items() if value == "modified"]
+        cleanup_discarded(
+            workspace_dir,
+            accepted,
+            modified,
+            {item["pair_id"]: ensure_artifact_key(item) for item in work_items},
+        )
+        selected = {
+            pair["pair_key"]: pair.get("selected_segmentation_uid")
+            for pair in batch.get("pairs") or []
+        }
+        for item in work_items:
+            pair_id = item["pair_id"]
+            decision = decisions.get(pair_id)
+            artifact_key = ensure_artifact_key(item)
+            if decision == "modified":
+                temp_path = workspace_subpath(
+                    workspace_dir,
+                    f"temp_segmentations/seg_{artifact_key}_modified.nii.gz",
+                )
+                target_path = workspace_subpath(workspace_dir, f"masks/{artifact_key}.nii.gz")
+                if temp_path.exists():
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(temp_path, target_path)
+                    item["mask_path"] = f"masks/{artifact_key}.nii.gz"
+                item["is_empty_mask"] = False
+                item["warning"] = None
+                item["review_status"] = "modified"
+                item["selected_segmentation_uid"] = selected.get(pair_id)
+            elif decision == "accepted":
+                item["review_status"] = "accepted"
+                item["selected_segmentation_uid"] = selected.get(pair_id)
+            elif decision == "rejected":
+                item["review_status"] = "rejected"
+                item["status"] = "rejected"
+
     async def _complete_review(
         self,
         workspace_dir: str,
@@ -1111,20 +1124,22 @@ class SegmentationModule:
         publisher = publisher or self._create_publisher(
             plan, work_items, workspace_dir
         )
-        manifest_path = self._write_manifest(
-            workspace_dir,
-            resolution_outcome,
-            work_items,
-            stage="awaiting_review",
-            run_id=run_id,
-        )
+        batch = await self.batch_store.read(self.segmentation_run_id)
+        if batch["review_status"] not in {"submitting", "submitted"}:
+            await self._write_manifest(
+                workspace_dir,
+                resolution_outcome,
+                work_items,
+                stage="awaiting_review",
+                run_id=run_id,
+            )
         ready_items = [
             item
             for item in work_items
             if item["status"] == "ready" and item.get("review_status", "pending") == "pending"
         ]
         await publisher.publish_final()
-        if ready_items:
+        if batch["review_status"] != "submitted" and ready_items:
             await emit_tool_events(
                 event_types=["tool_started", "tool_finished"],
                 content=TextPayload(
@@ -1135,86 +1150,21 @@ class SegmentationModule:
                 ),
                 session_id=self.session_id,
             )
-            raw_review = await self._wait_for_review()
-            
-            overlaps = (
-                set(raw_review.get("accepted", [])) & set(raw_review.get("rejected", [])) |
-                set(raw_review.get("accepted", [])) & set(raw_review.get("modified", [])) |
-                set(raw_review.get("rejected", [])) & set(raw_review.get("modified", []))
-            )
-            if overlaps:
-                logger.debug(f"Overlapping ids in raw_review (frontend glitch signature): {overlaps}")
-                
-            review = self._normalise_review_keys(
-                raw_review,
-                work_items,
-                len(plan.targets),
-            )
-            ready_pair_ids = {item["pair_id"] for item in ready_items}
-
-            # A pair that isn't currently open for review (already decided in an
-            # earlier round, or not "ready" at all) must not be touched, no matter
-            # what the incoming payload contains.
-            review["modified"] &= ready_pair_ids
-            review["rejected"] &= ready_pair_ids
-            review["accepted"] &= ready_pair_ids
-
-            # Precedence: explicit negative decisions always beat the default
-            # "accepted" state. "accepted" is the no-action default, so it must
-            # NEVER be allowed to silently override an explicit reject or modify —
-            # only the reverse. modified is the strongest signal, then rejected.
-            review["accepted"] -= review["modified"] | review["rejected"]
-            review["rejected"] -= review["modified"]
-
-            reviewed_pair_ids = (
-                review["modified"] | review["accepted"] | review["rejected"]
-            )
-            review["rejected"].update(ready_pair_ids - reviewed_pair_ids)
-
-            accepted_or_modified = review["accepted"] | review["modified"]
-            cleanup_discarded(
-                workspace_dir,
-                list(review["accepted"]),
-                list(review["modified"]),
-                {
-                    item["pair_id"]: ensure_artifact_key(item)
-                    for item in work_items
-                },
-            )
-            for item in work_items:
-                pair_id = item["pair_id"]
-                artifact_key = ensure_artifact_key(item)
-                if pair_id in review["modified"]:
-                    temp_path = workspace_subpath(
-                        workspace_dir,
-                        f"temp_segmentations/seg_{artifact_key}_modified.nii.gz",
-                    )
-                    target_path = workspace_subpath(
-                        workspace_dir,
-                        f"masks/{artifact_key}.nii.gz",
-                    )
-                    if temp_path.exists():
-                        shutil.copy2(temp_path, target_path)
-                    item["is_empty_mask"] = False
-                    item["warning"] = None
-                    item["review_status"] = "modified"
-                elif pair_id in review["accepted"]:
-                    item["review_status"] = "accepted"
-                elif pair_id in review["rejected"]:
-                    item["review_status"] = "rejected"
-                    item["status"] = "rejected"
-
-            if not accepted_or_modified:
+            await self._wait_for_review()
+            batch = await self.batch_store.read(self.segmentation_run_id)
+            if batch["review_status"] != "submitted":
+                raise RuntimeError(
+                    "The segmentation review wait ended but PostgreSQL has no submitted "
+                    "review for this batch."
+                )
+        if batch["review_status"] == "submitted":
+            self._apply_submitted_review(workspace_dir, batch, work_items)
+            if not any(
+                item.get("review_status") in {"accepted", "modified"} for item in work_items
+            ):
                 logger.warning("Human review accepted no segmentation masks")
 
-        self._write_manifest(
-            workspace_dir,
-            resolution_outcome,
-            work_items,
-            stage="reviewed",
-            run_id=run_id,
-        )
-        result = self._build_result(manifest_path, plan, work_items)
+        result = self._build_result(self.segmentation_run_id, plan, work_items)
         await emit_tool_events(
             event_types=["tool_started", "tool_finished"],
             content=TextPayload(message="Segmentation is done."),
@@ -1233,11 +1183,7 @@ class SegmentationModule:
         )
         return result
 
-    async def run(
-        self,
-        input_data: Union[str, Dict[str, Any]],
-        workspace_dir: str,
-    ):
+    async def run(self, workspace_dir: str):
         if (
             not self.model_client
             or not self.discovery_tools
@@ -1245,8 +1191,8 @@ class SegmentationModule:
         ):
             raise RuntimeError("SegmentationModule.initialize() must be called first")
 
-        config, state = self._load_run_context(input_data)
-        datasetlist: List[str] = config.get("datasetlist", [])
+        self.batch_store = SegmentationBatchStore(self.agent_run_id, client=self.http_client)
+        datasetlist, cohort_id, state = await self._load_run_context()
         if not datasetlist:
             raise ValueError(
                 "The datasetlist is empty. The population planner did not "
@@ -1264,7 +1210,7 @@ class SegmentationModule:
                 "Dataset contains unsafe SeriesInstanceUID values: "
                 f"{unsafe_volume_uids}"
             )
-        checkpoint = self._load_checkpoint(workspace_dir, datasetlist)
+        checkpoint = await self._load_checkpoint(workspace_dir, datasetlist)
         if checkpoint is not None:
             (
                 resolution_outcome,
@@ -1272,11 +1218,12 @@ class SegmentationModule:
                 run_id,
                 checkpoint_stage,
             ) = checkpoint
-            manifest_path = workspace_subpath(workspace_dir, "segmentation_manifest.json")
             if checkpoint_stage == "reviewed":
                 logger.info("Resuming completed segmentation review checkpoint")
+                batch = await self.batch_store.read(self.segmentation_run_id)
+                self._apply_submitted_review(workspace_dir, batch, work_items)
                 return self._build_result(
-                    manifest_path,
+                    self.segmentation_run_id,
                     resolution_outcome.plan,
                     work_items,
                 )
@@ -1285,15 +1232,15 @@ class SegmentationModule:
             )
             if checkpoint_stage == "processing":
                 logger.info("Resuming progressive segmentation processing checkpoint")
+                await self._execute_work_items(
+                    workspace_dir,
+                    resolution_outcome,
+                    work_items,
+                    run_id,
+                    publisher,
+                )
             else:
                 logger.info("Resuming segmentation from awaiting-review checkpoint")
-            await self._execute_work_items(
-                workspace_dir,
-                resolution_outcome,
-                work_items,
-                run_id,
-                publisher,
-            )
             return await self._complete_review(
                 workspace_dir,
                 resolution_outcome,
@@ -1411,14 +1358,23 @@ class SegmentationModule:
                             if existing
                             else None
                         ),
-                        "source_method": existing.get("method") if existing else None,
+                        # Reused masks come from the archive inventory, so the
+                        # pair can name them from the start.
+                        "candidate_confirmed": bool(existing),
+                        "source_method": (
+                            (existing.get("generation_method") or existing.get("method"))
+                            if existing
+                            else None
+                        ),
                         "source_model": (
                             (existing.get("name") or existing.get("model_name"))
                             if existing
                             else None
                         ),
                         "source_description": (
-                            existing.get("segmentation_type") if existing else None
+                            (existing.get("series_description") or existing.get("segmentation_type"))
+                            if existing
+                            else None
                         ),
                         "reused": bool(existing),
                         "status": "reusing" if existing else "pending",
@@ -1453,9 +1409,18 @@ class SegmentationModule:
             item["sequence_index"] = sequence_index
         if len({item["pair_id"] for item in work_items}) != len(work_items):
             raise ValueError("Segmentation work items contain duplicate pair_id values")
-        self._persist_processing_state(
-            workspace_dir, resolution_outcome, work_items, run_id
+
+        batch = await self.batch_store.create(
+            cohort_id=cohort_id,
+            config=batch_config(
+                resolution_outcome,
+                correlation_run_id=run_id,
+                schema_version=CURRENT_SCHEMA_VERSION,
+            ),
+            targets=batch_targets(plan, self._model_for_target),
+            work_items=work_items,
         )
+        self.segmentation_run_id = str(batch["segmentation_run_id"])
         publisher = self._create_publisher(plan, work_items, workspace_dir)
 
         target_count = len(plan.targets)

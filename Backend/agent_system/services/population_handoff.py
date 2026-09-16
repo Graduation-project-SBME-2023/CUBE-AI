@@ -2,98 +2,88 @@
 
 from __future__ import annotations
 
-import json
-import csv
-from pathlib import Path
-from storage_paths import workspace_subpath
-
+from typing import Any, Awaitable, Callable
 
 POPULATION_AGENT_ID = "study_population_planner_agent"
 
+RunFetcher = Callable[[str], Awaitable[dict[str, Any] | None]]
+CohortFetcher = Callable[[str], Awaitable[dict[str, Any] | None]]
 
-def population_handoff_issues(workspace_folder: str | Path) -> list[str]:
-    """Return every missing/invalid artifact that makes handoff unsafe.
 
-    A model response is not proof that the population stage completed. The
-    downstream pipeline may start only after anatomy validation, the HITL
-    targets gate, and the population agent's persisted completion records all
-    exist in the workspace.
-    """
-    workspace = Path(workspace_folder)
+async def _default_run(agent_run_id: str) -> dict[str, Any] | None:
+    from clients.backend_client import BackendClient
+
+    return await BackendClient.get_agent_run(agent_run_id)
+
+
+async def _default_cohort(session_id: str) -> dict[str, Any] | None:
+    from clients.backend_client import BackendClient
+
+    return await BackendClient.get_population_cohort(session_id)
+
+
+def _labelled_count(cohort: dict[str, Any]) -> int:
+    field = (cohort.get("label_definition") or {}).get("field", "has_target_disease")
+    return sum(
+        1
+        for member in cohort.get("members") or []
+        if isinstance((member.get("label") or {}).get(field), bool)
+    )
+
+
+async def population_handoff_issues(
+    session_id: str,
+    agent_run_id: str | None,
+    *,
+    fetch_run: RunFetcher | None = None,
+    fetch_cohort: CohortFetcher | None = None,
+) -> list[str]:
+    """Return every missing/invalid record that makes handoff unsafe."""
+    fetch_run = fetch_run or _default_run
+    fetch_cohort = fetch_cohort or _default_cohort
     issues: list[str] = []
 
-    config_path = workspace_subpath(workspace, "config.json")
-    config: dict | None = None
-    if not config_path.is_file():
-        issues.append("config.json is missing")
-    else:
-        try:
-            loaded = json.loads(config_path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                config = loaded
-            else:
-                issues.append("config.json must contain a JSON object")
-        except (OSError, json.JSONDecodeError) as exc:
-            issues.append(f"config.json is unreadable: {exc}")
+    if not agent_run_id:
+        return ["the population step has no agent run; nothing can be verified"]
 
-    if config is not None:
-        if config.get("anatomy_validated") is not True:
+    cohort = await fetch_cohort(session_id)
+    if not cohort:
+        issues.append("the population cohort has not been recorded")
+    else:
+        validation = (cohort.get("selection_summary") or {}).get("anatomy_validation") or {}
+        if validation.get("anatomy_validated") is not True:
             issues.append("validate_population_anatomy has not completed")
-        if "datasetlist" not in config:
-            issues.append("config.json has no validated datasetlist")
-        elif not isinstance(config["datasetlist"], list):
-            issues.append("config.json datasetlist must be a list")
-        elif not config["datasetlist"]:
-            issues.append("validated datasetlist is empty; at least one cohort volume is required")
-        if config.get("cohort_approved") is not True:
+        if not cohort.get("members"):
+            issues.append("validated cohort is empty; at least one cohort volume is required")
+        if not cohort.get("frozen_at"):
             issues.append("doctor cohort approval has not completed")
+        elif _labelled_count(cohort) == 0:
+            issues.append("the approved cohort has no labelled volume")
 
-    targets_path = workspace_subpath(workspace, "populations/targets/targets.csv")
-    if not targets_path.is_file():
-        issues.append("generate_targets has not produced populations/targets/targets.csv")
-    else:
-        try:
-            with targets_path.open(mode="r", encoding="utf-8", newline="") as target_file:
-                if not any(csv.DictReader(target_file)):
-                    issues.append("targets.csv has no cohort rows")
-        except (OSError, csv.Error) as exc:
-            issues.append(f"targets.csv is unreadable: {exc}")
-
-    scratchpad_path = workspace_subpath(workspace, "scratchpad.json")
-    if not scratchpad_path.is_file():
-        issues.append("scratchpad.json is missing")
-    else:
-        try:
-            scratchpad = json.loads(scratchpad_path.read_text(encoding="utf-8"))
-            agent_state = scratchpad.get("agents", {}).get(POPULATION_AGENT_ID, {})
-            if agent_state.get("status") != "done":
-                issues.append("population scratchpad status is not done")
-            summary = agent_state.get("summary")
-            if not isinstance(summary, dict) or not str(summary.get("content", "")).strip():
-                issues.append("population scratchpad summary is missing")
-        except (AttributeError, OSError, json.JSONDecodeError) as exc:
-            issues.append(f"scratchpad.json is unreadable: {exc}")
-
-    output_path = workspace_subpath(workspace, f"outputs/{POPULATION_AGENT_ID}_output.json")
-    if not output_path.is_file():
+    run = await fetch_run(agent_run_id)
+    if not run:
+        issues.append("the population agent run could not be read")
+        return issues
+    notes = run.get("durable_notes") or {}
+    if notes.get("status") != "done":
+        issues.append("population scratchpad status is not done")
+    summary = (run.get("output_summary") or {}).get("scratchpad_summary")
+    if not isinstance(summary, dict) or not str(summary.get("content", "")).strip():
+        issues.append("population scratchpad summary is missing")
+    agent_output = (run.get("output_summary") or {}).get("agent_output")
+    if not isinstance(agent_output, dict):
         issues.append("population structured output is missing")
-    else:
-        try:
-            output = json.loads(output_path.read_text(encoding="utf-8"))
-            if not isinstance(output, dict):
-                issues.append("population structured output must contain a JSON object")
-            elif output.get("agent_id") != POPULATION_AGENT_ID:
-                issues.append("population structured output has the wrong agent_id")
-            elif output.get("status") != "completed":
-                issues.append("population structured output status is not completed")
-        except (OSError, json.JSONDecodeError) as exc:
-            issues.append(f"population structured output is unreadable: {exc}")
-
+    elif agent_output.get("status") != "completed":
+        issues.append("population structured output status is not completed")
     return issues
 
 
-def require_population_handoff(workspace_folder: str | Path) -> None:
+async def require_population_handoff(
+    session_id: str,
+    agent_run_id: str | None,
+    **kwargs: Any,
+) -> None:
     """Raise when the population agent has not completed its durable contract."""
-    issues = population_handoff_issues(workspace_folder)
+    issues = await population_handoff_issues(session_id, agent_run_id, **kwargs)
     if issues:
         raise RuntimeError("Population handoff is incomplete: " + "; ".join(issues))

@@ -1,5 +1,4 @@
 import asyncio
-import copy
 import logging
 from typing import Awaitable, Callable, Dict, Any, List
 
@@ -8,14 +7,14 @@ from models.plans import ClinicalHypothesis, StudyPlan, StudyStep, TaskMessage
 from .session_store import SessionStore
 from task_manager.task_manager import TaskManager
 from clients.backend_client import BackendClient
-from .execution_state import (
-    execution_start_allowed,
-    find_first_incomplete_step,
-    normalize_step_status,
-    planning_start_allowed,
+from .execution_state import planning_start_allowed
+from .run_context import (
+    PlannedRun,
+    build_compiled_prompt,
+    build_input_refs,
+    first_incomplete,
+    planned_runs,
 )
-from .resume_recovery import reset_interrupted_agent
-from .best_effort import schedule_best_effort
 
 logger = logging.getLogger(__name__)
 
@@ -28,29 +27,41 @@ class SessionPlanningConflict(RuntimeError):
     """Raised when a non-explicit planning request targets existing work."""
 
 
+# ---------------------------------------------------------------------------
+# Per-step execution state
+#
+# `plan_steps` has no `status` and no `logs` column — a step is a definition,
+# and execution state belongs to `agent_runs`. Between steps E and F this
+# service kept it in memory, which meant a resume after a process restart could
+# not be honoured. It is durable now: every function below reads
+# `/agent-runs/session/{id}`, so a fresh process reports exactly what the
+# database says happened, and nothing has to be remembered to be recovered.
+# ---------------------------------------------------------------------------
+
+
+async def load_runs(session_id: str) -> list[PlannedRun]:
+    """The session's approved runs, in step order. Empty means "not approved"."""
+    return planned_runs(await BackendClient.get_agent_runs(session_id))
+
+
+# The in-memory `SessionState` the task manager tracks and the persisted DB
+# `status` (see application_api SESSION_STATUSES) are two different vocabularies.
+# IDLE has no DB counterpart — a session is never persisted before planning
+# starts, so it is left out on purpose. CANCELLED maps to "failed": the DB has
+# no "cancelled" status, and both mean "stopped without completing".
+_STATE_TO_DB_STATUS: dict[SessionState, str] = {
+    SessionState.PLANNING: "planning",
+    SessionState.READY: "ready",
+    SessionState.RUNNING: "running",
+    SessionState.PAUSED: "paused",
+    SessionState.COMPLETED: "completed",
+    SessionState.FAILED: "failed",
+    SessionState.CANCELLED: "failed",
+}
+
+
 class SessionService:
-    """
-    The single coordination layer for all session-related operations.
-
-    Owns:
-      - SessionStore  (in-memory session registry)
-      - TaskManager   (asyncio task lifecycle)
-      - BackendClient (HTTP persistence)
-      - ws_manager    (WebSocket broadcasts)
-
-    Everything else (routes, planners, executors) should talk through here.
-    Planners and executors receive a Session object and call back into this
-    service for any state updates or persistence — inject `self` when
-    building those callables (see start_planning / start_execution).
-
-    Error handling philosophy:
-      - Communication failures (HTTP, WebSocket) are logged and swallowed —
-        they must never raise into a running task.
-      - Missing/invalid session IDs raise immediately (caller's bug, not
-        a runtime condition).
-      - All public methods log at the appropriate level so failures are
-        always traceable without crashing.
-    """
+    """The single coordination layer for all session-related operations."""
 
     def __init__(self, ws_manager):
         self.store = SessionStore()
@@ -81,12 +92,12 @@ class SessionService:
     def _has_persisted_planning_state(session: Session) -> bool:
         """Return True only when persistence contains actual planner output.
 
-        A new dashboard launch now saves the user's free-text hypothesis as a
-        draft before calling /plan. That draft has no PICO fields and must not
-        trip the overwrite guard. Structured hypotheses and plans remain
-        protected unless the caller explicitly requests a restart.
+        Every session gets an empty draft `plans` row the instant it is
+        created (the schema's 1:1 session/plan invariant) — so `session.plan
+        is not None` is true for a session that has never been planned.
+        Only a plan that actually has steps counts as persisted state.
         """
-        if session.plan is not None:
+        if session.plan is not None and session.plan.steps:
             return True
 
         hypothesis = session.hypothesis
@@ -171,6 +182,7 @@ class SessionService:
         *,
         restart: bool = False,
     ) -> None:
+        """Approve the plan if needed, then execute its runs."""
         logger.info(f"[{session_id}] Starting execution")
         session = await self.store.get_or_create_async(session_id)
 
@@ -179,61 +191,77 @@ class SessionService:
                 f"Execution already running for session {session_id}"
             )
 
-        if (
-            session.plan is None
-            or not session.plan.steps
-            or str(session.plan.state or "").lower() != "confirmed"
-        ):
+        if session.plan is None or not session.plan.steps:
             raise SessionExecutionConflict(
-                f"Session {session_id} has no confirmed executable pipeline plan"
+                f"Session {session_id} has no plan to execute"
             )
 
-        persisted_steps = []
-        if session.plan is not None and session.plan.id:
-            persisted_steps = await BackendClient.get_plan_steps(str(session.plan.id))
-            if not persisted_steps and session.plan.steps:
-                persisted_steps = [
-                    {"status": plan_step.status}
-                    for plan_step in session.plan.steps
-                ]
-            elif not persisted_steps and not restart:
+        runs = await load_runs(session_id)
+        if not runs:
+            # A draft plan owns no runs. Approving it creates exactly one per
+            # step; a rejected approval (empty plan, unknown agent type) is a
+            # conflict, not something to work around.
+            approved = await BackendClient.approve_plan(session_id)
+            if approved is None:
                 raise SessionExecutionConflict(
-                    f"Session {session_id} has a persisted plan whose execution "
-                    "state could not be verified"
+                    f"The plan for session {session_id} could not be approved; "
+                    "it was not executed."
+                )
+            session.plan = approved
+            runs = await load_runs(session_id)
+            if not runs:
+                raise SessionExecutionConflict(
+                    f"Session {session_id} was approved but has no agent runs; "
+                    "reconciliation is required before it can execute."
                 )
 
-        if not execution_start_allowed(persisted_steps, restart=restart):
+        started = [run for run in runs if run.status != "pending"]
+        if started and not all(run.is_complete for run in started):
             raise SessionExecutionConflict(
-                f"Session {session_id} already has persisted execution progress; "
-                "an explicit restart is required"
+                f"Session {session_id} has already-started agent runs. Resume it "
+                "instead of starting it again — v1 runs each step exactly once."
+            )
+        if started and all(run.is_complete for run in runs):
+            raise SessionExecutionConflict(
+                f"Session {session_id} has already executed every step of its "
+                "plan. A new run requires a new session (A21)."
+            )
+        if restart and started:
+            raise SessionExecutionConflict(
+                f"Session {session_id} cannot be restarted: v1 permits one run "
+                "per step, so a re-execution requires a new session."
             )
 
-        # /run is a full start/restart. Manual suffix recovery is configured
-        # only by resume_pipeline().
-        session.resume_from_agent = None
-        session.resume_agent_statuses = {}
-        if restart:
-            self._clear_session_input(session_id)
-            await self.tasks.restart_execution(session, executor)
-        else:
-            await self.tasks.start_execution(session, executor)
+        # Continue from the first step that has not completed. On a first run
+        # that is step 1; after an interruption it is where the work stopped,
+        # and **nothing is deleted to get there**.
+        resume_point = first_incomplete(runs)
+        session.resume_from_step_id = (
+            resume_point.step_id if resume_point and started else None
+        )
+
+        self._clear_session_input(session_id)
+        await self.tasks.start_execution(session, executor)
+        # tasks.start_execution sets session.state = RUNNING synchronously
+        # before scheduling the background task; persist that now instead of
+        # leaving the DB status stuck at whatever it was created with.
+        await self.update_state(session, session.state)
+        if session.execution_task is not None:
+            session.execution_task.add_done_callback(
+                lambda _: asyncio.create_task(self._sync_state(session))
+            )
 
     async def resume_pipeline(
         self,
         session_id: str,
         executor,
         *,
-        workspace_root: str,
+        workspace_root: str | None = None,
         reset_runtime_state: (
             Callable[[str, str], Awaitable[None]] | None
         ) = None,
     ) -> dict:
-        """
-        Safely restart a hydrated pipeline from its first incomplete step.
-
-        This is intentionally separate from resume(), which only releases the
-        pause event of an already-live execution task.
-        """
+        """Continue an interrupted pipeline from its first incomplete step."""
         lock = self._resume_locks.setdefault(session_id, asyncio.Lock())
         async with lock:
             session = await self.store.get_or_create_async(session_id)
@@ -241,96 +269,48 @@ class SessionService:
                 raise SessionExecutionConflict(
                     f"Execution already running for session {session_id}"
                 )
-            if session.plan is None or not session.plan.id:
+
+            runs = await load_runs(session_id)
+            if not runs:
                 raise SessionExecutionConflict(
-                    f"Session {session_id} has no persisted plan to resume"
+                    f"Session {session_id} has no approved plan to resume. Approve "
+                    "and start it instead."
                 )
 
-            steps = await BackendClient.get_plan_steps(str(session.plan.id))
-            if not steps:
-                raise SessionExecutionConflict(
-                    f"Persisted execution state for session {session_id} "
-                    "could not be verified"
-                )
-
-            interrupted_step = find_first_incomplete_step(steps)
-            if interrupted_step is None:
+            interrupted = first_incomplete(runs)
+            if interrupted is None:
                 raise SessionExecutionConflict(
                     f"Session {session_id} is already fully completed"
                 )
-
-            interrupted_agent = str(interrupted_step.get("module") or "").strip()
-            interrupted_step_id = str(interrupted_step.get("id") or "").strip()
-            if not interrupted_agent or not interrupted_step_id:
+            if all(run.status == "pending" for run in runs):
                 raise SessionExecutionConflict(
-                    "The first incomplete plan step has no executable module or ID"
+                    f"Session {session_id} has not started yet; start it instead of "
+                    "resuming it."
                 )
 
-            try:
-                if reset_runtime_state is not None:
-                    await reset_runtime_state(session_id, interrupted_agent)
-                cleared_artifacts = await asyncio.to_thread(
-                    reset_interrupted_agent,
-                    workspace_root,
-                    session_id,
-                    interrupted_agent,
-                )
-            except (OSError, RuntimeError, ValueError) as exc:
-                raise SessionExecutionConflict(
-                    f"Could not safely clear interrupted artifacts for "
-                    f"{interrupted_agent}: {exc}"
-                ) from exc
+            # In-process waiters (a review long-poll, for example) are
+            # runtime state, not results: clearing them is not deleting work.
+            if reset_runtime_state is not None:
+                await reset_runtime_state(session_id, interrupted.agent_type)
 
-            persisted = await BackendClient.update_plan_step(
-                interrupted_step_id,
-                {"status": "PENDING"},
-            )
-            if persisted is None:
-                raise SessionExecutionConflict(
-                    f"Could not persist the reset of {interrupted_agent}; "
-                    "execution was not started"
-                )
-
-            initial_statuses: dict[str, str] = {}
-            agents: list[dict] = []
-            for step in steps:
-                agent_name = str(step.get("module") or "").strip()
-                if not agent_name:
-                    continue
-                status = (
-                    "PENDING"
-                    if str(step.get("id") or "") == interrupted_step_id
-                    else normalize_step_status(step.get("status"))
-                )
-                initial_statuses[agent_name] = status
-                agents.append(
-                    {
-                        "name": agent_name,
-                        "status": status,
-                        "started_at": None,
-                        "finished_at": None,
-                        "error": None,
-                    }
-                )
-
-            for plan_step in session.plan.steps:
-                if str(plan_step.id) == interrupted_step_id:
-                    plan_step.status = "PENDING"
-
-            session.resume_from_agent = interrupted_agent
-            session.resume_agent_statuses = initial_statuses
+            session.resume_from_step_id = interrupted.step_id
             session.last_error = None
 
-            await self._ws_send(
-                "pipeline_agent_status",
-                {"agents": agents},
-                session_id=session_id,
-            )
+            status = await BackendClient.get_agent_run_status(session_id)
+            if status is not None:
+                await self._ws_send(
+                    "pipeline_agent_status", status, session_id=session_id
+                )
             await self._ws_send(
                 "pipeline_resume_prepared",
                 {
-                    "interrupted_agent": interrupted_agent,
-                    "cleared_artifacts": cleared_artifacts,
+                    "interrupted_agent": interrupted.agent_type,
+                    "step_id": interrupted.step_id,
+                    "agent_run_id": interrupted.agent_run_id,
+                    "step_order": interrupted.step_order,
+                    # Stated explicitly because the legacy response listed the
+                    # artifacts it had just destroyed here.
+                    "cleared_artifacts": [],
                 },
                 session_id=session_id,
             )
@@ -338,16 +318,23 @@ class SessionService:
             self._clear_session_input(session_id)
             await self.tasks.restart_execution(session, executor)
             await self.update_state(session, SessionState.RUNNING)
+            if session.execution_task is not None:
+                session.execution_task.add_done_callback(
+                    lambda _: asyncio.create_task(self._sync_state(session))
+                )
             logger.info(
-                "[%s] Manually resumed pipeline from %s",
+                "[%s] Resumed pipeline at step %s (%s), deleting nothing",
                 session_id,
-                interrupted_agent,
+                interrupted.step_order,
+                interrupted.agent_type,
             )
             return {
                 "session_id": session_id,
                 "status": "resume_started",
-                "interrupted_agent": interrupted_agent,
-                "cleared_artifacts": cleared_artifacts,
+                "interrupted_agent": interrupted.agent_type,
+                "step_id": interrupted.step_id,
+                "agent_run_id": interrupted.agent_run_id,
+                "cleared_artifacts": [],
             }
 
     def pause(self, session_id: str) -> None:
@@ -388,18 +375,25 @@ class SessionService:
         session.state = state
         logger.info(f"[{session.session_id}] State: {prev.name} -> {state.name}")
 
-        results = await asyncio.gather(
-            BackendClient.update_session(session.session_id, {"state": state.name}),
-            self._ws_send(
-                "state_update", {"state": state.name}, session_id=session.session_id
-            ),
-            return_exceptions=True,
+        db_status = _STATE_TO_DB_STATUS.get(state)
+        persisted = True
+        if db_status is not None:
+            # Paused is only reachable through the DB's durable two-step
+            # path (running -> pausing -> paused); everything else is one
+            # guarded hop from wherever the session currently is.
+            if db_status == "paused":
+                await BackendClient.set_session_status(session.session_id, "pausing")
+            result = await BackendClient.set_session_status(session.session_id, db_status)
+            persisted = result is not None
+
+        await self._ws_send(
+            "state_update", {"state": state.name}, session_id=session.session_id
         )
 
-        if isinstance(results[0], Exception):
+        if db_status is not None and not persisted:
             logger.error(
-                f"[{session.session_id}] Failed to persist state '{state.name}' "
-                f"to backend: {results[0]}"
+                f"[{session.session_id}] Failed to persist status '{db_status}' "
+                "to backend"
             )
 
     async def _sync_state(self, session: Session) -> None:
@@ -412,11 +406,7 @@ class SessionService:
     async def handle_hypothesis_update(
         self, session: Session, hypo_data: dict
     ) -> ClinicalHypothesis | None:
-        """
-        Create or update the hypothesis based on whether the session
-        already has one. Returns the persisted object, or None if the
-        backend call failed (task continues either way).
-        """
+        """Create or update the hypothesis based on whether the session already has one. Returns the persisted object, or None if the backend call failed (task continues either way)."""
         existing = session.hypothesis
         action = "update" if existing is not None else "create"
         logger.info(
@@ -426,12 +416,12 @@ class SessionService:
         try:
             if existing is None:
                 hypothesis = ClinicalHypothesis(**hypo_data)
-                result = await BackendClient.create_hypothesis(
+                result = await BackendClient.save_intent(
                     session.session_id, hypothesis
                 )
             else:
                 updated = existing.model_copy(update=hypo_data)
-                result = await BackendClient.update_hypothesis(updated)
+                result = await BackendClient.save_intent(session.session_id, updated)
 
             if result is None:
                 # BackendClient already logged the HTTP error details
@@ -465,11 +455,7 @@ class SessionService:
     async def handle_plan_update(
         self, session: Session, steps_data: list
     ) -> StudyPlan | None:
-        """
-        Build and create/update the study plan. Requires session.hypothesis
-        to already be set (handle_hypothesis_update must have succeeded first).
-        Returns the persisted plan, or None on failure.
-        """
+        """Build and create/update the study plan. Requires session.hypothesis to already be set (handle_hypothesis_update must have succeeded first). Returns the persisted plan, or None on failure."""
         if session.hypothesis is None:
             logger.error(
                 f"[{session.session_id}] handle_plan_update called but session has no "
@@ -485,8 +471,7 @@ class SessionService:
 
         try:
             plan = StudyPlan(
-                hypothesis_id=session.hypothesis.id,
-                study_goal=session.hypothesis.title,
+                session_id=str(session.session_id),
                 steps=[
                     StudyStep(
                         title=s.get("title", ""),
@@ -497,11 +482,12 @@ class SessionService:
                 ],
             )
 
-            if session.plan is None:
-                result = await BackendClient.create_plan(plan)
-            else:
-                plan = plan.model_copy(update={"id": session.plan.id})
-                result = await BackendClient.update_plan(plan)
+            # A draft is unversioned: saving it is an idempotent replace of
+            # the ordered step list, so create and update are the same call.
+            plan = plan.model_copy(
+                update={"id": str(session.session_id), "session_id": str(session.session_id)}
+            )
+            result = await BackendClient.save_plan_draft(session.session_id, plan)
 
             if result is None:
                 logger.error(
@@ -511,7 +497,7 @@ class SessionService:
                 return None
 
             session.plan = result
-            logger.debug(f"[{result.hypothesis_id}] Hypothesis' Plan {action}d")
+            logger.debug(f"[{result.session_id}] Plan {action}d")
 
             ui_steps = [
                 {
@@ -543,7 +529,9 @@ class SessionService:
         if session.hypothesis is not None:
             session.hypothesis.state = "confirmed"
             try:
-                result = await BackendClient.update_hypothesis(session.hypothesis)
+                result = await BackendClient.save_intent(
+                    session.session_id, session.hypothesis
+                )
                 if result:
                     session.hypothesis = result
                 else:
@@ -564,33 +552,14 @@ class SessionService:
         # )
 
     async def confirm_plan(self, session: Session) -> None:
-        """
-        Mark hypothesis and plan as confirmed, persist both, update state.
-        Individual failures are logged but don't block the others.
-        """
-        logger.info(f"[{session.session_id}] Confirming plan")
+        """Mark the planning phase finished — **not** the approval."""
+        logger.info(f"[{session.session_id}] Plan draft ready for approval")
 
-        if session.plan is not None:
-            session.plan.state = "confirmed"
-            try:
-                result = await BackendClient.update_plan(session.plan)
-                if result:
-                    session.plan = result
-                else:
-                    logger.error(
-                        f"[{session.session_id}] Failed to confirm plan in backend"
-                    )
-            except Exception as e:
-                logger.exception(f"[{session.session_id}] Error confirming plan: {e}")
-        else:
+        if session.plan is None:
             logger.warning(
                 f"[{session.session_id}] confirm_plan called with no plan on session"
             )
-
         await self.update_state(session, SessionState.READY)
-        # await self._ws_send(
-        #     "msg", "Study Plan Confirmed.", session_id=session.session_id
-        # )
 
     # ------------------------------------------------------------------
     # Queries — routes call these
@@ -617,132 +586,59 @@ class SessionService:
         session: Session,
         task_messages: List[TaskMessage],
     ) -> List[Dict[str, Any]]:
-        """
-        Persist compiled task messages using step_id and then persist
-        context augmentation by task_id.
-        """
+        """Persist the compiled task messages onto the **draft** plan steps."""
         if session.plan is None:
             logger.warning(
                 f"[{session.session_id}] save_task_messages_for_plan called with no plan"
             )
             return []
 
-        # Map module name -> step id for step-scoped persistence endpoint.
-        step_index: Dict[str, str] = {
-            (step.module or ""): str(step.id)
-            for step in session.plan.steps
-            if step.id and step.module
-        }
+        by_agent: Dict[str, List[TaskMessage]] = {}
+        for message in task_messages:
+            by_agent.setdefault(message.agent_id, []).append(message)
 
-        persisted: List[Dict[str, Any]] = []
-        task_only_saved = 0
-
-        for tm in task_messages:
-            step_id = step_index.get(tm.agent_id)
-            if not step_id:
+        attached: List[Dict[str, Any]] = []
+        for step in session.plan.steps:
+            queued = by_agent.get(step.module or "")
+            if not queued:
                 logger.warning(
-                    f"[{session.session_id}] No step_id found for agent_id={tm.agent_id}; skipping task message persistence"
+                    f"[{session.session_id}] No compiled task message for step "
+                    f"{step.step_order} ({step.module}); it will execute on its "
+                    "definition alone"
                 )
                 continue
-
-            tm_payload = tm.model_dump()
-            tm_result = await BackendClient.save_task_message_by_step_id(
-                step_id, tm_payload
-            )
-            if not tm_result:
-                continue
-
-            task_only_saved += 1
-
-            task_id = str(tm_result.get("task_id") or tm.task_id)
-            context_payload = tm_payload.get("context_augmentation") or {}
-            context_result = await BackendClient.save_context_augmentation_by_task_id(
-                task_id,
-                context_payload,
-            )
-
-            if context_result is None:
-                logger.warning(
-                    f"[{session.session_id}] Context augmentation save failed for task_id={task_id}"
-                )
-                continue
-
-            persisted.append(
+            # Several steps may name one agent. They are filled in plan
+            # order, one message each, instead of every step sharing the first.
+            step.task_message = queued.pop(0)
+            attached.append(
                 {
-                    "step_id": step_id,
-                    "task_id": task_id,
-                    "task_message": tm_result,
-                    "context_augmentation": context_result,
+                    "step_id": step.id,
+                    "step_order": step.step_order,
+                    "agent_type": step.module,
+                    "task_id": step.task_message.task_id,
                 }
             )
 
+        saved = await BackendClient.save_plan_draft(session.session_id, session.plan)
+        if saved is None:
+            logger.error(
+                f"[{session.session_id}] Compiled task messages were NOT persisted; "
+                "the plan draft write failed"
+            )
+            return []
+        session.plan = saved
         logger.info(
-            f"[{session.session_id}] Persisted {len(persisted)}/{len(task_messages)} task messages with context augmentation "
-            f"(task rows saved: {task_only_saved})"
+            f"[{session.session_id}] Persisted {len(attached)}/{len(task_messages)} "
+            "compiled task message(s) onto the draft plan steps"
         )
-        return persisted
-
-    async def read_task_message_by_step_id(self, step_id: str) -> Dict[str, Any] | None:
-        """Read task message payload by plan step id."""
-        return await BackendClient.get_task_message_by_step_id(step_id)
-
-    async def read_context_augmentation_by_task_id(
-        self, task_id: str
-    ) -> Dict[str, Any] | None:
-        """Read context augmentation payload by task id."""
-        return await BackendClient.get_context_augmentation_by_task_id(task_id)
+        return attached
 
     async def handle_pipeline_update(
         self,
         session: Session,
         agents: list[dict],
     ) -> None:
-        """
-        Persist agent status changes to their corresponding plan steps,
-        then broadcast to the frontend.
-
-        Maps agent name → plan step by `module` field.
-        Appends error text to the step's logs JSONB column if failed.
-        """
-        if session.plan is None:
-            logger.warning(
-                f"[{session.session_id}] handle_pipeline_update called with no plan"
-            )
-            await self._ws_send(
-                "pipeline_agent_status",
-                {"agents": agents},
-                session_id=session.session_id,
-            )
-            return
-
-        # Build a name→step_id index from the in-memory plan
-        step_index: dict[str, str] = {
-            s.module: str(s.id) for s in session.plan.steps if s.id and s.module
-        }
-
-        for agent in agents:
-            step_id = step_index.get(agent["name"])
-            if not step_id:
-                continue  # agent not mapped to a plan step — skip
-
-            patch: dict = {"status": agent["status"]}
-
-            if agent.get("error"):
-                patch["logs"] = [
-                    {
-                        "timestamp": agent.get("finished_at"),
-                        "level": "error",
-                        "message": agent["error"],
-                    }
-                ]
-
-            schedule_best_effort(
-                lambda step_id=step_id, patch=copy.deepcopy(patch): (
-                    BackendClient.update_plan_step(step_id, patch)
-                ),
-                name=f"pipeline-status:{agent['name']}",
-            )
-
+        """Broadcast the in-flight agent view."""
         await self._ws_send(
             "pipeline_agent_status", {"agents": agents}, session_id=session.session_id
         )
@@ -750,46 +646,10 @@ class SessionService:
     async def update_agent_tool_logs(
         self, session: Session, agent: str, log: Dict
     ) -> None:
-        step = next(
-            (step for step in session.plan.steps if step.module == agent),
-            None,
-        ) if session.plan else None
-        body = {
-            "status": "RUNNING",
-            "log": log,
-        }
-        if step and step.id:
-            schedule_best_effort(
-                lambda _step_id=str(step.id), _body=copy.deepcopy(body): (
-                    BackendClient.update_plan_step(_step_id, _body)
-                ),
-                name=f"tool-log:{agent}",
-            )
         await self._ws_send(log.get("type"), log.get("payload"), log.get("session_id"))
 
     async def update_tool_views(self, session, agent, msg_type, payload):
-        step = next(
-            (step for step in session.plan.steps if step.module == agent),
-            None,
-        ) if session.plan else None
-        if not step or not step.id:
-            return
-
-        body = {
-            "status": "RUNNING",
-            "log": {
-                "type": msg_type,
-                "payload": payload,
-                "session_id": session.session_id,
-            },
-        }
-
-        schedule_best_effort(
-            lambda _step_id=str(step.id), _body=copy.deepcopy(body): (
-                BackendClient.update_plan_step(_step_id, _body)
-            ),
-            name=f"tool-view:{agent}:{msg_type}",
-        )
+        await self._ws_send(msg_type, payload, session.session_id)
 
     async def persist_agent_status(
         self,
@@ -797,67 +657,101 @@ class SessionService:
         agent_name: str,
         status: str,
     ) -> None:
-        """Persist a human-in-the-loop waiting/resolved state for hydration."""
-        session = await self.store.get_async(session_id)
-        if session is None or session.plan is None:
-            logger.warning(
-                f"[{session_id}] Cannot persist {agent_name}={status}: no hydrated plan"
-            )
-            return
-
-        step = next(
-            (
-                plan_step
-                for plan_step in session.plan.steps
-                if plan_step.module == agent_name
-            ),
-            None,
+        """Announce a human-in-the-loop wait, and record it as an event."""
+        await self._ws_send(
+            "agent_waiting_for_user_input",
+            {"agent": agent_name, "status": status},
+            session_id=session_id,
         )
-        if step is None or not step.id:
-            logger.warning(
-                f"[{session_id}] Cannot persist {agent_name}={status}: plan step not found"
-            )
-            return
 
-        await BackendClient.update_plan_step(str(step.id), {"status": status})
-        step.status = status
+    async def update_current_agent(self, session: Session, run: PlannedRun) -> None:
+        """Tell the UI which step is active. Live only — the durable record is
+        the run's own `running` status, written when it was claimed."""
+        await self._ws_send(
+            "run_status",
+            {
+                "state": "RUNNING",
+                "current_agent": run.agent_type,
+                "step_id": run.step_id,
+                "step_order": run.step_order,
+                "agent_run_id": run.agent_run_id,
+            },
+            session_id=session.session_id,
+        )
+
+    async def report_pipeline_error(self, session: Session, error: Exception) -> None:
+        """A failure outside any step (graph construction, cancellation)."""
+        session.last_error = str(error)
+        await self._ws_send(
+            "run_stopped",
+            {"reason": "pipeline_error", "error": str(error)[:2000]},
+            session_id=session.session_id,
+        )
+
+    # ------------------------------------------------------------------
+    # Run transitions — the runner's node wrapper calls these
+    # ------------------------------------------------------------------
+
+    async def claim_run(self, session: Session, run: PlannedRun) -> None:
+        """Claim the run immediately before its step starts."""
+        current = await load_runs(session.session_id)
+        upstream = [item for item in current if item.step_order < run.step_order]
+        this_run = next(
+            (item for item in current if item.step_id == run.step_id), run
+        )
+
+        if this_run.compiled_prompt:
+            # A reclaim continues the same run: its compiled prompt is already
+            # fixed and may not be recompiled into something else.
+            compiled_prompt = this_run.compiled_prompt
+        else:
+            compiled_prompt = build_compiled_prompt(this_run, upstream)
+
+        session_row = await BackendClient.get_session(session.session_id) or {}
+        input_refs = build_input_refs(this_run, upstream, session_row)
+
+        result = await BackendClient.start_agent_run(
+            run.agent_run_id, compiled_prompt, input_refs
+        )
+        await self._broadcast_committed_event(session, result)
+
+    async def finish_run(self, session: Session, run: PlannedRun) -> None:
+        """Close the run when its step ends."""
+        result = await BackendClient.complete_agent_run(run.agent_run_id)
+        await self._broadcast_committed_event(session, result)
+
+    async def fail_run(
+        self, session: Session, run: PlannedRun, error: BaseException
+    ) -> None:
+        result = await BackendClient.fail_agent_run(
+            run.agent_run_id,
+            code=type(error).__name__,
+            message=str(error) or type(error).__name__,
+            details={"schema_version": 1, "step_order": run.step_order},
+        )
+        session.last_error = str(error)
+        await self._broadcast_committed_event(session, result)
+
+    async def _broadcast_committed_event(
+        self, session: Session, transition: dict | None
+    ) -> None:
+        """Broadcast the event the Application API already committed."""
+        event = (transition or {}).get("event")
+        if not event:
+            return
+        await self.ws.send_ws_message(
+            event.get("msg_type"),
+            event.get("payload"),
+            session_id=session.session_id,
+            event_id=event.get("event_id"),
+        )
 
     async def recover_execution_state(self, session_id: str) -> dict | None:
-        """
-        Called by a route when the frontend reconnects.
-        Fetches persisted step statuses and returns a pipeline_agent_status
-        shaped payload the frontend can replay directly.
-        """
-        session = await self.store.get_async(session_id)
-        if session is None or session.plan is None:
-            hypothesis = await BackendClient.get_hypothesis_by_chat(session_id)
-            if not hypothesis:
-                return None
-            plan = await BackendClient.get_plan_by_hypothesis(hypothesis.id)
-            if not plan:
-                return None
-            steps = await BackendClient.get_plan_steps(str(plan.id))
-        else:
-            steps = await BackendClient.get_plan_steps(str(session.plan.id))
-
-        if not steps:
+        """Replay the per-agent status for a reconnecting frontend."""
+        status = await BackendClient.get_agent_run_status(session_id)
+        if not status or not status.get("agents"):
             return None
-
-        agents = [
-            {
-                "name": s["module"],
-                "status": s["status"],
-                "started_at": None,  # not stored — only current status matters
-                "finished_at": None,
-                "error": s.get("logs", [{}])[-1].get("message")
-                if s.get("logs")
-                else None,
-            }
-            for s in steps
-            if s.get("module")
-        ]
-
-        return {"agents": agents}
+        return status
 
     async def get_hypothesis_history(self, limit: int = 20) -> list[dict]:
         """Fetch hypothesis history from the backend API."""
