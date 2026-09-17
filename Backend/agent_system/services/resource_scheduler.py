@@ -57,6 +57,12 @@ class ResourceScheduler:
                 "RESOURCE_GPU_SEGMENTATION_CAPACITY", 1
             ),
             "cpu_heavy": _positive_int("RESOURCE_CPU_HEAVY_CAPACITY", 1),
+            # A large volume upload is hundreds of sequential HTTP requests to
+            # Orthanc; running several of those loops at once is what
+            # saturates Orthanc's own HTTP server and drops connections mid
+            # upload. This caps how many uploads hit Orthanc concurrently
+            # without serialising them outright.
+            "orthanc_io": _positive_int("RESOURCE_ORTHANC_IO_CAPACITY", 2),
         }
         if not configured or any(value < 1 for value in configured.values()):
             raise ValueError("Resource capacities must be positive")

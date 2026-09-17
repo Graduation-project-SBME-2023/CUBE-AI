@@ -53,6 +53,9 @@ NNUNET_DIR: Final[Path] = _resolve_configured_path(
 JOBS_DIR: Final[Path] = _resolve_configured_path(
     os.environ.get("INFERENCE_JOB_DIR", BACKEND_STORAGE_ROOT / "jobs" / "inference")
 )
+INGEST_JOBS_DIR: Final[Path] = _resolve_configured_path(
+    os.environ.get("INGEST_JOB_DIR", BACKEND_STORAGE_ROOT / "jobs" / "ingestion")
+)
 CACHE_DIR: Final[Path] = BACKEND_STORAGE_ROOT / "cache"
 LOGS_DIR: Final[Path] = _resolve_configured_path(
     os.environ.get("BACKEND_LOG_DIR", BACKEND_STORAGE_ROOT / "logs")
@@ -89,6 +92,10 @@ _WORKSPACE_DIR_MAP = {
     "models": ("outputs", "modeling"),
     "reports": ("outputs", "reports"),
     ".knowledge_cache": ("cache", "literature"),
+    # Session-scoped, disposable copies of masks that live permanently in
+    # Orthanc.  Deliberately under cache/ so a session teardown can delete them
+    # without touching anything the study depends on.
+    "mask_cache": ("cache", "masks"),
     "temp_segmentations": ("temp", "segmentations"),
 }
 
@@ -149,6 +156,7 @@ def ensure_storage_layout() -> None:
         NNUNET_DIR / "mappings",
         MODELS_DIR,
         JOBS_DIR,
+        INGEST_JOBS_DIR,
         CACHE_DIR / "huggingface",
         CACHE_DIR / "monailabel",
         CACHE_DIR / "literature",
@@ -158,6 +166,7 @@ def ensure_storage_layout() -> None:
         TEMP_DIR / "radiology",
         TEMP_DIR / "vista",
         TEMP_DIR / "latex",
+        TEMP_DIR / "ingest",
         RADIOLOGY_STATE_DIR,
         BACKEND_STORAGE_ROOT / "_migrated-legacy",
     ):

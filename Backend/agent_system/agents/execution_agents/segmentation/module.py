@@ -60,6 +60,8 @@ from .utils import (
 )
 from .ws_client_sender import send_ws_message_remote
 
+from services.mask_store import MaskStore, SegRef, orthanc_first
+
 logger = logging.getLogger("SegmentationModule")
 
 
@@ -322,6 +324,109 @@ class SegmentationModule:
             run_id=run_id,
         )
 
+    async def _resolve_mask_path(
+        self,
+        item: dict[str, Any],
+        artifact_key: str,
+    ) -> str:
+        """Logical workspace path the rest of the pipeline reads this mask from.
+
+        With ``MASK_SOURCE=orthanc`` the archived DICOM SEG is materialised into
+        the session cache and used instead of the workspace copy, so previews and
+        radiomics see exactly what the archive holds. Anything unexpected falls
+        back to the local copy, which is what happens with the flag off.
+        """
+        local_path = f"masks/{artifact_key}.nii.gz"
+        if not orthanc_first():
+            return local_path
+
+        seg_uid = str(
+            (item.get("inference_result") or {}).get("segmentation_series_uid") or ""
+        )
+        volume_uid = str(item.get("volume_uid") or "")
+        if not seg_uid or not volume_uid:
+            return local_path
+
+        try:
+            async with MaskStore() as store:
+                await store.ensure_local(
+                    self.session_id,
+                    SegRef(
+                        seg_series_uid=seg_uid,
+                        volume_uid=volume_uid,
+                        target_label=item.get("canonical_label"),
+                    ),
+                )
+            return f"mask_cache/{seg_uid}.nii.gz"
+        except Exception:  # noqa: BLE001 - the local copy is a valid fallback
+            logger.exception(
+                "Could not read mask %s from Orthanc for pair %s; using the "
+                "workspace copy instead",
+                seg_uid,
+                item.get("pair_id"),
+            )
+            return local_path
+
+    async def _publish_reviewed_mask(
+        self,
+        item: dict[str, Any],
+        mask_path: Path,
+    ) -> None:
+        """Archive a clinician's edited mask in Orthanc as a new DICOM SEG.
+
+        The edit is published as its own series that references the model's
+        segmentation, rather than replacing it: DICOM has no update, and the
+        original is what the correction has to remain comparable against.
+
+        A failure here is recorded on the item and does not stop the run. The
+        local copy still exists, so the worst case is the behaviour that existed
+        before this call -- except now it is visible instead of silent.
+        """
+        volume_uid = str(item.get("volume_uid") or "")
+        target_label = str(
+            item.get("canonical_label") or item.get("target_id") or ""
+        ).strip()
+        if not volume_uid or not target_label:
+            item["orthanc_publish"] = "skipped"
+            logger.warning(
+                "Cannot archive edited mask for pair %s: missing volume or target",
+                item.get("pair_id"),
+            )
+            return
+
+        derived_from = (item.get("inference_result") or {}).get(
+            "segmentation_series_uid"
+        )
+        try:
+            async with MaskStore() as store:
+                ref = await store.publish(
+                    volume_uid=volume_uid,
+                    target_label=target_label,
+                    mask_path=Path(mask_path),
+                    method="manual",
+                    derived_from=derived_from,
+                )
+            item["manual_segmentation_series_uid"] = ref.seg_series_uid
+            item["orthanc_publish"] = "ok"
+            logger.info(
+                "Archived edited mask for pair %s as %s",
+                item.get("pair_id"),
+                ref.seg_series_uid,
+            )
+            if orthanc_first():
+                # Downstream must now read the edit that was just archived,
+                # not the model's mask it was derived from.
+                async with MaskStore() as store:
+                    await store.ensure_local(self.session_id, ref)
+                item["mask_path"] = f"mask_cache/{ref.seg_series_uid}.nii.gz"
+        except Exception as exc:  # noqa: BLE001 - reported, never fatal
+            item["orthanc_publish"] = "failed"
+            item["orthanc_publish_error"] = str(exc)
+            logger.exception(
+                "Failed to archive edited mask for pair %s in Orthanc",
+                item.get("pair_id"),
+            )
+
     async def _fail_pair(
         self,
         item: dict[str, Any],
@@ -508,7 +613,10 @@ class SegmentationModule:
             )
             return False
 
-        item["mask_path"] = f"masks/{artifact_key}.nii.gz"
+        # Previews and radiomics both follow item["mask_path"], so this is the
+        # single point that decides whether they read the workspace copy or the
+        # archived DICOM SEG.
+        item["mask_path"] = await self._resolve_mask_path(item, artifact_key)
         item["geometry_adjusted"] = bool(
             (item.get("inference_result") or {}).get("geometry_adjusted")
             or pair_result.get("geometry_adjusted")
@@ -1195,6 +1303,10 @@ class SegmentationModule:
                     )
                     if temp_path.exists():
                         shutil.copy2(temp_path, target_path)
+                        # The local copy alone used to be the whole story, which
+                        # left Orthanc holding the model's mask while radiomics
+                        # ran on the clinician's. Archive the edit as well.
+                        await self._publish_reviewed_mask(item, temp_path)
                     item["is_empty_mask"] = False
                     item["warning"] = None
                     item["review_status"] = "modified"

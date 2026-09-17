@@ -340,6 +340,31 @@ class BackendClient:
                 return []
 
     # ------------------------------------------------------------------
+    # Segmentations
+    # ------------------------------------------------------------------
+
+    @classmethod
+    async def get_segmentations_by_volume(cls, volume_uid: str) -> list[dict]:
+        """Every registered DICOM SEG for one source volume.
+
+        This is what makes a mask addressable by what it *is* -- a segmentation
+        of a volume -- instead of by a filename convention in a workspace.
+        """
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            try:
+                response = await client.get(
+                    f"{BASE_URL}/segmentations/by-volume/{volume_uid}",
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as e:
+                logger.error(
+                    f"Failed to fetch segmentations for volume {volume_uid}: "
+                    f"{type(e).__name__}: {e}"
+                )
+                return []
+
+    # ------------------------------------------------------------------
     # Task Messages + Context Augmentation
     # ------------------------------------------------------------------
 
