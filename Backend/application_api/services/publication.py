@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 async def lock_session(db: AsyncSession, session_id: UUID | str) -> None:
-    """Take the session row lock. 404 when the session does not exist."""
+    """Serialize event allocation in commit order; 404 if the session is absent."""
     locked = (
         await db.execute(
             text(

@@ -41,8 +41,8 @@ def max_bytes_for(kind: str) -> int:
 
 
 # How many binary reads may be in flight per API process, and how long a caller
-# waits before it is told to come back (a bounded 503 + Retry-After beats an
-# unbounded queue that turns into a memory problem).
+# waits before it is told to come back. This is a per-process memory ceiling:
+# a bounded 503 + Retry-After is safer than an unbounded queue of BYTEA values.
 BINARY_READ_CONCURRENCY = int(os.environ.get("ARTIFACT_READ_CONCURRENCY", "2"))
 BINARY_READ_QUEUE_TIMEOUT_SECONDS = float(
     os.environ.get("ARTIFACT_READ_QUEUE_TIMEOUT_SECONDS", "5")

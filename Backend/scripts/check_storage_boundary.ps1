@@ -17,10 +17,20 @@ function Is-AllowedSourceArtifact([string]$Path) {
         (Join-Path $BackendRoot "mcp\test_data"),
         (Join-Path $BackendRoot "agent_system\tests"),
         (Join-Path $BackendRoot "apps\radiology\tests"),
-        (Join-Path $BackendRoot "apps\radiology\lib\configs")
+        (Join-Path $BackendRoot "apps\radiology\lib\configs"),
+        # Load-test evidence is a repository test artifact, not application
+        # runtime state. The load harness documents and owns this exact root.
+        (Join-Path $BackendRoot "tests\load\results")
     )
     foreach ($root in $allowedRoots) {
-        if ((Test-Path -LiteralPath $root) -and (Is-Under $Path $root)) { return $true }
+        if (Test-Path -LiteralPath $root) {
+            $fullPath = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+            $fullRoot = [IO.Path]::GetFullPath($root).TrimEnd('\')
+            if (
+                $fullPath.Equals($fullRoot, [StringComparison]::OrdinalIgnoreCase) -or
+                (Is-Under $Path $root)
+            ) { return $true }
+        }
     }
     return $false
 }
