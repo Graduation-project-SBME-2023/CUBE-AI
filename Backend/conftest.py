@@ -69,6 +69,7 @@ _ISOLATED_PATHS = {
     "GENERAL_DATA_DIR": _RUNTIME_ROOT / "data" / "medical",
     "NNUNET_DIR": _RUNTIME_ROOT / "data" / "nnunet",
     "INFERENCE_JOB_DIR": _RUNTIME_ROOT / "jobs" / "inference",
+    "INGEST_JOB_DIR": _RUNTIME_ROOT / "jobs" / "ingestion",
     "BACKEND_TEMP_DIR": _RUNTIME_ROOT / "temp",
     "BACKEND_LOG_DIR": _RUNTIME_ROOT / "logs",
 }
