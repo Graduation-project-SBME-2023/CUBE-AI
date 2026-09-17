@@ -1169,8 +1169,7 @@ export default function DataCohortView({
                 Interactive Patient Labeling
               </h2>
               <p className="mt-1 text-xs text-gray-400">
-                Assign or review Target Disease status (Positive / Negative). All edits persist
-                directly in the backend session without external CSV uploads.
+                Assign or review Target Disease status (Positive / Negative).
               </p>
             </div>
 
