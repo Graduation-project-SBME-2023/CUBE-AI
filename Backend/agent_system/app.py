@@ -10,6 +10,7 @@ if root_dir not in sys.path:
 import asyncio
 from contextlib import asynccontextmanager
 
+import base64
 import re
 import tempfile
 import subprocess
@@ -864,7 +865,18 @@ async def get_hypothesis_history(limit: int = 20):
 
 @app.post("/reports/compile")
 async def compile_report(data: dict, request: Request):
-    """Compile LaTeX text into a PDF inside the session workspace and return a public URL."""
+    """Compile LaTeX text to a PDF and return it inline (A19 — no durable PDF).
+
+    This is the manual "preview compile" in the Reporting tab, independent of
+    the pipeline's own publish flow (POST /reports/{id}/publish via the
+    Application API). It used to copy the compiled PDF into the session
+    workspace under outputs/reports/ and hand back a file URL — that path was
+    retired by storage_write_guard (§8; no file fallback for report PDFs), so
+    every compile here now raises RetiredWorkspaceWrite instead of returning a
+    result. Compiling only in TEMP_DIR (disposable, unguarded) and returning
+    the bytes as a data URI keeps the existing fetch(pdf_url)-then-blob
+    frontend contract working with no durable file anywhere.
+    """
     session_id = str(data.get("session_id") or "").strip()
     latex_text = data.get("latex_text")
     output_filename = str(data.get("output_filename") or "final_report.pdf").strip()
@@ -879,11 +891,6 @@ async def compile_report(data: dict, request: Request):
     safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", safe_name)
     if not safe_name.lower().endswith(".pdf"):
         safe_name = f"{safe_name}.pdf"
-
-    workspace_name = f"workspace_{session_id}"
-    workspace_folder = str(workspace(session_id))
-    reports_folder = str(workspace_subpath(workspace_folder, "reports"))
-    os.makedirs(reports_folder, exist_ok=True)
 
     latex_temp_root = TEMP_DIR / "latex"
     latex_temp_root.mkdir(parents=True, exist_ok=True)
@@ -919,23 +926,15 @@ async def compile_report(data: dict, request: Request):
                 "compile_log": merged_log,
             }
 
-        final_path = os.path.join(reports_folder, safe_name)
-        with open(pdf_temp_path, "rb") as src, open(final_path, "wb") as dst:
-            dst.write(src.read())
+        with open(pdf_temp_path, "rb") as src:
+            pdf_bytes = src.read()
 
-    # Prefer explicit AGENTS_BASE_URL env var when provided (no hardcoded hosts)
-    agents_base = os.environ.get("AGENTS_BASE_URL")
-    if agents_base:
-        pdf_url = agents_base.rstrip("/") + f"/files/{workspace_name}/reports/{safe_name}"
-    else:
-        base_url = str(request.base_url).rstrip("/")
-        pdf_url = f"{base_url}/files/{workspace_name}/reports/{safe_name}"
+    pdf_url = f"data:application/pdf;base64,{base64.b64encode(pdf_bytes).decode('ascii')}"
 
     return {
         "status": "success",
         "output_filename": safe_name,
         "pdf_url": pdf_url,
-        "pdf_path": final_path,
     }
 
 
@@ -1025,7 +1024,7 @@ async def ws_broadcast(data: dict):
 # and nothing else: the wait endpoint re-reads PostgreSQL.
 _review_events: Dict[str, asyncio.Event] = {}
 _review_futures: Dict[str, asyncio.Future] = {}
-REVIEW_RECHECK_SECONDS = float(os.environ.get("REVIEW_RECHECK_SECONDS", "5"))
+REVIEW_RECHECK_SECONDS = float(os.environ.get("REVIEW_RECHECK_SECONDS", "30"))
 
 
 def _domain_http_error(exc: "population_review.DomainError") -> HTTPException:

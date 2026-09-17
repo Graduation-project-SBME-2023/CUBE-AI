@@ -1,24 +1,16 @@
 """
 Literature Context MCP Tool
 
-Reads the literature review context saved by the planner during Phase 2.
-The file `literature_context.json` in the workspace contains:
-  - knowledge_base: Full domain knowledge built from PubMed, MeSH, etc.
-  - sources_guide: Curated sources and references for citing
-  - hypothesis: The confirmed PICO hypothesis
+Reads the literature review this session's planner persisted through the
+Application API (`literature_reviews` + `literature_papers` — Postgres is
+the only copy; there is no workspace file any more).
 """
 
 import json
-import os
 
 from . import mcp
 from tool_logging import ToolEvent, log_tool_state, TextPayload
-from storage_paths import HYPOTHESES_DIR, workspace_subpath
-
-
-# ── Constants ──────────────────────────────────────────────────────────────────
-
-WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", str(HYPOTHESES_DIR / "workspace_default"))
+from .helpers import domain_api
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
@@ -34,10 +26,11 @@ WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", str(HYPOTHESES_DIR / "workspace_
     },
 )
 async def read_literature_context() -> str:
-    """Read the literature review context saved during the planning phase.
+    """Read the literature review recorded during the planning phase.
 
     This contains the full knowledge base built from PubMed, MeSH, Wikipedia,
-    Semantic Scholar, and Europe PMC — plus a curated sources guide for citations.
+    Semantic Scholar, and Europe PMC — plus a curated sources guide and the
+    papers found, for citations.
 
     Use this data for:
     - Writing the Related Work / Literature Review section
@@ -46,44 +39,30 @@ async def read_literature_context() -> str:
     - Providing clinical context in the Introduction
 
     Returns:
-        str: JSON with 'knowledge_base', 'sources_guide', and 'hypothesis' fields.
+        str: JSON with 'knowledge_base', 'sources_guide', 'pico', and 'papers' fields.
     """
-    lit_path = str(workspace_subpath(WORKSPACE_DIR, "literature_context.json"))
+    payload = TextPayload(message="Reading literature context.")
+    log_tool_state(ToolEvent("tool_started", "text", payload))
 
-    payload = TextPayload(message=f'Reading literature context.')
-    start_event = ToolEvent('tool_started', 'text', payload)
-    log_tool_state(start_event)
-    finished_event = ToolEvent('tool_finished', 'text', payload)
-    log_tool_state(finished_event)
-    
-    if not os.path.exists(lit_path):
-        payload = TextPayload(message=f'Literature Review Context not found.')
-        failed_event = ToolEvent('error', 'text', payload)
-        log_tool_state(failed_event)
+    try:
+        review = await domain_api.latest_literature_review()
+    except domain_api.DomainApiError as exc:
+        log_tool_state(ToolEvent("error", "text", TextPayload(message="Failed to read literature context.")))
+        return json.dumps({"status": "error", "message": str(exc)}, indent=2)
+
+    if review is None:
+        log_tool_state(ToolEvent("error", "text", TextPayload(message="Literature Review Context not found.")))
         return json.dumps({
             "status": "not_available",
-            "message": "No literature context found. The planner may not have run the literature review phase.",
+            "message": "No literature review found. The planner may not have run the literature review phase.",
         }, indent=2)
-    
-    try:
-        with open(lit_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
 
-        payload = TextPayload(message=f'Literature context successfully retrieved.')
-        finished_event = ToolEvent('tool_finished', 'text', payload)
-        log_tool_state(finished_event)
-        
-        return json.dumps({
-            "status": "ok",
-            "knowledge_base": data.get("knowledge_base", ""),
-            "sources_guide": data.get("sources_guide", ""),
-            "hypothesis": data.get("hypothesis", {}),
-        }, indent=2)
-    except Exception as e:
-        payload = TextPayload(message=f'Failed to read literature context.')
-        failed_event = ToolEvent('error', 'text', payload)
-        log_tool_state(failed_event)
-        return json.dumps({
-            "status": "error",
-            "message": f"Failed to read literature context: {str(e)}",
-        }, indent=2)
+    log_tool_state(ToolEvent("tool_finished", "text", TextPayload(message="Literature context successfully retrieved.")))
+    summary = review.get("result_summary") or {}
+    return json.dumps({
+        "status": "ok",
+        "knowledge_base": summary.get("knowledge_base", ""),
+        "sources_guide": summary.get("sources_guide", ""),
+        "pico": review.get("query", {}),
+        "papers": review.get("papers", []),
+    }, indent=2)

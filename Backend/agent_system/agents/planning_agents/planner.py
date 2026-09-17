@@ -7,12 +7,11 @@ import logging
 import re
 import asyncio
 import copy
-import shutil
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Awaitable, Any, Optional, Tuple, List, Dict
 
-import aiofiles
 import yaml
 
 from autogen_agentchat.messages import TextMessage
@@ -37,7 +36,7 @@ from ..clinical_roi_policy import (
 
 from agents.literature_review_agent.knowledge_builder import build_knowledge_base
 from agents.literature_review_agent.literature_review_agent import run_literature_review
-from storage_paths import LOGS_DIR, workspace_subpath
+from storage_paths import LOGS_DIR
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TYPE ALIASES
@@ -154,6 +153,23 @@ def _fit_literature_payload(
         }
 
     return payload
+
+
+def literature_review_key(pico: Dict[str, str]) -> str:
+    """The `literature_reviews.review_key` idempotency key for this PICO.
+
+    Only an insert-or-read key on `UNIQUE(session_id, review_key)` (R15) —
+    the full PICO is already stored, unbounded, in `literature_reviews.query`.
+    It used to be the raw PICO JSON dump, which
+    `LiteratureReviewCreate.review_key` caps at 500 chars; any real clinical
+    hypothesis (free-text population/intervention/comparison/outcome/
+    hypothesis) blew past that, so every `create_literature_review` call
+    failed with 422 and `literature_reviews` had zero rows across every
+    session. A content digest is short, stable, and collides only on an
+    identical PICO, which is exactly the idempotency this key is for.
+    """
+    pico_json = json.dumps(pico, sort_keys=True)
+    return hashlib.sha256(pico_json.encode("utf-8")).hexdigest()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -670,7 +686,6 @@ class ClinicalPlanner:
                 lambda: build_knowledge_base(
                     pico,
                     progress_callback=progress_callback,
-                    cache_dir=workspace_subpath(self.workspace_dir, ".knowledge_cache"),
                 ),
             )
         )
@@ -690,37 +705,6 @@ class ClinicalPlanner:
 
         return knowledge_base, sources_guide, papers, knowledge_sections
 
-    async def _save_literature_context(
-        self,
-        knowledge_base: str,
-        sources_guide: str,
-        generated_context: Any = None,
-    ) -> None:
-        """Save the literature review context to the workspace as a structured JSON file for downstream agents."""
-        lit_context_path = workspace_subpath(self.workspace_dir, "literature_context.json")
-
-        context_data = {
-            "knowledge_base": knowledge_base,
-            "sources_guide": sources_guide,
-            "hypothesis": (
-                self.state.hypothesis.model_dump()
-                if self.state.hypothesis else {}
-            ),
-        }
-        if generated_context and isinstance(generated_context, dict):
-            context_data.update(generated_context)
-
-        try:
-            async with aiofiles.open(
-                lit_context_path, "w", encoding="utf-8"
-            ) as f:
-                await f.write(
-                    json.dumps(context_data, indent=2, ensure_ascii=False)
-                )
-            self.logger.info("Literature context saved to %s", lit_context_path)
-        except Exception as e:
-            self.logger.error("Failed to save literature context: %s", e)
-
     async def _persist_literature_review(
         self,
         pico: Dict[str, str],
@@ -737,7 +721,7 @@ class ClinicalPlanner:
         report row (item 25 — `reports.literature_review_id`)."""
         review = await BackendClient.create_literature_review(
             session_id=str(self.session.session_id),
-            review_key=json.dumps(pico, sort_keys=True),
+            review_key=literature_review_key(pico),
             query=pico,
             result_summary={
                 "knowledge_base": knowledge_base,
@@ -958,9 +942,6 @@ class ClinicalPlanner:
 
 
                     # Run multi-agent literature review pipeline
-                    workspace_dir = self.workspace_dir
-                    lit_output_dir = workspace_subpath(workspace_dir, "literature_review_output")
-
                     await self._send(
                         "lit_review_log",
                         {
@@ -969,12 +950,14 @@ class ClinicalPlanner:
                         },
                     )
 
-                    await run_literature_review(
+                    # No workspace/temp output any more: the pipeline returns
+                    # its generated context, report, and ranked papers directly
+                    # in memory, and the only durable copy is Postgres
+                    # (literature_reviews + literature_papers, written below).
+                    lit_result = await run_literature_review(
                         pico=self._extract_pico_from_hypothesis(),
                         model=getattr(self.client, "model", None)
                         or "gpt-oss:120b-cloud",
-                        output_dir=lit_output_dir,
-                        cache_dir=workspace_subpath(workspace_dir, ".knowledge_cache"),
                         prebuilt_knowledge={
                             "knowledge_base": knowledge_base,
                             "sources_guide": sources_guide,
@@ -982,35 +965,9 @@ class ClinicalPlanner:
                             "knowledge_sections": knowledge_sections,
                         },
                     )
-
-                    # ── Load Literature Output Files ──────────────────
-                    generated_context = {}
-                    ranked_papers = []
-
-                    context_path = lit_output_dir / "context.json"
-                    if context_path.exists():
-                        try:
-                            generated_context = json.loads(
-                                context_path.read_text(encoding="utf-8")
-                            )
-                        except Exception:
-                            generated_context = {}
-
-                    ranked_path = lit_output_dir / "ranked_papers.json"
-                    if ranked_path.exists():
-                        try:
-                            ranked_papers = json.loads(
-                                ranked_path.read_text(encoding="utf-8")
-                            )
-                        except Exception:
-                            ranked_papers = []
-
-                    # Save literature context for the reporter agent
-                    await self._save_literature_context(
-                        knowledge_base,
-                        sources_guide,
-                        generated_context=generated_context,
-                    )
+                    generated_context = lit_result.get("context") or {}
+                    ranked_papers = lit_result.get("ranked_papers") or []
+                    report_md = lit_result.get("literature_report") or ""
 
                     # Durable copy: literature_reviews + literature_papers
                     review_id = None
@@ -1028,24 +985,9 @@ class ClinicalPlanner:
                             e,
                         )
 
-                    # Try to read generated literature report
-                    report_md = ""
-                    report_path = lit_output_dir / "literature_report.md"
-                    if report_path.exists():
-                        try:
-                            report_md = report_path.read_text(encoding="utf-8")
-                        except Exception:
-                            pass
-
                     # Human-readable report row (V1-PLAN item 25): the
                     # planning-phase literature report hangs off the review,
                     # never off an agent run. Published without a PDF.
-                    # `report_persisted` also gates the temp-dir cleanup below —
-                    # literature_report.md's content lives ONLY in this row (the
-                    # review's result_summary does not carry it), so a failed
-                    # write here must not be followed by deleting the one
-                    # remaining copy on disk.
-                    report_persisted = not report_md.strip()  # nothing to lose
                     if review_id and report_md.strip():
                         try:
                             await BackendClient.create_report(
@@ -1055,28 +997,9 @@ class ClinicalPlanner:
                                 source_format="markdown",
                                 title=hypothesis_dump.get("title") or None,
                             )
-                            report_persisted = True
                         except Exception as e:
                             self.logger.warning(
                                 "Failed to persist literature report row: %s",
-                                e,
-                            )
-
-                    # temp/literature/ is disposable scratch, re-derived from the
-                    # same PICO on every run (storage_paths.py) — everything in it
-                    # (context.json, ranked_papers.json, literature_report.md) has
-                    # already been read into memory above. Remove it only once
-                    # every durable copy that scratch fed is confirmed in
-                    # Postgres — the review AND the report row, not just the
-                    # review — so a partial failure never deletes the last copy
-                    # of something that isn't in the DB yet.
-                    if review_id and report_persisted:
-                        try:
-                            shutil.rmtree(lit_output_dir, ignore_errors=True)
-                        except Exception as e:
-                            self.logger.warning(
-                                "Failed to clean up literature scratch dir %s: %s",
-                                lit_output_dir,
                                 e,
                             )
 

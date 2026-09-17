@@ -275,27 +275,43 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
 
         min_class_count = int(class_counts.min())
         n_rows = data.shape[0]
-        requested_fold = max(2, params.fold)
-        effective_fold = min(requested_fold, min_class_count)
-        if effective_fold < 2:
-            return json.dumps({
-                "status": "error",
-                "error_message": (
-                    f"The rarest class has only {min_class_count} sample(s). At least two "
-                    "samples per class are required for 2-fold cross-validation."
-                ),
-                "feature_set_id": prepared.feature_set_id,
-                "class_distribution": class_counts.to_dict(),
-                "fold": requested_fold,
-            }, indent=2)
 
         # ── Adaptive dataset-size handling ───────────────────────────────
         SMOTE_MIN_SAMPLES = 7  # SMOTE default k_neighbors=5 → need ≥ 6 minority samples in train
         SMALL_COHORT_THRESHOLD = 30
 
         train_ratio = 0.8 if n_rows < 50 else 0.7
-        estimated_train_minority = int(min_class_count * train_ratio)
+        # setup() takes its own train/test split (train_size, applied below
+        # for n_rows < 50) *before* cross-validation ever runs, so the
+        # minority-class count that actually bounds a valid fold count is the
+        # one left in the training partition, not the full dataset's. Fold
+        # count used to be clamped against the full-dataset min_class_count,
+        # so a fold request could still exceed the training partition's
+        # minority count (e.g. 5 folds requested, only 4 minority rows left
+        # after an 0.8 train/test split) — StratifiedKFold rejects that with
+        # n_splits > n_members per class, every candidate model failed
+        # identically, and compare_models() came back with an empty results
+        # table ("No models trained successfully") even though the cohort
+        # itself had enough rows to model.
         is_small_cohort = n_rows < SMALL_COHORT_THRESHOLD
+        estimated_train_minority = (
+            max(1, int(min_class_count * train_ratio)) if is_small_cohort else min_class_count
+        )
+        requested_fold = max(2, params.fold)
+        effective_fold = min(requested_fold, estimated_train_minority)
+        if effective_fold < 2:
+            return json.dumps({
+                "status": "error",
+                "error_message": (
+                    f"The rarest class has only {min_class_count} sample(s) overall "
+                    f"(~{estimated_train_minority} left in the training partition after "
+                    "the train/test split). At least two samples per class in the "
+                    "training partition are required for 2-fold cross-validation."
+                ),
+                "feature_set_id": prepared.feature_set_id,
+                "class_distribution": class_counts.to_dict(),
+                "fold": requested_fold,
+            }, indent=2)
 
         if params.fix_imbalance and estimated_train_minority < SMOTE_MIN_SAMPLES:
             effective_fix_imbalance = False

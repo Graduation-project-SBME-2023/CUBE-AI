@@ -172,10 +172,19 @@ class BackendClient:
         has_pico = any(
             intent.get(field) for field in ("population", "intervention", "outcome")
         )
-        updated = await cls.update_session(
-            session_id,
-            {"intent": intent, "prompt_kind": "hypothesis" if has_pico else "general"},
-        )
+        # sessions.title is only ever set at creation (almost always blank —
+        # a hypothesis session is created from the raw prompt, not a title),
+        # and history/list views read the lightweight SessionSummary schema,
+        # which has no `intent` field to fall back to. Mirror the planner's
+        # title (never blank — _build_intent_payload defaults it) onto the
+        # plain column so those views show it instead of the untruncated raw
+        # prompt.
+        payload = {
+            "intent": intent,
+            "prompt_kind": "hypothesis" if has_pico else "general",
+            "title": intent["title"],
+        }
+        updated = await cls.update_session(session_id, payload)
         if updated is None:
             return None
         return cls._parse_intent(updated)

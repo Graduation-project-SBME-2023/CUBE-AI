@@ -28,6 +28,38 @@ MAX_SOURCE_BYTES = 1024 * 1024
 # pdflatex hard timeout (seconds).
 COMPILE_TIMEOUT = 60.0
 
+# Unicode punctuation/math symbols the reporter agent routinely emits (they
+# read naturally as plain text) that plain pdflatex (no unicode-math/xelatex)
+# cannot typeset outside math mode. Substituting them before compilation
+# turns a recurring, LLM-caused `latex_compile_error` into a non-issue
+# instead of relying on the agent noticing the error and retrying.
+_LATEX_UNICODE_SUBSTITUTIONS = {
+    "≥": r"$\geq$",
+    "≤": r"$\leq$",
+    "≠": r"$\neq$",
+    "±": r"$\pm$",
+    "×": r"$\times$",
+    "÷": r"$\div$",
+    "−": "-",
+    "→": r"$\rightarrow$",
+    "–": "--",
+    "—": "---",
+    "‘": "`",
+    "’": "'",
+    "“": "``",
+    "”": "''",
+    "…": r"\ldots{}",
+    " ": " ",
+    " ": " ",
+    "​": "",
+}
+
+
+def _sanitize_latex_unicode(source_text: str) -> str:
+    for char, replacement in _LATEX_UNICODE_SUBSTITUTIONS.items():
+        source_text = source_text.replace(char, replacement)
+    return source_text
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -236,7 +268,7 @@ def _compile_latex(source_text: str, image_paths: dict[str, bytes]) -> bytes:
     with tempfile.TemporaryDirectory(dir=latex_root) as tmp:
         tmp_path = Path(tmp)
         tex_path = tmp_path / "document.tex"
-        tex_path.write_text(source_text, encoding="utf-8")
+        tex_path.write_text(_sanitize_latex_unicode(source_text), encoding="utf-8")
 
         # Write registered images into the temp dir so \includegraphics works.
         for key, content in image_paths.items():
@@ -244,13 +276,43 @@ def _compile_latex(source_text: str, image_paths: dict[str, bytes]) -> bytes:
             dest = tmp_path / key
             dest.write_bytes(content)
 
-        result = subprocess.run(
-            ["pdflatex", "-interaction=nonstopmode", str(tex_path)],
-            cwd=tmp,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=COMPILE_TIMEOUT,
-        )
+        if shutil.which("pdflatex") is None:
+            # Distinct from a compile error: no LaTeX edit can fix a missing
+            # binary, and reporting it as `latex_compile_error` sends the
+            # reporter agent into a blind edit-and-retry loop against a
+            # server-side problem it cannot see or solve.
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "pdflatex_not_installed",
+                    "message": (
+                        "pdflatex is not installed in this environment; report "
+                        "compilation is unavailable. This is an infrastructure "
+                        "problem, not a LaTeX error — do not retry with edited "
+                        "source."
+                    ),
+                },
+            )
+
+        try:
+            result = subprocess.run(
+                ["pdflatex", "-interaction=nonstopmode", str(tex_path)],
+                cwd=tmp,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=COMPILE_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "latex_compile_timeout",
+                    "message": f"pdflatex did not finish within {COMPILE_TIMEOUT:.0f}s; "
+                    "source_text unchanged (A19)",
+                    "stdout": (exc.stdout or b"").decode("utf-8", errors="replace")[-4000:],
+                    "stderr": (exc.stderr or b"").decode("utf-8", errors="replace")[-2000:],
+                },
+            ) from exc
 
         if result.returncode != 0 or not (tmp_path / "document.pdf").exists():
             stdout = result.stdout.decode("utf-8", errors="replace")[-4000:]

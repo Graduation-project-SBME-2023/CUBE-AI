@@ -69,10 +69,12 @@ RETIRED_WORKSPACE_PATHS: tuple[tuple[str, str, str], ...] = (
     ("outputs/reports/*.md", "reports.source_text (A19)", "K"),
     ("outputs/reports/*.tex", "reports.source_text (A19)", "K"),
     ("outputs/reports/*.pdf", "reports (no durable PDF — A19)", "K"),
-    # literature_review_output/ now maps to temp/literature/ (disposable
-    # scratch re-derived from PICO each run) rather than outputs/literature/:
-    # the durable copy is written to literature_reviews + literature_papers
-    # via the Application API (see planner.py's literature review step), so
+    # literature_review_output/ and state/literature_context.json are fully
+    # retired (storage_paths.workspace_subpath raises on either, so no
+    # workspace path is ever produced for them to guard): the literature
+    # agent returns its output in memory and the durable copy is written to
+    # literature_reviews + literature_papers via the Application API (see
+    # planner.py's literature review step), so
     # there is no retired outputs/literature/ path left to guard.
 )
 

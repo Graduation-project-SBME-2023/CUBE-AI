@@ -599,6 +599,7 @@ def test_a_feature_set_is_rectangular_same_session_and_owned(world):
     world.member(cohort, 0, 1, True)
     world.member(cohort, 1, 2, False)
     other = world.cohort(world.sessions["B"]["study_population_planner_agent"], key="features-b")
+    vol0, vol1 = world.volumes[0][1], world.volumes[1][1]
 
     # A feature set cannot exist without a cohort at all.
     assert "null value" in _rejects(
@@ -612,25 +613,25 @@ def test_a_feature_set_is_rectangular_same_session_and_owned(world):
     # A cohort from another session.
     assert "R1" in _rejects(
         c, _FEATURE_SET_INSERT,
-        _feature_set_params(world, "A", other, "cross", ["a"], {"subject-0": [1.0]}),
+        _feature_set_params(world, "A", other, "cross", ["a"], {vol0: [1.0]}),
     )
     # Modeling cannot write feature sets.
     assert "D17" in _rejects(
         c, _FEATURE_SET_INSERT,
-        _feature_set_params(world, "A", cohort, "modeling", ["a"], {"subject-0": [1.0]},
+        _feature_set_params(world, "A", cohort, "modeling", ["a"], {vol0: [1.0]},
                             agent="modeling_agent"),
     )
     # Rule 1: a 2-name / 1-value row does not commit.
     assert "feature_matrix_shape" in _rejects(
         c, _FEATURE_SET_INSERT,
-        _feature_set_params(world, "A", cohort, "ragged", ["a", "b"], {"subject-0": [1.0]}),
+        _feature_set_params(world, "A", cohort, "ragged", ["a", "b"], {vol0: [1.0]}),
     )
 
     assert _scalar(c, "SELECT frozen_at FROM cohorts WHERE cohort_id = %s", (cohort,)) is None
     _execute(
         c, _FEATURE_SET_INSERT,
         _feature_set_params(world, "A", cohort, "valid", ["a", "b"],
-                            {"subject-0": [1.0, 2.0], "subject-1": [3.0, 4.0]}),
+                            {vol0: [1.0, 2.0], vol1: [3.0, 4.0]}),
     )
     # Freeze on first downstream use.
     assert _scalar(c, "SELECT frozen_at FROM cohorts WHERE cohort_id = %s", (cohort,)) is not None
@@ -642,6 +643,7 @@ def test_freezing_a_feature_set_verifies_what_a_check_cannot(world):
     cohort = world.cohort(runs["study_population_planner_agent"], key="features-freeze")
     world.member(cohort, 0, 1, True)
     world.member(cohort, 1, 2, False)
+    vol0, vol1 = world.volumes[0][1], world.volumes[1][1]
     source_a = str(_execute(c, _RADIOMICS_INSERT, _radiomics_params(world, "A", 0, seed="freeze")))
     source_b = str(_execute(c, _RADIOMICS_INSERT, _radiomics_params(world, "B", 0, seed="freeze")))
 
@@ -650,7 +652,7 @@ def test_freezing_a_feature_set_verifies_what_a_check_cannot(world):
             c, _FEATURE_SET_INSERT,
             _feature_set_params(
                 world, "A", cohort, "freeze", ["a", "b"],
-                {"subject-0": [1.0, 2.0], "subject-1": [3.0, None]},
+                {vol0: [1.0, 2.0], vol1: [3.0, None]},
                 sources=[source_a],
                 summary={"schema_version": 1, "subjects": 2, "features": 2,
                          "missing_values": {"count": 1}},
@@ -667,14 +669,14 @@ def test_freezing_a_feature_set_verifies_what_a_check_cannot(world):
         "'{missing_values,reason}', '\"not measured\"') WHERE feature_set_id = %s",
         (feature_set,),
     )
-    # A key that is not a subject of this cohort.
+    # A key that is not a volume of this cohort.
     _execute(
         c,
         "UPDATE feature_sets SET feature_matrix = feature_matrix || '{\"stranger\": [0, 0]}'::jsonb, "
         "quality_summary = jsonb_set(quality_summary, '{subjects}', '3') WHERE feature_set_id = %s",
         (feature_set,),
     )
-    assert "not subject keys" in _rejects(c, freeze, (feature_set,))
+    assert "not volume UIDs" in _rejects(c, freeze, (feature_set,))
     _execute(
         c,
         "UPDATE feature_sets SET feature_matrix = feature_matrix - 'stranger', "
@@ -766,7 +768,7 @@ def test_legacy_radiomics_rows_keep_null_provenance_and_never_enter_a_frozen_set
     feature_set = str(
         _execute(
             c, _FEATURE_SET_INSERT,
-            _feature_set_params(world, "A", cohort, "legacy", ["a"], {"subject-2": [7.0]},
+            _feature_set_params(world, "A", cohort, "legacy", ["a"], {volume: [7.0]},
                                 sources=[legacy]),
         )
     )
@@ -836,7 +838,7 @@ def _frozen_feature_set(world, session, cohort, key):
     feature_set = str(
         _execute(
             world.connection, _FEATURE_SET_INSERT,
-            _feature_set_params(world, session, cohort, key, ["a"], {"subject-0": [1.0]}),
+            _feature_set_params(world, session, cohort, key, ["a"], {world.volumes[0][1]: [1.0]}),
         )
     )
     _execute(
@@ -858,7 +860,9 @@ def test_a_model_result_trains_on_a_frozen_same_cohort_set_or_a_captured_input(w
     building = str(
         _execute(
             c, _FEATURE_SET_INSERT,
-            _feature_set_params(world, "A", cohort, "model-building", ["a"], {"subject-0": [2.0]}),
+            _feature_set_params(
+                world, "A", cohort, "model-building", ["a"], {world.volumes[0][1]: [2.0]}
+            ),
         )
     )
 

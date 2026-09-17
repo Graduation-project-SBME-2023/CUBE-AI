@@ -114,9 +114,13 @@ async def latex_to_pdf(
                 }
             )
 
-        # Non-200 — surface the error to the agent.
+        # Non-200 — surface the error to the agent. FastAPI wraps every
+        # HTTPException body as {"detail": <value>}; unwrap it once here so
+        # every branch below can read `code`/`message`/etc. directly instead
+        # of silently falling through to their defaults.
         try:
-            detail = resp.json()
+            body = resp.json()
+            detail = body.get("detail", body) if isinstance(body, dict) else body
         except Exception:
             detail = resp.text[:2000]
         log_tool_state(
@@ -156,6 +160,20 @@ async def latex_to_pdf(
                     ),
                     "stdout": stdout,
                     "stderr": stderr,
+                }
+            )
+
+        if resp.status_code == 503:
+            code = detail.get("code", "unavailable") if isinstance(detail, dict) else "unavailable"
+            return json.dumps(
+                {
+                    "status": "error",
+                    "code": code,
+                    "message": (
+                        detail.get("message", str(detail))
+                        if isinstance(detail, dict)
+                        else str(detail)
+                    ),
                 }
             )
 

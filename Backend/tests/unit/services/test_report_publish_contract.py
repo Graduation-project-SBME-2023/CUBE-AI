@@ -242,19 +242,55 @@ def test_a19_compile_raises_on_bad_latex(monkeypatch, tmp_path):
 
 @pytest.mark.unit
 @_requires_deps
+def test_a19_compile_sanitizes_unicode_the_agent_cannot_help_writing(monkeypatch, tmp_path):
+    """A stray '≥' or narrow no-break space must not fail the compile —
+    the reporter agent writes plain-English LaTeX and will reproduce these
+    characters on the very next attempt too; sanitize instead of retrying."""
+    from pathlib import Path
+    from unittest.mock import MagicMock, patch
+    from application_api.repositories.reports import _compile_latex
+
+    captured_tex: dict[str, str] = {}
+
+    def _fake_run(cmd, cwd, stdout, stderr, timeout):
+        captured_tex["text"] = (Path(cwd) / "document.tex").read_text(encoding="utf-8")
+        (Path(cwd) / "document.pdf").write_bytes(b"%PDF-1.4 fake")
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = b""
+        result.stderr = b""
+        return result
+
+    source = "adult patients (≥18 years) were included."
+
+    with patch("subprocess.run", side_effect=_fake_run), \
+         patch("shutil.which", return_value="/usr/bin/pdflatex"), \
+         patch("application_api.repositories.reports.TEMP_DIR", tmp_path, create=True):
+        result = _compile_latex(source, {})
+
+    assert isinstance(result, bytes) and len(result) > 0
+    assert "≥" not in captured_tex["text"]
+    assert " " not in captured_tex["text"]
+    assert r"$\geq$18 years) were included" in captured_tex["text"]
+
+
+@pytest.mark.unit
+@_requires_deps
 def test_a19_successful_compile_returns_bytes(monkeypatch, tmp_path):
     """A successful compile must return PDF bytes (not a file path)."""
+    from pathlib import Path
     from unittest.mock import MagicMock, patch
-    import subprocess
     from application_api.repositories.reports import _compile_latex
 
     fake_pdf = b"%PDF-1.4 fake"
 
     def _fake_run(cmd, cwd, stdout, stderr, timeout):
-        # Write a fake document.pdf into cwd (the temp dir).
-        import os
-        (tmp_path / "document.pdf").write_bytes(fake_pdf)
-        # subprocess.run returns a CompletedProcess-like object.
+        # Write the fake document.pdf into the REAL cwd _compile_latex is
+        # about to check, not some other directory: a previous version of
+        # this test wrote it into the pytest tmp_path fixture instead, which
+        # is never what `cwd` actually is, so the "successful" compile it
+        # claimed to simulate always looked like a failed one.
+        (Path(cwd) / "document.pdf").write_bytes(fake_pdf)
         result = MagicMock()
         result.returncode = 0
         result.stdout = b""
@@ -262,6 +298,7 @@ def test_a19_successful_compile_returns_bytes(monkeypatch, tmp_path):
         return result
 
     with patch("subprocess.run", side_effect=_fake_run), \
+         patch("shutil.which", return_value="/usr/bin/pdflatex"), \
          patch("application_api.repositories.reports.TEMP_DIR", tmp_path, create=True):
         result = _compile_latex(
             r"\documentclass{article}\begin{document}.\end{document}", {}

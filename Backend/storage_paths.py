@@ -80,24 +80,20 @@ _STATE_FILES = {
     "segmentation_manifest.json",
     "review_draft.json",
     "review_result.json",
-    "literature_context.json",
 }
+_RETIRED_WORKSPACE_CACHE_DIRS = {".knowledge_cache", "cache"}
+_RETIRED_WORKSPACE_LITERATURE_PATHS = {"literature_context.json", "literature_review_output"}
+
 _WORKSPACE_DIR_MAP = {
     "populations": ("data", "populations"),
     "volumes": ("data", "volumes"),
     "masks": ("data", "masks"),
     "outputs": ("outputs", "agents"),
-    # Retired by V1 step K: the durable copy lives in literature_reviews +
-    # literature_papers (written via the Application API). This raw output
-    # is scratch the literature agent re-derives from PICO each run, so it
-    # belongs under temp/, not outputs/ (see storage_write_guard.py).
-    "literature_review_output": ("temp", "literature"),
     "overlays": ("outputs", "overlays"),
     "features": ("outputs", "features"),
     "modeling": ("outputs", "modeling"),
     "models": ("outputs", "modeling"),
     "reports": ("outputs", "reports"),
-    ".knowledge_cache": ("cache", "literature"),
     "temp_segmentations": ("temp", "segmentations"),
 }
 
@@ -128,6 +124,16 @@ def workspace_subpath(workspace_dir: str | os.PathLike[str], logical: str | os.P
         raise ValueError(f"Unsafe workspace path: {logical!r}")
 
     first, remainder = parts[0], parts[1:]
+    if first in _RETIRED_WORKSPACE_CACHE_DIRS:
+        raise ValueError(
+            f"Workspace cache paths are retired: {logical!r}. Use storage_paths.CACHE_DIR instead."
+        )
+    if first in _RETIRED_WORKSPACE_LITERATURE_PATHS or (
+        first in {"temp", "outputs"} and remainder and remainder[0] == "literature"
+    ):
+        raise ValueError(
+            f"Workspace literature paths are retired: {logical!r}. Use the literature_reviews API instead."
+        )
     if first in _STATE_FILES:
         mapped = ("state", first, *remainder)
     elif first in {"clinical_data.json", "clinical_data.csv"}:

@@ -1,7 +1,14 @@
 import unittest
 
+import pytest
+
 from clients.backend_client import BackendClient
 from unittest import IsolatedAsyncioTestCase
+from unittest.mock import AsyncMock, patch
+
+# This file had no marker at all, so `-m "unit or contract or pipeline"`
+# (the deterministic gate) silently deselected every test in it.
+pytestmark = pytest.mark.unit
 
 
 class BackendClientIntentTests(unittest.TestCase):
@@ -118,6 +125,67 @@ class BackendClientReportTests(IsolatedAsyncioTestCase):
                 literature_review_id="249b9571-f850-4b54-924f-73a19bbc4060",
                 source_format="markdown",
             )
+
+
+class BackendClientSaveIntentTests(IsolatedAsyncioTestCase):
+    """`sessions.title` is only ever set at creation — almost always blank,
+    since a hypothesis session is created from the raw prompt, not a title —
+    and the dashboard history list reads the lightweight SessionSummary
+    schema, which has no `intent` field to fall back to. Without mirroring,
+    every history card showed the raw, untruncated prompt instead of the
+    planner's title."""
+
+    SESSION_ID = "249b9571-f850-4b54-924f-73a19bbc4060"
+
+    async def test_save_intent_mirrors_the_title_onto_the_plain_column(self):
+        from models.plans import ClinicalHypothesis
+
+        with patch.object(
+            BackendClient, "update_session", new=AsyncMock(return_value={"session_id": self.SESSION_ID})
+        ) as mock_update:
+            await BackendClient.save_intent(
+                self.SESSION_ID,
+                ClinicalHypothesis(
+                    title="Whole-Spleen Radiomics Classification",
+                    population="P",
+                    intervention="I",
+                    comparison="C",
+                    outcome="O",
+                    hypothesis="statement text",
+                    question="the user's own words",
+                ),
+            )
+
+        mock_update.assert_awaited_once()
+        _, payload = mock_update.await_args.args
+        assert payload["title"] == "Whole-Spleen Radiomics Classification"
+
+    async def test_save_intent_falls_back_to_a_placeholder_title_for_a_blank_draft(self):
+        """A draft intent (planning still in progress, title not yet known)
+        must still mirror *something* other than the raw prompt — matching
+        `_build_intent_payload`'s own "Untitled Hypothesis" default, never a
+        blank column that would make the frontend fall back to the prompt."""
+        from models.plans import ClinicalHypothesis
+
+        with patch.object(
+            BackendClient, "update_session", new=AsyncMock(return_value={"session_id": self.SESSION_ID})
+        ) as mock_update:
+            await BackendClient.save_intent(
+                self.SESSION_ID,
+                ClinicalHypothesis(
+                    title="",
+                    population="",
+                    intervention="",
+                    comparison="",
+                    outcome="",
+                    hypothesis="",
+                    question="the user's own words",
+                ),
+            )
+
+        mock_update.assert_awaited_once()
+        _, payload = mock_update.await_args.args
+        assert payload["title"] == "Untitled Hypothesis"
 
 
 if __name__ == "__main__":

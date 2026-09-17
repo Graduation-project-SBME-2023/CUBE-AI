@@ -260,11 +260,21 @@ function ReviewView({
       if (!sessionId) {
         return;
       }
-      void saveSegmentationReviewDraft(sessionId, runId, getSavedReviewChoices(next)).catch(error =>
-        console.error('Failed to persist segmentation review draft:', error)
-      );
+      const decisions = getSavedReviewChoices(next);
+      const attempt = () => saveSegmentationReviewDraft(sessionId, runId, decisions);
+      void attempt()
+        .catch(() => attempt())
+        .catch(error => {
+          console.error('Failed to persist segmentation review draft:', error);
+          snackbar.show({
+            title: 'Review not saved',
+            message:
+              'Your mask review choice could not be saved to the server and may be lost if you close this session. Please try again.',
+            type: 'error',
+          });
+        });
     },
-    [runId, sessionId]
+    [runId, sessionId, snackbar]
   );
 
   const handleToggle = useCallback(
