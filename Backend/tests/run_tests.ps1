@@ -32,6 +32,7 @@ $Suites = [ordered]@{
             "Backend/tests/contracts",
             "Backend/tests/pipeline"
         )
+        ExtraArgs = @("--ignore=Backend/tests/unit/radiology")
         Marker = "unit or contract or pipeline"
         Environment = @{}
     }
@@ -45,7 +46,10 @@ $Suites = [ordered]@{
     "radiology" = @{
         Description = "MONAI, Torch, model-artifact, and VoxTell geometry tests."
         Image = $RadiologyImage
-        Paths = @("Backend/tests/regression/radiology")
+        Paths = @(
+            "Backend/tests/unit/radiology",
+            "Backend/tests/regression/radiology"
+        )
         Marker = "radiology"
         Environment = @{}
     }
@@ -97,7 +101,7 @@ function Invoke-LocalSuite([string]$Name) {
     $pytestArgs = @(
         "-m", "pytest",
         "-c", "Backend/pytest.ini"
-    ) + $definition.Paths + @(
+    ) + $definition.Paths + $definition.ExtraArgs + @(
         "-m", $definition.Marker,
         "--junitxml=$resultPath"
     ) + (Get-CoverageArguments $Name)
@@ -117,12 +121,13 @@ function Invoke-DockerSuite([string]$Name) {
     $definition = $Suites[$Name]
     $resultPath = "Backend/test-results/$Name.xml"
     $pathText = $definition.Paths -join " "
+    $extraText = $definition.ExtraArgs -join " "
     $coverageText = (Get-CoverageArguments $Name) -join " "
     $testCommand = (
         "mkdir -p Backend/test-results " +
         "&& python -m pip install --quiet -r Backend/requirements/test.txt " +
         "&& python -m pytest -c Backend/pytest.ini $pathText " +
-        "-m '$($definition.Marker)' --junitxml=$resultPath $coverageText"
+        "$extraText -m '$($definition.Marker)' --junitxml=$resultPath $coverageText"
     ).Trim()
 
     $dockerArgs = @(

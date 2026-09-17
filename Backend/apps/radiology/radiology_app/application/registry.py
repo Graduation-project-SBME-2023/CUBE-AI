@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
 
@@ -26,7 +26,9 @@ _MODEL_CLASS_PATHS = MappingProxyType(
 class ModelRegistry:
     """Explicit, auditable mapping of public model IDs to TaskConfig classes."""
 
-    class_paths: Mapping[str, str] = _MODEL_CLASS_PATHS
+    class_paths: Mapping[str, str] = field(
+        default_factory=lambda: _MODEL_CLASS_PATHS
+    )
     dynamic_model: str = "generic_segmentation"
 
     @property

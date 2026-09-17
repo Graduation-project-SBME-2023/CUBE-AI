@@ -140,3 +140,5 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         elif "/tests/regression/radiology/" in normalized_path:
             item.add_marker(pytest.mark.regression)
             item.add_marker(pytest.mark.radiology)
+        elif "/tests/unit/radiology/" in normalized_path:
+            item.add_marker(pytest.mark.radiology)
