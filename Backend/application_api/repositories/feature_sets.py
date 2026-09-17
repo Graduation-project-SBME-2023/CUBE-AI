@@ -239,15 +239,15 @@ async def create_feature_set(
                 ),
             ),
         )
-    subject_keys = {member.subject_key for member in cohort.members}
-    strangers = [key for key in data.feature_matrix if key not in subject_keys]
+    volume_uids = {member.volume_series_instance_uid for member in cohort.members}
+    strangers = [key for key in data.feature_matrix if key not in volume_uids]
     if strangers:
         raise await _abort(
             db,
             HTTPException(
                 status_code=422,
                 detail=(
-                    f"{len(strangers)} feature_matrix key(s) are not subject keys of cohort "
+                    f"{len(strangers)} feature_matrix key(s) are not volume UIDs of cohort "
                     f"{data.cohort_id}: {strangers[:10]}"
                 ),
             ),
@@ -447,16 +447,18 @@ async def export_rows(
         )
 
     analysis = await cohorts_repo.analysis_rows(db, feature_set.cohort_id)
+    # Keyed by volume: the label is a fact about one volume
+    # (`cohort_members.label`), so one subject may legitimately have several
+    # volumes with different targets. `holdout_groups` are subject keys
+    # (the split's grouping key), so each volume's split membership is
+    # resolved through its own subject_key, not through its own identity.
     targets: dict[str, Any] = {}
     first_ordinal: dict[str, int] = {}
+    subject_of: dict[str, str] = {}
     for row in analysis:
-        key = row["subject_key"]
-        if key in targets and targets[key] != row["target"]:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Subject {key!r} has members with different labels in the cohort.",
-            )
+        key = row["volume_series_instance_uid"]
         targets[key] = row["target"]
+        subject_of[key] = row["subject_key"]
         first_ordinal[key] = min(first_ordinal.get(key, row["ordinal"]), row["ordinal"])
 
     unlabelled = [key for key in feature_set.feature_matrix if key not in targets]
@@ -464,23 +466,24 @@ async def export_rows(
         raise HTTPException(
             status_code=409,
             detail=(
-                f"{len(unlabelled)} subject(s) in the matrix have no valid cohort label: "
+                f"{len(unlabelled)} volume(s) in the matrix have no valid cohort label: "
                 f"{unlabelled[:5]}"
             ),
         )
 
     rows = []
-    for subject in sorted(feature_set.feature_matrix, key=lambda key: (first_ordinal[key], key)):
-        split = "holdout" if subject in holdout else "train"
+    for volume in sorted(feature_set.feature_matrix, key=lambda key: (first_ordinal[key], key)):
+        split = "holdout" if subject_of[volume] in holdout else "train"
         if part != "all" and split != part:
             continue
         rows.append(
             {
-                "subject_key": subject,
-                "ordinal": first_ordinal[subject],
+                "volume_series_instance_uid": volume,
+                "subject_key": subject_of[volume],
+                "ordinal": first_ordinal[volume],
                 "split": split,
-                "target": targets[subject],
-                "values": feature_set.feature_matrix[subject],
+                "target": targets[volume],
+                "values": feature_set.feature_matrix[volume],
             }
         )
     return {

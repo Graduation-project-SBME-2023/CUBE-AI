@@ -272,6 +272,29 @@ async def model_results_summary(for_session: str | None = None) -> list[dict[str
     )
 
 
+async def latest_literature_review(for_session: str | None = None) -> dict[str, Any] | None:
+    """This session's most recent literature review, with its papers — the
+    durable replacement for the retired workspace `literature_context.json`.
+    `None` if the planner never ran the literature review phase."""
+    summaries = await request(
+        "GET", f"/literature-reviews/session/{for_session or require_session()}"
+    )
+    if not summaries:
+        return None
+    latest = max(summaries, key=lambda item: item["created_at"])
+    return await request("GET", f"/literature-reviews/{latest['literature_review_id']}")
+
+
+async def list_session_artifacts(kind: str | None = None) -> list[dict[str, Any]]:
+    """This session's artifact catalogue (no bytes — `artifact_content` fetches
+    those one at a time). `kind` restricts to one artifact kind, e.g.
+    `figure_png`; omit it to list every kind."""
+    params = {"kind": kind} if kind else None
+    return await request(
+        "GET", f"/artifacts/session/{require_session()}", params=params, timeout=_LONG_TIMEOUT
+    )
+
+
 async def artifact_content(artifact_id: str) -> bytes:
     """Retained bytes, e.g. a model's per-case predictions."""
     async with httpx.AsyncClient(timeout=_LONG_TIMEOUT) as client:

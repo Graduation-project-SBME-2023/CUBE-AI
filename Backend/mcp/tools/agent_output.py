@@ -1,13 +1,38 @@
 """Agent Output MCP Tool."""
 
 import json
+import logging
 import os
+import shutil
 from typing import Any, Dict, List, Literal
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import mcp
+from storage_paths import TEMP_DIR
+
+logger = logging.getLogger(__name__)
+
+# TEMP_DIR/<category>/<agent_run_id>/ is the convention every scratch-heavy
+# tool (PyRadiomics params/log, PyCaret train.csv/log/plots, ...) writes
+# its working files under — see feature_extraction/features.py and
+# modeling/classification.py|regression.py. None of it is durable (the
+# measurements/metrics land in Postgres, plots are re-published as
+# artifacts), so once this run's output is confirmed saved there is nothing
+# left to keep it for. A tool that follows the same <category>/<run_id>
+# convention is covered automatically — no per-tool cleanup code needed.
+_RUN_SCOPED_TEMP_CATEGORIES = ("feature-extraction", "feature-selection", "modeling")
+
+
+def _cleanup_run_temp_dirs(agent_run_id: str) -> None:
+    for category in _RUN_SCOPED_TEMP_CATEGORIES:
+        run_dir = TEMP_DIR / category / agent_run_id
+        if run_dir.exists():
+            try:
+                shutil.rmtree(run_dir)
+            except Exception as exc:
+                logger.warning("Failed to clean up temp dir %s: %s", run_dir, exc)
 
 def _app_api_url() -> str:
     """The Application API base URL."""
@@ -174,6 +199,10 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
             run = response.json()
     except Exception as exc:
         return _error(f"Failed to write output: {exc}")
+
+    # This agent's output is now durable in Postgres — its working scratch
+    # under temp/ (if any) has nothing left it's the only copy of.
+    _cleanup_run_temp_dirs(AGENT_RUN_ID)
 
     return json.dumps(
         {

@@ -18,7 +18,9 @@ from application_api.core.json_bounds import (
 
 FEATURE_SET_SCHEMA_VERSION = 1
 # Identity and label columns can never be features.
-FORBIDDEN_FEATURE_NAMES = frozenset({"target", "label", "subject_key", "ordinal"})
+FORBIDDEN_FEATURE_NAMES = frozenset(
+    {"target", "label", "subject_key", "volume_series_instance_uid", "ordinal"}
+)
 MAX_FEATURES = 20000
 MAX_SOURCE_FEATURE_IDS = 50000
 
@@ -93,7 +95,7 @@ class FeatureSetWrite(BaseModel):
                 f"{width} value(s), e.g. {ragged[:5]}"
             )
         if any(not str(key).strip() for key in self.feature_matrix):
-            raise ValueError("feature_matrix keys are subject keys and must not be blank")
+            raise ValueError("feature_matrix keys are volume UIDs and must not be blank")
         try:
             check_json(self.feature_matrix, max_bytes=FEATURE_MATRIX_MAX_BYTES, what="feature_matrix")
         except JsonBoundsError as exc:
@@ -143,6 +145,7 @@ class FeatureSetDetail(FeatureSetOut):
 
 
 class FeatureSetExportRow(BaseModel):
+    volume_series_instance_uid: str
     subject_key: str
     ordinal: int
     split: Literal["train", "holdout"]
@@ -151,7 +154,10 @@ class FeatureSetExportRow(BaseModel):
 
 
 class FeatureSetExport(BaseModel):
-    """The modeling handoff: features by subject in cohort order, with the label joined from the cohort at read time — never stored with them."""
+    """The modeling handoff: features by volume in cohort order, with the label
+    joined from the cohort at read time — never stored with them. A row is
+    one labelled volume, not one patient: `subject_key` groups a patient's
+    rows for the train/holdout split, but does not identify the row."""
 
     feature_set_id: UUID
     cohort_id: UUID

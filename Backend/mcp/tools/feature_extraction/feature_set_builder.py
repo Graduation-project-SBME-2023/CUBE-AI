@@ -8,11 +8,14 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import pandas as pd
 
+VOLUME_KEY = "volume_series_instance_uid"
 SUBJECT_KEY = "subject_key"
 TARGET_COLUMN = "target"
 FEATURE_SET_SCHEMA_VERSION = 1
 # Identity and label columns can never be features (rule 3).
-FORBIDDEN_FEATURE_NAMES = frozenset({"target", "label", "subject_key", "ordinal"})
+FORBIDDEN_FEATURE_NAMES = frozenset(
+    {"target", "label", "subject_key", "volume_series_instance_uid", "ordinal"}
+)
 # Exactly the manifest feature_selection_split.json held.
 SELECTION_FIELDS = (
     "strategy",
@@ -27,16 +30,18 @@ SELECTION_FIELDS = (
     "degraded_reason",
 )
 MISSING_VALUE_REASON = (
-    "no finite value was measured for this subject: the extractor returned a "
-    "non-finite value, or the subject had no mask for that target"
+    "no finite value was measured for this volume: the extractor returned a "
+    "non-finite value, or the volume had no mask for that target"
 )
 # Columns that can identify a row of a generic CSV, most specific first.
+# A volume-identifying column is unambiguous; a subject-identifying one only
+# resolves when that subject has exactly one volume in the cohort.
 _CSV_ID_COLUMNS = (
-    "subject_key",
     "volume_series_instance_uid",
-    "subject_id",
-    "id",
     "series_uid",
+    "id",
+    "subject_key",
+    "subject_id",
     "patient_id",
 )
 
@@ -47,7 +52,14 @@ class FeatureSetBuildError(ValueError):
 
 @dataclass
 class WideTable:
-    """Features by subject, labelled, in cohort order."""
+    """Features by volume, labelled, in cohort order.
+
+    A label is a fact about one volume (``cohort_members.label``), not about a
+    patient: one subject may legitimately contribute several volumes with
+    different labels (e.g. one lesion per kidney). ``subject_key`` stays on
+    the frame as a plain column so the selection split can group a patient's
+    volumes together and keep them on one side of the holdout — it is never
+    the row identity."""
 
     frame: pd.DataFrame
     feature_columns: list[str]
@@ -71,24 +83,25 @@ def finite_or_none(value: Any) -> float | None:
     return number if math.isfinite(number) else None
 
 
-def _subject_targets(analysis_rows: Sequence[Mapping[str, Any]]) -> tuple[dict, dict]:
-    """subject_key -> target and subject_key -> first ordinal."""
+def _volume_targets(analysis_rows: Sequence[Mapping[str, Any]]) -> tuple[dict, dict, dict]:
+    """volume -> target, volume -> first ordinal, volume -> subject_key.
+
+    The label is per volume (``cohort_members.label``): each analysis row is
+    already unique by ``volume_series_instance_uid``, so unlike a subject-keyed
+    lookup this can never see two different targets under one key."""
     targets: dict[str, Any] = {}
     first_ordinal: dict[str, int] = {}
+    subjects: dict[str, str] = {}
     for row in analysis_rows:
-        key = str(row["subject_key"])
-        if key in targets and targets[key] != row["target"]:
-            raise FeatureSetBuildError(
-                f"subject {key!r} has members labelled both {targets[key]!r} and "
-                f"{row['target']!r}; correct the cohort labels before selecting features"
-            )
+        key = str(row["volume_series_instance_uid"])
         targets[key] = row["target"]
+        subjects[key] = str(row["subject_key"])
         ordinal = int(row["ordinal"])
         first_ordinal[key] = min(first_ordinal.get(key, ordinal), ordinal)
-    return targets, first_ordinal
+    return targets, first_ordinal, subjects
 
 
-def _ordered_subjects(first_ordinal: Mapping[str, int]) -> list[str]:
+def _ordered_keys(first_ordinal: Mapping[str, int]) -> list[str]:
     return sorted(first_ordinal, key=lambda key: (first_ordinal[key], key))
 
 
@@ -100,7 +113,7 @@ def wide_table_from_rows(
     if not analysis_rows:
         raise FeatureSetBuildError("the cohort has no labelled member")
     members = {str(row["volume_series_instance_uid"]): row for row in analysis_rows}
-    targets, first_ordinal = _subject_targets(analysis_rows)
+    targets, first_ordinal, subjects = _volume_targets(analysis_rows)
 
     used = [row for row in radiomics_rows if str(row["source_volume_uid"]) in members]
     if not used:
@@ -108,67 +121,57 @@ def wide_table_from_rows(
             "none of the extracted radiomics rows belongs to a labelled member of the cohort"
         )
 
-    volumes_per_subject: dict[str, set[str]] = {}
     segments_per_target: dict[str, set[int]] = {}
     for row in used:
-        subject = str(members[str(row["source_volume_uid"])]["subject_key"])
-        volumes_per_subject.setdefault(subject, set()).add(str(row["source_volume_uid"]))
         target = str(row.get("target_key") or "roi")
         segments_per_target.setdefault(target, set()).add(int(row["segment_number"]))
-    shared = {
-        subject: sorted(volumes)
-        for subject, volumes in volumes_per_subject.items()
-        if len(volumes) > 1
-    }
-    if shared:
-        sample = dict(list(shared.items())[:5])
-        raise FeatureSetBuildError(
-            "feature_matrix is keyed by subject_key (the patient-level split group), and "
-            f"{len(shared)} subject(s) have features from more than one volume: {sample}. "
-            "Restrict the cohort to one volume per subject before selecting features."
-        )
 
-    per_subject: dict[str, dict[str, float | None]] = {}
+    per_volume: dict[str, dict[str, float | None]] = {}
     present: dict[str, set[str]] = {}
     source_ids: list[str] = []
     source_digests: list[str] = []
     for row in used:
-        subject = str(members[str(row["source_volume_uid"])]["subject_key"])
+        volume = str(row["source_volume_uid"])
         target = str(row.get("target_key") or "roi")
         prefix = (
             target
             if len(segments_per_target[target]) == 1
             else f"{target}_label_{int(row['segment_number'])}"
         )
-        values = per_subject.setdefault(subject, {})
+        values = per_volume.setdefault(volume, {})
         for name, value in (row.get("features") or {}).items():
             column = f"{prefix}__{name}"
             if column in values:
                 raise FeatureSetBuildError(
-                    f"subject {subject!r} has two measurements for {column!r}"
+                    f"volume {volume!r} has two measurements for {column!r}"
                 )
             values[column] = finite_or_none(value)
-        present.setdefault(subject, set()).add(target)
+        present.setdefault(volume, set()).add(target)
         source_ids.append(str(row["id"]))
         if row.get("source_digest"):
             source_digests.append(str(row["source_digest"]))
 
     organs = sorted(segments_per_target)
-    feature_columns = sorted({column for values in per_subject.values() for column in values})
+    feature_columns = sorted({column for values in per_volume.values() for column in values})
     presence_columns = [f"{organ}_present" for organ in organs]
 
     records = []
-    for subject in _ordered_subjects(first_ordinal):
-        values = per_subject.get(subject, {})
-        record: dict[str, Any] = {SUBJECT_KEY: subject, TARGET_COLUMN: targets[subject]}
+    for volume in _ordered_keys(first_ordinal):
+        values = per_volume.get(volume, {})
+        record: dict[str, Any] = {
+            VOLUME_KEY: volume,
+            SUBJECT_KEY: subjects[volume],
+            TARGET_COLUMN: targets[volume],
+        }
         for column in feature_columns:
             record[column] = values.get(column)
         for organ in organs:
-            record[f"{organ}_present"] = int(organ in present.get(subject, set()))
+            record[f"{organ}_present"] = int(organ in present.get(volume, set()))
         records.append(record)
 
     frame = pd.DataFrame.from_records(
-        records, columns=[SUBJECT_KEY, TARGET_COLUMN, *feature_columns, *presence_columns]
+        records,
+        columns=[VOLUME_KEY, SUBJECT_KEY, TARGET_COLUMN, *feature_columns, *presence_columns],
     )
     return WideTable(
         frame=frame,
@@ -182,15 +185,23 @@ def wide_table_from_rows(
 def frame_from_csv(
     frame: pd.DataFrame, analysis_rows: Sequence[Mapping[str, Any]]
 ) -> tuple[pd.DataFrame, list[str]]:
-    """A generic CSV, re-keyed by subject and re-labelled from the cohort."""
+    """A generic CSV, re-keyed by volume and re-labelled from the cohort."""
     if not analysis_rows:
         raise FeatureSetBuildError("the cohort has no labelled member")
-    targets, first_ordinal = _subject_targets(analysis_rows)
-    by_volume = {
-        str(row["volume_series_instance_uid"]): str(row["subject_key"]) for row in analysis_rows
-    }
-    known_subjects = set(targets)
+    targets, first_ordinal, subjects = _volume_targets(analysis_rows)
+    known_volumes = set(targets)
+    subject_volumes: dict[str, list[str]] = {}
+    for volume, subject in subjects.items():
+        subject_volumes.setdefault(subject, []).append(volume)
     notes: list[str] = []
+
+    def _resolve(value: str) -> str | None:
+        if value in known_volumes:
+            return value
+        # A bare subject key only resolves when it names exactly one volume;
+        # a subject with several volumes needs a volume-identifying column.
+        candidates = subject_volumes.get(value)
+        return candidates[0] if candidates and len(candidates) == 1 else None
 
     lowered = {str(column).lower(): column for column in frame.columns}
     id_column = None
@@ -200,22 +211,20 @@ def frame_from_csv(
         if column is None:
             continue
         values = [str(value).strip() for value in frame[column].tolist()]
-        attempt = [
-            value if value in known_subjects else by_volume.get(value)
-            for value in values
-        ]
+        attempt = [_resolve(value) for value in values]
         if any(item is not None for item in attempt):
             id_column, mapped = column, attempt
             break
     if id_column is None:
         raise FeatureSetBuildError(
-            "the CSV has no column identifying cohort subjects (one of "
-            f"{', '.join(_CSV_ID_COLUMNS)} holding volume UIDs or subject keys)"
+            "the CSV has no column identifying cohort volumes (one of "
+            f"{', '.join(_CSV_ID_COLUMNS)} holding volume UIDs, or an unambiguous "
+            "single-volume subject key)"
         )
     unmatched = [
         str(frame[id_column].iloc[index])
-        for index, subject in enumerate(mapped)
-        if subject is None
+        for index, volume in enumerate(mapped)
+        if volume is None
     ]
     if unmatched:
         raise FeatureSetBuildError(
@@ -224,7 +233,8 @@ def frame_from_csv(
         )
     if len(set(mapped)) != len(mapped):
         raise FeatureSetBuildError(
-            "two CSV rows belong to one subject; feature_matrix is keyed by subject_key"
+            "two CSV rows belong to one volume; feature_matrix is keyed by "
+            "volume_series_instance_uid"
         )
 
     label_columns = [
@@ -237,10 +247,11 @@ def frame_from_csv(
             f"dropped label column(s) {label_columns}: the cohort member's label is used"
         )
     features = frame.drop(columns=[id_column, *label_columns])
-    features.insert(0, TARGET_COLUMN, [targets[subject] for subject in mapped])
-    features.insert(0, SUBJECT_KEY, mapped)
-    features["__ordinal"] = [first_ordinal[subject] for subject in mapped]
-    features = features.sort_values(["__ordinal", SUBJECT_KEY]).drop(columns="__ordinal")
+    features.insert(0, TARGET_COLUMN, [targets[volume] for volume in mapped])
+    features.insert(0, SUBJECT_KEY, [subjects[volume] for volume in mapped])
+    features.insert(0, VOLUME_KEY, mapped)
+    features["__ordinal"] = [first_ordinal[volume] for volume in mapped]
+    features = features.sort_values(["__ordinal", VOLUME_KEY]).drop(columns="__ordinal")
     return features.reset_index(drop=True), notes
 
 
@@ -264,21 +275,22 @@ def check_feature_names(names: Sequence[str]) -> list[str]:
 def matrix_from_frame(
     frame: pd.DataFrame, feature_names: Sequence[str]
 ) -> tuple[dict[str, list[float | None]], int]:
-    """`{subject_key: [value, …]}` in `feature_names` order, and the number of
-    missing cells (recorded in `quality_summary`, never hidden)."""
+    """`{volume_series_instance_uid: [value, …]}` in `feature_names` order, and
+    the number of missing cells (recorded in `quality_summary`, never hidden).
+    Keyed by volume, not subject: a patient may contribute more than one row."""
     names = check_feature_names(feature_names)
     missing_columns = [name for name in names if name not in frame.columns]
     if missing_columns:
         raise FeatureSetBuildError(f"feature(s) {missing_columns[:10]} are not in the table")
     matrix: dict[str, list[float | None]] = {}
     missing = 0
-    for record in frame[[SUBJECT_KEY, *names]].itertuples(index=False, name=None):
-        subject = str(record[0])
-        if subject in matrix:
-            raise FeatureSetBuildError(f"subject {subject!r} appears twice in the table")
+    for record in frame[[VOLUME_KEY, *names]].itertuples(index=False, name=None):
+        volume = str(record[0])
+        if volume in matrix:
+            raise FeatureSetBuildError(f"volume {volume!r} appears twice in the table")
         values = [finite_or_none(value) for value in record[1:]]
         missing += sum(value is None for value in values)
-        matrix[subject] = values
+        matrix[volume] = values
     if not matrix:
         raise FeatureSetBuildError("the feature matrix has no row")
     return matrix, missing
@@ -287,17 +299,17 @@ def matrix_from_frame(
 def assemble_rows(
     feature_names: Sequence[str],
     feature_matrix: Mapping[str, Sequence[float | None]],
-    subjects_in_ordinal_order: Iterable[str],
+    keys_in_ordinal_order: Iterable[str],
 ) -> list[list[float | None]]:
     """The reader's side of rule 2: rows in cohort order, columns in name order."""
     width = len(feature_names)
     rows = []
-    for subject in subjects_in_ordinal_order:
-        if subject not in feature_matrix:
+    for key in keys_in_ordinal_order:
+        if key not in feature_matrix:
             continue
-        values = list(feature_matrix[subject])
+        values = list(feature_matrix[key])
         if len(values) != width:
-            raise FeatureSetBuildError(f"row {subject!r} is not rectangular")
+            raise FeatureSetBuildError(f"row {key!r} is not rectangular")
         rows.append(values)
     return rows
 
@@ -342,6 +354,7 @@ __all__ = [
     "SELECTION_FIELDS",
     "SUBJECT_KEY",
     "TARGET_COLUMN",
+    "VOLUME_KEY",
     "WideTable",
     "assemble_rows",
     "check_feature_names",

@@ -83,8 +83,10 @@ class ReporterAgent(AssistantAgent):
             "get_latex_template",
             "read_literature_context",
             "write_agent_output",
+            "create_report",
             "latex_to_pdf",
-            "list_workspace_plots",
+            "list_report_figures",
+            "register_report_image",
         ]
         final_tools = cls.get_desired_tools(mcp_tools, desired_tools)
         # final_tools = mcp_tools

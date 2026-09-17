@@ -72,13 +72,6 @@ def test_j_retired_paths_still_raise(logical):
         "temp_segmentations/something.tmp",
         # A CSV named with "reports" in the name but not under reports/ is fine
         "outputs/modeling/reports_summary.csv",
-        # Literature output — logical "literature_review_output/" now maps to
-        # physical "temp/literature/" (disposable scratch); the durable copy
-        # lives in literature_reviews + literature_papers via the API.
-        "literature_review_output/context.json",
-        "literature_review_output/papers_page1.json",
-        "literature_review_output/review_summary.json",
-        "literature_review_output/other_file.json",
     ],
 )
 def test_non_retired_paths_pass(logical):
@@ -91,6 +84,26 @@ def test_non_retired_paths_pass(logical):
         )
     # For all non-retired paths, check_write must not raise
     check_write(path)
+
+
+# ── Literature output has no workspace path at all any more ─────────────────
+
+@pytest.mark.parametrize(
+    "logical",
+    [
+        # There is no scratch/temp mapping left for literature output — the
+        # literature agent returns its output in memory, and the durable copy
+        # lives in literature_reviews + literature_papers via the API.
+        # workspace_subpath (called inside ws_sub) rejects these outright,
+        # before a write-guard entry is even reachable.
+        "literature_review_output/context.json",
+        "literature_context.json",
+        "temp/literature/context.json",
+    ],
+)
+def test_literature_paths_are_rejected_before_reaching_the_write_guard(logical):
+    with pytest.raises(ValueError, match="Workspace literature paths are retired"):
+        _path(logical)
 
 
 # ── Paths outside the workspace root are never blocked ───────────────────────

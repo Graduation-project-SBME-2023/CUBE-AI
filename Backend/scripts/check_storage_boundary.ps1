@@ -58,8 +58,8 @@ if (Test-Path -LiteralPath $workspacesRoot) {
     Get-ChildItem -LiteralPath $workspacesRoot -Directory -Force | Where-Object { $_.Name -like "workspace_*" } | ForEach-Object {
         $ws = $_.FullName
         # reports/*.md, reports/*.tex, reports/*.pdf — retired to reports.source_text /
-        @("*.md", "*.tex", "*.pdf") | ForEach-Object {
-            $reportsGlob = Join-Path $ws "reports" $_
+        foreach ($reportPattern in @("*.md", "*.tex", "*.pdf")) {
+            $reportsGlob = Join-Path $ws (Join-Path "reports" $reportPattern)
             Get-ChildItem -Path $reportsGlob -Force -ErrorAction SilentlyContinue | ForEach-Object {
                 $violations.Add($_.FullName + " [retired to reports.source_text by K]")
             }
@@ -76,6 +76,13 @@ if (Test-Path -LiteralPath $workspacesRoot) {
         if (Test-Path -LiteralPath $legacyLitDir) {
             Get-ChildItem -LiteralPath $legacyLitDir -Force -Recurse -File | ForEach-Object {
                 $violations.Add($_.FullName + " [retired to literature_reviews/papers by K]")
+            }
+        }
+        # workspace cache/ is retired; literature cache is shared at storage/cache/literature
+        $workspaceCacheDir = Join-Path $ws "cache"
+        if (Test-Path -LiteralPath $workspaceCacheDir) {
+            Get-ChildItem -LiteralPath $workspaceCacheDir -Force -Recurse | ForEach-Object {
+                $violations.Add($_.FullName + " [retired to shared storage/cache/literature]")
             }
         }
     }

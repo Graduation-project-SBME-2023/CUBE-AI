@@ -185,15 +185,17 @@ BEGIN
     END IF;
 
     IF NEW.status = 'frozen' AND OLD.status = 'building' THEN
-        -- Every matrix key is a subject of this set's cohort.
+        -- Every matrix key is a labelled volume of this set's cohort. The
+        -- label is per volume (cohort_members.label), not per subject: one
+        -- patient may legitimately contribute more than one matrix row.
         SELECT count(*) INTO offending
-        FROM jsonb_object_keys(NEW.feature_matrix) AS k(subject)
+        FROM jsonb_object_keys(NEW.feature_matrix) AS k(volume)
         WHERE NOT EXISTS (
             SELECT 1 FROM cohort_members m
-            WHERE m.cohort_id = NEW.cohort_id AND m.subject_key = k.subject);
+            WHERE m.cohort_id = NEW.cohort_id AND m.volume_series_instance_uid = k.volume);
         IF offending > 0 THEN
             RAISE EXCEPTION
-                'feature set %: % matrix key(s) are not subject keys of cohort %',
+                'feature set %: % matrix key(s) are not volume UIDs of cohort %',
                 NEW.feature_set_id, offending, NEW.cohort_id
                 USING ERRCODE = 'check_violation';
         END IF;
@@ -219,7 +221,8 @@ BEGIN
         SELECT count(*) INTO offending
         FROM jsonb_array_elements(NEW.feature_names) AS e(value)
         WHERE jsonb_typeof(value) <> 'string'
-           OR lower(btrim(value #>> '{}')) IN ('target', 'label', 'subject_key', 'ordinal')
+           OR lower(btrim(value #>> '{}')) IN
+              ('target', 'label', 'subject_key', 'volume_series_instance_uid', 'ordinal')
            OR (value #>> '{}') = label_field;
         IF offending > 0 OR names <> distinct_names THEN
             RAISE EXCEPTION

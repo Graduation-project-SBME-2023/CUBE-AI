@@ -8,6 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# reports.publish_report compiles the manuscript with pdflatex (subprocess,
+# not a Python package) — a minimal TeX Live covering the packages the
+# report templates use (geometry, booktabs, hyperref, graphicx, amsmath).
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    texlive-latex-base \
+    texlive-latex-recommended \
+    texlive-latex-extra \
+    texlive-fonts-recommended \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir \
     alembic \
     aiohttp \

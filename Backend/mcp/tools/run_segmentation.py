@@ -416,10 +416,18 @@ async def run_segmentation(
         result["save_traceback"] = traceback.format_exc()
         logger.error(f"Exception during datastore save: {traceback.format_exc()}")
 
+    # temp_file_path was only ever a scratch copy to upload from — the
+    # datastore (or the save-error captured above) is the outcome that
+    # matters, so there's nothing left needing the file on disk, saved or not.
+    try:
+        os.remove(temp_file_path)
+    except OSError as exc:
+        logger.warning(f"Failed to clean up temp segmentation file {temp_file_path}: {exc}")
+
     total_duration = (datetime.now() - start_time).total_seconds()
     result["total_duration_seconds"] = total_duration
-    
+
     logger.info(f"=== TOOL COMPLETED at {datetime.now()} ===")
     logger.info(f"Total execution time: {total_duration:.1f}s")
-    
+
     return result

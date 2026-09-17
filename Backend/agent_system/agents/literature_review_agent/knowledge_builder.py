@@ -29,6 +29,7 @@ import logging
 import os
 import random
 import re
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -36,15 +37,15 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from storage_paths import CACHE_DIR
+from storage_paths import CACHE_DIR as STORAGE_CACHE_DIR
 
 logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
-DEFAULT_CACHE_DIR = CACHE_DIR / "literature"
-CACHE_DIR = DEFAULT_CACHE_DIR
+LITERATURE_CACHE_DIR = STORAGE_CACHE_DIR / "literature"
+CACHE_FORMAT_VERSION = "v1"
 
 NCBI_API_KEY: str = os.environ.get("NCBI_API_KEY", "")
 # Optional Semantic Scholar API key — free key raises limit from 100 to 1000 req/day.
@@ -62,15 +63,6 @@ S2_MIN_PAPERS_THRESHOLD: int = 5
 # Maximum reviews/papers to fetch per concept for knowledge extraction
 MAX_REVIEWS_PER_CONCEPT = 5
 MAX_WIKI_CONCEPTS = 12
-
-
-def set_cache_dir(cache_dir: Optional[Path]) -> Path:
-    """Set the cache directory for this process and ensure it exists."""
-    global CACHE_DIR
-    CACHE_DIR = Path(cache_dir) if cache_dir else DEFAULT_CACHE_DIR
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    return CACHE_DIR
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HTTP & CACHING UTILITIES
@@ -105,15 +97,22 @@ def _http_get(url: str, timeout: int = 20, retries: int = 3) -> bytes:
 
 
 def _cache_key(prefix: str, query: str) -> str:
-    """Generate a cache filename from prefix and query."""
-    h = hashlib.md5(query.encode("utf-8")).hexdigest()[:12]
-    safe_prefix = re.sub(r"[^a-zA-Z0-9_]", "_", prefix)[:30]
-    return f"{safe_prefix}_{h}.json"
+    """Generate a collision-resistant cache filename from prefix and query."""
+    digest = hashlib.sha256(query.encode("utf-8")).hexdigest()
+    safe_prefix = re.sub(r"[^a-zA-Z0-9_]+", "_", prefix).strip("_")[:30] or "entry"
+    return f"{CACHE_FORMAT_VERSION}_{safe_prefix}_{digest}.json"
+
+
+def _cache_path(key: str) -> Path:
+    """Return a validated path inside the shared literature cache."""
+    if Path(key).name != key or not key.endswith(".json"):
+        raise ValueError(f"Unsafe cache key: {key!r}")
+    return LITERATURE_CACHE_DIR / key
 
 
 def _get_cached(key: str, max_age_hours: int = 72) -> Optional[Any]:
     """Return cached data if fresh enough, else None."""
-    path = CACHE_DIR / key
+    path = _cache_path(key)
     if path.exists():
         age_hours = (time.time() - path.stat().st_mtime) / 3600
         if age_hours < max_age_hours:
@@ -125,15 +124,31 @@ def _get_cached(key: str, max_age_hours: int = 72) -> Optional[Any]:
 
 
 def _set_cache(key: str, data: Any) -> None:
-    """Write data to local cache."""
+    """Write data to the shared cache with an atomic replace."""
+    tmp_path: Optional[Path] = None
     try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        (CACHE_DIR / key).write_text(
-            json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        path = _cache_path(key)
+        LITERATURE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=LITERATURE_CACHE_DIR,
+            prefix=f".{path.stem}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp_path = Path(tmp.name)
+            json.dump(data, tmp, indent=2, ensure_ascii=False)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.replace(tmp_path, path)
     except Exception as exc:
         logger.warning(f"Cache write failed for {key}: {exc}")
-
+        if tmp_path is not None:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CONCEPT EXTRACTION FROM PICO
@@ -1384,8 +1399,7 @@ def _build_sources_guide(concepts: Dict[str, List[str]], journal_data: Dict[str,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72,
-                         progress_callback: Optional[callable] = None,
-                         cache_dir: Optional[Path] = None) -> Tuple[str, str, List[Dict[str, Any]], Dict[str, str]]:
+                         progress_callback: Optional[callable] = None) -> Tuple[str, str, List[Dict[str, Any]], Dict[str, str]]:
     """
     Build a dynamic, PICO-specific knowledge base by querying online
     medical databases.
@@ -1422,13 +1436,10 @@ def build_knowledge_base(pico: Dict[str, str], cache_hours: int = 72,
         if progress_callback:
             progress_callback(msg)
 
-    # Allow callers (e.g., planner sessions) to scope cache to their workspace.
-    if cache_dir is not None:
-        set_cache_dir(cache_dir)
 
     # Check for a complete cached build
-    pico_hash = hashlib.md5(json.dumps(pico, sort_keys=True).encode()).hexdigest()[:16]
-    full_cache_key = f"full_kb_{pico_hash}.json"
+    canonical_pico = json.dumps(pico, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    full_cache_key = _cache_key("full_kb", canonical_pico)
     cached_full = _get_cached(full_cache_key, max_age_hours=cache_hours)
     if cached_full and isinstance(cached_full, dict):
         kb = cached_full.get("knowledge_base", "")
@@ -1553,7 +1564,7 @@ Focus: {primary_organ} — {primary_pathology} — {', '.join(concepts['modaliti
 ════════════════════════════════════════════════════════════════════════════════
 NOTE: This knowledge base was built dynamically from live queries to medical
 databases. Content reflects the current published literature and terminology.
-Cached for {cache_hours} hours. Delete workspace cache/literature/ to force refresh.
+Cached for {cache_hours} hours. Delete storage/cache/literature/ to force refresh.
 ════════════════════════════════════════════════════════════════════════════════
 """
 
@@ -1661,22 +1672,19 @@ Cached for {cache_hours} hours. Delete workspace cache/literature/ to force refr
     print(f"  Clinical guidelines:  {len(guideline_data)}")
     print(f"  Dataset references:   {len(dataset_data)}")
     print(f"  Knowledge base size:  {len(knowledge_base):,} characters")
-    print(f"  Cached to: {CACHE_DIR / full_cache_key}\n")
+    print(f"  Cached to: {_cache_path(full_cache_key)}\n")
 
     return knowledge_base, sources_guide, papers, knowledge_sections
 
 
-def clear_cache(cache_dir: Optional[Path] = None) -> int:
+def clear_cache() -> int:
     """
-    Clear all cached knowledge data. Returns number of files removed.
+    Clear all shared literature cache data. Returns number of files removed.
     """
-    if cache_dir is not None:
-        set_cache_dir(cache_dir)
-
     count = 0
-    if CACHE_DIR.exists():
-        for f in CACHE_DIR.glob("*.json"):
+    if LITERATURE_CACHE_DIR.exists():
+        for f in LITERATURE_CACHE_DIR.glob("*.json"):
             f.unlink()
             count += 1
-    logger.info(f"Cleared {count} cached files from {CACHE_DIR}")
+    logger.info(f"Cleared {count} cached files from {LITERATURE_CACHE_DIR}")
     return count

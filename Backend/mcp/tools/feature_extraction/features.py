@@ -41,6 +41,7 @@ from . import digests as provenance
 from .feature_set_builder import (
     FEATURE_SET_SCHEMA_VERSION,
     SUBJECT_KEY,
+    VOLUME_KEY,
     FeatureSetBuildError,
     finite_or_none,
     frame_from_csv,
@@ -1173,12 +1174,16 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             radiomics_config_digests = sorted(
                 {row["config_digest"] for row in recorded_rows if row.get("config_digest")}
             )
+        # `subject_keys` groups rows for the leakage-safe split below; `volume_keys`
+        # is the row identity a frozen feature set is actually keyed by — a patient
+        # may contribute more than one labelled volume, each with its own row.
         subject_keys = df[SUBJECT_KEY].astype(str).tolist()
+        volume_keys = df[VOLUME_KEY].astype(str).tolist()
 
         X = df.drop(columns=[target_column])
         id_cols_to_drop = [
             c for c in X.columns
-            if c.lower() in ("id", "subject_id", "subjectid", "subject_key", "ordinal", "patientid", "patient_id", "case_id", "caseid", "name", "uid", "pat_id", "unnamed: 0")
+            if c.lower() in ("id", "subject_id", "subjectid", "subject_key", "volume_series_instance_uid", "ordinal", "patientid", "patient_id", "case_id", "caseid", "name", "uid", "pat_id", "unnamed: 0")
             or c.lower().endswith("_id")
         ]
         if id_cols_to_drop:
@@ -1647,7 +1652,10 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
 
         frozen_sets: list = []
         for set_key, top_n, names in candidate_sets:
-            set_frame = pd.DataFrame({SUBJECT_KEY: subject_keys})
+            # Keyed by volume, not subject_key: matrix_from_frame() rejects a
+            # repeated key, and a patient may legitimately contribute more than
+            # one labelled volume, each measured and modelled as its own row.
+            set_frame = pd.DataFrame({VOLUME_KEY: volume_keys})
             for name in names:
                 # A measured column keeps its measured values — a missing value
                 # stays missing, with its reason recorded. Encoded columns
