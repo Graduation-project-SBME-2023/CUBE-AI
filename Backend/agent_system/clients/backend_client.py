@@ -408,6 +408,16 @@ class BackendClient:
                 )
                 return []
 
+    @classmethod
+    async def get_agent_run(cls, agent_run_id: str) -> dict | None:
+        cls._require_uuid(agent_run_id, "agent_run_id")
+        async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+            response = await client.get(f"{BASE_URL}/agent-runs/{agent_run_id}")
+            if response.status_code == 404:
+                return None
+            response.raise_for_status()
+            return response.json()
+
     # ------------------------------------------------------------------
     # Task Messages + Context Augmentation
     # ------------------------------------------------------------------
