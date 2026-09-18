@@ -1,0 +1,21 @@
+# Repackage an already-built OHIF bundle into the serving image.
+#
+# The full Dockerfile.openresty-orthanc rebuilds the whole monorepo inside
+# Docker (yarn install + yarn build), which takes far longer than building on
+# the host where node_modules already exists.  This image takes the dist that
+# `yarn build` just produced and layers it onto the same OpenResty base, so the
+# served bundle matches the source tree without a from-scratch container build.
+#
+# Build from the repository root:
+#   docker build -f deploy/Dockerfile.frontend.dist \
+#     --build-arg BASE_IMAGE=cubeai1/webapp:v1.0 \
+#     -t cubeai1/webapp:v1.1 .
+ARG BASE_IMAGE=cubeai1/webapp:v1.0
+FROM ${BASE_IMAGE}
+
+# Replace the baked bundle wholesale: leaving the old files in place would keep
+# stale, content-hashed chunks around that nothing references but that still
+# get served if an old index.html is cached anywhere.
+RUN rm -rf /var/www/html/*
+
+COPY Frontend/OHIF-Viewer/platform/app/dist/ /var/www/html/
