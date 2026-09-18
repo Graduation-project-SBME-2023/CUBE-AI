@@ -148,6 +148,32 @@ def sitk_image_from_array(array_zyx: np.ndarray, geometry: VolumeGeometry) -> si
     return image
 
 
+def volume_array_from_dicom_series(datasets: Sequence[pydicom.Dataset]) -> np.ndarray:
+    """Stack a sorted DICOM series into a ``(z, y, x)`` array in stored units.
+
+    Rescale slope and intercept are applied, so a CT comes back in Hounsfield
+    units rather than raw stored values -- the same numbers the NIfTI export
+    carries, which is what makes the two interchangeable.
+    """
+    if not datasets:
+        raise ValueError("a volume needs at least one DICOM instance")
+
+    ordered = sort_dicom_series(datasets)
+    slices = []
+    for dataset in ordered:
+        pixels = dataset.pixel_array.astype(np.float32)
+        slope = float(getattr(dataset, "RescaleSlope", 1) or 1)
+        intercept = float(getattr(dataset, "RescaleIntercept", 0) or 0)
+        if slope != 1.0 or intercept != 0.0:
+            pixels = pixels * slope + intercept
+        slices.append(pixels)
+
+    volume = np.stack(slices, axis=0)
+    if volume.ndim != 3:
+        raise ValueError(f"expected a 3-D volume, built shape {volume.shape}")
+    return volume
+
+
 def physical_slice_position(dataset: pydicom.Dataset) -> float | None:
     """Project a slice origin onto its own normal, for physical ordering."""
     try:

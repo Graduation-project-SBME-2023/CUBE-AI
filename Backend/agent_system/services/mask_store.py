@@ -33,6 +33,7 @@ from typing import Any, Iterable, Sequence
 
 import numpy as np
 import pydicom
+import SimpleITK as sitk
 
 from clients.backend_client import BackendClient
 from clients.orthanc_client import OrthancClient, OrthancError
@@ -45,7 +46,13 @@ from imaging.dicom_seg import (
     seg_to_mask_array,
     write_mask_nifti,
 )
-from imaging.geometry import geometries_match, geometry_from_dicom_series, sort_dicom_series
+from imaging.geometry import (
+    geometries_match,
+    geometry_from_dicom_series,
+    sitk_image_from_array,
+    sort_dicom_series,
+    volume_array_from_dicom_series,
+)
 from storage_paths import HYPOTHESES_DIR, ws_sub
 
 # The ingestion sync-webhook call is not ingestion-specific -- it is just
@@ -58,6 +65,7 @@ from ingestion.service import sync_series_to_database as _sync_segmentation_now
 logger = logging.getLogger(__name__)
 
 MASK_CACHE = "mask_cache"
+VOLUME_CACHE = "volume_cache"
 _DEFAULT_CACHE_TTL_HOURS = 24.0
 
 LOCAL_FIRST = "local"
@@ -244,6 +252,43 @@ class MaskStore:
         )
         return target
 
+    def volume_cache_path(self, session_id: str, volume_uid: str) -> Path:
+        return ws_sub(session_id, f"{VOLUME_CACHE}/{volume_uid}.nii.gz")
+
+    async def ensure_local_volume(self, session_id: str, volume_uid: str) -> Path:
+        """Return a NIfTI path for a source volume, rebuilding it if absent.
+
+        The workspace copy of a volume is the largest thing a session leaves
+        behind and is reproducible from the DICOM in Orthanc, so it is a cache
+        like the masks rather than something to keep. Rebuilding is not free --
+        it reads every instance in the series -- so it happens only when the
+        copy is actually gone.
+
+        Geometry comes from the DICOM, which is also what publish() validates a
+        mask against, so a mask saved against this file lines up with the
+        archive by construction.
+        """
+        target = self.volume_cache_path(session_id, volume_uid)
+        if target.is_file():
+            return target
+
+        datasets = await self._source_series(volume_uid)
+        array = await asyncio.to_thread(volume_array_from_dicom_series, datasets)
+        geometry = geometry_from_dicom_series(datasets)
+
+        def _write() -> None:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            sitk.WriteImage(sitk_image_from_array(array, geometry), str(target), useCompression=True)
+
+        await asyncio.to_thread(_write)
+        logger.info(
+            "Rebuilt volume %s for session %s from Orthanc (%s slices)",
+            volume_uid,
+            session_id,
+            array.shape[0],
+        )
+        return target
+
     async def read_mask(self, ref: SegRef) -> tuple[np.ndarray, Any]:
         """Fetch a SEG and its source series from Orthanc and decode the mask."""
         source = await self._source_series(ref.volume_uid)
@@ -375,15 +420,24 @@ class MaskStore:
     # ------------------------------------------------------------------
 
     async def clear_session(self, session_id: str) -> int:
-        """Delete a session's cached masks. Orthanc and the database are untouched."""
-        return await asyncio.to_thread(_remove_cache_dir, session_id)
+        """Drop everything this session holds that Orthanc can reproduce.
+
+        Masks and source volumes both exist in the archive, so the workspace
+        copies are caches: deleting them costs a rebuild and nothing else.
+        Reports, scratchpads and a clinician's saved edits are not reproducible
+        and are left alone.
+        """
+        return await asyncio.to_thread(_remove_reproducible_copies, session_id)
 
     @staticmethod
     def sweep_stale_caches(ttl_seconds: float | None = None) -> int:
-        """Remove mask caches left behind by sessions that never finished.
+        """Remove caches left behind by sessions that never finished.
 
-        A safety net for a worker that dies mid-run: the cache is disposable by
-        definition, so the worst case is a re-download.
+        A safety net for a worker that dies mid-run, which never reaches the
+        teardown that would have cleared them. Only cache/ is swept: it holds
+        copies of what Orthanc stores, so the worst case is a rebuild. The
+        workspace's own volumes/ is left alone here -- an unfinished run may
+        still be using it.
         """
         limit = cache_ttl_seconds() if ttl_seconds is None else ttl_seconds
         if limit <= 0 or not HYPOTHESES_DIR.is_dir():
@@ -392,18 +446,19 @@ class MaskStore:
         cutoff = time.time() - limit
         removed = 0
         for workspace_dir in HYPOTHESES_DIR.glob("workspace_*"):
-            cache_dir = workspace_dir / "cache" / "masks"
-            if not cache_dir.is_dir():
-                continue
-            try:
-                if cache_dir.stat().st_mtime >= cutoff:
+            for name in ("masks", "volumes"):
+                cache_dir = workspace_dir / "cache" / name
+                if not cache_dir.is_dir():
                     continue
-                shutil.rmtree(cache_dir, ignore_errors=True)
-                removed += 1
-            except OSError:
-                continue
+                try:
+                    if cache_dir.stat().st_mtime >= cutoff:
+                        continue
+                    shutil.rmtree(cache_dir, ignore_errors=True)
+                    removed += 1
+                except OSError:
+                    continue
         if removed:
-            logger.info("Swept %s stale mask cache directories", removed)
+            logger.info("Swept %s stale cache directories", removed)
         return removed
 
 
@@ -413,11 +468,22 @@ def _content_digest(mask: np.ndarray) -> str:
     return hashlib.sha256(binary.tobytes()).hexdigest()[:32]
 
 
-def _remove_cache_dir(session_id: str) -> int:
-    cache_dir = ws_sub(session_id, MASK_CACHE)
-    if not cache_dir.is_dir():
-        return 0
-    count = sum(1 for _ in cache_dir.glob("*.nii.gz"))
-    shutil.rmtree(cache_dir, ignore_errors=True)
-    logger.info("Cleared %s cached mask(s) for session %s", count, session_id)
-    return count
+# Workspace trees that only ever hold copies of what Orthanc stores. "volumes"
+# is the converted source imaging and is by far the largest; the two caches are
+# what materialising from the archive writes.
+REPRODUCIBLE_SUBTREES = (MASK_CACHE, VOLUME_CACHE, "volumes")
+
+
+def _remove_reproducible_copies(session_id: str) -> int:
+    removed = 0
+    for name in REPRODUCIBLE_SUBTREES:
+        directory = ws_sub(session_id, name)
+        if not directory.is_dir():
+            continue
+        removed += sum(1 for _ in directory.glob("*.nii.gz"))
+        shutil.rmtree(directory, ignore_errors=True)
+    if removed:
+        logger.info(
+            "Cleared %s reproducible file(s) for session %s", removed, session_id
+        )
+    return removed
