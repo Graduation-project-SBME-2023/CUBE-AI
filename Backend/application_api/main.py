@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import time
 from contextlib import asynccontextmanager, suppress
@@ -8,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from application_api.db.session import AsyncSessionLocal, engine
+from application_api.core.config import settings
 from application_api.core.metrics import install_sql_metrics, monitor_event_loop_lag, observe_http, render_metrics
 from application_api.api.routes import (
     Taskmessage,
@@ -28,6 +30,7 @@ from application_api.api.routes import (
     workflow,
 )
 
+logger = logging.getLogger(__name__)
 
 install_sql_metrics(engine)
 
@@ -35,10 +38,12 @@ install_sql_metrics(engine)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     lag_task = asyncio.create_task(monitor_event_loop_lag(), name="event-loop-lag-monitor")
-    # Orthanc is the source of truth for imaging; this catches up on anything
-    # that arrived while the API was down, or predates the database entirely.
+    # Orthanc is the source of truth for imaging. This catches up on anything
+    # that arrived while the API was down or predates the database entirely,
+    # then keeps watching for the events the fire-and-forget webhook drops.
     reconcile_task = asyncio.create_task(
-        sync.reconcile_with_orthanc_on_startup(), name="orthanc-startup-reconcile"
+        sync.reconcile_with_orthanc_forever(settings.RECONCILIATION_INTERVAL_SECONDS),
+        name="orthanc-reconciliation",
     )
     try:
         yield
@@ -115,8 +120,12 @@ async def liveness() -> dict[str, str]:
 async def readiness() -> dict[str, str]:
     async with AsyncSessionLocal() as session:
         await session.execute(text("SELECT 1"))
-        revision = (await session.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
-    return {"status": "ready", "migration": revision}
+        # alembic_version holds one row per head; .scalar_one() would raise
+        # as soon as the chain branches without a merge revision in place.
+        revisions = (
+            await session.execute(text("SELECT version_num FROM alembic_version"))
+        ).scalars().all()
+    return {"status": "ready", "migration": ",".join(sorted(revisions))}
 
 
 @app.get("/health")

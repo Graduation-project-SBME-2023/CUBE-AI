@@ -20,14 +20,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade():
     op.drop_constraint(
-        "patients_gender_check",  # change to your actual name!
+        # This constraint was created by the initial migration with this exact
+        # legacy name. Mark it as finalized so the current SQLAlchemy naming
+        # convention does not turn it into
+        # ``ck_patients_patients_gender_check``.
+        op.f("patients_gender_check"),
         "patients",
         type_="check"
     )
 
 def downgrade():
     op.create_check_constraint(
-        "patients_gender_check",
+        op.f("patients_gender_check"),
         "patients",
         "gender IN ('M', 'F')"
     )

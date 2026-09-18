@@ -105,7 +105,6 @@ async def _save_and_broadcast_cohort(validated_uids: list[str]) -> dict:
         async with httpx.AsyncClient(timeout=5.0) as client:
             await client.post(
                 f"{mas_base_url}/ws-broadcast",
-                headers={"X-Internal-Token": os.environ.get("WS_INTERNAL_TOKEN", "")},
                 json={
                     "type": "population_output",
                     "payload": {

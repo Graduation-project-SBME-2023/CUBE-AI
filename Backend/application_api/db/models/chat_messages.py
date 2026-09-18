@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Integer, ForeignKey, String, DateTime, Text,UUID, text
-from sqlalchemy.dialects.postgresql import JSON
+from sqlalchemy import Column, Integer, ForeignKey, String, DateTime, Text, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from application_api.db.base import Base
@@ -21,7 +21,7 @@ class ChatMessage(Base):
     text = Column(Text, nullable=False)        # actual message text
 
     # Optional extra data
-    extra_data = Column(JSON, nullable=True)   # e.g., attachments, metadata, or any future fields
+    extra_data = Column(JSONB, nullable=True)   # e.g., attachments, metadata, or any future fields
 
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 

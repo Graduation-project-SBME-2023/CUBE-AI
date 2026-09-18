@@ -21,7 +21,7 @@ from ingestion.provenance import (
     normalise_extension,
 )
 from ingestion.service import run_ingestion
-from services.resource_scheduler import resource_scheduler
+from ingestion.limits import ingestion_limiter
 from storage_paths import TEMP_DIR
 
 logger = logging.getLogger(__name__)
@@ -151,9 +151,7 @@ async def ingest_volume(
         patient_id=(patient_id or None),
         patient_name=(patient_name or None),
         series_description=(series_description or None),
-        # Share the pipeline's CPU lease so a conversion cannot compete with a
-        # radiomics run for the same cores.
-        scheduler=resource_scheduler,
+        scheduler=ingestion_limiter,
     )
     logger.info(
         "Queued ingestion job %s for %s (%s bytes, modality=%s)",

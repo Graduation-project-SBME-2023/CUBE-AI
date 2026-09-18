@@ -18,20 +18,13 @@ class TaskManager:
     is the caller's responsibility (SessionService owns that).
     """
 
-    def start_planning(
-        self,
-        session: Session,
-        starting_message: str,
-        planner,
-        *,
-        initial_state: SessionState = SessionState.PLANNING,
-    ) -> None:
+    def start_planning(self, session: Session, starting_message: str, planner) -> None:
         if session.planning_task and not session.planning_task.done():
             raise RuntimeError(f"Planning already running for session {session.session_id}")
 
         session.cancel_event.clear()
         session.pause_event.set()
-        session.state = initial_state
+        session.state = SessionState.PLANNING
 
         session.planning_task = asyncio.create_task(
             self._run_planning(session, starting_message, planner)
@@ -65,13 +58,7 @@ class TaskManager:
             session.interrupted = False
             session.planning_task = None
 
-    async def start_execution(
-        self,
-        session: Session,
-        executor,
-        *,
-        initial_state: SessionState = SessionState.RUNNING,
-    ) -> None:
+    async def start_execution(self, session: Session, executor) -> None:
         # If planning is still active, cancel it cleanly before starting execution
         if session.planning_task and not session.planning_task.done():
             session.interrupted = True
@@ -86,7 +73,7 @@ class TaskManager:
 
         session.cancel_event.clear()
         session.pause_event.set()
-        session.state = initial_state
+        session.state = SessionState.RUNNING
 
         session.execution_task = asyncio.create_task(
             self._run_execution(session, executor)
@@ -143,13 +130,7 @@ class TaskManager:
         if session.execution_task and not session.execution_task.done():
             session.execution_task.cancel()
 
-    async def restart_execution(
-        self,
-        session: Session,
-        executor,
-        *,
-        initial_state: SessionState = SessionState.RUNNING,
-    ) -> None:
+    async def restart_execution(self, session: Session, executor) -> None:
         # Cancel any running task and wait for clean shutdown
         self.stop(session)
         if session.execution_task and not session.execution_task.done():
@@ -174,7 +155,7 @@ class TaskManager:
         # Reset state for a fresh run
         session.cancel_event.clear()
         session.pause_event.set()
-        session.state = initial_state
+        session.state = SessionState.RUNNING
         session.last_error = None
 
         session.execution_task = asyncio.create_task(

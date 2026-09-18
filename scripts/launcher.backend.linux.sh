@@ -4,9 +4,10 @@
 #  Double-click this file (or: bash launcher.backend.linux.sh)
 #
 #  - No frontend: use launcher.linux.sh for both.
-#  - No image updates: runs whatever images are already on this
-#    machine (--pull never). Use launcher.linux.sh when you
-#    actually want to fetch newer images.
+#  - No image updates: reuses whatever images are already on this
+#    machine (--pull missing) and only pulls one that's missing
+#    entirely. Use launcher.linux.sh when you actually want to
+#    fetch newer images.
 #  - Applies the storage changes: compose recreates only the
 #    containers whose spec changed, which is what makes the new
 #    Backend/storage mounts and BACKEND_STORAGE_ROOT / *_DIR env
@@ -25,36 +26,134 @@ if [[ "$(uname)" == "Darwin" ]] && [[ "$TERM_PROGRAM" == "" ]]; then
   osascript -e 'tell application "Terminal" to activate' 2>/dev/null || true
 fi
 
+# Bounds a command with a hard timeout so a stuck call (e.g. 'ollama list' or
+# 'docker info' while their backend is still starting up) can never freeze
+# this whole launcher. Falls back to running unbounded if no timeout tool is
+# available (plain macOS without coreutils).
+with_timeout() {
+  local secs="$1"; shift
+  if command -v timeout &>/dev/null; then
+    timeout "$secs" "$@"
+  elif command -v gtimeout &>/dev/null; then
+    gtimeout "$secs" "$@"
+  else
+    "$@"
+  fi
+}
+
 echo
 echo "  OHIF-Standalone Backend-only launcher"
 echo "  ─────────────────────────────────────────"
 echo -e "${NC}"
 
-# ── 1. Docker ────────────────────────────────
+# Check every required application before trying to start either one so a new
+# user gets the complete installation list in a single run.
+missing_prerequisites=()
 if ! command -v docker &>/dev/null; then
-  abort "Docker is not installed. Install Docker Desktop from https://www.docker.com/products/docker-desktop/ then re-run this script."
+  missing_prerequisites+=("Docker: https://docs.docker.com/engine/install/")
+fi
+if ! command -v ollama &>/dev/null; then
+  missing_prerequisites+=("Ollama: https://ollama.com/download")
 fi
 
-if ! docker info &>/dev/null; then
-  abort "Docker Desktop is not running.
-       Please open Docker Desktop, wait until it shows 'Docker is running', then double-click this script again."
+if (( ${#missing_prerequisites[@]} > 0 )); then
+  warn "The following required software is not installed or is not available in PATH:"
+  for prerequisite in "${missing_prerequisites[@]}"; do
+    echo "  - $prerequisite"
+  done
+  abort "Install the missing software, start it once to finish setup, then re-run this script. If it is already installed, open a new terminal so PATH is refreshed."
+fi
+
+info "Docker is installed."
+info "Ollama is installed."
+
+# ── 1. Docker ────────────────────────────────
+# Don't make the user open Docker by hand - start it here and wait.
+start_docker() {
+  case "$(uname)" in
+    Darwin)
+      open -a Docker 2>/dev/null || open -a "Docker Desktop" 2>/dev/null || true
+      ;;
+    *)
+      # Docker Desktop for Linux first, then the system daemon.
+      if command -v systemctl &>/dev/null; then
+        systemctl --user start docker-desktop 2>/dev/null \
+          || sudo systemctl start docker 2>/dev/null || true
+      else
+        sudo service docker start 2>/dev/null || true
+      fi
+      ;;
+  esac
+}
+
+# Launch the Docker app whenever its process isn't already running - even if
+# the engine already answers (e.g. a lingering daemon) - so the app actually
+# opens instead of silently relying on a background engine.
+docker_app_running() {
+  case "$(uname)" in
+    Darwin) pgrep -x Docker &>/dev/null || pgrep -f "Docker Desktop" &>/dev/null ;;
+    *)      pgrep -f "Docker Desktop" &>/dev/null || pgrep -x dockerd &>/dev/null ;;
+  esac
+}
+
+if ! docker_app_running; then
+  warn "Docker app is not running - launching it..."
+  start_docker
+fi
+
+if ! with_timeout 10 docker info &>/dev/null; then
+  warn "Waiting for the Docker engine to come up (up to 180s)..."
+  waited=0
+  while ! with_timeout 10 docker info &>/dev/null; do
+    if (( waited >= 180 )); then
+      abort "Docker did not become ready within 180 seconds.
+       Start Docker manually, wait until it reports 'Docker is running', then re-run this script."
+    fi
+    if (( waited % 15 == 0 )); then
+      warn "  ...still waiting on Docker (${waited}s elapsed)"
+    fi
+    sleep 3
+    waited=$((waited + 3))
+  done
 fi
 info "Docker is running."
 
 # ── 2. Ollama ────────────────────────────────
-if ! command -v ollama &>/dev/null; then
-  abort "Ollama is not installed. Download it from https://ollama.com/download then re-run this script."
-fi
+# Same idea: if Ollama isn't answering, start it ourselves - the macOS app when
+# present, otherwise a headless 'ollama serve' in the background.
+# The HTTP port is the only signal that actually matters: it's exactly what
+# the agents container talks to (OLLAMA_BASE_URL=http://host.docker.internal:11434).
+# 'ollama list' is deliberately NOT used here - on some installs it silently
+# launches the app/server as a side effect just by being invoked, and on
+# others it can exit 0 even when nothing is actually listening, so its exit
+# code is not a trustworthy readiness signal either way.
+ollama_ready() {
+  curl -sf --max-time 3 http://localhost:11434 &>/dev/null
+}
 
-# Try the HTTP health endpoint first; fall back to 'ollama list'
-if curl -sf http://localhost:11434 &>/dev/null || ollama list &>/dev/null 2>&1; then
-  info "Ollama is running."
-else
-  abort "Ollama does not appear to be running.
-       On macOS:  open the Ollama app from your Applications folder.
-       On Linux:  run 'ollama serve' in a separate terminal.
-       Then double-click this script again."
+if ! ollama_ready; then
+  warn "Ollama is not responding - starting it now..."
+  if [[ "$(uname)" == "Darwin" ]] && open -a Ollama 2>/dev/null; then
+    :
+  else
+    nohup ollama serve >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+  fi
+  warn "Waiting for Ollama to accept connections (up to 60s)..."
+  waited=0
+  while ! ollama_ready; do
+    if (( waited >= 60 )); then
+      abort "Ollama did not become ready within 60 seconds.
+       Start it manually (run 'ollama serve' or open the Ollama app), then re-run this script."
+    fi
+    if (( waited % 10 == 0 )); then
+      warn "  ...still waiting on Ollama (${waited}s elapsed)"
+    fi
+    sleep 3
+    waited=$((waited + 3))
+  done
 fi
+info "Ollama is running."
 
 # ── 3. Environment variable ───────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -69,31 +168,12 @@ fi
 
 info "COMPOSE_PROJECT_DIR set to: $COMPOSE_PROJECT_DIR"
 
-# ── 4. Backend Selection ─────────────────────
-echo "Select backend mode:"
-echo "  1) GPU"
-echo "  2) CPU"
+# ── 4. Backend compose (GPU only) ────────────
+# The CPU backend variant has been removed - this stack is GPU-only.
+BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/deploy/docker-compose.backend.gpu.yml"
+BACKEND_MODE="GPU"
 echo
-while true; do
-  read -rp "Choice [1-2]: " BACKEND_CHOICE
-  case "$BACKEND_CHOICE" in
-    1)
-      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/deploy/docker-compose.backend.gpu.yml"
-      BACKEND_MODE="GPU"
-      break
-      ;;
-    2)
-      BACKEND_COMPOSE="$COMPOSE_PROJECT_DIR/deploy/docker-compose.backend.cpu.yml"
-      BACKEND_MODE="CPU"
-      break
-      ;;
-    *)
-      warn "Invalid selection."
-      ;;
-  esac
-done
-echo
-info "Selected backend: $BACKEND_MODE"
+info "Backend mode: $BACKEND_MODE"
 warn "Frontend will NOT be started. Run scripts/launcher.linux.sh if you need the viewer."
 echo
 
@@ -120,12 +200,26 @@ fi
 
 # ── 6. Launch ────────────────────────────────
 warn "Starting backend Docker containers..."
-warn "Using the images already on this machine - nothing will be pulled or updated."
+warn "Images already on this machine are reused as-is; only ones missing entirely are pulled."
 warn "Only containers whose config changed (storage mounts, storage env vars)"
 warn "are recreated; everything else is left running as-is."
 echo
 
-# --pull never          : never contact the registry, use the local image only.
+# --pull missing        : reuse the pre-built images (agents, monailabel,
+#                         orthanc, postgres) already on this machine as-is;
+#                         only pull one that isn't present at all. Never
+#                         re-pulls/updates an image that's already here -
+#                         `--pull never` used to be here, but that hard-fails
+#                         with "No such image" the moment any required image
+#                         hasn't been pulled yet.
+# --build               : application-api/db-migrate/db-seed have a `build:`
+#                         section and are meant to always run the current
+#                         checkout's code; without it, `up` can reuse an
+#                         already-built local image tag and silently run
+#                         stale migrations/code (database_audit.md D-33).
+#                         --build only affects services that declare
+#                         `build:`, so the "nothing re-pulled" behavior for
+#                         the rest is unaffected.
 # (no --force-recreate) : compose recreates a container only when its spec
 #                         changed, so the storage volume/env edits land while
 #                         unrelated services keep their current containers.
@@ -133,7 +227,8 @@ if ! docker compose \
   --env-file "$BACKEND_ENV" \
   -f "$BACKEND_COMPOSE" \
   up \
-  --pull never \
+  --pull missing \
+  --build \
   --detach \
   --wait \
   --wait-timeout 3600; then

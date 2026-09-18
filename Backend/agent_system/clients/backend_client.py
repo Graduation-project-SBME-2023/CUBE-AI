@@ -16,9 +16,6 @@ BASE_URL = os.environ.get(
     os.environ.get("CONTROL_API_URL", "http://localhost:8001"),
 ).rstrip("/")
 DEFAULT_TIMEOUT = CONTROL_HTTP_TIMEOUT
-WS_LOG_PAGE_SIZE = 100
-
-
 class BackendClient:
     """
     Async HTTP client for the backend REST API.
@@ -543,7 +540,7 @@ class BackendClient:
     # WS Stream Logs
     # ------------------------------------------------------------------
     @classmethod
-    async def save_log(cls, log: WS_Log) -> WS_Log | None:
+    async def save_log(cls, log: WS_Log) -> WS_Log:
         """Save a ws log whenever the socket store sends any message."""
         # Local-only frontend chats are deliberately not backed by a
         # chat_sessions row, so attempting to persist their messages would
@@ -565,30 +562,19 @@ class BackendClient:
                 return WS_Log(**response.json())
             except httpx.HTTPError as e:
                 logger.error(f"Failed to save ws log {log.msg_type}: {type(e).__name__}: {e}")
-                return None
+                return log
 
     @classmethod
     async def get_logs(cls, session_id: str) -> list[WS_Log]:
-        """Get the complete, ordered log history for a session."""
-        logs: list[WS_Log] = []
-        skip = 0
-
+        """Get all logs sent in a session."""
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
-                while True:
-                    response = await client.get(
-                        f"{BASE_URL}/ws_logs/session/{session_id}",
-                        params={"skip": skip, "limit": WS_LOG_PAGE_SIZE},
-                    )
-                    response.raise_for_status()
-                    data = response.json()
-                    page = [WS_Log(**item) for item in data]
-                    logs.extend(page)
-
-                    if len(page) < WS_LOG_PAGE_SIZE:
-                        return logs
-
-                    skip += len(page)
+                response = await client.get(
+                    f"{BASE_URL}/ws_logs/session/{session_id}",
+                )
+                response.raise_for_status()
+                data = response.json()
+                return [WS_Log(**item) for item in data]
             except httpx.HTTPError as e:
                 logger.error(f"Failed to retrieve ws logs for session {session_id}: {type(e).__name__}: {e}")
                 return []

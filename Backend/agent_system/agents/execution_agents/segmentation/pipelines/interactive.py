@@ -10,10 +10,8 @@ from .common import (
     SegmentationPipelineError,
     check_session_cancelled,
     raise_for_segmentation_error,
-    resources_for_segmentation_item,
     run_with_progress_heartbeat,
 )
-from services.resource_scheduler import resource_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -125,26 +123,20 @@ async def run_interactive_pipeline(
         )
 
         try:
-            async with resource_scheduler.lease(
-                resources_for_segmentation_item(item),
+            result = await run_with_progress_heartbeat(
+                segmentation_service.run_segmentation(
+                    model=model,
+                    series_instance_uid=volume_uid,
+                    label_info=label,
+                    params={"text_prompts": [prompt]},
+                    job_id=str(item["inference_job_id"]),
+                ),
                 session_id=session_id,
-                operation=f"segmentation_agent.infer:{pair_id}",
-                agent_id="segmentation_agent",
-            ):
-                result = await run_with_progress_heartbeat(
-                    segmentation_service.run_segmentation(
-                        model=model,
-                        series_instance_uid=volume_uid,
-                        label_info=label,
-                        params={"text_prompts": [prompt]},
-                        job_id=str(item["inference_job_id"]),
-                    ),
-                    session_id=session_id,
-                    current=index - 0.5,
-                    total=total,
-                    label=f"Segmenting volume {index} of {total}",
-                    volume_uid=volume_uid,
-                )
+                current=index - 0.5,
+                total=total,
+                label=f"Segmenting volume {index} of {total}",
+                volume_uid=volume_uid,
+            )
             raise_for_segmentation_error(result, volume_uid, label)
             outcome = {
                 "pair_id": pair_id,

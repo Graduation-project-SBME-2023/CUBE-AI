@@ -3,10 +3,20 @@ from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
+# Chat session/message routes and repositories moved from
+# Backend/monailabel/{endpoints,crud}/ to Backend/application_api/{api/routes,repositories}/
+# during the database-ownership refactor (see
+# test_service_route_ownership.py:test_database_source_tree_is_owned_only_by_application_api,
+# which asserts monailabel/crud no longer exists at all). This test targeted
+# the old paths and raised FileNotFoundError after the refactor landed —
+# see cubeai-docs/backend/database_audit.md D-34.
+ROUTES_ROOT = BACKEND_ROOT / "application_api" / "api" / "routes"
+REPOSITORIES_ROOT = BACKEND_ROOT / "application_api" / "repositories"
+
 
 def test_chat_session_collection_is_bounded_and_does_not_eager_load_messages():
-    endpoint_source = (BACKEND_ROOT / "monailabel" / "endpoints" / "chat_sessions.py").read_text(encoding="utf-8")
-    crud_source = (BACKEND_ROOT / "monailabel" / "crud" / "chat_sessions.py").read_text(encoding="utf-8")
+    endpoint_source = (ROUTES_ROOT / "chat_sessions.py").read_text(encoding="utf-8")
+    crud_source = (REPOSITORIES_ROOT / "chat_sessions.py").read_text(encoding="utf-8")
 
     assert "limit: int = Query(50, ge=1, le=100)" in endpoint_source
     assert "skip: int = Query(0, ge=0)" in endpoint_source
@@ -18,8 +28,8 @@ def test_chat_session_collection_is_bounded_and_does_not_eager_load_messages():
 
 
 def test_chat_message_history_is_bounded():
-    endpoint_source = (BACKEND_ROOT / "monailabel" / "endpoints" / "chat_messages.py").read_text(encoding="utf-8")
-    crud_source = (BACKEND_ROOT / "monailabel" / "crud" / "chat_messages.py").read_text(encoding="utf-8")
+    endpoint_source = (ROUTES_ROOT / "chat_messages.py").read_text(encoding="utf-8")
+    crud_source = (REPOSITORIES_ROOT / "chat_messages.py").read_text(encoding="utf-8")
 
     assert "limit: int = Query(50, ge=1, le=100)" in endpoint_source
     assert ".offset(skip)" in crud_source
@@ -27,7 +37,7 @@ def test_chat_message_history_is_bounded():
 
 
 def test_new_chat_sessions_use_the_same_start_and_activity_timestamp():
-    crud_source = (BACKEND_ROOT / "monailabel" / "crud" / "chat_sessions.py").read_text(encoding="utf-8")
+    crud_source = (REPOSITORIES_ROOT / "chat_sessions.py").read_text(encoding="utf-8")
     create_section = crud_source[
         crud_source.index("async def create_chat_session"):crud_source.index("async def get_chat_session")
     ]

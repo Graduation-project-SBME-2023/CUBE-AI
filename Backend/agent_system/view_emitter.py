@@ -16,7 +16,7 @@ WebSocket event types:
 
 import json
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from socket_store import send_ws_message
 
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 async def emit_view_update(
     view_event: str,
     data: Dict[str, Any],
-    session_id: str,
+    session_id: Optional[str] = None,
 ):
     """
     Send a structured update to a specific frontend view via WebSocket.
@@ -49,7 +49,7 @@ async def emit_view_update(
 
 async def emit_population_output(
     data: Dict[str, Any],
-    session_id: str,
+    session_id: Optional[str] = None,
 ):
     """Emit population/cohort selection results to DataCohortView."""
     await emit_view_update("population_output", data, session_id)
@@ -57,7 +57,7 @@ async def emit_population_output(
 
 async def emit_segmentation_output(
     data: Dict[str, Any],
-    session_id: str,
+    session_id: Optional[str] = None,
 ):
     """Emit segmentation results to DataCohortView."""
     await emit_view_update("segmentation_output", data, session_id)
@@ -65,7 +65,7 @@ async def emit_segmentation_output(
 
 async def emit_features_output(
     data: Dict[str, Any],
-    session_id: str,
+    session_id: Optional[str] = None,
 ):
     """Emit feature extraction results to FeaturesView."""
     await emit_view_update("features_output", data, session_id)
@@ -73,7 +73,7 @@ async def emit_features_output(
 
 async def emit_modeling_output(
     data: Dict[str, Any],
-    session_id: str,
+    session_id: Optional[str] = None,
 ):
     """Emit modeling/classification results to ModelingView."""
     await emit_view_update("modeling_output", data, session_id)
@@ -81,7 +81,7 @@ async def emit_modeling_output(
 
 async def emit_report_output(
     data: Dict[str, Any],
-    session_id: str,
+    session_id: Optional[str] = None,
 ):
     """Emit result reporter output to ReportingView."""
     await emit_view_update("report_output", data, session_id)
@@ -89,7 +89,7 @@ async def emit_report_output(
 
 async def emit_latex_output(
     data: Dict[str, Any],
-    session_id: str,
+    session_id: Optional[str] = None,
 ):
     """Emit LaTeX/PDF generation output to ReportingView."""
     await emit_view_update("latex_output", data, session_id)

@@ -10,7 +10,7 @@ from sqlalchemy.future import select
 
 from application_api.db.models.segmentation import Segmentation
 from application_api.schemas.segmentation import SegmentationCreate, SegmentationUpdate
-from application_api.services.orthanc_client import delete_orthanc_resource
+from application_api.services.orthanc_client import cleanup_orthanc_resources_after_db_delete
 
 logger = logging.getLogger(__name__)
 
@@ -81,35 +81,38 @@ async def update_segmentation(
 # Delete
 async def delete_segmentation(db: AsyncSession, label_uid: str):
     """
-    Delete segmentation from both Orthanc and database.
+    Delete segmentation from both the database and Orthanc.
     Returns (success: bool, error_message: str | None)
+
+    Database-first (see delete_volume in repositories/volume.py for the
+    full rationale): commit the DB delete before attempting Orthanc
+    cleanup, so an Orthanc failure cannot leave a dangling DB row.
     """
     result = await db.execute(
         select(Segmentation).where(Segmentation.label_series_instance_uid == label_uid)
     )
     segmentation = result.scalar_one_or_none()
-    
+
     if not segmentation:
         return False, "Segmentation not found"
-    
+
     orthanc_series_id = segmentation.orthanc_series_id
-    deleted_from_orthanc, error_msg = await delete_orthanc_resource(
-        "series",
-        orthanc_series_id,
-    )
-    if not deleted_from_orthanc:
-        return False, error_msg
-    
-    # Delete from database
+
     try:
         await db.delete(segmentation)
         await db.commit()
-        return True, None
     except SQLAlchemyError as e:
         await db.rollback()
         error_msg = f"Database error: {str(e)}"
         logger.error(error_msg)
         return False, error_msg
+
+    await cleanup_orthanc_resources_after_db_delete(
+        "series",
+        [orthanc_series_id],
+        context=f"DB delete of segmentation {label_uid}",
+    )
+    return True, None
 
 
 # Get by volume UID
@@ -173,6 +176,17 @@ async def search_segmentations(
 
 
 # Simple statistics: count per model_name, count per segmentation_type
+#
+# Grouped result cardinality is bounded by the number of distinct
+# model/type values, but segmentation_type is free text written by the
+# sync path (see orthanc_sync.py), not a constrained enum, so nothing stops
+# it from accumulating pathologically many distinct values over time. The
+# LIMIT below is a defensive cap, not a correctness fix for the underlying
+# full-table scan — that needs an index on segmentation_type if this
+# endpoint's cost ever becomes a problem.
+_STATS_GROUP_LIMIT = 1000
+
+
 async def get_segmentation_stats(db: AsyncSession):
     try:
         # Count per model name
@@ -180,7 +194,7 @@ async def get_segmentation_stats(db: AsyncSession):
             select(
                 Segmentation.name,
                 func.count(Segmentation.label_series_instance_uid)
-            ).group_by(Segmentation.name)
+            ).group_by(Segmentation.name).limit(_STATS_GROUP_LIMIT)
         )
         counts_by_model = [{"model_name": m, "count": c} for m, c in result_model.all()]
 
@@ -189,7 +203,7 @@ async def get_segmentation_stats(db: AsyncSession):
             select(
                 Segmentation.segmentation_type,
                 func.count(Segmentation.label_series_instance_uid)
-            ).group_by(Segmentation.segmentation_type)
+            ).group_by(Segmentation.segmentation_type).limit(_STATS_GROUP_LIMIT)
         )
         counts_by_type = [{"segmentation_type": t, "count": c} for t, c in result_type.all()]
 

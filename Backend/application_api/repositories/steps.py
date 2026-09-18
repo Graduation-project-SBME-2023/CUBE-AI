@@ -27,15 +27,15 @@ async def add_step_to_plan(db: AsyncSession, plan_id: UUID, step_in: PlanStepCre
     try:
         # Auto-increment order within this plan
         result = await db.execute(
-            select(PlanStep.order)
+            select(PlanStep.step_order)
             .where(PlanStep.plan_id == plan_id)
-            .order_by(desc(PlanStep.order))
+            .order_by(desc(PlanStep.step_order))
         )
         last_order = result.scalar()
         next_order = 1 if last_order is None else last_order + 1
  
         step_data = step_in.model_dump(exclude={"task_message"})
-        new_step = PlanStep(id=uuid4(), plan_id=plan_id, order=next_order, **step_data)
+        new_step = PlanStep(id=uuid4(), plan_id=plan_id, step_order=next_order, **step_data)
         db.add(new_step)
         await db.flush()  # get new_step.id
  
@@ -85,7 +85,7 @@ async def get_steps_for_plan(
         result = await db.execute(
             _step_query()
             .where(PlanStep.plan_id == plan_id)
-            .order_by(PlanStep.order)
+            .order_by(PlanStep.step_order)
             .offset(skip)
             .limit(limit)
         )

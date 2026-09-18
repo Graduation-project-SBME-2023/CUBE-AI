@@ -43,7 +43,6 @@ const WAITING_MESSAGES: Record<string, string> = {
   WAITING_FOR_REVIEW: 'Agent is waiting for user review',
   WAITING_FOR_USER_REVIEW: 'Agent is waiting for user review',
   WAITING_FOR_LABELS: 'Waiting for user to upload labels',
-  WAITING_FOR_RESOURCE: 'Waiting for compute resources',
   WAITING_FOR_USER_INPUT: 'Agent is waiting for user input',
 };
 
@@ -145,12 +144,6 @@ function ResearchPlaygroundInner() {
   // also marked historical after the status check below; do not infer history
   // solely from sendInitialMessage because a running session can be reopened.
   const isHistoricalNavigation = Boolean(routeState.isHistorical || routeState.archived);
-
-  useEffect(() => {
-    if (!sessionId) return;
-    websocketService.connect(String(sessionId));
-    return () => websocketService.disconnect();
-  }, [sessionId]);
   const activePhaseRef = useRef(activePhase);
   const viewedPhaseIdsRef = useRef<Set<string>>(new Set());
   const waitingPhaseIdsRef = useRef<Set<string>>(new Set());
@@ -422,8 +415,6 @@ function ResearchPlaygroundInner() {
                 );
                 const liveState = String(liveStatus?.state || '').toUpperCase();
                 const executionActive = Boolean(liveStatus?.execution_active);
-                const executionQueued =
-                    String(liveStatus?.execution_capacity?.state || '').toUpperCase() === 'QUEUED';
                 const requiresManualResume =
                     !sendInitialMessage &&
                     statuses.length > 0 &&
@@ -437,7 +428,6 @@ function ResearchPlaygroundInner() {
                     setRestoredMode('results');
                 } else if (
                     requiresManualResume ||
-                    executionQueued ||
                     hasProgress ||
                     ['RUNNING', 'PAUSED', 'FAILED', 'CANCELLED'].includes(liveState)
                 ) {
@@ -495,17 +485,10 @@ function ResearchPlaygroundInner() {
   useEffect(() => {
     // Wait for both: views mounted AND mode resolved before replaying
     if (!sessionId || !viewsReady || !restoredModeReady) return;
-    const replaySessionId = String(sessionId);
-    const abortController = new AbortController();
-    let cancelled = false;
-    const replayGeneration = websocketService.startReplayCapture();
-
     const replay = async () => {
+      websocketService.startReplayCapture();
       try {
-        const replayEvents = await replaySessionLogs(replaySessionId, abortController.signal);
-        if (cancelled || websocketService.getSessionId() !== replaySessionId) return;
-
-        websocketService.dispatchReplay(replayEvents);
+        await replaySessionLogs(sessionId);
         // Log history can contain older status broadcasts. Apply the current
         // persisted snapshot last so replay cannot roll the UI backwards.
         if (Array.isArray(hydratedExecutionState?.agents)) {
@@ -517,25 +500,15 @@ function ResearchPlaygroundInner() {
           });
         }
       } catch (err) {
-        if (!cancelled && (err as any)?.name !== 'AbortError') {
-          console.error('[ResearchPlayground] Failed to replay logs:', err);
-        }
+        console.error('[ResearchPlayground] Failed to replay logs:', err);
       } finally {
-        websocketService.stopReplayCapture(replayGeneration);
+        websocketService.stopReplayCapture();
         // Replayed events populate the views, but must never be presented as
         // a new update.  Future live events for an active session may alert.
-        if (!cancelled && updateStateRef.current.sessionId === replaySessionId) {
-          updateStateRef.current.isHydrating = false;
-        }
+        updateStateRef.current.isHydrating = false;
       }
     };
     replay();
-
-    return () => {
-      cancelled = true;
-      abortController.abort();
-      websocketService.stopReplayCapture(replayGeneration);
-    };
   }, [hydratedExecutionState, sessionId, viewsReady, restoredModeReady]);
 
   // ── Plan-driven sidebar: listen for pipeline plan events ───────────────────
@@ -665,29 +638,6 @@ function ResearchPlaygroundInner() {
         if (outputForAgent) clearPhaseIndicator(outputForAgent.phase);
       }
 
-      if (type === 'resource_status') {
-        const agentName = String(payload?.agent || '');
-        const state = String(payload?.state || '').toUpperCase();
-        const outputForAgent = Object.values(OUTPUT_EVENT_AGENTS).find(
-          item => item.agent === agentName
-        );
-        if (outputForAgent && state === 'WAITING_FOR_RESOURCE') {
-          const resources = Array.isArray(payload?.resources)
-            ? payload.resources.join(' + ').replace(/_/g, ' ')
-            : 'compute resources';
-          const position = payload?.queue_position
-            ? ` (queue ${payload.queue_position})`
-            : '';
-          showPhaseIndicator(
-            outputForAgent.phase,
-            `Waiting for ${resources}${position}`,
-            true
-          );
-        } else if (outputForAgent && state === 'ACQUIRED') {
-          clearPhaseIndicator(outputForAgent.phase);
-        }
-      }
-
       if (type === 'pipeline_agent_status' || type === 'Pipeline_agent_status') {
         // Execution has started — unlock the Data & Population tab
         setIsPlanApproved(true);
@@ -695,13 +645,12 @@ function ResearchPlaygroundInner() {
         const allDone = agents.length > 0 && agents.every((a: any) =>
           ['COMPLETED', 'DONE'].includes(String(a?.status || '').toUpperCase())
         );
-        const anyUserWaiting = agents.some((a: any) => {
-          const status = String(a?.status || '').toUpperCase();
-          return status.startsWith('WAITING') && status !== 'WAITING_FOR_RESOURCE';
-        });
+        const anyWaiting = agents.some((a: any) =>
+          String(a?.status || '').toUpperCase().startsWith('WAITING')
+        );
         // Lock chat while actively running; unlock when all done or paused for input
         if (!updateStateRef.current.isHydrating && !updateStateRef.current.isHistorical) {
-          setIsAgentExecuting(!allDone && !anyUserWaiting);
+          setIsAgentExecuting(!allDone && !anyWaiting);
         }
 
         // ── Progressive sidebar unlock ──────────────────────────────────────
@@ -971,12 +920,8 @@ function ResearchPlaygroundInner() {
 }
 
 export default function ResearchPlayground() {
-  const location = useLocation();
-  const routeState = (location.state || {}) as ResearchRouteState;
-  const sessionKey = String(routeState.sessionId || routeState.session_id || 'no-session');
-
   return (
-    <ResearchProvider key={sessionKey}>
+    <ResearchProvider>
       <ResearchPlaygroundInner />
     </ResearchProvider>
   );

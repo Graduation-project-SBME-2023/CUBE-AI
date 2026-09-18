@@ -150,89 +150,26 @@ agents_workspace/
 
 ## WebSocket Protocol
 
-The Agent System exposes a native FastAPI WebSocket endpoint. Every connection
-must be bound to one session with `/ws?session_id=<id>`. Server events are sent
-only to sockets registered for that session; multiple tabs may intentionally
-share the same session stream.
-
-Each server event uses this envelope:
-
-```json
-{
-  "version": 1,
-  "event_id": "uuid",
-  "sequence": 42,
-  "session_id": "session-uuid",
-  "run_id": null,
-  "type": "pipeline_agent_status",
-  "payload": {},
-  "timestamp": "2026-08-21T12:00:00Z",
-  "replaying": false
-}
-```
+The Agent System exposes a **Socket.IO WebSocket** endpoint that the frontend connects to.
 
 ### Events (Server → Client)
 
 | Event | Payload | Description |
 |---|---|---|
 | `plan` | `{steps: [...]}` | Pipeline plan ready |
-| `pipeline_agent_status` | `{agents: [...]}` | Pipeline agent states |
-| `state_update` | `{state}` | Session lifecycle state |
-| `run_queued` | `{queue_position}` | Pipeline is waiting for capacity |
-| `planning_queued` | `{queue_position}` | Planning is waiting for capacity |
-| `resource_status` | `{state, resources, operation, queue_position}` | A heavy stage is waiting, acquired, or released |
-| `msg` | string or object | Chat message from an agent |
-| `protocol_error` | `{reason}` | Rejected client WebSocket message |
+| `PLAN_UPDATE` | `{steps: [...]}` | Plan was revised |
+| `node` | `{id, status, logs}` | Agent node status update |
+| `NODE_UPDATE` | `{id, status, logs}` | Agent node update |
+| `message` | `{role, content}` | Chat message from agent |
+| `error` | `{message}` | Error notification |
 
 ### Events (Client → Server)
 
 | Event | Payload | Description |
 |---|---|---|
-| `user` | `{text}` or string | Queue user input for the bound session |
-| `user_input` | `{text}` or string | Alias for `user` |
-| `chat_input` | `{message}` or string | Alias for `user` |
-
-Client messages should include a unique `message_id`; duplicate IDs are ignored
-within the same session and acknowledged with `client_message_ack`. Pipeline
-start, pause, resume, and stop commands use REST endpoints rather than WebSocket
-control events.
-
-Without Redis, routing and capacity queues are process-local. Run exactly one
-Agent System worker. A later multi-worker deployment must add a shared broker and
-distributed admission control before increasing the worker count.
-
-### Resource-Aware Concurrency
-
-Up to `PIPELINE_MAX_CONCURRENCY` sessions may execute at once, but expensive
-stages acquire process-local resource leases before doing work:
-
-- `gpu_segmentation` covers MONAI segmentation and defaults to one concurrent job.
-- `cpu_heavy` covers radiomics, PyCaret, and VoxTell cache-miss embedding and
-  defaults to one concurrent job.
-- A VoxTell cache miss acquires CPU and GPU atomically, so it cannot deadlock with
-  another stage.
-- Leases are released before segmentation review waits, allowing other sessions
-  to use the hardware while a user reviews results.
-
-Waiting agents use the `WAITING_FOR_RESOURCE` status. The wait queue is bounded,
-cancellation-safe, and resource-aware: an unrelated CPU job may proceed while a
-GPU job is blocked, but a later conflicting job cannot overtake an earlier one.
-
-Configure the scheduler with:
-
-```dotenv
-PIPELINE_MAX_CONCURRENCY=4
-RESOURCE_GPU_SEGMENTATION_CAPACITY=1
-RESOURCE_CPU_HEAVY_CAPACITY=1
-RESOURCE_WAIT_QUEUE_CAPACITY=32
-CPU_HEAVY_THREADS=4
-VOXTELL_CPU_THREADS=4
-```
-
-Keep both resource capacities at `1` until profiling proves the host has enough
-VRAM and CPU headroom. Increasing pipeline concurrency permits overlap between
-lightweight and differently constrained stages; it does not make heavy stages
-run simultaneously.
+| `START_WORKFLOW` | `{session_id}` | Begin pipeline execution |
+| `RESET_WORKFLOW` | `{}` | Reset to planning mode |
+| `message` | `{content}` | User chat message |
 
 ---
 

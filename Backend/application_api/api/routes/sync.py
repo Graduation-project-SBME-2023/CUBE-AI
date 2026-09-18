@@ -1,9 +1,11 @@
 import asyncio
 import logging
+import secrets
 
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, BackgroundTasks, Header, HTTPException
 from application_api.db.session import get_db, AsyncSessionLocal
+from application_api.core.config import settings
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -27,6 +29,18 @@ router = APIRouter(prefix="/sync", tags=["orthanc"])
 logger = logging.getLogger(__name__)
 
 
+# ----------------- Webhook authentication (D-30) -----------------
+# Orthanc's Lua hook is the only caller. If ORTHANC_WEBHOOK_TOKEN is set,
+# require it on every webhook call so an unauthenticated request cannot
+# delete rows by supplying an arbitrary resource_id. Set the same value in
+# the Lua script's JSON_HEADERS (see Backend/orthanc/lua/on-stable-series.lua).
+async def verify_webhook_token(x_webhook_token: str | None = Header(default=None)) -> None:
+    if settings.ORTHANC_WEBHOOK_TOKEN is None:
+        return
+    if not x_webhook_token or not secrets.compare_digest(x_webhook_token, settings.ORTHANC_WEBHOOK_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid or missing webhook token")
+
+
 # ----------------- Pydantic Payload -----------------
 
 class OrthancWebhookPayload(BaseModel):
@@ -40,7 +54,7 @@ class OrthancWebhookPayload(BaseModel):
 
 # ----------------- MANUAL FULL SYNC -----------------
 
-@router.post("/sync-all")
+@router.post("/sync-all", dependencies=[Depends(verify_webhook_token)])
 async def manual_full_sync(background_tasks: BackgroundTasks):
     """
     Manually trigger a full sync of all Orthanc data.
@@ -79,6 +93,20 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
             async with session.get(f"{ORTHANC_URL}/statistics") as resp:
                 orthanc_stats = await resp.json() if resp.status == 200 else {}
 
+        db_series_count = (volumes_count or 0) + (segs_count or 0)
+        orthanc_series_count = orthanc_stats.get("CountSeries")
+        orthanc_studies_count = orthanc_stats.get("CountStudies")
+
+        # Compare studies AND series (volumes + segmentations combined),
+        # not just studies — a study-only comparison can read "synced" while
+        # entire series are missing underneath it.
+        synced = None
+        if orthanc_stats:
+            synced = (
+                studies_count == orthanc_studies_count
+                and db_series_count == orthanc_series_count
+            )
+
         return {
             "database": {
                 "patients": patients_count or 0,
@@ -92,7 +120,7 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
                 "series": orthanc_stats.get("CountSeries", "unknown"),
                 "instances": orthanc_stats.get("CountInstances", "unknown")
             },
-            "synced": studies_count == orthanc_stats.get("CountStudies", 0) if orthanc_stats else None
+            "synced": synced,
         }
     except Exception as exc:
         logger.warning("Unable to read Orthanc sync status: %s", exc)
@@ -136,7 +164,7 @@ async def run_full_sync_background():
         await _run_full_sync_once(db)
 
 
-async def reconcile_with_orthanc_on_startup(delay_seconds: float = 5.0) -> None:
+async def reconcile_with_orthanc(delay_seconds: float = 5.0) -> None:
     """Backfill anything in Orthanc that the database never heard about.
 
     The database only learns of a study through Orthanc's stable-series hook,
@@ -147,17 +175,20 @@ async def reconcile_with_orthanc_on_startup(delay_seconds: float = 5.0) -> None:
     the database, so those studies simply are not offered to a study population,
     with no error anywhere to explain why.
 
-    A full sync is idempotent (every writer upserts), so the cheap correct fix is
-    to compare counts at startup and backfill when they disagree. Orthanc is
+    A full sync is idempotent (every writer upserts), so the cheap correct fix
+    is to compare counts and backfill only when they disagree. That keeps the
+    common case -- already in sync -- down to one /statistics call and one
+    COUNT, which is what makes this safe to run on a timer. Orthanc is
     authoritative; the database is a projection of it.
 
-    Runs detached and never raises: the API must serve requests whether or not
-    Orthanc is reachable yet.
+    Never raises: the API must serve requests whether or not Orthanc is
+    reachable yet, and a caller on a timer must not die on one bad pass.
     """
     try:
         # Orthanc and this API usually start together, and its index is not
         # queryable the instant its port opens.
-        await asyncio.sleep(delay_seconds)
+        if delay_seconds > 0:
+            await asyncio.sleep(delay_seconds)
 
         async with create_orthanc_session() as session:
             async with session.get(f"{ORTHANC_URL}/statistics") as response:
@@ -193,8 +224,23 @@ async def reconcile_with_orthanc_on_startup(delay_seconds: float = 5.0) -> None:
                 logger.info("Orthanc reconcile finished")
     except asyncio.CancelledError:
         raise
-    except Exception:  # noqa: BLE001 - startup housekeeping is never fatal
+    except Exception:  # noqa: BLE001 - housekeeping is never fatal
         logger.exception("Orthanc reconcile failed; the database may be incomplete")
+
+
+async def reconcile_with_orthanc_forever(interval_seconds: float) -> None:
+    """Reconcile at startup and then on a timer.
+
+    The webhook is fire-and-forget, so an event raised while this API is
+    restarting is simply lost and nothing else re-derives the database from
+    Orthanc's actual state. The first pass runs immediately rather than after a
+    full interval: a database that starts out behind should not stay behind for
+    the length of the timer.
+    """
+    await reconcile_with_orthanc()
+    while True:
+        await asyncio.sleep(interval_seconds)
+        await reconcile_with_orthanc(delay_seconds=0)
 
 
 async def process_webhook_background(change_type: str, resource_id: str, level: str):
@@ -282,7 +328,7 @@ async def process_webhook_background(change_type: str, resource_id: str, level: 
 
 # ----------------- ORTHANC WEBHOOK -----------------
 
-@router.post("/orthanc-webhook")
+@router.post("/orthanc-webhook", dependencies=[Depends(verify_webhook_token)])
 async def orthanc_webhook(payload: OrthancWebhookPayload, background_tasks: BackgroundTasks):
     """
     Webhook endpoint that responds immediately and processes in background.

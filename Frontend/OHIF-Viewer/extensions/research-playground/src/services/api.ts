@@ -39,19 +39,9 @@ export async function resumeSessionPipeline(sessionId: string) {
   return res.json();
 }
 
-export async function replaySessionLogs(sessionId: string, signal?: AbortSignal) {
-  const res = await fetch(`${API_BASE}/session/${sessionId}/replay-logs`, { signal });
-  if (!res.ok) {
-    throw new Error(`Replay request failed with status ${res.status}`);
-  }
-  const body = await res.json();
-  if (
-    body?.session_id &&
-    String(body.session_id).toLowerCase() !== String(sessionId).toLowerCase()
-  ) {
-    throw new Error('Replay response belongs to a different session');
-  }
-  return Array.isArray(body?.events) ? body.events : [];
+export async function replaySessionLogs(sessionId: string) {
+  const res = await fetch(`${API_BASE}/session/${sessionId}/replay-logs`);
+  return res.ok;
 }
 
 export async function compileLatexReport(

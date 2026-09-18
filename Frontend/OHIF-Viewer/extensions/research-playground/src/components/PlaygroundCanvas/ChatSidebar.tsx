@@ -423,13 +423,15 @@ const ChatSidebar = ({
         duration: 5000,
       });
     }
-    websocketService.connect(String(sessionId));
-    const sent = websocketService.sendMessage({
-      type: 'user',
-      payload: { text: userMsg.text, session_id: sessionId },
-      session_id: sessionId,
-    });
-    if (!sent) {
+    // Debug log outgoing message
+    console.log('[ChatSidebar] Sending WS message:', { type: 'user', payload: userMsg.text });
+    if (websocketService.isConnected()) {
+      websocketService.sendMessage({
+        type: 'user',
+        payload: { text: userMsg.text, session_id: sessionId },
+        session_id: sessionId,
+      });
+    } else {
       // B8: replaced alert() with snackbar
       snackbar.show({
         title: 'Connection Error',
@@ -479,7 +481,6 @@ const ChatSidebar = ({
       if (data.type === 'run_finished') {
         const currentSessionId = activeSessionIdRef.current;
         if (!currentSessionId) return;
-        if (String(data.session_id || '') !== String(currentSessionId)) return;
         if (data.replaying) return;
         const completionMsg = {
           id: makeId('a'),
@@ -510,7 +511,6 @@ const ChatSidebar = ({
       if (data.type === 'run_stopped') {
         const currentSessionId = activeSessionIdRef.current;
         if (!currentSessionId) return;
-        if (String(data.session_id || '') !== String(currentSessionId)) return;
         if (data.replaying) return;
         const stoppedMsg = {
           id: makeId('a'),
@@ -632,20 +632,16 @@ const ChatSidebar = ({
     [snackbar]
   );
 
+  // Only connect WebSocket once for the app session (not just when sidebar is open)
   useEffect(() => {
+    websocketService.connect();
     // If scoped to a specific session, only fetch that session; otherwise load all
     fetchChatSessions(externalSessionId ? String(externalSessionId) : undefined);
     const unsubscribe = websocketService.subscribe(handleWS);
     return () => {
       unsubscribe();
     };
-  }, [externalSessionId, handleWS]);
-
-  useEffect(() => {
-    if (activeSessionId) {
-      websocketService.connect(String(activeSessionId));
-    }
-  }, [activeSessionId]);
+  }, [handleWS]);
 
   // B1: flush buffered early messages once the session becomes available
   useEffect(() => {

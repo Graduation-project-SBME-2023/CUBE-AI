@@ -1,10 +1,11 @@
 import logging
 logger = logging.getLogger(__name__)
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import uuid
 import importlib.util
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 
 def _load_module_from_configs(module_filename: str):
@@ -42,15 +43,20 @@ VISTA_CLASS_MAP = _load_vista_labels()
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from application_api.db.base import Base
 from application_api.db.models import model
 
 
-database_url = os.getenv("DATABASE_URL")
-sync_url = database_url.replace("+asyncpg", "") if database_url else None
+def _sync_url_from_env() -> str:
+    """Build the sync (psycopg2) DSN from DATABASE_URL.
 
-sync_engine = create_engine(sync_url)
-SessionLocal = sessionmaker(bind=sync_engine, autoflush=False, autocommit=False)
+    Raises loudly rather than silently constructing create_engine(None) if
+    DATABASE_URL is unset, and rewrites only the driver segment of the DSN
+    instead of a blind substring replace.
+    """
+    database_url = os.environ["DATABASE_URL"]
+    parsed = urlsplit(database_url)
+    scheme = parsed.scheme.replace("+asyncpg", "")
+    return urlunsplit(parsed._replace(scheme=scheme))
 
 
 def _load_voxtell_supported_labels() -> list:
@@ -63,18 +69,15 @@ def _load_voxtell_supported_labels() -> list:
 VOXTELL_SUPPORTED_LABELS = _load_voxtell_supported_labels()
 
 
-def seed_models():
-    Base.metadata.create_all(bind=sync_engine)
-    db = SessionLocal()
+def _model_catalog() -> list:
+    """Return the seed catalog as plain dicts, keyed by name.
 
-    if db.query(model.Model).count() != 0:
-        logger.info("Models already seeded. Skipping.")
-        db.close()
-        return
-
-    model_entries = [
-
-       model.Model(
+    Kept as a function (rather than module-level Model instances) so the
+    per-name idempotency check in seed_models() can compare against it
+    without needing a live session first.
+    """
+    return [
+        dict(
             name="segmentation_spleen",
             description="A pre-trained model for volumetric (3D) segmentation of the spleen from CT image",
             config={},
@@ -83,11 +86,8 @@ def seed_models():
             dimension=3,
             anatomy=["spleen"],
             params_schema=None,
-            model_id=str(uuid.uuid4()),
-            created_at=datetime.now(),
         ),
-
-        model.Model(
+        dict(
             name="voxtell",
             description="text_prompted interactive model for volumetric segmentation",
             config={},
@@ -98,18 +98,11 @@ def seed_models():
             params_schema={
                 "text_prompts": {
                     "type": "list[string]",
-                    "examples": [
-                        {
-                            "text_prompts": ["spleen"]
-                        }
-                    ]
+                    "examples": [{"text_prompts": ["spleen"]}],
                 }
             },
-            model_id=str(uuid.uuid4()),
-            created_at=datetime.now(),
         ),
-        
-        model.Model(
+        dict(
             name="vista",
             description="A pre-trained model for volumetric (2.5D) segmentation of the monai vista",
             config={},
@@ -123,20 +116,52 @@ def seed_models():
                     # Class index mapping from VISTA_CLASS_MAP — single source of truth
                     "mapping": VISTA_CLASS_MAP,
                     "examples": [
-                        {"input_labels": ["spleen"],  "params": {"Class": 1}},
-                        {"input_labels": ["liver"],   "params": {"Class": 5}},
+                        {"input_labels": ["spleen"], "params": {"Class": 1}},
+                        {"input_labels": ["liver"], "params": {"Class": 5}},
                         {"input_labels": ["pancreas"], "params": {"Class": 10}},
-                    ]
+                    ],
                 }
             },
-            model_id=str(uuid.uuid4()),
-            created_at=datetime.now(),
         ),
     ]
 
-    db.add_all(model_entries)
-    db.commit()
 
-    logger.info(f"{len(model_entries)} models seeded successfully!")
-    db.close()
+def seed_models():
+    """Idempotently insert the built-in model catalog.
 
+    Schema is Alembic's responsibility alone — this function must never call
+    Base.metadata.create_all(), which would create tables without recording
+    them in alembic_version and let the ORM and migration history diverge.
+    Idempotency is checked per model name rather than "table is non-empty",
+    so a model added to the catalog later still gets seeded into databases
+    that already have earlier entries (e.g. synced in from MONAI Label).
+    """
+    sync_engine = create_engine(_sync_url_from_env())
+    SessionLocal = sessionmaker(bind=sync_engine, autoflush=False, autocommit=False)
+    db = SessionLocal()
+    try:
+        existing_names = {row[0] for row in db.query(model.Model.name).all()}
+        to_insert = [
+            model.Model(
+                model_id=uuid.uuid4(),
+                created_at=datetime.now(timezone.utc),
+                **entry,
+            )
+            for entry in _model_catalog()
+            if entry["name"] not in existing_names
+        ]
+
+        if not to_insert:
+            logger.info("Model catalog already up to date. Skipping.")
+            return
+
+        db.add_all(to_insert)
+        db.commit()
+        logger.info(
+            "%d model(s) seeded successfully: %s",
+            len(to_insert),
+            ", ".join(m.name for m in to_insert),
+        )
+    finally:
+        db.close()
+        sync_engine.dispose()

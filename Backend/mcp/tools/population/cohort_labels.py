@@ -491,7 +491,6 @@ async def extract_cohort_labels() -> dict:
             async with httpx.AsyncClient() as ws_client:
                 await ws_client.post(
                     "http://localhost:8150/ws-broadcast",
-                    headers={"X-Internal-Token": os.environ.get("WS_INTERNAL_TOKEN", "")},
                     json={
                         "type": "cohort_labels_output",
                         "payload": {
