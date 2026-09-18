@@ -618,7 +618,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
             target_id = str(pair.get("target_key") or "")
             pair_id = str(pair.get("pair_key") or "")
             label_uid = str(pair.get("selected_segmentation_uid") or "")
-            mask_rel = str((pair.get("quality") or {}).get("mask_path") or "")
+            mask_rel = str((pair.get("execution_checkpoint") or {}).get("mask_path") or "")
             image_path = images_dict.get(subject_id)
             mask_path = base_on_workspace_dir(mask_rel) if mask_rel else None
             if not (subject_id and target_id and pair_id and label_uid and image_path and mask_path):

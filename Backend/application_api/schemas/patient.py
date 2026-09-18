@@ -13,7 +13,7 @@ class PatientCreate(PatientBase):
 
 class PatientUpdate(BaseModel):
     name: Optional[str] = None
-    birth_date: datetime = None
+    birth_date: Optional[date] = None
     gender: Optional[str] = None
 
 

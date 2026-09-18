@@ -12,7 +12,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -126,7 +126,7 @@ _CATALOGUE_COLUMNS = (
     FeatureSet.config_digest,
     FeatureSet.source_digest,
     FeatureSet.manifest_digest,
-    FeatureSet.status,
+    case((FeatureSet.frozen_at.isnot(None), "frozen"), else_="building").label("status"),
     FeatureSet.frozen_at,
     FeatureSet.created_at,
     AgentRun.session_id,
@@ -342,7 +342,6 @@ async def create_feature_set(
         config_digest=data.config_digest,
         source_digest=source_digest,
         manifest_digest=digest,
-        status="building",
     )
     db.add(feature_set)
     try:
@@ -370,7 +369,7 @@ async def freeze_feature_set(db: AsyncSession, feature_set_id: UUID) -> tuple[di
         {"fid": str(feature_set_id)},
     )
     await db.refresh(feature_set)
-    if feature_set.status == "frozen":
+    if feature_set.frozen_at is not None:
         await db.commit()
         return await get_feature_set(db, feature_set_id), None
 
@@ -400,7 +399,6 @@ async def freeze_feature_set(db: AsyncSession, feature_set_id: UUID) -> tuple[di
     event = None
     try:
         async with publication(db, session_id) as publish:
-            feature_set.status = "frozen"
             feature_set.frozen_at = _now()
             await db.flush()
             event = publish(

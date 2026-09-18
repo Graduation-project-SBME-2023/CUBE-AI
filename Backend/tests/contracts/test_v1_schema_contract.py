@@ -111,9 +111,11 @@ def test_segmentations_columns_match_the_v1_shape():
     assert "series_description" in columns and "segmentation_type" not in columns
     assert "generation_method" in columns and "method" not in columns
     # Added: origin is what closes the "every synced SEG is reusable" bug.
-    assert {"origin", "is_empty_mask", "model_id", "provenance", "content_digest"} <= columns
+    assert {"origin", "is_empty_mask", "model_id"} <= columns
     # Dropped only after model_id was backfilled from the exact name.
     assert "name" not in columns
+    # Dropped: no producer ever wrote them, no consumer ever read them (V1 plan #14).
+    assert "provenance" not in columns and "content_digest" not in columns
     # /: neither value exists to record, so neither column exists.
     assert "producing_model_version" not in columns
     assert "producing_model_digest" not in columns

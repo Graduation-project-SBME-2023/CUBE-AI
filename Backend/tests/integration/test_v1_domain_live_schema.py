@@ -659,7 +659,7 @@ def test_freezing_a_feature_set_verifies_what_a_check_cannot(world):
             ),
         )
     )
-    freeze = "UPDATE feature_sets SET status = 'frozen', frozen_at = now() WHERE feature_set_id = %s"
+    freeze = "UPDATE feature_sets SET frozen_at = now() WHERE feature_set_id = %s"
 
     # A missing value without a recorded reason.
     assert "missing value" in _rejects(c, freeze, (feature_set,))
@@ -774,7 +774,7 @@ def test_legacy_radiomics_rows_keep_null_provenance_and_never_enter_a_frozen_set
     )
     assert "R9" in _rejects(
         c,
-        "UPDATE feature_sets SET status = 'frozen', frozen_at = now() WHERE feature_set_id = %s",
+        "UPDATE feature_sets SET frozen_at = now() WHERE feature_set_id = %s",
         (feature_set,),
     )
 
@@ -843,7 +843,7 @@ def _frozen_feature_set(world, session, cohort, key):
     )
     _execute(
         world.connection,
-        "UPDATE feature_sets SET status = 'frozen', frozen_at = now() WHERE feature_set_id = %s",
+        "UPDATE feature_sets SET frozen_at = now() WHERE feature_set_id = %s",
         (feature_set,),
     )
     return feature_set

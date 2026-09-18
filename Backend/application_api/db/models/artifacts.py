@@ -38,10 +38,11 @@ class Artifact(Base):
         nullable=False,
     )
     # Nullable for planning-phase literature artifacts, which have no agent run
-    # to hang off.
+    # to hang off. No standalone FK here: the composite
+    # (created_by_agent_run_id, session_id) FK below already proves existence
+    # and same-session ownership together.
     created_by_agent_run_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("agent_runs.agent_run_id", ondelete="RESTRICT"),
         nullable=True,
     )
 

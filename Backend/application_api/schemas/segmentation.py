@@ -18,8 +18,6 @@ class SegmentationBase(BaseModel):
     origin: SegmentationOrigin = "imported"
     is_empty_mask: Optional[bool] = None
     model_id: Optional[UUID] = None
-    provenance: Optional[dict[str, Any]] = None
-    content_digest: Optional[str] = None
     archive_status: ArchiveStatus = "available"
     created_at: Optional[datetime] = None  # ISO format date-time
 
@@ -34,8 +32,6 @@ class SegmentationUpdate(BaseModel):
     generation_method: Optional[str] = None
     is_empty_mask: Optional[bool] = None
     model_id: Optional[UUID] = None
-    provenance: Optional[dict[str, Any]] = None
-    content_digest: Optional[str] = None
     archive_status: Optional[ArchiveStatus] = None
     created_at: Optional[datetime] = None  # ISO format date-time
 
@@ -50,7 +46,6 @@ class SegmentationOriginDeclaration(BaseModel):
     generation_method: Optional[str] = None
     series_description: Optional[str] = None
     model_name: Optional[str] = None
-    provenance: Optional[dict[str, Any]] = None
 
 
 class Segmentation(SegmentationBase):

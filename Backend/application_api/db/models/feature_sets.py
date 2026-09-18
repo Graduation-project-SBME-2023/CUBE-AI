@@ -53,7 +53,10 @@ class FeatureSet(Base):
     config_digest = Column(Text, nullable=False)
     source_digest = Column(Text, nullable=False)
     manifest_digest = Column(Text, nullable=False)
-    status = Column(Text, nullable=False, server_default="building")
+    # Derived, not stored: `frozen_at IS NULL` means "building", else "frozen".
+    # A physical `status` column used to duplicate this and could never
+    # diverge from it (it was DB-CHECK-enforced), so it was removed; readers
+    # get `status` as a computed value instead (see repositories/feature_sets.py).
     frozen_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -105,6 +108,4 @@ class FeatureSet(Base):
             ),
             name="digests_are_sha256",
         ),
-        CheckConstraint("status IN ('building', 'frozen')", name="status"),
-        CheckConstraint("(status = 'frozen') = (frozen_at IS NOT NULL)", name="frozen_at_iff_frozen"),
     )

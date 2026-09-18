@@ -154,7 +154,7 @@ def test_segmentation_pairs_prove_every_alignment_with_a_composite_fk():
         "selected_segmentation_uid",
         "segment_number",
         "review_decision",
-        "quality",
+        "execution_checkpoint",
         "created_at",
     } == columns
     # The pointer to the MONAI receipt, not a mirror of the job files.

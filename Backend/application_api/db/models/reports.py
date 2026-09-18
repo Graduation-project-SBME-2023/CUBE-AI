@@ -5,7 +5,6 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
-    Index,
     Integer,
     Text,
     UniqueConstraint,
@@ -35,18 +34,18 @@ class Report(Base):
         nullable=False,
         index=True,
     )
-    # Exactly one of the next two is non-NULL.
+    # Exactly one of the next two is non-NULL. No separate `index=True` here:
+    # the unique constraints below already back every non-null lookup on
+    # these columns, so a second plain index would only duplicate them.
     created_by_agent_run_id = Column(
         UUID(as_uuid=True),
         ForeignKey("agent_runs.agent_run_id", ondelete="RESTRICT"),
         nullable=True,
-        index=True,
     )
     literature_review_id = Column(
         UUID(as_uuid=True),
         ForeignKey("literature_reviews.literature_review_id", ondelete="RESTRICT"),
         nullable=True,
-        index=True,
     )
     source_text = Column(Text, nullable=False)
     source_format = Column(Text, nullable=False, server_default="latex")
@@ -63,20 +62,14 @@ class Report(Base):
     )
 
     __table_args__ = (
-        # One report per research run.
-        Index(
-            "uq_reports_created_by_agent_run_id",
-            "created_by_agent_run_id",
-            unique=True,
-            postgresql_where=text("created_by_agent_run_id IS NOT NULL"),
-        ),
+        # One report per research run. A plain (non-partial) UNIQUE constraint,
+        # to match what the migration actually creates: multiple NULLs are
+        # still allowed (Postgres does not consider NULL to equal NULL in a
+        # unique constraint), so this behaves like a partial index over the
+        # non-null rows without needing postgresql_where.
+        UniqueConstraint("created_by_agent_run_id", name="uq_reports_created_by_agent_run_id"),
         # One report per literature review.
-        Index(
-            "uq_reports_literature_review_id",
-            "literature_review_id",
-            unique=True,
-            postgresql_where=text("literature_review_id IS NOT NULL"),
-        ),
+        UniqueConstraint("literature_review_id", name="uq_reports_literature_review_id"),
         # exactly one source.
         CheckConstraint(
             "(created_by_agent_run_id IS NOT NULL) != (literature_review_id IS NOT NULL)",

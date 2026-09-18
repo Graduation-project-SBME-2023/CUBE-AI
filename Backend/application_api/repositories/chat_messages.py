@@ -109,44 +109,6 @@ async def get_chat_message(db: AsyncSession, message_id: UUID):
 
 
 # -------------------------
-# UPDATE MESSAGE
-# -------------------------
-async def update_chat_message(db: AsyncSession, message_id: UUID, new_data: ChatMessageCreate):
-    try:
-        result = await db.execute(select(ChatMessage).filter(ChatMessage.message_id == message_id))
-        msg = result.scalars().first()
-        if not msg:
-            raise HTTPException(status_code=404, detail="Message not found")
-
-        msg.role = new_data.role
-        msg.text = new_data.text
-        msg.extra_data = new_data.extra_data
-        await db.commit()
-        await db.refresh(msg)
-        return msg
-    except SQLAlchemyError as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to update message: {str(e)}")
-
-
-# -------------------------
-# DELETE MESSAGE
-# -------------------------
-async def delete_chat_message(db: AsyncSession, message_id: UUID):
-    try:
-        result = await db.execute(select(ChatMessage).filter(ChatMessage.message_id == message_id))
-        msg = result.scalars().first()
-        if not msg:
-            raise HTTPException(status_code=404, detail="Message not found")
-        await db.delete(msg)
-        await db.commit()
-        return {"detail": "Message deleted"}
-    except SQLAlchemyError as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Failed to delete message: {str(e)}")
-
-
-# -------------------------
 # GET MESSAGES BY ROLE
 # -------------------------
 async def get_chat_messages_by_role(

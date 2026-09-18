@@ -1078,7 +1078,10 @@ Produce three output files from the ranked paper corpus:
 
 AVAILABLE TOOLS
 ───────────────
-• save_output(filename, content) → saves string to the output directory
+• save_output(filename, content) → captures the string under this key for the
+  planner to persist into the literature_reviews / literature_papers database
+  tables (there is no output directory or on-disk file — the filename below is
+  only a naming convention for the captured key, not a path)
 
 ════════════════════════════════════════════════════════════════════════
 FILE 1 — literature_report.md  (WRITE THIS FIRST AND IN FULL)

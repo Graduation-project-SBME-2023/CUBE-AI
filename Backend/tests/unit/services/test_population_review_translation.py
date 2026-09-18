@@ -136,7 +136,7 @@ def test_the_review_payload_and_snapshot_are_derived_from_the_pairs():
                 "target_key": "spleen",
                 "status": "ready",
                 "review_decision": "accepted",
-                "quality": {"schema_version": 1, "work_state": "ready"},
+                "execution_checkpoint": {"schema_version": 1, "work_state": "ready"},
             },
             {
                 "pair_key": "v2__spleen",
@@ -144,7 +144,7 @@ def test_the_review_payload_and_snapshot_are_derived_from_the_pairs():
                 "target_key": "spleen",
                 "status": "ready",
                 "review_decision": "rejected",
-                "quality": {"schema_version": 1, "work_state": "ready"},
+                "execution_checkpoint": {"schema_version": 1, "work_state": "ready"},
             },
         ],
     }
