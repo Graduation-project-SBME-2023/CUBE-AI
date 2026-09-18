@@ -83,11 +83,18 @@ async def request(
         except ValueError:
             body = response.text
         detail = body.get("detail") if isinstance(body, dict) else body
-        raise DomainApiError(
-            f"{method} {path} -> {response.status_code}: {str(detail)[:600]}",
-            status_code=response.status_code,
-            body=body,
-        )
+        if response.status_code >= 500:
+            # A 5xx detail is an unhandled server exception (stack frames, raw
+            # SQL, column names) -- useful in the Application API's own logs,
+            # never something an agent should see: it ends up quoted verbatim
+            # in scratchpad flags and, from there, in generated reports.
+            message = (
+                f"{method} {path} -> {response.status_code}: the Application API "
+                "encountered an internal error and could not complete this request."
+            )
+        else:
+            message = f"{method} {path} -> {response.status_code}: {str(detail)[:600]}"
+        raise DomainApiError(message, status_code=response.status_code, body=body)
     if not response.content:
         return None
     content_type = response.headers.get("content-type", "")

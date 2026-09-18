@@ -191,6 +191,14 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
             response = await client.put(
                 f"{APP_API_URL}/agent-runs/{AGENT_RUN_ID}/output", json=payload
             )
+            if response.status_code >= 500:
+                # A 5xx body is an unhandled server exception (stack frames,
+                # raw SQL) -- never something to hand back to an agent that
+                # may quote it verbatim in a generated report.
+                return _error(
+                    f"{response.status_code} from the Application API: an internal "
+                    "error occurred and the request could not complete."
+                )
             if response.status_code >= 400:
                 return _error(
                     f"{response.status_code} from the Application API: "
