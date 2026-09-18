@@ -35,9 +35,14 @@ logger = logging.getLogger(__name__)
 # delete rows by supplying an arbitrary resource_id. Set the same value in
 # the Lua script's JSON_HEADERS (see Backend/orthanc/lua/on-stable-series.lua).
 async def verify_webhook_token(x_webhook_token: str | None = Header(default=None)) -> None:
-    if settings.ORTHANC_WEBHOOK_TOKEN is None:
+    # An unset variable arrives from compose as "", not as None, so testing for
+    # None alone left an empty token meaning "reject everything" instead of
+    # "authentication is off" -- which locked out Orthanc's own Lua hook and
+    # silently stopped every sync event from arriving.
+    expected = (settings.ORTHANC_WEBHOOK_TOKEN or "").strip()
+    if not expected:
         return
-    if not x_webhook_token or not secrets.compare_digest(x_webhook_token, settings.ORTHANC_WEBHOOK_TOKEN):
+    if not x_webhook_token or not secrets.compare_digest(x_webhook_token, expected):
         raise HTTPException(status_code=401, detail="Invalid or missing webhook token")
 
 
@@ -201,24 +206,40 @@ async def reconcile_with_orthanc(delay_seconds: float = 5.0) -> None:
                 stats = await response.json()
 
         orthanc_studies = int(stats.get("CountStudies", 0))
+        orthanc_series = int(stats.get("CountSeries", 0))
         async with AsyncSessionLocal() as db:
             db_studies = (
                 await db.execute(select(func.count()).select_from(Study))
             ).scalar() or 0
+            # Series are counted too, not just studies. A SEG whose referenced
+            # volume has not been written yet is deferred to "the next full
+            # reconciliation pass", and a study-only comparison never schedules
+            # one: the study is already present, so the pass that would pick the
+            # SEG up is exactly the pass that gets skipped, and the segmentation
+            # stays missing for good.
+            db_series = (
+                (await db.execute(select(func.count()).select_from(Volume))).scalar() or 0
+            ) + (
+                (await db.execute(select(func.count()).select_from(Segmentation))).scalar() or 0
+            )
 
-            if db_studies >= orthanc_studies:
+            if db_studies >= orthanc_studies and db_series >= orthanc_series:
                 logger.info(
-                    "Orthanc reconcile not needed: %s studies in the database, "
-                    "%s in Orthanc",
+                    "Orthanc reconcile not needed: %s/%s studies, %s/%s series",
                     db_studies,
                     orthanc_studies,
+                    db_series,
+                    orthanc_series,
                 )
                 return
 
             logger.info(
-                "Backfilling from Orthanc: the database has %s of %s studies",
+                "Backfilling from Orthanc: the database has %s/%s studies and "
+                "%s/%s series",
                 db_studies,
                 orthanc_studies,
+                db_series,
+                orthanc_series,
             )
             if await _run_full_sync_once(db):
                 logger.info("Orthanc reconcile finished")
