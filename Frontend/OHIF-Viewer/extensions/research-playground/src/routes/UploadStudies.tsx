@@ -64,6 +64,8 @@ interface VolumeRow {
   status: RowStatus;
   /** Chosen per row: several files selected together are several studies. */
   bodyPart: string;
+  /** Optional free text; becomes SeriesDescription. */
+  description: string;
   error?: string;
   jobId?: string;
   job?: IngestJob;
@@ -189,7 +191,6 @@ export default function UploadStudies() {
   const [bodyParts, setBodyParts] = useState<BodyPartOption[]>([]);
 
   const volumeInputRef = useRef<HTMLInputElement | null>(null);
-  const dicomFileInputRef = useRef<HTMLInputElement | null>(null);
   const dicomFolderInputRef = useRef<HTMLInputElement | null>(null);
   const volumeRowsRef = useRef<VolumeRow[]>([]);
   volumeRowsRef.current = volumeRows;
@@ -264,6 +265,7 @@ export default function UploadStudies() {
         file,
         status: 'pending' as RowStatus,
         bodyPart: '',
+        description: '',
       })),
       ...previous,
     ]);
@@ -278,6 +280,7 @@ export default function UploadStudies() {
         const result = await uploadVolumeFile(row.file, {
           modality,
           bodyPart: row.bodyPart || undefined,
+          seriesDescription: row.description.trim() || undefined,
           studyUid: studyUid.trim() || undefined,
           patientId: patientId.trim() || undefined,
           patientName: patientName.trim() || undefined,
@@ -310,6 +313,12 @@ export default function UploadStudies() {
   const setRowBodyPart = (id: string, value: string) => {
     setVolumeRows(previous =>
       previous.map(row => (row.id === id ? { ...row, bodyPart: value } : row))
+    );
+  };
+
+  const setRowDescription = (id: string, value: string) => {
+    setVolumeRows(previous =>
+      previous.map(row => (row.id === id ? { ...row, description: value } : row))
     );
   };
 
@@ -580,23 +589,17 @@ export default function UploadStudies() {
                 </div>
                 <div className="mt-1 text-sm text-[#566a84]">
                   {tab === 'dicom'
-                    ? 'a study folder, or a folder containing one per study'
+                    ? 'a study folder, or a folder containing one per study — loose files can be dropped too'
                     : VOLUME_EXTENSIONS.join(' · ')}
                 </div>
               </div>
 
               <div className="mt-1 flex flex-wrap items-center justify-center gap-2">
                 {tab === 'dicom' ? (
-                  <>
-                    <PickerButton onClick={() => dicomFolderInputRef.current?.click()} primary>
-                      <FolderOpenIcon size={15} />
-                      Choose folder
-                    </PickerButton>
-                    <PickerButton onClick={() => dicomFileInputRef.current?.click()}>
-                      <FileTextIcon size={15} />
-                      Choose files
-                    </PickerButton>
-                  </>
+                  <PickerButton onClick={() => dicomFolderInputRef.current?.click()} primary>
+                    <FolderOpenIcon size={15} />
+                    Choose folder
+                  </PickerButton>
                 ) : (
                   <PickerButton onClick={() => volumeInputRef.current?.click()} primary>
                     <FileStackIcon size={15} />
@@ -612,18 +615,6 @@ export default function UploadStudies() {
                 multiple
                 className="hidden"
                 {...({ webkitdirectory: '', directory: '' } as any)}
-                onChange={event => {
-                  if (event.target.files) {
-                    addDicomGroups(groupByFolder(filesFromInput(event.target.files)));
-                  }
-                  event.target.value = '';
-                }}
-              />
-              <input
-                ref={dicomFileInputRef}
-                type="file"
-                multiple
-                className="hidden"
                 onChange={event => {
                   if (event.target.files) {
                     addDicomGroups(groupByFolder(filesFromInput(event.target.files)));
@@ -694,6 +685,7 @@ export default function UploadStudies() {
                           row={row}
                           groupedBodyParts={groupedBodyParts}
                           onBodyPart={value => setRowBodyPart(row.id, value)}
+                          onDescription={value => setRowDescription(row.id, value)}
                           onUpload={() => startVolumeUpload(row)}
                           onRemove={() => removeVolumeRow(row.id)}
                         />
@@ -805,12 +797,14 @@ function VolumeRowView({
   row,
   groupedBodyParts,
   onBodyPart,
+  onDescription,
   onUpload,
   onRemove,
 }: {
   row: VolumeRow;
   groupedBodyParts: [string, BodyPartOption[]][];
   onBodyPart: (value: string) => void;
+  onDescription: (value: string) => void;
   onUpload: () => void;
   onRemove: () => void;
 }) {
@@ -839,6 +833,20 @@ function VolumeRowView({
           </div>
         )}
       </div>
+
+      {/* Optional, and deliberately not a substitute for the organ. Volume
+          search reads this the same way it reads the body part, so anything
+          the list cannot express belongs here rather than in a free-text
+          organ, where an unrecognised word would be ignored and a word from
+          another region would drop the study from the cohort entirely. */}
+      <input
+        value={row.description}
+        disabled={!editable}
+        placeholder="Description (optional)"
+        onChange={event => onDescription(event.target.value)}
+        title="Stored as SeriesDescription and searched alongside the organ"
+        className="w-44 rounded-lg border border-[#3c5d80] bg-[#0f1724] px-2 py-1.5 text-xs text-white placeholder:text-[#3c5d80] focus:border-[#5acce6] focus:outline-none disabled:opacity-50"
+      />
 
       {/* Per row, because several files selected together become several
           studies — and a NIfTI header carries no anatomy to fall back on. */}
