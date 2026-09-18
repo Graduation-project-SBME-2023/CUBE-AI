@@ -114,15 +114,20 @@ function Add-WorkspaceOperations([IO.DirectoryInfo]$WorkspaceSource) {
         "volumes" = "data\volumes"
         "masks" = "data\masks"
         "outputs" = "outputs\agents"
-        "literature_review_output" = "outputs\literature"
+        "literature_review_output" = "temp\literature"
         "overlays" = "outputs\overlays"
         "features" = "outputs\features"
         "modeling" = "outputs\modeling"
         "models" = "outputs\modeling"
         "reports" = "outputs\reports"
-        ".knowledge_cache" = "cache\literature"
         "temp_segmentations" = "temp\segmentations"
     }
+    $workspaceCacheSource = Join-Path $WorkspaceSource.FullName ".knowledge_cache"
+    if (Test-Path -LiteralPath $workspaceCacheSource) {
+        Add-TreeOperations $workspaceCacheSource (Join-Path $StorageRoot "cache\literature") ($WorkspaceSource.Name + "-literature-cache")
+        [void]$known.Add(".knowledge_cache")
+    }
+
     foreach ($entry in $directoryMap.GetEnumerator()) {
         [void]$known.Add($entry.Key)
         Add-TreeOperations (Join-Path $WorkspaceSource.FullName $entry.Key) (Join-Path $workspaceDestination $entry.Value) $WorkspaceSource.Name

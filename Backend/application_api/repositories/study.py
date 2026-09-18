@@ -1,7 +1,7 @@
 import logging
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.future import select
 from application_api.db.models.study import Study
 from application_api.db.models.volume import Volume
@@ -59,16 +59,7 @@ async def update_study(db: AsyncSession, study_uid: str, updates: StudyUpdate):
         raise HTTPException(status_code=400, detail=f"Failed to update study: {str(e)}")
 
 async def delete_study(db: AsyncSession, study_uid: str):
-    """
-    Delete study from both the database and Orthanc.
-    Returns (success: bool, error_message: str | None)
-
-    Database-first (see repositories/volume.py:delete_volume for the full
-    rationale). A study delete cascades in the DB to volume_series and, from
-    there, to segmentations — every one of those rows' Orthanc series ids
-    is collected before the delete so PACS cleanup covers the whole subtree,
-    not just the study resource itself.
-    """
+    """Delete study from both the database and Orthanc. Returns (success: bool, error_message: str | None)"""
     result = await db.execute(select(Study).where(Study.study_uid == study_uid))
     study = result.scalar_one_or_none()
 
@@ -94,9 +85,23 @@ async def delete_study(db: AsyncSession, study_uid: str):
         )
         seg_orthanc_ids = [row[0] for row in seg_result.all()]
 
+    if volumes:
+        return False, (
+            f"Study {study_uid} still has {len(volumes)} series under it. Deleting "
+            "it would destroy the masks and radiomics rows derived from them; mark "
+            "it archive_status='unavailable' instead, or delete the series first."
+        )
+
     try:
-        await db.delete(study)  # cascades to volume_series -> segmentations
+        await db.delete(study)
         await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        logger.error("Refusing to delete referenced study %s: %s", study_uid, e)
+        return False, (
+            f"Study {study_uid} is still referenced by other records and cannot be "
+            "deleted."
+        )
     except SQLAlchemyError as e:
         await db.rollback()
         error_msg = f"Database error: {str(e)}"

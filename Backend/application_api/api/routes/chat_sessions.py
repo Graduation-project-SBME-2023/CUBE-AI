@@ -1,129 +1,90 @@
+"""DEPRECATED alias for the legacy `/chat_sessions` surface."""
 
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from application_api.schemas import chat_sessions as schemas
-from application_api.repositories import chat_sessions as crud
+
 from application_api.db.session import get_db
-from uuid import uuid4, UUID
-router = APIRouter(prefix="/chat_sessions", tags=["Chat Sessions"])
+from application_api.repositories import chats as chats_crud
+from application_api.repositories import sessions as crud
+from application_api.schemas import sessions as schemas
 
-# ---------------------------------------------------------
-# CREATE A CHAT SESSION
-# ---------------------------------------------------------
-@router.post("/", response_model=schemas.ChatSession, status_code=status.HTTP_201_CREATED)
-async def create_chat_session(data: schemas.ChatSessionCreate, db: AsyncSession = Depends(get_db)):
-    """
-    Create a new chat session and optionally link it to one or more study UIDs.
-    """
-    session = await crud.create_chat_session(db, data)
-    # eager load relationships to avoid MissingGreenlet
-    await db.refresh(session)
-    return session
+router = APIRouter(
+    prefix="/chat_sessions",
+    tags=["Chat Sessions (deprecated)"],
+    deprecated=True,
+)
 
 
-# ---------------------------------------------------------
-# GET ALL CHAT SESSIONS
-# ---------------------------------------------------------
+class LegacyChatSessionCreate(BaseModel):
+    prompt: str = Field(min_length=1)
+    prompt_kind: schemas.PromptKind = "hypothesis"
+    title: str | None = None
 
-@router.get("/", response_model=list[schemas.ChatSessionSummary])
-async def get_chat_sessions(
-    study_UID: str | None = None,
+
+def _project(session, chat_id=None) -> dict:
+    """Project a Session onto the old response shape."""
+    return {
+        "chat_id": session.session_id,
+        "session_id": session.session_id,
+        "default_chat_id": chat_id,
+        "title": session.title,
+        "prompt": session.prompt,
+        "prompt_kind": session.prompt_kind,
+        "status": session.status,
+        "started_at": session.created_at,
+        "created_at": session.created_at,
+        "last_activity": session.updated_at,
+        "messages": [],
+    }
+
+
+@router.post("/", status_code=status.HTTP_201_CREATED)
+async def create_chat_session_alias(
+    data: LegacyChatSessionCreate, db: AsyncSession = Depends(get_db)
+):
+    """Create a session plus one default chat, and return both ids."""
+    session = await crud.create_session(
+        db,
+        schemas.SessionCreate(
+            prompt=data.prompt,
+            prompt_kind=data.prompt_kind,
+            title=data.title,
+        ),
+    )
+    chat = await chats_crud.create_chat(
+        db, session.session_id, title=data.title or "Chat"
+    )
+    return _project(session, chat.chat_id)
+
+
+@router.get("/")
+async def list_chat_sessions_alias(
     active_only: bool = False,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Retrieve all chat sessions.
-    Optionally filter by:
-    - study_UID (get sessions related to a specific study)
-    - active_only=True (get only active sessions)
-    """
-    return await crud.get_chat_sessions(
+    sessions = await crud.get_sessions(
         db,
-        study_UID=study_UID,
-        active_only=active_only,
+        include_archived=not active_only,
         skip=skip,
         limit=limit,
     )
-# ---------------------------------------------------------
-# GET CHAT SESSION BY ID
-# ---------------------------------------------------------
-@router.get("/{chat_id}", response_model=schemas.ChatSession)
-async def get_chat_session(chat_id: UUID, db: AsyncSession = Depends(get_db)):
-    """
-    Retrieve a chat session by its unique chat_id.
-    """
-    session = await crud.get_chat_session(db, chat_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
-    return session
+    return [_project(session) for session in sessions]
 
 
-# ---------------------------------------------------------
-# UPDATE CHAT SESSION (title, summary, etc.)
-# ---------------------------------------------------------
-@router.put("/{chat_id}", response_model=schemas.ChatSession)
-async def update_chat_session(chat_id: UUID, data: schemas.ChatSessionUpdate, db: AsyncSession = Depends(get_db)):
-    """
-    Update chat session fields such as title, summary, or is_active.
-    Automatically updates last_activity timestamp.
-    """
-    session = await crud.update_chat_session(db, chat_id, data)
-    if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
-    return session
+@router.get("/{session_id}")
+async def get_chat_session_alias(session_id: UUID, db: AsyncSession = Depends(get_db)):
+    return _project(await crud.get_session(db, session_id))
 
-# ---------------------------------------------------------
-# TOUCH CHAT SESSION (update only last_activity)
-# ---------------------------------------------------------
-@router.patch("/{chat_id}/touch", response_model=schemas.ChatSession)
-async def touch_chat_session(chat_id: UUID, db: AsyncSession = Depends(get_db)):
-    """
-    Update only the last_activity timestamp of a chat session.
-    Typically used when the user sends or receives a message.
-    """
-    session = await crud.touch_chat_session(db, chat_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
-    return session
 
-# ---------------------------------------------------------
-# DEACTIVATE CHAT SESSION
-# ---------------------------------------------------------
-@router.patch("/{chat_id}/deactivate", response_model=schemas.ChatSession)
-async def deactivate_chat_session(chat_id: UUID, db: AsyncSession = Depends(get_db)):
-    """
-    Mark a chat session as inactive (e.g., when user closes the session).
-    """
-    session = await crud.deactivate_chat_session(db, chat_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
-    return session
-
-# ---------------------------------------------------------
-# ACTIVATE CHAT SESSION
-# ---------------------------------------------------------
-@router.patch("/{chat_id}/activate", response_model=schemas.ChatSession)
-async def activate_chat_session(chat_id: UUID, db: AsyncSession = Depends(get_db)):
-    """
-    Reactivate a chat session when user resumes chatting.
-    """
-    session = await crud.activate_chat_session(db, chat_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Chat session not found")
-    return session
-
-# ---------------------------------------------------------
-# DELETE CHAT SESSION
-# ---------------------------------------------------------
-@router.delete("/{chat_id}", status_code=status.HTTP_200_OK)
-async def delete_chat_session(chat_id: UUID, db: AsyncSession = Depends(get_db)):
-    """
-    Delete a chat session permanently.
-    """
-    deleted = await crud.delete_chat_session(db, chat_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Chat session not found")
-    return None
+@router.delete("/{session_id}", status_code=status.HTTP_200_OK)
+async def delete_chat_session_alias(
+    session_id: UUID, db: AsyncSession = Depends(get_db)
+):
+    """Archives, which is what current means by removing a session."""
+    session = await crud.archive_session(db, session_id)
+    return {"detail": f"Session {session.session_id} archived"}

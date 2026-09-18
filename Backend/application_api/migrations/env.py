@@ -10,17 +10,25 @@ if str(backend_root) not in sys.path:
     sys.path.insert(0, str(backend_root))
 
 from application_api.db.base import Base
-from application_api.db.models.Taskmessage import TaskMessage
+from application_api.db.models.agent_runs import AgentRun
+from application_api.db.models.artifacts import Artifact
 from application_api.db.models.Wslog import WSLog
 from application_api.db.models.chat_messages import ChatMessage
-from application_api.db.models.chat_sessions import ChatSession
-from application_api.db.models.contextaugmentation import ContextAugmentation
-from application_api.db.models.hypothesis import Hypothesis
+from application_api.db.models.sessions import Session
+from application_api.db.models.chats import Chat
+from application_api.db.models.cohorts import Cohort, CohortMember
+from application_api.db.models.feature_sets import FeatureSet
 from application_api.db.models.model import Model
+from application_api.db.models.model_results import ModelResult
 from application_api.db.models.patient import Patient
 from application_api.db.models.plan import Plan
 from application_api.db.models.radiomics import Radiomics
 from application_api.db.models.segmentation import Segmentation
+from application_api.db.models.segmentation_runs import (
+    SegmentationPair,
+    SegmentationRun,
+    SegmentationTarget,
+)
 from application_api.db.models.steps import PlanStep
 from application_api.db.models.study import Study
 from application_api.db.models.volume import Volume
@@ -72,17 +80,7 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    """Run migrations in 'offline' mode.
-
-    This configures the context with just a URL
-    and not an Engine, though an Engine is acceptable
-    here as well.  By skipping the Engine creation
-    we don't even need a DBAPI to be available.
-
-    Calls to context.execute() here emit the given string to the
-    script output.
-
-    """
+    """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
@@ -98,12 +96,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations in 'online' mode.
-
-    In this scenario we need to create an Engine
-    and associate a connection with the context.
-
-    """
+    """Run migrations in 'online' mode."""
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

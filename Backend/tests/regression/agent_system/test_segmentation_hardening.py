@@ -53,11 +53,18 @@ from agent_system.agents.execution_agents.segmentation.utils import (
     download_and_pair_volumes,
     parse_multipart_response,
 )
-from agent_system.services.resume_recovery import reset_interrupted_agent
+from agent_system.services import resume_recovery
+from agent_system.services.resume_recovery import (
+    RecoveryConflict,
+    describe_resume,
+    reconcile_replayed_payload,
+)
 from agent_system.services.pipeline_monitor import (
     PipelineMonitor,
+    is_fatal_tool_failure,
     raise_for_fatal_tool_failure,
 )
+from agent_system.services.run_context import PlannedRun, agent_type_of
 from agent_system.models.execution import AgentStatus
 
 
@@ -671,7 +678,7 @@ class SegmentationReuseAlignmentTests(unittest.IsolatedAsyncioTestCase):
         for reused in (True, False):
             with self.subTest(reused=reused):
                 module = SegmentationModule(session_id="session")
-                module._persist_processing_state = MagicMock()
+                module._persist_processing_state = AsyncMock()
                 module._workspace_volume_is_valid = MagicMock(return_value=True)
                 item = {
                     "pair_id": "volume__spleen",
@@ -795,6 +802,8 @@ class DicomSegGeometryAlignmentTests(unittest.TestCase):
 
 
 class PipelineFailureTests(unittest.IsolatedAsyncioTestCase):
+    """What a tool result means, after the database-backed flow."""
+
     class _SessionService:
         def __init__(self):
             self.broadcasts = []
@@ -805,18 +814,29 @@ class PipelineFailureTests(unittest.IsolatedAsyncioTestCase):
         async def update_tool_views(self, *_args, **_kwargs):
             return None
 
+        async def update_current_agent(self, *_args, **_kwargs):
+            return None
+
     @staticmethod
     def _monitor():
         service = PipelineFailureTests._SessionService()
         session = SimpleNamespace(session_id="test-session")
-        return PipelineMonitor(service, session), service
+        run = PlannedRun(
+            agent_run_id="run-1",
+            step_id="step-1",
+            session_id="test-session",
+            agent_type="segmentation_agent",
+            step_order=1,
+            title="Segment",
+        )
+        return PipelineMonitor(service, session, runs=[run]), service, run.node_name
 
-    async def test_plain_execution_error_marks_segmentation_failed(self):
-        monitor, _service = self._monitor()
-        await monitor.on_agent_active("segmentation_agent")
+    async def test_plain_execution_error_is_reported_as_a_failure(self):
+        monitor, _service, node = self._monitor()
+        await monitor.on_agent_active(node)
 
         failed = await monitor.on_tool_result(
-            "segmentation_agent",
+            node,
             "segmentation_tool",
             "ResolvedTarget validation failed",
             "/tmp/workspace",
@@ -824,25 +844,30 @@ class PipelineFailureTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(failed)
-        self.assertEqual(
-            monitor.agents["segmentation_agent"].status,
-            AgentStatus.FAILED,
+        # The node name identifies the execution, so the caller resolves the
+        # agent type before asking whether the failure is fatal (app.py does
+        # exactly this with `agent_type_of`).
+        self.assertFalse(is_fatal_tool_failure(node, "segmentation_tool", failed))
+        self.assertTrue(
+            is_fatal_tool_failure(agent_type_of(node), "segmentation_tool", failed)
         )
+        # No status is invented here; the run wrapper closes the run.
+        self.assertFalse(hasattr(monitor, "agents"))
 
     async def test_structured_failure_is_fatal_but_partial_is_not(self):
-        failed_monitor, _service = self._monitor()
-        await failed_monitor.on_agent_active("segmentation_agent")
+        failed_monitor, _service, node = self._monitor()
+        await failed_monitor.on_agent_active(node)
         failed = await failed_monitor.on_tool_result(
-            "segmentation_agent",
+            node,
             "segmentation_tool",
             json.dumps({"status": "failed"}),
             "/tmp/workspace",
         )
 
-        partial_monitor, _service = self._monitor()
-        await partial_monitor.on_agent_active("segmentation_agent")
+        partial_monitor, _service, node = self._monitor()
+        await partial_monitor.on_agent_active(node)
         partial = await partial_monitor.on_tool_result(
-            "segmentation_agent",
+            node,
             "segmentation_tool",
             json.dumps({"status": "partial"}),
             "/tmp/workspace",
@@ -850,10 +875,6 @@ class PipelineFailureTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(failed)
         self.assertFalse(partial)
-        self.assertEqual(
-            partial_monitor.agents["segmentation_agent"].status,
-            AgentStatus.RUNNING,
-        )
 
     def test_failed_segmentation_stops_before_feature_event(self):
         events = [
@@ -1026,7 +1047,7 @@ class EmptySegmentationResultTests(unittest.IsolatedAsyncioTestCase):
             ),
             purge_inference_job=AsyncMock(),
         )
-        module._persist_processing_state = MagicMock()
+        module._persist_processing_state = AsyncMock()
         item = {
             "pair_id": "volume-uid__lesion",
             "artifact_key": "empty-mask-key",
@@ -1105,72 +1126,68 @@ class EmptySegmentationResultTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SegmentationRecoveryTests(unittest.TestCase):
-    def test_review_checkpoint_survives_interrupted_agent_reset(self):
+    """Recovery keeps everything."""
+
+    def test_resume_describes_where_to_continue_and_deletes_nothing(self):
+        runs = [
+            {"step_id": "step-1", "status": "completed"},
+            {"step_id": "step-2", "status": "running"},
+            {"step_id": "step-3", "status": "pending"},
+        ]
+
+        plan = describe_resume(runs)
+
+        self.assertEqual(plan["resumes_at_step_id"], "step-2")
+        self.assertEqual(plan["completed_runs"], 1)
+        self.assertEqual(plan["deleted_artifacts"], [])
+
+    def test_workspace_artifacts_survive_a_resume(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             workspace = root / "workspace_session"
             mask_path = workspace_subpath(workspace, "masks/volume__liver.nii.gz")
             volume_path = workspace_subpath(workspace, "volumes/volume.nii.gz")
-            output_path = workspace_subpath(workspace, "outputs/segmentation_agent_output.json")
-            for path in (mask_path, volume_path, output_path):
+            manifest_path = workspace_subpath(workspace, "segmentation_manifest.json")
+            for path in (mask_path, volume_path, manifest_path):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"test")
 
-            manifest_path = workspace_subpath(workspace, "segmentation_manifest.json")
-            manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            manifest_path.write_text(
-                json.dumps(
-                    {
-                        "stage": "awaiting_review",
-                        "pairs": [
-                            {
-                                "status": "ready",
-                                "volume_uid": "volume",
-                                "mask_path": "masks/volume__liver.nii.gz",
-                            }
-                        ],
-                    }
-                ),
-                encoding="utf-8",
-            )
+            describe_resume([{"step_id": "step-1", "status": "running"}])
 
-            removed = reset_interrupted_agent(root, "session", "segmentation_agent")
-
-            self.assertEqual(removed, ["outputs/segmentation_agent_output.json"])
-            self.assertTrue(manifest_path.exists())
+            # The recovery module has no delete path left to exercise.
             self.assertTrue(mask_path.exists())
             self.assertTrue(volume_path.exists())
-
-    def test_processing_checkpoint_preserves_persisted_inference_uid(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            workspace = root / "workspace_session"
-            manifest_path = workspace_subpath(workspace, "segmentation_manifest.json")
-            output_path = workspace_subpath(workspace, "outputs/segmentation_agent_output.json")
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_bytes(b"test")
-            manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            manifest_path.write_text(
-                json.dumps(
-                    {
-                        "stage": "processing",
-                        "pairs": [
-                            {
-                                "pair_id": "volume__liver",
-                                "status": "inference_succeeded",
-                                "volume_uid": "volume",
-                                "source_segmentation_uid": "segmentation-uid",
-                            }
-                        ],
-                    }
-                ),
-                encoding="utf-8",
+            self.assertTrue(manifest_path.exists())
+            self.assertFalse(
+                hasattr(resume_recovery, "reset_interrupted_agent"),
+                "recovery must not regain a delete path",
             )
 
-            removed = reset_interrupted_agent(root, "session", "segmentation_agent")
+    def test_replayed_content_is_reused_and_a_conflict_is_reported(self):
+        existing = {"digest": "abc", "rows": 14}
 
-            self.assertEqual(removed, ["outputs/segmentation_agent_output.json"])
-            self.assertTrue(manifest_path.exists())
+        self.assertEqual(
+            reconcile_replayed_payload(
+                "pair:volume__liver", None, existing, compare_fields=("digest",)
+            ),
+            "insert",
+        )
+        self.assertEqual(
+            reconcile_replayed_payload(
+                "pair:volume__liver",
+                existing,
+                {"digest": "abc", "rows": 14},
+                compare_fields=("digest", "rows"),
+            ),
+            "reuse",
+        )
+        with self.assertRaises(RecoveryConflict):
+            reconcile_replayed_payload(
+                "pair:volume__liver",
+                existing,
+                {"digest": "different", "rows": 14},
+                compare_fields=("digest", "rows"),
+            )
 
 
 if __name__ == "__main__":

@@ -43,19 +43,33 @@ class TaskMessage(BaseModel):
 
 
 class StudyStep(BaseModel):
+    # `id` is the persisted step_id. Runner node, checkpoint and scratchpad
+    # identity is this value, never `module` — two steps may legitimately name
+    # the same agent and must execute separately.
     id: str = ""
     title: str
-    description: str
+    description: str = ""
     module: Optional[str] = None
+    step_order: int = 0
     task_message: Optional[TaskMessage] = None
-    logs: List[dict] = Field(default_factory=list)
-    status: str = "pending"
+    # Execution state, read from `agent_runs`. It is NOT a
+    # second copy that can drift: nothing writes these fields except a read of
+    # the run, and `plan_steps` has no status column at all.
+    agent_run_id: str = ""
+    run_status: str = "pending"
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    error: Optional[str] = None
 
 
 class StudyPlan(BaseModel):
+    # A plan is keyed by its session: `plans.session_id` is both the primary
+    # key and the foreign key. `id` is kept as an alias of that same value so
+    # existing in-memory readers keep working; there is no separate plan id and
+    # no `hypothesis_id` — the NOT NULL UNIQUE `plans.hypothesis_id` is exactly
+    # the constraint that used to force every prompt to be a hypothesis.
     id: str = ""
-    hypothesis_id: str = ""
-    study_goal: str = ""
+    session_id: str = ""
     steps: List[StudyStep] = Field(default_factory=list)
     state: str = "not_confirmed"
 

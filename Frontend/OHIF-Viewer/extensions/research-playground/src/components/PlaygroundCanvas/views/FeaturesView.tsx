@@ -168,7 +168,7 @@ export default function FeaturesView({ featuresData, importanceData, isLoading }
             <KPIHeader featuresData={featuresData} importanceData={importanceData} />
           </div>
           <div className="shrink-0 mt-1">
-            <DownloadDropdown csvPaths={featuresData?.csv_paths} />
+            <DownloadDropdown exports={{ ...featuresData?.exports, ...importanceData?.exports }} />
           </div>
         </div>
       )}

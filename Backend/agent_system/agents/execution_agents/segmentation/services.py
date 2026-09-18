@@ -34,6 +34,24 @@ from .naming import build_segmentation_series_description
 
 logger = logging.getLogger(__name__)
 
+
+def _app_api_base_url() -> str:
+    """Resolve the Application API base URL. Never hardcode a service URL."""
+    return os.environ.get(
+        "APP_API_URL",
+        os.environ.get("CONTROL_API_URL", "http://localhost:8001"),
+    ).rstrip("/")
+
+
+def _orthanc_webhook_headers() -> dict[str, str]:
+    """Shared secret the Application API's /sync/orthanc-webhook route requires.
+
+    Must match ORTHANC_WEBHOOK_TOKEN on the application-api; omitted when unset,
+    matching the Lua hook's own "unset -> no auth enforced" behaviour.
+    """
+    token = os.environ.get("ORTHANC_WEBHOOK_TOKEN", "")
+    return {"X-Webhook-Token": token} if token else {}
+
 INFERENCE_TIMEOUT = httpx.Timeout(
     connect=30.0,
     read=SEGMENTATION_RESULT_READ_SECONDS,
@@ -604,6 +622,12 @@ class SegmentationService:
             result["sync_succeeded"] = await self._sync_uploaded_segmentation_series(
                 existing_instance_id,
                 seg_series_uid,
+                source_volume_uid=series_instance_uid,
+                is_empty_mask=False,
+                model_name=clean_model,
+                series_description=build_segmentation_series_description(
+                    clean_model, target_label
+                ),
             )
             logger.info(
                 "Reconciled existing DICOM-SEG for inference job %s: %s",
@@ -672,6 +696,10 @@ class SegmentationService:
             result["sync_succeeded"] = await self._sync_uploaded_segmentation_series(
                 instance_id,
                 seg_uid,
+                source_volume_uid=series_instance_uid,
+                is_empty_mask=False,
+                model_name=clean_model,
+                series_description=str(getattr(seg, "SeriesDescription", "") or ""),
             )
         else:
             logger.error("Failed to upload DICOM-SEG: %s %s", response.status_code, response.text)
@@ -683,6 +711,142 @@ class SegmentationService:
             result["upload_response"] = response.text[:500]
 
         return result
+
+    async def publish_modified_mask(
+        self,
+        *,
+        volume_uid: str,
+        mask_path: str,
+        target_label: str,
+        pair_key: str,
+        wait_seconds: float = 60.0,
+    ) -> dict[str, Any]:
+        """Publish a reviewer-edited mask to Orthanc as a DICOM SEG."""
+        import hashlib
+
+        dicom_datasets = await self.fetch_source_datasets_from_orthanc(
+            series_instance_uid=volume_uid
+        )
+        geometry = self._dicom_reference_geometry(dicom_datasets)
+        mask = await asyncio.to_thread(sitk.ReadImage, mask_path)
+        if tuple(int(value) for value in mask.GetSize()[:3]) != tuple(geometry["size_xyz"]):
+            raise ValueError(
+                f"Edited mask grid {tuple(mask.GetSize())} does not match source series "
+                f"{volume_uid} grid {tuple(geometry['size_xyz'])}; refusing to guess an "
+                "alignment."
+            )
+        reference = sitk.Image(list(geometry["size_xyz"]), sitk.sitkUInt8)
+        reference.SetSpacing(geometry["spacing_xyz"])
+        reference.SetOrigin(geometry["origin_lps"])
+        reference.SetDirection(tuple(float(v) for v in geometry["direction_matrix"].flatten()))
+        resampled = await asyncio.to_thread(
+            sitk.Resample,
+            mask,
+            reference,
+            sitk.Transform(),
+            sitk.sitkNearestNeighbor,
+            0,
+            sitk.sitkUInt8,
+        )
+        labelmap_np = (sitk.GetArrayFromImage(resampled) > 0).astype(np.uint8)
+        expected_shape = (len(dicom_datasets), int(dicom_datasets[0].Rows), int(dicom_datasets[0].Columns))
+        if tuple(labelmap_np.shape) != expected_shape:
+            raise ValueError(
+                f"Resampled edited mask has shape {labelmap_np.shape}, expected {expected_shape}"
+            )
+        if int(labelmap_np.sum()) == 0:
+            raise ValueError(
+                "The edited mask is empty. Reject the pair instead of publishing an empty SEG."
+            )
+
+        content_digest = hashlib.sha256(
+            labelmap_np.tobytes() + repr(labelmap_np.shape).encode("ascii")
+        ).hexdigest()
+        uid_prefix = "1.2.826.0.1.3680043.10.511.3."
+        seg_series_uid = generate_uid(prefix=uid_prefix, entropy_srcs=[pair_key, content_digest, "series"])
+        seg_sop_uid = generate_uid(prefix=uid_prefix, entropy_srcs=[pair_key, content_digest, "instance"])
+        series_description = build_segmentation_series_description("user-modified", target_label)
+        result: dict[str, Any] = {
+            "segmentation_series_uid": seg_series_uid,
+            "content_digest": content_digest,
+        }
+
+        instance_id = await self._find_existing_segmentation_instance(seg_series_uid)
+        if not instance_id:
+            ensure_required_patient_tags(dicom_datasets)
+            segment = hd.seg.SegmentDescription(
+                segment_number=1,
+                segment_label=target_label or "Segment",
+                segmented_property_category=codes.cid7150.Tissue,
+                segmented_property_type=codes.cid7166.ConnectiveTissue,
+                algorithm_type=hd.seg.SegmentAlgorithmTypeValues.SEMIAUTOMATIC,
+                algorithm_identification=hd.AlgorithmIdentificationSequence(
+                    name="user-modified",
+                    version=SEGMENTATION_GEOMETRY_VERSION,
+                    family=codes.cid7162.ArtificialIntelligence,
+                ),
+                tracking_uid=hd.UID(),
+                tracking_id="Reviewed Segmentation",
+            )
+            seg = await asyncio.to_thread(
+                partial(
+                    hd.seg.Segmentation,
+                    source_images=dicom_datasets,
+                    pixel_array=labelmap_np,
+                    segmentation_type=hd.seg.SegmentationTypeValues.BINARY,
+                    segment_descriptions=[segment],
+                    series_instance_uid=seg_series_uid,
+                    series_number=1002,
+                    sop_instance_uid=seg_sop_uid,
+                    series_description=series_description,
+                    instance_number=1,
+                    manufacturer="Manufacturer Name",
+                    manufacturer_model_name="MONAI Label Backend",
+                    software_versions=SEGMENTATION_GEOMETRY_VERSION,
+                    device_serial_number="XYZ",
+                    omit_empty_frames=False,
+                )
+            )
+            buffer = io.BytesIO()
+            await asyncio.to_thread(seg.save_as, buffer)
+            response = await self.client.post(
+                f"{self.orthanc_url}/instances",
+                headers={"Content-Type": "application/dicom"},
+                content=buffer.getvalue(),
+                timeout=INFERENCE_TIMEOUT,
+            )
+            if response.status_code not in (200, 201):
+                raise RuntimeError(
+                    f"Orthanc refused the edited mask SEG ({response.status_code}): "
+                    f"{response.text[:300]}"
+                )
+            instance_id = str(response.json()["ID"])
+        result["orthanc_instance_id"] = instance_id
+        result["sync_succeeded"] = await self._sync_uploaded_segmentation_series(
+            instance_id,
+            seg_series_uid,
+            source_volume_uid=volume_uid,
+            is_empty_mask=False,
+            model_name=None,
+            series_description=series_description,
+            generation_method="user_modified",
+        )
+
+        # The review may only name a SEG the archive has: wait for the row.
+        deadline = asyncio.get_running_loop().time() + wait_seconds
+        while True:
+            check = await self.client.get(
+                f"{_app_api_base_url()}/segmentations/{seg_series_uid}",
+                timeout=QUICK_TIMEOUT,
+            )
+            if check.status_code == 200:
+                return result
+            if asyncio.get_running_loop().time() >= deadline:
+                raise RuntimeError(
+                    f"Edited mask SEG {seg_series_uid} was uploaded but never reached the "
+                    "archive; the review cannot name it yet."
+                )
+            await asyncio.sleep(2.0)
 
     async def _find_existing_segmentation_instance(
         self,
@@ -718,16 +882,62 @@ class SegmentationService:
             )
             return None
 
+    async def _declare_segmentation_origin(
+        self,
+        label_uid: str,
+        volume_uid: str | None,
+        is_empty_mask: bool | None = None,
+        model_name: str | None = None,
+        series_description: str | None = None,
+        generation_method: str = "inference",
+    ) -> bool:
+        """Tell the Application API that this mask came from the pipeline."""
+        if not volume_uid:
+            logger.warning(
+                "Cannot declare origin for SEG %s: no source volume UID.", label_uid
+            )
+            return False
+        payload: dict[str, Any] = {
+            "label_series_instance_uid": label_uid,
+            "volume_series_instance_uid": volume_uid,
+            "origin": "pipeline",
+            "generation_method": generation_method,
+        }
+        if is_empty_mask is not None:
+            payload["is_empty_mask"] = bool(is_empty_mask)
+        if model_name:
+            payload["model_name"] = model_name
+        if series_description:
+            payload["series_description"] = series_description
+        try:
+            response = await self.client.post(
+                f"{_app_api_base_url()}/segmentations/declare-origin",
+                json=payload,
+                timeout=QUICK_TIMEOUT,
+            )
+            if response.status_code in (200, 201):
+                return True
+            logger.warning(
+                "Origin declaration for SEG %s rejected: status=%s body=%s",
+                label_uid,
+                response.status_code,
+                response.text[:200],
+            )
+        except Exception as exc:
+            logger.warning("Origin declaration for SEG %s failed: %s", label_uid, exc)
+        return False
+
     async def _sync_uploaded_segmentation_series(
         self,
         instance_id: str,
         dicom_series_uid: str,
+        source_volume_uid: str | None = None,
+        is_empty_mask: bool | None = None,
+        model_name: str | None = None,
+        series_description: str | None = None,
+        generation_method: str = "inference",
     ) -> bool:
-        """
-        Proactively sync the newly uploaded SEG instead of waiting for Orthanc's
-        Lua stable-series webhook. The Lua hook can be delayed or time out when
-        MONAI is busy with the next large inference.
-        """
+        """Proactively sync the newly uploaded SEG instead of waiting for Orthanc's Lua stable-series webhook. The Lua hook can be delayed or time out when MONAI is busy with the next large inference."""
         try:
             instance_response = await self.client.get(
                 f"{self.orthanc_url}/instances/{instance_id}",
@@ -747,7 +957,7 @@ class SegmentationService:
                 return False
 
             sync_response = await self.client.post(
-                f"{os.environ.get('APP_API_URL', os.environ.get('CONTROL_API_URL', 'http://localhost:8001')).rstrip('/')}/sync/orthanc-webhook",
+                f"{_app_api_base_url()}/sync/orthanc-webhook",
                 json={
                     "change_type": "stable_series",
                     "resource_id": orthanc_series_id,
@@ -755,12 +965,21 @@ class SegmentationService:
                     "modality": "SEG",
                     "series_uid": str(dicom_series_uid),
                 },
+                headers=_orthanc_webhook_headers(),
                 timeout=QUICK_TIMEOUT,
             )
             if sync_response.status_code == 200:
                 logger.info(
                     "Direct Orthanc sync accepted for uploaded SEG series: orthanc_series_id=%s",
                     orthanc_series_id,
+                )
+                await self._declare_segmentation_origin(
+                    label_uid=str(dicom_series_uid),
+                    volume_uid=source_volume_uid,
+                    is_empty_mask=is_empty_mask,
+                    model_name=model_name,
+                    series_description=series_description,
+                    generation_method=generation_method,
                 )
                 return True
             logger.warning(
@@ -868,12 +1087,7 @@ class SegmentationService:
 
     @staticmethod
     def _nrrd_space_to_lps_signs(space: Any) -> np.ndarray:
-        """Return component signs that convert an NRRD world space to DICOM LPS.
-
-        NRRD commonly uses either LPS (left-posterior-superior) or RAS
-        (right-anterior-superior).  DICOM ImagePositionPatient and
-        ImageOrientationPatient are always expressed in LPS.
-        """
+        """Return component signs that convert an NRRD world space to DICOM LPS."""
         normalized = str(space or "").strip().lower().replace("_", "-")
         aliases = {
             "lps": "left-posterior-superior",
@@ -920,12 +1134,7 @@ class SegmentationService:
         cls,
         header: dict[str, Any],
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
-        """Return (origin, x-direction, y-direction, z-direction) in DICOM LPS.
-
-        The three direction vectors correspond, in order, to the NRRD's own
-        axis 0 (i, fastest-varying), axis 1 (j), and axis 2 (k, slices) -
-        the same order as ``header["sizes"]``.
-        """
+        """Return (origin, x-direction, y-direction, z-direction) in DICOM LPS."""
         raw_origin = next(
             (
                 header[key]
@@ -994,13 +1203,7 @@ class SegmentationService:
         nrrd_directions_lps: tuple[np.ndarray, np.ndarray, np.ndarray],
         dicom_axes_lps: tuple[np.ndarray, np.ndarray, np.ndarray],
     ) -> tuple[dict[str, bool], dict[str, Any]]:
-        """Describe NRRD-to-DICOM axis permutation/sign for diagnostics only.
-
-        The mapping is intentionally NOT applied as a manual transpose/flip.
-        Physical-space resampling below is authoritative and handles flips,
-        permutations and oblique orientations in one operation without
-        double-transforming the mask.
-        """
+        """Describe NRRD-to-DICOM axis permutation/sign for diagnostics only."""
         nrrd_names = ("nrrd_x", "nrrd_y", "nrrd_z")
         dicom_names = ("x", "y", "z")
         nrrd_unit = [
@@ -1168,15 +1371,7 @@ class SegmentationService:
         *,
         allow_source_index_fallback: bool = False,
     ) -> tuple[np.ndarray, dict[str, bool], dict[str, Any]]:
-        """Resample the NRRD mask onto the exact DICOM patient-space grid.
-
-        ``labelmap_np`` is in (Z, Y, X) order.  We reconstruct its physical
-        geometry from the NRRD origin/direction vectors, reconstruct the target
-        grid from DICOM IOP/IPP/PixelSpacing, and use nearest-neighbor
-        SimpleITK resampling.  This handles axis flips, X/Y permutations,
-        oblique orientation and spacing/origin differences without relying on
-        array shape or manual flip heuristics.
-        """
+        """Resample the NRRD mask onto the exact DICOM patient-space grid."""
         if labelmap_np.ndim != 3:
             raise ValueError(
                 f"Expected a 3-D MONAI mask after transpose, got {labelmap_np.shape}"

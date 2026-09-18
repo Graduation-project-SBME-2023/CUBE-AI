@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -74,12 +73,13 @@ async def test_segmentation_tool_closes_module_and_writes_structured_output(
     monkeypatch,
     workspace_dir,
 ):
+    """The structured result is a row on this step's run."""
     fake_module = SimpleNamespace(
         initialize=AsyncMock(),
         run=AsyncMock(
             return_value={
                 "status": "completed",
-                "manifest_path": "state/segmentation_manifest.json",
+                "segmentation_run_id": "seg-run-1",
                 "segmentation_method": "cached",
                 "targets": ["spleen"],
                 "pair_count": 2,
@@ -91,23 +91,46 @@ async def test_segmentation_tool_closes_module_and_writes_structured_output(
         ),
         close=AsyncMock(),
     )
-    constructor = lambda session_id: fake_module
-    monkeypatch.setattr(module, "SegmentationModule", constructor)
+    monkeypatch.setattr(
+        module, "SegmentationModule", lambda session_id, agent_run_id=None: fake_module
+    )
+    written = AsyncMock(return_value={})
+    monkeypatch.setattr(module.BackendClient, "write_agent_output", written)
 
     result = await module.segmentation_tool(
         workspace_folder=str(workspace_dir),
         session_id="session-seg",
+        agent_run_id="run-seg",
     )
 
     assert result["status"] == "completed"
     fake_module.initialize.assert_awaited_once()
     fake_module.close.assert_awaited_once()
-    output_path = workspace_subpath(
-        workspace_dir,
-        "outputs/segmentation_agent_output.json",
-    )
-    output = json.loads(output_path.read_text(encoding="utf-8"))
-    assert output["agent_id"] == "segmentation_agent"
+    # The batch is run through PostgreSQL; the workspace keeps no manifest.
+    assert not workspace_subpath(workspace_dir, "outputs").exists()
+    run_id, output = written.await_args.args
+    assert run_id == "run-seg"
     assert output["status"] == "completed"
-    assert output["outputs"]["metrics"]["accepted_count"] == 2
+    assert output["output_metrics"]["accepted_count"] == 2
+    assert output["output_files"]["segmentation_run_id"] == "seg-run-1"
 
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_segmentation_tool_refuses_to_run_without_a_run_to_record_on(
+    monkeypatch,
+    workspace_dir,
+):
+    fake_module = SimpleNamespace(
+        initialize=AsyncMock(),
+        run=AsyncMock(return_value={"status": "completed", "failures": []}),
+        close=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        module, "SegmentationModule", lambda session_id, agent_run_id=None: fake_module
+    )
+    with pytest.raises(RuntimeError, match="agent_run_id"):
+        await module.segmentation_tool(
+            workspace_folder=str(workspace_dir),
+            session_id="session-seg",
+        )

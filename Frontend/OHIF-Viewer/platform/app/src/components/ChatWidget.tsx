@@ -10,6 +10,8 @@ type Message = {
 
 type ChatSession = {
   chat_id: string;
+  // The session that owns this chat. Never equal to chat_id.
+  session_id?: string;
   title: string;
   messages: Message[];
   summary?: string;
@@ -45,11 +47,14 @@ const CustomChatWidget: React.FC = () => {
 
 
   // --- Backend calls ---
+  // A chat is one conversation inside a session, and the two ids are
+  // never the same. This widget's "session" list is the chat list; the owning
+  // session id is carried alongside so archiving can address it.
   const fetchChatSessions = async () => {
     try {
       const data: any[] = [];
       for (let skip = 0; ; skip += 100) {
-        const r = await fetch(`${getAppApiBaseUrl()}/chat_sessions/?skip=${skip}&limit=100`);
+        const r = await fetch(`${getAppApiBaseUrl()}/chats/?skip=${skip}&limit=100`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const page = await r.json();
         data.push(...page);
@@ -57,9 +62,10 @@ const CustomChatWidget: React.FC = () => {
       }
       const mapped: ChatSession[] = (data || []).map((s: any) => ({
         chat_id: String(s.chat_id),
+        session_id: String(s.session_id),
         title: s.title || `Chat ${s.chat_id}`,
         messages: [],
-        summary: s.summary,
+        summary: '',
         last_activity: s.last_activity ? new Date(s.last_activity).getTime() : 0,
       }));
       setSessions(mapped);
@@ -101,25 +107,49 @@ const CustomChatWidget: React.FC = () => {
     }
   };
 
-  const createNewSession = async (title?: string) => {
+  const createNewSession = async (title?: string, prompt?: string) => {
+    // A chat needs a session, and a session is created WITH the user's own
+    // words: `prompt` is required and immutable, and the session's empty plan
+    // is created in the same server-side transaction. A viewer-assistant chat
+    // is not a clinical hypothesis, so it is created as `general` — that is a
+    // first-class case in current, not a degraded one.
+    const openingPrompt = (prompt || '').trim();
+    if (!openingPrompt) {
+      console.warn('Refusing to create a session with no prompt');
+      return null;
+    }
     try {
-      const payload = { title: title || `chat ${sessions.length + 1}` };
-      const r = await fetch(`${getAppApiBaseUrl()}/chat_sessions/`, {
+      const sessionResponse = await fetch(`${getAppApiBaseUrl()}/sessions/`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          prompt: openingPrompt,
+          prompt_kind: "general",
+          title: title || openingPrompt.slice(0, 60),
+        }),
       });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const data = await r.json();
-      console.log(data);
+      if (!sessionResponse.ok) throw new Error(`HTTP ${sessionResponse.status}`);
+      const session = await sessionResponse.json();
+
+      const chatResponse = await fetch(
+        `${getAppApiBaseUrl()}/chats/session/${session.session_id}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: title || openingPrompt.slice(0, 60) }),
+        }
+      );
+      if (!chatResponse.ok) throw new Error(`HTTP ${chatResponse.status}`);
+      const chat = await chatResponse.json();
 
       const newSession: ChatSession = {
-        chat_id: String(data.chat_id),
-        title: data.title || payload.title,
+        chat_id: String(chat.chat_id),
+        session_id: String(session.session_id),
+        title: chat.title || title || openingPrompt.slice(0, 60),
         messages: [
           { id: makeId("sys"), role: "system", text: "Hello Doctor! I am your radiologist assistant.", ts: Date.now() },
         ],
-        summary: data.summary,
+        summary: '',
         last_activity: Date.now(),
       };
 
@@ -134,17 +164,19 @@ const CustomChatWidget: React.FC = () => {
       setActiveSessionId(newSession.chat_id);
       setDrawerOpen(false);
       setOpen(true);
+      return newSession.chat_id;
     } catch (err) {
       console.warn("Failed to create session", err);
+      return null;
     }
   };
 
   const updateSessionLastActivity = async (chat_id: string) => {
     try {
-      await fetch(`${getAppApiBaseUrl()}/chat_sessions/${chat_id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ last_activity: new Date().toISOString() }),
+      // `last_activity` belongs to the chat and has its own TOUCH endpoint; it
+      // is stored rather than derived from the message timeline.
+      await fetch(`${getAppApiBaseUrl()}/chats/${chat_id}/touch`, {
+        method: "PATCH",
       });
       setSessions((prev) =>
         prev.map((s) => (s.chat_id === chat_id ? { ...s, last_activity: Date.now() } : s))
@@ -155,10 +187,20 @@ const CustomChatWidget: React.FC = () => {
   };
 
   const deleteSession = async (chat_id: string) => {
+    // Normal removal is archiving the owning session. Message history is
+    // provenance and is never deleted implicitly.
+    const target = sessions.find((x) => x.chat_id === chat_id);
+    if (!target?.session_id) {
+      console.warn("No owning session for chat", chat_id);
+      return;
+    }
     try {
-      await fetch(`${getAppApiBaseUrl()}/chat_sessions/${chat_id}`, { method: "DELETE" });
+      await fetch(`${getAppApiBaseUrl()}/sessions/${target.session_id}/archive`, {
+        method: "POST",
+      });
     } catch (err) {
-      console.warn("Failed to delete session", err);
+      console.warn("Failed to archive session", err);
+      return;
     }
     setSessions((s) => s.filter((x) => x.chat_id !== chat_id));
     if (activeSessionId === chat_id) {
@@ -186,8 +228,13 @@ const CustomChatWidget: React.FC = () => {
 
   const sendMessage = async (text: string) => {
     if (!text.trim()) return;
-    if (!activeSessionId) await createNewSession();
-    const sessionId = activeSessionId ?? sessions[0]?.chat_id;
+    // The first message is the session prompt, so it has to be in hand
+    // before a session can exist at all.
+    let sessionId = activeSessionId;
+    if (!sessionId) {
+      sessionId = await createNewSession(undefined, text);
+    }
+    sessionId = sessionId ?? sessions[0]?.chat_id;
     if (!sessionId) return;
 
     const userMsg: Message = { id: makeId("u"), role: "user", text, ts: Date.now() };
@@ -335,7 +382,19 @@ const CustomChatWidget: React.FC = () => {
             </div>
             <div className="flex items-center gap-1">
               <button title="History" onClick={() => setDrawerOpen((v) => !v)} className="px-2 py-1 rounded-md hover:bg-gray-100">📜</button>
-              <button title="New" onClick={() => createNewSession()} className="px-2 py-1 rounded-md hover:bg-gray-100">➕</button>
+              <button
+                title="New"
+                onClick={() => {
+                  // A session cannot be created empty: it needs the user's
+                  // words. Clear the active chat so the next message starts one.
+                  setActiveSessionId(null);
+                  setDrawerOpen(false);
+                  setOpen(true);
+                }}
+                className="px-2 py-1 rounded-md hover:bg-gray-100"
+              >
+                ➕
+              </button>
               <button title="Close" onClick={() => setOpen(false)} className="ml-1 text-lg font-bold px-2 py-1 rounded-md hover:bg-gray-100">×</button>
             </div>
           </div>

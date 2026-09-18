@@ -15,8 +15,10 @@ EXPECTED_TOOLS = [
     "get_latex_template",
     "read_literature_context",
     "write_agent_output",
+    "create_report",
     "latex_to_pdf",
-    "list_workspace_plots",
+    "list_report_figures",
+    "register_report_image",
 ]
 
 

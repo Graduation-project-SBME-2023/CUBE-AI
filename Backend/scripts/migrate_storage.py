@@ -54,13 +54,12 @@ WORKSPACE_DIR_MAP: dict[str, tuple[str, ...]] = {
     "volumes": ("data", "volumes"),
     "masks": ("data", "masks"),
     "outputs": ("outputs", "agents"),
-    "literature_review_output": ("outputs", "literature"),
+    "literature_review_output": ("temp", "literature"),
     "overlays": ("outputs", "overlays"),
     "features": ("outputs", "features"),
     "modeling": ("outputs", "modeling"),
     "models": ("outputs", "modeling"),
     "reports": ("outputs", "reports"),
-    ".knowledge_cache": ("cache", "literature"),
     "temp_segmentations": ("temp", "segmentations"),
 }
 CLINICAL_FILES = ("clinical_data.json", "clinical_data.csv")
@@ -71,12 +70,11 @@ WORKSPACE_SKELETON = (
     ("data", "volumes"),
     ("data", "masks"),
     ("outputs", "agents"),
-    ("outputs", "literature"),
+    ("temp", "literature"),
     ("outputs", "overlays"),
     ("outputs", "features"),
     ("outputs", "modeling"),
     ("outputs", "reports"),
-    ("cache", "literature"),
     ("temp", "segmentations"),
 )
 
@@ -219,6 +217,15 @@ class Plan:
         for name in STATE_FILES:
             known.add(name)
             self.add_file(source / name, destination / "state" / name, source.name)
+
+        workspace_cache_source = source / ".knowledge_cache"
+        if workspace_cache_source.exists():
+            self.add_tree(
+                workspace_cache_source,
+                STORAGE_ROOT / "cache" / "literature",
+                f"{source.name}-literature-cache",
+            )
+            known.add(".knowledge_cache")
 
         for logical, physical in WORKSPACE_DIR_MAP.items():
             known.add(logical)

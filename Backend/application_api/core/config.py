@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -19,6 +20,16 @@ class Settings(BaseSettings):
     # gap in enforcing that at the ingress).
     ORTHANC_WEBHOOK_TOKEN: str | None = None
 
+    @field_validator("ORTHANC_WEBHOOK_TOKEN", mode="before")
+    @classmethod
+    def _empty_webhook_token_is_none(cls, value: str | None) -> str | None:
+        # docker-compose always injects this key via `${ORTHANC_WEBHOOK_TOKEN:-}`,
+        # so an unset .env value arrives here as "" rather than absent. Without
+        # this, verify_webhook_token() treats "" as "a token is configured" and
+        # rejects every webhook call (Lua hook and agent-system direct sync
+        # alike) with 401, since neither sends an empty token header.
+        return value or None
+
     # How often the periodic reconciliation pass (sync_all_from_orthanc)
     # runs from the application lifespan, independent of the Lua webhook.
     RECONCILIATION_INTERVAL_SECONDS: float = 300.0
@@ -26,6 +37,14 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=("deploy/.env", "../deploy/.env", "../../deploy/.env"),
         env_file_encoding="utf-8",
+        # deploy/.env is the SHARED compose environment file: it carries
+        # POSTGRES_*, CORS_ORIGINS, COMPOSE_PROJECT_DIR and other services'
+        # keys as well as this one's. pydantic-settings v2 forbids undeclared
+        # inputs by default, so without this the Application API refuses to
+        # start the moment an unpinned `pydantic-settings` resolves to a
+        # version with that default — which is what happens on every image
+        # rebuild, since deploy/Dockerfile.application-api does not pin it.
+        extra="ignore",
     )
 
 

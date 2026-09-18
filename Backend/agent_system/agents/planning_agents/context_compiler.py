@@ -1,22 +1,4 @@
-"""
-Context Compiler — AOT (Ahead-of-Time) Task Message Generator
-
-After the planner confirms a hypothesis and the knowledge builder fetches
-domain knowledge, the Context Compiler:
-  1. Receives pre-structured knowledge sections from the knowledge builder.
-  2. Selects the relevant knowledge slice for each execution agent.
-  3. Assembles structured TaskMessage objects with:
-        - Agent-specific instructions (contextualized to the hypothesis)
-        - Context augmentation (knowledge, literature, terminology, methods)
-        - Hypothesis summary
-  4. Returns the list of TaskMessages — one per pipeline step.
-
-Pipeline:
-    knowledge_builder → (structured sections) → context_compiler → task messages
-
-This implements the "AOT Context Compiler" from
-``cubeai-docs/architecture/arch.html``.
-"""
+"""Context Compiler — AOT (Ahead-of-Time) Task Message Generator"""
 
 import json
 import uuid
@@ -42,19 +24,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _build_hypothesis_summary(hypothesis: ClinicalHypothesis) -> str:
-    """
-    Create a compact, structured PICO hypothesis summary for agent prompts.
-
-    Formats all PICO components (Population, Intervention, Comparison, Outcome)
-    plus the research question and clinical context into a readable text block
-    that can be prepended to any agent's task instructions.
-
-    Args:
-        hypothesis: The confirmed clinical hypothesis with full PICO fields.
-
-    Returns:
-        Formatted multi-line string summarizing the hypothesis.
-    """
+    """Create a compact, structured PICO hypothesis summary for agent prompts."""
     def _field_str(val):
         """Handle nested dict fields gracefully."""
         if isinstance(val, dict):
@@ -115,19 +85,7 @@ _PHASE_MAP = {
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _truncate(text: str, max_chars: int = 4000) -> str:
-    """
-    Truncate text to max_chars, preferring sentence boundaries.
-
-    Avoids cutting mid-sentence by backtracking to the last period
-    if it's within a reasonable range (70% of max_chars).
-
-    Args:
-        text: The text to truncate.
-        max_chars: Maximum allowed characters.
-
-    Returns:
-        Truncated text with "[...truncated]" marker if shortened.
-    """
+    """Truncate text to max_chars, preferring sentence boundaries."""
     if len(text) <= max_chars:
         return text
 
@@ -153,12 +111,7 @@ def _build_population_context(
     sources_guide: str,
     hypothesis: ClinicalHypothesis,
 ) -> Tuple[ContextAugmentation, str]:
-    """
-    Build context for the population planner (cohort discovery) agent.
-
-    Prioritizes anatomy/pathology knowledge and clinical guidelines
-    to inform inclusion/exclusion criteria and cohort selection.
-    """
+    """Build context for the population planner (cohort discovery) agent."""
     ctx = ContextAugmentation(
         knowledge_summary=_truncate(
             sections.get("anatomy_pathology", ""), 3000,
@@ -184,7 +137,7 @@ def _build_population_context(
         "- Define precise inclusion/exclusion criteria based on clinical guidelines\n"
         "- Apply correct medical terminology (MeSH terms provided)\n"
         "- Ensure the cohort matches the literature-recommended study design\n"
-        "- Generate a targets.csv mapping each selected volume to its target label"
+        "- Label each selected volume in the cohort so downstream agents can read its target"
     )
     return ctx, instructions
 
@@ -194,12 +147,7 @@ def _build_segmentation_context(
     sources_guide: str,
     hypothesis: ClinicalHypothesis,
 ) -> Tuple[ContextAugmentation, str]:
-    """
-    Build context for the segmentation agent.
-
-    Focuses on anatomical knowledge, method trends, and terminology
-    to guide ROI selection and segmentation protocols.
-    """
+    """Build context for the segmentation agent."""
     ctx = ContextAugmentation(
         knowledge_summary=_truncate(
             sections.get("anatomy_pathology", ""), 2000,
@@ -240,12 +188,7 @@ def _build_feature_extraction_context(
     sources_guide: str,
     hypothesis: ClinicalHypothesis,
 ) -> Tuple[ContextAugmentation, str]:
-    """
-    Build context for the radiomics feature extraction agent.
-
-    Emphasizes literature evidence and method trends to guide feature
-    selection, normalization, and preprocessing choices.
-    """
+    """Build context for the radiomics feature extraction agent."""
     ctx = ContextAugmentation(
         knowledge_summary=_truncate(
             sections.get("anatomy_pathology", ""), 1500,
@@ -279,12 +222,7 @@ def _build_modeling_context(
     sources_guide: str,
     hypothesis: ClinicalHypothesis,
 ) -> Tuple[ContextAugmentation, str]:
-    """
-    Build context for the ML modeling agent.
-
-    Prioritizes literature evidence and method trends to inform model
-    selection, evaluation metrics, and benchmarking against published results.
-    """
+    """Build context for the ML modeling agent."""
     ctx = ContextAugmentation(
         knowledge_summary="",  # Modeling doesn't need anatomical knowledge
         literature_findings=_truncate(
@@ -316,12 +254,7 @@ def _build_result_reporter_context(
     sources_guide: str,
     hypothesis: ClinicalHypothesis,
 ) -> Tuple[ContextAugmentation, str]:
-    """
-    Build context for the result analysis agent.
-
-    Provides comprehensive literature evidence, clinical guidelines, and
-    sources for benchmarking, hypothesis validation, and scientific interpretation.
-    """
+    """Build context for the result analysis agent."""
     ctx = ContextAugmentation(
         knowledge_summary=_truncate(
             sections.get("anatomy_pathology", ""), 1500,
@@ -355,12 +288,7 @@ def _build_latex_reporter_context(
     sources_guide: str,
     hypothesis: ClinicalHypothesis,
 ) -> Tuple[ContextAugmentation, str]:
-    """
-    Build context for the LaTeX manuscript generation agent.
-
-    Focuses on literature evidence, sources for citations, and journal
-    landscape information to guide formatting and reference management.
-    """
+    """Build context for the LaTeX manuscript generation agent."""
     ctx = ContextAugmentation(
         knowledge_summary="",
         literature_findings=_truncate(
@@ -412,39 +340,7 @@ def compile_task_messages(
     pipeline_instructions: Optional[Dict[str, str]] = None,
     locked_roi_interpretation: Optional[Dict[str, Any]] = None,
 ) -> List[TaskMessage]:
-    """
-    Compile structured task messages for every step in the study plan.
-
-    Each TaskMessage includes:
-        - Unique task_id (UUID)
-        - Pipeline phase name
-        - Agent-specific instructions enriched with hypothesis context
-        - Pipeline architect's detailed instructions (from dynamic planning)
-        - Context augmentation with relevant knowledge slices
-        - Hypothesis summary for shared context
-
-    The instructions are layered in priority order:
-        1. Locked ROI interpretation and identity policy (segmentation only)
-        2. Pipeline Architect's study-specific instructions
-        3. Planner's step description
-        4. Domain-informed guidance from knowledge base
-
-    Args:
-        hypothesis:            The confirmed clinical hypothesis with PICO fields.
-        plan:                  The confirmed study plan with customized steps.
-        knowledge_sections:    Pre-structured dict from knowledge_builder mapping
-                               canonical section keys (anatomy_pathology,
-                               mesh_terminology, literature_evidence, etc.)
-                               to their text content.
-        sources_guide:         Sources guide text from knowledge_builder.
-        pipeline_instructions: Dict mapping agent_id → detailed instructions
-                               from the Pipeline Architect (Phase 3).
-        locked_roi_interpretation:
-                               Validated, non-persisted ROI scope and labels.
-
-    Returns:
-        List of TaskMessage objects, one per plan step, ordered by pipeline phase.
-    """
+    """Compile structured task messages for every step in the study plan."""
     logger.info(
         "Context Compiler: Assembling task messages for %d steps",
         len(plan.steps),
@@ -564,20 +460,7 @@ def compile_task_messages(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def format_task_prompt(task_message: TaskMessage) -> str:
-    """
-    Format a single TaskMessage into a text prompt for AutoGen agents.
-
-    This is the bridge between the structured TaskMessage model and the
-    plain-text interface expected by execution agents. The output is
-    suitable for passing via TextMessage to any agent in the pipeline.
-
-    Args:
-        task_message: A fully populated TaskMessage with instructions,
-                      context augmentation, and hypothesis summary.
-
-    Returns:
-        Formatted multi-line string prompt.
-    """
+    """Format a single TaskMessage into a text prompt for AutoGen agents."""
     parts = []
 
     # Header with task identity
@@ -619,32 +502,7 @@ def summarize_knowledge_for_planning(
     hypothesis: ClinicalHypothesis,
     max_chars: int = 6000,
 ) -> str:
-    """
-    Create a balanced, structured summary of the knowledge base for the
-    Pipeline Architect prompt.
-
-    Instead of blindly truncating the full KB text (which biases towards
-    whichever section appears first), this draws from every section
-    proportionally so the planner sees anatomy, evidence, methods,
-    guidelines, and datasets — all in one concise block.
-
-    Section allocation:
-        - Clinical Context (anatomy/pathology):    15%
-        - Key Evidence (literature):               25%
-        - Method Trends:                           20%
-        - Clinical Guidelines:                     15%
-        - Key Terminology (MeSH):                  10%
-        - Reference Datasets:                       8%
-        - Target Journals:                          7%
-
-    Args:
-        knowledge_sections: Pre-structured dict from knowledge_builder.
-        hypothesis:         The confirmed clinical hypothesis.
-        max_chars:          Total character budget for the summary.
-
-    Returns:
-        Summarized knowledge string for use in the pipeline planning prompt.
-    """
+    """Create a balanced, structured summary of the knowledge base for the Pipeline Architect prompt."""
     if not knowledge_sections:
         return "No domain knowledge available."
 
@@ -677,19 +535,7 @@ def summarize_knowledge_for_planning(
 
 
 def build_enriched_pipeline_prompt(task_messages: List[TaskMessage]) -> str:
-    """
-    Build a complete pipeline task prompt from all task messages.
-
-    This is used as the `task=` parameter for GraphFlow.run_stream().
-    The first agent (population planner) gets the full prompt; subsequent
-    agents receive their own task messages via MessageFilterAgent.
-
-    Args:
-        task_messages: Ordered list of task messages, one per pipeline step.
-
-    Returns:
-        Complete formatted prompt string for the pipeline entry point.
-    """
+    """Build a complete pipeline task prompt from all task messages."""
     if not task_messages:
         return "Run the pipeline."
 

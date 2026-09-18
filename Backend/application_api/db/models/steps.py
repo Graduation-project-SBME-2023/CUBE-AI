@@ -1,42 +1,67 @@
-
-
-from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, text,ForeignKey
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.sql import func
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
-from application_api.db.base import Base  
-from sqlalchemy.dialects.postgresql import UUID
+
+from application_api.db.base import Base
+
 
 class PlanStep(Base):
+    """One step of a session's plan."""
+
     __tablename__ = "plan_steps"
 
-    id = Column(
+    step_id = Column(
         UUID(as_uuid=True),
         primary_key=True,
-        server_default=text('gen_random_uuid()')
+        server_default=text("gen_random_uuid()"),
     )
-
-    plan_id = Column(
+    session_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("plans.id", ondelete="CASCADE"),
-        nullable=False
+        ForeignKey("plans.session_id", ondelete="RESTRICT"),
+        nullable=False,
     )
 
-    title = Column(String(255), nullable=False)
-    description = Column(Text)
-    module = Column(String(255))
-    status = Column(String(50), default="pending")
-    instructions = Column(JSONB, nullable=True, server_default='{}')
     step_order = Column(Integer, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    logs = Column(JSONB, nullable=True, server_default='[]')
+    agent_type = Column(String(255), nullable=False)
+    title = Column(String(255), nullable=False)
+    instructions = Column(JSONB, nullable=False, server_default="{}")
+
+    # no is_enabled, no timestamps. /: no status and no logs —
+    # execution state lives on agent_runs, and a second copy here could
+    # disagree with it.
 
     plan = relationship("Plan", back_populates="steps")
-
-    task_message = relationship(
-        "TaskMessage",
-        back_populates="plan_step",
+    # 0 while the plan is a draft, exactly 1 once it is approved. The
+    # compiled task message the `task_messages` table used to hold is part of
+    # the this flowEFINITION and lives in `instructions["task_message"]` now
+    agent_run = relationship(
+        "AgentRun",
+        back_populates="step",
+        foreign_keys="AgentRun.step_id",
         uselist=False,
-        cascade="all, delete-orphan",
-        lazy="selectin" 
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        CheckConstraint("step_order > 0", name="step_order_positive"),
+        # DEFERRABLE so a reorder can swap two step_orders inside one
+        # transaction without an intermediate collision.
+        UniqueConstraint(
+            "session_id",
+            "step_order",
+            name="uq_plan_steps_session_id",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        # Free (step_id is the PK) and required as the target of agent_runs'
+        # composite (step_id, session_id) FK in this flow.
+        UniqueConstraint("step_id", "session_id", name="uq_plan_steps_step_id"),
     )

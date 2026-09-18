@@ -1,113 +1,104 @@
-"""
-Multi-Agent Scratchpad MCP Tool
-
-A shared scratchpad for multi-agent systems. Each agent writes to its own
-isolated section. A reporting agent can read a clean cross-agent view
-(summaries + flags + activity sequence) without wading through raw notes.
-
-scratchpad.json structure:
-{
-  "agents": {
-    "<agent_id>": {
-      "agent_id": str,
-      "role": str,
-      "status": "in_progress" | "done" | "blocked" | "failed",
-      "registered_at": ISO str,
-      "notes": [ { "content", "created_at" } ],
-      "flags": [ { "level", "message", "created_at" } ],
-      "summary": { "content", "updated_at" } | null
-    }
-  },
-  "activity_log": [
-    { "agent_id", "role", "action", "detail", "timestamp" }
-  ]
-}
-"""
+"""Multi-Agent Scratchpad MCP Tool."""
 
 import json
 import os
-import asyncio
-from datetime import datetime, timezone
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, Literal
+
+import httpx
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import mcp
-from pydantic import BaseModel, ConfigDict, Field
 from tool_logging import log_tool_state, ToolEvent, TextPayload
-from storage_paths import HYPOTHESES_DIR, workspace_subpath
 
-# ── Dynamic imports logic
-import sys
-import httpx
-
-
-# ── Constants ──────────────────────────────────────────────────────────────────
-
-WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", str(HYPOTHESES_DIR / "workspace_default"))
-SCRATCHPAD_FILE = str(workspace_subpath(WORKSPACE_DIR, "scratchpad.json"))
 AgentStatus = Literal["in_progress", "done", "blocked", "failed"]
 FlagLevel = Literal["info", "warning", "error", "critical"]
 
-current_agent_id = os.environ.get("AGENT_ID")
+def _app_api_url() -> str:
+    """The Application API base URL."""
+    try:
+        from service_urls import APP_API_URL
 
-async def _emit_ws_message(msg_type: str, payload_ws: dict, session_id: str):
-    """Sends an HTTP POST to app.py to broadcast a WebSocket message."""
+        return APP_API_URL
+    except ImportError:
+        return os.environ.get(
+            "APP_API_URL", os.environ.get("CONTROL_API_URL", "http://localhost:8001")
+        ).rstrip("/")
+
+
+APP_API_URL = _app_api_url()
+SESSION_ID = os.environ.get("SESSION_ID", "")
+AGENT_ID = os.environ.get("AGENT_ID", "")
+# The run this MCP subprocess belongs to. Set by the agent factory from the
+# approved `agent_runs` row: identity is the run, not the agent name.
+AGENT_RUN_ID = os.environ.get("AGENT_RUN_ID", "")
+STEP_ID = os.environ.get("STEP_ID", "")
+
+AGENTS_BASE_URL = os.environ.get("AGENTS_BASE_URL", "http://localhost:8150").rstrip("/")
+REQUEST_TIMEOUT = 20.0
+
+
+async def _emit_ws_message(msg_type: str, payload_ws: dict, session_id: str) -> None:
+    """Broadcast a live scratchpad update through the agent system."""
     try:
         async with httpx.AsyncClient() as client:
             await client.post(
-                "http://localhost:8150/ws-broadcast",
+                f"{AGENTS_BASE_URL}/ws-broadcast",
                 json={"type": msg_type, "payload": payload_ws, "session_id": session_id},
-                timeout=2.0
+                timeout=2.0,
             )
-            # Log the broadcast attempt internally (prints to mcp server stdout, which usually gets captured by Autogen logger)
-            print(f"[Scratchpad WebSockets] Successfully emitted {msg_type} for agent {payload_ws.get('agent_id')}")
-    except Exception as e:
-        print(f"[Scratchpad WebSockets] Error emitting ws message: {e}")
-
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
-def _load() -> Dict[str, Any]:
-    if not os.path.exists(SCRATCHPAD_FILE):
-        return {"agents": {}, "activity_log": []}
-    with open(SCRATCHPAD_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+    except Exception as exc:  # live delivery only; the write already committed
+        print(f"[Scratchpad WebSockets] Error emitting ws message: {exc}")
 
 
-def _save(data: Dict[str, Any]) -> None:
-    # Ensure the parent directories exist before writing
-    os.makedirs(os.path.dirname(SCRATCHPAD_FILE), exist_ok=True)
-    
-    with open(SCRATCHPAD_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+def _error(message: str) -> str:
+    return json.dumps({"status": "error", "message": message}, indent=2)
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def _require_run() -> str | None:
+    if not AGENT_RUN_ID:
+        return None
+    return AGENT_RUN_ID
 
 
-def _get_agent(data: Dict[str, Any], agent_id: str) -> Optional[Dict[str, Any]]:
-    return data["agents"].get(agent_id)
-
-
-def _require_agent(data: Dict[str, Any], agent_id: str) -> Dict[str, Any]:
-    agent = _get_agent(data, agent_id)
-    if agent is None:
-        raise ValueError(
-            f"Agent '{agent_id}' is not registered. Call scratchpad_register_agent first."
+async def _post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Write to this run's scratchpad. A failed write is an error, not a warning: there is no file to fall back to, and silently losing an agent's own record of its work is what current removes."""
+    run_id = _require_run()
+    if run_id is None:
+        raise RuntimeError(
+            "AGENT_RUN_ID is not set in the MCP environment; this agent is not "
+            "bound to an approved plan step and cannot write its scratchpad."
         )
-    return agent
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        response = await client.post(
+            f"{APP_API_URL}/agent-runs/{run_id}/scratchpad/{path}", json=payload
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"{response.status_code} from the Application API: {response.text[:400]}"
+            )
+        return response.json()
 
 
-def _log_activity(data: Dict[str, Any], agent_id: str, role: str, action: str, detail: str) -> None:
-    data["activity_log"].append({
-        "agent_id": agent_id,
-        "role": role,
-        "action": action,
-        "detail": detail,
-        "timestamp": _now(),
-    })
+async def _get(url: str) -> Dict[str, Any]:
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        response = await client.get(url)
+        response.raise_for_status()
+        return response.json()
 
 
-# ── Input Models ───────────────────────────────────────────────────────────────
+def _notes(run: Dict[str, Any]) -> Dict[str, Any]:
+    return run.get("durable_notes") or {}
+
+
+def _flags(run: Dict[str, Any]) -> list:
+    return (run.get("warnings") or {}).get("items", [])
+
+
+def _summary(run: Dict[str, Any]) -> Dict[str, Any] | None:
+    return (run.get("output_summary") or {}).get("scratchpad_summary")
+
+
+# -- Input models (unchanged shapes) -------------------------------------------
 
 class RegisterAgentInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
@@ -149,16 +140,7 @@ class WriteSummaryInput(BaseModel):
 class RaiseFlagInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    level: FlagLevel = Field(
-        ...,
-        description=(
-            "Severity of the flag: "
-            "'info' = noteworthy but not problematic, "
-            "'warning' = potential issue, "
-            "'error' = something went wrong, "
-            "'critical' = blocking issue requiring immediate attention."
-        ),
-    )
+    level: FlagLevel = Field(..., description="Severity of the flag.")
     message: str = Field(
         ...,
         description="Clear description of the issue or observation for the reporting agent.",
@@ -169,16 +151,7 @@ class RaiseFlagInput(BaseModel):
 class SetStatusInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    status: AgentStatus = Field(
-        ...,
-        description=(
-            "Agent's current status: "
-            "'in_progress' = actively working, "
-            "'done' = work complete and summary written, "
-            "'blocked' = cannot proceed (raise a flag too), "
-            "'failed' = encountered a fatal error."
-        ),
-    )
+    status: AgentStatus = Field(..., description="Agent's current status.")
 
 
 class ReadAgentInput(BaseModel):
@@ -191,7 +164,8 @@ class ReadAgentInput(BaseModel):
     )
 
 
-# ── Tools ──────────────────────────────────────────────────────────────────────
+# -- Tools ---------------------------------------------------------------------
+
 @mcp.tool(
     name="scratchpad_register_agent",
     annotations={
@@ -203,71 +177,45 @@ class ReadAgentInput(BaseModel):
     },
 )
 async def scratchpad_register_agent(role: str = "agent") -> str:
-    """Register an agent in the scratchpad at the start of its work.
-
-    Must be called before any other scratchpad tool. Creates an isolated section
-    for the agent keyed by agent_id, and logs the registration to the activity log.
-
-    Args:
-        role (str): Agent's role (e.g. 'researcher', 'writer', 'ROI extractor', 'modeler').
-
-    Returns:
-        str: JSON confirmation, or error if agent_id is already registered.
-    """
-    data = _load()
-    if current_agent_id in data["agents"]:
-        return json.dumps({
-            "status": "error",
-            "message": f"Agent '{current_agent_id}' is already registered.",
-        }, indent=2)
-
-    data["agents"][current_agent_id] = {
-        "agent_id": current_agent_id,
-        "role": role,
-        "status": "in_progress",
-        "registered_at": _now(),
-        "notes": [],
-        "flags": [],
-        "summary": None,
-    }
-    _log_activity(data, current_agent_id, role, "registered", f"Role: {role}")
-    _save(data)
-
-    # Calculate the absolute directory path
-    import os
-    save_directory = os.path.abspath(os.path.dirname(SCRATCHPAD_FILE))
+    """Register an agent in the scratchpad at the start of its work."""
+    try:
+        run = await _post("register", {"role": role})
+    except Exception as exc:
+        return _error(str(exc))
 
     try:
-        payload = TextPayload(message=f'Registering agent {current_agent_id}.')
-        start_event = ToolEvent('tool_started', 'text', payload)
-        log_tool_state(start_event)
-        finished_event = ToolEvent('tool_finished', 'text', payload)
-        log_tool_state(finished_event)
-    except Exception as e:
-        print(f"Warning: Could not connect to logging server: {e}")
+        payload = TextPayload(message=f"Registering agent {AGENT_ID}.")
+        log_tool_state(ToolEvent("tool_started", "text", payload))
+        log_tool_state(ToolEvent("tool_finished", "text", payload))
+    except Exception as exc:
+        print(f"Warning: Could not connect to logging server: {exc}")
 
-    try:
-        session_id = os.environ.get("SESSION_ID", "")
-        payload_ws = {
-            "type": "agent_registered",
-            "agent_id": current_agent_id,
+    if SESSION_ID:
+        await _emit_ws_message(
+            "scratchpad_update",
+            {
+                "type": "agent_registered",
+                "agent_id": AGENT_ID,
+                "agent_run_id": AGENT_RUN_ID,
+                "step_id": STEP_ID,
+                "role": role,
+                "status": "in_progress",
+                "timestamp": _notes(run).get("registered_at"),
+                "content": f"Agent {AGENT_ID} registered as {role}",
+            },
+            SESSION_ID,
+        )
+
+    return json.dumps(
+        {
+            "status": "ok",
+            "agent_id": AGENT_ID,
+            "agent_run_id": AGENT_RUN_ID,
             "role": role,
-            "status": "in_progress",
-            "timestamp": _now(),
-            "content": f"Agent {current_agent_id} registered as {role}"
-        }
-        if session_id:
-            asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
-    except Exception as e:
-        print(f"Warning: Could not broadcast agent registration: {e}")
+        },
+        indent=2,
+    )
 
-    # Return the save_directory in the final JSON response
-    return json.dumps({
-        "status": "ok", 
-        "agent_id": current_agent_id, 
-        "role": role,
-        "save_path": save_directory
-    }, indent=2)
 
 @mcp.tool(
     name="scratchpad_write_note",
@@ -280,46 +228,28 @@ async def scratchpad_register_agent(role: str = "agent") -> str:
     },
 )
 async def scratchpad_write_note(content: str) -> str:
-    """Append a private working note to the agent's scratchpad section.
-
-    Use this for intermediate thoughts, observations, or partial results during
-    a task. Notes are only visible when explicitly reading a single agent's section
-    and are excluded from the reporter's cross-agent view.
-
-    Args:
-        content (str): Note text (1-10000 characters).
-
-    Returns:
-        str: JSON confirmation with the note index.
-    """
-    data = _load()
+    """Append a private working note to this run's scratchpad section."""
     try:
-        agent = _require_agent(data, current_agent_id)
-    except ValueError as e:
-        return json.dumps({"status": "error", "message": str(e)}, indent=2)
+        run = await _post("notes", {"content": content})
+    except Exception as exc:
+        return _error(str(exc))
 
-    note = {"content": content, "created_at": _now()}
-    agent["notes"].append(note)
-    _log_activity(data, current_agent_id, agent["role"], "wrote_note",
-                  f"Note #{len(agent['notes']) - 1}")
-    _save(data)
-
-    try:
-        session_id = os.environ.get("SESSION_ID", "")
-        payload_ws = {
-            "type": "agent_note",
-            "agent_id": current_agent_id,
-            "role": agent["role"],
-            "content": content,
-            "timestamp": _now(),
-            "note_index": len(agent["notes"]) - 1
-        }
-        if session_id:
-            asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
-    except Exception as e:
-        print(f"Warning: Could not broadcast agent note: {e}")
-
-    return json.dumps({"status": "ok", "note_index": len(agent["notes"]) - 1}, indent=2)
+    notes = _notes(run).get("notes", [])
+    if SESSION_ID:
+        await _emit_ws_message(
+            "scratchpad_update",
+            {
+                "type": "agent_note",
+                "agent_id": AGENT_ID,
+                "agent_run_id": AGENT_RUN_ID,
+                "role": _notes(run).get("role", ""),
+                "content": content,
+                "timestamp": notes[-1]["created_at"] if notes else None,
+                "note_index": len(notes) - 1,
+            },
+            SESSION_ID,
+        )
+    return json.dumps({"status": "ok", "note_index": len(notes) - 1}, indent=2)
 
 
 @mcp.tool(
@@ -333,50 +263,33 @@ async def scratchpad_write_note(content: str) -> str:
     },
 )
 async def scratchpad_raise_flag(level: str = "warning", message: str = "No message provided.") -> str:
-    """Raise a flag in the agent's section to surface issues to the reporting agent.
-
-    Use this to highlight anything the reporter should pay attention to:
-    data quality issues, unexpected results, blockers, or errors.
-    Flags appear prominently in the reporter's cross-agent view.
-
-    Args:
-        level (str): Severity — 'info' | 'warning' | 'error' | 'critical'.
-        message (str): Clear description of the issue (1-2000 characters).
-
-    Returns:
-        str: JSON confirmation with flag index.
-    """
+    """Raise a flag so the reporting agent sees an issue."""
     if level not in ("info", "warning", "error", "critical"):
-        return json.dumps({"status": "error", "message": f"Invalid level '{level}'. Must be one of: info, warning, error, critical."}, indent=2)
-    data = _load()
+        return _error(
+            f"Invalid level '{level}'. Must be one of: info, warning, error, critical."
+        )
     try:
-        agent = _require_agent(data, current_agent_id)
-    except ValueError as e:
-        return json.dumps({"status": "error", "message": str(e)}, indent=2)
+        run = await _post("flags", {"level": level, "message": message})
+    except Exception as exc:
+        return _error(str(exc))
 
-    flag = {"level": level, "message": message, "created_at": _now()}
-    agent["flags"].append(flag)
-    _log_activity(data, current_agent_id, agent["role"], "raised_flag",
-                  f"[{level.upper()}] {message[:120]}")
-    _save(data)
-
-    try:
-        session_id = os.environ.get("SESSION_ID", "")
-        payload_ws = {
-            "type": "agent_flag",
-            "agent_id": current_agent_id,
-            "role": agent["role"],
-            "level": level,
-            "content": message,
-            "timestamp": _now(),
-            "flag_index": len(agent["flags"]) - 1
-        }
-        if session_id:
-            asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
-    except Exception as e:
-        print(f"Warning: Could not broadcast agent flag: {e}")
-
-    return json.dumps({"status": "ok", "flag_index": len(agent["flags"]) - 1}, indent=2)
+    flags = _flags(run)
+    if SESSION_ID:
+        await _emit_ws_message(
+            "scratchpad_update",
+            {
+                "type": "agent_flag",
+                "agent_id": AGENT_ID,
+                "agent_run_id": AGENT_RUN_ID,
+                "role": _notes(run).get("role", ""),
+                "level": level,
+                "content": message,
+                "timestamp": flags[-1]["created_at"] if flags else None,
+                "flag_index": len(flags) - 1,
+            },
+            SESSION_ID,
+        )
+    return json.dumps({"status": "ok", "flag_index": len(flags) - 1}, indent=2)
 
 
 @mcp.tool(
@@ -390,49 +303,35 @@ async def scratchpad_raise_flag(level: str = "warning", message: str = "No messa
     },
 )
 async def scratchpad_set_status(status: str) -> str:
-    """Update the calling agent's status in the scratchpad.
-
-    Call this whenever your state changes. The reporting agent uses statuses
-    to know whether all agents have finished before starting its review.
-    If setting status to 'blocked' or 'failed', also call scratchpad_raise_flag.
-
-    Args:
-        status (str): Agent's current status — 'in_progress' | 'done' | 'blocked' | 'failed'.
-
-    Returns:
-        str: JSON confirmation with previous and new status.
-    """
+    """Update this run's self-reported working status."""
     if status not in ("in_progress", "done", "blocked", "failed"):
-        return json.dumps({"status": "error", "message": f"Invalid status '{status}'. Must be one of: in_progress, done, blocked, failed."}, indent=2)
-    data = _load()
+        return _error(
+            f"Invalid status '{status}'. Must be one of: in_progress, done, blocked, failed."
+        )
     try:
-        agent = _require_agent(data, current_agent_id)
-    except ValueError as e:
-        return json.dumps({"status": "error", "message": str(e)}, indent=2)
+        current = await _get(f"{APP_API_URL}/agent-runs/{AGENT_RUN_ID}") if AGENT_RUN_ID else {}
+        previous = _notes(current).get("status")
+        run = await _post("status", {"status": status})
+    except Exception as exc:
+        return _error(str(exc))
 
-    previous = agent["status"]
-    agent["status"] = status
-    _log_activity(data, current_agent_id, agent["role"], "status_change",
-                  f"{previous} -> {status}")
-    _save(data)
-
-    try:
-        session_id = os.environ.get("SESSION_ID", "")
-        payload_ws = {
-            "type": "agent_status",
-            "agent_id": current_agent_id,
-            "role": agent["role"],
-            "status": status,
-            "previous_status": previous,
-            "timestamp": _now(),
-            "content": f"Status changed: {previous} -> {status}"
-        }
-        if session_id:
-            asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
-    except Exception as e:
-        print(f"Warning: Could not broadcast agent status: {e}")
-
-    return json.dumps({"status": "ok", "previous_status": previous, "new_status": status}, indent=2)
+    if SESSION_ID:
+        await _emit_ws_message(
+            "scratchpad_update",
+            {
+                "type": "agent_status",
+                "agent_id": AGENT_ID,
+                "agent_run_id": AGENT_RUN_ID,
+                "role": _notes(run).get("role", ""),
+                "status": status,
+                "previous_status": previous,
+                "content": f"Status changed: {previous} -> {status}",
+            },
+            SESSION_ID,
+        )
+    return json.dumps(
+        {"status": "ok", "previous_status": previous, "new_status": status}, indent=2
+    )
 
 
 @mcp.tool(
@@ -446,57 +345,33 @@ async def scratchpad_set_status(status: str) -> str:
     },
 )
 async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str:
-    """Write the agent's final work summary. Call this when the task is complete.
-
-    The summary is the primary input the reporting agent uses to review this
-    agent's work. It should be self-contained and cover: what was done, key
-    outputs or findings, and any caveats. After writing the summary, set your
-    status to 'done' via scratchpad_set_status.
-
-    Args:
-        summary (str): Full summary of completed work (1-20000 characters).
-        overwrite (bool): Replace an existing summary (default False).
-
-    Returns:
-        str: JSON confirmation, or error if summary exists and overwrite=False.
-    """
-    data = _load()
+    """Write this run's final work summary."""
     try:
-        agent = _require_agent(data, current_agent_id)
-    except ValueError as e:
-        return json.dumps({"status": "error", "message": str(e)}, indent=2)
+        run = await _post("summary", {"summary": summary, "overwrite": overwrite})
+    except Exception as exc:
+        return _error(str(exc))
 
-    if agent["summary"] is not None and not overwrite:
-        return json.dumps({
-            "status": "error",
-            "message": "A summary already exists for this agent. Set overwrite=true to replace it.",
-        }, indent=2)
-
-    agent["summary"] = {"content": summary, "updated_at": _now()}
-    _log_activity(data, current_agent_id, agent["role"], "wrote_summary",
-                  f"{len(summary)} chars")
-    _save(data)
+    if SESSION_ID:
+        await _emit_ws_message(
+            "scratchpad_update",
+            {
+                "type": "agent_summary",
+                "agent_id": AGENT_ID,
+                "agent_run_id": AGENT_RUN_ID,
+                "role": _notes(run).get("role", ""),
+                "content": summary,
+                "timestamp": (_summary(run) or {}).get("updated_at"),
+                "summary_length": len(summary),
+            },
+            SESSION_ID,
+        )
 
     try:
-        session_id = os.environ.get("SESSION_ID", "")
-        payload_ws = {
-            "type": "agent_summary",
-            "agent_id": current_agent_id,
-            "role": agent["role"],
-            "content": summary,
-            "timestamp": _now(),
-            "summary_length": len(summary)
-        }
-        if session_id:
-            asyncio.create_task(_emit_ws_message("scratchpad_update", payload_ws, session_id))
-    except Exception as e:
-        print(f"Warning: Could not broadcast agent summary: {e}")
-
-    payload = TextPayload(message=f'Writing a Summary.')
-    start_event = ToolEvent('tool_started', 'text', payload)
-    log_tool_state(start_event)
-    finished_event = ToolEvent('tool_finished', 'text', payload)
-    log_tool_state(finished_event)
+        payload = TextPayload(message="Writing a Summary.")
+        log_tool_state(ToolEvent("tool_started", "text", payload))
+        log_tool_state(ToolEvent("tool_finished", "text", payload))
+    except Exception as exc:
+        print(f"Warning: Could not connect to logging server: {exc}")
 
     return json.dumps({"status": "ok", "message": "Summary saved."}, indent=2)
 
@@ -512,38 +387,45 @@ async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str
     },
 )
 async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True) -> str:
-    """Read the full scratchpad section for a specific agent.
+    """Read the scratchpad section of an agent in this session.: several plan steps may name the same agent. This resolves the FIRST such step in plan order and reports how many matched, rather than pretending the agent name is a unique key."""
+    if not SESSION_ID:
+        return _error("SESSION_ID is not set in the MCP environment.")
+    try:
+        resolved = await _get(
+            f"{APP_API_URL}/agent-runs/session/{SESSION_ID}/by-agent-type/{target_agent_id}"
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            return _error(f"Agent '{target_agent_id}' not found in this session.")
+        return _error(f"Could not read agent '{target_agent_id}': {exc}")
+    except Exception as exc:
+        return _error(f"Could not read agent '{target_agent_id}': {exc}")
 
-    Returns the agent's status, flags, summary, and optionally their private notes.
-    Any agent can read any other agent's section, enabling context sharing.
-
-    Args:
-        target_agent_id (str): ID of the agent whose section to read.
-        include_notes (bool): Include private working notes (default True).
-
-    Returns:
-        str: JSON of the agent's full section, with notes optionally omitted.
-    """
-    data = _load()
-    agent = _get_agent(data, target_agent_id)
-    if agent is None:
-        return json.dumps({
-            "status": "error",
-            "message": f"Agent '{target_agent_id}' not found.",
-        }, indent=2)
-
-    result = {k: v for k, v in agent.items() if k != "notes" or include_notes}
+    run = resolved.get("run") or {}
+    notes = _notes(run)
+    section: Dict[str, Any] = {
+        "agent_id": target_agent_id,
+        "agent_run_id": run.get("agent_run_id"),
+        "step_id": run.get("step_id"),
+        "steps_sharing_this_agent_type": resolved.get("steps_sharing_this_agent_type"),
+        "role": notes.get("role", ""),
+        "status": notes.get("status"),
+        "run_status": run.get("status"),
+        "registered_at": notes.get("registered_at"),
+        "flags": _flags(run),
+        "summary": _summary(run),
+    }
+    if include_notes:
+        section["notes"] = notes.get("notes", [])
 
     try:
         payload = TextPayload(message=f"Reading {target_agent_id}'s notes.")
-        start_event = ToolEvent('tool_started', 'text', payload)
-        log_tool_state(start_event)
-        finished_event = ToolEvent('tool_finished', 'text', payload)
-        log_tool_state(finished_event)
-    except Exception as e:
-        print(f"Warning: Could not connect to logging server: {e}")
+        log_tool_state(ToolEvent("tool_started", "text", payload))
+        log_tool_state(ToolEvent("tool_finished", "text", payload))
+    except Exception as exc:
+        print(f"Warning: Could not connect to logging server: {exc}")
 
-    return json.dumps(result, indent=2)
+    return json.dumps(section, indent=2)
 
 
 @mcp.tool(
@@ -557,61 +439,15 @@ async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True
     },
 )
 async def scratchpad_read_report() -> str:
-    """Read the reporter-focused view of the scratchpad.
-
-    Returns a structured report containing:
-    - overall_status: whether all agents are done, any are blocked/failed, or still in progress
-    - agents: each agent's id, role, status, flags, and summary (no raw notes)
-    - activity_log: full chronological sequence of all agent actions
-
-    This is the primary tool for the reporting agent. It surfaces everything
-    needed to audit agents' work without the noise of private working notes.
-
-    Returns:
-        str: JSON report view with fields:
-            - overall_status (str): 'all_done' | 'in_progress' | 'blocked' | 'failed' | 'no_agents'
-            - agent_count (int): Total number of registered agents.
-            - agents (list): Per-agent summary with id, role, status, flags, summary.
-            - activity_log (list): Chronological log of all agent actions.
-    """
-    data = _load()
-    agents = data.get("agents", {})
-
-    statuses = {a["status"] for a in agents.values()}
-    if not agents:
-        overall = "no_agents"
-    elif "failed" in statuses:
-        overall = "failed"
-    elif "blocked" in statuses:
-        overall = "blocked"
-    elif statuses - {"done"}:
-        overall = "in_progress"
-    else:
-        overall = "all_done"
-
-    agent_report = []
-    for agent in agents.values():
-        agent_report.append({
-            "agent_id": agent["agent_id"],
-            "role": agent["role"],
-            "status": agent["status"],
-            "registered_at": agent["registered_at"],
-            "flag_count": len(agent["flags"]),
-            "flags": agent["flags"],
-            "has_summary": agent["summary"] is not None,
-            "summary": agent["summary"],
-        })
-
-    report = {
-        "overall_status": overall,
-        "agent_count": len(agents),
-        "agents": agent_report,
-        "activity_log": data.get("activity_log", []),
-    }
+    """Read the reporter-focused view of this session's scratchpad."""
+    if not SESSION_ID:
+        return _error("SESSION_ID is not set in the MCP environment.")
+    try:
+        report = await _get(f"{APP_API_URL}/agent-runs/session/{SESSION_ID}/scratchpad")
+    except Exception as exc:
+        return _error(f"Could not read the scratchpad report: {exc}")
     return json.dumps(report, indent=2)
 
-
-# ── Entry point ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     mcp.run()

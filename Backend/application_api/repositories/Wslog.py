@@ -1,186 +1,72 @@
-from sqlalchemy import delete as sa_delete
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy.exc import SQLAlchemyError
-from fastapi import HTTPException
+"""Session event log"""
+
+import logging
 from uuid import UUID
 
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from application_api.db.models.Wslog import WSLog as WSLogModel
-from application_api.schemas.Wslog import *
+from application_api.schemas.Wslog import WSLogCreate
+from application_api.services.publication import publication
+
+logger = logging.getLogger(__name__)
 
 
-# ---------------------------
-# CREATE WS LOG
-# ---------------------------
-async def create_ws_log(db: AsyncSession, data: WSLogCreate):
-    try:
-        log = WSLogModel(
-            session_id=data.session_id,
-            msg_type=data.msg_type,
-            payload=data.payload
-        )
-
-        db.add(log)
-        await db.commit()
-        await db.refresh(log)
-        return log
-
-    except SQLAlchemyError as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+async def create_ws_log(db: AsyncSession, data: WSLogCreate) -> WSLogModel:
+    """Append one event, locking the session row first."""
+    async with publication(db, data.session_id) as publish:
+        event = publish(data.msg_type, data.payload)
+    return event
 
 
-# ---------------------------
-# GET WS LOG
-# ---------------------------
-async def get_ws_log(db: AsyncSession, log_id: UUID):
-    result = await db.execute(
-        select(WSLogModel).where(WSLogModel.uuid == log_id)
-    )
-    log = result.scalar_one_or_none()
-
-    if not log:
+async def get_ws_log(db: AsyncSession, event_id: int) -> WSLogModel:
+    event = (
+        await db.execute(select(WSLogModel).where(WSLogModel.event_id == event_id))
+    ).scalar_one_or_none()
+    if not event:
         raise HTTPException(status_code=404, detail="WS log not found")
+    return event
 
-    return log
 
-
-# ---------------------------
-# GET LOGS WITH FILTERS
-# ---------------------------
-async def get_logs(
+async def replay_session(
     db: AsyncSession,
-    session_id: UUID = None,
-    msg_type: str = None,
-    json_key: str = None,
-    json_value: str = None,
-    skip: int = 0,
-    limit: int | None = 100,
-):
-    try:
-        query = select(WSLogModel)
-
-        if session_id:
-            query = query.where(WSLogModel.session_id == session_id)
-
-        if msg_type:
-            query = query.where(WSLogModel.msg_type == msg_type)
-
-        # JSON search
-        if json_key:
-            if json_value:
-                query = query.where(
-                    WSLogModel.payload[json_key].astext == json_value
-                )
-            else:
-                query = query.where(
-                    WSLogModel.payload.has_key(json_key)  # noqa
-                )
-
-        query = query.order_by(WSLogModel.created_at.asc()).offset(skip)
-        if limit is not None:
-            query = query.limit(limit)
-
-        result = await db.execute(query)
-        return result.scalars().all()
-
-    except SQLAlchemyError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ---------------------------
-# UPDATE WS LOG
-# ---------------------------
-async def update_ws_log(db: AsyncSession, log_id: UUID, data:   WSLogUpdate):
-    try:
-        log = await get_ws_log(db, log_id)
-
-        update_data = data.dict(exclude_unset=True)
-
-        for field, value in update_data.items():
-            setattr(log, field, value)
-
-        await db.commit()
-        await db.refresh(log)
-        return log
-
-    except SQLAlchemyError as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ---------------------------
-# APPEND TO PAYLOAD
-# ---------------------------
-async def append_ws_payload(db: AsyncSession, log_id: UUID, new_data: dict):
-    try:
-        log = await get_ws_log(db, log_id)
-
-        if log.payload is None:
-            log.payload = new_data
-        elif isinstance(log.payload, dict):
-            log.payload = {**log.payload, **new_data}
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="Payload is not JSON object"
-            )
-
-        await db.commit()
-        await db.refresh(log)
-        return log
-
-    except SQLAlchemyError as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ---------------------------
-# DELETE LOG
-# ---------------------------
-async def delete_ws_log(db: AsyncSession, log_id: UUID):
-    try:
-        log = await get_ws_log(db, log_id)
-        await db.delete(log)
-        await db.commit()
-        return {"detail": "Deleted"}
-
-    except SQLAlchemyError as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ---------------------------
-# GET ALL LOGS
-# ---------------------------
-async def get_all_logs(db: AsyncSession, skip: int = 0, limit: int = 100):
+    session_id: UUID,
+    after_event_id: int = 0,
+    limit: int = 500,
+) -> list[WSLogModel]:
+    """`WHERE session_id =:id AND event_id >:cursor ORDER BY event_id`."""
     try:
         result = await db.execute(
             select(WSLogModel)
-            .order_by(WSLogModel.created_at.desc())
-            .offset(skip)
+            .where(
+                WSLogModel.session_id == session_id,
+                WSLogModel.event_id > after_event_id,
+            )
+            .order_by(WSLogModel.event_id)
             .limit(limit)
         )
-        return result.scalars().all()
-
+        return list(result.scalars().all())
     except SQLAlchemyError as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-# ---------------------------
-# DELETE LOGS BY SESSION
-# ---------------------------
-async def delete_logs_by_session(db: AsyncSession, session_id: UUID):
-    """Delete every WSLog row for a session in one statement.
+        raise HTTPException(status_code=500, detail=str(e))
 
-    Previously fetched every row unbounded (get_logs(..., limit=None)) and
-    issued one DELETE per row through the ORM identity map — an N-statement
-    delete for what is a single WHERE-clause operation.
-    """
+
+async def get_logs(
+    db: AsyncSession,
+    session_id: UUID | None = None,
+    msg_type: str | None = None,
+    after_event_id: int = 0,
+    limit: int = 100,
+) -> list[WSLogModel]:
     try:
-        result = await db.execute(
-            sa_delete(WSLogModel).where(WSLogModel.session_id == session_id)
-        )
-        await db.commit()
-        return {"detail": "All session logs deleted", "deleted": result.rowcount or 0}
-
+        query = select(WSLogModel).where(WSLogModel.event_id > after_event_id)
+        if session_id:
+            query = query.where(WSLogModel.session_id == session_id)
+        if msg_type:
+            query = query.where(WSLogModel.msg_type == msg_type)
+        result = await db.execute(query.order_by(WSLogModel.event_id).limit(limit))
+        return list(result.scalars().all())
     except SQLAlchemyError as e:
-        await db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

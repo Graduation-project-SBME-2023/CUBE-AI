@@ -8,21 +8,29 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from application_api.db.binary_session import binary_engine
 from application_api.db.session import AsyncSessionLocal, engine
 from application_api.core.config import settings
 from application_api.core.metrics import install_sql_metrics, monitor_event_loop_lag, observe_http, render_metrics
 from application_api.api.routes import (
-    Taskmessage,
     Wslog,
+    agent_runs,
+    artifacts,
     chat_messages,
     chat_sessions,
-    contextaugmentation,
-    hypothesis,
+    chats,
+    cohorts,
+    feature_sets,
+    literature,
     model,
+    model_results,
     patient,
     plan,
     radiomics,
+    reports,
     segmentation,
+    segmentation_runs,
+    sessions,
     steps,
     study,
     sync,
@@ -53,6 +61,7 @@ async def lifespan(_app: FastAPI):
             with suppress(asyncio.CancelledError):
                 await task
         await engine.dispose()
+        await binary_engine.dispose()
 
 
 app = FastAPI(title="CUBE.AI Application API", version="1.1.0", lifespan=lifespan)
@@ -79,13 +88,22 @@ for router in (
     model.router,
     segmentation.router,
     radiomics.router,
-    chat_sessions.router,
+    sessions.router,
+    chats.router,
     chat_messages.router,
-    hypothesis.router,
+    # Deprecated alias for the legacy /chat_sessions surface; delegates to the
+    # two routers above and is removed once out-of-tree callers have migrated.
+    chat_sessions.router,
     plan.router,
     steps.router,
-    Taskmessage.router,
-    contextaugmentation.router,
+    agent_runs.router,
+    artifacts.router,
+    cohorts.router,
+    segmentation_runs.router,
+    feature_sets.router,
+    model_results.router,
+    reports.router,
+    literature.router,
     Wslog.router,
     workflow.router,
     sync.router,

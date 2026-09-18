@@ -8,6 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# reports.publish_report compiles the manuscript with pdflatex (subprocess,
+# not a Python package) — a minimal TeX Live covering the packages the
+# report templates use (geometry, booktabs, hyperref, graphicx, amsmath).
+RUN apt-get update && apt-get install --no-install-recommends -y \
+    texlive-latex-base \
+    texlive-latex-recommended \
+    texlive-latex-extra \
+    texlive-fonts-recommended \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN pip install --no-cache-dir \
     alembic \
     aiohttp \
@@ -20,10 +30,17 @@ RUN pip install --no-cache-dir \
     psycopg2-binary \
     "pydicom==2.4.4" \
     pydantic-settings \
+    python-multipart \
     sqlalchemy \
     "uvicorn[standard]"
 
 COPY Backend/application_api /app/application_api
+# V1 build step G: the artifact catalogue resolves `render_path` through
+# storage_paths (the A13 GIF exception), so the Application API needs the
+# same canonical path resolver every other service uses. It reads the render
+# root through the /storage mount it already has and gains no other file
+# ownership.
+COPY Backend/storage_paths.py /app/storage_paths.py
 COPY Backend/apps/radiology/lib/configs /app/apps/radiology/lib/configs
 
 EXPOSE 8001

@@ -51,17 +51,19 @@ def test_uuid_conversion_drops_naming_convention_foreign_keys():
 
 
 def test_alembic_env_registers_relationship_models_for_autogenerate():
-    """
-    There is no standalone monailabel/models/__init__.py seeder registry
-    anymore (Backend/monailabel/models/ cannot exist post-refactor — see
-    test_service_route_ownership.py). The equivalent contract — that
-    Alembic's autogenerate can see every relationship-bearing model, not
-    just the ones a given migration happens to touch — is enforced by
-    migrations/env.py importing them directly against Base.metadata.
-    """
+    """There is no standalone monailabel/models/__init__.py seeder registry anymore (Backend/monailabel/models/ cannot exist post-refactor — see test_service_route_ownership.py)."""
     env_source = (APPLICATION_ROOT / "migrations" / "env.py").read_text(encoding="utf-8")
 
-    assert "from application_api.db.models.hypothesis import Hypothesis" in env_source
+    # `hypotheses` no longer exists: the database-backed flow dropped it, and the PICO
+    # fields it held live in sessions.intent.
+    assert "from application_api.db.models.hypothesis import" not in env_source
+    assert "from application_api.db.models.sessions import Session" in env_source
+    assert "from application_api.db.models.chats import Chat" in env_source
     assert "from application_api.db.models.plan import Plan" in env_source
     assert "from application_api.db.models.steps import PlanStep" in env_source
-    assert "from application_api.db.models.Taskmessage import TaskMessage" in env_source
+    # `task_messages` and `context_augmentations` are gone (the database-backed flow,
+    # ): the compiled task message is part of the step definition now, and
+    # execution state is `agent_runs`.
+    assert "from application_api.db.models.agent_runs import AgentRun" in env_source
+    assert "Taskmessage" not in env_source
+    assert "contextaugmentation" not in env_source

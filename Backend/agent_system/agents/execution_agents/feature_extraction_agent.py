@@ -52,6 +52,13 @@ class FeatureExtractionAgent(AssistantAgent):
         mcp_server_path=None,
         session_id=None,
         max_tool_iterations=35,
+        # The node's identity is its step and its run, never the agent
+        # selector. The selector still names the factory; these name the
+        # execution, and the MCP subprocess needs them to write to the right
+        # `agent_runs` row.
+        node_name=None,
+        agent_run_id=None,
+        step_id=None,
     ):
         model_client = OllamaClient() if not model_client else model_client
 
@@ -76,6 +83,8 @@ class FeatureExtractionAgent(AssistantAgent):
             "WORKSPACE_DIR": workspace_folder,
             "SESSION_ID": session_id,
             "AGENT_ID": "feature_extraction_agent",
+            "AGENT_RUN_ID": str(agent_run_id or ""),
+            "STEP_ID": str(step_id or ""),
         })
         mcp_server = StdioServerParams(
             command=sys.executable,
@@ -104,7 +113,9 @@ class FeatureExtractionAgent(AssistantAgent):
             "browse_workspace",
         ]
         final_mcp_tools = cls.get_desired_tools(mcp_tools, desired_mcp_tools)
-        name = "feature_extraction_agent"
+        # The node name identifies THIS step's execution; it falls
+        # back to the agent type for the standalone/dev entrypoints below.
+        name = node_name or "feature_extraction_agent"
         # tools = [feature_extraction_tool_wrapper, feature_importance_tool_wrapper, *final_mcp_tools]
         tools = final_mcp_tools
         description = FEATURE_EXTRACTION_AGENT_DESCRIPTION

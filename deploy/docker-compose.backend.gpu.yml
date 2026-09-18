@@ -8,6 +8,7 @@ services:
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
       - ${COMPOSE_PROJECT_DIR}/Backend/storage_paths.py:/app/Backend/storage_paths.py:ro
+      - ${COMPOSE_PROJECT_DIR}/Backend/storage_write_guard.py:/app/Backend/storage_write_guard.py:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/agent_system:/app/Backend/agent_system
       - ${COMPOSE_PROJECT_DIR}/Backend/mcp:/app/Backend/mcp
       - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/lib/configs:/app/Backend/apps/radiology/lib/configs:ro
@@ -31,6 +32,7 @@ services:
       MONAI_URL: http://monailabel:8000
       CONTROL_API_URL: http://application-api:8001
       ORTHANC_URL: http://orthanc:8042
+      ORTHANC_WEBHOOK_TOKEN: ${ORTHANC_WEBHOOK_TOKEN:-}
     env_file:
       - .env
     depends_on:
@@ -38,7 +40,12 @@ services:
         condition: service_healthy
     healthcheck:
       test: [ "CMD", "python", "-c", 'import urllib.request; urllib.request.urlopen("http://localhost:8150/client-config", timeout=3)' ]
-      interval: 5s
+      # Fast polling only while coming up (bounded by start_period); once
+      # healthy, fall back to the same 30s cadence as the other services.
+      # A flat 5s interval for the container's entire lifetime is what was
+      # flooding the agents-backend logs with GET /client-config forever.
+      interval: 30s
+      start_interval: 5s
       timeout: 4s
       retries: 24
       start_period: 180s
@@ -217,6 +224,10 @@ services:
     container_name: orthanc-backend
     ports:
       - 8043:8042
+    environment:
+      ORTHANC_WEBHOOK_TOKEN: ${ORTHANC_WEBHOOK_TOKEN:-}
+    env_file:
+      - .env
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/orthanc/orthanc.json:/etc/orthanc/orthanc.json:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/orthanc/lua:/etc/orthanc/lua:ro

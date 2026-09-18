@@ -20,11 +20,42 @@ const isUuid = (value: unknown) =>
   typeof value === 'string' &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
-const makeLocalSessionId = () => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `local-${crypto.randomUUID()}`;
+// current rejects non-UUID session ids at every API and WebSocket boundary. The
+// local-only id this file used to mint on a failed create produced a whole
+// pipeline run that no database row described and that could never be
+// recovered — a failed session create is a visible error, not a phantom run.
+
+// A session owns many chats. Messages belong to a CHAT, so the sidebar
+// resolves the session's first chat once and posts there; the chat id is never
+// the session id.
+const resolveChatId = async (sessionId: string): Promise<string | null> => {
+  try {
+    const response = await fetch(
+      `${getBackendApiBaseUrl()}/chats/session/${encodeURIComponent(sessionId)}?limit=1`
+    );
+    if (!response.ok) {
+      return null;
+    }
+    const chats = await response.json();
+    if (Array.isArray(chats) && chats.length > 0) {
+      return String(chats[0].chat_id);
+    }
+    const created = await fetch(
+      `${getBackendApiBaseUrl()}/chats/session/${encodeURIComponent(sessionId)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: 'Chat' }),
+      }
+    );
+    if (!created.ok) {
+      return null;
+    }
+    return String((await created.json()).chat_id);
+  } catch (err) {
+    console.error('Could not resolve the session chat', err);
+    return null;
   }
-  return `local-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
 const ChatSidebar = ({
@@ -53,6 +84,8 @@ const ChatSidebar = ({
   const resizeStateRef = useRef({ startX: 0, startWidth: 420 });
   const messagesEndRef = useRef(null);
   const activeSessionIdRef = useRef(null);
+  // The chat that receives messages for the active session.
+  const activeChatIdRef = useRef<string | null>(null);
   const isMountedRef = useRef(true);
   // B2: prevent the initial message from being sent more than once
   const initialMessageSentRef = useRef(false);
@@ -126,11 +159,18 @@ const ChatSidebar = ({
       if (!isUuid(String(externalSessionId))) {
         return;
       }
-      fetch(`${getBackendApiBaseUrl()}/chat_messages/${externalSessionId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ role: 'user', text: initialUserMessage }),
-      })
+      resolveChatId(String(externalSessionId))
+        .then(chatId => {
+          if (!chatId) {
+            throw new Error('No chat for this session');
+          }
+          activeChatIdRef.current = chatId;
+          return fetch(`${getBackendApiBaseUrl()}/chat_messages/${chatId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: 'user', text: initialUserMessage }),
+          });
+        })
         .then(response => {
           console.log('[HypothesisFlow][ChatSidebar] Initial message POST result', {
             ok: response.ok,
@@ -205,18 +245,18 @@ const ChatSidebar = ({
     // history drawer with sessions from completely different studies.
     if (scopedSessionId && isUuid(String(scopedSessionId))) {
       try {
-        const r = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/${scopedSessionId}`);
+        const r = await fetch(`${getBackendApiBaseUrl()}/sessions/${scopedSessionId}`);
         if (!r.ok) return;
         const s = await r.json();
         if (!isMountedRef.current) return;
         setSessions(prev => {
-          const idx = prev.findIndex(x => String(x.chat_id) === String(s.chat_id));
+          const idx = prev.findIndex(x => String(x.chat_id) === String(s.session_id));
           const entry = {
-            chat_id: s.chat_id,
-            title: s.title || `Chat ${s.chat_id}`,
+            chat_id: s.session_id,
+            title: s.title || s.prompt || `Session ${s.session_id}`,
             messages: idx !== -1 && prev[idx].messages.length > 0 ? prev[idx].messages : [],
-            summary: s.summary,
-            last_activity: s.last_activity ? new Date(s.last_activity).getTime() : 0,
+            summary: '',
+            last_activity: s.updated_at ? new Date(s.updated_at).getTime() : 0,
           };
           if (idx === -1) return [entry, ...prev];
           return prev.map((x, i) => (i === idx ? entry : x));
@@ -229,7 +269,7 @@ const ChatSidebar = ({
     try {
       const data = [];
       for (let skip = 0; ; skip += 100) {
-        const r = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/?skip=${skip}&limit=100`);
+        const r = await fetch(`${getBackendApiBaseUrl()}/sessions/?skip=${skip}&limit=100`);
         if (!r.ok) {
           throw new Error(`HTTP ${r.status}`);
         }
@@ -238,11 +278,11 @@ const ChatSidebar = ({
         if (page.length < 100) break;
       }
       const mapped = (data || []).map(s => ({
-        chat_id: s.chat_id,
-        title: s.title || `Chat ${s.chat_id}`,
+        chat_id: s.session_id,
+        title: s.title || s.prompt || `Session ${s.session_id}`,
         messages: [],
-        summary: s.summary,
-        last_activity: s.last_activity ? new Date(s.last_activity).getTime() : 0,
+        summary: '',
+        last_activity: s.updated_at ? new Date(s.updated_at).getTime() : 0,
       }));
       if (!isMountedRef.current) return;
       setSessions(prev => {
@@ -262,10 +302,16 @@ const ChatSidebar = ({
       });
     } catch (err) {}
   };
-  const fetchMessagesForSession = async chat_id => {
-    if (!isUuid(String(chat_id))) {
+  const fetchMessagesForSession = async session_id => {
+    if (!isUuid(String(session_id))) {
       return;
     }
+    // Messages hang off a chat, not off the session.
+    const chat_id = await resolveChatId(String(session_id));
+    if (!chat_id) {
+      return;
+    }
+    activeChatIdRef.current = chat_id;
     try {
       const msgs = [];
       for (let skip = 0; ; skip += 100) {
@@ -288,7 +334,7 @@ const ChatSidebar = ({
       if (!isMountedRef.current) return;
       setSessions(prev =>
         prev.map(s => {
-          if (String(s.chat_id) !== String(chat_id)) return s;
+          if (String(s.chat_id) !== String(session_id)) return s;
           // Merge: use DB messages as base, append any local-only messages not in DB
           const dbIds = new Set(dbMessages.map(m => m.id));
           const dbTexts = new Set(dbMessages.map(m => m.text.trim()));
@@ -300,22 +346,46 @@ const ChatSidebar = ({
       );
     } catch (err) {}
   };
-  // B4: returns the new session ID directly so callers don't race on ref/state
-  const createNewSession = async (): Promise<string | null> => {
+  // B4: returns the new session ID directly so callers don't race on ref/state.
+  //
+  // A session is created WITH the user's own words — `prompt` is required
+  // and immutable, and the session's empty plan is created in the same
+  // server-side transaction. So a session cannot be created by pressing "New
+  // chat"; it is created when the first message is sent, and that message IS
+  // the prompt.
+  const createNewSession = async (prompt: string): Promise<string | null> => {
+    const trimmed = (prompt || '').trim();
+    if (!trimmed) {
+      snackbar.show({
+        title: 'Cannot start a session',
+        message: 'Type your research question first — it is saved as the session prompt.',
+        type: 'warning',
+        duration: 5000,
+      });
+      return null;
+    }
+
     try {
-      const payload = { title: `Chat ${sessions.length + 1}` };
-      const r = await fetch(`${getBackendApiBaseUrl()}/chat_sessions/`, {
+      const r = await fetch(`${getBackendApiBaseUrl()}/sessions/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ prompt: trimmed, title: trimmed.slice(0, 60) }),
       });
       if (!r.ok) {
         throw new Error(`HTTP ${r.status}`);
       }
       const data = await r.json();
+      const sessionId = String(data.session_id);
+
+      const chatId = await resolveChatId(sessionId);
+      if (!chatId) {
+        throw new Error('Session created but its chat could not be resolved');
+      }
+      activeChatIdRef.current = chatId;
+
       const newSession = {
-        chat_id: data.chat_id,
-        title: data.title || payload.title,
+        chat_id: sessionId,
+        title: data.title || trimmed.slice(0, 60),
         messages: [
           {
             id: makeId('sys'),
@@ -324,52 +394,39 @@ const ChatSidebar = ({
             ts: Date.now(),
           },
         ],
-        summary: data.summary,
-        last_activity: Date.now(),
-      };
-      if (!isMountedRef.current) return null;
-      setSessions(s => [newSession, ...s]);
-      setActiveSessionId(newSession.chat_id);
-      setDrawerOpen(false);
-      return newSession.chat_id; // B4: return so sendMessage can use it immediately
-    } catch (err) {
-      // Fallback: create a local-only session if DB fails
-      const fallbackId = makeLocalSessionId();
-      const newSession = {
-        chat_id: fallbackId,
-        title: `Local Chat ${sessions.length + 1}`,
-        messages: [
-          {
-            id: makeId('sys'),
-            role: 'system',
-            text: 'Hello! (local session, DB unavailable)',
-            ts: Date.now(),
-          },
-        ],
         summary: '',
         last_activity: Date.now(),
       };
       if (!isMountedRef.current) return null;
       setSessions(s => [newSession, ...s]);
-      setActiveSessionId(newSession.chat_id);
+      setActiveSessionId(sessionId);
       setDrawerOpen(false);
-      // B8: replaced alert() with snackbar
+      return sessionId;
+    } catch (err) {
+      // No local-only fallback: a run that the database never recorded cannot
+      // be resumed, cannot be reported on, and silently loses the user's work.
+      console.error('Failed to create session', err);
       snackbar.show({
-        title: 'Session Warning',
-        message: 'Could not create chat session in the database. Using a local-only session.',
-        type: 'warning',
-        duration: 5000,
+        title: 'Could not start the session',
+        message:
+          'The application API did not accept the new research session. Nothing was started; check the API and try again.',
+        type: 'error',
+        duration: 8000,
       });
-      return fallbackId; // B4: return fallback ID so caller is not left with null
+      return null;
     }
   };
+
   const confirmDeleteSession = async () => {
     if (!sessionToDelete) return;
     setIsDeleting(true);
     const chat_id = sessionToDelete.chat_id;
     try {
       if (isUuid(String(chat_id))) {
-        await fetch(`${getBackendApiBaseUrl()}/chat_sessions/${chat_id}`, { method: 'DELETE' });
+        // Normal removal is archiving; provenance blocks a hard delete.
+        await fetch(`${getBackendApiBaseUrl()}/sessions/${chat_id}/archive`, {
+          method: 'POST',
+        });
       }
       setSessions(s => s.filter(x => x.chat_id !== chat_id));
       if (activeSessionId === chat_id) {
@@ -390,11 +447,21 @@ const ChatSidebar = ({
     let sessionId = activeSessionId;
     // B4: use returned ID directly — avoids React state/ref race condition
     if (!sessionId) {
-      const newId = await createNewSession();
+      // The first message IS the session prompt.
+      const newId = await createNewSession(textToSend);
       if (!newId) return;
       sessionId = newId;
     }
-    const userMsg = { id: makeId('u'), role: 'user', text: textToSend, ts: Date.now() };
+    const userMsg = {
+      id: makeId('u'),
+      id_uuid:
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : undefined,
+      role: 'user',
+      text: textToSend,
+      ts: Date.now(),
+    };
     setSessions(prev =>
       prev.map(s =>
         String(s.chat_id) === String(sessionId)
@@ -407,20 +474,35 @@ const ChatSidebar = ({
     }
     setIsTyping(true);
     try {
-      if (isUuid(String(sessionId))) {
-        await fetch(`${getBackendApiBaseUrl()}/chat_messages/${sessionId}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role: 'user', text: userMsg.text }),
-        });
+      const chatId =
+        activeChatIdRef.current || (await resolveChatId(String(sessionId)));
+      if (!chatId) {
+        throw new Error('No chat for this session');
+      }
+      activeChatIdRef.current = chatId;
+      const persisted = await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chatId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // The message id is the idempotency key: a retry after a timeout
+        // re-sends the same id and gets the same row back.
+        body: JSON.stringify({
+          message_id: userMsg.id_uuid,
+          role: 'user',
+          text: userMsg.text,
+        }),
+      });
+      if (!persisted.ok) {
+        throw new Error(`HTTP ${persisted.status}`);
       }
     } catch (e) {
-      // B8: replaced alert() with snackbar
+      // There is no local-only degradation any more: a message the database
+      // does not have is a message the run cannot be reconstructed from.
       snackbar.show({
-        title: 'Message Warning',
-        message: 'Could not save message to the database. This chat is now local-only.',
-        type: 'warning',
-        duration: 5000,
+        title: 'Message not saved',
+        message:
+          'The application API did not accept this message, so it is not part of the research record. Check the API and send it again.',
+        type: 'error',
+        duration: 8000,
       });
     }
     // Debug log outgoing message
@@ -467,8 +549,11 @@ const ChatSidebar = ({
         );
         setIsTyping(true);
         try {
-          if (isUuid(String(currentSessionId))) {
-            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
+          const chatId =
+            activeChatIdRef.current || (await resolveChatId(String(currentSessionId)));
+          if (chatId) {
+            activeChatIdRef.current = chatId;
+            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chatId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ role: 'user', text: userMsg.text }),
@@ -497,8 +582,11 @@ const ChatSidebar = ({
         );
         setIsTyping(false);
         try {
-          if (isUuid(String(currentSessionId))) {
-            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
+          const chatId =
+            activeChatIdRef.current || (await resolveChatId(String(currentSessionId)));
+          if (chatId) {
+            activeChatIdRef.current = chatId;
+            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chatId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ role: 'assistant', text: completionMsg.text }),
@@ -527,8 +615,11 @@ const ChatSidebar = ({
         );
         setIsTyping(false);
         try {
-          if (isUuid(String(currentSessionId))) {
-            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
+          const chatId =
+            activeChatIdRef.current || (await resolveChatId(String(currentSessionId)));
+          if (chatId) {
+            activeChatIdRef.current = chatId;
+            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chatId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ role: 'assistant', text: stoppedMsg.text }),
@@ -621,11 +712,16 @@ const ChatSidebar = ({
       setIsTyping(false);
       try {
         if (isUuid(String(currentSessionId))) {
-          await fetch(`${getBackendApiBaseUrl()}/chat_messages/${currentSessionId}`, {
+          const chatIdForMessage =
+            activeChatIdRef.current || (await resolveChatId(String(currentSessionId)));
+          if (chatIdForMessage) {
+            activeChatIdRef.current = chatIdForMessage;
+            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chatIdForMessage}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ role: 'assistant', text: assistantMsg.text }),
-          });
+            });
+          }
         }
       } catch (err) {}
     },

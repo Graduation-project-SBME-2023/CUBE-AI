@@ -72,20 +72,26 @@ RADIOLOGY_STATE_DIR: Final[Path] = _resolve_configured_path(
 
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 _STATE_FILES = {
+    # No writer maps to "state.json" any more (retired — see
+    # storage_write_guard.py's RETIRED_WORKSPACE_PATHS), but it stays mapped
+    # to state/state.json here so a future regression still resolves to the
+    # path the write guard blocks, rather than falling through to a new,
+    # unguarded top-level path.
     "state.json",
     "scratchpad.json",
     "config.json",
     "segmentation_manifest.json",
     "review_draft.json",
     "review_result.json",
-    "literature_context.json",
 }
+_RETIRED_WORKSPACE_CACHE_DIRS = {".knowledge_cache", "cache"}
+_RETIRED_WORKSPACE_LITERATURE_PATHS = {"literature_context.json", "literature_review_output"}
+
 _WORKSPACE_DIR_MAP = {
     "populations": ("data", "populations"),
     "volumes": ("data", "volumes"),
     "masks": ("data", "masks"),
     "outputs": ("outputs", "agents"),
-    "literature_review_output": ("outputs", "literature"),
     "overlays": ("outputs", "overlays"),
     "features": ("outputs", "features"),
     "modeling": ("outputs", "modeling"),
@@ -129,6 +135,16 @@ def workspace_subpath(workspace_dir: str | os.PathLike[str], logical: str | os.P
         raise ValueError(f"Unsafe workspace path: {logical!r}")
 
     first, remainder = parts[0], parts[1:]
+    if first in _RETIRED_WORKSPACE_CACHE_DIRS:
+        raise ValueError(
+            f"Workspace cache paths are retired: {logical!r}. Use storage_paths.CACHE_DIR instead."
+        )
+    if first in _RETIRED_WORKSPACE_LITERATURE_PATHS or (
+        first in {"temp", "outputs"} and remainder and remainder[0] == "literature"
+    ):
+        raise ValueError(
+            f"Workspace literature paths are retired: {logical!r}. Use the literature_reviews API instead."
+        )
     if first in _STATE_FILES:
         mapped = ("state", first, *remainder)
     elif first in {"clinical_data.json", "clinical_data.csv"}:

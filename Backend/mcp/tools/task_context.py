@@ -1,17 +1,33 @@
 import os
-from service_urls import CONTROL_API_URL
-import httpx
 from typing import Any
 import logging
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
 from . import mcp
 from tool_logging import ToolEvent, log_tool_state, TextPayload
 
-BASE_URL = CONTROL_API_URL
+def _app_api_url() -> str:
+    """The Application API base URL."""
+    try:
+        from service_urls import APP_API_URL
+
+        return APP_API_URL
+    except ImportError:
+        return os.environ.get(
+            "APP_API_URL", os.environ.get("CONTROL_API_URL", "http://localhost:8001")
+        ).rstrip("/")
+
+
+BASE_URL = _app_api_url()
 SESSION_ID = os.environ.get("SESSION_ID", "")
 AGENT_ID = os.environ.get("AGENT_ID", "")
+# The approved step and run this agent instance was created for. When it
+# is present there is nothing to resolve: identity is the run, not the name.
+AGENT_RUN_ID = os.environ.get("AGENT_RUN_ID", "")
+STEP_ID = os.environ.get("STEP_ID", "")
 
 
 async def _get_json(client: httpx.AsyncClient, path: str) -> Any:
@@ -32,81 +48,39 @@ async def _get_json(client: httpx.AsyncClient, path: str) -> Any:
     },
 )
 async def read_agent_task_context() -> dict[str, Any]:
-    """
-    Resolve and return the current agent's task message + context augmentation
-    from DB using SESSION_ID and AGENT_ID environment variables.
-
-    Resolution flow:
-      1) hypothesis by chat session id
-      2) plan by hypothesis id
-      3) step by module == AGENT_ID
-      4) task message by step id
-      5) context augmentation by task_id
-    """
+    """Return this agent's task: the session's prompt and intent, its own plan step, and the compiled prompt of the run executing it."""
     if not SESSION_ID:
         return {
             "status": "error",
             "message": "SESSION_ID is not set in MCP environment.",
         }
 
-    if not AGENT_ID:
+    if not AGENT_ID and not AGENT_RUN_ID:
         return {
             "status": "error",
-            "message": "AGENT_ID is not set in MCP environment.",
+            "message": "Neither AGENT_RUN_ID nor AGENT_ID is set in MCP environment.",
         }
 
     log_tool_state(ToolEvent("tool_started", "text", TextPayload(message="Reading task context from DB")))
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
-            hypothesis = await _get_json(client, f"/hypotheses/by-chat/{SESSION_ID}")
-            hypothesis_id = str(hypothesis.get("id") or "")
-            if not hypothesis_id:
-                return {
-                    "status": "not_found",
-                    "message": f"No hypothesis linked to session {SESSION_ID}.",
-                    "session_id": SESSION_ID,
-                    "agent_id": AGENT_ID,
-                }
+            session = await _get_json(client, f"/sessions/{SESSION_ID}")
 
-            plans = await _get_json(client, f"/plans/by-hypothesis/{hypothesis_id}")
-            if not isinstance(plans, list) or not plans:
-                return {
-                    "status": "not_found",
-                    "message": f"No plans found for hypothesis {hypothesis_id}.",
-                    "session_id": SESSION_ID,
-                    "agent_id": AGENT_ID,
-                    "hypothesis_id": hypothesis_id,
-                }
+            steps_sharing = 1
+            if AGENT_RUN_ID:
+                run = await _get_json(client, f"/agent-runs/{AGENT_RUN_ID}")
+            else:
+                resolved = await _get_json(
+                    client,
+                    f"/agent-runs/session/{SESSION_ID}/by-agent-type/{AGENT_ID}",
+                )
+                run = resolved.get("run") or {}
+                steps_sharing = resolved.get("steps_sharing_this_agent_type", 1)
 
-            confirmed_plan = next((p for p in plans if p.get("state") == "confirmed"), None)
-            plan = confirmed_plan or plans[-1]
-            plan_id = str(plan.get("id") or "")
-            steps = plan.get("steps") or []
-
-            step = next((s for s in steps if s.get("module") == AGENT_ID), None)
-            if not step:
-                return {
-                    "status": "not_found",
-                    "message": f"No plan step mapped to AGENT_ID={AGENT_ID}.",
-                    "session_id": SESSION_ID,
-                    "agent_id": AGENT_ID,
-                    "hypothesis_id": hypothesis_id,
-                    "plan_id": plan_id,
-                    "available_modules": [s.get("module") for s in steps if s.get("module")],
-                }
-
-            step_id = str(step.get("id") or "")
-            task_message = await _get_json(client, f"/task-messages/step/{step_id}")
-            task_id = str(task_message.get("task_id") or "")
-
-            context_augmentation: dict[str, Any] = {}
-            if task_id:
-                try:
-                    context_augmentation = await _get_json(client, f"/context-augmentations/task/{task_id}")
-                except httpx.HTTPStatusError as context_error:
-                    if context_error.response.status_code != 404:
-                        raise
+            step = run.get("step") or {}
+            instructions = step.get("instructions") or {}
+            task_message = instructions.get("task_message") or {}
 
             log_tool_state(
                 ToolEvent(
@@ -119,26 +93,33 @@ async def read_agent_task_context() -> dict[str, Any]:
             return {
                 "status": "ok",
                 "session_id": SESSION_ID,
-                "agent_id": AGENT_ID,
-                "hypothesis": {
-                    "id": hypothesis.get("id"),
-                    "title": hypothesis.get("title", ""),
-                    "state": hypothesis.get("state", ""),
-                },
-                "plan": {
-                    "id": plan_id,
-                    "state": plan.get("state", ""),
-                    "study_goal": plan.get("study_goal", ""),
-                },
+                "agent_id": AGENT_ID or step.get("agent_type", ""),
+                # The user's own words, plus the planner's structured reading
+                # of them — beside each other, not one on top of the other.
+                "prompt": session.get("prompt", ""),
+                "prompt_kind": session.get("prompt_kind", ""),
+                "intent": session.get("intent") or {},
                 "step": {
-                    "id": step_id,
-                    "module": step.get("module", ""),
+                    "step_id": run.get("step_id"),
+                    "agent_type": step.get("agent_type", ""),
+                    "step_order": step.get("step_order"),
                     "title": step.get("title", ""),
-                    "description": step.get("description", ""),
-                    "status": step.get("status", ""),
+                    # The old free-text description lives inside
+                    # `instructions` rather than as a second, divergent field.
+                    "instructions": instructions,
+                    "steps_sharing_this_agent_type": steps_sharing,
+                },
+                "run": {
+                    "agent_run_id": run.get("agent_run_id"),
+                    "status": run.get("status"),
+                    "started_at": run.get("started_at"),
+                    # Assembled from the step PLUS the upstream results that
+                    # existed when this run started.
+                    "compiled_prompt": run.get("compiled_prompt") or "",
+                    "input_refs": run.get("input_refs") or {},
                 },
                 "task_message": task_message,
-                "context_augmentation": context_augmentation,
+                "context_augmentation": task_message.get("context_augmentation") or {},
             }
 
     except httpx.HTTPStatusError as e:

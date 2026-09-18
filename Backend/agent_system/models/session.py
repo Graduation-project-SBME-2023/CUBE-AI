@@ -40,13 +40,22 @@ class Session:
     agent_status: Dict[str, Any] = field(default_factory=dict)
     last_error: Optional[str] = None
     interrupted: bool = False
-    resume_from_agent: Optional[str] = None
-    resume_agent_statuses: Dict[str, str] = field(default_factory=dict)
+    # Where a resume continues, identified by the STEP rather than by the
+    # agent selector: two steps may name the same agent, and resuming "the
+    # segmentation agent" would be ambiguous between them.
+    resume_from_step_id: Optional[str] = None
 
     hypothesis: ClinicalHypothesis | None = None
     plan: StudyPlan | None = None
 
     def __post_init__(self):
+        # Routes type session_id as either `str` (path params) or `UUID`
+        # (Pydantic request bodies); this plain dataclass never coerces it
+        # like Pydantic would. Every consumer downstream (WS queue keys,
+        # SessionStore dict keys, JSON payloads) assumes a plain string, so
+        # normalize once here rather than at each call site.
+        self.session_id = str(self.session_id)
+
         # Create asyncio primitives here, inside the running event loop
         self.pause_event = asyncio.Event()
         self.cancel_event = asyncio.Event()

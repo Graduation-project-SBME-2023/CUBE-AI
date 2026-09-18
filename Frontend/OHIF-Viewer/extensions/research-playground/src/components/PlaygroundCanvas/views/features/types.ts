@@ -1,6 +1,14 @@
+/**
+ * Application API paths (relative to BACKEND_API) that serve generated
+ * downloads. Feature tables are rows in PostgreSQL, not workspace files.
+ */
+export type ExportPaths = Record<string, string>;
+
 export interface FeaturesData {
   status: string;
-  csv_paths?: Record<string, string>;
+  agent_run_id?: string;
+  radiomics_rows?: { created?: number; reused?: number; total?: number };
+  exports?: ExportPaths;
   num_subjects?: number;
   /** Patients that actually had at least one feature extracted (subset of num_subjects). */
   num_subjects_with_features?: number;
@@ -13,6 +21,13 @@ export interface FeaturesData {
   processing_time_seconds?: number;
 }
 
+export interface FeatureSetSummary {
+  set_key: string;
+  feature_set_id: string;
+  feature_count?: number;
+  frozen_at?: string | null;
+  label_supervised_on_full_data?: boolean;
+}
 
 export interface ImportanceBar {
   feature: string;
@@ -60,6 +75,8 @@ export interface FeatureImportanceData {
   status: string;
   method?: string;
   feature_count?: number;
-  result_files?: Record<string, string>;
+  feature_sets?: FeatureSetSummary[];
+  exports?: ExportPaths;
+  label_supervised_on_full_data?: boolean;
   chart_data?: ChartData | null;
 }

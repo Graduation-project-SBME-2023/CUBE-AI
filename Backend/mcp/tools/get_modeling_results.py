@@ -1,90 +1,124 @@
-from . import mcp 
-from pathlib import Path
-import os
-import pandas as pd
-import sys
-from pathlib import Path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
+"""Read recorded modeling results for reporting."""
+
+from __future__ import annotations
+
+from typing import Any, Iterable
+
+from . import mcp
+from .helpers import domain_api
 from tool_logging import ToolEvent, log_tool_state, TextPayload
-from storage_paths import HYPOTHESES_DIR, workspace_subpath
+
+_HEADLINE_METRICS = ("accuracy", "auc", "f1", "precision", "recall", "specificity", "sensitivity")
+
+
+def _cell(value: Any) -> str:
+    if value is None:
+        return "—"
+    if isinstance(value, float):
+        return f"{value:.4f}"
+    return str(value).replace("|", "/")
+
+
+def _table(header: Iterable[str], rows: Iterable[Iterable[Any]]) -> str:
+    header = list(header)
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join("---" for _ in header) + " |",
+    ]
+    lines += ["| " + " | ".join(_cell(value) for value in row) + " |" for row in rows]
+    return "\n".join(lines)
+
+
+def _feature_section(feature_sets: list[dict[str, Any]]) -> str:
+    if not feature_sets:
+        return "### Features\n*No frozen feature set is recorded for this session.*"
+    rows = []
+    for item in feature_sets:
+        selection = item.get("selection") or {}
+        rows.append(
+            [
+                item.get("set_key"),
+                item.get("feature_set_id"),
+                item.get("feature_count"),
+                item.get("subject_count"),
+                "yes" if selection.get("label_supervised_on_full_data") else "no",
+                ", ".join((item.get("feature_names") or [])[:10]),
+            ]
+        )
+    return "### Features\n" + _table(
+        ["Set", "Feature set id", "Features", "Subjects", "Selected on every label", "First features"],
+        rows,
+    )
+
+
+def _comparison_section(entry: dict[str, Any]) -> str:
+    selected = entry.get("selected") or {}
+    metrics = selected.get("metrics") or {}
+    evaluation = metrics.get("evaluation") or {}
+    headline = evaluation.get("metrics") or {}
+    feature_set = entry.get("feature_set") or {}
+    source = (
+        f"feature set `{feature_set.get('set_key')}` ({feature_set.get('feature_count')} features)"
+        if feature_set
+        else f"captured input CSV (artifact {entry.get('input_artifact_id')})"
+    )
+    parts = [
+        f"### Comparison `{entry.get('comparison_key')}`",
+        f"- Trained on: {source}",
+        f"- Evaluation: {evaluation.get('kind', 'unknown')} on {evaluation.get('n_cases', '?')} case(s)",
+        f"- Selected model: {selected.get('algorithm', '—')} (`{selected.get('variant_key', '—')}`)",
+    ]
+    if not evaluation.get("generalisation_estimate"):
+        parts.append(
+            "- **Caveat:** these metrics are NOT a generalisation estimate — the features "
+            "were selected with the evaluated rows' labels, or no withheld rows were used. "
+            "Report them as optimistic."
+        )
+    if headline:
+        parts.append(
+            _table(
+                ["Metric", "Value"],
+                [[name, headline.get(name)] for name in _HEADLINE_METRICS if name in headline],
+            )
+        )
+    variants = entry.get("variants") or []
+    if variants:
+        parts.append(
+            _table(
+                ["Variant", "Algorithm", "Status", "Selected", "CV AUC", "CV Accuracy", "Eval AUC"],
+                [
+                    [
+                        variant.get("variant_key"),
+                        variant.get("algorithm"),
+                        variant.get("status"),
+                        "yes" if variant.get("selected") else "",
+                        ((variant.get("metrics") or {}).get("cv") or {}).get("AUC"),
+                        ((variant.get("metrics") or {}).get("cv") or {}).get("Accuracy"),
+                        (((variant.get("metrics") or {}).get("evaluation") or {}).get("metrics") or {}).get("auc"),
+                    ]
+                    for variant in variants
+                ],
+            )
+        )
+    return "\n".join(parts)
 
 
 @mcp.tool()
-def get_modeling_results() -> str:
-    """
-    Retrieves the latest machine learning modeling artifacts from the local file system. this will git you all the required data with one request
-
-    Use this tool in scenarios such as:
-    1. When you need to retrieve the modeling and the feature extraction results to write your report
-    """
-    mode = "all"
-    WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR")
+async def get_modeling_results() -> str:
+    """Retrieves the recorded feature sets and modeling results of this session in one request — everything needed to write the results report."""
+    log_tool_state(ToolEvent("tool_started", "text", TextPayload(message="fetching results")))
     try:
-        payload = TextPayload(message='fetching results')
-        start_event = ToolEvent(
-            event_type='tool_started',
-            content_type='text',
-            content=payload
-        )
-        log_tool_state(start_event)
-        # 1. Resolve Paths
-        if not WORKSPACE_DIR:
-            WORKSPACE_DIR = str(HYPOTHESES_DIR / "workspace_default")
-        WORKSPACE_DIR = Path(WORKSPACE_DIR)
+        feature_sets = await domain_api.list_feature_sets()
+        summary = await domain_api.model_results_summary()
+    except domain_api.DomainApiError as exc:
+        return f"Error: the modeling results could not be read from the Application API: {exc}"
 
-        # current_dir = Path(__file__).resolve().parent
-        # logging_path = current_dir.parent.parent / "agent_system" / "workspace"
-
-        # Map modes to specific files (or all of them)
-        all_files = {
-            "features": workspace_subpath(WORKSPACE_DIR, "features/top_10_features.csv"),
-            # "tuning": logging_path / "model_1_results.csv",
-            "evaluation": workspace_subpath(WORKSPACE_DIR, "models/models/model_1/independent_eval_results_model_1.csv"),
-            "comparisons": workspace_subpath(WORKSPACE_DIR, "models/model_comparison_results.csv"),
-            "summary": workspace_subpath(WORKSPACE_DIR, "models/model_summary.csv")
-        }
-
-        # Select which files to read based on the 'mode' argument
-        files_to_read = all_files if mode == "all" else {mode: all_files[mode]}
-        
-        results = []
-
-        # 2. Check Directory
-        if not WORKSPACE_DIR.exists():
-            return f"Error: The directory '{WORKSPACE_DIR}' does not exist."
-
-        # 3. Read Files with Error Handling
-        for key, file_path in files_to_read.items():
-            header = key.replace("_", " ").title()
-            
-            if not file_path.exists():
-                results.append(f"### {header}\n*Error: File not found at {file_path}*")
-                continue
-
-            try:
-                df = pd.read_csv(file_path)
-                if df.empty:
-                    results.append(f"### {header}\n*Warning: File is empty.*")
-                else:
-                    # Convert to markdown for clear AI reading
-                    results.append(f"### {header}\n{df.to_markdown(index=False)}")
-            except Exception as e:
-                results.append(f"### {header}\n*Error reading CSV: {str(e)}*")
-        payload = TextPayload(message="study data results Fetched")
-        finish_event = ToolEvent(
-            event_type='tool_finished',
-            content_type='text',
-            content=payload
-        )
-        log_tool_state(finish_event)
-        return "\n\n".join(results)
-
-    except Exception as e:
-        return f"Critical error in get_modeling_results: {str(e)}"
-
-
-# current_dir = Path(__file__).resolve().parent
-# logging_path = current_dir.parent.parent / "agent_system" / "memory_output_logs"
-
-# data = pd.read_csv(logging_path / "independent_eval_results_tuned_model_1.csv")
-# print(data)
+    sections = [_feature_section(feature_sets)]
+    if summary:
+        sections += [_comparison_section(entry) for entry in summary]
+    else:
+        sections.append("### Modeling\n*No model result is recorded for this session.*")
+    log_tool_state(
+        ToolEvent("tool_finished", "text", TextPayload(message="study data results Fetched"))
+    )
+    return "\n\n".join(sections)

@@ -4,7 +4,6 @@ import { compileLatexReport } from '../../../services/api';
 import { ReportingViewProps, CompileStatus } from './reporting/types';
 import { extractLatexText, handlePdfDownload } from './reporting/utils';
 import { EmptyReportingState } from './reporting/Shared';
-import { AGENTS_API } from '../../../config';
 
 const FileTextIcon: any = FileText;
 const DownloadIcon: any = Download;
@@ -26,12 +25,7 @@ export default function ReportingView({ reportData, latexData, sessionId }: Repo
 
     const sessionForCompile = sessionId || latexData?.sessionId || reportData?.sessionId;
     
-    let pdfUrl = compiledPdfUrl || latexData?.latex_pdf || latexData?.pdf_path;
-    const backendPdfPath = latexData?.outputs?.files?.manuscript_pdf;
-    if (!pdfUrl && backendPdfPath && sessionForCompile) {
-        const filename = backendPdfPath.split('/').pop() || 'research_abstract.pdf';
-        pdfUrl = `${AGENTS_API}/files/workspace_${sessionForCompile}/reports/${filename}`;
-    }
+    const pdfUrl = compiledPdfUrl || latexData?.latex_pdf || latexData?.pdf_path;
 
     const [pdfBlobUrl, setPdfBlobUrl] = useState<string>('');
 
@@ -58,8 +52,15 @@ export default function ReportingView({ reportData, latexData, sessionId }: Repo
         
         let isMounted = true;
         
-        // Append timestamp for cache busting when re-compiling the exact same URL
-        const fetchUrl = lastCompiledAt ? `${pdfUrl}${pdfUrl.includes('?') ? '&' : '?'}t=${lastCompiledAt}` : pdfUrl;
+        // Append timestamp for cache busting when re-compiling the exact same URL.
+        // A data: URI (the manual-compile preview, streamed inline — A19, no
+        // durable PDF file) is already unique per compile and has no query
+        // string syntax of its own; appending "?t=..." would corrupt its
+        // base64 payload instead of busting any cache.
+        const isDataUri = pdfUrl.startsWith('data:');
+        const fetchUrl = !isDataUri && lastCompiledAt
+            ? `${pdfUrl}${pdfUrl.includes('?') ? '&' : '?'}t=${lastCompiledAt}`
+            : pdfUrl;
 
         fetch(fetchUrl)
             .then(res => {

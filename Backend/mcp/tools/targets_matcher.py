@@ -1,56 +1,35 @@
 import os
-import csv
 import json
 import httpx
 import logging
+import asyncio
+
 from . import mcp
 from tool_logging import ToolEvent, log_tool_state, TextPayload
 from .scratchpad import scratchpad_raise_flag, scratchpad_write_note
-import asyncio
-from service_urls import CONTROL_API_URL
-from storage_paths import workspace_subpath
+from .helpers import domain_api
 
-base_url = CONTROL_API_URL
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Shared: wait for doctor-uploaded targets.csv (manual mode)
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Shared: wait for explicit human cohort approval (HITL Gate)
-# ---------------------------------------------------------------------------
+APPROVAL_POLL_SECONDS = float(os.environ.get("COHORT_APPROVAL_POLL_SECONDS", "2"))
 
 _IS_WAITING_FOR_APPROVAL = False
 
 
-async def _wait_for_cohort_approval(workspace_dir: str, config_path: str, csv_path: str, timeout_seconds: int = 3600) -> str:
-    """
-    Polls until config.json contains 'cohort_approved': True (set when the user clicks
-    'Approve & Lock Cohort' on Subpage 4 of the Population UI).
-    Raises an exception on timeout to prevent Autogen from silently continuing to downstream agents.
-    """
+async def _wait_for_cohort_approval(timeout_seconds: int = 3600) -> dict:
+    """Wait until the doctor approves (freezes) the population cohort."""
     global _IS_WAITING_FOR_APPROVAL
 
-    def is_approved() -> bool:
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, mode="r", encoding="utf-8") as f:
-                    c = json.load(f)
-                datasetlist = c.get("datasetlist", [])
-                if c.get("cohort_approved", False) is not True or not datasetlist:
-                    return False
-                if not os.path.exists(csv_path):
-                    return False
-                with open(csv_path, mode="r", encoding="utf-8", newline="") as f:
-                    return any(csv.DictReader(f))
-            except Exception:
-                return False
-        return False
+    async def approved_cohort() -> dict | None:
+        cohort = await domain_api.get_population_cohort()
+        if cohort and cohort.get("frozen_at"):
+            return cohort
+        return None
 
-    if is_approved():
+    cohort = await approved_cohort()
+    if cohort is not None:
         _IS_WAITING_FOR_APPROVAL = False
-        return csv_path
+        return cohort
 
     if not _IS_WAITING_FOR_APPROVAL:
         _IS_WAITING_FOR_APPROVAL = True
@@ -74,254 +53,103 @@ async def _wait_for_cohort_approval(workspace_dir: str, config_path: str, csv_pa
             except Exception as exc:
                 logger.warning("Could not publish cohort-approval waiting state: %s", exc)
 
-    poll_interval = 2
-    elapsed = 0
-
-    while not is_approved():
-        await asyncio.sleep(poll_interval)
-        elapsed += poll_interval
+    elapsed = 0.0
+    while True:
+        await asyncio.sleep(APPROVAL_POLL_SECONDS)
+        elapsed += APPROVAL_POLL_SECONDS
+        cohort = await approved_cohort()
+        if cohort is not None:
+            _IS_WAITING_FOR_APPROVAL = False
+            return cohort
         if elapsed >= timeout_seconds:
             _IS_WAITING_FOR_APPROVAL = False
-            raise RuntimeError("Execution stopped: Cohort approval timed out waiting for user review in UI. Pipeline cannot continue without approval.")
+            raise RuntimeError(
+                "Execution stopped: Cohort approval timed out waiting for user review in UI. "
+                "Pipeline cannot continue without approval."
+            )
 
-    _IS_WAITING_FOR_APPROVAL = False
-    return csv_path
-
-
-# ---------------------------------------------------------------------------
-# Shared: join cohort_labels.csv + datasetlist → targets.csv
-# ---------------------------------------------------------------------------
-
-async def _build_targets_from_labels(workspace_dir: str, datasetlist: list, config: dict, csv_path: str) -> str:
-    """
-    Reads cohort_labels.csv and resolves patient IDs via Orthanc to produce targets.csv.
-    If cohort_labels.csv is missing in automatic mode, runs extract_cohort_labels first.
-    Returns csv_path on success, or a JSON error string.
-    """
-    from .population.cohort_labels import extract_cohort_labels
-
-    cohort_labels_path = str(workspace_subpath(workspace_dir, "populations/cohort_labels.csv"))
-    if not os.path.exists(cohort_labels_path):
-        print("[generate_targets] cohort_labels.csv not found — running extract_cohort_labels automatically...")
-        extraction_result = await extract_cohort_labels()
-        if isinstance(extraction_result, dict) and extraction_result.get("status") == "error":
-            err_msg = f"extract_cohort_labels failed: {extraction_result.get('message', 'unknown error')}"
-            await scratchpad_raise_flag(level="error", message=err_msg)
-            return json.dumps({"status": "error", "message": err_msg})
-        if not os.path.exists(cohort_labels_path):
-            err_msg = "cohort_labels.csv still missing after extract_cohort_labels ran."
-            await scratchpad_raise_flag(level="error", message=err_msg)
-            return json.dumps({"status": "error", "message": err_msg})
-
-    labels_dict: dict = {}
-    with open(cohort_labels_path, mode="r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            labels_dict[row["patient_id"]] = row
-
-    dropped_patients: list[str] = []
-    low_confidence_patients: list[str] = []
-    valid_targets: list[tuple] = []
-
-    async with httpx.AsyncClient() as client:
-        for uid in datasetlist:
-            try:
-                study_res = await client.get(f"{base_url}/volumes/{uid}/study")
-                study_res.raise_for_status()
-                patient_uuid = study_res.json().get("patient_id")
-
-                patient_res = await client.get(f"{base_url}/patients/{patient_uuid}")
-                patient_res.raise_for_status()
-                patient_data = patient_res.json()
-                orthanc_pid = patient_data.get("orthanc_patient_id", "")
-                clinical_pid = patient_data.get("name", "")
-
-                case_id = clinical_pid if clinical_pid else orthanc_pid
-
-                kits_case_id = None
-                if clinical_pid and clinical_pid.startswith("KiTS-"):
-                    kits_case_id = clinical_pid.replace("KiTS-", "case_")
-                elif orthanc_pid and orthanc_pid.startswith("KiTS-"):
-                    kits_case_id = orthanc_pid.replace("KiTS-", "case_")
-
-                # 5-way lookup in labels_dict
-                label_info = (
-                    labels_dict.get(case_id)
-                    or labels_dict.get(clinical_pid)
-                    or labels_dict.get(orthanc_pid)
-                    or (labels_dict.get(kits_case_id) if kits_case_id else None)
-                    or labels_dict.get(uid)
-                )
-
-                if not label_info:
-                    dropped_patients.append(f"{clinical_pid or orthanc_pid} (No medical report found)")
-                    continue
-
-                if label_info.get("confidence") == "low":
-                    low_confidence_patients.append(orthanc_pid)
-
-                is_target = str(label_info.get("has_target_disease")).lower() == "true"
-                target_val = 1 if is_target else 0
-                valid_targets.append((uid, case_id, target_val))
-
-            except Exception as e:
-                dropped_patients.append(f"{uid} (API error: {e})")
-
-    valid_uids = [uid for uid, _, _ in valid_targets]
-
-    if not valid_uids:
-        msg = "0 valid target labels found in cohort. Proceeding with 0-size initial targets so the user can manually select volumes in the dataviewer UI."
-        await scratchpad_raise_flag(level="warning", message=msg)
-        config_json_path = str(workspace_subpath(workspace_dir, "config.json"))
-        config["datasetlist"] = []
-        with open(config_json_path, mode="w", encoding="utf-8") as f:
-            json.dump(config, f, indent=4)
-        with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["id", "name", "target"])
-        return csv_path
-
-    # Update config.json to only contain validated UIDs
-    config_json_path = str(workspace_subpath(workspace_dir, "config.json"))
-    config["datasetlist"] = valid_uids
-    with open(config_json_path, mode="w", encoding="utf-8") as f:
-        json.dump(config, f, indent=4)
-
-    if dropped_patients:
-        msg = (
-            f"Dropped {len(dropped_patients)} volumes because no medical report exists for them. "
-            f"Continuing with {len(valid_targets)} valid patients."
-        )
-        await scratchpad_raise_flag(level="warning", message=msg)
-
-    if low_confidence_patients:
-        msg = (
-            f"Included {len(low_confidence_patients)} patients with low LLM confidence "
-            f"(retained as per policy). See metadata for details."
-        )
-        await scratchpad_raise_flag(level="warning", message=msg)
-
-    with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["id", "name", "target"])
-        for uid, name, target in valid_targets:
-            writer.writerow([uid, name, target])
-
-    return csv_path
-
-
-# ---------------------------------------------------------------------------
-# MCP Tool
-# ---------------------------------------------------------------------------
 
 @mcp.tool()
 async def generate_targets() -> str:
-    """
-    Generates the targets.csv file mapping study cohort volumes to class labels (0/1)
-    and acts as the Human-in-the-Loop approval gate before segmentation.
-
-    In both 'automatic' and 'manual' labelling modes, after preparing initial candidate
-    labels, this tool waits for explicit human review and cohort approval via the
-    interactive frontend UI before proceeding.
-    """
+    """Prepares the cohort's target labels for review and acts as the Human-in-the-Loop approval gate before segmentation."""
     log_tool_state(ToolEvent(event_type='tool_started', content_type='text',
                              content=TextPayload(message='preparing targets & awaiting cohort approval')))
 
-    workspace_dir = os.environ.get("WORKSPACE_DIR")
-    if not workspace_dir:
-        return json.dumps({"status": "error", "message": "WORKSPACE_DIR not set."})
+    try:
+        cohort = await domain_api.require_population_cohort()
+    except domain_api.DomainApiError as exc:
+        return json.dumps({"status": "error", "message": str(exc)})
 
-    output_dir = str(workspace_subpath(workspace_dir, "populations/targets"))
-    os.makedirs(output_dir, exist_ok=True)
-    csv_path = os.path.join(output_dir, "targets.csv")
-
-    config_json_path = str(workspace_subpath(workspace_dir, "config.json"))
-    config: dict = {}
-    datasetlist: list = []
-    labelling_mode = "automatic"
-
-    if os.path.exists(config_json_path):
-        try:
-            with open(config_json_path, mode="r", encoding="utf-8") as f:
-                config = json.load(f)
-                datasetlist = config.get("datasetlist", [])
-                labelling_mode = config.get("labelling_mode", "automatic")
-        except (json.JSONDecodeError, OSError):
-            pass
-
-    if not datasetlist:
-        msg = (
-            "Datasetlist is empty (0 cohort). Waiting at the Human-in-the-Loop "
-            "checkpoint until the user manually selects and labels at least one volume. "
-            "Downstream execution is blocked for an empty cohort."
+    members = cohort.get("members") or []
+    labelling_mode = (cohort.get("criteria") or {}).get("labelling_mode", "automatic")
+    if not members:
+        await scratchpad_raise_flag(
+            level="warning",
+            message=(
+                "The cohort is empty (0 volumes). Waiting at the Human-in-the-Loop "
+                "checkpoint until the user manually selects and labels at least one volume. "
+                "Downstream execution is blocked for an empty cohort."
+            ),
         )
-        await scratchpad_raise_flag(level="warning", message=msg)
+    elif not cohort.get("frozen_at"):
+        field = (cohort.get("label_definition") or {}).get("field", "has_target_disease")
+        unlabeled = [
+            member["volume_series_instance_uid"]
+            for member in members
+            if not isinstance((member.get("label") or {}).get(field), bool)
+        ]
+        low_confidence = [
+            member["volume_series_instance_uid"]
+            for member in members
+            if member.get("label_confidence") == "low"
+        ]
+        if unlabeled:
+            await scratchpad_raise_flag(
+                level="warning",
+                message=(
+                    f"{len(unlabeled)} of {len(members)} cohort volume(s) have no valid label "
+                    f"({labelling_mode} mode). They stay unlabelled — and out of the analysis — "
+                    "unless the doctor labels them before approving."
+                ),
+            )
+        if low_confidence:
+            await scratchpad_raise_flag(
+                level="warning",
+                message=(
+                    f"Included {len(low_confidence)} volume(s) with low LLM confidence "
+                    "(retained as per policy)."
+                ),
+            )
 
-    if labelling_mode == "automatic":
-        print(f"[generate_targets] Automatic mode — building candidate targets for {len(datasetlist)} volumes...")
-        res = await _build_targets_from_labels(workspace_dir, datasetlist, config, csv_path)
-        if res.startswith("{") and "error" in res:
-            return res
-    else:
-        print(f"[generate_targets] Manual mode — checking/initializing manual label workspace...")
-        cohort_labels_path = str(workspace_subpath(workspace_dir, "populations/cohort_labels.csv"))
-        if not os.path.exists(cohort_labels_path):
-            os.makedirs(workspace_subpath(workspace_dir, "populations"), exist_ok=True)
-            with open(cohort_labels_path, mode="w", newline="", encoding="utf-8") as f:
-                fieldnames = ["patient_id", "has_target_disease", "confidence", "requires_manual_review", "source_evidence"]
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                writer.writeheader()
-                for uid in datasetlist:
-                    writer.writerow({
-                        "patient_id": uid,
-                        "has_target_disease": "",
-                        "confidence": "unlabeled",
-                        "requires_manual_review": "True",
-                        "source_evidence": "Manual mode — awaiting user selection in UI"
-                    })
-        await _build_targets_from_labels(workspace_dir, datasetlist, config, csv_path)
+    approved = await _wait_for_cohort_approval(timeout_seconds=3600)
+    rows = await domain_api.cohort_analysis_rows(approved["cohort_id"])
+    final_count = len(rows)
 
-    # HITL Approval Gate: wait for doctor to sign off on Subpage 4
-    result = await _wait_for_cohort_approval(workspace_dir, config_json_path, csv_path, timeout_seconds=3600)
-
-    # Re-read config and targets.csv after approval to obtain definitive final volume count (reflecting user manual selection in UI)
-    final_count = len(datasetlist)
-    if os.path.exists(config_json_path):
-        try:
-            with open(config_json_path, mode="r", encoding="utf-8") as f:
-                final_config = json.load(f)
-                final_count = len(final_config.get("datasetlist", []))
-        except Exception as e:
-            logger.warning(f"Failed to re-read config after cohort approval: {e}")
-
-    # Verify actual row count in targets.csv as the ultimate truth after user labeling
-    if os.path.exists(result):
-        try:
-            with open(result, mode="r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                rows = list(reader)
-                if len(rows) > 0:
-                    final_count = len(rows)
-        except Exception as e:
-            logger.warning(f"Failed to read targets.csv row count after approval: {e}")
-
-    if final_count > 0:
-        await scratchpad_write_note(
-            content=f"### Validated Study Cohort Approved by Doctor\nThe user has reviewed and approved the final cohort in the UI dataviewer with a final count of {final_count} volume(s). Even if preliminary automated searches yielded fewer or zero cases, this post-review count ({final_count}) is the authoritative cohort size. All downstream agents (feature extraction, modeling, reporting) MUST use this finalized cohort from targets.csv without errors."
-        )
-    else:
+    if final_count <= 0:
         raise RuntimeError(
             "Cohort approval produced zero labeled volumes. The population stage "
             "cannot continue until at least one volume is selected and labeled."
         )
+    await scratchpad_write_note(
+        content=(
+            "### Validated Study Cohort Approved by Doctor\n"
+            f"The user has reviewed and approved (locked) the final cohort in the UI with "
+            f"{final_count} labelled volume(s). Even if preliminary automated searches yielded "
+            f"fewer or zero cases, this post-review count ({final_count}) is the authoritative "
+            f"cohort size. Downstream agents read it from cohort {approved['cohort_id']}."
+        )
+    )
 
     log_tool_state(ToolEvent(event_type='tool_finished', content_type='text',
                              content=TextPayload(message=f"Cohort Approved & Targets Locked! ({final_count} volumes)")))
     return json.dumps({
         "status": "success",
-        "targets_path": result,
+        "cohort_id": approved["cohort_id"],
         "final_cohort_size": final_count,
-        "message": f"Human-in-the-Loop review complete and cohort approved in the UI. Final validated cohort size after user review and manual labeling is exactly {final_count} volumes. You MUST report this exact final cohort size ({final_count}) and targets.csv path in your final summary and write_agent_output calls."
+        "message": (
+            f"Human-in-the-Loop review complete and cohort approved in the UI. Final validated "
+            f"cohort size after user review and manual labeling is exactly {final_count} volumes. "
+            f"You MUST report this exact final cohort size ({final_count}) and cohort_id "
+            f"{approved['cohort_id']} in your final summary and write_agent_output calls."
+        ),
     })
-
-

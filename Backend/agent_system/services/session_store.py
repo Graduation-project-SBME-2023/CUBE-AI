@@ -15,21 +15,18 @@ class SessionStore:
     # ------------------------------------------------------------------
 
     def get_or_create(self, session_id: str) -> Session:
-        """
-        Return the in-memory session if present, otherwise create a new
-        shell. Callers that want full DB hydration should use
-        get_or_create_async instead.
-        """
+        """Return the in-memory session if present, otherwise create a new shell. Callers that want full DB hydration should use get_or_create_async instead."""
+        session_id = str(session_id)
         if session_id not in self._sessions:
             self._sessions[session_id] = Session(session_id=session_id)
         return self._sessions[session_id]
 
     def get(self, session_id: str) -> Session | None:
-        return self._sessions.get(session_id)
+        return self._sessions.get(str(session_id))
 
     def require(self, session_id: str) -> Session:
         """Get a session or raise KeyError if not found in memory."""
-        session = self._sessions.get(session_id)
+        session = self._sessions.get(str(session_id))
         if not session:
             raise KeyError(
                 f"Session {session_id} not found in memory. "
@@ -42,12 +39,12 @@ class SessionStore:
     # ------------------------------------------------------------------
 
     async def get_or_create_async(self, session_id: str) -> Session:
-        """
-        Return in-memory session if present.
-        Otherwise fetch hypothesis + plan from the DB, hydrate a Session,
-        cache it, and return it. Falls back to a bare shell if the DB
-        has nothing for this ID.
-        """
+        """Return in-memory session if present. Otherwise fetch hypothesis + plan from the DB, hydrate a Session, cache it, and return it. Falls back to a bare shell if the DB has nothing for this ID."""
+        # Routes type session_id as either `str` (path params) or `UUID`
+        # (request bodies typed via Pydantic); the Session dataclass never
+        # coerces it. Normalizing to str here keeps this dict's keys
+        # consistent no matter which route created the session.
+        session_id = str(session_id)
         if session_id in self._sessions:
             return self._sessions[session_id]
 
@@ -60,10 +57,11 @@ class SessionStore:
         Return in-memory session if present, otherwise try the DB.
         Returns None if neither source has a record.
         """
+        session_id = str(session_id)
         if session_id in self._sessions:
             return self._sessions[session_id]
 
-        hypothesis = await BackendClient.get_hypothesis_by_chat(session_id)
+        hypothesis = await BackendClient.get_intent(session_id)
         if hypothesis is None:
             return None
 
@@ -89,10 +87,10 @@ class SessionStore:
 
     def put(self, session: Session) -> None:
         """Explicitly cache a session (e.g. after external construction)."""
-        self._sessions[session.session_id] = session
+        self._sessions[str(session.session_id)] = session
 
     def delete(self, session_id: str) -> None:
-        self._sessions.pop(session_id, None)
+        self._sessions.pop(str(session_id), None)
 
     def all(self) -> dict[str, Session]:
         return dict(self._sessions)
@@ -109,7 +107,7 @@ class SessionStore:
         session = Session(session_id=session_id)
 
         try:
-            hypothesis = await BackendClient.get_hypothesis_by_chat(session_id)
+            hypothesis = await BackendClient.get_intent(session_id)
         except Exception as e:
             logger.error(f"[{session_id}] Failed to fetch hypothesis during hydration: {e}")
             return session
@@ -122,7 +120,7 @@ class SessionStore:
         logger.info(f"[{session_id}] Hydrated hypothesis [id={hypothesis.id}]")
 
         try:
-            plan = await BackendClient.get_plan_by_hypothesis(hypothesis.id)
+            plan = await BackendClient.get_plan_by_session(session_id)
         except Exception as e:
             logger.error(f"[{session_id}] Failed to fetch plan during hydration: {e}")
             return session
@@ -137,33 +135,30 @@ class SessionStore:
         )
 
         try:
-            persisted_steps = await BackendClient.get_plan_steps(str(plan.id))
+            runs = await BackendClient.get_agent_runs(session_id)
         except Exception as e:
             logger.error(
-                f"[{session_id}] Failed to fetch plan steps during hydration: {e}"
+                f"[{session_id}] Failed to fetch agent runs during hydration: {e}"
             )
-            persisted_steps = []
+            runs = []
 
-        if persisted_steps:
-            session.state = SessionState[
-                infer_recovered_session_state(persisted_steps)
-            ]
-            status_by_id = {
-                str(step.get("id")): step.get("status")
-                for step in persisted_steps
-                if step.get("id")
-            }
-            status_by_module = {
-                step.get("module"): step.get("status")
-                for step in persisted_steps
-                if step.get("module")
-            }
+        if runs:
+            # Execution state comes from `agent_runs` now, so a hydrated
+            # session reports what actually happened instead of assuming
+            # nothing did. A persisted RUNNING row cannot mean an asyncio task
+            # survived a process restart, so it hydrates as PAUSED: hydration
+            # must never imply permission to create a replacement task.
+            session.state = SessionState[infer_recovered_session_state(runs)]
+            by_step = {str(run.get("step_id")): run for run in runs}
             for plan_step in session.plan.steps:
-                persisted_status = status_by_id.get(str(plan_step.id))
-                if persisted_status is None and plan_step.module:
-                    persisted_status = status_by_module.get(plan_step.module)
-                if persisted_status is not None:
-                    plan_step.status = str(persisted_status)
+                run = by_step.get(str(plan_step.id))
+                if run is None:
+                    continue
+                plan_step.agent_run_id = str(run.get("agent_run_id") or "")
+                plan_step.run_status = str(run.get("status") or "pending")
+                plan_step.started_at = run.get("started_at")
+                plan_step.completed_at = run.get("completed_at")
+                plan_step.error = (run.get("error") or {}).get("message")
         elif plan.state.lower() == "confirmed":
             session.state = SessionState.READY
 
