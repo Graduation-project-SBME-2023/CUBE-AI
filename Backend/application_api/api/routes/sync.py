@@ -1,8 +1,10 @@
+import asyncio
 import logging
 
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from application_api.db.session import get_db, AsyncSessionLocal
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -66,8 +68,6 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
     Get current sync status: count of patients, studies, volumes, and segmentations.
     """
     try:
-        from sqlalchemy import func
-
         # Count records in database
         patients_count = (await db.execute(select(func.count()).select_from(Patient))).scalar()
         studies_count = (await db.execute(select(func.count()).select_from(Study))).scalar()
@@ -101,10 +101,100 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
 
 # ----------------- BACKGROUND TASKS -----------------
 
+# Arbitrary but fixed: identifies the full-sync lock among advisory locks.
+_FULL_SYNC_LOCK_KEY = 0x5CB1A17C
+
+
+async def _run_full_sync_once(db: AsyncSession) -> bool:
+    """Run a full sync unless another worker is already running one.
+
+    This API runs several uvicorn workers, and both the startup reconcile and
+    the manual endpoint can fire in each of them at once. A full sync walks every
+    study and upserts it, so two of them racing means duplicated work at best and
+    rows deadlocking against each other at worst.
+
+    A session-level advisory lock is the cheap fix: it is held in PostgreSQL, so
+    it covers every worker, and it is released when this connection closes even
+    if the process is killed mid-sync.
+    """
+    acquired = (
+        await db.execute(select(func.pg_try_advisory_lock(_FULL_SYNC_LOCK_KEY)))
+    ).scalar()
+    if not acquired:
+        logger.info("A full Orthanc sync is already running; skipping this one")
+        return False
+    try:
+        await sync_all_from_orthanc(db)
+        return True
+    finally:
+        await db.execute(select(func.pg_advisory_unlock(_FULL_SYNC_LOCK_KEY)))
+
+
 async def run_full_sync_background():
     """Background task for full sync."""
     async with AsyncSessionLocal() as db:
-        await sync_all_from_orthanc(db)
+        await _run_full_sync_once(db)
+
+
+async def reconcile_with_orthanc_on_startup(delay_seconds: float = 5.0) -> None:
+    """Backfill anything in Orthanc that the database never heard about.
+
+    The database only learns of a study through Orthanc's stable-series hook,
+    which fires once, when the study arrives. Anything already in Orthanc before
+    this API could receive that call -- a restore from the named volume, studies
+    pushed while the API was down, a database recreated under an existing PACS --
+    stays invisible forever, because nothing re-checks. The cohort browser reads
+    the database, so those studies simply are not offered to a study population,
+    with no error anywhere to explain why.
+
+    A full sync is idempotent (every writer upserts), so the cheap correct fix is
+    to compare counts at startup and backfill when they disagree. Orthanc is
+    authoritative; the database is a projection of it.
+
+    Runs detached and never raises: the API must serve requests whether or not
+    Orthanc is reachable yet.
+    """
+    try:
+        # Orthanc and this API usually start together, and its index is not
+        # queryable the instant its port opens.
+        await asyncio.sleep(delay_seconds)
+
+        async with create_orthanc_session() as session:
+            async with session.get(f"{ORTHANC_URL}/statistics") as response:
+                if response.status != 200:
+                    logger.warning(
+                        "Skipping the Orthanc reconcile: statistics returned %s",
+                        response.status,
+                    )
+                    return
+                stats = await response.json()
+
+        orthanc_studies = int(stats.get("CountStudies", 0))
+        async with AsyncSessionLocal() as db:
+            db_studies = (
+                await db.execute(select(func.count()).select_from(Study))
+            ).scalar() or 0
+
+            if db_studies >= orthanc_studies:
+                logger.info(
+                    "Orthanc reconcile not needed: %s studies in the database, "
+                    "%s in Orthanc",
+                    db_studies,
+                    orthanc_studies,
+                )
+                return
+
+            logger.info(
+                "Backfilling from Orthanc: the database has %s of %s studies",
+                db_studies,
+                orthanc_studies,
+            )
+            if await _run_full_sync_once(db):
+                logger.info("Orthanc reconcile finished")
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - startup housekeeping is never fatal
+        logger.exception("Orthanc reconcile failed; the database may be incomplete")
 
 
 async def process_webhook_background(change_type: str, resource_id: str, level: str):

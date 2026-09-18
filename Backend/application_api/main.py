@@ -35,12 +35,18 @@ install_sql_metrics(engine)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     lag_task = asyncio.create_task(monitor_event_loop_lag(), name="event-loop-lag-monitor")
+    # Orthanc is the source of truth for imaging; this catches up on anything
+    # that arrived while the API was down, or predates the database entirely.
+    reconcile_task = asyncio.create_task(
+        sync.reconcile_with_orthanc_on_startup(), name="orthanc-startup-reconcile"
+    )
     try:
         yield
     finally:
-        lag_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await lag_task
+        for task in (lag_task, reconcile_task):
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
         await engine.dispose()
 
 
