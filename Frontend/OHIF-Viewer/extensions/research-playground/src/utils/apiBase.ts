@@ -15,3 +15,5 @@ export const getBackendApiBaseUrl = () => getApiBaseUrl(config?.BACKEND_API, 800
 export const getInferenceApiBaseUrl = () => getApiBaseUrl(config?.INFERENCE_URL || config?.MONAI_URL, 8000);
 
 export const getAgentsApiBaseUrl = () => getApiBaseUrl(config?.AGENTS_API, 8150);
+
+export const getPacsApiBaseUrl = () => getApiBaseUrl(config?.PACS_URL, 8043);

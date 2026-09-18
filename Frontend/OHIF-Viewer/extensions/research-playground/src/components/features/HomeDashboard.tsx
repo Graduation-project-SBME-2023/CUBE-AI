@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Bot, Box, Clock, List, Search, Trash2, Settings, AlertTriangle, Check, ChevronDown, Book, Sliders, Dna, Activity, BrainCircuit, LayoutList, Loader2 } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bot, Box, Clock, List, Search, Trash2, Settings, AlertTriangle, Check, ChevronDown, Book, Sliders, Dna, Activity, BrainCircuit, LayoutList, Loader2, UploadCloud } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import Card from '../ui/Card';
 import { getBackendApiBaseUrl, getAgentsApiBaseUrl } from '../../utils/apiBase';
@@ -346,6 +346,14 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
             title="Go to Worklist"
           >
             <LayoutList size={14} className="transition-transform group-hover:scale-110" /> Worklist
+          </button>
+
+          <button
+            onClick={() => (onNavigate ? onNavigate('/upload') : navigate('/upload'))}
+            className="flex h-8 items-center gap-2 rounded-lg border border-[#2e445c] bg-[#151a1f] px-4 text-[11px] font-bold uppercase tracking-wider text-[#91b9cd] transition-all duration-300 hover:border-[#5acce6] hover:bg-[#1a2535] hover:text-[#cbe1ed] hover:shadow-[0_0_12px_rgba(90,204,230,0.15)] group"
+            title="Upload Studies"
+          >
+            <UploadCloud size={14} className="transition-transform group-hover:-translate-y-0.5" /> Upload
           </button>
 
           <div className="w-px h-5 bg-[#2e445c] mx-1"></div>

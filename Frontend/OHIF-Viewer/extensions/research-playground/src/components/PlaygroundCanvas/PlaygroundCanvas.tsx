@@ -668,7 +668,12 @@ export default function PlaygroundCanvas({
     }
 
     try {
-      const response = await fetch(`${getAgentsApiBaseUrl()}/run/`, {
+      // No trailing slash: the backend route is POST /run. With the slash,
+      // FastAPI answers 307 to /run -- and because OpenResty strips the
+      // /agents prefix before the request arrives, that Location drops it too,
+      // so the browser follows the redirect to /<root>/run and gets the SPA
+      // index.html instead of the backend. The pipeline then never starts.
+      const response = await fetch(`${getAgentsApiBaseUrl()}/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
