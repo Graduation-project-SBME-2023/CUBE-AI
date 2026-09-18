@@ -316,6 +316,7 @@ async def scratchpad_set_status(status: str) -> str:
         return _error(str(exc))
 
     if SESSION_ID:
+        activity_log = _notes(run).get("activity_log") or []
         await _emit_ws_message(
             "scratchpad_update",
             {
@@ -326,6 +327,7 @@ async def scratchpad_set_status(status: str) -> str:
                 "status": status,
                 "previous_status": previous,
                 "content": f"Status changed: {previous} -> {status}",
+                "timestamp": activity_log[-1]["timestamp"] if activity_log else None,
             },
             SESSION_ID,
         )
