@@ -22,6 +22,7 @@ from ingestion.provenance import (
 )
 from ingestion.service import run_ingestion
 from ingestion.limits import ingestion_limiter
+from ingestion.body_parts import BODY_PARTS, normalise_body_part
 from storage_paths import TEMP_DIR
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,12 @@ async def supported_formats():
     return {
         "extensions": list(SUPPORTED_EXTENSIONS),
         "modalities": sorted(SOP_CLASS_BY_MODALITY),
+        # Served rather than duplicated in the viewer so the uploader can only
+        # offer values the converter accepts and anatomy validation recognises.
+        "body_parts": [
+            {"value": value, "group": group}
+            for value, group in sorted(BODY_PARTS.items())
+        ],
         "max_upload_bytes": _max_upload_bytes(),
     }
 
@@ -95,6 +102,7 @@ async def ingest_volume(
     patient_id: str | None = Form(None),
     patient_name: str | None = Form(None),
     series_description: str | None = Form(None),
+    body_part: str | None = Form(None),
 ):
     """Accept a volume file and convert it into a DICOM series in the background.
 
@@ -118,13 +126,18 @@ async def ingest_volume(
         )
     modality = str(modality).strip().upper()
 
+    try:
+        body_part = normalise_body_part(body_part)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     destination = _staging_path(extension)
     checksum, size = await _stream_to_disk(file, destination)
     # Modality is part of the job id, not just the checksum: the same bytes
     # re-declared under a different modality produce a genuinely different
     # DICOM series (see nifti_to_dicom.convert_volume_to_dicom), so they need
     # their own job record rather than overwriting the first upload's.
-    job_id = jobs.job_id_for_checksum(checksum, modality)
+    job_id = jobs.job_id_for_checksum(checksum, modality, body_part or "")
 
     existing = jobs.read_job(job_id)
     if jobs.is_active(existing):
@@ -151,6 +164,7 @@ async def ingest_volume(
         patient_id=(patient_id or None),
         patient_name=(patient_name or None),
         series_description=(series_description or None),
+        body_part=body_part,
         scheduler=ingestion_limiter,
     )
     logger.info(

@@ -58,7 +58,7 @@ def job_path(job_id: str) -> Path:
     return INGEST_JOBS_DIR / f"{_safe_job_id(job_id)}.json"
 
 
-def job_id_for_checksum(checksum: str, modality: str = "") -> str:
+def job_id_for_checksum(checksum: str, modality: str = "", body_part: str = "") -> str:
     """A job id that repeats for the same file, so re-uploads reuse one record.
 
     The declared modality is part of the id.  Series identity in
@@ -66,7 +66,10 @@ def job_id_for_checksum(checksum: str, modality: str = "") -> str:
     Orthanc deduplicates instances by SOPInstanceUID and silently keeps
     whichever content it stored first, so the same bytes re-declared under a
     different modality must become a distinct upload rather than colliding
-    with -- and losing to -- the earlier one.
+    with -- and losing to -- the earlier one. The declared body part is scoped
+    the same way and for the same reason: it reaches the DICOM as
+    BodyPartExamined, so correcting it on a re-upload has to start a new job
+    rather than be turned away as a duplicate of the first.
     """
     if not checksum:
         raise ValueError("a checksum is required to derive a job id")
@@ -74,7 +77,12 @@ def job_id_for_checksum(checksum: str, modality: str = "") -> str:
         # Back-compat form, used only where the modality genuinely is not
         # known yet (e.g. looking up a job by checksum alone).
         return checksum[:16]
-    digest = hashlib.sha256(f"{checksum}:{modality.strip().upper()}".encode()).hexdigest()
+    scope = f"{checksum}:{modality.strip().upper()}"
+    if body_part:
+        # Appended only when declared, so every job id minted before body part
+        # existed keeps resolving to the same record.
+        scope = f"{scope}:{body_part.strip().upper()}"
+    digest = hashlib.sha256(scope.encode()).hexdigest()
     return digest[:16]
 
 
