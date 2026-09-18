@@ -175,6 +175,7 @@ async def run_ingestion(
     patient_id: str | None = None,
     patient_name: str | None = None,
     series_description: str | None = None,
+    body_part: str | None = None,
     orthanc: OrthancClient | None = None,
     scheduler: Any | None = None,
 ) -> dict[str, Any]:
@@ -205,6 +206,7 @@ async def run_ingestion(
             checksum=checksum,
             filename=filename,
             series_description=series_description,
+            body_part=body_part,
             scheduler=scheduler,
         )
 
@@ -341,6 +343,7 @@ async def _convert(
     checksum: str,
     filename: str,
     series_description: str | None,
+    body_part: str | None,
     scheduler: Any | None,
 ):
     """Run the CPU-bound conversion off the event loop, under a lease if given."""
@@ -353,6 +356,7 @@ async def _convert(
             checksum=checksum,
             source_filename=filename,
             series_description=series_description,
+            body_part=body_part,
         )
 
     if scheduler is None:

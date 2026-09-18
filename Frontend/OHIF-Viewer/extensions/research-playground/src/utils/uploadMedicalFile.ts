@@ -18,7 +18,7 @@ export const VOLUME_EXTENSIONS = ['.nii.gz', '.nii', '.nrrd', '.nhdr', '.mha', '
  * quietly hide the series, and calling something CT when its units are unknown
  * is a scientific error rather than a formatting one.
  */
-export type IngestModality = 'CT' | 'MR' | 'PT' | 'OT';
+export type IngestModality = 'CT' | 'MR' | 'OT';
 
 export type IngestJobStatus =
   | 'queued'
@@ -52,6 +52,12 @@ export interface VolumeUploadOptions {
   patientId?: string;
   patientName?: string;
   seriesDescription?: string;
+  /**
+   * DICOM BodyPartExamined. A NIfTI header carries no anatomy at all, so this
+   * is the only chance to record it -- and anatomy validation reads it before
+   * segmentation. Values come from GET /ingest/formats, never hardcoded here.
+   */
+  bodyPart?: string;
   signal?: AbortSignal;
 }
 
@@ -128,6 +134,9 @@ export async function uploadVolumeFile(
   }
   if (options.seriesDescription) {
     form.append('series_description', options.seriesDescription);
+  }
+  if (options.bodyPart) {
+    form.append('body_part', options.bodyPart);
   }
 
   const response = await fetch(`${getAgentsApiBaseUrl()}/ingest/nifti`, {

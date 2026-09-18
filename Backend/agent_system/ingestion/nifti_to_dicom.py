@@ -221,6 +221,7 @@ def convert_volume_to_dicom(
     identity: SeriesIdentity,
     checksum: str | None = None,
     series_description: str | None = None,
+    body_part: str | None = None,
     source_filename: str | None = None,
     created_at: datetime | None = None,
 ) -> ConversionResult:
@@ -260,18 +261,21 @@ def convert_volume_to_dicom(
         )
     window_center, window_width = _window_from_percentiles(array_zyx)
 
-    # The series identity includes the declared modality, not just the file's
-    # checksum. Orthanc deduplicates by SOPInstanceUID and silently keeps
-    # whatever it stored first, discarding a later upload's content -- so
-    # re-declaring modality for the same bytes must mint a new series instead
-    # of colliding with (and losing to) the earlier one. The patient/study
-    # identity stays checksum-only: the same file is still the same subject
-    # regardless of which modality was declared for it.
-    series_instance_uid = ingested_uid(resolved_checksum, modality_key, "series")
+    # The series identity includes everything the uploader declared, not just
+    # the file's checksum. Orthanc deduplicates by SOPInstanceUID and silently
+    # keeps whatever it stored first, discarding a later upload's content -- so
+    # re-declaring the same bytes must mint a new series instead of colliding
+    # with (and losing to) the earlier one. Body part is in here for the same
+    # reason as modality: correcting it on a re-upload has to produce a series
+    # that actually carries the correction. The patient/study identity stays
+    # checksum-only: the same file is still the same subject however it was
+    # described.
+    declared = (modality_key, body_part or "")
+    series_instance_uid = ingested_uid(resolved_checksum, *declared, "series")
     # A fresh frame of reference: the ingested grid is not proven to share
     # physical space with anything already in the study.
     frame_of_reference_uid = ingested_uid(
-        resolved_checksum, modality_key, "frame-of-reference"
+        resolved_checksum, *declared, "frame-of-reference"
     )
     orientation = image_orientation_patient(geometry)
     spacing_row_col = pixel_spacing_row_col(geometry)
@@ -309,6 +313,10 @@ def convert_volume_to_dicom(
         dataset.ReferringPhysicianName = ""
 
         dataset.Modality = str(modality).upper()
+        # Left off entirely when nothing was declared: an absent tag reads as
+        # "not stated", while an empty one reads as "stated, and blank".
+        if body_part:
+            dataset.BodyPartExamined = body_part
         dataset.SeriesNumber = INGESTED_SERIES_NUMBER
         dataset.SeriesDescription = description
         dataset.InstanceNumber = index + 1
