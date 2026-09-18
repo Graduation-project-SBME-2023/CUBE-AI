@@ -39,9 +39,16 @@ export const getAgentsBaseUrl = () =>
 
 // Orthanc's REST root, used to store DICOM directly. DICOMweb reads still go
 // through the data-source configuration, not this.
+//
+// Same-origin in every environment, unlike the services above. They publish
+// CORS_ORIGINS and so can be called on their own port from the dev server;
+// Orthanc sends no CORS headers at all, so a POST straight to :8043 from
+// http://localhost:3000 fails the preflight and surfaces only as "Failed to
+// fetch", with nothing in Orthanc's log to say a request arrived. Both fronts
+// already proxy this prefix: webpack's devServer maps /pacs to :8043, and
+// OpenResty maps it to the orthanc container.
 export const getPacsBaseUrl = () =>
-  normalizeBaseUrl(getEnv()?.REACT_APP_PACS_URL) ||
-  (usesDirectServicePorts() ? directHttpUrl(8043) : '/pacs');
+  normalizeBaseUrl(getEnv()?.REACT_APP_PACS_URL) || '/pacs';
 
 export const getAgentsWsUrl = () => {
   const envUrl = normalizeBaseUrl(getEnv()?.REACT_APP_AGENTS_WS_URL);
