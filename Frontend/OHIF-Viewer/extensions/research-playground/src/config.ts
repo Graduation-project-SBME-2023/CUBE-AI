@@ -14,6 +14,9 @@ const defaultAgentsBaseUrl = usesDirectServicePorts
 const defaultAgentsWsUrl = usesDirectServicePorts
   ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.hostname}:8150/ws`
   : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
+const defaultPacsUrl = usesDirectServicePorts
+  ? `${window.location.protocol}//${window.location.hostname}:8043`
+  : '/pacs';
 
 export const BACKEND_API =
   processEnv?.REACT_APP_APP_API_URL ||
@@ -40,10 +43,15 @@ export const INFERENCE_URL =
   defaultInferenceUrl;
 export const MONAI_URL = INFERENCE_URL;
 
+// Orthanc's own REST root, used to store DICOM directly. DICOMweb reads still
+// go through the data-source configuration, not this.
+export const PACS_URL = processEnv?.REACT_APP_PACS_URL || defaultPacsUrl;
+
 export default {
   BACKEND_API,
   AGENTS_API,
   AGENTS_WS,
   INFERENCE_URL,
   MONAI_URL,
+  PACS_URL,
 };

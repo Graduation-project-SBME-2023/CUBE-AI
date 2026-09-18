@@ -2,6 +2,7 @@ import ResearchPlayground from './components/ResearchPlayground';
 import AgentsPlayground from './routes/Playground/AgentsPlayground';
 import AgenticHome from './routes/agenticHome';
 import StartUp from './routes/StartUp';
+import UploadStudies from './routes/UploadStudies';
 
 export default function getCustomizationModule() {
   return [
@@ -19,6 +20,11 @@ export default function getCustomizationModule() {
             {
               path: '/agentic-home',
               children: AgenticHome,
+              private: false,
+            },
+            {
+              path: '/upload',
+              children: UploadStudies,
               private: false,
             },
             {

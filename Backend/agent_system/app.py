@@ -15,7 +15,8 @@ import re
 import tempfile
 import subprocess
 import shutil
-from typing import Dict
+from typing import Any, Dict
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
@@ -89,7 +90,9 @@ from services.best_effort import drain_best_effort, initialize_best_effort
 from services.pipeline_monitor import PipelineMonitor, raise_for_fatal_tool_failure
 from services.population_handoff import require_population_handoff
 from services.resource_scheduler import resource_scheduler
+from services.mask_store import MaskStore, orthanc_first
 from clients.backend_client import BackendClient
+from ingestion.routes import router as ingestion_router
 from agents.execution_agents.segmentation.progressive import (
     artifact_key_for_pair,
     build_snapshot_from_manifest,
@@ -126,6 +129,13 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     initialize_best_effort()
+    # A worker killed mid-run leaves its mask cache behind. Sweeping on startup
+    # keeps that from accumulating; the caches are disposable by definition, so
+    # the worst case is a re-download.
+    try:
+        await asyncio.to_thread(MaskStore.sweep_stale_caches)
+    except Exception:  # noqa: BLE001 - never block startup on housekeeping
+        logger.exception("Mask cache sweep failed during startup")
     try:
         yield
     finally:
@@ -171,6 +181,9 @@ class CoopCoepMiddleware(BaseHTTPMiddleware):
 
 
 app.add_middleware(CoopCoepMiddleware)
+
+# Volume-file ingestion lives in its own router rather than inline below.
+app.include_router(ingestion_router)
 
 ensure_storage_layout()
 agents_workspace_dir = str(HYPOTHESES_DIR)
@@ -526,6 +539,16 @@ async def run_pipeline(session: Session) -> None:
         raise
     finally:
         cancel_task.cancel()
+        # Cached masks are copies of what Orthanc already holds permanently, so
+        # the run is the right place to drop them. Nothing the study depends on
+        # lives under cache/.
+        try:
+            async with MaskStore() as store:
+                await store.clear_session(session.session_id)
+        except Exception:  # noqa: BLE001 - the TTL sweeper is the safety net
+            logger.exception(
+                "Could not clear the mask cache for session %s", session.session_id
+            )
 
 
 # ----------------------------------------------------------------------
@@ -585,6 +608,12 @@ async def start_planning(request: PlanningRequest):
     return response
 
 
+# Both spellings are served explicitly. OpenResty strips the /agents prefix, so
+# FastAPI's automatic trailing-slash redirect would answer /run/ with a Location
+# of /run -- without the prefix the browser needs -- and the POST would land on
+# the SPA's index.html instead of here. Accepting /run/ directly means no
+# redirect is ever issued, so a cached older bundle still starts the pipeline.
+@app.post("/run/", include_in_schema=False)
 @app.post("/run")
 async def start_execution(request: SessionControlRequest):
     try:
@@ -1944,13 +1973,156 @@ async def upload_modified_mask(
         workspace_subpath(workspace_folder, gif_path)
     ).st_mtime_ns
 
+    archive = await _archive_edited_mask(
+        session_id, series_instance_uid, target_id, file_path
+    )
+
     return {
-        "message": "Modified mask saved successfully", 
+        "message": "Modified mask saved successfully",
         "session_id": session_id,
         "path": os.path.abspath(file_path),
         "status": "saved",
         "overlay": overlay,
+        "archive": archive,
     }
+
+
+def _manifest_pair(
+    session_id: str,
+    series_uid: str,
+    target_id: str | None,
+) -> dict[str, Any] | None:
+    """The segmentation manifest entry for one volume/target pair, if present."""
+    if not target_id:
+        return None
+    manifest_path = ws_sub(session_id, "segmentation_manifest.json")
+    try:
+        pairs = json.loads(manifest_path.read_text(encoding="utf-8")).get("pairs") or []
+    except (OSError, json.JSONDecodeError):
+        return None
+    for pair in pairs:
+        if (
+            str(pair.get("volume_uid")) == series_uid
+            and str(pair.get("target_id")) == str(target_id)
+        ):
+            return pair
+    return None
+
+
+def _canonical_label_for_pair(
+    session_id: str,
+    series_uid: str,
+    target_id: str | None,
+) -> str | None:
+    """Translate a pair's target id into the label the archive stores.
+
+    ``segmentations.target_label`` holds the DICOM SegmentLabel -- the canonical
+    anatomical name -- while the QC grid addresses pairs by target id. Without
+    this mapping a multi-target series would look up the wrong mask.
+    """
+    pair = _manifest_pair(session_id, series_uid, target_id)
+    label = (pair or {}).get("canonical_label")
+    return str(label) if label else None
+
+
+async def _archive_edited_mask(
+    session_id: str,
+    series_uid: str,
+    target_id: str | None,
+    mask_path: str,
+) -> dict[str, Any]:
+    """Publish a clinician's saved edit to Orthanc as its own DICOM SEG.
+
+    Saving used to write the workspace NIfTI and stop there; the edit only
+    reached Orthanc later, when the segmentation agent resumed after the review
+    was *submitted*. Anyone who saved an edit and then looked at the archive --
+    or at the viewer, which reads the archive -- saw the model's mask instead,
+    and an edit saved but never submitted never reached Orthanc at all.
+
+    Publishing here makes the save itself the thing that updates the archive.
+    The edit is a new series that references the original rather than replacing
+    it: DICOM has no update, and the original is what the correction has to stay
+    comparable against. The SEG UID covers the mask's content, so saving the
+    same mask twice is a no-op while a genuinely changed edit is archived as its
+    own series -- and ``resolve`` then reads back the newest manual one.
+
+    Never raises -- the local copy is still saved, so a failure here degrades to
+    exactly the old behaviour, except now it is reported instead of silent.
+    """
+    pair = _manifest_pair(session_id, series_uid, target_id) or {}
+    label = str(
+        pair.get("canonical_label") or target_id or ""
+    ).strip()
+    if not label:
+        return {"status": "skipped", "reason": "no target label for this pair"}
+
+    derived_from = (pair.get("inference_result") or {}).get("segmentation_series_uid")
+    try:
+        async with MaskStore() as store:
+            ref = await store.publish(
+                volume_uid=series_uid,
+                target_label=label,
+                mask_path=Path(mask_path),
+                method="manual",
+                derived_from=derived_from,
+            )
+            if orthanc_first():
+                # Subsequent reads must see the edit that was just archived, not
+                # the model's mask it was derived from.
+                await store.ensure_local(session_id, ref)
+        logger.info(
+            "Archived edited mask for session=%s series=%s target=%s as %s",
+            session_id,
+            series_uid,
+            target_id or "",
+            ref.seg_series_uid,
+        )
+        return {"status": "ok", "seg_series_uid": ref.seg_series_uid}
+    except Exception as exc:  # noqa: BLE001 - reported, never fatal
+        logger.exception(
+            "Failed to archive the edited mask for session=%s series=%s target=%s",
+            session_id,
+            series_uid,
+            target_id or "",
+        )
+        return {"status": "failed", "error": str(exc)}
+
+
+async def _mask_from_orthanc(
+    session_id: str,
+    series_uid: str,
+    target_id: str | None,
+) -> str | None:
+    """Materialise the archived mask for this pair, or None if unavailable.
+
+    Never raises: the workspace copy remains a valid fallback while the two
+    sources are still being compared.
+    """
+    try:
+        label = _canonical_label_for_pair(session_id, series_uid, target_id)
+        if target_id and not label:
+            # Without a label a multi-target series could resolve to the mask of
+            # a different organ, which is worse than falling back.
+            logger.warning(
+                "No canonical label for target %s on series %s; using the "
+                "workspace copy",
+                target_id,
+                series_uid,
+            )
+            return None
+        async with MaskStore() as store:
+            ref = await store.resolve(series_uid, target_label=label)
+            if ref is None:
+                return None
+            return str(await store.ensure_local(session_id, ref))
+    except Exception:  # noqa: BLE001 - fall back to the workspace copy
+        logger.exception(
+            "Could not read the archived mask for session=%s series=%s target=%s",
+            session_id,
+            series_uid,
+            target_id or "",
+        )
+        return None
 
 
 @app.get("/segmentation-review/mask/{session_id}/{series_uid}")
@@ -1966,7 +2138,8 @@ async def get_segmentation_mask(
 
     Search order:
       1. temp/segmentations/ – user-uploaded modified masks (highest priority)
-      2. data/masks/         – agent-generated masks
+      2. Orthanc            – the archived DICOM SEG, when MASK_SOURCE=orthanc
+      3. data/masks/         – agent-generated masks
     """
     import io
     import numpy as np
@@ -1982,23 +2155,27 @@ async def get_segmentation_mask(
     # Search locations in priority order
     pair_id = f"{series_uid}__{target_id}" if target_id else series_uid
     artifact_key = artifact_key_for_pair(pair_id)
-    candidates = [
-        str(ws_sub(session_id, f"temp_segmentations/seg_{artifact_key}_modified.nii.gz")),
-        str(ws_sub(session_id, f"masks/{artifact_key}.nii.gz")),
-    ]
-    if "/" not in pair_id and "\\" not in pair_id:
-        candidates.extend(
-            [
-                str(ws_sub(session_id, f"temp_segmentations/seg_{pair_id}_modified.nii.gz")),
-                str(ws_sub(session_id, f"masks/{pair_id}.nii.gz")),
-            ]
-        )
+    legacy_name_is_safe = "/" not in pair_id and "\\" not in pair_id
 
-    nifti_path = None
-    for path in candidates:
-        if os.path.isfile(path):
-            nifti_path = path
-            break
+    # An unsaved edit always wins: it is the work in progress, not yet archived.
+    pending_edits = [
+        str(ws_sub(session_id, f"temp_segmentations/seg_{artifact_key}_modified.nii.gz")),
+    ]
+    workspace_masks = [str(ws_sub(session_id, f"masks/{artifact_key}.nii.gz"))]
+    if legacy_name_is_safe:
+        pending_edits.append(
+            str(ws_sub(session_id, f"temp_segmentations/seg_{pair_id}_modified.nii.gz"))
+        )
+        workspace_masks.append(str(ws_sub(session_id, f"masks/{pair_id}.nii.gz")))
+
+    def _first_existing(paths):
+        return next((path for path in paths if os.path.isfile(path)), None)
+
+    nifti_path = _first_existing(pending_edits)
+    if not nifti_path and orthanc_first():
+        nifti_path = await _mask_from_orthanc(session_id, series_uid, target_id)
+    if not nifti_path:
+        nifti_path = _first_existing(workspace_masks)
 
     # Failed or rejected segmentations may still be advertised in the QC grid
     # even though cleanup removed their mask file. Keep those entries editable

@@ -37,6 +37,12 @@ export const getAgentsBaseUrl = () =>
   normalizeBaseUrl(getEnv()?.REACT_APP_AGENTS_URL) ||
   (usesDirectServicePorts() ? directHttpUrl(8150) : '/agents');
 
+// Orthanc's REST root, used to store DICOM directly. DICOMweb reads still go
+// through the data-source configuration, not this.
+export const getPacsBaseUrl = () =>
+  normalizeBaseUrl(getEnv()?.REACT_APP_PACS_URL) ||
+  (usesDirectServicePorts() ? directHttpUrl(8043) : '/pacs');
+
 export const getAgentsWsUrl = () => {
   const envUrl = normalizeBaseUrl(getEnv()?.REACT_APP_AGENTS_WS_URL);
   if (envUrl) {
