@@ -1657,8 +1657,9 @@ async def upload_modified_mask(
     artifact_key = artifact_key_for_pair(pair_id)
     file_path = os.path.join(output_dir, f"seg_{artifact_key}_modified.nii.gz")
     # The frontend mask matches the full DICOM volume space.
-    # The workspace stores volumes in 'volumes/' and masks in 'masks/'.
-    base_volume_path = str(ws_sub(session_id, f"volumes/{series_instance_uid}.nii.gz"))
+    # The workspace stores volumes in 'volumes/' and masks in 'masks/'; once a
+    # run has finished that copy is gone, so this rebuilds it from Orthanc.
+    base_volume_path = await _local_volume_path(session_id, series_instance_uid)
     original_mask_path = str(ws_sub(session_id, f"masks/{artifact_key}.nii.gz"))
     legacy_pair_name_is_safe = "/" not in pair_id and "\\" not in pair_id
     if not os.path.exists(original_mask_path) and legacy_pair_name_is_safe:
@@ -1677,7 +1678,7 @@ async def upload_modified_mask(
         ref_nii = None
         ref_shape = None
         
-        if os.path.exists(base_volume_path):
+        if base_volume_path and os.path.exists(base_volume_path):
             ref_nii = nib.load(base_volume_path)
             ref_shape = ref_nii.shape[:3]
             logger.info(f"Using base volume for reference: shape={ref_shape}")
@@ -1689,7 +1690,9 @@ async def upload_modified_mask(
         # If neither file exists, try to infer shape from the frontend-provided dimensions
         if ref_shape is None:
             raise FileNotFoundError(
-                f"Neither base volume ({base_volume_path}) nor original mask ({original_mask_path}) found."
+                f"Neither the source volume for series {series_instance_uid} "
+                f"(not in the workspace, and not rebuildable from Orthanc) nor "
+                f"the original mask ({original_mask_path}) could be read."
             )
         
         # Check if the raw bytes match the reference shape
@@ -1751,6 +1754,7 @@ async def upload_modified_mask(
                 "volume_uid": series_instance_uid,
                 "target_id": target_id or "",
                 "mask_path": file_path,
+                "volume_path": base_volume_path or "",
             }
         ],
     )
@@ -1820,6 +1824,33 @@ def _canonical_label_for_pair(
     pair = _manifest_pair(session_id, series_uid, target_id)
     label = (pair or {}).get("canonical_label")
     return str(label) if label else None
+
+
+async def _local_volume_path(session_id: str, series_uid: str) -> str | None:
+    """A readable NIfTI for this source volume, rebuilt from Orthanc if needed.
+
+    The workspace copy is deleted when a run finishes -- it is the largest
+    thing a session leaves behind and Orthanc holds the DICOM it was made from.
+    Reopening a finished session to review or edit a mask still needs it, so it
+    is rebuilt on demand rather than kept.
+
+    Returns None instead of raising: both callers already have a path for the
+    volume being absent, and neither should fail because Orthanc is briefly
+    unreachable.
+    """
+    workspace_copy = ws_sub(session_id, f"volumes/{series_uid}.nii.gz")
+    if workspace_copy.is_file():
+        return str(workspace_copy)
+    try:
+        async with MaskStore() as store:
+            return str(await store.ensure_local_volume(session_id, series_uid))
+    except Exception:  # noqa: BLE001 - callers handle a missing volume
+        logger.exception(
+            "Could not rebuild volume %s for session %s from Orthanc",
+            series_uid,
+            session_id,
+        )
+        return None
 
 
 async def _archive_edited_mask(
@@ -1979,8 +2010,8 @@ async def get_segmentation_mask(
     # by initializing an empty mask from the source volume geometry.
     is_empty_fallback = False
     if not nifti_path:
-        volume_path = str(ws_sub(session_id, f"volumes/{series_uid}.nii.gz"))
-        if target_id and os.path.isfile(volume_path):
+        volume_path = await _local_volume_path(session_id, series_uid)
+        if target_id and volume_path and os.path.isfile(volume_path):
             nifti_path = volume_path
             is_empty_fallback = True
             logger.warning(

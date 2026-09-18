@@ -94,13 +94,26 @@ def test_mask_cache_lives_in_the_disposable_tree():
 
     source = MASK_STORE.read_text(encoding="utf-8")
 
-    # cache/ and temp/ are the only trees a session teardown may delete, so
-    # every workspace path the store resolves must be the mask cache -- never a
-    # path under data/ holding real study artifacts.
+    # A session teardown may only delete what Orthanc can reproduce. That is the
+    # two caches and the converted source imaging under volumes/ -- which is a
+    # copy of the DICOM in the archive, restored on demand by
+    # ensure_local_volume, and by far the largest thing a session leaves behind.
+    #
+    # Everything else under data/ and outputs/ is a real study artifact that
+    # exists nowhere else: the masks the pipeline wrote, a clinician's saved
+    # edits, the reports. Naming the permitted set here rather than allowing any
+    # path keeps those unreachable from the store.
     assert 'MASK_CACHE = "mask_cache"' in source
+    assert 'VOLUME_CACHE = "volume_cache"' in source
+    permitted = ("MASK_CACHE", "VOLUME_CACHE", "REPRODUCIBLE_SUBTREES", "name")
     workspace_paths = re.findall(r"ws_sub\([^)]*\)", source)
     assert workspace_paths, "mask_store must resolve workspace paths through ws_sub"
-    assert all("MASK_CACHE" in call for call in workspace_paths), workspace_paths
+    assert all(
+        any(token in call for token in permitted) for call in workspace_paths
+    ), workspace_paths
+    # The loop above resolves each name in turn, so the tuple is what decides
+    # what can be deleted; assert its contents rather than only its use.
+    assert 'REPRODUCIBLE_SUBTREES = (MASK_CACHE, VOLUME_CACHE, "volumes")' in source
 
 
 @pytest.mark.contract

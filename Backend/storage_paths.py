@@ -96,6 +96,9 @@ _WORKSPACE_DIR_MAP = {
     # Orthanc.  Deliberately under cache/ so a session teardown can delete them
     # without touching anything the study depends on.
     "mask_cache": ("cache", "masks"),
+    # The source imaging, rebuilt from the DICOM in Orthanc when a finished
+    # session is reopened. Under cache/ for the same reason as the masks.
+    "volume_cache": ("cache", "volumes"),
     "temp_segmentations": ("temp", "segmentations"),
 }
 

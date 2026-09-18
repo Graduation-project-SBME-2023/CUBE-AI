@@ -1318,7 +1318,18 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
             mask_path_override = ""
             pair_id = uid
             artifact_key = pair_id
-        vol_path = os.path.join(volumes_dir, f"{uid}.nii.gz")
+        # A caller that already resolved the volume -- which after a run means
+        # rebuilding it from Orthanc into cache/ -- passes the path rather than
+        # letting this look under volumes/, where it no longer is.
+        volume_path_override = str(item.get("volume_path") or "") if isinstance(item, dict) else ""
+        if volume_path_override:
+            vol_path = (
+                volume_path_override
+                if os.path.isabs(volume_path_override)
+                else str(workspace_subpath(workspace_dir, volume_path_override))
+            )
+        else:
+            vol_path = os.path.join(volumes_dir, f"{uid}.nii.gz")
         default_mask_path = os.path.join(masks_dir, f"{artifact_key}.nii.gz")
         legacy_name_is_safe = (
             os.path.basename(pair_id) == pair_id
