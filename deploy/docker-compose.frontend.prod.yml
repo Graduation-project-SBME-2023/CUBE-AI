@@ -1,14 +1,32 @@
 name: CUBE.AI
 services:
   ohif_viewer:
+    # The image supplies OpenResty only; the bundle it was built with is covered
+    # by the dist mount below, so this tag does not change when the frontend
+    # does. cubeai1/webapp:v1.0-aug-backup is the pre-September build, kept only
+    # so the retag is reversible.
     image: cubeai1/webapp:v1.0
     container_name: webapp
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/config/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
       - ${COMPOSE_PROJECT_DIR}/Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/logs/nginx:/var/logs/nginx
-      # Override the app-config.js baked into the image (its DICOMweb roots point
-      # at http://127.0.0.1, which is cross-origin from http://localhost and gets
-      # blocked by CORS). This copy uses relative, same-origin roots.
+      # Serve the bundle straight off the host, the way the backend services
+      # mount their source. Baking it in meant every frontend change needed an
+      # image rebuild before it could be seen, and forgetting that step served
+      # stale code with nothing to indicate it -- the image looked current
+      # because its tag had not changed.
+      #
+      # `yarn build` in Frontend/OHIF-Viewer now replaces a browser refresh
+      # away. Webpack still has to compile: unlike the Python services, a
+      # browser cannot read the source, so dist/ -- not src/ -- is what gets
+      # mounted. Build at least once before starting, or this mounts an empty
+      # directory and the viewer serves nothing.
+      - ${COMPOSE_PROJECT_DIR}/Frontend/OHIF-Viewer/platform/app/dist:/var/www/html:ro
+      # Nested on purpose, and kept even though dist/ currently carries an
+      # identical copy: the app-config.js baked into the image resolves DICOMweb
+      # through an absolute http://127.0.0.1, which is cross-origin from
+      # http://localhost and is refused by CORS. Pinning the same-origin config
+      # keeps that from coming back if the dist mount is ever removed.
       - ${COMPOSE_PROJECT_DIR}/Frontend/OHIF-Viewer/platform/app/public/config/docker_openresty-orthanc.js:/var/www/html/app-config.js:ro
     ports:
       - '443:443'

@@ -75,3 +75,7 @@ project.md
 # Local Codex project context
 .codex/
 AGENTS.md
+
+# OHIF production build output (regenerate with `yarn build` in Frontend/OHIF-Viewer).
+# Baked into the webapp image via deploy/Dockerfile.frontend.dist; ~53MB, never committed.
+Frontend/OHIF-Viewer/platform/app/dist/
