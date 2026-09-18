@@ -38,9 +38,10 @@ class ModelResult(Base):
         nullable=False,
         index=True,
     )
+    # No standalone FK here: the composite (feature_set_id, cohort_id) FK
+    # below already proves existence and cohort alignment together.
     feature_set_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("feature_sets.feature_set_id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
     )

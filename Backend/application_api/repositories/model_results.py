@@ -257,7 +257,8 @@ async def _check_inputs(
         feature_set = (
             await db.execute(
                 text(
-                    "SELECT status, cohort_id FROM feature_sets "
+                    "SELECT (CASE WHEN frozen_at IS NOT NULL THEN 'frozen' ELSE 'building' END) "
+                    "AS status, cohort_id FROM feature_sets "
                     "WHERE feature_set_id = :fid FOR SHARE"
                 ),
                 {"fid": str(data.feature_set_id)},

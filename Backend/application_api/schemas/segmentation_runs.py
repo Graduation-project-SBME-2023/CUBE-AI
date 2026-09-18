@@ -54,12 +54,12 @@ class PairIn(BaseModel):
     status: PairStatus = "pending"
     external_job_id: Optional[str] = None
     candidate_segmentation_uid: Optional[str] = None
-    quality: Optional[dict[str, Any]] = None
+    execution_checkpoint: Optional[dict[str, Any]] = None
 
-    @field_validator("quality")
+    @field_validator("execution_checkpoint")
     @classmethod
-    def _quality(cls, value):
-        return _versioned(value, "pair quality")
+    def _execution_checkpoint(cls, value):
+        return _versioned(value, "pair execution checkpoint")
 
 
 class SegmentationBatchCreate(BaseModel):
@@ -83,12 +83,12 @@ class PairStateUpdate(BaseModel):
     status: PairStatus
     external_job_id: Optional[str] = None
     candidate_segmentation_uid: Optional[str] = None
-    quality: Optional[dict[str, Any]] = None
+    execution_checkpoint: Optional[dict[str, Any]] = None
 
-    @field_validator("quality")
+    @field_validator("execution_checkpoint")
     @classmethod
-    def _quality(cls, value):
-        return _versioned(value, "pair quality")
+    def _execution_checkpoint(cls, value):
+        return _versioned(value, "pair execution checkpoint")
 
 
 class PairStatesUpdate(BaseModel):
@@ -157,7 +157,7 @@ class PairOut(BaseModel):
     selected_segmentation_uid: Optional[str] = None
     segment_number: int
     review_decision: Optional[str] = None
-    quality: Optional[dict[str, Any]] = None
+    execution_checkpoint: Optional[dict[str, Any]] = None
     created_at: datetime
 
 

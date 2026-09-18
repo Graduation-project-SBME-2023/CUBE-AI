@@ -1,5 +1,5 @@
 from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, String, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from application_api.db.base import Base
 
@@ -45,10 +45,6 @@ class Segmentation(Base):
         nullable=True,
         index=True,
     )
-
-    # Segment number / source SOP / frame, validated at the writer.
-    provenance = Column(JSONB, nullable=True)
-    content_digest = Column(String, nullable=True)
 
     archive_status = Column(String, nullable=False, server_default="available", index=True)
 

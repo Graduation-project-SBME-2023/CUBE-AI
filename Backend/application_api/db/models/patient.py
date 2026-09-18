@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, Column, DateTime, String, text
+from sqlalchemy import CheckConstraint, Column, Date, DateTime, String, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from application_api.db.base import Base
@@ -19,8 +19,9 @@ class Patient(Base):
     # cubeai-docs/backend/database_audit.md ("PHI storage decision").
     name = Column(String, nullable=False)
     # Nullable: the Orthanc sync stores NULL when PatientBirthDate is absent or
-    # unparseable (see repositories/orthanc_sync.py).
-    birth_date = Column(DateTime(timezone=True), nullable=True)
+    # unparseable (see repositories/orthanc_sync.py). DICOM PatientBirthDate
+    # (DA) is date-only, so this column is DATE, not TIMESTAMPTZ.
+    birth_date = Column(Date, nullable=True)
     gender = Column(String, nullable=True)
 
     # Orthanc loss marks the row unavailable instead of deleting it.

@@ -143,12 +143,13 @@ def test_feature_sets_have_the_a14_shape():
         "config_digest",
         "source_digest",
         "manifest_digest",
-        "status",
         "frozen_at",
         "created_at",
     }
-    # /// removals.
-    assert {"session_id", "cohort_mode", "updated_at", "producer_job_id"}.isdisjoint(columns)
+    # /// removals. `status` was dropped (V1 plan #15): it was DB-CHECK-forced
+    # to always equal `frozen_at IS NOT NULL`, so it could never diverge and
+    # readers now derive it instead of storing it twice.
+    assert {"session_id", "cohort_mode", "updated_at", "producer_job_id", "status"}.isdisjoint(columns)
     table = _table("feature_sets")
     # A feature set cannot be created without a cohort.
     assert table.columns["cohort_id"].nullable is False
@@ -170,7 +171,11 @@ def test_rectangularity_and_label_supervision_are_constraints():
     names = {constraint.name for constraint in _table("feature_sets").constraints}
     assert "ck_feature_sets_feature_matrix_shape" in names
     assert "ck_feature_sets_selection_states_label_supervision" in names
-    assert "ck_feature_sets_frozen_at_iff_frozen" in names
+    # `status` (and the CHECK tying it to frozen_at) was dropped (V1 plan #15):
+    # it could never diverge from `frozen_at IS NOT NULL`, so readers derive
+    # it instead of storing a duplicate of the same fact.
+    assert "status" not in _table("feature_sets").columns.keys()
+    assert "ck_feature_sets_frozen_at_iff_frozen" not in names
 
 
 def test_every_step_i_fk_is_restrict():

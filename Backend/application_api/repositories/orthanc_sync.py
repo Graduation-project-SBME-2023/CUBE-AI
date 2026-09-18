@@ -125,7 +125,7 @@ async def _get_or_create_study(
             patient_id=patient_id,
             description=description or "Unknown",
             modality=(modality or "UNK")[:20],
-            created_at=created_at,
+            study_datetime=created_at,
         )
         .on_conflict_do_nothing(index_elements=["study_uid"])
     )
@@ -181,7 +181,7 @@ async def _get_or_create_volume(
             series_description=desc or "Unknown",
             modality=modality or "UNK",
             num_slices=safe_num_slices,
-            created_at=created_at,
+            series_datetime=created_at,
             body_part_examined=body_part_examined,
         )
         .on_conflict_do_nothing(index_elements=["volume_series_instance_uid"])

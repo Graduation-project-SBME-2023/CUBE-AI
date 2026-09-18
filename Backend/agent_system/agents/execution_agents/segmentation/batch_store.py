@@ -39,7 +39,7 @@ _PAIR_STATUS = {
     "rejected": "ready",
     "failed": "failed",
 }
-# Carried by the row itself, never duplicated into `quality`.
+# Carried by the row itself, never duplicated into `execution_checkpoint`.
 _ROW_KEYS = {
     "pair_id",
     "volume_uid",
@@ -67,18 +67,18 @@ def pair_status(item: dict[str, Any]) -> str:
 
 
 def pair_payload(item: dict[str, Any]) -> dict[str, Any]:
-    quality = {
+    checkpoint = {
         key: value for key, value in item.items() if key not in _ROW_KEYS
     }
-    quality["schema_version"] = CONFIG_SCHEMA_VERSION
-    quality["work_state"] = item.get("status")
+    checkpoint["schema_version"] = CONFIG_SCHEMA_VERSION
+    checkpoint["work_state"] = item.get("status")
     candidate = item.get("source_segmentation_uid") if item.get("candidate_confirmed") else None
     return {
         "pair_key": str(item["pair_id"]),
         "status": pair_status(item),
         "external_job_id": item.get("inference_job_id") or None,
         "candidate_segmentation_uid": candidate or None,
-        "quality": quality,
+        "execution_checkpoint": checkpoint,
     }
 
 
@@ -86,10 +86,10 @@ def work_items_from_batch(batch: dict[str, Any]) -> list[dict[str, Any]]:
     """Rebuild the module's work items from the stored pairs."""
     items: list[dict[str, Any]] = []
     for pair in batch.get("pairs") or []:
-        quality = dict(pair.get("quality") or {})
-        quality.pop("schema_version", None)
-        work_state = quality.pop("work_state", None)
-        item = dict(quality)
+        checkpoint = dict(pair.get("execution_checkpoint") or {})
+        checkpoint.pop("schema_version", None)
+        work_state = checkpoint.pop("work_state", None)
+        item = dict(checkpoint)
         item["pair_id"] = pair["pair_key"]
         item["volume_uid"] = pair["volume_series_instance_uid"]
         item["target_id"] = pair["target_key"]
@@ -209,7 +209,7 @@ class SegmentationBatchStore:
                     "status": payload["status"],
                     "external_job_id": payload["external_job_id"],
                     "candidate_segmentation_uid": payload["candidate_segmentation_uid"],
-                    "quality": payload["quality"],
+                    "execution_checkpoint": payload["execution_checkpoint"],
                 }
             )
         response = await self._request(

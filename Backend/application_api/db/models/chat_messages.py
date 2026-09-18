@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, ForeignKey, String, DateTime, Text, text
+from sqlalchemy import CheckConstraint, Column, Integer, ForeignKey, String, DateTime, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -30,6 +30,11 @@ class ChatMessage(Base):
     # Optional extra data
     extra_data = Column(JSONB, nullable=True)   # e.g., attachments, metadata, or any future fields
 
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    timestamp = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     chat = relationship("Chat", back_populates="messages")
+
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'assistant', 'system')", name="role"),
+        CheckConstraint("length(btrim(text)) > 0", name="text_not_blank"),
+    )

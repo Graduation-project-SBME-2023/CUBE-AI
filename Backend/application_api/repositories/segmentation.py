@@ -358,8 +358,6 @@ async def declare_segmentation_origin(
         existing.generation_method = declaration.generation_method
     if declaration.series_description:
         existing.series_description = declaration.series_description
-    if declaration.provenance is not None:
-        existing.provenance = declaration.provenance
     if model_id is not None:
         existing.model_id = model_id
 

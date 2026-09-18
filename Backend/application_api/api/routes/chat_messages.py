@@ -8,8 +8,6 @@ from application_api.repositories.chat_messages import (
     create_chat_message,
     get_chat_messages,
     get_chat_message,
-    update_chat_message,
-    delete_chat_message,
     get_chat_messages_by_role
 )
 
@@ -34,16 +32,6 @@ async def api_get_chat_messages(
 @router.get("/message/{message_id}", response_model=ChatMessageRead)
 async def api_get_chat_message(message_id: UUID, db: AsyncSession = Depends(get_db)):
     return await get_chat_message(db, message_id)
-
-
-@router.put("/message/{message_id}", response_model=ChatMessageRead)
-async def api_update_chat_message(message_id: UUID, new_data: ChatMessageCreate, db: AsyncSession = Depends(get_db)):
-    return await update_chat_message(db, message_id, new_data)
-
-
-@router.delete("/message/{message_id}")
-async def api_delete_chat_message(message_id: UUID, db: AsyncSession = Depends(get_db)):
-    return await delete_chat_message(db, message_id)
 
 
 @router.get("/{chat_id}/by_role", response_model=List[ChatMessageRead])

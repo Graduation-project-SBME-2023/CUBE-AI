@@ -33,9 +33,11 @@ class AgentRun(Base):
         primary_key=True,
         server_default=text("gen_random_uuid()"),
     )
+    # No standalone FK here: the composite (step_id, session_id) FK below
+    # already proves existence and same-session ownership together, so a
+    # second single-column FK on step_id would only duplicate it.
     step_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("plan_steps.step_id", ondelete="RESTRICT"),
         nullable=False,
         unique=True,
     )
@@ -60,8 +62,8 @@ class AgentRun(Base):
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
-    # Two FK paths lead to plan_steps (the plain this flowK and the composite
-    # (step_id, session_id) alignment FK); the relationship follows step_id.
+    # The only FK path to plan_steps is the composite (step_id, session_id)
+    # alignment FK below; the relationship still joins on step_id alone.
     step = relationship("PlanStep", back_populates="agent_run", foreign_keys=[step_id])
 
     __table_args__ = (

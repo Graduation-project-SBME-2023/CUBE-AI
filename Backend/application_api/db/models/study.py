@@ -14,6 +14,7 @@ class Study(Base):
     patient_id = Column(
         UUID(as_uuid=True),
         ForeignKey('patients.patient_id', ondelete="RESTRICT"),
+        nullable=False,
         index=True,
     )
     description = Column(String, nullable=True)
@@ -22,9 +23,10 @@ class Study(Base):
 
     archive_status = Column(String, nullable=False, server_default="available", index=True)
 
-    # NOTE: existing rows may hold StudyDate here rather than ingestion time —
-    # do not reinterpret it silently.
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # Renamed from `created_at`: this holds the DICOM StudyDate/StudyTime
+    # (falling back to sync time only when that tag is missing/unparseable),
+    # never row-insertion time.
+    study_datetime = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,

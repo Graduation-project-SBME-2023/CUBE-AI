@@ -13,6 +13,7 @@ class Volume(Base):
     study_uid = Column(
         String,
         ForeignKey('studies.study_uid', ondelete="RESTRICT"),
+        nullable=False,
         index=True,
     )
     series_description = Column(String, nullable=True)
@@ -21,7 +22,10 @@ class Volume(Base):
 
     archive_status = Column(String, nullable=False, server_default="available", index=True)
 
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())  # ISO format date-time
+    # Renamed from `created_at`: this holds the DICOM SeriesDate/SeriesTime
+    # (falling back to sync time only when that tag is missing/unparseable),
+    # never row-insertion time.
+    series_datetime = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True),
         nullable=False,

@@ -41,15 +41,15 @@ def test_fine_grained_work_states_map_onto_the_four_the_schema_allows():
     assert batch_store.pair_status(_item(status="rejected")) == "ready"
 
 
-def test_the_detailed_state_is_kept_in_quality_and_identity_is_not_duplicated():
+def test_the_detailed_state_is_kept_in_execution_checkpoint_and_identity_is_not_duplicated():
     payload = batch_store.pair_payload(_item(status="preparing", geometry_adjusted=True))
     assert payload["pair_key"] == "volume-1__spleen"
     assert payload["status"] == "running"
-    assert payload["quality"]["work_state"] == "preparing"
-    assert payload["quality"]["geometry_adjusted"] is True
+    assert payload["execution_checkpoint"]["work_state"] == "preparing"
+    assert payload["execution_checkpoint"]["geometry_adjusted"] is True
     # Identity lives in the row's own columns.
     for duplicated in ("pair_id", "volume_uid", "target_id", "review_status", "inference_job_id"):
-        assert duplicated not in payload["quality"]
+        assert duplicated not in payload["execution_checkpoint"]
 
 
 def test_a_candidate_seg_is_only_named_once_the_archive_row_exists():
@@ -76,7 +76,7 @@ def test_work_items_round_trip_through_the_stored_pairs():
                 "candidate_segmentation_uid": payload["candidate_segmentation_uid"],
                 "selected_segmentation_uid": None,
                 "review_decision": None,
-                "quality": payload["quality"],
+                "execution_checkpoint": payload["execution_checkpoint"],
             }
         ],
     }
@@ -102,7 +102,7 @@ def test_a_submitted_rejection_comes_back_as_a_rejected_work_item():
                 "target_key": "spleen",
                 "status": "ready",
                 "review_decision": "rejected",
-                "quality": {"schema_version": 1, "work_state": "ready"},
+                "execution_checkpoint": {"schema_version": 1, "work_state": "ready"},
             }
         ],
     }

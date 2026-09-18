@@ -141,7 +141,10 @@ class SegmentationPair(Base):
     selected_segmentation_uid = Column(Text, nullable=True, index=True)
     segment_number = Column(Integer, nullable=False, server_default="1")
     review_decision = Column(Text, nullable=True)
-    quality = Column(JSONB(none_as_null=True), nullable=True)
+    # Recovery/resume checkpoint state for the crashed-batch resume path
+    # (`batch_store.py`), never a QA/Dice score — renamed from `quality`,
+    # which was misleading (see execution_checkpoint_versioned below).
+    execution_checkpoint = Column(JSONB(none_as_null=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
@@ -204,7 +207,9 @@ class SegmentationPair(Base):
             "external_job_id IS NULL OR length(btrim(external_job_id)) > 0",
             name="external_job_id_not_blank",
         ),
-        CheckConstraint(_versioned("quality", nullable=True), name="quality_versioned"),
+        CheckConstraint(
+            _versioned("execution_checkpoint", nullable=True), name="execution_checkpoint_versioned"
+        ),
         Index(
             "ix_segmentation_pairs_segmentation_run_id_status", "segmentation_run_id", "status"
         ),

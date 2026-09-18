@@ -126,7 +126,7 @@ def _pair_out(pair: SegmentationPair, target_key: str, subject_key=None, ordinal
         "selected_segmentation_uid": pair.selected_segmentation_uid,
         "segment_number": pair.segment_number,
         "review_decision": pair.review_decision,
-        "quality": pair.quality,
+        "execution_checkpoint": pair.execution_checkpoint,
         "created_at": pair.created_at,
     }
 
@@ -297,7 +297,7 @@ async def create_batch(
                     status=pair.status,
                     candidate_segmentation_uid=pair.candidate_segmentation_uid,
                     segment_number=1,
-                    quality=pair.quality,
+                    execution_checkpoint=pair.execution_checkpoint,
                 )
             )
         await db.flush()
@@ -380,7 +380,7 @@ async def update_pair_states(
                 status_code=404, detail=f"Unknown segmentation pair {update.pair_key!r}"
             ))
         pair.status = update.status
-        pair.quality = update.quality
+        pair.execution_checkpoint = update.execution_checkpoint
         pair.candidate_segmentation_uid = update.candidate_segmentation_uid
         if update.external_job_id is not None:
             if pair.external_job_id not in (None, update.external_job_id):
