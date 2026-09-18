@@ -36,7 +36,6 @@ from ingestion.provenance import (
     provenance_summary,
 )
 from ingestion.verify import verify_round_trip
-from services.resource_scheduler import ResourceScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +44,7 @@ SYNC_TIMEOUT_SECONDS = 30.0
 
 @asynccontextmanager
 async def _maybe_lease(
-    scheduler: ResourceScheduler | None,
+    scheduler: Any | None,
     resources: list[str],
     **kwargs: Any,
 ) -> AsyncIterator[None]:
@@ -53,7 +52,7 @@ async def _maybe_lease(
 
     Lets a bare call to ``run_ingestion`` (as every unit test makes) skip
     capacity limiting entirely, while production code -- which always passes
-    the shared scheduler -- gets it for free.
+    ``ingestion_limiter`` -- gets it for free.
     """
     if scheduler is None:
         yield None
@@ -177,7 +176,7 @@ async def run_ingestion(
     patient_name: str | None = None,
     series_description: str | None = None,
     orthanc: OrthancClient | None = None,
-    scheduler: ResourceScheduler | None = None,
+    scheduler: Any | None = None,
 ) -> dict[str, Any]:
     """Convert one uploaded volume and store it, updating the job as it goes."""
     client = orthanc or OrthancClient()
@@ -246,7 +245,7 @@ async def run_ingestion(
         # several large uploads running this loop at once is exactly what was
         # saturating Orthanc's HTTP server and producing dropped connections.
         # This is the same capacity-limiting the rest of the pipeline already
-        # applies to expensive stages -- see services/resource_scheduler.py.
+        # applies to expensive stages -- see ingestion/limits.py.
         async with _maybe_lease(
             scheduler,
             ["orthanc_io"],
@@ -342,7 +341,7 @@ async def _convert(
     checksum: str,
     filename: str,
     series_description: str | None,
-    scheduler: ResourceScheduler | None,
+    scheduler: Any | None,
 ):
     """Run the CPU-bound conversion off the event loop, under a lease if given."""
 

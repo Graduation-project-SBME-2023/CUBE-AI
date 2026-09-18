@@ -40,6 +40,21 @@ class TaskMessage(Base):
  
     created_at = Column(DateTime(timezone=True), server_default=func.now())
  
-    context_augmentation = relationship("ContextAugmentation", back_populates="task_message")
+    # single_parent=True + delete-orphan: a ContextAugmentation belongs to
+    # exactly one TaskMessage, so deleting or reassigning the TaskMessage
+    # must delete the ContextAugmentation too. Without this, the FK's
+    # ondelete="SET NULL" (on context_augmentation_id) only protects against
+    # dangling references — it does not clean up the ContextAugmentation row
+    # itself, leaving it permanently orphaned.
+    context_augmentation = relationship(
+        "ContextAugmentation",
+        back_populates="task_message",
+        cascade="all, delete-orphan",
+        single_parent=True,
+        # ORM-level delete-orphan cascade only fires for loaded relationships;
+        # eager-load it so `db.delete(task_message)` reliably cascades
+        # regardless of the query path that fetched the row.
+        lazy="selectin",
+    )
     plan_step            = relationship("PlanStep", back_populates="task_message")
  

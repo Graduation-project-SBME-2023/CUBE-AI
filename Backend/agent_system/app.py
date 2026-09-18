@@ -8,7 +8,6 @@ if root_dir not in sys.path:
     sys.path.append(root_dir)
 
 import asyncio
-import hmac
 from contextlib import asynccontextmanager
 
 import re
@@ -17,7 +16,6 @@ import subprocess
 import shutil
 from typing import Any, Dict
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import httpx
 # pyrefly: ignore [missing-import]
@@ -55,12 +53,7 @@ from storage_paths import (
     ws_sub,
 )
 
-from socket_store import (
-    WebSocketCapacityExceeded,
-    manager as ws_manager,
-    normalize_session_id,
-    send_ws_message,
-)
+from socket_store import manager as ws_manager, send_ws_message
 from agents.planning_agents.planner import ClinicalPlanner
 from models.session import Session
 from models.plans import PlannerState
@@ -74,14 +67,9 @@ from client_config import (
 )
 
 from models.tool_logging import ToolEvent
-from models.requests import (
-    PlanningRequest,
-    SessionControlRequest,
-    WebSocketBroadcastRequest,
-)
+from models.requests import PlanningRequest, SessionControlRequest
 from tool_logging import receive_tool_event
 from services.session_service import (
-    SessionCapacityExceeded,
     SessionExecutionConflict,
     SessionPlanningConflict,
     SessionService,
@@ -89,7 +77,6 @@ from services.session_service import (
 from services.best_effort import drain_best_effort, initialize_best_effort
 from services.pipeline_monitor import PipelineMonitor, raise_for_fatal_tool_failure
 from services.population_handoff import require_population_handoff
-from services.resource_scheduler import resource_scheduler
 from services.mask_store import MaskStore, orthanc_first
 from clients.backend_client import BackendClient
 from ingestion.routes import router as ingestion_router
@@ -100,16 +87,6 @@ from agents.execution_agents.segmentation.progressive import (
 
 logger = logging.getLogger(__name__)
 
-
-def _positive_int_env(name: str, default: int) -> int:
-    try:
-        value = int(os.environ.get(name, str(default)))
-    except (TypeError, ValueError):
-        return default
-    return value if value > 0 else default
-
-
-WS_MAX_MESSAGE_BYTES = _positive_int_env("WS_MAX_MESSAGE_BYTES", 65_536)
 class RedactApiKeyFilter(logging.Filter):
     def filter(self, record):
         if hasattr(record, 'msg') and isinstance(record.msg, str):
@@ -139,8 +116,6 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
-        await resource_scheduler.shutdown()
-        await ws_manager.shutdown()
         await drain_best_effort(timeout_seconds=2.0)
 
 
@@ -160,16 +135,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-def _websocket_origin_allowed(websocket: WebSocket) -> bool:
-    origin = (websocket.headers.get("origin") or "").rstrip("/")
-    if not origin:
-        return True
-    allowed = {value.strip().rstrip("/") for value in _cors_origins if value.strip()}
-    if "*" in allowed or origin in allowed:
-        return True
-    return urlsplit(origin).netloc == websocket.headers.get("host", "")
 
 
 class CoopCoepMiddleware(BaseHTTPMiddleware):
@@ -273,21 +238,6 @@ def serve_static_pdf(file_path: str):
 # Single shared service — the only stateful object routes need to know about
 session_service = SessionService(ws_manager=ws_manager)
 
-
-async def _publish_resource_status(payload: dict) -> None:
-    session_id = str(payload.get("session_id") or "")
-    session = session_service.get_session(session_id)
-    if session and session.execution_monitor:
-        await session.execution_monitor.on_resource_status(payload)
-    await ws_manager.send_ws_message(
-        "resource_status",
-        payload,
-        session_id=session_id,
-    )
-
-
-resource_scheduler.set_notifier(_publish_resource_status)
-
 api_key = os.getenv("OLLAMA_API_KEY", "")
 
 
@@ -301,13 +251,7 @@ async def run_planner(session: Session, message: str, do_lit_review: bool = True
     os.makedirs(workspace_folder, exist_ok=True)
     planner = ClinicalPlanner(
         input_provider=lambda: ws_manager.wait_for_user_message(session.session_id),
-        output_callback=lambda event_type, data, _claimed_session: (
-            ws_manager.send_ws_message(
-                event_type,
-                data,
-                session.session_id,
-            )
-        ),
+        output_callback=lambda t, d, s: ws_manager.send_ws_message(t, d, s),
         model_client=create_model_client_from_config(),
         workspace_dir=workspace_folder,
         session=session,
@@ -588,7 +532,7 @@ async def start_planning(request: PlanningRequest):
     from functools import partial
     bound_planner = partial(run_planner, do_lit_review=request.do_lit_review)
     try:
-        admission = await session_service.start_planning(
+        await session_service.start_planning(
             request.session_id,
             request.message,
             bound_planner,
@@ -596,16 +540,7 @@ async def start_planning(request: PlanningRequest):
         )
     except SessionPlanningConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    except SessionCapacityExceeded as exc:
-        raise HTTPException(status_code=429, detail=str(exc))
-    response = {
-        "session_id": request.session_id,
-        "status": "queued" if admission.queued else "planning_started",
-        "queue_position": admission.queue_position,
-    }
-    if admission.queued:
-        return JSONResponse(status_code=202, content=response)
-    return response
+    return {"session_id": request.session_id, "status": "planning_started"}
 
 
 # Both spellings are served explicitly. OpenResty strips the /agents prefix, so
@@ -617,24 +552,21 @@ async def start_planning(request: PlanningRequest):
 @app.post("/run")
 async def start_execution(request: SessionControlRequest):
     try:
-        admission = await session_service.start_execution(
+        await session_service.start_execution(
             request.session_id,
             run_pipeline,
             restart=request.restart,
         )
     except SessionExecutionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    except SessionCapacityExceeded as exc:
-        raise HTTPException(status_code=429, detail=str(exc))
-
-    response = {
-        "session_id": request.session_id,
-        "status": "queued" if admission.queued else "execution_started",
-        "queue_position": admission.queue_position,
-    }
-    if admission.queued:
-        return JSONResponse(status_code=202, content=response)
-    return response
+    # Immediately tell the UI that execution has started so tabs unlock
+    # without waiting for the first pipeline_agent_status message.
+    await ws_manager.send_ws_message(
+        "run_status",
+        {"state": "RUNNING", "current_agent": None},
+        session_id=request.session_id,
+    )
+    return {"session_id": request.session_id, "status": "execution_started"}
 
 
 @app.post("/pause")
@@ -644,8 +576,6 @@ async def pause_execution(request: SessionControlRequest):
         return {"session_id": request.session_id, "status": "paused"}
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
-    except SessionExecutionConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @app.post("/resume")
@@ -655,8 +585,6 @@ async def resume_execution(request: SessionControlRequest):
         return {"session_id": request.session_id, "status": "running"}
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
-    except SessionExecutionConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @app.post("/session/{session_id}/resume-pipeline")
@@ -680,8 +608,6 @@ async def resume_hydrated_pipeline(session_id: str):
         )
     except SessionExecutionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    except SessionCapacityExceeded as exc:
-        raise HTTPException(status_code=429, detail=str(exc))
 
 
 @app.post("/stop")
@@ -707,9 +633,6 @@ async def get_status(session_id: str):
     session = session_service.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    capacity = await session_service.execution_capacity.status(session_id)
-    planning_capacity = await session_service.planning_capacity.status(session_id)
-    resource_capacity = await resource_scheduler.status(session_id)
     return {
         "session_id": session_id,
         "state": session.state.name,
@@ -717,22 +640,6 @@ async def get_status(session_id: str):
         "execution_active": bool(
             session.execution_task and not session.execution_task.done()
         ),
-        "planning_active": bool(
-            session.planning_task and not session.planning_task.done()
-        ),
-        "execution_capacity": capacity,
-        "planning_capacity": planning_capacity,
-        "resource_capacity": resource_capacity,
-    }
-
-
-@app.get("/ws-status")
-async def websocket_status():
-    return {
-        "active_connections": ws_manager.connection_count(),
-        "active_sessions": len(ws_manager.connections_by_session),
-        "input_queues": len(ws_manager.message_queues),
-        "resource_capacity": await resource_scheduler.status(),
     }
 
 
@@ -742,21 +649,9 @@ class latex_output(BaseModel):
     session_id: str
 
 
-def _require_internal_event_token(request: Request) -> None:
-    configured_token = os.environ.get("WS_INTERNAL_TOKEN", "").strip()
-    provided_token = request.headers.get("X-Internal-Token", "")
-    if configured_token and not hmac.compare_digest(configured_token, provided_token):
-        raise HTTPException(status_code=403, detail="Invalid internal event token")
-
-
 @app.post("/events")
-async def receive_event(event: ToolEvent | latex_output, request: Request):
-    _require_internal_event_token(request)
-    logger.info(
-        "Received internal event type=%s session=%s",
-        event.event_type,
-        event.session_id,
-    )
+async def receive_event(event: ToolEvent | latex_output):
+    logger.info(f"Received tool event: {event}")
     if isinstance(event, latex_output):
         await send_ws_message(
             msg_type="latex_output",
@@ -892,23 +787,10 @@ async def list_providers():
 
 @app.get("/session/{session_id}/replay-logs")
 async def replay_logs(session_id: str):
-    session_id = normalize_session_id(session_id)
     logs: list[WS_Log] = await BackendClient.get_logs(session_id)
-    events = []
-    for sequence, log in enumerate(logs, start=1):
-        if log.msg_type == "msg":
-            continue
-        events.append(
-            ws_manager.build_event(
-                log.msg_type,
-                log.payload,
-                session_id,
-                replaying=True,
-                event_id=str(log.uuid) if log.uuid else None,
-                sequence=sequence,
-                timestamp=log.created_at.isoformat() if log.created_at else None,
-            )
-        )
+    for log in logs:
+        if log.msg_type in ('msg'): continue
+        await ws_manager.send_ws_message(log.msg_type, log.payload, log.session_id, replaying=True)
 
     workspace_dir = str(workspace(session_id))
     manifest_path = str(ws_sub(session_id, "segmentation_manifest.json"))
@@ -934,14 +816,11 @@ async def replay_logs(session_id: str):
                         status = decisions.get(volume.get("pairId"))
                         if status in {"accepted", "rejected", "modified"}:
                             volume["reviewStatus"] = status
-                events.append(
-                    ws_manager.build_event(
-                        "segmentation_output",
-                        snapshot,
-                        session_id,
-                        replaying=True,
-                        sequence=len(events) + 1,
-                    )
+                await ws_manager.send_ws_message(
+                    "segmentation_output",
+                    snapshot,
+                    session_id,
+                    replaying=True,
                 )
     except FileNotFoundError:
         pass
@@ -951,8 +830,6 @@ async def replay_logs(session_id: str):
             session_id,
             exc_info=True,
         )
-
-    return {"session_id": session_id, "events": events}
 
 
 
@@ -1152,32 +1029,12 @@ async def compile_report(data: dict, request: Request):
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    if not _websocket_origin_allowed(websocket):
-        await websocket.close(code=1008, reason="WebSocket origin is not allowed")
-        return
-
-    try:
-        session_id = normalize_session_id(websocket.query_params.get("session_id"))
-    except ValueError as exc:
-        await websocket.close(code=1008, reason=str(exc))
-        return
-
-    try:
-        await ws_manager.connect(websocket, session_id)
-    except WebSocketCapacityExceeded as exc:
-        await websocket.close(code=1013, reason=str(exc))
-        return
-    logging.getLogger("HypothesisFlow").info(
-        "[HypothesisFlow][WS] Client connected | session_id=%s",
-        session_id,
-    )
+    await ws_manager.connect(websocket)
+    logging.getLogger("HypothesisFlow").info("[HypothesisFlow][WS] Client connected")
 
     try:
         while True:
             data = await websocket.receive_text()
-            if len(data.encode("utf-8")) > WS_MAX_MESSAGE_BYTES:
-                await websocket.close(code=1009, reason="WebSocket message is too large")
-                break
             # NOTE: Do NOT push_to_queue here — that caused every message to be
             # queued twice (once as raw text, once after JSON parsing).
             # Only queue inside the typed message block below.
@@ -1191,13 +1048,7 @@ async def websocket_endpoint(websocket: WebSocket):
             except json.JSONDecodeError:
                 # Backward compatibility: plain text is treated as user input.
                 # Queued exactly ONCE here.
-                queued = await ws_manager.push_to_queue(data, session_id=session_id)
-                if not queued:
-                    ws_manager.send_to_connection(
-                        websocket,
-                        "protocol_error",
-                        {"reason": "input_queue_full"},
-                    )
+                await ws_manager.push_to_queue(data)
                 continue
 
             if not isinstance(message, dict):
@@ -1205,43 +1056,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
             msg_type = message.get("type")
             payload = message.get("payload")
-            claimed_session_id = message.get("session_id")
+            session_id = message.get("session_id")
 
             # Some clients may nest session_id inside payload.
-            if not claimed_session_id and isinstance(payload, dict):
-                claimed_session_id = payload.get("session_id")
-
-            if claimed_session_id and str(claimed_session_id) != session_id:
-                ws_manager.send_to_connection(
-                    websocket,
-                    "protocol_error",
-                    {"reason": "session_id_mismatch"},
-                )
-                continue
+            if not session_id and isinstance(payload, dict):
+                session_id = payload.get("session_id")
 
             if msg_type in {"user", "user_input", "chat_input"}:
-                message_id = str(message.get("message_id") or "").strip()
-                if message_id:
-                    try:
-                        is_new_message = ws_manager.remember_client_message(
-                            session_id,
-                            message_id,
-                        )
-                    except ValueError as exc:
-                        ws_manager.send_to_connection(
-                            websocket,
-                            "protocol_error",
-                            {"reason": str(exc)},
-                        )
-                        continue
-                    if not is_new_message:
-                        ws_manager.send_to_connection(
-                            websocket,
-                            "client_message_ack",
-                            {"message_id": message_id, "duplicate": True},
-                        )
-                        continue
-
                 if isinstance(payload, dict):
                     text = payload.get("text") or payload.get("message") or ""
                 else:
@@ -1249,47 +1070,25 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 if text.strip():
                     logging.getLogger("HypothesisFlow").info(
-                        "[HypothesisFlow][WS] Queueing user text | session_id=%s | text_len=%s",
+                        "[HypothesisFlow][WS] Queueing user text | session_id=%s | text_len=%s | preview=%s",
                         session_id,
                         len(text),
+                        text[:120],
                     )
-                    queued = await ws_manager.push_to_queue(text, session_id=session_id)
-                    if not queued:
-                        if message_id:
-                            ws_manager.forget_client_message(session_id, message_id)
-                        ws_manager.send_to_connection(
-                            websocket,
-                            "protocol_error",
-                            {"reason": "input_queue_full"},
-                        )
-                    elif message_id:
-                        ws_manager.send_to_connection(
-                            websocket,
-                            "client_message_ack",
-                            {"message_id": message_id, "duplicate": False},
-                        )
-            else:
-                logging.getLogger("HypothesisFlow").debug(
-                    "[HypothesisFlow][WS] Ignoring unsupported client event | session_id=%s | type=%s",
-                    session_id,
-                    msg_type,
-                )
+                    await ws_manager.push_to_queue(text, session_id=session_id)
 
     except WebSocketDisconnect:
         logging.getLogger("HypothesisFlow").info(
             "[HypothesisFlow][WS] Client disconnected"
         )
-    finally:
         ws_manager.disconnect(websocket)
 
 
 @app.post("/ws-broadcast")
-async def ws_broadcast(data: WebSocketBroadcastRequest, request: Request):
-    _require_internal_event_token(request)
-
-    session_id = normalize_session_id(data.session_id)
-    if data.type == "agent_waiting_for_user_input":
-        payload = data.payload if isinstance(data.payload, dict) else {}
+async def ws_broadcast(data: dict):
+    if data.get("type") == "agent_waiting_for_user_input":
+        payload = data.get("payload") or {}
+        session_id = data.get("session_id")
         agent_name = payload.get("agent")
         waiting_status = payload.get("status")
         if session_id and agent_name and waiting_status:
@@ -1299,9 +1098,7 @@ async def ws_broadcast(data: WebSocketBroadcastRequest, request: Request):
                 str(waiting_status),
             )
     await ws_manager.send_ws_message(
-        data.type,
-        data.payload,
-        session_id=session_id,
+        data["type"], data["payload"], session_id=data.get("session_id")
     )
     return {"status": "ok"}
     
@@ -2357,21 +2154,8 @@ async def recover_session(session_id: str, restart: bool = False):
             "execution_state": execution_state,
         }
 
-    try:
-        admission = await session_service.start_execution(
-            session_id,
-            run_pipeline,
-            restart=True,
-        )
-    except SessionExecutionConflict as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    except SessionCapacityExceeded as exc:
-        raise HTTPException(status_code=429, detail=str(exc))
-    return {
-        "session_id": session_id,
-        "status": "queued" if admission.queued else "restart_started",
-        "queue_position": admission.queue_position,
-    }
+    await session_service.start_execution(session_id, run_pipeline, restart=True)
+    return {"session_id": session_id, "status": "restart_started"}
 
 
 # ----------------------------------------------------------------------
@@ -2386,9 +2170,6 @@ if __name__ == "__main__":
         "app:app",
         host="0.0.0.0",
         port=8150,
-        reload=os.environ.get("AGENTS_RELOAD", "false").lower() == "true",
-        ws_max_size=WS_MAX_MESSAGE_BYTES,
-        ws_ping_interval=20.0,
-        ws_ping_timeout=20.0,
+        reload=True,
         log_config=uvicorn_log_config("Agents API"),
     )

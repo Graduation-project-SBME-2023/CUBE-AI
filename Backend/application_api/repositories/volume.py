@@ -6,9 +6,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.db.models.volume import Volume
+from application_api.db.models.segmentation import Segmentation
 from application_api.schemas.volume import VolumeCreate, VolumeUpdate
 from application_api.db.models.study import Study
-from application_api.services.orthanc_client import delete_orthanc_resource
+from application_api.services.orthanc_client import cleanup_orthanc_resources_after_db_delete
 
 logger = logging.getLogger(__name__)
 
@@ -64,35 +65,49 @@ async def update_volume(db: AsyncSession, volume_series_instance_uid: str, updat
 
 async def delete_volume(db: AsyncSession, volume_uid: str):
     """
-    Delete volume from both Orthanc and database.
+    Delete volume from both the database and Orthanc.
     Returns (success: bool, error_message: str | None)
+
+    Database-first: the DB delete (and its ON DELETE CASCADE to
+    segmentations) is the operation that can actually fail and needs to be
+    reported to the caller. Orthanc cleanup happens only after that commit
+    succeeds, so a slow or unreachable Orthanc can no longer leave a
+    dangling DB row pointing at already-deleted imaging. Every Orthanc
+    series that belonged to this volume AND to its cascaded segmentations
+    is deleted from PACS too, closing the gap where a deleted volume left
+    its derived SEG series orphaned in Orthanc.
     """
     result = await db.execute(
         select(Volume).where(Volume.volume_series_instance_uid == volume_uid)
     )
     volume = result.scalar_one_or_none()
-    
+
     if not volume:
         return False, "Volume not found"
-    
+
     orthanc_series_id = volume.orthanc_series_id
-    deleted_from_orthanc, error_msg = await delete_orthanc_resource(
-        "series",
-        orthanc_series_id,
+    seg_result = await db.execute(
+        select(Segmentation.orthanc_series_id).where(
+            Segmentation.volume_series_instance_uid == volume_uid
+        )
     )
-    if not deleted_from_orthanc:
-        return False, error_msg
-    
-    # Delete from database
+    seg_orthanc_ids = [row[0] for row in seg_result.all()]
+
     try:
-        await db.delete(volume)
+        await db.delete(volume)  # cascades to segmentations in the DB
         await db.commit()
-        return True, None
     except SQLAlchemyError as e:
         await db.rollback()
         error_msg = f"Database error: {str(e)}"
         logger.error(error_msg)
         return False, error_msg
+
+    await cleanup_orthanc_resources_after_db_delete(
+        "series",
+        [orthanc_series_id, *seg_orthanc_ids],
+        context=f"DB delete of volume {volume_uid}",
+    )
+    return True, None
 
 async def get_volumes_by_study(
     db: AsyncSession, study_uid: str, skip: int = 0, limit: int = 100

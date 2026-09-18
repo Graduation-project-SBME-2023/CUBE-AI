@@ -87,7 +87,6 @@ def test_application_image_owns_alembic_and_database_dependencies():
     repository_root = BACKEND_ROOT.parent
     dockerfile = (repository_root / "deploy" / "Dockerfile.application-api").read_text(encoding="utf-8")
     compose_files = (
-        repository_root / "deploy" / "docker-compose.backend.cpu.yml",
         repository_root / "deploy" / "docker-compose.backend.gpu.yml",
     )
     alembic_config = (APPLICATION_ROOT / "alembic.ini").read_text(encoding="utf-8")

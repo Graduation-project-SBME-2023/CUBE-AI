@@ -55,7 +55,6 @@ async def _emit_ws_message(msg_type: str, payload_ws: dict, session_id: str):
         async with httpx.AsyncClient() as client:
             await client.post(
                 "http://localhost:8150/ws-broadcast",
-                headers={"X-Internal-Token": os.environ.get("WS_INTERNAL_TOKEN", "")},
                 json={"type": msg_type, "payload": payload_ws, "session_id": session_id},
                 timeout=2.0
             )

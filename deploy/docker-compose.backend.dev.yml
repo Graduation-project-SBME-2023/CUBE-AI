@@ -1,5 +1,17 @@
 name: CUBE.AI
 services:
+  # Bind-mount live source for hot-reload during development only. The base
+  # compose files intentionally do NOT do this: db-migrate/db-seed always run
+  # the image's baked code, and application-api bind-mounting a different
+  # source tree meant it could silently run code the migrations never saw
+  # (see database_audit.md D-33). Restrict that divergence to this
+  # explicit dev overlay, where it is an accepted, visible trade-off.
+  application-api:
+    volumes:
+      - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
+      - ${COMPOSE_PROJECT_DIR}/Backend/application_api:/app/application_api
+      - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/lib/configs:/app/apps/radiology/lib/configs:ro
+
   monailabel:
     environment:
       MONAI_LABEL_APP_DIR: /apps/radiology

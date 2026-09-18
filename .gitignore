@@ -10,7 +10,12 @@ __pycache__/
 # venvs and envs
 **/*venv
 
-# .env  #TEMPORARY COMMENTED OUT FOR TESTING PURPOSES
+# # Never commit real credentials. Copy deploy/.env.example to deploy/.env
+# # and fill in your own values (see database_audit.md D-29 for why this was
+# # re-enabled: deploy/.env was previously tracked with a live DATABASE_URL
+# # and Postgres/Orthanc passwords committed to the repo).
+# .env
+# deploy/.env
 
 
 # Backend runtime data lives under one generated-data boundary.

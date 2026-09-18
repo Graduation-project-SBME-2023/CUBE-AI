@@ -31,25 +31,6 @@ services:
       MONAI_URL: http://monailabel:8000
       CONTROL_API_URL: http://application-api:8001
       ORTHANC_URL: http://orthanc:8042
-      PIPELINE_MAX_CONCURRENCY: ${PIPELINE_MAX_CONCURRENCY:-4}
-      PIPELINE_QUEUE_CAPACITY: ${PIPELINE_QUEUE_CAPACITY:-8}
-      PLANNING_MAX_CONCURRENCY: ${PLANNING_MAX_CONCURRENCY:-2}
-      PLANNING_QUEUE_CAPACITY: ${PLANNING_QUEUE_CAPACITY:-16}
-      RESOURCE_GPU_SEGMENTATION_CAPACITY: ${RESOURCE_GPU_SEGMENTATION_CAPACITY:-1}
-      RESOURCE_CPU_HEAVY_CAPACITY: ${RESOURCE_CPU_HEAVY_CAPACITY:-1}
-      RESOURCE_ORTHANC_IO_CAPACITY: ${RESOURCE_ORTHANC_IO_CAPACITY:-2}
-      RESOURCE_WAIT_QUEUE_CAPACITY: ${RESOURCE_WAIT_QUEUE_CAPACITY:-32}
-      OMP_NUM_THREADS: ${CPU_HEAVY_THREADS:-4}
-      MKL_NUM_THREADS: ${CPU_HEAVY_THREADS:-4}
-      OPENBLAS_NUM_THREADS: ${CPU_HEAVY_THREADS:-4}
-      NUMEXPR_NUM_THREADS: ${CPU_HEAVY_THREADS:-4}
-      WS_INPUT_QUEUE_SIZE: ${WS_INPUT_QUEUE_SIZE:-32}
-      WS_OUTBOUND_QUEUE_SIZE: ${WS_OUTBOUND_QUEUE_SIZE:-256}
-      WS_CLIENT_MESSAGE_HISTORY: ${WS_CLIENT_MESSAGE_HISTORY:-1024}
-      WS_MAX_CONNECTIONS: ${WS_MAX_CONNECTIONS:-256}
-      WS_MAX_CONNECTIONS_PER_SESSION: ${WS_MAX_CONNECTIONS_PER_SESSION:-8}
-      WS_MAX_MESSAGE_BYTES: ${WS_MAX_MESSAGE_BYTES:-65536}
-      WS_SESSION_IDLE_TTL_SECONDS: ${WS_SESSION_IDLE_TTL_SECONDS:-3600}
     env_file:
       - .env
     depends_on:
@@ -129,6 +110,8 @@ services:
       ORTHANC_URL: http://orthanc:8042
       ORTHANC_USER: ${ORTHANC_USER:-orthanc}
       ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:-orthanc}
+      ORTHANC_WEBHOOK_TOKEN: ${ORTHANC_WEBHOOK_TOKEN:-}
+      RECONCILIATION_INTERVAL_SECONDS: ${RECONCILIATION_INTERVAL_SECONDS:-300}
       BACKEND_STORAGE_ROOT: /storage
       AGENTS_WORKSPACE_DIR: /storage/hypotheses
       GENERAL_DATA_DIR: /storage/data/medical
@@ -144,7 +127,6 @@ services:
       - .env
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
-      - ${COMPOSE_PROJECT_DIR}/Backend/application_api:/app/application_api
       - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/lib/configs:/app/apps/radiology/lib/configs:ro
     depends_on:
       db-seed:
@@ -197,10 +179,6 @@ services:
       TMPDIR: /storage/temp/radiology
       TEXT_MODEL_PATH: /storage/models/qwen3-4b-embedding
       VOXTELL_DIR: /storage/models/voxtell_v1.1
-      OMP_NUM_THREADS: ${VOXTELL_CPU_THREADS:-4}
-      MKL_NUM_THREADS: ${VOXTELL_CPU_THREADS:-4}
-      OPENBLAS_NUM_THREADS: ${VOXTELL_CPU_THREADS:-4}
-      NUMEXPR_NUM_THREADS: ${VOXTELL_CPU_THREADS:-4}
       VISTA_CONFIG_SOURCE_DIR: /config/vista
       nnUNet_raw: /storage/data/nnunet/nnUNet_raw
       nnUNet_preprocessed: /storage/data/nnunet/nnUNet_preprocessed
@@ -242,15 +220,24 @@ services:
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/orthanc/orthanc.json:/etc/orthanc/orthanc.json:ro
       - ${COMPOSE_PROJECT_DIR}/Backend/orthanc/lua:/etc/orthanc/lua:ro
-      - orthanc-db2:/var/lib/orthanc/db/
+      # Same volume name as docker-compose.backend.cpu.yml: previously this
+      # was orthanc-db2, a DIFFERENT named volume than the CPU stack, so
+      # switching between CPU and GPU profiles silently presented an empty
+      # PACS archive instead of the same data.
+      - orthanc-db:/var/lib/orthanc/db/
     restart: unless-stopped
 
   postgres:
-    image: postgres:18rc1-alpine3.22
+    image: postgres:18-alpine
     container_name: postgres-backend
     volumes:
       - ${COMPOSE_PROJECT_DIR}/deploy/database/backup.sql:/docker-entrypoint-initdb.d/backup.sql
-      - postgres-db2:/var/lib/postgresql/data
+      # Same volume name as docker-compose.backend.cpu.yml (see the orthanc
+      # comment above for why this must match, not use a "-2" suffix).
+      # PostgreSQL 18 stores clusters below a major-version directory (for
+      # example /var/lib/postgresql/18/docker). Mount the parent directory so
+      # that layout survives container recreation and supports pg_upgrade.
+      - postgres-db:/var/lib/postgresql
     ports:
       - "5433:5432"
     environment:
@@ -301,5 +288,5 @@ services:
     restart: "no"
 
 volumes:
-  postgres-db2:
-  orthanc-db2:
+  postgres-db:
+  orthanc-db:

@@ -13,7 +13,6 @@ class HypothesisBase(BaseModel):
     relationship_type: Optional[str] = None
     state: Optional[str] = None
     hypothesis: Optional[str] = None
-    column: Optional[str] = None
     comparison: Optional[str] = None
 
 
@@ -32,7 +31,6 @@ class HypothesisUpdate(BaseModel):
     state: Optional[str] = None
 
     hypothesis: Optional[str] = None
-    column: Optional[str] = None
     comparison: Optional[str] = None
 
 class HypothesisOut(HypothesisBase):

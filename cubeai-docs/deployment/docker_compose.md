@@ -115,4 +115,9 @@ This will stop and remove the containers.
 | ----------- | ----------------------------------- |
 | postgres-db | Stores PostgreSQL data persistently |
 
+The PostgreSQL 18 container mounts `postgres-db` at `/var/lib/postgresql`.
+PostgreSQL creates its major-version-specific data directory beneath that
+mount, so recreating the container preserves the supported PostgreSQL 18
+layout.
+
 ---

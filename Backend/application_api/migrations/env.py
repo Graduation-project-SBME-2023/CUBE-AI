@@ -3,6 +3,7 @@ from logging.config import fileConfig
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 backend_root = Path(__file__).resolve().parents[2]
 if str(backend_root) not in sys.path:
@@ -35,11 +36,23 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
-#  Override Alembic URL from environment variable if present
-database_url = os.getenv("DATABASE_URL")
-sync_url = database_url.replace("asyncpg", "psycopg2") if database_url else None
-if sync_url:
-    config.set_main_option("sqlalchemy.url", sync_url)
+#  DATABASE_URL is required: never fall back to the placeholder DSN baked
+#  into alembic.ini, which would silently target whatever is on that host
+#  and port using a committed credential.
+try:
+    database_url = os.environ["DATABASE_URL"]
+except KeyError as exc:
+    raise RuntimeError(
+        "DATABASE_URL must be set before running Alembic; refusing to fall "
+        "back to the placeholder DSN in alembic.ini."
+    ) from exc
+
+# Rewrite only the URL scheme (async driver -> sync driver) instead of a
+# blind substring replace across the whole DSN, which could corrupt a
+# password that happens to contain "asyncpg".
+_parsed = urlsplit(database_url)
+sync_url = urlunsplit(_parsed._replace(scheme=_parsed.scheme.replace("+asyncpg", "+psycopg2")))
+config.set_main_option("sqlalchemy.url", sync_url)
 
 
 # Interpret the config file for Python logging.
@@ -76,6 +89,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=True,
+        compare_server_default=True,
     )
 
     with context.begin_transaction():
@@ -97,7 +112,10 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            compare_server_default=True,
         )
 
         with context.begin_transaction():

@@ -1,7 +1,28 @@
 -- Orthanc Lua script to notify MONAI/FastAPI when resources change.
+--
+-- This is a best-effort, low-latency notification path only. It is NOT the
+-- system of record for keeping Postgres in sync with Orthanc: the
+-- application-api process also runs a periodic full reconciliation
+-- (sync_all_from_orthanc, see main.py's lifespan) specifically because a
+-- webhook call made while application-api is restarting is lost with no
+-- retry. If you disable or slow down that periodic reconciliation, a lost
+-- webhook here becomes a permanently missed sync.
 
 local WEBHOOK_URL = 'http://application-api:8001/sync/orthanc-webhook'
-local JSON_HEADERS = { ['Content-Type'] = 'application/json' }
+
+-- Set this to the same value as ORTHANC_WEBHOOK_TOKEN in the application-api
+-- environment to authenticate webhook calls (see database_audit.md D-30).
+-- Leave empty to match an application-api deployment that has
+-- ORTHANC_WEBHOOK_TOKEN unset (no auth enforced).
+local WEBHOOK_TOKEN = ''
+
+local function webhook_headers()
+    local headers = { ['Content-Type'] = 'application/json' }
+    if WEBHOOK_TOKEN ~= '' then
+        headers['X-Webhook-Token'] = WEBHOOK_TOKEN
+    end
+    return headers
+end
 
 local function main_tag(resource, tag_name, fallback)
     local tags = resource['MainDicomTags'] or {}
@@ -9,12 +30,18 @@ local function main_tag(resource, tag_name, fallback)
 end
 
 local function post_webhook(payload, description)
-    -- Fire-and-forget: MONAI Label may be busy (e.g. running inference).
-    -- Failures are expected and non-critical. Orthanc may still log transport
-    -- failures internally; keep HttpTimeout low so this cannot block for minutes.
-    pcall(function()
-        HttpPost(WEBHOOK_URL, DumpJson(payload, true), JSON_HEADERS)
+    -- Best-effort: MONAI Label may be busy (e.g. running inference), and
+    -- application-api may be restarting. A failure here is expected and is
+    -- covered by the periodic reconciliation pass described above, so it is
+    -- not fatal to this script — but it must be visible in Orthanc's own
+    -- logs rather than silently discarded, which the previous bare pcall()
+    -- did (it also never used the `description` argument at all).
+    local ok, err = pcall(function()
+        HttpPost(WEBHOOK_URL, DumpJson(payload, true), webhook_headers())
     end)
+    if not ok then
+        PrintToConsole('Webhook POST failed for ' .. description .. ': ' .. tostring(err))
+    end
 end
 
 local function notify_deleted(resource_id, level)

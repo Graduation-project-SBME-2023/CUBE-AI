@@ -1,4 +1,6 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, JSON, text,UUID
+from sqlalchemy import Column, String, DateTime, ForeignKey, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.sql import func
 from application_api.db.base import Base
 
 class Radiomics(Base):
@@ -11,5 +13,5 @@ class Radiomics(Base):
     )
 
     label_series_instance_uid = Column(String, ForeignKey('segmentations.label_series_instance_uid'), index=True)
-    features = Column(JSON, nullable=False)
-    created_at = Column(DateTime, nullable=True)  # ISO format date-time
+    features = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
