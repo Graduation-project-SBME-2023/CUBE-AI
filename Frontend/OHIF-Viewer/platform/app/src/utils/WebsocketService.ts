@@ -9,6 +9,48 @@ class WebSocketService {
   private isConnecting = false;
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * The highest `ws_log.event_id` seen per session, and the ids already
+   * delivered.
+   *
+   * Every persisted event carries a globally increasing `event_id`, and
+   * replay is `event_id > cursor ORDER BY event_id`. Ids are global, so gaps
+   * inside one session are other sessions' events and are NOT missing —
+   * the cursor must therefore be the highest id actually received, never a
+   * count. The delivered set is what stops a reconnect-and-replay from
+   * re-rendering an event the live socket already delivered.
+   */
+  private cursorBySession: Map<string, number> = new Map();
+  private deliveredEventIds: Set<number> = new Set();
+  private static readonly MAX_TRACKED_EVENT_IDS = 5000;
+
+  /** The replay cursor for a session: the last event id actually received. */
+  replayCursor(sessionId: string): number {
+    return this.cursorBySession.get(sessionId) ?? 0;
+  }
+
+  private trackEvent(data: any): boolean {
+    const eventId = typeof data?.event_id === 'number' ? data.event_id : null;
+    if (eventId === null) {
+      // An event the agent system could not persist is still delivered live;
+      // it simply cannot be replayed, so there is nothing to dedupe against.
+      return true;
+    }
+    if (this.deliveredEventIds.has(eventId)) {
+      return false;
+    }
+    this.deliveredEventIds.add(eventId);
+    if (this.deliveredEventIds.size > WebSocketService.MAX_TRACKED_EVENT_IDS) {
+      const oldest = this.deliveredEventIds.values().next().value;
+      this.deliveredEventIds.delete(oldest);
+    }
+    const sessionId = String(data?.session_id || '');
+    if (sessionId) {
+      this.cursorBySession.set(sessionId, Math.max(this.replayCursor(sessionId), eventId));
+    }
+    return true;
+  }
+
   connect() {
     if (this.isConnecting || (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING))) {
       return;
@@ -23,6 +65,9 @@ class WebSocketService {
     this.socket.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
+        if (!this.trackEvent(data)) {
+          return; // already delivered — a replay overlapping the live stream
+        }
         this.listeners.forEach((cb) => cb(data));
       } catch (err) {
         // handle error

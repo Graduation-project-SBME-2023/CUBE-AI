@@ -103,20 +103,6 @@ from autogen_agentchat.ui import Console
 from autogen_core.tools import FunctionTool
 from autogen_ext.models.ollama import OllamaChatCompletionClient
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Output directory
-# ──────────────────────────────────────────────────────────────────────────────
-# Default fallback output dir — used only when run_literature_review() is
-# called without an explicit output_dir (e.g. standalone CLI usage).
-# NEVER mutated at module level; each call creates its own local path.
-from storage_paths import HYPOTHESES_DIR, workspace_subpath
-
-_DEFAULT_OUTPUT_DIR = workspace_subpath(
-    HYPOTHESES_DIR / "workspace_default",
-    "literature_review_output",
-)
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — LLM CLIENT
 # ══════════════════════════════════════════════════════════════════════════════
@@ -567,23 +553,12 @@ def score_paper_relevance(paper_json: str, pico_json: str) -> str:
         return json.dumps({"relevance_score": 0.0, "score_breakdown": {}, "error": str(exc)})
 
 
-# ── Tool 6: Save output files ─────────────────────────────────────────────────
+# ── Tool 6: Capture generated outputs ─────────────────────────────────────────
 
-def _save_output(filename: str, content: str, output_dir: Path) -> str:
-    """
-    Save string content to the given output directory.
-
-    Args:
-        filename   : Target filename (e.g., 'context.json', 'report.md').
-        content    : String content to write.
-        output_dir : Session-scoped output directory Path.
-    """
-    try:
-        path = output_dir / filename
-        path.write_text(content, encoding="utf-8")
-        return f"Saved successfully → {path.resolve()}"
-    except Exception as exc:
-        return f"[save_output ERROR] {exc}"
+def _capture_output(filename: str, content: str, outputs: Dict[str, str]) -> str:
+    """Capture generated literature output in memory for database persistence."""
+    outputs[Path(filename).name] = content
+    return f"Captured successfully: {Path(filename).name}"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1103,7 +1078,10 @@ Produce three output files from the ranked paper corpus:
 
 AVAILABLE TOOLS
 ───────────────
-• save_output(filename, content) → saves string to the output directory
+• save_output(filename, content) → captures the string under this key for the
+  planner to persist into the literature_reviews / literature_papers database
+  tables (there is no output directory or on-disk file — the filename below is
+  only a naming convention for the captured key, not a path)
 
 ════════════════════════════════════════════════════════════════════════
 FILE 1 — literature_report.md  (WRITE THIS FIRST AND IN FULL)
@@ -1419,8 +1397,6 @@ async def run_literature_review(
     pico: Dict[str, str],
     model: str = OllamaClient.DEFAULT_MODEL,
     max_turns: int = 30,
-  output_dir: Optional[Path] = None,
-  cache_dir: Optional[Path] = None,
   prebuilt_knowledge: Optional[Dict[str, Any]] = None,
   progress_callback: Optional[callable] = None,
 ) -> Dict[str, Any]:
@@ -1432,14 +1408,12 @@ async def run_literature_review(
                     outcome, hypothesis, and optionally question.
         model              : Ollama model tag to use.
         max_turns          : Hard cap on total agent turns.
-        output_dir         : Optional output directory for generated artifacts.
-        cache_dir          : Optional cache directory for knowledge builder.
         prebuilt_knowledge : Optional dict containing precomputed
                  knowledge_base/sources_guide to avoid rebuilding.
         progress_callback  : Optional callback for knowledge-builder progress.
 
     Returns:
-        Dict with resolved paths to the three generated output files.
+        Dict with generated literature context, report text, and ranked papers.
     """
     # ── Validate PICO input ───────────────────────────────────────────────────
     required = {"population", "intervention", "comparison", "outcome", "hypothesis"}
@@ -1447,9 +1421,7 @@ async def run_literature_review(
     if missing:
         raise ValueError(f"PICO input is missing required keys: {missing}")
 
-    # ── Configure output path — session-scoped, never a shared global ────────
-    _output_dir = Path(output_dir) if output_dir else _DEFAULT_OUTPUT_DIR
-    _output_dir.mkdir(parents=True, exist_ok=True)
+    captured_outputs: Dict[str, str] = {}
 
     # ── Build session-scoped domain keywords — no shared global state ─────────
     # Each concurrent call gets its own list derived from its PICO.
@@ -1463,8 +1435,6 @@ async def run_literature_review(
       knowledge_base = prebuilt_knowledge["knowledge_base"]
       sources_guide = prebuilt_knowledge["sources_guide"]
 
-      # Always write output files if prebuilt knowledge is supplied
-      import json
       try:
           from agent_system.agents.planning_agents.planner import ClinicalPlanner
           clean_knowledge = ClinicalPlanner._clean_knowledge_for_ui(None, knowledge_base)
@@ -1473,7 +1443,6 @@ async def run_literature_review(
           clean_knowledge = knowledge_base
           clean_sources = sources_guide
 
-      report_path = _output_dir / "literature_report.md"
       report_content = f"""# Literature Review
 
 ## PICO Summary
@@ -1488,26 +1457,21 @@ async def run_literature_review(
 ## Sources & References
 {clean_sources}
 """
-      report_path.write_text(report_content, encoding="utf-8")
 
-      context_path = _output_dir / "context.json"
+      papers = prebuilt_knowledge.get("papers", [])
+      ranked_papers = [
+          {"title": p.get("title", ""), "authors": p.get("authors", ""), "abstract": p.get("abstract", "")}
+          for p in papers
+      ]
       context_data = {
           "pico": pico,
           "knowledge_sections": prebuilt_knowledge.get("knowledge_sections", {}),
-          "paper_count": len(prebuilt_knowledge.get("papers", [])),
+          "paper_count": len(papers),
       }
-      context_path.write_text(json.dumps(context_data, indent=2, ensure_ascii=False), encoding="utf-8")
-
-      ranked_path = _output_dir / "ranked_papers.json"
-      papers = prebuilt_knowledge.get("papers", [])
-      ranked_papers = [{"title": p.get("title", ""), "authors": p.get("authors", ""), "abstract": p.get("abstract", "")} for p in papers]
-      ranked_path.write_text(json.dumps(ranked_papers, indent=2, ensure_ascii=False), encoding="utf-8")
-
       return {
-          "context_json": str(context_path),
-          "literature_report": str(report_path),
-          "ranked_papers": str(ranked_path),
-          "output_directory": str(_output_dir.resolve()),
+          "context": context_data,
+          "literature_report": report_content,
+          "ranked_papers": ranked_papers,
       }
     else:
       print("\n[Pipeline] Building dynamic knowledge base from online medical databases...")
@@ -1515,7 +1479,6 @@ async def run_literature_review(
       knowledge_base, sources_guide, _papers, _sections = build_knowledge_base(
         pico,
         progress_callback=progress_callback,
-        cache_dir=cache_dir,
       )
       print(f"[Pipeline] Knowledge base ready ({len(knowledge_base):,} chars)")
 
@@ -1531,7 +1494,7 @@ async def run_literature_review(
     model_client = OllamaClient(model=model)
 
     # ── Session-scoped tool closures ──────────────────────────────────────────
-    # Each closure captures _output_dir and domain_kws for THIS specific call.
+    # Each closure captures domain_kws and the in-memory output dict for THIS specific call.
     # Concurrent users get fully isolated instances — no shared global state.
     def search_pubmed(query: str, max_results: int = _CFG_MAX_RESULTS) -> str:
         """Search PubMed via NCBI E-utilities for clinical/medical literature."""
@@ -1550,8 +1513,8 @@ async def run_literature_review(
         return _search_europe_pmc(query, max_results, domain_kws)
 
     def save_output(filename: str, content: str) -> str:
-        """Save a file to the workspace literature-output directory."""
-        return _save_output(filename, content, _output_dir)
+        """Capture a generated literature artifact for database persistence."""
+        return _capture_output(filename, content, captured_outputs)
 
     # ── FunctionTool wrappers ─────────────────────────────────────────────────
     t_pubmed    = FunctionTool(search_pubmed,           description="Search PubMed for clinical/medical literature.")
@@ -1559,7 +1522,7 @@ async def run_literature_review(
     t_semantic  = FunctionTool(search_semantic_scholar, description="Search Semantic Scholar for cross-disciplinary papers.")
     t_europepmc = FunctionTool(search_europe_pmc,       description="Search Europe PMC for open-access life-science papers.")
     t_scorer    = FunctionTool(score_paper_relevance,   description="Score a paper's relevance vs. the PICO hypothesis (0-100).")
-    t_save      = FunctionTool(save_output,             description="Save a file to the workspace outputs/literature directory.")
+    t_save      = FunctionTool(save_output,             description="Capture generated literature output for database persistence.")
 
     # ── Agent Definitions ─────────────────────────────────────────────────────
     pico_analyst = AssistantAgent(
@@ -1638,7 +1601,6 @@ PICO JSON (for programmatic use):
     print("  Agentic AI Radiology Researcher — Literature Review Pipeline")
     print("═" * 72)
     print(f"\n  Hypothesis:\n  {pico['hypothesis']}\n")
-    print(f"  Output directory: {_output_dir.resolve()}\n")
     print("─" * 72 + "\n")
 
     try:
@@ -1658,20 +1620,23 @@ PICO JSON (for programmatic use):
             "  4. Verify autogen versions     → pip show autogen-agentchat autogen-ext\n"
         )
 
-    # ── Collect output paths ──────────────────────────────────────────────────
+    def _json_output(filename: str, fallback: Any) -> Any:
+        raw = captured_outputs.get(filename)
+        if not raw:
+            return fallback
+        try:
+            return json.loads(raw)
+        except Exception:
+            return fallback
+
     outputs = {
-        "context_json"      : str(_output_dir / "context.json"),
-        "literature_report" : str(_output_dir / "literature_report.md"),
-        "ranked_papers"     : str(_output_dir / "ranked_papers.json"),
-        "output_directory"  : str(_output_dir.resolve()),
+        "context": _json_output("context.json", {}),
+        "literature_report": captured_outputs.get("literature_report.md", ""),
+        "ranked_papers": _json_output("ranked_papers.json", []),
     }
 
     print("\n" + "═" * 72)
-    print("  Pipeline complete. Output files:")
-    for k, v in outputs.items():
-        if k != "output_directory":
-            status = "OK" if Path(v).exists() else "NOT YET WRITTEN"
-            print(f"    [{status}]  {v}")
+    print("  Pipeline complete. Generated literature outputs captured in memory.")
     print("═" * 72 + "\n")
 
     return outputs

@@ -5,3 +5,13 @@ pytest-mock>=3.14,<4
 pytest-timeout>=2.3,<3
 respx>=0.22,<1
 
+# The deterministic suite includes the Application API's contract tests, which
+# read its ORM metadata and Pydantic schemas. The agent-system image does not
+# ship these (it has no database access by design — see V1-PLAN §2.1), so the
+# test runtime installs them itself rather than the suite silently skipping the
+# schema contracts it exists to enforce.
+sqlalchemy>=2.0,<3
+alembic>=1.13,<2
+asyncpg>=0.29,<1
+pydantic-settings>=2,<3
+aiohttp>=3.9,<4

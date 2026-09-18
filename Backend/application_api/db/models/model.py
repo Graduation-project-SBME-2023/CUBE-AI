@@ -35,3 +35,12 @@ class Model(Base):
 
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # (closed 2026-09-15): kept — the MONAI /info/ sync writer mutates
+    # this row on every sync. removed current_version/weights_digest/
+    # weights_registered_at/status: /info/ supplies nothing to put in them.
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

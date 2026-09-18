@@ -13,6 +13,13 @@ from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from services.job_capacity import inference_capacity
+from services.job_root import (
+    JobRootBusy,
+    JobRootLock,
+    JobStateConflict,
+    guard_terminal,
+    write_json_atomically,
+)
 from storage_paths import JOBS_DIR, TEMP_DIR
 
 logger = logging.getLogger(__name__)
@@ -38,8 +45,24 @@ _DEFAULT_RUNTIME = _default_runtime()
 _tasks: dict[str, asyncio.Task] = {}
 _start_lock = asyncio.Lock()
 
+# One owner per job root. The lock is taken BEFORE the startup scan,
+# because that scan marks every in-flight job INTERRUPTED — two processes doing
+# that to each other's live jobs is how a running inference becomes a lost one.
+# It is held for the life of the process and released by the kernel if the
+# process is killed.
+_job_root_lock = JobRootLock(_JOB_ROOT)
+
+
+def claim_job_root() -> JobRootLock:
+    """Take ownership of the job root, or refuse to start."""
+    if not _job_root_lock.held:
+        _job_root_lock.acquire()
+    return _job_root_lock
+
 
 def interrupt_stale_jobs() -> None:
+    """Mark jobs this process cannot be executing as INTERRUPTED."""
+    claim_job_root()
     _JOB_ROOT.mkdir(parents=True, exist_ok=True)
     for metadata_path in _JOB_ROOT.glob("*.json"):
         try:
@@ -54,12 +77,21 @@ def interrupt_stale_jobs() -> None:
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
-            metadata_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            write_json_atomically(
+                metadata_path,
+                _JOB_TEMP_ROOT / f"{metadata_path.stem}.json.tmp",
+                payload,
+            )
         except (OSError, json.JSONDecodeError):
             logger.warning("Unable to recover inference job metadata %s", metadata_path)
 
 
-interrupt_stale_jobs()
+try:
+    interrupt_stale_jobs()
+except JobRootBusy:
+    # Refusing to start is the correct outcome: a second scheduler would
+    # "recover" jobs the first one is still running.
+    raise
 
 
 class InferenceJobRequest(BaseModel):
@@ -97,12 +129,15 @@ def _read_job(job_id: str) -> dict | None:
         raise HTTPException(status_code=500, detail=f"Corrupt inference job: {exc}")
 
 
-def _write_job(job_id: str, payload: dict) -> dict:
+def _write_job(job_id: str, payload: dict, *, allow_terminal_change: bool = False) -> dict:
+    """Persist job metadata atomically, and never over a terminal outcome.: a job that finished has a result, or a recorded absence of one. A cancel that arrives after completion must not erase that — under this file is the only evidence the work happened."""
     metadata_path, _, _ = _paths(job_id)
+    if not allow_terminal_change:
+        guard_terminal(_read_job(job_id), str(payload.get("status") or ""))
     payload["updated_at"] = datetime.now(timezone.utc).isoformat()
-    temporary_path = _JOB_TEMP_ROOT / f"{job_id}.json.tmp"
-    temporary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    temporary_path.replace(metadata_path)
+    write_json_atomically(
+        metadata_path, _JOB_TEMP_ROOT / f"{job_id}.json.tmp", payload
+    )
     return payload
 
 
@@ -219,7 +254,9 @@ async def _execute_job(request: InferenceJobRequest) -> None:
             }
         )
     finally:
-        _write_job(request.job_id, job)
+        # The executing task is what makes a job terminal, so this write is the
+        # one allowed to set a terminal status.
+        _write_job(request.job_id, job, allow_terminal_change=True)
         _tasks.pop(request.job_id, None)
 
 
@@ -315,12 +352,20 @@ async def cancel_or_purge_inference_job(
 
     if purge:
         metadata_path, result_path, result_tmp = _paths(job_id)
-        metadata_path.unlink(missing_ok=True)
+        # Free the result BEFORE the id. The metadata file is what makes
+        # the id taken, so deleting it first would leave a window where a new
+        # job could claim the id while the old result is still on disk and be
+        # handed someone else's bytes.
         result_path.unlink(missing_ok=True)
         result_tmp.unlink(missing_ok=True)
+        metadata_path.unlink(missing_ok=True)
         return {"job_id": job_id, "status": "PURGED"}
 
-    job["status"] = "CANCELLED"
-    job["error"] = "Inference job was cancelled"
-    _write_job(job_id, job)
-    return job
+    try:
+        job["status"] = "CANCELLED"
+        job["error"] = "Inference job was cancelled"
+        return _write_job(job_id, job)
+    except JobStateConflict:
+        # Cancelling a job that already finished is a no-op, not a rewrite:
+        # the result (or the recorded failure) stands.
+        return _read_job(job_id) or job

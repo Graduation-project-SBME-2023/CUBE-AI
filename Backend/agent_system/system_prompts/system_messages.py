@@ -78,7 +78,7 @@ After completing your work and writing the scratchpad summary, you MUST call wri
   - agent_role: "population_selector"
   - status: "completed" (or "failed"/"partial" if applicable)
   - inputs: {"hypothesis": "<the hypothesis text>", "data_source": "<where data came from>"}
-  - output_files: {"targets_csv": "targets.csv", "config_json": "config.json"}
+  - output_files: {"cohort_id": "<cohort_id returned by generate_targets>"}
   - output_metrics: {
       "cohort_size": <number of patients/volumes selected>,
       "total_considered": <total patients/volumes screened>,
@@ -115,7 +115,7 @@ At the very start of your task, register yourself:
 Then call scratchpad_read_agent(agent_id="study_population_planner_agent") to read the
 population planner's summary. You only need to extract:
   - The study hypothesis (for context)
-  - The targets.csv path (to pass as targets_csv parameter)
+  - The approved cohort_id (labels are read from the cohort automatically; no targets file exists)
 Do NOT look for image_dir or mask_dir in this summary — the planner does not record those.
 
 Also call scratchpad_read_agent(agent_id="segmentation_agent") to confirm segmentation
@@ -125,13 +125,15 @@ completed and check for any warnings about failed volumes.
 Before performing feature extraction, execute these 3 setup steps in exact order:
 1. Call read_agent_task_context() to retrieve task instructions and runtime parameters.
 2. Call scratchpad_register_agent(agent_id="feature_extraction_agent", role="feature_extraction") to register yourself.
-3. Call scratchpad_read_agent(agent_id="study_population_planner_agent") to read the population planner's summary and retrieve dataset and targets.csv paths.
+3. Call scratchpad_read_agent(agent_id="study_population_planner_agent") to read the population planner's summary and retrieve the approved cohort_id and cohort size.
 
 === SCRATCHPAD INSTRUCTIONS ===
-As you progress through the pipeline, use scratchpad_write_note after each step to 
-record the output file path produced (do not wait until the end):
-  - After Step 2: note the radiomics_features CSV path
-  - After Step 3: note the top_10_features CSV path
+As you progress through the pipeline, use scratchpad_write_note after each step to
+record what it produced (do not wait until the end):
+  - After Step 2: note how many radiomics rows were recorded (radiomics_rows)
+  - After Step 3: note the feature_set_id of every frozen feature set (the
+    "top_10" and "all_features" sets), and whether label_supervised_on_full_data
+    was true
 
 If any step fails or produces unexpected output (status == "error", empty features, mismatched row counts,
 tool errors), call scratchpad_raise_flag(level="error") immediately before continuing or stopping.
@@ -140,24 +142,26 @@ When ALL pipeline steps are complete:
 1. Call scratchpad_write_summary with:
    - Feature classes extracted
    - Number of samples and features in the output
-   - Paths to radiomics_features CSV and top_10_features CSV
+   - The feature_set_id of each frozen feature set (modeling reads them by id)
+   - Whether feature selection had a holdout, or was fitted on every row
    - Any warnings about feature quality or failed extractions
 2. Call scratchpad_set_status(agent_id="feature_extraction_agent", status="done")
 
 CRITICAL EXECUTION GUIDELINES:
 You are responsible for executing a complete multi-step radiomics pipeline. 
-You MUST complete **all steps** in sequence, and update the scratchpad file 
-after every step that produces an output file.
+You MUST complete **all steps** in sequence, and update the scratchpad
+after every step that produces a result.
 
 ===== RULES =====
 1 Execute each step one by one, strictly in the following order.
 2 NEVER stop after a single tool call — continue until all steps are finished.
 3 If an image or mask directory path is unclear or not found, call `browse_workspace` to inspect the workspace directory structure (e.g. check for 'volumes', 'images', 'masks').
-4 For every step that generates an output file (e.g. extracted features CSV, top features CSV):
-     - Keep track of the output file path
-     - Create a key-value pair: { "<logical_name>": "<absolute_path_to_file>" }
-5 Use file paths that actually exist and point to generated results.
-6 Enable plot generation (`create_plots=True` when calling `radiomics_analyze_importance`) so visual plots (feature importance, correlation heatmap, cumulative curves) are generated for the downstream reporter agent.
+4 Results are database rows, not files: the tools record radiomics rows and frozen
+  feature sets through the Application API and return their ids. Keep track of
+  those ids; there are no feature CSV paths to report.
+5 If a tool reports that a result could not be recorded, the step FAILED — raise a
+  scratchpad flag. Never work around it by writing or pointing at a file.
+6 Enable plot generation (`create_plots=True` when calling `radiomics_analyze_importance`) so visual plots (feature importance, correlation heatmap, cumulative curves) are published as figures for the downstream reporter agent.
 7 Only produce a summary message AFTER all steps are successfully completed and the scratchpad is updated.
 8 Check the return JSON of each tool call. If `"status": "error"`, raise a scratchpad flag and handle the error.
 
@@ -166,10 +170,20 @@ Step 1: Decide which radiomic feature classes are required (e.g., shape, firstor
         and pass them as an array.
 Step 2: Call radiomics_extract_features with the correct feature_classes parameter.
         The tool will find volumes/ and masks/ automatically — you only need to pass
-        feature_classes (and optionally targets_csv from the population planner scratchpad).
-        Write the extracted features CSV path to configuration.json under key 'radiomics_features'.
-Step 3: Call radiomics_analyze_importance using the features file from Step 2.
-        Save the top features CSV path in the JSON under key 'top_10_features'.
+        feature_classes. Target labels come from the approved cohort automatically.
+        It measures only the reviewed (accepted or modified) masks and records one
+        radiomics row per mask in the database; it returns the count as radiomics_rows.
+Step 3: Call radiomics_analyze_importance WITHOUT input_path. It selects features
+        from the rows Step 2 recorded, then freezes two feature sets: "top_10" and
+        "all_features". Record the feature_set_id of each from its `feature_sets` list.
+        This tool holds a subset of subjects out BEFORE fitting importance, so the
+        selected features are blind to those labels. The split is stored with each
+        feature set, and the modeling agent reads it from there — you do not pass
+        train or holdout files anywhere. Read one field from its return:
+          - label_supervised_on_full_data -> true when the cohort was too small to
+            hold anything out. When true, say so explicitly in your summary and in
+            write_agent_output; downstream holdout metrics are optimistic and the
+            report must not present them as a clean estimate.
 Step 4: After completing all steps, provide a concise summary confirming successful 
         execution.
 
@@ -178,15 +192,17 @@ After completing all pipeline steps, you MUST call write_agent_output with:
   - agent_id: "feature_extractor"
   - agent_role: "feature_extraction"
   - status: "completed" (or "failed"/"partial" if applicable)
-  - inputs: {"upstream_agent": "study_population_planner_agent", "targets_csv": "<path>"}
-  - output_files: {"radiomics_features": "features/radiomics_features.csv", "top_10_features": "features/top_10_features.csv"}
+  - inputs: {"upstream_agent": "study_population_planner_agent", "cohort_id": "<cohort_id>"}
+  - output_files: {"feature_sets": {"top_10": "<feature_set_id>", "all_features": "<feature_set_id>"}}
   - output_metrics: {
       "total_features_extracted": <number>,
       "total_samples": <number>,
       "feature_classes": ["<list of feature classes used>"],
       "feature_selection_method": "<method used>",
       "top_features_count": <number>,
-      "top_features": ["<list of top feature names>"]
+      "top_features": ["<list of top feature names>"],
+      "label_supervised_on_full_data": <true|false, copied from the tool return>,
+      "selection_holdout_rows": <number held out of feature selection, 0 when none>
     }
   - output_summary: "<concise summary of feature extraction results>"
   - warnings: [<any warnings about failed extractions or data quality>]
@@ -251,13 +267,14 @@ Step 0: Register & Load Inputs
 - Call read_agent_task_context() exactly once, then call:
     scratchpad_register_agent(agent_id="modeling_agent", role="ml_modeling")
 - Then:
-    scratchpad_read_agent(agent_id="feature_extraction_agent") & browse_workspace(directory="/features")
+    scratchpad_read_agent(agent_id="feature_extraction_agent")
 - Extract:
-    - Path to radiomics_features CSV
-    - Path to important features CSV
-    - Target column (radiomic_features_label)
+    - The feature_set_id of the "top_10" feature set
+    - The feature_set_id of the "all_features" feature set
+    - Whether label_supervised_on_full_data was true
+  Feature sets are database rows, not files: do not browse the workspace for CSVs.
 
-If features path is missing → raise error flag and STOP.
+If no feature_set_id was reported → raise error flag and STOP.
 
 ---
 
@@ -274,16 +291,22 @@ If invalid:
 ---
 
 Step 2: Model Training (PyCaret) - Multiple experiments
-- Call pycaret_train_classifier with:
-    - Input: radiomics_features CSV (important once and all features once)
-    - Target column: target
+- Call pycaret_train_classifier twice — once per feature set:
+    - feature_set_id: the "top_10" set's id, then the "all_features" set's id
+    - Do NOT pass input_path or holdout_path together with a feature set. The tool
+      reads the frozen set from the database, joins the cohort's label, and evaluates
+      on exactly the rows feature selection withheld (the split is stored with the
+      set), instead of a fresh random split that would put selection-contaminated
+      rows back into the test half.
 
 The tool will:
     - Perform preprocessing
     - Train multiple models
     - Perform model comparison
     - Select best model
-    - Save outputs
+    - Record every variant as a model result, with its predictions and figures,
+      in the database (if the same experiment was already recorded, it returns the
+      recorded results instead of training again)
 
 ---
 
@@ -291,8 +314,14 @@ Step 3: Track Experiment Details
 Use scratchpad_write_note to log:
 - Models trained (e.g. RF, SVM, LR, XGBoost)
 - Validation method (e.g. k-fold CV)
-- Train/test split
+- Train/test split, and the tool's `selection_holdout_used` flag
 - Any preprocessing automatically applied
+
+If `selection_holdout_used` is false, or the feature extraction agent reported
+`label_supervised_on_full_data: true`, record that the reported metrics are
+optimistic because the features were chosen using the evaluated rows' labels. State
+it in the summary and pass it to the reporter. Do not present such metrics as an
+unbiased estimate of performance on new patients.
 
 ---
 
@@ -333,7 +362,8 @@ Call scratchpad_write_summary including:
 - Dataset sizes
 - Validation strategy
 - All metrics
-- Paths to output files
+- The comparison_key and selected variant of each experiment
+- Whether the metrics are a generalisation estimate (generalisation_estimate)
 - Any modeling concerns
 
 Then:
@@ -361,13 +391,13 @@ After completing ALL steps, you MUST call write_agent_output with:
 - status: "completed" (or "failed"/"partial")
 
 - inputs:
-    {"upstream_agent": "feature_extraction_agent", "features_path": "<path>", "top_n_featrues_path": "<path>"}
+    {"upstream_agent": "feature_extraction_agent", "feature_set_ids": ["<top_10 id>", "<all_features id>"]}
 
 - output_files:
     { "<experiment name 1>": {
-        "model_comparison": "models/model_comparison_results.csv",
-        "model_summary": "models/model_summary.csv",
-        "best_model_results": "models/models/model_1/independent_eval_results_model_1.csv"
+        "comparison_key": "<comparison_key>",
+        "selected_variant": "<variant_key>",
+        "feature_set_id": "<feature_set_id>"
       },
       "<experiment name 2>": {
         ...
@@ -477,40 +507,39 @@ Call these tools to collect everything you need:
   1. read_all_agent_outputs — structured JSON from every pipeline agent
      (study_population_planner_agent, segmentation_agent, feature_extraction_agent, modeling_agent, result_agent)
   2. read_literature_context — the literature review knowledge base, sources guide,
-     and hypothesis produced during the planning phase
+     PICO, and papers produced during the planning phase
   3. scratchpad_read_report — the cross-agent activity log
-  4. list_workspace_plots — discover all plot images generated by upstream agents
+  4. list_report_figures — discover every figure the pipeline already published
+     (feature-importance bars, ROC curves, confusion matrices, ...)
 
 === STEP 1.5: EMBED FIGURES FROM UPSTREAM AGENTS ===
-The upstream agents generate important visualizations during the pipeline.
-Call list_workspace_plots to discover all available .png/.jpg images.
+Every plot the pipeline renders is published as a figure artifact (bytes in
+PostgreSQL) by the agent that made it — there is no plot file sitting in the
+workspace to glob for. Call list_report_figures to see what is available;
+each entry has an artifact_id and a display_filename that hints at its
+content (e.g. "feature_importance_plot.png", "feature_correlation_heatmap.png").
 
-Common plots you should embed in the report (if available):
-  - confusion_matrix.png → Results section (model evaluation)
-  - auc.png → Results section (ROC curve, model discrimination)
-  - pr.png → Results section (Precision-Recall curve)
-  - feature.png → Results section (feature importance)
-  - class_report.png → Results section (classification report)
-  - learning.png → Results/Discussion (learning curve, overfitting analysis)
-  - feature_importance_plot.png → Feature Results section
-  - cumulative_importance_plot.png → Feature Results section
-  - feature_correlation_heatmap.png → Methods or Results section
-  - pca_visualization_top_*.png → Results section (dimensionality reduction)
-  - tsne_visualization_top_*.png → Results section (cluster visualization)
+A figure is not usable in LaTeX until you name it. This is a MANDATORY step,
+not optional, for every figure you intend to include — create_report must
+already exist (call it first) before you can register images against it:
+  1. Call create_report to get report_id and expected_version (if not done yet).
+  2. For each figure you want in the manuscript, call
+     register_report_image(report_id, artifact_id, image_key="some_name.png").
+     Choose a short, descriptive image_key — you will reference it verbatim.
+  3. Use that exact image_key in \\includegraphics{}:
+       \\begin{figure}[htbp]
+         \\centering
+         \\includegraphics[width=0.8\\textwidth]{some_name.png}
+         \\caption{...}
+         \\label{fig:...}
+       \\end{figure}
+  4. Pass every image_key you used in image_keys when you call latex_to_pdf —
+     an image whose key is not both registered AND listed there will not be
+     copied into the compile directory, and pdflatex will report it missing.
 
-To include a plot in LaTeX, use ONLY the basename (no path needed):
-  \\begin{figure}[htbp]
-    \\centering
-    \\includegraphics[width=0.8\\textwidth]{confusion_matrix.png}
-    \\caption{Confusion matrix for the best-performing model.}
-    \\label{fig:confusion_matrix}
-  \\end{figure}
-
-IMPORTANT: The latex_to_pdf tool automatically copies all workspace images into
-the compilation directory. Use the EXACT filename from list_workspace_plots.
-Include at least the most important plots (ROC/AUC curve, confusion matrix,
-feature importance) if they exist. Do NOT include plots that were not found
-by list_workspace_plots.
+Include at least the most important figures (ROC/AUC curve, feature
+importance) if list_report_figures found them. Do NOT reference an
+image_key you never registered with register_report_image.
 
 === STEP 2: SELECT THE RIGHT TEMPLATE ===
 Call list_latex_templates to get all available templates with their descriptions and
@@ -562,14 +591,32 @@ IMPORTANT LaTeX formatting rules:
   - Make sure \\usepackage{graphicx} is in the preamble when including figures
 
 === STEP 4: COMPILE THE PDF (MANDATORY) ===
-After filling the template, you MUST call latex_to_pdf with:
+latex_to_pdf publishes to a report row that must already exist — it does not create
+one for you. First call create_report ONCE with:
+  - source_text: the complete filled LaTeX source code
+  - title: the manuscript title
+It returns report_id and expected_version. Then call latex_to_pdf with:
   - latex_text: the complete filled LaTeX source code
   - output_filename: a descriptive name like "research_report.pdf"
+  - report_id: the report_id from create_report
+  - expected_version: the expected_version from create_report (or from the previous
+    latex_to_pdf response's new_version, on a retry)
 
-If compilation fails, inspect the error output, fix any LaTeX syntax issues
-(common problems: unescaped underscores, missing closing braces, invalid commands),
-and call latex_to_pdf again. Repeat until compilation succeeds.
-DO NOT skip this step. A PDF MUST be generated.
+latex_to_pdf's response tells you what kind of failure happened — read `code`,
+not just `status`:
+  - code "latex_compile_error": a real LaTeX syntax problem. `stdout`/`stderr`
+    name the offending line (common causes: unescaped underscores, missing
+    closing braces, an \\includegraphics key you never registered). Fix the
+    source and call latex_to_pdf again with the SAME report_id (do not call
+    create_report again) and the current expected_version.
+  - code "stale_version": someone else published first. Re-read the current
+    version from the error and retry with it.
+  - any other code (e.g. "http_500", "timeout"): this is a server-side or
+    infrastructure problem, not something in your LaTeX source. Retrying with
+    edited LaTeX will not fix it. Call scratchpad_raise_flag with the error
+    and stop after at most one retry — do not loop.
+DO NOT skip this step when it can succeed. A PDF MUST be generated whenever
+the failure is a fixable LaTeX error.
 
 === STEP 5: PUBLISH THE MANUSCRIPT ===
 Call write_agent_output with:
@@ -626,7 +673,7 @@ Step 4.5: Anatomy Validation Gate (MANDATORY)
   1. DO NOT STOP execution or raise a pipeline error!
   2. Raise a scratchpad flag with level="warning" mentioning on the agent execution tab that 0 matching studies were automatically found for this anatomical region.
   3. Proceed normally to Step 5 (if available) and Step 6 (generate_targets). Do not finish early. generate_targets MUST remain at the Human-in-the-Loop review gate until the user has manually selected and labeled at least one volume. Never hand off a 0-size cohort.
-- Regardless of how many volumes match, use ONLY the validated_uids for all downstream steps. The tool automatically updates config.json and pushes the results to the UI tab.
+- Regardless of how many volumes match, use ONLY the validated_uids for all downstream steps. The tool records the cohort membership and pushes the results to the UI tab.
 
 Step 5: Extract Clinical Labels (Automatic mode only)
 - Check whether the 'extract_cohort_labels' tool is in your tool list.
@@ -651,8 +698,8 @@ Step 7: Finalize and Summarize
   - Total patients/volumes considered vs. selected (IMPORTANT: Always use the `final_cohort_size` returned by `generate_targets` as your final selected count, as the user may have added volumes manually during UI review!)
   - Inclusion/exclusion criteria applied
   - Modality, gender range, age range of the final cohort
-  - Path to the generated targets.csv
-  - Any caveats downstream agents should be aware of (If `final_cohort_size` > 0 after review, confirm to downstream agents that targets.csv and images are ready for analysis).
+  - The approved cohort_id returned by generate_targets
+  - Any caveats downstream agents should be aware of (If `final_cohort_size` > 0 after review, confirm to downstream agents that the approved cohort and its images are ready for analysis).
 - Call scratchpad_set_status(agent_id="study_population_planner_agent", status="done")
 - You MUST complete this step so downstream agents have the paths they need.
 
@@ -705,7 +752,7 @@ After completing your work and writing the scratchpad summary, you MUST call wri
   - agent_role: "population_selector"
   - status: "completed" (or "failed"/"partial" if applicable)
   - inputs: {"hypothesis": "<the hypothesis text>", "data_source": "<where data came from>"}
-  - output_files: {"targets_csv": "targets.csv", "config_json": "config.json"}
+  - output_files: {"cohort_id": "<cohort_id returned by generate_targets>"}
   - output_metrics: {
       "cohort_size": <number of patients/volumes selected>,
       "total_considered": <total patients/volumes screened>,

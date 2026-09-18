@@ -29,7 +29,6 @@ This agent is specialized in extracting the radiomics features from image-mask p
         "image_dir": "", # required
         "mask_dir": "", # required
         "output_dir": "", # optional
-        "targets_csv": "", # optional
         "target_column": "", # optional
 }
 """

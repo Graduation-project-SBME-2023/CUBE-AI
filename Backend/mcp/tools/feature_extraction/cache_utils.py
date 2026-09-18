@@ -1,48 +1,34 @@
-"""
-cache_utils.py — Extraction result caching helpers.
-
-# ADDED FOR UI ENHANCEMENT — Task 4: Caching Layer
-Provides a simple file-based cache keyed by image/mask modification times and
-the active bin_width. Every cache operation is wrapped in try/except so that
-a missing cache directory or permission error NEVER blocks the extraction pipeline.
-"""
+"""Extraction result cache — disposable and content-addressed."""
 
 import hashlib
 import json
 import logging
 import os
-from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+_KEY_VERSION = "radiomics-cache-v2"
 
-def get_cache_key(image_path: str, mask_path: str, bin_width: float) -> str:
-    """
-    Compute a deterministic SHA-256 cache key from:
-      - Image file modification time
-      - Mask file modification time
-      - Active bin_width (6 decimal places)
 
-    Returns an empty string on any failure so callers can safely skip caching.
-    """
-    try:
-        img_mtime  = str(Path(image_path).stat().st_mtime)
-        mask_mtime = str(Path(mask_path).stat().st_mtime)
-        raw = f"{image_path}:{img_mtime}|{mask_path}:{mask_mtime}|bw={bin_width:.6f}"
-        return hashlib.sha256(raw.encode()).hexdigest()
-    except Exception as exc:
-        logger.debug(f"[cache] Key computation failed: {exc}")
+def _is_digest(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(ch in "0123456789abcdef" for ch in value)
+    )
+
+
+def get_cache_key(image_digest: str, segmentation_digest: str, config_digest: str) -> str:
+    """SHA-256 over the three content digests of one extraction."""
+    parts = (image_digest, segmentation_digest, config_digest)
+    if not all(_is_digest(part) for part in parts):
         return ""
+    return hashlib.sha256("|".join((_KEY_VERSION, *parts)).encode("ascii")).hexdigest()
 
 
 def load_from_cache(cache_dir: str, cache_key: str) -> Optional[dict]:
-    """
-    Return the cached feature dict for cache_key if it exists; None otherwise.
-
-    Safety: returns None on any I/O or JSON error — caller falls through to
-    full extraction automatically.
-    """
+    """Return the cached feature dict for cache_key if it exists; None otherwise."""
     if not cache_key:
         return None
     try:
@@ -56,12 +42,7 @@ def load_from_cache(cache_dir: str, cache_key: str) -> Optional[dict]:
 
 
 def save_to_cache(cache_dir: str, cache_key: str, features: dict) -> None:
-    """
-    Persist the feature dict to {cache_dir}/{cache_key}.json.
-
-    Safety: silently skips on any I/O or serialisation error. The extraction
-    result is never lost — only the cache write is abandoned.
-    """
+    """Persist the feature dict to {cache_dir}/{cache_key}.json; never raises."""
     if not cache_key:
         return
     try:

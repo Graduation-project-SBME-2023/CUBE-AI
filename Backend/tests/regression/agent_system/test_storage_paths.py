@@ -22,12 +22,10 @@ class WorkspacePathMappingTests(unittest.TestCase):
                 "volumes/series.nii.gz": workspace / "data" / "volumes" / "series.nii.gz",
                 "masks/mask.nii.gz": workspace / "data" / "masks" / "mask.nii.gz",
                 "outputs/agent_output.json": workspace / "outputs" / "agents" / "agent_output.json",
-                "literature_review_output/context.json": workspace / "outputs" / "literature" / "context.json",
                 "overlays/mask.gif": workspace / "outputs" / "overlays" / "mask.gif",
                 "features/features.csv": workspace / "outputs" / "features" / "features.csv",
                 "modeling/model.pkl": workspace / "outputs" / "modeling" / "model.pkl",
                 "reports/report.pdf": workspace / "outputs" / "reports" / "report.pdf",
-                ".knowledge_cache/query.json": workspace / "cache" / "literature" / "query.json",
                 "temp_segmentations/edit.nii.gz": workspace / "temp" / "segmentations" / "edit.nii.gz",
             }
             for logical, physical in expected.items():
@@ -36,6 +34,32 @@ class WorkspacePathMappingTests(unittest.TestCase):
                         workspace_subpath(workspace, logical),
                         physical.resolve(),
                     )
+
+    def test_rejects_retired_workspace_cache_paths(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir) / "workspace_session"
+            retired_paths = [
+                ".knowledge_cache/query.json",
+                "cache/literature/query.json",
+            ]
+            for logical in retired_paths:
+                with self.subTest(logical=logical):
+                    with self.assertRaisesRegex(ValueError, "Workspace cache paths are retired"):
+                        workspace_subpath(workspace, logical)
+
+    def test_rejects_retired_workspace_literature_paths(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir) / "workspace_session"
+            retired_paths = [
+                "literature_context.json",
+                "literature_review_output/context.json",
+                "temp/literature/context.json",
+                "outputs/literature/report.md",
+            ]
+            for logical in retired_paths:
+                with self.subTest(logical=logical):
+                    with self.assertRaisesRegex(ValueError, "Workspace literature paths are retired"):
+                        workspace_subpath(workspace, logical)
 
     def test_rejects_parent_traversal(self):
         with tempfile.TemporaryDirectory() as temp_dir:

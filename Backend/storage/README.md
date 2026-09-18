@@ -16,13 +16,13 @@ Backend/storage/
 |       |   `-- masks/                # segmentation masks
 |       |-- outputs/
 |       |   |-- agents/               # structured agent outputs
-|       |   |-- literature/           # literature-review outputs
 |       |   |-- overlays/             # preview GIFs
 |       |   |-- features/             # CSV/YAML/logs/plots
 |       |   |-- modeling/             # trained models and modeling logs
 |       |   `-- reports/              # PDF and LaTeX reports
-|       |-- cache/literature/
-|       `-- temp/segmentations/
+|       `-- temp/
+|           |-- literature/           # scratch literature-review output
+|           `-- segmentations/
 |-- data/
 |   |-- medical/{images,labels,exports}/
 |   `-- nnunet/{nnUNet_raw,nnUNet_preprocessed,nnUNet_results,mappings}/
@@ -39,8 +39,9 @@ Backend/storage/
 
 - Durable: `hypotheses/*/{state,data,outputs}`, `data/`, `models/`, `jobs/`,
   and `state/`.
-- Disposable: global `cache/` and `temp/`, and each workspace's `cache/` and
-  `temp/` directories.
+- Disposable: global `cache/` and `temp/`, plus each workspace's `temp/`
+  directories. Literature knowledge cache files are shared by all hypotheses in
+  `cache/literature/`; workspaces must not create their own literature cache.
 - `_migrated-legacy/` preserves conflicts and ownerless files. Review it before
   deleting any migration source or rollback data.
 

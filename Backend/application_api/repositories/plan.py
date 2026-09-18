@@ -1,217 +1,182 @@
-# app/crud/plan.py
-from fastapi import HTTPException
-from sqlalchemy.orm import Session
-from uuid import UUID, uuid4
+"""Plan repository"""
 
-from application_api.db.models.plan import Plan
-from application_api.db.models.steps import PlanStep
-from application_api.schemas.plan import PlanCreate, PlanUpdate, PlanWithStepsOut, PlanCreateWithSteps, PlanUpdateWithSteps
-# app/crud/async_plan.py
+import logging
+from datetime import datetime, timezone
+from uuid import UUID
+
 from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
-from application_api.db.models.hypothesis import Hypothesis
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-async def create_plan(db: AsyncSession, hypothesis_id: UUID, plan_in: PlanCreate):
-    # fetch hypothesis to read title
-    result = await db.execute(
-        select(Hypothesis).where(Hypothesis.id == hypothesis_id)
-    )
-    hypothesis = result.scalar_one_or_none()
+from application_api.core.agent_types import unknown_agent_types
+from application_api.db.models.plan import Plan
+from application_api.db.models.sessions import Session as SessionModel
+from application_api.db.models.steps import PlanStep
+from application_api.repositories.agent_runs import create_pending_runs, list_runs
+from application_api.schemas.plan import PlanDraftUpdate
+from application_api.services.publication import lock_session_and_plan
 
-    if not hypothesis:
-        raise HTTPException(status_code=404, detail="Hypothesis not found")
-
-    # auto-set study_goal = hypothesis.title
-    study_goal_value = hypothesis.title
-
-    new_plan = Plan(
-        id=uuid4(),
-        hypothesis_id=hypothesis_id,
-        state=plan_in.state,
-        study_goal=study_goal_value,   # auto-set here
-    )
-
-    try:
-        db.add(new_plan)
-        await db.commit()
-        await db.refresh(new_plan)
-        return new_plan
-    except SQLAlchemyError as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+logger = logging.getLogger(__name__)
 
 
-# ----------------------------------------------------------------------
-async def create_plan_with_steps(
-    db: AsyncSession,
-    hypothesis_id: UUID,
-    plan_in: PlanCreateWithSteps
-):
+async def create_session_with_plan(db: AsyncSession, session: SessionModel) -> Plan:
+    """Add the empty plan for a session inside the caller's transaction."""
+    plan = Plan(session_id=session.session_id, approved_at=None)
+    db.add(plan)
+    return plan
 
-    # fetch hypothesis
-    result = await db.execute(
-        select(Hypothesis).where(Hypothesis.id == hypothesis_id)
-    )
-    hypothesis = result.scalar_one_or_none()
 
-    if not hypothesis:
-        raise HTTPException(status_code=404, detail="Hypothesis not found")
-
-    study_goal_value = hypothesis.title
-
-    new_plan = Plan(
-        id=uuid4(),
-        hypothesis_id=hypothesis_id,
-        state=plan_in.state,
-        study_goal=study_goal_value
-    )
-
-    try:
-        db.add(new_plan)
-
-        # flush to get plan_id
-        await db.flush()
-
-        # create steps
-        for step_order, step in enumerate(plan_in.steps, start=1):
-            new_step = PlanStep(
-                id=uuid4(),
-                plan_id=new_plan.id,
-                step_order=step_order,
-                **step.dict()
-            )
-            db.add(new_step)
-
-        await db.commit()
-        await db.refresh(new_plan)
-
-        return new_plan
-
-    except SQLAlchemyError as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    
-# ----------------------------------------------------------------------
-
-async def get_plan(db: AsyncSession, plan_id: UUID):
-    try:
-        result = await db.execute(select(Plan).where(Plan.id == plan_id))
-        plan = result.scalar_one_or_none()
-        if not plan:
-            raise HTTPException(status_code=404, detail="Plan not found")
-        return plan
-    except SQLAlchemyError as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-async def get_all_plans(db: AsyncSession, skip: int = 0, limit: int = 100):
-    try:
-        result = await db.execute(select(Plan).offset(skip).limit(limit))
-        return result.scalars().all()
-    except SQLAlchemyError as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    
-
-async def get_plans_for_hypothesis(
-    db: AsyncSession, hypothesis_id: UUID, skip: int = 0, limit: int = 100
-):
-    try:
-        result = await db.execute(
-            select(Plan).where(Plan.hypothesis_id == hypothesis_id).offset(skip).limit(limit)
+async def get_plan(db: AsyncSession, session_id: UUID) -> Plan:
+    plan = (
+        await db.execute(
+            select(Plan)
+            .options(selectinload(Plan.steps))
+            .where(Plan.session_id == session_id)
         )
-        plans = result.scalars().all()
-        return plans
-    except SQLAlchemyError as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-async def update_plan(db: AsyncSession, plan_id: UUID, plan_in: PlanUpdate):
-    plan = await get_plan(db, plan_id)
-    for field, value in plan_in.dict(exclude_unset=True).items():
-        setattr(plan, field, value)
-    try:
-        await db.commit()
-        await db.refresh(plan)
-        return plan
-    except SQLAlchemyError as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    ).unique().scalar_one_or_none()
+    if plan is None:
+        raise HTTPException(
+            status_code=404, detail=f"No plan for session {session_id}"
+        )
+    return plan
 
 
-# ----------------------------------------------------------------------
+async def get_all_plans(db: AsyncSession, skip: int = 0, limit: int = 100) -> list[Plan]:
+    result = await db.execute(
+        select(Plan)
+        .options(selectinload(Plan.steps))
+        .order_by(Plan.updated_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    return list(result.unique().scalars().all())
 
 
-async def update_plan_with_steps(
-    db: AsyncSession,
-    plan_id: UUID,
-    plan_in: PlanUpdateWithSteps
-):
+async def _require_draft(db: AsyncSession, session_id: UUID) -> Plan:
+    await lock_session_and_plan(db, session_id)
+    plan = await get_plan(db, session_id)
+    if plan.approved_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"The plan for session {session_id} was approved at "
+                f"{plan.approved_at.isoformat()}. An approved plan and its steps "
+                "are immutable; a changed plan requires a new session."
+            ),
+        )
+    return plan
 
-    plan = await get_plan(db, plan_id)
 
-    try:
+async def replace_draft_steps(
+    db: AsyncSession, session_id: UUID, data: PlanDraftUpdate
+) -> Plan:
+    """Replace the draft's ordered step list."""
+    plan = await _require_draft(db, session_id)
 
-        # update plan fields
-        if plan_in.state is not None:
-            plan.state = plan_in.state
+    existing = (
+        await db.execute(select(PlanStep).where(PlanStep.session_id == session_id))
+    ).scalars().all()
+    for step in existing:
+        await db.delete(step)
+    await db.flush()
 
-        if plan_in.steps is not None:
-
-            result = await db.execute(
-                select(PlanStep).where(PlanStep.plan_id == plan_id)
+    for position, step_in in enumerate(data.steps, start=1):
+        db.add(
+            PlanStep(
+                session_id=session_id,
+                step_order=position,
+                agent_type=step_in.agent_type,
+                title=step_in.title,
+                instructions=step_in.instructions,
             )
-            existing_steps = {str(s.id): s for s in result.scalars().all()}
+        )
 
-            received_ids = set()
-
-            for step_order, step in enumerate(plan_in.steps, start=1):
-
-                step_dict = step.model_dump(exclude_unset=True, exclude={"step_order"})
-
-                # update existing step
-                if "id" in step_dict and str(step_dict["id"]) in existing_steps:
-
-                    step_obj = existing_steps[str(step_dict["id"])]
-                    received_ids.add(str(step_dict["id"]))
-
-                    for field, value in step_dict.items():
-                        if field != "id":
-                            setattr(step_obj, field, value)
-
-                    step_obj.step_order = step_order
-
-                else:
-                    # create new step
-                    new_step = PlanStep(
-                        id=uuid4(),
-                        plan_id=plan_id,
-                        step_order=step_order,
-                        **step_dict
-                    )
-                    db.add(new_step)
-
-            # delete removed steps
-            for step_id, step_obj in existing_steps.items():
-                if step_id not in received_ids:
-                    await db.delete(step_obj)
-
-        await db.commit()
-        await db.refresh(plan)
-
-        return plan
-
-    except SQLAlchemyError as e:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ----------------------------------------------------------------------
-
-async def delete_plan(db: AsyncSession, plan_id: UUID):
-    plan = await get_plan(db, plan_id)
+    plan.updated_at = datetime.now(timezone.utc)
     try:
-        await db.delete(plan)
         await db.commit()
-        return {"detail": "Plan deleted"}
+    except IntegrityError as e:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=f"Plan draft rejected: {e}")
     except SQLAlchemyError as e:
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    # `AsyncSessionLocal` is `expire_on_commit=False`, so `plan.steps` — loaded
+    # empty (or stale) by `_require_draft`'s earlier `get_plan` call — is not
+    # invalidated by the commit above. The individual PlanStep rows were
+    # deleted/added directly rather than through the `plan.steps` collection,
+    # so without expiring it explicitly, the `selectinload` in `get_plan`
+    # below reuses the already-loaded (now stale) collection instead of
+    # re-querying it, and the caller gets back the steps it just replaced.
+    db.expire(plan, ["steps"])
+    return await get_plan(db, session_id)
+
+
+async def approve_plan(db: AsyncSession, session_id: UUID) -> Plan:
+    """ one way, atomic approval."""
+    # _require_draft takes the session lock and then the plan lock — the order
+    # asks for, held through commit.
+    plan = await _require_draft(db, session_id)
+    if not plan.steps:
+        raise HTTPException(
+            status_code=409,
+            detail="An empty plan cannot be approved.",
+        )
+
+    orders = [step.step_order for step in plan.steps]
+    if sorted(orders) != list(range(1, len(orders) + 1)):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Plan step order is not a contiguous 1..n sequence: {sorted(orders)}."
+            ),
+        )
+
+    unknown = unknown_agent_types([step.agent_type for step in plan.steps])
+    if unknown:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Unknown agent_type(s): {', '.join(unknown)}. A step must name an "
+                "agent that exists in AGENT_FACTORIES; unknown keys are rejected "
+                "before admission, never silently skipped."
+            ),
+        )
+
+    existing_runs = await list_runs(db, session_id)
+    if existing_runs:
+        # Only an approved plan can own runs (the deferred trigger enforces it),
+        # so this state is unreachable through the API. Refuse rather than
+        # create a second set.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Session {session_id} already has {len(existing_runs)} agent run(s) "
+                "for a draft plan; reconciliation is required before approval."
+            ),
+        )
+
+    plan.approved_at = datetime.now(timezone.utc)
+    plan.updated_at = plan.approved_at
+    await create_pending_runs(db, list(plan.steps))
+    try:
+        await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=f"Approval rejected: {e}")
+    except SQLAlchemyError as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    return await get_plan(db, session_id)
+
+
+async def delete_plan(db: AsyncSession, session_id: UUID):
+    """Refused the session exists — the plan is not independently deletable; archive the session instead."""
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"The plan for session {session_id} cannot be deleted independently "
+            "of its session. Archive the session instead."
+        ),
+    )

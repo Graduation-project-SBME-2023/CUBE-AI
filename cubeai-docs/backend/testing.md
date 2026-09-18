@@ -34,7 +34,7 @@ local PowerShell scripts.
 |---|---|---|
 | `-Suite` | `deterministic` | Fast unit, contract, and mocked full-pipeline tests. This is the PR gate. |
 | `-Suite` | `agent-regression` | Consolidated agent-system resilience and segmentation regression tests. |
-| `-Suite` | `radiology` | Model-artifact and VoxTell geometry tests in the MONAI/Torch image. |
+| `-Suite` | `radiology` | Radiology unit tests plus model-artifact and VoxTell geometry tests in the MONAI/Torch image. |
 | `-Suite` | `integration` | Health checks against running Docker services. |
 | `-Suite` | `all` | Runs deterministic, agent regression, then radiology. |
 | `-Runtime` | `docker` | Default. Uses the correct project container image. |
@@ -85,6 +85,7 @@ Run only deterministic tests:
 ```powershell
 python -m pytest -c Backend/pytest.ini `
   Backend/tests/unit Backend/tests/contracts Backend/tests/pipeline `
+  --ignore=Backend/tests/unit/radiology `
   -m "unit or contract or pipeline"
 ```
 
@@ -99,7 +100,8 @@ Run radiology regressions from an environment containing MONAI and Torch:
 
 ```powershell
 python -m pytest -c Backend/pytest.ini `
-  Backend/tests/regression/radiology -m radiology
+  Backend/tests/unit/radiology Backend/tests/regression/radiology `
+  -m radiology
 ```
 
 ## Test layout and responsibility
@@ -178,10 +180,11 @@ python -m pytest -c Backend/pytest.ini `
 | `regression/agent_system/test_task_cancellation.py` | Task-manager cancellation, segmentation cancellation guards, and cleanup. |
 | `regression/agent_system/test_timeout_resilience.py` | Tool deadlines, durable inference polling, and best-effort persistence lifecycle. |
 
-### Consolidated radiology regression tests
+### Radiology tests
 
 | File | Function |
 |---|---|
+| `unit/radiology/` | MONAI/Torch-backed application settings, datastore metadata, and inference-unit behavior. |
 | `regression/radiology/test_model_artifacts.py` | Model snapshot completeness, archive validation, redownload behavior, and download skipping. |
 | `regression/radiology/test_qwen_embedding_model.py` | Qwen embedding model metadata, required files, size/integrity checks, and recovery. |
 | `regression/radiology/test_voxtell_artifacts.py` | VoxTell v1.0/v1.1 checkpoints, embedding archives, truncation removal, and verified downloads. |

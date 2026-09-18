@@ -5,7 +5,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from application_api.db.models.patient import Patient
 from application_api.db.models.study import Study
 from application_api.db.models.volume import Volume
@@ -90,15 +90,7 @@ async def update_patient(db: AsyncSession, patient_id: UUID, data: PatientUpdate
     
 
 async def delete_patient(db: AsyncSession, patient_id: UUID):
-    """
-    Delete patient from both the database and Orthanc.
-    Returns (success: bool, error_message: str | None)
-
-    Database-first (see repositories/volume.py:delete_volume for the full
-    rationale). A patient delete cascades in the DB through studies ->
-    volume_series -> segmentations; every Orthanc id in that subtree is
-    collected before the delete so PACS cleanup is complete.
-    """
+    """Delete patient from both the database and Orthanc. Returns (success: bool, error_message: str | None)"""
     result = await db.execute(select(Patient).where(Patient.patient_id == patient_id))
     patient = result.scalar_one_or_none()
 
@@ -134,9 +126,24 @@ async def delete_patient(db: AsyncSession, patient_id: UUID):
             )
             seg_orthanc_ids = [row[0] for row in seg_result.all()]
 
+    if studies:
+        return False, (
+            f"Patient {patient_id} still has {len(studies)} study/studies. Deleting "
+            "the patient would destroy every series, mask and radiomics row beneath "
+            "them; mark archive_status='unavailable' instead, or delete the studies "
+            "first."
+        )
+
     try:
-        await db.delete(patient)  # cascades to studies -> volume_series -> segmentations
+        await db.delete(patient)
         await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        logger.error("Refusing to delete referenced patient %s: %s", patient_id, e)
+        return False, (
+            f"Patient {patient_id} is still referenced by other records and cannot "
+            "be deleted."
+        )
     except SQLAlchemyError as e:
         await db.rollback()
         error_msg = f"Database error: {str(e)}"

@@ -9,9 +9,10 @@ class VolumeBase(BaseModel):
     modality: Optional[str] = None
     num_slices: Optional[int] = None
     body_part_examined: Optional[str] = None
-    created_at: Optional[date] = None  # ISO format date-time
+    # The DICOM SeriesDate/SeriesTime, not row-insertion time.
+    series_datetime: Optional[date] = None
 
-    @validator("created_at", pre=True)
+    @validator("series_datetime", pre=True)
     def extract_date(cls, v):
         if isinstance(v, datetime):
             return v.date()  # keep only the date part
@@ -28,5 +29,6 @@ class VolumeUpdate(BaseModel):
 
 class Volume(VolumeBase):
     orthanc_series_id: str | None = None
+    archive_status: str = "available"
 
     model_config = ConfigDict(from_attributes=True)

@@ -1,45 +1,61 @@
-"""
-Agent Output MCP Tool
-
-Provides structured JSON output writing for each agent in the pipeline.
-Each agent writes its outputs to `workspace/outputs/{agent_id}_output.json`.
-The reporter agent can read all outputs at once via `read_all_agent_outputs`.
-
-Output JSON structure per agent:
-{
-  "agent_id": str,
-  "agent_role": str,
-  "status": "completed" | "failed" | "partial",
-  "timestamp": ISO str,
-  "inputs": { ... },
-  "outputs": {
-    "files": { "logical_name": "relative_path", ... },
-    "metrics": { ... },
-    "summary": str
-  },
-  "errors": [ str ],
-  "warnings": [ str ]
-}
-"""
+"""Agent Output MCP Tool."""
 
 import json
+import logging
 import os
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, Optional
+import shutil
+from typing import Any, Dict, List, Literal
+
+import httpx
+from pydantic import BaseModel, ConfigDict, Field
 
 from . import mcp
-from pydantic import BaseModel, ConfigDict, Field
-from storage_paths import HYPOTHESES_DIR, workspace_subpath
+from storage_paths import TEMP_DIR
 
-# ── Constants ──────────────────────────────────────────────────────────────────
+logger = logging.getLogger(__name__)
 
-WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", str(HYPOTHESES_DIR / "workspace_default"))
-OUTPUTS_DIR = str(workspace_subpath(WORKSPACE_DIR, "outputs"))
+# TEMP_DIR/<category>/<agent_run_id>/ is the convention every scratch-heavy
+# tool (PyRadiomics params/log, PyCaret train.csv/log/plots, ...) writes
+# its working files under — see feature_extraction/features.py and
+# modeling/classification.py|regression.py. None of it is durable (the
+# measurements/metrics land in Postgres, plots are re-published as
+# artifacts), so once this run's output is confirmed saved there is nothing
+# left to keep it for. A tool that follows the same <category>/<run_id>
+# convention is covered automatically — no per-tool cleanup code needed.
+_RUN_SCOPED_TEMP_CATEGORIES = ("feature-extraction", "feature-selection", "modeling")
+
+
+def _cleanup_run_temp_dirs(agent_run_id: str) -> None:
+    for category in _RUN_SCOPED_TEMP_CATEGORIES:
+        run_dir = TEMP_DIR / category / agent_run_id
+        if run_dir.exists():
+            try:
+                shutil.rmtree(run_dir)
+            except Exception as exc:
+                logger.warning("Failed to clean up temp dir %s: %s", run_dir, exc)
+
+def _app_api_url() -> str:
+    """The Application API base URL."""
+    try:
+        from service_urls import APP_API_URL
+
+        return APP_API_URL
+    except ImportError:
+        return os.environ.get(
+            "APP_API_URL", os.environ.get("CONTROL_API_URL", "http://localhost:8001")
+        ).rstrip("/")
+
+
+APP_API_URL = _app_api_url()
+SESSION_ID = os.environ.get("SESSION_ID", "")
+AGENT_ID = os.environ.get("AGENT_ID", "")
+AGENT_RUN_ID = os.environ.get("AGENT_RUN_ID", "")
+REQUEST_TIMEOUT = 30.0
 
 OutputStatus = Literal["completed", "failed", "partial"]
 
 
-# ── Input Models ───────────────────────────────────────────────────────────────
+# -- Input models (unchanged shapes) -------------------------------------------
 
 class WriteAgentOutputInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
@@ -104,22 +120,44 @@ class ReadAgentOutputInput(BaseModel):
     )
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# -- Helpers -------------------------------------------------------------------
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def _ensure_outputs_dir() -> str:
-    os.makedirs(OUTPUTS_DIR, exist_ok=True)
-    return OUTPUTS_DIR
+def _error(message: str) -> str:
+    return json.dumps({"status": "error", "message": message}, indent=2)
 
 
-def _output_path(agent_id: str) -> str:
-    return os.path.join(OUTPUTS_DIR, f"{agent_id}_output.json")
+def _document(run: Dict[str, Any]) -> Dict[str, Any]:
+    """Present a run's stored output in the shape the file had."""
+    step = run.get("step") or {}
+    agent_output = (run.get("output_summary") or {}).get("agent_output") or {}
+    warnings = [
+        item.get("message")
+        for item in (run.get("warnings") or {}).get("items", [])
+        if item.get("message")
+    ]
+    return {
+        "agent_id": step.get("agent_type"),
+        "agent_run_id": run.get("agent_run_id"),
+        "step_id": run.get("step_id"),
+        "step_order": step.get("step_order"),
+        "agent_role": agent_output.get("agent_role", ""),
+        "status": agent_output.get("status", run.get("status")),
+        "timestamp": agent_output.get("recorded_at"),
+        "inputs": agent_output.get("inputs") or {},
+        "outputs": agent_output.get("outputs") or {},
+        "errors": agent_output.get("errors") or [],
+        "warnings": warnings,
+    }
 
 
-# ── Tools ──────────────────────────────────────────────────────────────────────
+async def _session_runs() -> List[Dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        response = await client.get(f"{APP_API_URL}/agent-runs/session/{SESSION_ID}")
+        response.raise_for_status()
+        return response.json()
+
+
+# -- Tools ---------------------------------------------------------------------
 
 @mcp.tool(
     name="write_agent_output",
@@ -132,62 +170,49 @@ def _output_path(agent_id: str) -> str:
     },
 )
 async def write_agent_output(params: WriteAgentOutputInput) -> str:
-    """Write the agent's structured output to a JSON file in the workspace.
-
-    Each agent MUST call this tool when its work is complete. The output file
-    is saved to `workspace/outputs/{agent_id}_output.json` and contains all
-    key inputs, output file paths, metrics, and summary text.
-
-    The reporter agent uses these structured outputs to build the final paper.
-
-    Args:
-        params (WriteAgentOutputInput):
-            - agent_id: Unique agent identifier
-            - agent_role: Agent's role description
-            - status: 'completed' | 'failed' | 'partial'
-            - inputs: Dict of inputs received
-            - output_files: Dict of logical_name -> file_path
-            - output_metrics: Dict of metric_name -> value
-            - output_summary: Text summary of work done
-            - errors: List of error messages
-            - warnings: List of warnings/caveats
-
-    Returns:
-        str: JSON confirmation with the output file path.
-    """
+    """Write this agent's structured output."""
+    if not AGENT_RUN_ID:
+        return _error(
+            "AGENT_RUN_ID is not set in the MCP environment; this agent is not "
+            "bound to an approved plan step and cannot record its output."
+        )
+    payload = {
+        "agent_role": params.agent_role,
+        "status": params.status,
+        "inputs": params.inputs,
+        "output_files": params.output_files,
+        "output_metrics": params.output_metrics,
+        "output_summary": params.output_summary,
+        "errors": params.errors,
+        "warnings": params.warnings,
+    }
     try:
-        _ensure_outputs_dir()
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            response = await client.put(
+                f"{APP_API_URL}/agent-runs/{AGENT_RUN_ID}/output", json=payload
+            )
+            if response.status_code >= 400:
+                return _error(
+                    f"{response.status_code} from the Application API: "
+                    f"{response.text[:400]}"
+                )
+            run = response.json()
+    except Exception as exc:
+        return _error(f"Failed to write output: {exc}")
 
-        output_data = {
-            "agent_id": params.agent_id,
-            "agent_role": params.agent_role,
-            "status": params.status,
-            "timestamp": _now(),
-            "inputs": params.inputs,
-            "outputs": {
-                "files": params.output_files,
-                "metrics": params.output_metrics,
-                "summary": params.output_summary,
-            },
-            "errors": params.errors,
-            "warnings": params.warnings,
-        }
+    # This agent's output is now durable in Postgres — its working scratch
+    # under temp/ (if any) has nothing left it's the only copy of.
+    _cleanup_run_temp_dirs(AGENT_RUN_ID)
 
-        file_path = _output_path(params.agent_id)
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(output_data, f, indent=2, ensure_ascii=False)
-
-        return json.dumps({
+    return json.dumps(
+        {
             "status": "ok",
             "message": f"Output saved for agent '{params.agent_id}'.",
-            "file_path": file_path,
-        }, indent=2)
-
-    except Exception as e:
-        return json.dumps({
-            "status": "error",
-            "message": f"Failed to write output: {str(e)}",
-        }, indent=2)
+            "agent_run_id": run.get("agent_run_id"),
+            "step_id": run.get("step_id"),
+        },
+        indent=2,
+    )
 
 
 @mcp.tool(
@@ -201,31 +226,27 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
     },
 )
 async def read_agent_output(params: ReadAgentOutputInput) -> str:
-    """Read the structured output JSON file for a specific agent.
-
-    Args:
-        params (ReadAgentOutputInput):
-            - agent_id: ID of the agent whose output to read.
-
-    Returns:
-        str: JSON content of the agent's output file, or error if not found.
-    """
-    file_path = _output_path(params.agent_id)
-    if not os.path.exists(file_path):
-        return json.dumps({
-            "status": "error",
-            "message": f"No output file found for agent '{params.agent_id}'.",
-        }, indent=2)
-
+    """Read the structured output of an agent in this session.: when several plan steps name one agent, this resolves the FIRST in plan order and says how many matched."""
+    if not SESSION_ID:
+        return _error("SESSION_ID is not set in the MCP environment.")
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return json.dumps(data, indent=2)
-    except Exception as e:
-        return json.dumps({
-            "status": "error",
-            "message": f"Failed to read output: {str(e)}",
-        }, indent=2)
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            response = await client.get(
+                f"{APP_API_URL}/agent-runs/session/{SESSION_ID}"
+                f"/by-agent-type/{params.agent_id}"
+            )
+            if response.status_code == 404:
+                return _error(f"No output found for agent '{params.agent_id}'.")
+            response.raise_for_status()
+            resolved = response.json()
+    except Exception as exc:
+        return _error(f"Failed to read output: {exc}")
+
+    document = _document(resolved.get("run") or {})
+    document["steps_sharing_this_agent_type"] = resolved.get(
+        "steps_sharing_this_agent_type"
+    )
+    return json.dumps(document, indent=2)
 
 
 @mcp.tool(
@@ -239,58 +260,41 @@ async def read_agent_output(params: ReadAgentOutputInput) -> str:
     },
 )
 async def read_all_agent_outputs() -> str:
-    """Read all agent output JSON files from the workspace.
-
-    Returns a combined view of every agent's structured output, including
-    their inputs, output files, metrics, summaries, errors, and warnings.
-    This is the primary data source for the reporter agent.
-
-    Returns:
-        str: JSON object with:
-            - agent_count (int): Number of agent output files found
-            - agents (dict): Keyed by agent_id, each containing the full output data
-            - pipeline_status (str): 'all_completed' | 'has_failures' | 'has_partial' | 'no_outputs'
-    """
-    if not os.path.exists(OUTPUTS_DIR):
-        return json.dumps({
-            "agent_count": 0,
-            "agents": {},
-            "pipeline_status": "no_outputs",
-        }, indent=2)
-
-    agents = {}
-    statuses = set()
-
+    """Read every agent's structured output for this session, in plan order."""
+    if not SESSION_ID:
+        return _error("SESSION_ID is not set in the MCP environment.")
     try:
-        for filename in sorted(os.listdir(OUTPUTS_DIR)):
-            if filename.endswith("_output.json"):
-                file_path = os.path.join(OUTPUTS_DIR, filename)
-                try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    agent_id = data.get("agent_id", filename.replace("_output.json", ""))
-                    agents[agent_id] = data
-                    statuses.add(data.get("status", "unknown"))
-                except Exception:
-                    continue
+        runs = await _session_runs()
+    except Exception as exc:
+        return _error(f"Failed to read outputs: {exc}")
 
-        if not agents:
-            pipeline_status = "no_outputs"
-        elif "failed" in statuses:
-            pipeline_status = "has_failures"
-        elif "partial" in statuses:
-            pipeline_status = "has_partial"
-        else:
-            pipeline_status = "all_completed"
+    agents: Dict[str, Any] = {}
+    statuses = set()
+    for run in runs:
+        document = _document(run)
+        if not document.get("timestamp"):
+            continue  # this step has not written an output yet
+        key = document["agent_id"] or str(document["step_id"])
+        if key in agents:
+            # Two steps share this agent type — keep both, keyed by step.
+            key = f"{key}#{document['step_order']}"
+        agents[key] = document
+        statuses.add(document.get("status", "unknown"))
 
-        return json.dumps({
+    if not agents:
+        pipeline_status = "no_outputs"
+    elif "failed" in statuses:
+        pipeline_status = "has_failures"
+    elif "partial" in statuses:
+        pipeline_status = "has_partial"
+    else:
+        pipeline_status = "all_completed"
+
+    return json.dumps(
+        {
             "agent_count": len(agents),
             "agents": agents,
             "pipeline_status": pipeline_status,
-        }, indent=2)
-
-    except Exception as e:
-        return json.dumps({
-            "status": "error",
-            "message": f"Failed to read outputs: {str(e)}",
-        }, indent=2)
+        },
+        indent=2,
+    )

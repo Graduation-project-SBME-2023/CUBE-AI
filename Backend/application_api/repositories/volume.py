@@ -2,7 +2,7 @@ import logging
 
 from fastapi import HTTPException
 from sqlalchemy import func, not_, or_, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.db.models.volume import Volume
@@ -64,19 +64,7 @@ async def update_volume(db: AsyncSession, volume_series_instance_uid: str, updat
         raise HTTPException(status_code=400, detail=f"Failed to update volume: {str(e)}")
 
 async def delete_volume(db: AsyncSession, volume_uid: str):
-    """
-    Delete volume from both the database and Orthanc.
-    Returns (success: bool, error_message: str | None)
-
-    Database-first: the DB delete (and its ON DELETE CASCADE to
-    segmentations) is the operation that can actually fail and needs to be
-    reported to the caller. Orthanc cleanup happens only after that commit
-    succeeds, so a slow or unreachable Orthanc can no longer leave a
-    dangling DB row pointing at already-deleted imaging. Every Orthanc
-    series that belonged to this volume AND to its cascaded segmentations
-    is deleted from PACS too, closing the gap where a deleted volume left
-    its derived SEG series orphaned in Orthanc.
-    """
+    """Delete volume from both the database and Orthanc. Returns (success: bool, error_message: str | None)"""
     result = await db.execute(
         select(Volume).where(Volume.volume_series_instance_uid == volume_uid)
     )
@@ -93,9 +81,23 @@ async def delete_volume(db: AsyncSession, volume_uid: str):
     )
     seg_orthanc_ids = [row[0] for row in seg_result.all()]
 
+    if seg_orthanc_ids:
+        return False, (
+            f"Volume {volume_uid} still has {len(seg_orthanc_ids)} segmentation(s) "
+            "derived from it. Deleting it would destroy scientific history; mark "
+            "it archive_status='unavailable' instead, or delete the masks first."
+        )
+
     try:
-        await db.delete(volume)  # cascades to segmentations in the DB
+        await db.delete(volume)
         await db.commit()
+    except IntegrityError as e:
+        await db.rollback()
+        logger.error("Refusing to delete referenced volume %s: %s", volume_uid, e)
+        return False, (
+            f"Volume {volume_uid} is still referenced by other records and cannot "
+            "be deleted."
+        )
     except SQLAlchemyError as e:
         await db.rollback()
         error_msg = f"Database error: {str(e)}"
@@ -104,7 +106,7 @@ async def delete_volume(db: AsyncSession, volume_uid: str):
 
     await cleanup_orthanc_resources_after_db_delete(
         "series",
-        [orthanc_series_id, *seg_orthanc_ids],
+        [orthanc_series_id],
         context=f"DB delete of volume {volume_uid}",
     )
     return True, None
@@ -145,11 +147,7 @@ async def search_volumes_by_description(
     skip: int = 0,
     limit: int = 100,
 ):
-    """
-    Search volumes by keywords in series_description AND body_part_examined.
-    Returns a list of dicts with uid, series_description, body_part_examined,
-    and modality so the caller can see what anatomy each volume covers.
-    """
+    """Search volumes by keywords in series_description AND body_part_examined. Returns a list of dicts with uid, series_description, body_part_examined, and modality so the caller can see what anatomy each volume covers."""
     try:
         if not words_to_include:
             return []

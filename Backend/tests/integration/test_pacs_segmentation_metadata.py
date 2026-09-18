@@ -42,7 +42,7 @@ def _description_target(description: Any) -> str | None:
 
 def _metadata_conflict(segmentation: dict[str, Any]) -> dict[str, str] | None:
     segment_label = str(segmentation.get("target_label") or "").strip()
-    description_target = _description_target(segmentation.get("segmentation_type"))
+    description_target = _description_target(segmentation.get("series_description"))
     if not segment_label or not description_target:
         return None
     if _normalize_label(segment_label) == _normalize_label(description_target):
@@ -53,7 +53,7 @@ def _metadata_conflict(segmentation: dict[str, Any]) -> dict[str, str] | None:
         "segmentation_uid": str(
             segmentation.get("label_series_instance_uid") or ""
         ),
-        "series_description": str(segmentation.get("segmentation_type") or ""),
+        "series_description": str(segmentation.get("series_description") or ""),
         "segment_label": segment_label,
         "description_target": description_target,
     }
@@ -81,7 +81,7 @@ def test_metadata_conflict_detects_kidney_mask_labeled_as_spleen():
         {
             "volume_series_instance_uid": "volume-uid",
             "label_series_instance_uid": "segmentation-uid",
-            "segmentation_type": "08/08/2026 - voxtell - kidney",
+            "series_description": "08/08/2026 - voxtell - kidney",
             "target_label": "spleen",
         }
     )
@@ -99,7 +99,7 @@ def test_metadata_conflict_accepts_matching_labels():
     assert (
         _metadata_conflict(
             {
-                "segmentation_type": "12/08/2026 - voxtell - left kidney",
+                "series_description": "12/08/2026 - voxtell - left kidney",
                 "target_label": "left_kidney",
             }
         )
@@ -113,7 +113,7 @@ def test_metadata_conflict_detects_new_formats():
             {
                 "volume_series_instance_uid": "volume-uid",
                 "label_series_instance_uid": "segmentation-uid",
-                "segmentation_type": "kidney-voxtell-08:45:30 PM-g",
+                "series_description": "kidney-voxtell-08:45:30 PM-g",
                 "target_label": "spleen",
             }
         )["description_target"]
@@ -124,7 +124,7 @@ def test_metadata_conflict_detects_new_formats():
             {
                 "volume_series_instance_uid": "volume-uid",
                 "label_series_instance_uid": "segmentation-uid",
-                "segmentation_type": "Segmentation: kidney",
+                "series_description": "Segmentation: kidney",
                 "target_label": "spleen",
             }
         )["description_target"]

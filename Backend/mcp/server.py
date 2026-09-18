@@ -6,8 +6,12 @@ if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 
 from storage_paths import ensure_storage_layout
+from storage_write_guard import install_write_guard
 
 ensure_storage_layout()
+# A tool that writes a retired workspace file fails instead of creating a
+# second source of truth next to the table that replaced it.
+install_write_guard()
 
 from tools import mcp
 from fastapi import FastAPI
@@ -30,10 +34,11 @@ from tools.database.segmentations.get_segmentation import get_segmentation, get_
 from tools.database.segmentations.search_segmentation import search_segmentation
 from tools.database.segmentations.segmentations_status import get_segmentation_stats
 from tools.save_population import save_final_output
-from tools.latex.get_final_report import get_final_report
+from tools.latex.create_report import create_report
 from tools.latex.latex_to_pdf import latex_to_pdf
 from tools.latex.template_tools import get_latex_template, list_latex_templates
-from tools.latex.list_plots import list_workspace_plots
+from tools.latex.list_plots import list_report_figures
+from tools.latex.register_image import register_report_image
 from tools.get_modeling_results import get_modeling_results
 from tools.targets_matcher import generate_targets
 
@@ -54,6 +59,7 @@ import tools.literature_context
 import tools.task_context
 from tools.modeling.classification import pycaret_train_classifier, pycaret_run_inference
 from tools.modeling.regression import pycaret_train_regressor, pycaret_run_regression_inference
+from tools.modeling.refit import pycaret_refit_model
 
 from tools.feature_extraction.features import radiomics_extract_features, radiomics_analyze_importance
 

@@ -46,6 +46,10 @@ Backend/volumes
 **/node_modules/
 **/yarn.lock
 
+# Frontend build and test artifacts
+Frontend/OHIF-Viewer/platform/app/dist/
+Frontend/OHIF-Viewer/junit.xml
+
 
 Frontend/Viewers-*
 

@@ -14,10 +14,10 @@ from application_api.repositories.orthanc_sync import (
     sync_study_to_db,
     sync_series_to_db,
     sync_all_from_orthanc,
-    delete_study_from_db,
-    delete_series_from_db,
-    delete_patient_from_db,
-    delete_segmentation_from_db,
+    mark_study_unavailable,
+    mark_series_unavailable,
+    mark_patient_unavailable,
+    mark_segmentation_unavailable,
 )
 from application_api.services.orthanc_client import ORTHANC_URL, create_orthanc_session
 from application_api.db.models.patient import Patient
@@ -277,16 +277,22 @@ async def process_webhook_background(change_type: str, resource_id: str, level: 
                 await db.commit()
 
             # ---------- DELETE EVENTS ----------
+            # Orthanc losing a resource marks the archive row
+            # `unavailable`; it never deletes the row. The radiomics rows,
+            # frozen feature sets, model results and reports that reference it
+            # are scientific history, and a PACS deletion is not permission to
+            # destroy them.
             elif change_type == "deleted":
                 level_lower = level.lower()
-                
-                # We need to fetch the DICOM UID BEFORE deletion happens
-                # But the resource is already deleted in Orthanc, so we query our DB
-                
+
+                # The resource is already gone from Orthanc by the time the
+                # Lua hook fires, so the DICOM UID is resolved from our own
+                # row, which still exists.
+
                 if level_lower == "patient":
                     # For patient, we use orthanc_patient_id directly
-                    deleted = await delete_patient_from_db(db, resource_id)
-                    if not deleted:
+                    marked = await mark_patient_unavailable(db, resource_id)
+                    if not marked:
                         logger.warning("Patient %s not found in database", resource_id)
 
                 elif level_lower == "study":
@@ -297,7 +303,7 @@ async def process_webhook_background(change_type: str, resource_id: str, level: 
                     study = result.scalar_one_or_none()
                     if study:
                         study_uid = study.study_uid
-                        await delete_study_from_db(db, study_uid)
+                        await mark_study_unavailable(db, study_uid)
                     else:
                         logger.warning("Study with Orthanc ID %s not found in database", resource_id)
 
@@ -310,7 +316,7 @@ async def process_webhook_background(change_type: str, resource_id: str, level: 
                     
                     if volume:
                         series_uid = volume.volume_series_instance_uid
-                        await delete_series_from_db(db, series_uid)
+                        await mark_series_unavailable(db, series_uid)
                     else:
                         # Try as segmentation
                         result = await db.execute(
@@ -319,7 +325,7 @@ async def process_webhook_background(change_type: str, resource_id: str, level: 
                         seg = result.scalar_one_or_none()
                         if seg:
                             seg_uid = seg.label_series_instance_uid
-                            await delete_segmentation_from_db(db, seg_uid)
+                            await mark_segmentation_unavailable(db, seg_uid)
                         else:
                             logger.warning("Series with Orthanc ID %s not found in database", resource_id)
 
