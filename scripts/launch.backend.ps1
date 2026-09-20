@@ -219,7 +219,20 @@ Write-Host ""
 $MigrateScript = Join-Path $ProjectRoot "Backend\scripts\migrate_storage.py"
 $PythonBin = $null
 foreach ($candidate in @("python", "python3", "py")) {
-    if (Get-Command $candidate -ErrorAction SilentlyContinue) {
+    # Get-Command on its own is not a usable test here. Windows ships zero-byte
+    # "app execution alias" stubs for python.exe/python3.exe under
+    # %LOCALAPPDATA%\Microsoft\WindowsApps, and that directory is on PATH by
+    # default - so on a machine with no Python at all, Get-Command still resolves
+    # one. Running it only prints "Python was not found; run without arguments to
+    # install from the Microsoft Store..." and exits 9009, which the check below
+    # then reported as a failed storage migration and turned into a Stop-Launch,
+    # killing the launcher before a single container started. The migration is a
+    # no-op on such machines anyway, so actually execute the interpreter: a real
+    # one passes, a stub fails and we fall through to the skip branch below.
+    if (-not (Get-Command $candidate -ErrorAction SilentlyContinue)) {
+        continue
+    }
+    if (Test-ProcessSucceeds -FileName $candidate -Arguments "-c pass" -TimeoutMs 20000) {
         $PythonBin = $candidate
         break
     }
