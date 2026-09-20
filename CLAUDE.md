@@ -41,15 +41,27 @@ bash scripts/launcher.linux.sh          # Linux/macOS, full stack
 bash scripts/launcher.backend.linux.sh  # backend only
 ```
 
+**The stack is GPU-only** — the CPU backend variant was removed, and
+`deploy/docker-compose.backend.cpu.yml` no longer exists. Every launcher hardcodes
+`docker-compose.backend.gpu.yml`. The only remaining CPU image is
+`cubeai1/custom-monailabel:v1.0-cpu`, used by CI and the `radiology` test suite.
+
+The "full stack" launchers start the backend plus the **production** frontend
+(`docker-compose.frontend.prod.yml`, OpenResty on `:80`) — not the webpack dev server. For
+frontend work, run the backend-only launcher and `yarn dev` separately (see **Frontend**).
+
 Manual dev startup (`COMPOSE_PROJECT_DIR` **must** be the absolute repo root):
 
 ```bash
 export COMPOSE_PROJECT_DIR="$(pwd)"   # PowerShell: $env:COMPOSE_PROJECT_DIR = (Get-Location).Path
-docker compose --env-file deploy/.env -f deploy/docker-compose.backend.cpu.yml -f deploy/docker-compose.backend.dev.yml up
+docker compose --env-file deploy/.env -f deploy/docker-compose.backend.gpu.yml -f deploy/docker-compose.backend.dev.yml up
 ```
 
-Swap `.cpu.` for `.gpu.` for GPU. Overlays: `backend.dev` (source-mounted, hot reload),
-`backend.prod` (removes published backend ports), `frontend.prod` (OpenResty + built OHIF).
+Overlays: `backend.dev` (bind-mounts `application_api` + `storage` for hot reload; the base
+file deliberately does not, so `db-migrate`/`db-seed` always run the image's baked code),
+`backend.prod` (`ports: !reset []` — OpenResty becomes the only published ingress),
+`frontend.prod` (OpenResty + built OHIF). `docker-compose.frontend.dev.yml` exists but is
+marked unused in its own header comment ("react app runs super slow on docker").
 
 ### Backend tests
 
@@ -84,6 +96,13 @@ Test deps: `python -m pip install -r Backend/requirements/test.txt` (plus
 
 ### Frontend
 
+Toolchain: `engines` asks for Node `>=16` / Yarn `>=1.16`, and `Dockerfile.frontend.dev` pins
+`node:18-slim`, but the monorepo builds cleanly on current Node (verified on **Node 24.19.0 +
+Yarn 1.22.22**). Yarn **1** is required — this is a Yarn-1-workspaces + Lerna repo, so do not
+let corepack activate Yarn 3/4. On Windows, `corepack enable` fails with `EPERM` when Node is
+installed under `C:\Program Files\nodejs`; `npm install -g yarn@1.22.22` (user-level npm
+prefix) works without elevation.
+
 ```bash
 cd Frontend/OHIF-Viewer && yarn install
 ```
@@ -91,6 +110,13 @@ cd Frontend/OHIF-Viewer && yarn install
 ```bash
 yarn dev              # webpack dev server on :3000
 ```
+
+`yarn dev` -> `lerna run dev:viewer` -> `webpack serve --config .webpack/webpack.pwa.js` with
+the default `APP_CONFIG`; it proxies `/pacs` to `http://localhost:8043/` (the dev Orthanc), so
+it expects the backend-only launcher to be running. A cold bundle takes ~70s and the dev-mode
+`app.js` is ~35 MiB, so the first paint lags the "compiled successfully" line. `Failed to load
+./.env.` in the output is benign — there is no frontend-local `.env`. Other `dev:*` variants
+(`dev:orthanc`, `dev:dcm4chee`, `dev:static`) just swap `APP_CONFIG`.
 
 ```bash
 yarn build            # production bundle -> platform/app/dist/
@@ -119,6 +145,8 @@ CI-enforced and also wired as a pre-commit hook. Read-only whole-system load smo
 ```powershell
 powershell -ExecutionPolicy Bypass -File Backend/tests/load/run.ps1 -Profile smoke
 ```
+
+Profiles: `smoke` (default), `load`, `stress`.
 
 ### Database
 
@@ -162,7 +190,17 @@ Compose runs one-shot `db-migrate` then `db-seed` before `application-api`.
 `Backend/storage_paths.py` (`workspace()`, `workspace_subpath()`, `ws_sub()`,
 `ensure_storage_layout()`). Never assemble runtime paths ad hoc, and never write runtime
 artifacts (`*.nii.gz`, `*.pt`, `*.gif`, `workspace_*`, `execution_*.log`, ...) next to source —
-`check_storage_boundary.ps1` fails CI and blocks commits if you do. Session data lives at
+`check_storage_boundary.ps1` fails CI and blocks commits if you do.
+
+That static check now has a runtime counterpart: `Backend/storage_write_guard.py`
+(`install_write_guard()`, `check_write()`) refuses writes to workspace paths whose data was
+moved into PostgreSQL by the V1 migration — `state/scratchpad.json`, `state/state.json`,
+`outputs/agents/*_output.json`, `state/config.json`, `data/populations/*`,
+`outputs/features/*` and more, each listed in `RETIRED_WORKSPACE_PATHS` with the table that
+replaced it. If a write raises here, the fix is to write the DB row, not to pick a new filename.
+The guard is mounted into the agents container by the compose file, so it applies in dev too.
+
+Session data lives at
 `hypotheses/workspace_<session-id>/{state,data,outputs}`; `cache/` and `temp/` are the only
 disposable trees. `Backend/storage/README.md` documents the layout and the env overrides.
 
@@ -178,10 +216,16 @@ canonical agent ids to factories, in this order:
 
 **Adding an agent = adding an entry to `AGENT_FACTORIES` plus its factory**; the dynamic
 builder picks it up. Agent ids must stay identical across team wiring, scratchpad
-reads/writes, planner output and `write_agent_output()` payloads. Agents share state through
-the session workspace and `scratchpad.json`, and act through MCP tools in `Backend/mcp/tools/`
-(population, radiomics, modeling, LaTeX, scratchpad, DB reads). Per-agent I/O contracts are in
-`cubeai-docs/agent-system/io-contracts/`.
+reads/writes, planner output and `write_agent_output()` payloads. Agents act through MCP tools
+in `Backend/mcp/tools/` (population, radiomics, modeling, LaTeX, scratchpad, DB reads).
+Per-agent I/O contracts are in `cubeai-docs/agent-system/io-contracts/`.
+
+Agent-to-agent state is now **database-backed, not file-backed**. The `scratchpad_*` MCP tools
+(`Backend/mcp/tools/scratchpad.py`) read and write `agent_runs` rows — `durable_notes`,
+`warnings`, `output_summary` — keyed by the run, not the agent name. `state/scratchpad.json`,
+`state/state.json` and `outputs/agents/*_output.json` are **retired**: writing them raises at
+runtime (see the write guard below). Do not reintroduce a workspace file for state that now
+has a table.
 
 ### Sessions, WebSocket, and scheduling
 
@@ -231,7 +275,10 @@ System worker.** Multi-worker needs a shared broker first.
 - **Never hardcode service URLs.** Use `platform/app/src/utils/runtimeUrls.ts`
   (`getAppApiBaseUrl`, `getAgentsBaseUrl`, `getAgentsWsUrl`, `getInferenceBaseUrl`) or
   `extensions/research-playground/src/config.ts`. Both auto-switch between direct dev ports
-  and same-origin production prefixes and honour `REACT_APP_*` overrides.
+  and same-origin production prefixes and honour `REACT_APP_*` overrides. Note there is a
+  second, narrower copy at `extensions/monai-label/src/utils/runtimeUrls.ts` exporting only
+  `getAppApiBaseUrl` / `getAgentsApiBaseUrl` and overriding via `window.config` instead of
+  `REACT_APP_*` — when changing URL resolution, check both.
 
 ### Tests
 
@@ -255,6 +302,18 @@ or explicit contract.
   gitignored (the `.env` rule is commented out in `.gitignore`); never commit real credentials.
 - **`COMPOSE_PROJECT_DIR` must be the absolute repo root** or every bind mount breaks. The
   launchers set it; manual `docker compose` invocations must set it themselves.
+- **The launchers' Python probe must _execute_ the interpreter, not just resolve it.** Windows
+  ships zero-byte *app execution alias* stubs for `python.exe`/`python3.exe` in
+  `%LOCALAPPDATA%\Microsoft\WindowsApps`, which is on `PATH` by default — so a bare
+  `Get-Command python` succeeds on a machine with no Python at all. Running the stub prints
+  "Python was not found..." and exits **9009**, which made `migrate_storage.py --auto` look like
+  a failed migration and `Stop-Launch` killed the launcher before any container started, with the
+  misleading `[ERROR] Storage migration failed ... a rollback script was written` (no rollback was
+  written; any files in `_migrated-legacy/` are from an older successful run). Both launchers now
+  gate on `Test-ProcessSucceeds -Arguments "-c pass"` — **do not "simplify" that back to
+  `Get-Command`.** The migration itself is a genuine no-op unless one of the nine `LEGACY_PROBES`
+  in `Backend/scripts/migrate_storage.py` holds data, so skipping it on a Python-less machine is
+  correct. `launcher.linux.sh` has the same probe but no Store aliases, so this is Windows-only.
 - **Never `docker compose down -v`** as a troubleshooting step — it destroys the PostgreSQL and
   Orthanc named volumes.
 - **Python dep install order matters:** install `Backend/agent_system/requirements.txt`, then
@@ -269,6 +328,8 @@ or explicit contract.
   the real frontend manifest is `Frontend/OHIF-Viewer/package.json`.
 - Backend CI runs inside the published project images (`cubeai1/agents-app:latest`,
   `cubeai1/custom-monailabel:v1.0-cpu`); the storage-boundary job runs on `windows-latest`.
+  `backend-tests.yml` fires on every PR touching `Backend/**`, but its `push` trigger watches
+  the **`Release`** branch — not `main`.
 - External dependencies that must be up for full function: Docker, Ollama (or a configured
   OpenAI/Azure endpoint), and for GPU mode NVIDIA drivers + Container Toolkit. SAM2 checkpoints
   must be downloaded manually into `Backend/apps/radiology/sam2/checkpoints/`.
