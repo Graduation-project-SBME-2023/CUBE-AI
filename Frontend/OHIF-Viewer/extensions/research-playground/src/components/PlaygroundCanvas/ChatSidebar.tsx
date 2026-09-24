@@ -13,6 +13,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import websocketService from '../../services/websocket';
 import { getBackendApiBaseUrl } from '../../utils/apiBase';
+import { submitSessionInput } from '../../services/api';
 
 const makeId = (prefix = 'id') => `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 const renderIcon = (Icon, size) => React.createElement(Icon, { size, 'aria-hidden': true });
@@ -505,19 +506,17 @@ const ChatSidebar = ({
         duration: 8000,
       });
     }
-    // Debug log outgoing message
-    console.log('[ChatSidebar] Sending WS message:', { type: 'user', payload: userMsg.text });
-    if (websocketService.isConnected()) {
-      websocketService.sendMessage({
-        type: 'user',
-        payload: { text: userMsg.text, session_id: sessionId },
-        session_id: sessionId,
-      });
-    } else {
-      // B8: replaced alert() with snackbar
+    // The socket is push-only now (WEBSOCKET_FIX_PLAN.md WS-10): this is the
+    // REST replacement for the old `user` WebSocket send. An idempotency key
+    // (reusing the same id the chat-persistence POST above already used)
+    // makes a retry safe, and a failure here is reported instead of a
+    // pre-WS-10 silent drop when the socket happened to be closed (W18).
+    try {
+      await submitSessionInput(String(sessionId), userMsg.text, userMsg.id_uuid || userMsg.id);
+    } catch (e) {
       snackbar.show({
-        title: 'Connection Error',
-        message: 'WebSocket not connected — message not sent to the AI backend.',
+        title: 'Message not delivered',
+        message: 'The agent system did not accept this message — it will not be acted on until you resend it.',
         type: 'error',
         duration: 5000,
       });
@@ -728,9 +727,13 @@ const ChatSidebar = ({
     [snackbar]
   );
 
-  // Only connect WebSocket once for the app session (not just when sidebar is open)
+  // Subscribe once for the app session (not just when sidebar is open).
+  // Connecting is not done here: this effect runs before activeSessionId is
+  // necessarily set (ChatSidebar can mount to show the full chat list with
+  // no active session at all), and a socket without a session_id is refused
+  // server-side (WEBSOCKET_FIX_PLAN.md Principle 2). The effect below drives
+  // connect()/reconnect() off activeSessionId instead.
   useEffect(() => {
-    websocketService.connect();
     // If scoped to a specific session, only fetch that session; otherwise load all
     fetchChatSessions(externalSessionId ? String(externalSessionId) : undefined);
     const unsubscribe = websocketService.subscribe(handleWS);
@@ -738,6 +741,14 @@ const ChatSidebar = ({
       unsubscribe();
     };
   }, [handleWS]);
+
+  // Bind this tab's one socket to whichever session is active. Switching
+  // sessions closes the old socket and opens a new one (Principle 2) — never
+  // silently keep receiving a session we've navigated away from.
+  useEffect(() => {
+    if (!activeSessionId) return;
+    websocketService.connect(String(activeSessionId));
+  }, [activeSessionId]);
 
   // B1: flush buffered early messages once the session becomes available
   useEffect(() => {

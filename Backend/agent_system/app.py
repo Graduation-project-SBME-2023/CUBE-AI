@@ -105,6 +105,12 @@ from storage_write_guard import install_write_guard
 
 install_write_guard()
 
+# Refuses to start if /events and /ws-broadcast would accept unauthenticated
+# internal events -- see services/internal_auth.py and WEBSOCKET_FIX_PLAN.md W12.
+from services.internal_auth import ensure_configured as ensure_internal_auth_configured
+
+ensure_internal_auth_configured()
+
 # The legacy workspace-file route must be registered before the /files mount,
 # which would otherwise shadow it.
 app.include_router(files.router)

@@ -65,7 +65,7 @@ from .utils import (
     download_and_pair_volumes,
     generate_gif_overlays,
 )
-from .ws_client_sender import send_ws_message_remote
+from socket_store import manager as ws_manager
 
 from services.mask_store import MaskStore, SegRef, orthanc_first
 
@@ -294,7 +294,6 @@ class SegmentationModule:
             work_items=work_items,
             workspace_dir=workspace_dir,
             session_id=self.session_id,
-            client=self.http_client,
             base_url=self.agent_base_url,
         )
 
@@ -986,18 +985,15 @@ class SegmentationModule:
 
     async def _wait_for_review(self) -> dict[str, list[str]]:
         try:
-            await send_ws_message_remote(
+            await ws_manager.send_ws_message(
                 "agent_waiting_for_user_input",
                 {
                     "agent": "segmentation_agent",
                     "status": "WAITING_FOR_REVIEW",
                 },
-                self.session_id,
-                client=self.http_client,
-                base_url=self.agent_base_url,
-                timeout=5.0,
+                session_id=self.session_id,
             )
-        except httpx.HTTPError as exc:
+        except Exception as exc:
             logger.warning("Could not publish review waiting state: %s", exc)
 
         retry_delay = 0.5
@@ -1397,7 +1393,7 @@ class SegmentationModule:
         try:
             target_labels = [t.canonical_label for t in plan.targets if t.canonical_label]
             selected_models = list(plan.selected_models)
-            await send_ws_message_remote(
+            await ws_manager.send_ws_message(
                 "segmentation_output",
                 {
                     "runId": run_id,
@@ -1412,10 +1408,7 @@ class SegmentationModule:
                     "progress": {"total": len(datasetlist), "generated": 0, "failed": 0},
                     "isFinished": False,
                 },
-                self.session_id,
-                client=self.http_client,
-                base_url=self.agent_base_url,
-                timeout=10.0,
+                session_id=self.session_id,
             )
         except Exception:
             logger.warning("Could not send early segmentation target announcement", exc_info=True)

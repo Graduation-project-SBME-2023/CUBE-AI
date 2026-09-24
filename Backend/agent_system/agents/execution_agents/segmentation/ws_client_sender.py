@@ -17,6 +17,8 @@ async def send_ws_message_remote(
     timeout: float = 60.0,
 ):
     request_client = client or httpx.AsyncClient()
+    token = os.environ.get("WS_INTERNAL_TOKEN", "")
+    headers = {"X-Internal-Token": token} if token else {}
     try:
         response = await request_client.post(
             f"{(base_url or BASE_URL).rstrip('/')}/ws-broadcast",
@@ -25,6 +27,7 @@ async def send_ws_message_remote(
                 "payload": payload,
                 "session_id": session_id,
             },
+            headers=headers,
             timeout=timeout,
         )
         response.raise_for_status()

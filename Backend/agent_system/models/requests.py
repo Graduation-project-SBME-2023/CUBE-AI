@@ -21,3 +21,13 @@ class PlanningRequest(BaseModel):
         False,
         description="Explicitly replace an existing persisted plan",
     )
+
+
+class SessionInputRequest(BaseModel):
+    """Body for POST /session/{id}/input (WEBSOCKET_FIX_PLAN.md WS-10). The
+    only thing this ever did over the WebSocket was push text into the
+    planner's per-session input queue -- this is that, over REST, so a client
+    retry (same Idempotency-Key header) can be made safe instead of silently
+    racing a socket that might not be open (W18)."""
+
+    text: str = Field(..., min_length=1, description="User-authored text for the session's input queue")

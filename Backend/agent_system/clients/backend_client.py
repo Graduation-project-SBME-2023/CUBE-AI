@@ -671,22 +671,24 @@ class BackendClient:
     async def replay_logs(
         cls, session_id: str, after_event_id: int = 0, limit: int = 2000
     ) -> list[WS_Log]:
-        """Replay a session's events in `event_id` order from a cursor."""
+        """Replay a session's events in `event_id` order from a cursor.
+
+        Raises on failure rather than swallowing it (WEBSOCKET_FIX_PLAN.md
+        W4): an empty return used to be ambiguous between "nothing new" and
+        "the backend is unreachable," so a failed replay looked like a
+        successful, empty one. The handshake-cursor replay loop
+        (socket_store.ConnectionManager.replay, WS-08) depends on being able
+        to tell the two apart -- it sends an error frame and closes the
+        socket on a genuine failure, never a silent empty session.
+        """
         cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            try:
-                response = await client.get(
-                    f"{BASE_URL}/ws_logs/session/{session_id}",
-                    params={"after_event_id": after_event_id, "limit": limit},
-                )
-                response.raise_for_status()
-                return [WS_Log(**item) for item in response.json()]
-            except httpx.HTTPError as e:
-                logger.error(
-                    f"Failed to replay ws logs for session {session_id}: "
-                    f"{type(e).__name__}: {e}"
-                )
-                return []
+            response = await client.get(
+                f"{BASE_URL}/ws_logs/session/{session_id}",
+                params={"after_event_id": after_event_id, "limit": limit},
+            )
+            response.raise_for_status()
+            return [WS_Log(**item) for item in response.json()]
 
     @classmethod
     async def get_logs(cls, session_id: str) -> list[WS_Log]:

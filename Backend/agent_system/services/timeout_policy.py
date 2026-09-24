@@ -11,6 +11,14 @@ def _positive_float(name: str, default: float) -> float:
     return value if value > 0 else default
 
 
+def _positive_int(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
 # Session state, logs, and database metadata must fail quickly. They are never
 # allowed to inherit an inference-sized timeout.
 CONTROL_CONNECT_SECONDS = _positive_float("CONTROL_CONNECT_SECONDS", 3.0)
@@ -27,6 +35,10 @@ BEST_EFFORT_TIMEOUT_SECONDS = _positive_float(
     "BEST_EFFORT_TIMEOUT_SECONDS", 10.0
 )
 WS_SEND_TIMEOUT_SECONDS = _positive_float("WS_SEND_TIMEOUT_SECONDS", 3.0)
+# Per-connection outbound queue depth (WEBSOCKET_FIX_PLAN.md WS-04). A socket
+# that cannot keep up is closed once its own backlog passes this, not
+# throttled -- the client reconnects and catches up from the durable log.
+WS_OUTBOUND_QUEUE_MAXSIZE = _positive_int("WS_OUTBOUND_QUEUE_MAXSIZE", 200)
 
 # Long tools have an explicit wall-clock budget in addition to their transport
 # timeout. The orchestration heartbeat remains responsive inside this window.

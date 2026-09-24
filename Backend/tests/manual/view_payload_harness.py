@@ -18,6 +18,7 @@ import argparse
 import asyncio
 import json
 import math
+import os
 import random
 import sys
 import httpx
@@ -307,10 +308,16 @@ def _generate_labels(n_labels: int):
 # ── HTTP broadcast ─────────────────────────────────────────────────────────────
 
 async def broadcast(client: httpx.AsyncClient, base_url: str, msg_type: str, payload: dict, session_id: str):
-    """POST to /ws-broadcast — same path the app uses internally."""
+    """POST to /ws-broadcast — same path the app uses internally.
+
+    /ws-broadcast requires WS_INTERNAL_TOKEN (see WEBSOCKET_FIX_PLAN.md W12);
+    export it in this shell before running the script against a real server.
+    """
     body = {"type": msg_type, "payload": payload, "session_id": session_id}
+    token = os.environ.get("WS_INTERNAL_TOKEN", "")
+    headers = {"X-Internal-Token": token} if token else {}
     try:
-        r = await client.post(f"{base_url}/ws-broadcast", json=body, timeout=10)
+        r = await client.post(f"{base_url}/ws-broadcast", json=body, headers=headers, timeout=10)
         r.raise_for_status()
         print(f"  ✓  {msg_type}")
     except httpx.HTTPStatusError as e:

@@ -28,6 +28,33 @@ export async function hydrateSession(sessionId: string) {
   return res.json();
 }
 
+/**
+ * Deliver user text to a session's planner input queue (WEBSOCKET_FIX_PLAN.md
+ * WS-10). Replaces what used to be a `user`/`user_input`/`chat_input` frame
+ * sent over the WebSocket -- the socket is push-only now, so this REST call
+ * is the only way in. `idempotencyKey` lets a caller retry safely: the
+ * server recognizes a repeated key for the same session and skips re-queuing
+ * it rather than delivering the text twice.
+ */
+export async function submitSessionInput(
+  sessionId: string,
+  text: string,
+  idempotencyKey: string
+) {
+  const res = await fetch(`${API_BASE}/session/${sessionId}/input`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) {
+    throw new Error(`Session input request failed with status ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function resumeSessionPipeline(sessionId: string) {
   const res = await fetch(`${API_BASE}/session/${sessionId}/resume-pipeline`, {
     method: 'POST',
@@ -37,19 +64,6 @@ export async function resumeSessionPipeline(sessionId: string) {
     throw new Error(error?.detail || `Resume request failed with status ${res.status}`);
   }
   return res.json();
-}
-
-/**
- * Replay a session's events from a cursor.
- *
- * `afterEventId` is the last `ws_log.event_id` this client actually received,
- * which the websocket service tracks. Replaying from 0 re-delivers the whole
- * session; replaying from the cursor delivers only what was missed.
- */
-export async function replaySessionLogs(sessionId: string, afterEventId = 0) {
-  const query = afterEventId > 0 ? `?after_event_id=${afterEventId}` : '';
-  const res = await fetch(`${API_BASE}/session/${sessionId}/replay-logs${query}`);
-  return res.ok;
 }
 
 /**

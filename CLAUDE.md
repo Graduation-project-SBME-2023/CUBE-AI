@@ -229,19 +229,62 @@ has a table.
 
 ### Sessions, WebSocket, and scheduling
 
-Everything is scoped to a `session_id`. `/ws?session_id=<id>` is mandatory; the server only
-delivers a session's events to its own sockets, and the client
-(`platform/app/src/utils/WebsocketService.ts`) drops cross-session traffic, dedupes by
-`event_id`, and uses bounded reconnect/pending buffers. Server envelope:
-`{version, event_id, sequence, session_id, run_id, type, payload, timestamp, replaying}`.
-Pipeline start/pause/resume/stop are **REST**, not WebSocket events.
+Everything is scoped to a `session_id`. The WebSocket is **push-only** and **session-bound at
+the handshake** (`Backend/agent_system/api/routes/websocket.py`,
+`Backend/agent_system/socket_store.py`) — see `WEBSOCKET_FIX_PLAN.md` if that file is present
+in your checkout; it documents the design below ticket by ticket.
 
-Concurrency is two-layered: up to `PIPELINE_MAX_CONCURRENCY` sessions run, but heavy stages
-take process-local leases (`gpu_segmentation`, `cpu_heavy`, capacity `1` by default).
-`WAITING_FOR_RESOURCE` means "queued for hardware" — it is **not** a request for user input.
+- `/ws?session_id=<uuid>&after_event_id=<n>` — `session_id` is required and must be a UUID;
+  anything else closes with **1008** before any frame is sent. `after_event_id` is best-effort
+  (missing/malformed defaults to `0`, i.e. full replay — never a rejection). The server keeps
+  `dict[session_id, set[Connection]]`: a socket only ever receives its own session's frames, and
+  each `Connection` has its own bounded outbound queue and sender task
+  (`WS_OUTBOUND_QUEUE_MAXSIZE`, default 200; `WS_SEND_TIMEOUT_SECONDS`, default 3s) — one stalled
+  tab is evicted (close code 1013) on overflow, not allowed to delay anything else.
+- **Catch-up is part of the handshake, not a separate HTTP call.** On connect, the server pages
+  the durable log from `after_event_id` (500 rows at a time) as `replaying: true` frames, sends a
+  `replay_complete` frame, then drains live traffic — with a per-connection watermark so an event
+  committed mid-replay is delivered exactly once. A durable-log read failure sends a
+  `replay_failed` frame and closes (1011) rather than looking like an empty session.
+- **Every event type is registered as durable or ephemeral**
+  (`Backend/agent_system/services/event_registry.py`). Only durable events are persisted and get
+  a real `event_id`; ephemeral events (e.g. `tool_progress`) are fanned out live and never
+  replayed. `classify()` never raises — an unregistered type logs an error and defaults to
+  durable — but a static source scan (`Backend/tests/unit/services/test_event_registry.py`) fails
+  the deterministic suite if a new emitted type isn't in the registry.
+- **Envelope v1:** `{v, event_id, session_id, run_id, step_id, agent_run_id, type, payload,
+  replaying, ts}`. `event_id` is `null` for ephemeral events; `run_id`/`step_id`/`agent_run_id`
+  are nullable and populated where the emitter already knows them.
+- **The client sends nothing over the socket.** User chat, prompt input, and any other
+  client-originated text goes over REST — `POST /session/{id}/input` with an `Idempotency-Key`
+  header, which feeds the same per-session queue the planner blocks on
+  (`ws_manager.wait_for_user_message`). `/ws`'s receive loop only pumps the ASGI connection to
+  detect a client-initiated close; anything a client still sends is logged and dropped. Pipeline
+  start/pause/resume/stop (`/plan`, `/run`, `/pause`, `/resume`, `/stop`) remain REST, as before.
+- **In-process emitters never call the agent system's own HTTP port.** Code running inside the
+  agent-system process (the segmentation module, the view emitter, the planner) calls
+  `socket_store.manager` directly. Only MCP subprocesses are out-of-process, and they emit
+  through `Backend/mcp/internal_emitter.py`, authenticated with `WS_INTERNAL_TOKEN`
+  (`X-Internal-Token` header, `hmac.compare_digest`) — the Agent System refuses to start with
+  this unset unless `WS_INTERNAL_TOKEN_DEV_BYPASS=1` is also set.
+- **There is exactly one WebSocket client**: `extensions/research-playground/src/utils/WebsocketService.ts`.
+  The old `platform/app/src/utils/WebsocketService.ts` copy and the dead `<ChatWidget />` that
+  imported it are deleted. The client opens one socket per session, sends its stored replay
+  cursor as `after_event_id` on every connect, drops any frame with a missing or foreign
+  `session_id` as defence in depth, dedupes by `event_id` per session, and ends hydration on the
+  `replay_complete` frame rather than racing a separate fetch. Reconnect backs off exponentially
+  with full jitter (base 1s, capped at 30s) instead of a fixed interval.
 
-Without Redis, socket routing and capacity queues are process-local: **run exactly one Agent
-System worker.** Multi-worker needs a shared broker first.
+There is no `PIPELINE_MAX_CONCURRENCY` or GPU-lease system gating pipeline execution, and no
+`WAITING_FOR_RESOURCE` status — neither exists in this codebase; if you find either mentioned
+elsewhere (docs, an old PR, a teammate's memory of the design), it does not describe the code as
+it stands. `Backend/agent_system/ingestion/limits.py` has its own semaphore-based limiter
+(`cpu_heavy`, `orthanc_io`) for ingestion work specifically — unrelated to pipeline execution or
+to the WebSocket layer.
+
+Socket routing (`session_connections`, per-connection queues) and session/execution state
+(`SessionStore`) are process-local, in-memory structures with no shared backing store: **run
+exactly one Agent System worker.** Multi-worker needs a shared broker/store first.
 
 ## Conventions
 

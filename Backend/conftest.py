@@ -76,6 +76,14 @@ _ISOLATED_PATHS = {
 for variable, isolated_path in _ISOLATED_PATHS.items():
     os.environ[variable] = str(isolated_path)
 
+# services/internal_auth.py refuses to let agent_system's app.py import
+# unless WS_INTERNAL_TOKEN is set (or the dev bypass is). Tests that need to
+# exercise the unset/bypass paths (e.g. test_internal_auth.py) monkeypatch
+# this away for the duration of that one test; every other test gets a fixed
+# synthetic token regardless of what a developer's real deploy/.env has.
+os.environ["WS_INTERNAL_TOKEN"] = "test-internal-token"
+os.environ.pop("WS_INTERNAL_TOKEN_DEV_BYPASS", None)
+
 
 @pytest.fixture
 def workspace_dir(tmp_path: Path) -> Path:

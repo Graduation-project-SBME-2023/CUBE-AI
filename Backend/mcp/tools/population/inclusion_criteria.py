@@ -1,11 +1,11 @@
 import os
 from typing import Annotated
 
-import httpx
 from pydantic import Field
 
 from .. import mcp
 from ..helpers import domain_api
+from internal_emitter import broadcast_ws_message
 
 
 @mcp.tool()
@@ -27,24 +27,17 @@ async def write_inclusion_criteria(
     except domain_api.DomainApiError as exc:
         return {"status": "error", "message": f"Criteria were not recorded: {exc}"}
 
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as broadcast_client:
-            await broadcast_client.post(
-                f'{os.environ.get("MAS_BASE_URL", "http://localhost:8150").rstrip("/")}/ws-broadcast',
-                json={
-                    "type": "population_output",
-                    "payload": {
-                        "tool": "write_inclusion_criteria",
-                        "status": "completed",
-                        "inclusion_criteria": inclusion_criteria,
-                        "exclusion_criteria": exclusion_criteria,
-                        "modality": modality,
-                    },
-                    "session_id": session_id,
-                },
-            )
-    except Exception as exc:  # live delivery only; the criteria are committed
-        print(f"[write_inclusion_criteria] broadcast failed: {exc}")
+    await broadcast_ws_message(
+        "population_output",
+        {
+            "tool": "write_inclusion_criteria",
+            "status": "completed",
+            "inclusion_criteria": inclusion_criteria,
+            "exclusion_criteria": exclusion_criteria,
+            "modality": modality,
+        },
+        session_id,
+    )
 
     return {
         "status": "success",

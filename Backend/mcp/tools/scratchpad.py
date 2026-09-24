@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import mcp
 from tool_logging import log_tool_state, ToolEvent, TextPayload
+from internal_emitter import broadcast_ws_message
 
 AgentStatus = Literal["in_progress", "done", "blocked", "failed"]
 FlagLevel = Literal["info", "warning", "error", "critical"]
@@ -33,21 +34,7 @@ AGENT_ID = os.environ.get("AGENT_ID", "")
 AGENT_RUN_ID = os.environ.get("AGENT_RUN_ID", "")
 STEP_ID = os.environ.get("STEP_ID", "")
 
-AGENTS_BASE_URL = os.environ.get("AGENTS_BASE_URL", "http://localhost:8150").rstrip("/")
 REQUEST_TIMEOUT = 20.0
-
-
-async def _emit_ws_message(msg_type: str, payload_ws: dict, session_id: str) -> None:
-    """Broadcast a live scratchpad update through the agent system."""
-    try:
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                f"{AGENTS_BASE_URL}/ws-broadcast",
-                json={"type": msg_type, "payload": payload_ws, "session_id": session_id},
-                timeout=2.0,
-            )
-    except Exception as exc:  # live delivery only; the write already committed
-        print(f"[Scratchpad WebSockets] Error emitting ws message: {exc}")
 
 
 def _error(message: str) -> str:
@@ -199,7 +186,7 @@ async def scratchpad_register_agent(role: str = "agent") -> str:
         print(f"Warning: Could not connect to logging server: {exc}")
 
     if SESSION_ID:
-        await _emit_ws_message(
+        await broadcast_ws_message(
             "scratchpad_update",
             {
                 "type": "agent_registered",
@@ -244,7 +231,7 @@ async def scratchpad_write_note(content: str) -> str:
 
     notes = _notes(run).get("notes", [])
     if SESSION_ID:
-        await _emit_ws_message(
+        await broadcast_ws_message(
             "scratchpad_update",
             {
                 "type": "agent_note",
@@ -283,7 +270,7 @@ async def scratchpad_raise_flag(level: str = "warning", message: str = "No messa
 
     flags = _flags(run)
     if SESSION_ID:
-        await _emit_ws_message(
+        await broadcast_ws_message(
             "scratchpad_update",
             {
                 "type": "agent_flag",
@@ -325,7 +312,7 @@ async def scratchpad_set_status(status: str) -> str:
 
     if SESSION_ID:
         activity_log = _notes(run).get("activity_log") or []
-        await _emit_ws_message(
+        await broadcast_ws_message(
             "scratchpad_update",
             {
                 "type": "agent_status",
@@ -362,7 +349,7 @@ async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str
         return _error(str(exc))
 
     if SESSION_ID:
-        await _emit_ws_message(
+        await broadcast_ws_message(
             "scratchpad_update",
             {
                 "type": "agent_summary",
