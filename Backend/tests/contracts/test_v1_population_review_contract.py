@@ -30,6 +30,12 @@ def _source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _agent_http_source() -> str:
+    """The Agent System HTTP layer: app.py plus the api/ package it was split into."""
+    paths = [AGENT_ROOT / "app.py", *sorted((AGENT_ROOT / "api").rglob("*.py"))]
+    return "\n".join(_source(path) for path in paths)
+
+
 def _migration(revision: str) -> str:
     for path in VERSIONS.glob("*.py"):
         text = path.read_text(encoding="utf-8")
@@ -252,7 +258,7 @@ def test_the_segmentation_module_checkpoints_into_the_batch():
 
 
 def test_the_review_endpoints_read_and_write_rows():
-    app = _source(AGENT_ROOT / "app.py")
+    app = _agent_http_source()
     for gone in (
         "_persist_review_to_disk",
         "_load_review_from_disk",
@@ -273,7 +279,7 @@ def test_an_edited_mask_is_published_as_a_seg_and_never_reshaped_by_guessing():
     services = _source(AGENT_ROOT / "agents/execution_agents/segmentation/services.py")
     assert "async def publish_modified_mask" in services
     assert "refusing to guess an" in services
-    app = _source(AGENT_ROOT / "app.py")
+    app = _agent_http_source()
     assert "Could not infer frontend shape" not in app
     assert "Edited mask size mismatch" in app
 

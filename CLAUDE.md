@@ -259,6 +259,14 @@ System worker.** Multi-worker needs a shared broker first.
   `deploy/.env`; tunables elsewhere read `os.environ` with a safe fallback (see
   `client_config.py` `_retry_delays()`).
 - `logger = logging.getLogger(__name__)` per module.
+- Agent System HTTP layer: `agent_system/app.py` is only the composition root (middleware,
+  lifespan, router registration, `__main__`). Endpoints live in `agent_system/api/routes/<domain>.py`;
+  shared singletons (`session_service`, CORS origins, `domain_http_error`) in `api/runtime.py`;
+  `run_planner`/`run_pipeline` in `api/runners.py`; review-gate state in `api/review_state.py`.
+  `ensure_storage_layout()` and `install_write_guard()` stay in `app.py`, after every import.
+  A new router must be added to the `include_router` loop in `app.py`. Keep `files.router` ahead
+  of the `/files` StaticFiles mount, and keep `session_service` re-exported from `app`
+  (`tool_logging.py` and `segmentation/pipelines/common.py` import it from there).
 - File naming is inconsistent in `application_api` (`Taskmessage.py`, `Wslog.py` alongside
   snake_case) — match the existing file you are editing rather than renaming.
 
