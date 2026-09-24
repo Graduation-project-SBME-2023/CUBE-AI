@@ -10,30 +10,9 @@ if str(backend_root) not in sys.path:
     sys.path.insert(0, str(backend_root))
 
 from application_api.db.base import Base
-from application_api.db.models.agent_runs import AgentRun
-from application_api.db.models.artifacts import Artifact
-from application_api.db.models.Wslog import WSLog
-from application_api.db.models.chat_messages import ChatMessage
-from application_api.db.models.sessions import Session
-from application_api.db.models.chats import Chat
-from application_api.db.models.cohorts import Cohort, CohortMember
-from application_api.db.models.feature_sets import FeatureSet
-from application_api.db.models.model import Model
-from application_api.db.models.model_results import ModelResult
-from application_api.db.models.patient import Patient
-from application_api.db.models.plan import Plan
-from application_api.db.models.radiomics import Radiomics
-from application_api.db.models.segmentation import Segmentation
-from application_api.db.models.segmentation_runs import (
-    SegmentationPair,
-    SegmentationRun,
-    SegmentationTarget,
-)
-from application_api.db.models.steps import PlanStep
-from application_api.db.models.study import Study
-from application_api.db.models.volume import Volume
-from application_api.db.models.workflow import Workflow
-from application_api.db.models.workflow_details import WorkflowDetail
+# The models package __init__ imports every model module, which registers all
+# tables on Base.metadata for autogenerate. Add new models there, not here.
+import application_api.db.models  # noqa: F401
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
