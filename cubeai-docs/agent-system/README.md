@@ -80,7 +80,7 @@ User Research Question (via Chat)
 ### Segmentation Agent
 - **Input:** Study UIDs, target structure name
 - **Output:** Segmentation masks (NIfTI) per study
-- **Mechanism:** Calls MONAI Label API → nnUNet inference
+- **Mechanism:** New masks come from MONAI Label inference. Reused masks are decoded from their archived DICOM SEG, aligned to the current source volume in physical space, and corrected only when the SEG's provenance confirms a legacy geometry error. The same aligned mask drives previews, review, and radiomics.
 
 ### Feature Extraction Agent
 - **Input:** Study UIDs, segmentation masks
