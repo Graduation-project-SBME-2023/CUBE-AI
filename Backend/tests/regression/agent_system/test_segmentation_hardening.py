@@ -604,39 +604,39 @@ class SegmentationUtilityTests(unittest.TestCase):
             self.assertEqual(aligned.GetSpacing(), reference.GetSpacing())
             self.assertLessEqual(values, {0, 1})
 
-    def test_same_size_monai_mask_keeps_voxel_order_when_header_z_is_reversed(self):
+    def test_same_size_reused_mask_aligns_in_all_three_planes(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp = Path(temp_dir)
+            size = (4, 3, 5)
+            point = (1, 0, 1)
+            reference = sitk.Image(size, sitk.sitkInt16)
             reference_path = temp / "volume.nii.gz"
-            mask_path = temp / "mask.nii.gz"
-            output_path = temp / "aligned.nii.gz"
-
-            reference = sitk.Image([4, 3, 5], sitk.sitkInt16)
-            reference.SetOrigin((0.0, 0.0, 0.0))
-            reference.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
             sitk.WriteImage(reference, str(reference_path))
 
-            mask_array = np.zeros((5, 3, 4), dtype=np.uint8)
-            mask_array[4, 1, 2] = 255
-            mask = sitk.GetImageFromArray(mask_array)
-            mask.SetOrigin((0.0, 0.0, 4.0))
-            mask.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0))
-            sitk.WriteImage(mask, str(mask_path))
+            for axis in range(3):
+                with self.subTest(flipped_axis=axis):
+                    mask_array = np.zeros((size[2], size[1], size[0]), dtype=np.uint8)
+                    source_point = list(point)
+                    source_point[axis] = size[axis] - 1 - point[axis]
+                    mask_array[source_point[2], source_point[1], source_point[0]] = 1
+                    mask = sitk.GetImageFromArray(mask_array)
+                    origin = [0.0, 0.0, 0.0]
+                    origin[axis] = float(size[axis] - 1)
+                    direction = np.eye(3)
+                    direction[axis, axis] = -1
+                    mask.SetOrigin(origin)
+                    mask.SetDirection(tuple(direction.flatten()))
+                    mask_path = temp / f"mask_{axis}.nii.gz"
+                    output_path = temp / f"aligned_{axis}.nii.gz"
+                    sitk.WriteImage(mask, str(mask_path))
 
-            result = align_and_binarize_mask(
-                str(mask_path),
-                str(reference_path),
-                str(output_path),
-                preserve_index_order_if_same_size=True,
-            )
-            aligned = sitk.ReadImage(str(output_path))
-            aligned_array = sitk.GetArrayFromImage(aligned)
-
-            self.assertTrue(result["geometry_adjusted"])
-            self.assertEqual(result["alignment_mode"], "reference_geometry_only")
-            self.assertTrue(np.array_equal(aligned_array, mask_array > 0))
-            self.assertEqual(aligned.GetOrigin(), reference.GetOrigin())
-            self.assertEqual(aligned.GetDirection(), reference.GetDirection())
+                    result = align_and_binarize_mask(
+                        str(mask_path), str(reference_path), str(output_path)
+                    )
+                    aligned = sitk.GetArrayFromImage(sitk.ReadImage(str(output_path)))
+                    self.assertEqual(result["alignment_mode"], "physical_resample")
+                    self.assertEqual(int(aligned.sum()), 1)
+                    self.assertEqual(int(aligned[point[2], point[1], point[0]]), 1)
 
     def test_fresh_same_size_mask_still_uses_physical_space_alignment(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -674,7 +674,7 @@ class SegmentationUtilityTests(unittest.TestCase):
 
 
 class SegmentationReuseAlignmentTests(unittest.IsolatedAsyncioTestCase):
-    async def test_only_reused_masks_enable_index_order_compatibility(self):
+    async def test_reused_and_new_masks_share_physical_alignment(self):
         for reused in (True, False):
             with self.subTest(reused=reused):
                 module = SegmentationModule(session_id="session")
@@ -733,10 +733,8 @@ class SegmentationReuseAlignmentTests(unittest.IsolatedAsyncioTestCase):
 
                 requested_pair = download.await_args.args[1][0]
                 self.assertTrue(prepared)
-                self.assertEqual(
-                    requested_pair["preserve_index_order"],
-                    reused,
-                )
+                self.assertNotIn("preserve_index_order", requested_pair)
+                self.assertEqual(requested_pair["reused"], reused)
 
 
 class DicomSegGeometryAlignmentTests(unittest.TestCase):

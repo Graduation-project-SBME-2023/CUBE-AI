@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+from uuid import uuid4
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,11 @@ from socket_store import manager as ws_manager
 from services import population_review
 from services.artifact_client import register_render, render_logical_key
 from services.mask_store import MaskStore, orthanc_first
+from clients.orthanc_client import OrthancClient
+from agents.execution_agents.segmentation.utils import (
+    align_and_binarize_mask,
+    describe_legacy_repair,
+)
 from agents.execution_agents.segmentation.progressive import artifact_key_for_pair
 from agents.execution_agents.segmentation.services import SegmentationService
 from api.review_state import review_events
@@ -320,19 +326,26 @@ async def upload_modified_mask(
     }
 
 
-def _manifest_pair(
+async def _manifest_pair(
     session_id: str,
     series_uid: str,
     target_id: str | None,
 ) -> dict[str, Any] | None:
-    """The segmentation manifest entry for one volume/target pair, if present."""
+    """Find this pair in the durable batch, with legacy file compatibility."""
     if not target_id:
         return None
-    manifest_path = ws_sub(session_id, "segmentation_manifest.json")
     try:
-        pairs = json.loads(manifest_path.read_text(encoding="utf-8")).get("pairs") or []
-    except (OSError, json.JSONDecodeError):
-        return None
+        batch = await population_review.current_batch(session_id)
+        pairs = population_review.snapshot_manifest(batch)["pairs"] if batch else []
+    except Exception:
+        logger.warning("Could not read segmentation batch for session %s", session_id, exc_info=True)
+        pairs = []
+    if not pairs:
+        manifest_path = ws_sub(session_id, "segmentation_manifest.json")
+        try:
+            pairs = json.loads(manifest_path.read_text(encoding="utf-8")).get("pairs") or []
+        except (OSError, json.JSONDecodeError):
+            return None
     for pair in pairs:
         if (
             str(pair.get("volume_uid")) == series_uid
@@ -342,18 +355,13 @@ def _manifest_pair(
     return None
 
 
-def _canonical_label_for_pair(
+async def _canonical_label_for_pair(
     session_id: str,
     series_uid: str,
     target_id: str | None,
 ) -> str | None:
-    """Translate a pair's target id into the label the archive stores.
-
-    ``segmentations.target_label`` holds the DICOM SegmentLabel -- the canonical
-    anatomical name -- while the QC grid addresses pairs by target id. Without
-    this mapping a multi-target series would look up the wrong mask.
-    """
-    pair = _manifest_pair(session_id, series_uid, target_id)
+    """Translate the review pair's target id into its archived SegmentLabel."""
+    pair = await _manifest_pair(session_id, series_uid, target_id)
     label = (pair or {}).get("canonical_label")
     return str(label) if label else None
 
@@ -409,7 +417,7 @@ async def _archive_edited_mask(
     Never raises -- the local copy is still saved, so a failure here degrades to
     exactly the old behaviour, except now it is reported instead of silent.
     """
-    pair = _manifest_pair(session_id, series_uid, target_id) or {}
+    pair = await _manifest_pair(session_id, series_uid, target_id) or {}
     label = str(
         pair.get("canonical_label") or target_id or ""
     ).strip()
@@ -459,7 +467,7 @@ async def _mask_from_orthanc(
     sources are still being compared.
     """
     try:
-        label = _canonical_label_for_pair(session_id, series_uid, target_id)
+        label = await _canonical_label_for_pair(session_id, series_uid, target_id)
         if target_id and not label:
             # Without a label a multi-target series could resolve to the mask of
             # a different organ, which is worse than falling back.
@@ -474,7 +482,50 @@ async def _mask_from_orthanc(
             ref = await store.resolve(series_uid, target_label=label)
             if ref is None:
                 return None
-            return str(await store.ensure_local(session_id, ref))
+            archived_path = await store.ensure_local(session_id, ref)
+
+        # The SEG cache uses the source DICOM grid. Align it to the exact
+        # volume shown in the editor, and repair only proven legacy SEG pixels.
+        reference_path = await _local_volume_path(session_id, series_uid)
+        if not reference_path:
+            return None
+        async with OrthancClient() as orthanc:
+            async def first_dataset(uid: str):
+                orthanc_id = await orthanc.find_series(uid)
+                if not orthanc_id:
+                    raise ValueError(f"Series {uid} is missing from Orthanc")
+                instance_ids = await orthanc.instance_ids(orthanc_id)
+                if not instance_ids:
+                    raise ValueError(f"Series {uid} has no instances")
+                return await orthanc.read_instance(instance_ids[0], stop_before_pixels=True)
+
+            seg_dataset = await first_dataset(ref.seg_series_uid)
+            source_dataset = await first_dataset(series_uid)
+        repair = await asyncio.to_thread(
+            describe_legacy_repair,
+            ref.seg_series_uid,
+            seg_dataset,
+            source_dataset,
+            reference_path,
+        )
+        aligned_path = ws_sub(
+            session_id, f"mask_cache/review_{ref.seg_series_uid}.nii.gz"
+        )
+        temporary_path = aligned_path.with_name(
+            f"review_{ref.seg_series_uid}_{uuid4().hex}.nii.gz"
+        )
+        try:
+            await asyncio.to_thread(
+                align_and_binarize_mask,
+                str(archived_path),
+                reference_path,
+                str(temporary_path),
+                legacy_repair=repair,
+            )
+            os.replace(temporary_path, aligned_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        return str(aligned_path)
     except Exception:  # noqa: BLE001 - fall back to the workspace copy
         logger.exception(
             "Could not read the archived mask for session=%s series=%s target=%s",
@@ -496,9 +547,9 @@ async def get_segmentation_mask(
     The mask is converted from NIfTI (.nii.gz) to NRRD on-the-fly so the existing
     frontend SegmentationReader.parseNrrdData() pipeline works without modification.
 
-    Search order:
-      1. temp/segmentations/ – user-uploaded modified masks (highest priority)
-      2. data/masks/         – agent-generated masks
+    A pending edit always wins. With MASK_SOURCE=orthanc, the newest archived
+    SEG is aligned to the editor volume first; otherwise the workspace mask is
+    used first. Either path falls back to the other when unavailable.
     """
     import io
     import numpy as np
@@ -531,10 +582,13 @@ async def get_segmentation_mask(
         return next((path for path in paths if os.path.isfile(path)), None)
 
     nifti_path = _first_existing(pending_edits)
-    if not nifti_path and orthanc_first():
+    archive_preferred = orthanc_first()
+    if not nifti_path and archive_preferred:
         nifti_path = await _mask_from_orthanc(session_id, series_uid, target_id)
     if not nifti_path:
         nifti_path = _first_existing(workspace_masks)
+    if not nifti_path and not archive_preferred:
+        nifti_path = await _mask_from_orthanc(session_id, series_uid, target_id)
 
     # Failed or rejected segmentations may still be advertised in the QC grid
     # even though cleanup removed their mask file. Keep those entries editable

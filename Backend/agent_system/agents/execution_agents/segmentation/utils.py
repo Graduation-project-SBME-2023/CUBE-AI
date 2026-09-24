@@ -18,6 +18,7 @@ import logging
 from email import policy
 from email.parser import BytesParser
 from storage_paths import MEDICAL_IMAGES_DIR, MEDICAL_LABELS_DIR, TEMP_DIR, workspace_subpath
+from services.mask_store import MaskStore, SegRef
 
 logger = logging.getLogger(__name__)
 from PIL import Image
@@ -411,12 +412,52 @@ def _is_legacy_cube_segmentation(
     }
 
 
+def describe_legacy_repair(
+    segmentation_uid: str,
+    seg_dataset: pydicom.Dataset,
+    source_dataset: pydicom.Dataset,
+    reference_volume_path: str,
+) -> dict:
+    """Use SEG provenance and source geometry to describe a safe index repair."""
+    is_legacy, provenance = _is_legacy_cube_segmentation(
+        segmentation_uid, seg_dataset
+    )
+    if provenance.get("ambiguous_unversioned"):
+        raise ValueError(
+            "Existing CUBE SEG has no geometry version and no usable DICOM "
+            "creation timestamp; refusing to guess whether legacy repair is needed"
+        )
+    if not is_legacy:
+        return {
+            "apply": False,
+            "segmentation_uid": segmentation_uid,
+            "provenance": provenance,
+        }
+
+    orientation = np.asarray(source_dataset.ImageOrientationPatient, dtype=float)
+    reference = sitk.ReadImage(reference_volume_path)
+    transform = _describe_legacy_axis_transform(reference, orientation)
+    logger.warning(
+        "Legacy SEG %s detected; recovered historical index transform: "
+        "permutation=%s flips=%s confidence=%s",
+        segmentation_uid,
+        transform["permutation"],
+        transform["flips"],
+        transform["confidence"],
+    )
+    return {
+        "apply": True,
+        "segmentation_uid": segmentation_uid,
+        "provenance": provenance,
+        **transform,
+    }
+
+
 def align_and_binarize_mask(
     mask_path: str,
     reference_volume_path: str,
     output_path: str,
     *,
-    preserve_index_order_if_same_size: bool = False,
     legacy_repair: dict | None = None,
 ) -> dict:
     """Binarize a mask and align it in physical patient space.
@@ -424,9 +465,9 @@ def align_and_binarize_mask(
     Modern masks are fixed by physical resampling.  Some historical DICOM-SEG
     exports have the opposite failure mode: their voxel buffer is already in
     the source volume's index order, but the generated NIfTI affine is reversed.
-    For an explicitly reused mask with the same dimensions as its source,
-    ``preserve_index_order_if_same_size`` keeps those voxels and replaces only
-    the bad geometry metadata.  Fresh inference never enables that mode.
+    A matching shape does not prove matching voxel order. Reused masks follow
+    the same physical-space alignment as fresh masks; known legacy SEG pixel
+    corruption is repaired only when its DICOM provenance confirms it.
     """
     reference = sitk.ReadImage(reference_volume_path)
     mask = sitk.ReadImage(mask_path)
@@ -437,30 +478,7 @@ def align_and_binarize_mask(
         "direction": list(mask.GetDirection()),
     }
     geometry_differs = not _geometry_matches(mask, reference)
-    same_index_size = (
-        mask.GetDimension() == reference.GetDimension()
-        and mask.GetSize() == reference.GetSize()
-    )
-    preserve_index_order = bool(
-        preserve_index_order_if_same_size and same_index_size
-    )
-    physical_resampled = bool(geometry_differs and not preserve_index_order)
-    reference_geometry_only = bool(geometry_differs and preserve_index_order)
-
-    if reference_geometry_only:
-        logger.warning(
-            "Preserving voxel index order for reused mask %s while replacing "
-            "its exported geometry with the source volume geometry",
-            mask_path,
-        )
-    elif preserve_index_order_if_same_size and not same_index_size:
-        logger.info(
-            "Cannot preserve reused-mask index order for %s because mask size "
-            "%s differs from source size %s; using physical resampling",
-            mask_path,
-            list(mask.GetSize()),
-            list(reference.GetSize()),
-        )
+    physical_resampled = geometry_differs
 
     if physical_resampled:
         resample = sitk.ResampleImageFilter()
@@ -478,11 +496,7 @@ def align_and_binarize_mask(
 
     legacy_diagnostics = None
     legacy_repair_applied = False
-    if (
-        legacy_repair
-        and legacy_repair.get("apply")
-        and not preserve_index_order
-    ):
+    if legacy_repair and legacy_repair.get("apply"):
         try:
             mask, legacy_diagnostics = _apply_legacy_index_repair(
                 mask,
@@ -518,17 +532,9 @@ def align_and_binarize_mask(
     binary.CopyInformation(reference)
     sitk.WriteImage(binary, output_path)
 
-    if legacy_repair and legacy_repair.get("apply") and preserve_index_order:
-        legacy_diagnostics = {
-            "applied": False,
-            "skipped": "reused_mask_index_order_is_authoritative",
-        }
-
     modes = []
     if physical_resampled:
         modes.append("physical_resample")
-    if reference_geometry_only:
-        modes.append("reference_geometry_only")
     if legacy_repair_applied:
         modes.append("legacy_index_repair")
     alignment_mode = "+".join(modes) if modes else "unchanged"
@@ -558,6 +564,7 @@ async def download_and_pair_volumes(
     task_name="segmentation_task",
     *,
     client: httpx.AsyncClient | None = None,
+    session_id: str | None = None,
 ):
     DOWNLOAD_IMAGES_URL  = f"{MONAI_URL}/datastore/images"
     DOWNLOAD_LABELS_URL  = f"{MONAI_URL}/datastore/labels"
@@ -789,48 +796,10 @@ async def download_and_pair_volumes(
         if not label_uid:
             return None
         seg_dataset = await fetch_first_series_dataset(label_uid)
-        is_legacy, provenance = _is_legacy_cube_segmentation(
-            label_uid,
-            seg_dataset,
-        )
-        if provenance.get("ambiguous_unversioned"):
-            raise ValueError(
-                "Existing CUBE SEG has no geometry version and no usable DICOM "
-                "creation timestamp; refusing to guess whether legacy repair is needed"
-            )
-        if not is_legacy:
-            logger.info(
-                "Existing SEG %s is not classified as legacy geometry: %s",
-                label_uid,
-                provenance,
-            )
-            return {
-                "apply": False,
-                "segmentation_uid": label_uid,
-                "provenance": provenance,
-            }
-
         source_dataset = await fetch_first_series_dataset(volume_uid)
-        orientation = np.asarray(
-            source_dataset.ImageOrientationPatient,
-            dtype=float,
+        return describe_legacy_repair(
+            label_uid, seg_dataset, source_dataset, reference_volume_path
         )
-        reference = sitk.ReadImage(reference_volume_path)
-        transform = _describe_legacy_axis_transform(reference, orientation)
-        logger.warning(
-            "Legacy SEG %s detected; recovered historical index transform: "
-            "permutation=%s flips=%s confidence=%s",
-            label_uid,
-            transform["permutation"],
-            transform["flips"],
-            transform["confidence"],
-        )
-        return {
-            "apply": True,
-            "segmentation_uid": label_uid,
-            "provenance": provenance,
-            **transform,
-        }
 
     def copy_volume(src_path, volume_uid, dest_dir):
         dst = os.path.join(dest_dir, f"{volume_uid}.nii.gz")
@@ -847,7 +816,6 @@ async def download_and_pair_volumes(
         target_id=None,
         artifact_key=None,
         legacy_repair=None,
-        preserve_index_order=False,
     ):
         """Align the label to its reference volume and save a binary mask."""
         if artifact_key:
@@ -862,7 +830,6 @@ async def download_and_pair_volumes(
                 src_path,
                 reference_volume_path,
                 dst,
-                preserve_index_order_if_same_size=preserve_index_order,
                 legacy_repair=legacy_repair,
             )
         except Exception:
@@ -917,7 +884,7 @@ async def download_and_pair_volumes(
     pair_ids_to_process = []
     artifact_keys_to_process = []
     empty_masks_to_process = []
-    preserve_index_order_to_process = []
+    reused_to_process = []
 
     for pair in resolved_pairs:
         volume_uid = str(pair.get("volume_uid") or "").strip()
@@ -926,7 +893,6 @@ async def download_and_pair_volumes(
         pair_id = str(pair.get("pair_id") or f"{volume_uid}__{target_id}").strip()
         artifact_key = str(pair.get("artifact_key") or pair_id).strip()
         is_empty_mask = bool(pair.get("is_empty_mask"))
-        preserve_index_order = bool(pair.get("preserve_index_order"))
         if (
             not volume_uid
             or not target_id
@@ -940,7 +906,7 @@ async def download_and_pair_volumes(
         pair_ids_to_process.append(pair_id)
         artifact_keys_to_process.append(artifact_key)
         empty_masks_to_process.append(is_empty_mask)
-        preserve_index_order_to_process.append(preserve_index_order)
+        reused_to_process.append(bool(pair.get("reused")))
 
     if not volumes_to_process:
         logger.error("Nothing to process; aborting.")
@@ -952,7 +918,36 @@ async def download_and_pair_volumes(
     #  2. use exact local exports first; trigger only what is missing     #
     # ------------------------------------------------------------------ #
     unique_volumes = list(dict.fromkeys(volumes_to_process))
-    valid_labels = list(dict.fromkeys(uid for uid in labels_to_process if uid))
+    # Reused labels must come from their immutable DICOM SEG. MONAI's exported
+    # NIfTI cache may contain a mask repaired during an older hypothesis; using
+    # it and applying the SEG's legacy repair again would flip the voxels back.
+    valid_labels = list(dict.fromkeys(
+        uid for uid, reused in zip(labels_to_process, reused_to_process)
+        if uid and not reused
+    ))
+    archived_labels: dict[str, str] = {}
+    archive_errors: dict[str, str] = {}
+    if any(reused_to_process):
+        async with MaskStore() as store:
+            for vol_uid, label_uid, pair_id, reused in zip(
+                volumes_to_process, labels_to_process, pair_ids_to_process,
+                reused_to_process,
+            ):
+                if not reused:
+                    continue
+                try:
+                    if not session_id:
+                        raise ValueError("session_id is required to read an archived mask")
+                    archived_labels[pair_id] = str(await store.ensure_local(
+                        session_id,
+                        SegRef(seg_series_uid=label_uid, volume_uid=vol_uid),
+                    ))
+                except Exception as exc:
+                    archive_errors[pair_id] = str(exc)
+                    logger.warning(
+                        "Could not read archived mask for reused pair %s",
+                        pair_id, exc_info=True,
+                    )
 
     found_volumes = (
         await asyncio.to_thread(scan_exact_files, MONAI_IMG_DIR, unique_volumes)
@@ -1073,7 +1068,7 @@ async def download_and_pair_volumes(
         pair_id,
         artifact_key,
         is_empty_mask,
-        preserve_index_order,
+        reused,
     ) in zip(
         volumes_to_process,
         labels_to_process,
@@ -1081,7 +1076,7 @@ async def download_and_pair_volumes(
         pair_ids_to_process,
         artifact_keys_to_process,
         empty_masks_to_process,
-        preserve_index_order_to_process,
+        reused_to_process,
     ):
         volume_path = os.path.join(FINAL_DIR_IMG, f"{vol_uid}.nii.gz")
         vol_result = volume_path
@@ -1113,7 +1108,10 @@ async def download_and_pair_volumes(
                 )
             vol_result = copied_volumes[vol_uid]
 
-        label_src = found_labels.get(label_uid) if label_uid else None
+        label_src = (
+            archived_labels.get(pair_id) if reused
+            else found_labels.get(label_uid) if label_uid else None
+        )
         if not label_src and label_uid:
             logger.error(
                 f"Label file never appeared for volume={vol_uid} "
@@ -1128,10 +1126,11 @@ async def download_and_pair_volumes(
                     "label_uid": label_uid,
                     "reason": (
                         "mask_export_failed"
-                        if label_uid in missing_labels and not label_trigger["ok"]
+                        if reused or (label_uid in missing_labels and not label_trigger["ok"])
                         else "mask_file_missing"
                     ),
                     "export": label_trigger if label_uid in missing_labels else None,
+                    "archive_error": archive_errors.get(pair_id),
                 }
             )
             continue
@@ -1174,35 +1173,9 @@ async def download_and_pair_volumes(
                     target_id,
                     artifact_key,
                     legacy_repair,
-                    preserve_index_order,
                 )
-                if (
-                    isinstance(label_result, dict)
-                    and label_result.get("legacy_repair_applied")
-                ):
-                    # Self-heal MONAI's local exported-label cache.  The PACS
-                    # SEG remains untouched, but future runs can reuse the
-                    # corrected local NIfTI instead of repeatedly loading the
-                    # historically corrupted voxel order.
-                    try:
-                        cache_root = MONAI_LABEL_DIR.resolve()
-                        source_cache_path = Path(label_src).resolve()
-                        source_cache_path.relative_to(cache_root)
-                        await asyncio.to_thread(
-                            shutil.copy2,
-                            label_result["path"],
-                            source_cache_path,
-                        )
-                        logger.warning(
-                            "Self-healed legacy local mask cache %s",
-                            source_cache_path,
-                        )
-                    except (OSError, ValueError, KeyError):
-                        logger.warning(
-                            "Could not self-heal legacy local mask cache %s",
-                            label_src,
-                            exc_info=True,
-                        )
+                # Do not overwrite MONAI's exported SEG cache with the repaired
+                # mask: its provenance would trigger the same repair again.
         else:
             label_result = True # No label to process for interactive manual
 
@@ -1389,8 +1362,25 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
         try:
             volume_image = sitk.ReadImage(vol_path)
             mask_image = sitk.ReadImage(mask_path)
-            if not _geometry_matches(mask_image, volume_image):
-                align_and_binarize_mask(mask_path, vol_path, mask_path)
+            render_mask_path = mask_path
+            temporary_mask_path = None
+            try:
+                if not _geometry_matches(mask_image, volume_image):
+                    with tempfile.NamedTemporaryFile(
+                        suffix=".nii.gz", dir=output_dir, delete=False
+                    ) as temporary_mask:
+                        temporary_mask_path = temporary_mask.name
+                    align_and_binarize_mask(
+                        mask_path, vol_path, temporary_mask_path
+                    )
+                    render_mask_path = temporary_mask_path
+                # Load the aligned pixels before removing the temporary file.
+                mask_data = nib.as_closest_canonical(
+                    nib.load(render_mask_path)
+                ).get_fdata()
+            finally:
+                if temporary_mask_path:
+                    Path(temporary_mask_path).unlink(missing_ok=True)
             # Reorient to canonical RAS before slicing. The saved NIfTI's native
             # storage order/sign depends on whatever the source DICOM series'
             # direction cosines happened to be, so slicing it directly (as this
@@ -1402,7 +1392,6 @@ def generate_gif_overlays(workspace_dir, uids, on_gif_ready=None):
             # superior/inferior (slice) axis and makes the per-frame display
             # transform below correct regardless of the source orientation.
             vol_data = nib.as_closest_canonical(nib.load(vol_path)).get_fdata()
-            mask_data = nib.as_closest_canonical(nib.load(mask_path)).get_fdata()
 
             if vol_data.shape != mask_data.shape:
                 raise ValueError(

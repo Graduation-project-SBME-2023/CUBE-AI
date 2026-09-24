@@ -481,12 +481,7 @@ class SegmentationModule:
                     "target_id": item["target_id"],
                     "label_uid": item.get("source_segmentation_uid"),
                     "is_empty_mask": bool(item.get("is_empty_mask")),
-                    # Historical DICOM-SEG exports can carry a reversed affine
-                    # even though their voxel buffer is already in the source
-                    # volume's index order.  Only reused/pre-existing masks
-                    # need this compatibility mode; fresh inference keeps the
-                    # physical-space normalization path unchanged.
-                    "preserve_index_order": bool(item.get("reused")),
+                    "reused": bool(item.get("reused")),
                 }
             ],
             download_volumes=not self._workspace_volume_is_valid(
@@ -494,6 +489,7 @@ class SegmentationModule:
             ),
             task_name=f"{item['model']}_segmentation_task",
             client=self.http_client,
+            session_id=self.session_id,
         )
         pair_result = next(
             (result for result in successful if result.get("pair_id") == item["pair_id"]),

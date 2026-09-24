@@ -88,6 +88,21 @@ GET /reports/{session_id}
 
 Returns the compiled PDF file.
 
+### Segmentation Review Mask
+
+\`\`\`http
+GET /segmentation-review/mask/{session_id}/{series_uid}?target_id={target_id}
+\`\`\`
+
+Returns a binary NRRD mask on the source volume's grid for the assisted editor.
+The review pair's canonical target label is read from the current segmentation
+batch. A pending edit takes precedence. In \`MASK_SOURCE=orthanc\` mode, the
+newest archived DICOM SEG is aligned to the editor volume first; otherwise the
+hypothesis workspace mask is used first. Each falls back to the other when
+unavailable. Known legacy SEG geometry is repaired from DICOM
+provenance; an uncertain mask is not displayed as a guessed overlay. Use
+\`http://localhost:8150\` in development and the \`/agents\` prefix in production.
+
 ---
 
 ## Agent System WebSocket API
