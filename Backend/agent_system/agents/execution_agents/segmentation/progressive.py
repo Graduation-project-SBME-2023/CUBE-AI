@@ -1,6 +1,5 @@
 """Pair identity, progressive preview publication, and replay helpers."""
 
-import asyncio
 import hashlib
 import logging
 from pathlib import Path
@@ -8,9 +7,7 @@ from typing import Any
 
 from storage_paths import workspace_subpath
 
-import httpx
-
-from .ws_client_sender import send_ws_message_remote
+from socket_store import manager as ws_manager
 
 logger = logging.getLogger(__name__)
 
@@ -217,14 +214,12 @@ class ProgressivePreviewPublisher:
         work_items: list[dict[str, Any]],
         workspace_dir: str,
         session_id: str | None,
-        client: httpx.AsyncClient,
         base_url: str,
     ):
         self.plan = plan
         self.work_items = work_items
         self.workspace_dir = workspace_dir
         self.session_id = session_id
-        self.client = client
         self.base_url = base_url.rstrip("/")
 
     def build_snapshot(self, *, is_finished: bool) -> dict[str, Any]:
@@ -237,31 +232,24 @@ class ProgressivePreviewPublisher:
         )
 
     async def publish(self, *, is_finished: bool = False) -> bool:
+        """Hand the snapshot straight to the manager (WS-06/W10): this runs
+        inside the same process as the socket routing table, so there is no
+        HTTP hop to retry, and a UI-notification failure must never raise
+        into segmentation logic -- log and move on instead."""
         payload = self.build_snapshot(is_finished=is_finished)
-        attempts = 3 if is_finished else 1
-        delays = (0.5, 1.0)
-        for attempt in range(attempts):
-            try:
-                await send_ws_message_remote(
-                    "segmentation_output",
-                    payload,
-                    self.session_id,
-                    client=self.client,
-                    base_url=self.base_url,
-                    timeout=60.0,
-                )
-                return True
-            except httpx.HTTPError as exc:
-                logger.warning(
-                    "Could not publish %s segmentation snapshot (attempt %s/%s): %s",
-                    "final" if is_finished else "progressive",
-                    attempt + 1,
-                    attempts,
-                    exc,
-                )
-                if attempt < attempts - 1:
-                    await asyncio.sleep(delays[attempt])
-        return False
+        try:
+            await ws_manager.send_ws_message(
+                "segmentation_output", payload, session_id=self.session_id
+            )
+            return True
+        except Exception as exc:
+            logger.warning(
+                "Could not publish %s segmentation snapshot: %s",
+                "final" if is_finished else "progressive",
+                exc,
+                exc_info=True,
+            )
+            return False
 
     async def publish_ready(self) -> bool:
         return await self.publish(is_finished=False)

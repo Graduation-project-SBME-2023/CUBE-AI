@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from .. import mcp
 from ..helpers import domain_api
 from storage_paths import workspace_subpath
+from internal_emitter import broadcast_ws_message
 
 # Confidence keeps the observed categories; "manual override" is a label
 # SOURCE, not a confidence.
@@ -343,24 +344,17 @@ async def extract_cohort_labels() -> dict:
 
     session_id = os.environ.get("SESSION_ID", "")
     if session_id:
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as ws_client:
-                await ws_client.post(
-                    f'{os.environ.get("MAS_BASE_URL", "http://localhost:8150").rstrip("/")}/ws-broadcast',
-                    json={
-                        "type": "cohort_labels_output",
-                        "payload": {
-                            "tool": "extract_cohort_labels",
-                            "status": "completed",
-                            "extracted_count": len(results),
-                            "llm_unavailable": llm_unavailable,
-                            "cohort_id": cohort_id,
-                        },
-                        "session_id": session_id
-                    }
-                )
-        except Exception as e:
-            print(f"Warning: Failed to broadcast cohort_labels_output WS message: {e}")
+        await broadcast_ws_message(
+            "cohort_labels_output",
+            {
+                "tool": "extract_cohort_labels",
+                "status": "completed",
+                "extracted_count": len(results),
+                "llm_unavailable": llm_unavailable,
+                "cohort_id": cohort_id,
+            },
+            session_id,
+        )
 
     return {
         "status": "success",

@@ -5,9 +5,6 @@ import i18n from '@ohif/i18n';
 import { I18nextProvider } from 'react-i18next';
 import { BrowserRouter } from 'react-router-dom';
 import Compose from './routes/Mode/Compose';
-import ChatWidget from "./components/ChatWidget";
-// import { registerAllLogRenderers } from './components/PlaygroundCanvas/logs/registerRenderers';
-// import websocketService from './utils/WebsocketService';
 import { ServicesManager, ExtensionManager, CommandsManager, HotkeysManager } from '@ohif/core';
 import {
   DialogProvider,
@@ -135,7 +132,6 @@ function App({ config, defaultExtensions, defaultModes }) {
       <BrowserRouter basename={routerBasename}>
         {authRoutes}
         {appRoutes}
-        {/* <ChatWidget /> */}
       </BrowserRouter>
     </CombinedProviders>
 

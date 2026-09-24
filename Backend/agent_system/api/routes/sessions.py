@@ -4,15 +4,15 @@ import logging
 import os
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 
 from storage_paths import workspace
 from socket_store import manager as ws_manager
 from models.logs import WS_Log
+from models.requests import SessionInputRequest
 from services import population_review
 from clients.backend_client import BackendClient
 from agents.execution_agents.segmentation.progressive import build_snapshot_from_manifest
-from api.runners import run_pipeline
 from api.runtime import session_service
 
 logger = logging.getLogger(__name__)
@@ -24,57 +24,60 @@ router = APIRouter()
 # State Recovery
 # ----------------------------------------------------------------------
 
-@router.get("/session/{session_id}/replay-logs")
-async def replay_logs(session_id: str, after_event_id: int = 0):
-    """Replay a session's events from a cursor."""
-    logs: list[WS_Log] = await BackendClient.replay_logs(
-        session_id, after_event_id=after_event_id
-    )
-    last_event_id = after_event_id
-    for log in logs:
-        last_event_id = log.event_id or last_event_id
-        if log.msg_type in ('msg'):
-            continue
-        await ws_manager.send_ws_message(
-            log.msg_type,
-            log.payload,
-            log.session_id,
-            replaying=True,
-            event_id=log.event_id,
-        )
 
-    if after_event_id == 0 and not logs:
-        # Nothing has ever happened in this session (fresh create/open) — no
-        # agent has run yet, so there is no segmentation batch to resume a
-        # review for. Skip the DB round trip entirely rather than always
-        # probing it on every session open.
-        return
+async def send_segmentation_catchup_snapshot(
+    ws_manager, connection, session_id: str
+) -> None:
+    """Reconstruct the current segmentation-review state (from
+    segmentation_runs/pairs, including the doctor's draft decisions) and
+    deliver it to exactly the connection that just completed its handshake
+    replay (WEBSOCKET_FIX_PLAN.md WS-08, principle 5 step 2, "the trailing
+    segmentation snapshot is sent on this socket only").
 
+    This is not the same thing as replaying `segmentation_output` rows from
+    ws_logs: the review may have moved on since the last such event was
+    emitted (further doctor decisions, pair resolutions), so this always
+    rebuilds current truth from the authoritative tables rather than trusting
+    the log to still describe it.
+    """
     workspace_dir = str(workspace(session_id))
     try:
         batch = await population_review.current_batch(session_id)
-        if batch and batch["review_status"] != "not_ready":
-            # current this flow: rebuilt from segmentation_runs/pairs, including the
-            # doctor's draft decisions, which are rows now.
-            manifest = population_review.snapshot_manifest(batch)
-            snapshot = build_snapshot_from_manifest(
-                manifest,
-                workspace_dir,
-                os.environ.get("MAS_BASE_URL", "http://localhost:8150"),
+        if not batch or batch["review_status"] == "not_ready":
+            return
+        manifest = population_review.snapshot_manifest(batch)
+        snapshot = build_snapshot_from_manifest(
+            manifest,
+            workspace_dir,
+            os.environ.get("MAS_BASE_URL", "http://localhost:8150"),
+        )
+        if snapshot:
+            await ws_manager.send_replaying_frame(
+                connection, "segmentation_output", snapshot
             )
-            if snapshot:
-                await ws_manager.send_ws_message(
-                    "segmentation_output",
-                    snapshot,
-                    session_id,
-                    replaying=True,
-                )
     except (population_review.DomainError, httpx.HTTPError, ValueError, KeyError):
         logger.warning(
             "Could not reconstruct segmentation snapshot for session %s",
             session_id,
             exc_info=True,
         )
+
+
+@router.get("/session/{session_id}/replay-logs")
+async def replay_logs(session_id: str, after_event_id: int = 0, limit: int = 2000):
+    """Read-only: a session's events from a cursor, as JSON.
+
+    This used to also broadcast every returned row over every socket in the
+    process (WEBSOCKET_FIX_PLAN.md W2) -- that is now the WebSocket
+    handshake's own job (`/ws?session_id=...&after_event_id=...`,
+    `socket_store.ConnectionManager.replay`, WS-08), scoped to the one
+    connecting socket. Nothing here sends anything over any socket; this
+    route exists only for tooling/debugging that wants the raw log.
+    """
+    logs: list[WS_Log] = await BackendClient.replay_logs(
+        session_id, after_event_id=after_event_id, limit=limit
+    )
+    return logs
 
 
 
@@ -140,6 +143,33 @@ async def get_session_chat_messages(session_id: str):
 
 
 # ----------------------------------------------------------------------
+# Client Input (WEBSOCKET_FIX_PLAN.md WS-10)
+# ----------------------------------------------------------------------
+
+
+@router.post("/session/{session_id}/input")
+async def submit_session_input(
+    session_id: str,
+    request: SessionInputRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+):
+    """Deliver user text to this session's planner input queue.
+
+    This is the REST replacement for what used to arrive as a `user` /
+    `user_input` / `chat_input` frame over the WebSocket -- the socket is
+    push-only now (principle 1), so this is the only way in. Unlike the old
+    WebSocket send, a client retrying this call (same `Idempotency-Key`) gets
+    an acknowledgement instead of a silent drop when the socket happened to
+    be closed (fixes W18): `ws_manager.push_to_queue` recognizes a repeated
+    key and skips re-queuing it.
+    """
+    queued = await ws_manager.push_to_queue(
+        request.text, session_id=session_id, idempotency_key=idempotency_key
+    )
+    return {"session_id": session_id, "status": "queued" if queued else "duplicate"}
+
+
+# ----------------------------------------------------------------------
 # Hypothesis History
 # ----------------------------------------------------------------------
 
@@ -190,6 +220,12 @@ async def recover_session(session_id: str, restart: bool = False):
             "state": session.state.name,
             "execution_state": execution_state,
         }
+
+    # Deferred: api.runners pulls in the full AutoGen/execution stack, which
+    # this module otherwise has no reason to import just to define its
+    # routes (websocket.py imports send_segmentation_catchup_snapshot from
+    # here on every connect, and must stay importable without it).
+    from api.runners import run_pipeline
 
     await session_service.start_execution(session_id, run_pipeline, restart=True)
     return {"session_id": session_id, "status": "restart_started"}

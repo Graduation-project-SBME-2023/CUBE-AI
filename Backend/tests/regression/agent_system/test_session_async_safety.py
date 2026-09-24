@@ -1,3 +1,4 @@
+import asyncio
 import json
 import unittest
 from types import SimpleNamespace
@@ -21,8 +22,11 @@ class ToolLogSnapshotTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(socket_store.BackendClient, "save_log", fake_save):
             payload = {"value": 1}
+            # A durable type: "tool_progress" is registered ephemeral
+            # (WS-05) and would skip persistence entirely, which is not what
+            # this test is about.
             await manager.send_ws_message(
-                "tool_progress", payload, session_id="session-1"
+                "hypothesis", payload, session_id="session-1"
             )
             payload["value"] = 99
 
@@ -38,6 +42,8 @@ class ToolLogSnapshotTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(socket_store.BackendClient, "save_log", fake_save):
             payload = {"items": ["original"]}
+            # Unregistered types default to durable (event_registry.py's fail
+            # -safe default), so this still exercises the persist path.
             await manager.send_ws_message("tool_view", payload, session_id="session-1")
             payload["items"].append("mutated")
 
@@ -48,18 +54,28 @@ class ToolLogSnapshotTests(unittest.IsolatedAsyncioTestCase):
         an event_id would make replay skip it."""
         manager = ConnectionManager()
         sent = []
+        received = asyncio.Event()
 
         class _Socket:
+            async def accept(self):
+                pass
+
             async def send_text(self, message):
                 sent.append(json.loads(message))
+                received.set()
 
-        manager.active_connections.append(_Socket())
+        # Delivery is routed by session_id now (WS-02): the socket must be
+        # bound to the same session the event is sent to, or it never sees
+        # it. A durable type: "tool_progress" is ephemeral (WS-05) and would
+        # never attempt to persist at all, which is not what this tests.
+        await manager.connect(_Socket(), "s1")
 
         async def failing_save(_log):
             raise RuntimeError("application api unavailable")
 
         with patch.object(socket_store.BackendClient, "save_log", failing_save):
-            await manager.send_ws_message("tool_progress", {"v": 1}, session_id="s1")
+            await manager.send_ws_message("hypothesis", {"v": 1}, session_id="s1")
+            await asyncio.wait_for(received.wait(), timeout=1.0)
 
         self.assertEqual(len(sent), 1)
         self.assertIsNone(sent[0]["event_id"])
@@ -82,8 +98,13 @@ class SessionQueueLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_socket_disconnect_does_not_drop_valid_session_input(self):
         manager = ConnectionManager()
-        socket = object()
-        manager.active_connections.append(socket)
+
+        class _Socket:
+            async def accept(self):
+                pass
+
+        socket = _Socket()
+        await manager.connect(socket, "session-a")
         await manager.push_to_queue("review response", "session-a")
 
         manager.disconnect(socket)

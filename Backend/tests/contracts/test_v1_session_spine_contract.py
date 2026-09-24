@@ -320,7 +320,10 @@ FRONTEND = BACKEND_ROOT.parent / "Frontend" / "OHIF-Viewer"
 MIGRATED_COMPONENTS = (
     FRONTEND / "extensions/research-playground/src/components/features/HomeDashboard.tsx",
     FRONTEND / "extensions/research-playground/src/components/PlaygroundCanvas/ChatSidebar.tsx",
-    FRONTEND / "platform/app/src/components/ChatWidget.tsx",
+    # platform/app/src/components/ChatWidget.tsx was deleted as dead code
+    # (WEBSOCKET_FIX_PLAN.md DQ2/WS-03): it was never a live importer of any
+    # chat_sessions/hypotheses endpoint by the time it was removed, and there
+    # is now only one WebSocket client in the frontend.
 )
 
 

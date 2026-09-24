@@ -1,15 +1,12 @@
 import os
 import json
-import httpx
-import logging
 import asyncio
 
 from . import mcp
 from tool_logging import ToolEvent, log_tool_state, TextPayload
 from .scratchpad import scratchpad_raise_flag, scratchpad_write_note
 from .helpers import domain_api
-
-logger = logging.getLogger(__name__)
+from internal_emitter import broadcast_ws_message
 
 APPROVAL_POLL_SECONDS = float(os.environ.get("COHORT_APPROVAL_POLL_SECONDS", "2"))
 
@@ -37,21 +34,14 @@ async def _wait_for_cohort_approval(timeout_seconds: int = 3600) -> dict:
         log_tool_state(ToolEvent(event_type='tool_started', content_type='text', content=payload))
         session_id = os.environ.get("SESSION_ID")
         if session_id:
-            try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    await client.post(
-                        f'{os.environ.get("MAS_BASE_URL", "http://localhost:8150").rstrip("/")}/ws-broadcast',
-                        json={
-                            "type": "agent_waiting_for_user_input",
-                            "payload": {
-                                "agent": "study_population_planner_agent",
-                                "status": "WAITING_FOR_REVIEW",
-                            },
-                            "session_id": session_id,
-                        },
-                    )
-            except Exception as exc:
-                logger.warning("Could not publish cohort-approval waiting state: %s", exc)
+            await broadcast_ws_message(
+                "agent_waiting_for_user_input",
+                {
+                    "agent": "study_population_planner_agent",
+                    "status": "WAITING_FOR_REVIEW",
+                },
+                session_id,
+            )
 
     elapsed = 0.0
     while True:

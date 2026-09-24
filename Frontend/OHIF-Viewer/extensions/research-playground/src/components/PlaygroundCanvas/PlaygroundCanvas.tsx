@@ -7,7 +7,7 @@ import CanvasHeader from './CanvasHeader';
 import FlowEngineWrapper from './FlowEngineWrapper';
 import { registerAllLogRenderers } from './logs/registerRenderers';
 import { getAgentsApiBaseUrl } from '../../utils/apiBase';
-import { resumeSessionPipeline } from '../../services/api';
+import { resumeSessionPipeline, submitSessionInput } from '../../services/api';
 
 interface PlaygroundCanvasProps {
   initialHypothesis?: string;
@@ -410,9 +410,16 @@ export default function PlaygroundCanvas({
     [initialHypothesis]
   );
 
+  // Bind this tab's one socket to this canvas's session. Switching sessions
+  // closes the old socket and opens a new one (WEBSOCKET_FIX_PLAN.md
+  // Principle 2) rather than reusing one session's connection for another.
+  useEffect(() => {
+    if (!session_id) return;
+    websocketService.connect(session_id);
+  }, [session_id]);
+
   useEffect(() => {
     registerAllLogRenderers();
-    websocketService.connect();
 
     const unsubscribeMsg = websocketService.subscribe((data: any) => {
       const { type, payload } = data;
@@ -631,20 +638,6 @@ export default function PlaygroundCanvas({
     }
   }, [autoStartPlanning, includeLitReview, initialHypothesis, session_id]);
 
-  const sendPlanToBackend = useCallback(
-    (nodesData: FlowNode[], edgesData: FlowEdge[]) => {
-      websocketService.sendMessage({
-        type: 'PLAN_UPDATE',
-        nodes: nodesData,
-        edges: edgesData,
-        mode,
-        session_id,
-        timestamp: new Date().toISOString(),
-      });
-    },
-    [mode, session_id]
-  );
-
   const handleNodesChange = useCallback(
     (updatedNodes: FlowNode[]) => {
       const isUserStructuralEdit = updatedNodes.length !== nodes.length; // rough heuristic, ideally check for actual structural changes
@@ -654,11 +647,8 @@ export default function PlaygroundCanvas({
         setCountdown(null);
       }
       setNodes(updatedNodes);
-      if (mode === 'planning' || mode === 'generated' || mode === 'manual') {
-        sendPlanToBackend(updatedNodes, edges);
-      }
     },
-    [mode, edges, sendPlanToBackend, nodes.length]
+    [mode, nodes.length]
   );
 
   const startExecution = async () => {
@@ -804,15 +794,16 @@ export default function PlaygroundCanvas({
   };
 
   const resetWorkflow = () => {
+    // The actual reset signal to the backend is `restartRequestedRef`, read
+    // by the next /plan or /run REST call (see startPlanning/startExecution)
+    // -- the WebSocket never had a RESET_WORKFLOW handler to receive this
+    // (WEBSOCKET_FIX_PLAN.md DQ3/WS-11), so there is nothing to send here.
     restartRequestedRef.current = true;
     setMode('planning');
     setIsPaused(false);
     setRequiresRecoveryResume(false);
     setNodes(createInitialNodes(initialHypothesis));
     setEdges(INITIAL_EDGES);
-    if (websocketService.isConnected()) {
-      websocketService.sendMessage({ type: 'RESET_WORKFLOW' });
-    }
   };
 
   const handleDrop = (event: React.DragEvent) => {
@@ -843,7 +834,6 @@ export default function PlaygroundCanvas({
 
     const updatedNodes = nodes.concat(newNode);
     setNodes(updatedNodes);
-    sendPlanToBackend(updatedNodes, edges);
   };
 
   const handleDragOver = (event: React.DragEvent) => {
@@ -852,15 +842,25 @@ export default function PlaygroundCanvas({
   };
 
   const handlePromptSubmit = (message: string) => {
-    websocketService.sendMessage({
-      type: 'user_input',
-      payload: { message },
-      session_id,
-    });
     websocketService.dispatchLocal({
       type: 'chat_echo',
       payload: { text: message },
       session_id,
+    });
+    // The socket is push-only now (WEBSOCKET_FIX_PLAN.md WS-10): this is the
+    // REST replacement for the old `user_input` WebSocket send, with an
+    // Idempotency-Key so a retry can't deliver the same prompt twice.
+    const idempotencyKey =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    submitSessionInput(String(session_id), message, idempotencyKey).catch(error => {
+      console.error('[PlaygroundCanvas] Failed to submit prompt input:', error);
+      websocketService.dispatchLocal({
+        type: 'msg',
+        payload: 'Your message could not be delivered to the agent system. Please try again.',
+        session_id,
+      });
     });
   };
 

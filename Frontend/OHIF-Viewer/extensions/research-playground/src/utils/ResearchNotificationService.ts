@@ -72,6 +72,7 @@ class ResearchNotificationService {
   private enabled: boolean = true;
   private wsUnsubscribe: (() => void) | null = null;
   private wsStatusUnsubscribe: (() => void) | null = null;
+  private wsErrorUnsubscribe: (() => void) | null = null;
   private previousAgentStatuses: Map<string, string> = new Map();
   private isDisconnectedNotificationShown: boolean = false;
 
@@ -263,6 +264,16 @@ class ResearchNotificationService {
     }
   };
 
+  private handleWebSocketError = (message: string): void => {
+    if (!this.enabled) return;
+    this.showNotification('websocket_error', {
+      title: 'Connection Issue',
+      message,
+      type: 'warning',
+      duration: 5000,
+    });
+  };
+
   private handleWebSocketStatusChange = (isConnected: boolean): void => {
     if (isConnected && this.enabled) {
       console.log('[ResearchNotificationService] WebSocket reconnected, service active');
@@ -289,11 +300,17 @@ class ResearchNotificationService {
       return;
     }
 
-    console.log('[ResearchNotificationService] Starting, connecting to:', websocketService['url']);
-    
-    websocketService.connect();
+    // This service is initialized at extension load, before any session is
+    // open, so it has no session_id of its own to connect with (a socket
+    // without one is refused server-side — WEBSOCKET_FIX_PLAN.md
+    // Principle 2). It only listens: whichever view owns the active session
+    // (ResearchPlayground, the canvas, the chat sidebar) is responsible for
+    // calling websocketService.connect(sessionId).
+    console.log('[ResearchNotificationService] Starting (listen-only)');
+
     this.wsUnsubscribe = websocketService.subscribe(this.handleWebSocketMessage);
     this.wsStatusUnsubscribe = websocketService.onStatusChange(this.handleWebSocketStatusChange);
+    this.wsErrorUnsubscribe = websocketService.onError(this.handleWebSocketError);
 
     console.log('[ResearchNotificationService] Started');
   }
@@ -307,6 +324,10 @@ class ResearchNotificationService {
     if (this.wsStatusUnsubscribe) {
       this.wsStatusUnsubscribe();
       this.wsStatusUnsubscribe = null;
+    }
+    if (this.wsErrorUnsubscribe) {
+      this.wsErrorUnsubscribe();
+      this.wsErrorUnsubscribe = null;
     }
     this.completedPhases.clear();
     this.isStudyComplete = false;

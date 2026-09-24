@@ -1,8 +1,9 @@
 from dataclasses import dataclass, asdict, field
 from typing import Literal, Union, Dict
 import time
-import requests
 import os
+
+from internal_emitter import fire_and_forget, post_internal
 
 EventType = Literal[
     "tool_started",
@@ -55,30 +56,18 @@ class ToolEvent:
     session_id: str = None
 
 
-def log_tool_state(event: ToolEvent):
+def log_tool_state(event: ToolEvent) -> None:
+    """Fire-and-forget: never blocks the tool call that reports it (WS-07)."""
     session_id = os.environ.get("SESSION_ID")
     event.session_id = session_id
-    try:
-        requests.post(
-            "http://localhost:8150/events",
-            json=asdict(event),
-            timeout=1,
-        )
-    except Exception as e:
-        pass
+    fire_and_forget(post_internal("/events", asdict(event)))
 
-def log_pdf_tool_view(event: Dict):
+
+def log_pdf_tool_view(event: Dict) -> None:
     session_id = os.environ.get("SESSION_ID")
     payload = {
         "event_type": "latex_output",
         "content": event,
         "session_id": session_id,
     }
-    try:
-        requests.post(
-            "http://localhost:8150/events",
-            json=payload,
-            timeout=1,
-        )
-    except Exception as e:
-        pass
+    fire_and_forget(post_internal("/events", payload))

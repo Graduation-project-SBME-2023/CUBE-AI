@@ -1,11 +1,11 @@
 """Anatomy Validation Gate for the Population Agent."""
 
 import os
-import httpx
 from typing import Annotated
 from pydantic import Field
 from .. import mcp
 from ..helpers import domain_api
+from internal_emitter import broadcast_ws_message
 
 
 # ── Anatomy group mapping ───────────────────────────────────────────────────
@@ -78,25 +78,17 @@ async def _save_and_broadcast_cohort(
     )
     await domain_api.set_cohort_members(cohort["cohort_id"], validated_uids)
 
-    try:
-        mas_base_url = os.environ.get("MAS_BASE_URL", "http://localhost:8150").rstrip("/")
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.post(
-                f"{mas_base_url}/ws-broadcast",
-                json={
-                    "type": "population_output",
-                    "payload": {
-                        "tool": "validate_population_anatomy",
-                        "status": "completed",
-                        "count": len(validated_uids),
-                        "uid_list": validated_uids,
-                        "cohort_id": cohort["cohort_id"],
-                    },
-                    "session_id": session_id
-                }
-            )
-    except Exception as exc:
-        print(f"[validate_population_anatomy] WebSocket broadcast failed: {exc}")
+    await broadcast_ws_message(
+        "population_output",
+        {
+            "tool": "validate_population_anatomy",
+            "status": "completed",
+            "count": len(validated_uids),
+            "uid_list": validated_uids,
+            "cohort_id": cohort["cohort_id"],
+        },
+        session_id,
+    )
 
     return {"cohort_updated": True, "cohort_id": cohort["cohort_id"]}
 

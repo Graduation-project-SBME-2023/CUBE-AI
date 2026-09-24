@@ -20,7 +20,6 @@ import {
   fetchSessionExecutionState,
   fetchSessionStatus,
   hydrateSession,
-  replaySessionLogs,
 } from '../services/api';
 import { ResearchRouteState } from '../types';
 
@@ -138,6 +137,20 @@ function ResearchPlaygroundInner() {
   // Derive sessionId first so it can be used in useState initialisers below
   const hypothesis = routeState.hypothesis || 'No active hypothesis defined.';
   const sessionId = routeState.sessionId || routeState.session_id || null;
+  // Reset this session's replay cursor/dedup bookkeeping synchronously
+  // during render, before any child mounts (ChatSidebar, PlaygroundCanvas)
+  // get a chance to call websocketService.connect() in their own effects.
+  // The cursor now travels in connect()'s own handshake URL (WS-08/WS-09),
+  // so whichever component connects *first* decides what gets replayed --
+  // effects fire child-before-parent, and this must win that race every
+  // time, not just when this component's own connect effect happens to run
+  // first.
+  useMemo(() => {
+    if (sessionId && typeof websocketService.resetSession === 'function') {
+      websocketService.resetSession(String(sessionId));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
   const sendInitialMessage = routeState.sendInitialMessage || false;
   const initialUserMessage = sendInitialMessage ? hypothesis : undefined;
   // Explicitly archived routes are always historical. Completed sessions are
@@ -492,52 +505,50 @@ function ResearchPlaygroundInner() {
   }, []);
 
   useEffect(() => {
-    // Wait for both: views mounted AND mode resolved before replaying
+    // Wait for both: views mounted AND mode resolved before connecting.
+    // (The replay cursor for this session was already reset synchronously
+    // during render, above -- before this or any child's connect() call.)
     if (!sessionId || !viewsReady || !restoredModeReady) return;
-    const replay = async () => {
-      websocketService.startReplayCapture();
-      try {
-        // This effect runs once per fresh mount of the playground view — i.e.
-        // once per session entry, not once per socket reconnect. The
-        // websocket service is a page-lifetime singleton, so if this same
-        // session was already open earlier in this tab, its cursor/dedup
-        // state from that prior visit would otherwise suppress every event a
-        // brand-new set of component-local nodes/edges has never actually
-        // seen, leaving the canvas empty until a hard refresh reset the
-        // singleton. Reset that per-session bookkeeping before requesting a
-        // full replay so this mount always gets the complete session state.
-        if (typeof websocketService.resetSession === 'function') {
-          websocketService.resetSession(sessionId);
-        }
-        await replaySessionLogs(sessionId, 0);
-        // Log history can contain older status broadcasts. Apply the current
-        // persisted snapshot last so replay cannot roll the UI backwards.
-        if (Array.isArray(hydratedExecutionState?.agents)) {
-          websocketService.dispatchLocal({
-            type: 'pipeline_agent_status',
-            payload: hydratedExecutionState,
-            session_id: sessionId,
-            replaying: true,
-          });
-        }
-      } catch (err) {
-        console.error('[ResearchPlayground] Failed to replay logs:', err);
-      } finally {
-        websocketService.stopReplayCapture();
-        // Replayed events populate the views, but must never be presented as
-        // a new update.  Future live events for an active session may alert.
-        updateStateRef.current.isHydrating = false;
+    // The handshake itself now replays this session's history before the
+    // server considers the connection live (WS-08) — there is no separate
+    // HTTP call left to race against it. Hydration ends when the
+    // "replay_complete" frame arrives (see the subscribe effect below), not
+    // when this connect resolves.
+    websocketService.connect(String(sessionId));
+  }, [sessionId, viewsReady, restoredModeReady]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    const unsubscribe = websocketService.subscribe((event: any) => {
+      if (event?.type !== 'replay_complete') return;
+      const incomingSessionId = String(event?.session_id ?? '');
+      if (incomingSessionId !== String(sessionId)) return;
+      // Replayed events populate the views, but must never be presented as
+      // a new update. Future live events for an active session may alert.
+      updateStateRef.current.isHydrating = false;
+      // Replay can contain older status broadcasts. Apply the current
+      // persisted snapshot last so it cannot roll the UI backwards.
+      if (Array.isArray(hydratedExecutionState?.agents)) {
+        websocketService.dispatchLocal({
+          type: 'pipeline_agent_status',
+          payload: hydratedExecutionState,
+          session_id: sessionId,
+          replaying: true,
+        });
       }
-    };
-    replay();
-  }, [hydratedExecutionState, sessionId, viewsReady, restoredModeReady]);
+    });
+    return unsubscribe;
+  }, [hydratedExecutionState, sessionId]);
 
   // ── Plan-driven sidebar: listen for pipeline plan events ───────────────────
   useEffect(() => {
     const unsubscribe = websocketService.subscribe((event: any) => {
       const { type, payload } = event;
-      const incomingSessionId = event?.session_id;
-      if (incomingSessionId && sessionId && String(incomingSessionId) !== String(sessionId)) return;
+      // Strict: a missing session_id is dropped too, not let through
+      // (WEBSOCKET_FIX_PLAN.md W17). Defence in depth only — the socket
+      // already only carries this session's own frames (WS-02).
+      const incomingSessionId = String(event?.session_id ?? '');
+      if (!sessionId || incomingSessionId !== String(sessionId)) return;
 
       if (
         type === 'pipeline_update' ||
@@ -579,8 +590,10 @@ function ResearchPlaygroundInner() {
   useEffect(() => {
     const unsubscribe = websocketService.subscribe((event: any) => {
       const { type, payload } = event;
-      const incomingSessionId = event?.session_id;
-      if (incomingSessionId && sessionId && String(incomingSessionId) !== String(sessionId)) {
+      // Strict, matching the block above: a missing session_id is dropped
+      // too (W17), not let through.
+      const incomingSessionId = String(event?.session_id ?? '');
+      if (!sessionId || incomingSessionId !== String(sessionId)) {
         return;
       }
 
