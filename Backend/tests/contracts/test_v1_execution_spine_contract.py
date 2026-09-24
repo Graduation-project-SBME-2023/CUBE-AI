@@ -34,6 +34,12 @@ def _source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _agent_http_source() -> str:
+    """The Agent System HTTP layer: app.py plus the api/ package it was split into."""
+    paths = [AGENT_ROOT / "app.py", *sorted((AGENT_ROOT / "api").rglob("*.py"))]
+    return "\n".join(_source(path) for path in paths)
+
+
 # ----------------------------------------------------------------------
 # agent_runs — execution state only
 # ----------------------------------------------------------------------
@@ -237,7 +243,7 @@ def test_replay_reads_from_a_cursor_not_from_the_whole_log():
     assert "after_event_id" in repo
     assert "WSLogModel.event_id > after_event_id" in repo
 
-    app = _source(AGENT_ROOT / "app.py")
+    app = _agent_http_source()
     assert "after_event_id" in app
 
 

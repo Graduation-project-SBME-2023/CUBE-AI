@@ -34,6 +34,12 @@ def _source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _agent_http_source() -> str:
+    """The Agent System HTTP layer: app.py plus the api/ package it was split into."""
+    paths = [AGENT_ROOT / "app.py", *sorted((AGENT_ROOT / "api").rglob("*.py"))]
+    return "\n".join(_source(path) for path in paths)
+
+
 # ----------------------------------------------------------------------
 # The table
 # ----------------------------------------------------------------------
@@ -166,7 +172,7 @@ def test_gif_overlays_are_catalogued_as_renders_not_uploaded():
         AGENT_ROOT / "agents" / "execution_agents" / "segmentation" / "module.py"
     )
     assert "register_render" in module
-    app = _source(AGENT_ROOT / "app.py")
+    app = _agent_http_source()
     assert "register_render" in app
 
 

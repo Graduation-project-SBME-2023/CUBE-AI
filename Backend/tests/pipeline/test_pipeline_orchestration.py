@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-import app as app_module
+import api.runners as runners
 from models.session import Session
 
 
@@ -38,7 +38,7 @@ class FakeGraphFlow:
         self.graph = graph
 
     async def run_stream(self, task, cancellation_token):
-        yield app_module.TaskResult(messages=[], stop_reason="test complete")
+        yield runners.TaskResult(messages=[], stop_reason="test complete")
 
 
 def _api_runs():
@@ -73,17 +73,17 @@ async def test_run_pipeline_builds_the_graph_from_the_approved_runs(monkeypatch)
     session = Session(SESSION_ID)
 
     monkeypatch.setattr(
-        app_module.BackendClient,
+        runners.BackendClient,
         "get_agent_runs",
         AsyncMock(return_value=_api_runs()),
     )
     monkeypatch.setattr(
-        app_module.BackendClient,
+        runners.BackendClient,
         "get_session",
         AsyncMock(return_value={"prompt": "does bin width change AUC?"}),
     )
     monkeypatch.setattr(
-        app_module.BackendClient,
+        runners.BackendClient,
         "get_agent_run_status",
         AsyncMock(return_value={"schema_version": 1, "agents": []}),
     )
@@ -94,10 +94,10 @@ async def test_run_pipeline_builds_the_graph_from_the_approved_runs(monkeypatch)
         get_pipeline_prompt=lambda fallback_hypothesis="": "compiled test prompt",
     )
     create_builder = AsyncMock(return_value=builder)
-    monkeypatch.setattr(app_module.BasicPipelineBuilder, "create", create_builder)
-    monkeypatch.setattr(app_module, "GraphFlow", FakeGraphFlow)
+    monkeypatch.setattr(runners.BasicPipelineBuilder, "create", create_builder)
+    monkeypatch.setattr(runners, "GraphFlow", FakeGraphFlow)
     monkeypatch.setattr(
-        app_module,
+        runners,
         "create_model_client_from_config",
         lambda: FakeModelClient(),
     )
@@ -108,11 +108,11 @@ async def test_run_pipeline_builds_the_graph_from_the_approved_runs(monkeypatch)
         on_agent_active=AsyncMock(),
         on_tool_result=AsyncMock(return_value=False),
     )
-    monkeypatch.setattr(app_module, "PipelineMonitor", lambda *args, **kwargs: monitor)
+    monkeypatch.setattr(runners, "PipelineMonitor", lambda *args, **kwargs: monitor)
     send_ws = AsyncMock()
-    monkeypatch.setattr(app_module.ws_manager, "send_ws_message", send_ws)
+    monkeypatch.setattr(runners.ws_manager, "send_ws_message", send_ws)
 
-    await app_module.run_pipeline(session)
+    await runners.run_pipeline(session)
 
     create_builder.assert_awaited_once()
     call = create_builder.await_args
@@ -140,11 +140,11 @@ async def test_run_pipeline_refuses_a_session_with_no_approved_runs(monkeypatch)
     """A draft plan owns no runs, so there is nothing to execute — and nothing to reconstruct from a file either."""
     session = Session(SESSION_ID)
     monkeypatch.setattr(
-        app_module.BackendClient, "get_agent_runs", AsyncMock(return_value=[])
+        runners.BackendClient, "get_agent_runs", AsyncMock(return_value=[])
     )
 
     with pytest.raises(RuntimeError, match="no approved agent runs"):
-        await app_module.run_pipeline(session)
+        await runners.run_pipeline(session)
 
 
 @pytest.mark.pipeline
@@ -157,13 +157,13 @@ async def test_run_pipeline_resumes_at_the_recorded_step(monkeypatch):
     runs[0]["status"] = "completed"
     runs[1]["status"] = "completed"
     monkeypatch.setattr(
-        app_module.BackendClient, "get_agent_runs", AsyncMock(return_value=runs)
+        runners.BackendClient, "get_agent_runs", AsyncMock(return_value=runs)
     )
     monkeypatch.setattr(
-        app_module.BackendClient, "get_session", AsyncMock(return_value={})
+        runners.BackendClient, "get_session", AsyncMock(return_value={})
     )
     monkeypatch.setattr(
-        app_module.BackendClient,
+        runners.BackendClient,
         "get_agent_run_status",
         AsyncMock(return_value=None),
     )
@@ -174,13 +174,13 @@ async def test_run_pipeline_resumes_at_the_recorded_step(monkeypatch):
         get_pipeline_prompt=lambda fallback_hypothesis="": "compiled test prompt",
     )
     create_builder = AsyncMock(return_value=builder)
-    monkeypatch.setattr(app_module.BasicPipelineBuilder, "create", create_builder)
-    monkeypatch.setattr(app_module, "GraphFlow", FakeGraphFlow)
+    monkeypatch.setattr(runners.BasicPipelineBuilder, "create", create_builder)
+    monkeypatch.setattr(runners, "GraphFlow", FakeGraphFlow)
     monkeypatch.setattr(
-        app_module, "create_model_client_from_config", lambda: FakeModelClient()
+        runners, "create_model_client_from_config", lambda: FakeModelClient()
     )
     monkeypatch.setattr(
-        app_module,
+        runners,
         "PipelineMonitor",
         lambda *args, **kwargs: SimpleNamespace(
             on_pipeline_complete=AsyncMock(),
@@ -189,8 +189,8 @@ async def test_run_pipeline_resumes_at_the_recorded_step(monkeypatch):
             on_tool_result=AsyncMock(return_value=False),
         ),
     )
-    monkeypatch.setattr(app_module.ws_manager, "send_ws_message", AsyncMock())
+    monkeypatch.setattr(runners.ws_manager, "send_ws_message", AsyncMock())
 
-    await app_module.run_pipeline(session)
+    await runners.run_pipeline(session)
 
     assert create_builder.await_args.kwargs["start_step_id"] == "step-3"
