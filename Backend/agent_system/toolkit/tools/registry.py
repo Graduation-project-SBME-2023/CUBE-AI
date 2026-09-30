@@ -162,7 +162,8 @@ class ToolRegistry(Registry[ToolSpec]):
         """The tools ``agent`` gets for this run, in its allowlist's order.
 
         A function-valued allowlist only ever sees the tools of the agent's
-        audience; a fixed one naming anything else is refused.
+        audience; a fixed one naming anything else is refused. A tool with a
+        ``for_caller`` binding is returned specialized for ``agent``.
         """
         candidates = self.visible_to(self.audience_of(agent))
         names = agent.tools_for(ctx, candidates)
@@ -174,4 +175,8 @@ class ToolRegistry(Registry[ToolSpec]):
                 f"agent {agent.agent_type!r} may not use {hidden}: "
                 f"not visible to {self.audience_of(agent).value!r}"
             )
-        return tuple(self.get(name) for name in names)
+        return tuple(_bound(self.get(name), agent) for name in names)
+
+
+def _bound(spec: ToolSpec, agent: AgentSpec) -> ToolSpec:
+    return spec.for_caller(spec, agent) if spec.for_caller is not None else spec

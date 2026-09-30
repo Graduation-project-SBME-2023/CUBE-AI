@@ -13,7 +13,7 @@ import re
 from enum import StrEnum
 from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 # Error codes are snake_case so the Watchdog, Recovery and the UI can match on them.
 ERROR_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -30,6 +30,13 @@ def error_result(code: str, message: str, **extra: Any) -> dict[str, Any]:
     if clash:
         raise ValueError(f"extra fields may not override the envelope: {clash}")
     return {"status": "error", "error_code": code, "error_message": message, **extra}
+
+
+def validation_message(exc: ValidationError) -> str:
+    """A pydantic error as one line a model can act on: ``field.path: reason; ...``."""
+    return "; ".join(
+        f"{'.'.join(map(str, error['loc'])) or 'value'}: {error['msg']}" for error in exc.errors()
+    )
 
 
 def is_error_result(result: Any) -> bool:
