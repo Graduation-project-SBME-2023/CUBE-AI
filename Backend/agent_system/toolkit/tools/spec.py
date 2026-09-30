@@ -77,6 +77,7 @@ class ToolSpec:
     input_model: type[BaseModel] | None = None  # first-party: built from the signature
     input_schema: Mapping[str, Any] | None = None  # external: raw JSON schema
     output_model: type[BaseModel] | None = None
+    context_param: str | None = None  # the handler argument that receives the ToolContext
 
     # --- ports (see toolkit/ports.py): inputs set param, outputs set extract
     inputs: Mapping[str, PortSpec] = field(default_factory=dict)
@@ -138,6 +139,15 @@ class ToolSpec:
                 raise TypeError(f"tool {self.name!r}: {attr} must be a pydantic model class")
         if self.input_schema is not None:
             _set("input_schema", MappingProxyType(dict(self.input_schema)))
+        if self.context_param is not None and (
+            not isinstance(self.context_param, str)
+            or not self.context_param.isidentifier()
+            or self.context_param in self.arg_names
+        ):
+            raise ValueError(
+                f"tool {self.name!r}: context_param {self.context_param!r} must be an "
+                f"argument name that is not also a model argument"
+            )
 
         _set("inputs", freeze_ports(self.inputs, "inputs", forbidden=("extract",)))
         _set("outputs", freeze_ports(self.outputs, "outputs", forbidden=("param",)))
@@ -193,6 +203,14 @@ class ToolSpec:
 
     def visible_to(self, audience: Visibility | str) -> bool:
         return coerce_enum(Visibility, audience, "audience") in self.visibility
+
+    @property
+    def arg_names(self) -> frozenset[str]:
+        """The arguments the model fills (the ToolContext argument is not one)."""
+        if self.input_model is not None:
+            return frozenset(self.input_model.model_fields)
+        properties = (self.input_schema or {}).get("properties", {})
+        return frozenset(properties) if isinstance(properties, Mapping) else frozenset()
 
     def args_schema(self) -> dict[str, Any]:
         """JSON schema of the arguments, whichever way the tool declared them."""
