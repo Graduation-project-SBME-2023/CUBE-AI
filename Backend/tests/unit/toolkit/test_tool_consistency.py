@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from dataclasses import dataclass
 from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Literal, Optional
@@ -12,6 +11,7 @@ from typing import Annotated, Any, Literal, Optional
 import pytest
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, create_model
 
+from agent_system.toolkit.ports import ExtractedArtifact, PortSpec
 from agent_system.toolkit.tools.consistency import (
     ManifestRule,
     ManifestViolation,
@@ -23,12 +23,8 @@ from agent_system.toolkit.tools.spec import ToolSpec
 pytestmark = pytest.mark.unit
 
 
-@dataclass(frozen=True)
-class _Port:
-    """Stand-in for PortSpec (Phase 1.1 step 3): the rules only read ``param``."""
-
-    artifact_type: str
-    param: str | None = None
+def _features(result: Any) -> ExtractedArtifact:
+    return ExtractedArtifact(ref={"feature_set_id": result["feature_set_id"]})
 
 
 # Same shape as the real WorkspacePath in the tool packs.
@@ -97,8 +93,8 @@ def _job_tool(**overrides: Any) -> ToolSpec:
         "isolation": "process",
         "data_scopes": {"phi_read", "fs_write", "db_write"},
         "visibility": {"graph", "agent"},
-        "inputs": {"cohort": _Port("Cohort", param="cohort_id")},
-        "outputs": {"features": _Port("FeatureTable")},
+        "inputs": {"cohort": PortSpec("Cohort", param="cohort_id")},
+        "outputs": {"features": PortSpec("FeatureTable", extract=_features)},
     }
     fields.update(overrides)
     return ToolSpec(**fields)
@@ -220,15 +216,22 @@ def test_graph_tool_needs_an_output_port():
     assert _rules(_job_tool(outputs={})) == [ManifestRule.GRAPH_OUTPUT_PORT]
 
 
+def test_graph_output_port_needs_extract():
+    (violation,) = check_manifest(_job_tool(outputs={"features": PortSpec("FeatureTable")}))
+
+    assert violation.rule is ManifestRule.GRAPH_OUTPUT_EXTRACT
+    assert "'features' needs an extract function" in violation.message
+
+
 def test_graph_input_port_must_name_its_param():
-    (violation,) = check_manifest(_job_tool(inputs={"cohort": _Port("Cohort")}))
+    (violation,) = check_manifest(_job_tool(inputs={"cohort": PortSpec("Cohort")}))
 
     assert violation.rule is ManifestRule.GRAPH_INPUT_PARAM
     assert "'cohort' must name the argument" in violation.message
 
 
 def test_graph_input_param_must_be_an_argument():
-    (violation,) = check_manifest(_job_tool(inputs={"cohort": _Port("Cohort", param="cohort")}))
+    (violation,) = check_manifest(_job_tool(inputs={"cohort": PortSpec("Cohort", param="cohort")}))
 
     assert violation.rule is ManifestRule.GRAPH_INPUT_PARAM
     assert "param 'cohort', which is not an argument" in violation.message
@@ -244,7 +247,7 @@ def test_graph_input_param_is_looked_up_in_a_raw_schema():
 
 
 def test_ports_are_not_checked_without_graph_visibility():
-    spec = _job_tool(visibility={"agent"}, outputs={}, inputs={"cohort": _Port("Cohort")})
+    spec = _job_tool(visibility={"agent"}, outputs={}, inputs={"cohort": PortSpec("Cohort")})
 
     assert check_manifest(spec) == []
 
