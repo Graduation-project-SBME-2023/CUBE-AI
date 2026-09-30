@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from agent_system.toolkit.tools.manifest import (
+from agent_system.toolkit.manifest import (
     PHI_SCOPES,
     RESOURCE_QUEUES,
+    TOOL_NAME_PATTERN,
     WRITE_SCOPES,
     DataScope,
     Resource,
@@ -47,3 +48,19 @@ def test_queue_map_lists_each_resource_once():
 
     assert len(resources) == len(set(resources))
     assert all(queue.startswith("compute.") for _, queue in RESOURCE_QUEUES)
+
+
+@pytest.mark.parametrize(
+    ("name", "ok"),
+    [
+        ("get_patient", True),
+        ("mcp__pubmed__search-v2", True),
+        ("x" * 64, True),
+        ("", False),
+        ("x" * 65, False),
+        ("has space", False),
+        ("dotted.name", False),
+    ],
+)
+def test_tool_name_pattern(name, ok):
+    assert bool(TOOL_NAME_PATTERN.match(name)) is ok

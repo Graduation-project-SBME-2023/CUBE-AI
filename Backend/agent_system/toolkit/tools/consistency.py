@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAliasType, get_ar
 
 from pydantic import BaseModel
 
-from .manifest import Cost, Execution, SideEffects, Visibility
+from ..manifest import Cost, Execution, SideEffects, Visibility
 
 if TYPE_CHECKING:
     from .spec import ToolSpec

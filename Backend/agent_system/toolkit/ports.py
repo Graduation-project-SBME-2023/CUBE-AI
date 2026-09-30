@@ -52,6 +52,25 @@ type PortExtract = Callable[
 ]
 
 
+def freeze_ports(
+    ports: Mapping[str, PortSpec], field_name: str, *, forbidden: Sequence[str]
+) -> Mapping[str, PortSpec]:
+    """Check a spec's ``inputs`` or ``outputs`` and return a read-only copy.
+
+    ``forbidden`` names the PortSpec attributes that make no sense in this
+    direction, e.g. ``extract`` on a tool input or ``param`` on any output.
+    """
+    for name, port in ports.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"{field_name} port names must be non-empty strings: {name!r}")
+        if not isinstance(port, PortSpec):
+            raise TypeError(f"{field_name} port {name!r} must be a PortSpec, not {port!r}")
+        for attr in forbidden:
+            if getattr(port, attr) is not None:
+                raise ValueError(f"{field_name} port {name!r} must not set {attr}")
+    return MappingProxyType(dict(ports))
+
+
 class PortExtractError(ValueError):
     """An output port's ``extract`` broke the port's contract."""
 

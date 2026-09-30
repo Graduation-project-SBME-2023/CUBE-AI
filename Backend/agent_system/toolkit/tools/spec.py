@@ -2,7 +2,8 @@
 
 A tool is a callable action. An agent is a definition (``AgentSpec``) and is
 never a tool, so nothing here knows about agents. The vocabulary the manifest
-is written in (the enums, scope sets and queue map) lives in ``manifest.py``.
+is written in (the enums, scope sets, queue map and name rule) lives in
+``toolkit/manifest.py``.
 
 This module only describes a tool and checks that each field is well-formed on
 its own. The cross-field manifest rules (``side_effects="none"`` <=> read-only,
@@ -14,7 +15,6 @@ No AutoGen, LangGraph, or MCP imports: the toolkit is framework-neutral.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -22,12 +22,12 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from ..ports import PortSpec
-from .manifest import (
+from ..manifest import (
     MAX_PRIORITY,
     MIN_PRIORITY,
     PHI_SCOPES,
     RESOURCE_QUEUES,
+    TOOL_NAME_PATTERN,
     WRITE_SCOPES,
     Cost,
     DataScope,
@@ -40,34 +40,18 @@ from .manifest import (
     coerce_enum,
     coerce_enum_set,
 )
+from ..ports import PortSpec, freeze_ports
 
 if TYPE_CHECKING:
     # Filled by a later step of Phase 1.1. Annotation-only.
     from ..context import ToolContext
 
 
-# The name the model sees; the strictest common rule across chat-model tool APIs.
-TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
-
 DEFAULT_TIMEOUT_S = 120.0
 
 type ToolHandler = Callable[..., Awaitable[Any]]
 # Turns a successful result into zero or more UI view events for the EventSink.
 type OnResultHook = Callable[[Any, ToolContext], Iterable[Mapping[str, Any]]]
-
-
-def _freeze_ports(
-    ports: Mapping[str, PortSpec], field_name: str, forbidden: str
-) -> Mapping[str, PortSpec]:
-    """Check one direction's ports; ``forbidden`` is the other direction's attribute."""
-    for name, port in ports.items():
-        if not isinstance(name, str) or not name:
-            raise ValueError(f"{field_name} port names must be non-empty strings: {name!r}")
-        if not isinstance(port, PortSpec):
-            raise TypeError(f"{field_name} port {name!r} must be a PortSpec, not {port!r}")
-        if getattr(port, forbidden) is not None:
-            raise ValueError(f"{field_name} port {name!r} must not set {forbidden}")
-    return MappingProxyType(dict(ports))
 
 
 @dataclass(frozen=True, eq=False, kw_only=True)
@@ -154,8 +138,8 @@ class ToolSpec:
         if self.input_schema is not None:
             _set("input_schema", MappingProxyType(dict(self.input_schema)))
 
-        _set("inputs", _freeze_ports(self.inputs, "inputs", forbidden="extract"))
-        _set("outputs", _freeze_ports(self.outputs, "outputs", forbidden="param"))
+        _set("inputs", freeze_ports(self.inputs, "inputs", forbidden=("extract",)))
+        _set("outputs", freeze_ports(self.outputs, "outputs", forbidden=("param",)))
 
         _set("side_effects", coerce_enum(SideEffects, self.side_effects, "side_effects"))
         _set("cost", coerce_enum(Cost, self.cost, "cost"))
