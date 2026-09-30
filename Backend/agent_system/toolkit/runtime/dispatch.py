@@ -35,7 +35,7 @@ from pydantic import BaseModel, ValidationError
 from ..context import ToolContext, use_context
 from ..events import EventType, TextPayload, ToolEvent
 from ..manifest import Execution
-from ..results import error_result, is_error_result
+from ..results import error_result, is_error_result, validation_message
 from ..tools.spec import ToolSpec
 from .cancel import CancelToken, ToolCancelled
 from .inline import run_inline
@@ -68,7 +68,8 @@ class Dispatcher:
         ctx: ToolContext,
         cancel: CancelToken | None = None,
     ) -> Any:
-        ctx = ctx.for_tool(spec.name)
+        ctx = ctx.for_tool(spec.name, cancel=cancel)
+        cancel = ctx.cancel
         with use_context(ctx):
             try:
                 kwargs = validate_arguments(spec, args)
@@ -137,7 +138,7 @@ def validate_arguments(spec: ToolSpec, args: Mapping[str, Any]) -> dict[str, Any
     try:
         model = spec.input_model.model_validate(_parse_json_strings(spec.input_model, args))
     except ValidationError as exc:
-        raise InvalidArguments(_describe(exc)) from exc
+        raise InvalidArguments(validation_message(exc)) from exc
     return dict(model)
 
 
@@ -153,13 +154,6 @@ def _parse_json_strings(model: type[BaseModel], args: Mapping[str, Any]) -> dict
             if isinstance(decoded, (dict, list)):
                 parsed[name] = decoded
     return parsed
-
-
-def _describe(exc: ValidationError) -> str:
-    return "; ".join(
-        f"{'.'.join(map(str, error['loc'])) or 'arguments'}: {error['msg']}"
-        for error in exc.errors()
-    )
 
 
 async def _until_cancelled[T](call: Awaitable[T], cancel: CancelToken | None) -> T:

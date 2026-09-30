@@ -9,8 +9,8 @@ context.
 
 A job (Plan 5) runs in another process: the context crosses over as
 ``to_payload()`` and is rebuilt with ``from_payload()``. The payload is JSON
-and leaves out the three live objects (``event_sink``, ``session_handle``,
-``mailbox``); the worker attaches its own.
+and leaves out the live objects (``event_sink``, ``session_handle``,
+``mailbox``, ``cancel``); the worker attaches its own.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from .manifest import coerce_enum
 
 if TYPE_CHECKING:
     from .events import EventSink
+    from .runtime.cancel import CancelToken
 
 
 class Caller(StrEnum):
@@ -50,8 +51,8 @@ class PrivacyMode(StrEnum):
     PHI_LOCAL = "phi_local"  # patient data may only reach local models
 
 
-# The three live objects; they never enter the payload.
-LIVE_FIELDS: frozenset[str] = frozenset({"event_sink", "session_handle", "mailbox"})
+# The live objects; they never enter the payload.
+LIVE_FIELDS: frozenset[str] = frozenset({"event_sink", "session_handle", "mailbox", "cancel"})
 
 
 class NoToolContextError(RuntimeError):
@@ -82,6 +83,8 @@ class ToolContext:
     event_sink: EventSink | None = field(default=None, compare=False, repr=False)
     session_handle: Any = field(default=None, compare=False, repr=False)
     mailbox: asyncio.Queue[str] | None = field(default=None, compare=False, repr=False)
+    # The call's cancel token, set by dispatch: long work can check it or pass it down.
+    cancel: CancelToken | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         def _set(name: str, value: Any) -> None:
@@ -105,9 +108,10 @@ class ToolContext:
 
     # --- derived contexts
 
-    def for_tool(self, tool_name: str) -> ToolContext:
-        """The context for one tool call made from this context."""
-        return copy.replace(self, tool_name=tool_name)
+    def for_tool(self, tool_name: str, *, cancel: CancelToken | None = None) -> ToolContext:
+        """The context for one tool call made from this context. The call's
+        cancel token defaults to the one this context runs under."""
+        return copy.replace(self, tool_name=tool_name, cancel=cancel or self.cancel)
 
     def for_subagent(self, agent_type: str) -> ToolContext:
         """The context of an internal agent started with run_agent: one level deeper."""
@@ -137,6 +141,7 @@ class ToolContext:
         event_sink: EventSink | None = None,
         session_handle: Any = None,
         mailbox: asyncio.Queue[str] | None = None,
+        cancel: CancelToken | None = None,
     ) -> ToolContext:
         """Rebuild a context from ``to_payload()``, attaching this side's live objects."""
         allowed = {item.name for item in fields(cls)} - LIVE_FIELDS
@@ -148,6 +153,7 @@ class ToolContext:
             event_sink=event_sink,
             session_handle=session_handle,
             mailbox=mailbox,
+            cancel=cancel,
         )
 
 
