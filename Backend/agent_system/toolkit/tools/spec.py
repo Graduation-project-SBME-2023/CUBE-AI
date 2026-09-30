@@ -15,7 +15,7 @@ No AutoGen, LangGraph, or MCP imports: the toolkit is framework-neutral.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
@@ -43,15 +43,16 @@ from ..manifest import (
 from ..ports import PortSpec, freeze_ports
 
 if TYPE_CHECKING:
-    # Filled by a later step of Phase 1.1. Annotation-only.
     from ..context import ToolContext
+    from ..events import ViewEvent
 
 
 DEFAULT_TIMEOUT_S = 120.0
 
 type ToolHandler = Callable[..., Awaitable[Any]]
-# Turns a successful result into zero or more UI view events for the EventSink.
-type OnResultHook = Callable[[Any, ToolContext], Iterable[Mapping[str, Any]]]
+# Turns a successful result into the UI view events the EventSink sends. Async,
+# because the legacy hooks it replaces read the agent output over HTTP.
+type OnResultHook = Callable[[Any, ToolContext], Awaitable[Sequence[ViewEvent]]]
 
 
 @dataclass(frozen=True, eq=False, kw_only=True)
