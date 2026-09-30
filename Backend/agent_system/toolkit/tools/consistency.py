@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import types
 import typing
-from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import TYPE_CHECKING, Annotated, Any, Literal, TypeAliasType, get_args, get_origin
@@ -107,14 +106,13 @@ def check_manifest(spec: ToolSpec) -> list[ManifestViolation]:
                     ManifestRule.GRAPH_OUTPUT_EXTRACT,
                     f"output port {port_name!r} needs an extract function",
                 )
-        arg_names = _arg_names(spec)
         for port_name, port in spec.inputs.items():
             if port.param is None:
                 fail(
                     ManifestRule.GRAPH_INPUT_PARAM,
                     f"input port {port_name!r} must name the argument that receives it (param)",
                 )
-            elif port.param not in arg_names:
+            elif port.param not in spec.arg_names:
                 fail(
                     ManifestRule.GRAPH_INPUT_PARAM,
                     f"input port {port_name!r} names param {port.param!r}, "
@@ -122,13 +120,6 @@ def check_manifest(spec: ToolSpec) -> list[ManifestViolation]:
                 )
 
     return violations
-
-
-def _arg_names(spec: ToolSpec) -> set[str]:
-    if spec.input_model is not None:
-        return set(spec.input_model.model_fields)
-    properties = (spec.input_schema or {}).get("properties", {})
-    return set(properties) if isinstance(properties, Mapping) else set()
 
 
 # --- JSON-only args ---------------------------------------------------------

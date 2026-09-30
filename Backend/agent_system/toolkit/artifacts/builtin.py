@@ -231,7 +231,4 @@ BUILTIN_ARTIFACT_TYPES: tuple[ArtifactType, ...] = (
 
 def builtin_registry() -> ArtifactTypeRegistry:
     """A fresh registry holding the built-in types; the catalog adds pack types to it."""
-    registry = ArtifactTypeRegistry()
-    for artifact_type in BUILTIN_ARTIFACT_TYPES:
-        registry.register(artifact_type)
-    return registry
+    return ArtifactTypeRegistry(BUILTIN_ARTIFACT_TYPES)

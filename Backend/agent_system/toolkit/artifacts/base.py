@@ -14,13 +14,13 @@ and the Validator (Plan 8) refuses a binding whose types are not compatible.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ..ports import ARTIFACT_TYPE_PATTERN, ExtractedArtifact
+from ..registry import Registry, UnknownNameError
 
 # Summaries go into the Main Agent's context; refs are pointers. Both stay small.
 MAX_REF_BYTES = 64 * 1024
@@ -43,11 +43,8 @@ class ArtifactValidationError(ValueError):
     """An extracted artifact does not match its type."""
 
 
-class UnknownArtifactTypeError(KeyError):
-    """No artifact type is registered under this name."""
-
-    def __str__(self) -> str:  # KeyError would print the repr of the name
-        return f"unknown artifact type {self.args[0]!r}"
+class UnknownArtifactTypeError(UnknownNameError):
+    kind = "artifact type"
 
 
 @dataclass(frozen=True, eq=False, kw_only=True)
@@ -133,40 +130,13 @@ class ArtifactType:
         return f"ArtifactType(name={self.name!r}, version={self.version})"
 
 
-class ArtifactTypeRegistry:
+class ArtifactTypeRegistry(Registry[ArtifactType]):
     """The artifact types known to one catalog. Built-in types come from
     ``builtin.py``; packs may register more. Parents may be registered after
     their children; ``problems()`` reports any that never were."""
 
-    def __init__(self) -> None:
-        self._types: dict[str, ArtifactType] = {}
-
-    def register(self, artifact_type: ArtifactType) -> ArtifactType:
-        if not isinstance(artifact_type, ArtifactType):
-            raise TypeError(f"expected an ArtifactType, not {artifact_type!r}")
-        existing = self._types.get(artifact_type.name)
-        if existing is not None and existing is not artifact_type:
-            raise ValueError(f"artifact type {artifact_type.name!r} is already registered")
-        self._types[artifact_type.name] = artifact_type
-        return artifact_type
-
-    def get(self, name: str) -> ArtifactType:
-        try:
-            return self._types[name]
-        except KeyError:
-            raise UnknownArtifactTypeError(name) from None
-
-    def __contains__(self, name: object) -> bool:
-        return name in self._types
-
-    def __iter__(self) -> Iterator[ArtifactType]:
-        return iter(self._types.values())
-
-    def __len__(self) -> int:
-        return len(self._types)
-
-    def names(self) -> frozenset[str]:
-        return frozenset(self._types)
+    item_type = ArtifactType
+    unknown_error = UnknownArtifactTypeError
 
     def ancestors(self, name: str) -> frozenset[str]:
         """Every type ``name`` can stand in for, excluding itself (parents,
@@ -178,8 +148,8 @@ class ArtifactTypeRegistry:
             if parent in seen or parent == name:
                 continue
             seen.add(parent)
-            if parent in self._types:
-                pending.extend(self._types[parent].parents)
+            if parent in self._items:
+                pending.extend(self._items[parent].parents)
         return frozenset(seen)
 
     def is_compatible(self, produced: str, expected: str) -> bool:
@@ -200,13 +170,13 @@ class ArtifactTypeRegistry:
 
     def _reaches_itself(self, name: str) -> bool:
         seen: set[str] = set()
-        pending = list(self._types[name].parents)
+        pending = list(self._items[name].parents)
         while pending:
             parent = pending.pop()
             if parent == name:
                 return True
-            if parent in seen or parent not in self._types:
+            if parent in seen or parent not in self._items:
                 continue
             seen.add(parent)
-            pending.extend(self._types[parent].parents)
+            pending.extend(self._items[parent].parents)
         return False
