@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from ..ports import PortSpec
 from .manifest import (
     MAX_PRIORITY,
     MIN_PRIORITY,
@@ -41,9 +42,8 @@ from .manifest import (
 )
 
 if TYPE_CHECKING:
-    # Filled by later steps of Phase 1.1 (ports.py, context.py). Annotation-only.
+    # Filled by a later step of Phase 1.1. Annotation-only.
     from ..context import ToolContext
-    from ..ports import PortSpec
 
 
 # The name the model sees; the strictest common rule across chat-model tool APIs.
@@ -56,10 +56,17 @@ type ToolHandler = Callable[..., Awaitable[Any]]
 type OnResultHook = Callable[[Any, ToolContext], Iterable[Mapping[str, Any]]]
 
 
-def _freeze_ports(ports: Mapping[str, Any], field_name: str) -> Mapping[str, Any]:
-    for port in ports:
-        if not isinstance(port, str) or not port:
-            raise ValueError(f"{field_name} port names must be non-empty strings: {port!r}")
+def _freeze_ports(
+    ports: Mapping[str, PortSpec], field_name: str, forbidden: str
+) -> Mapping[str, PortSpec]:
+    """Check one direction's ports; ``forbidden`` is the other direction's attribute."""
+    for name, port in ports.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"{field_name} port names must be non-empty strings: {name!r}")
+        if not isinstance(port, PortSpec):
+            raise TypeError(f"{field_name} port {name!r} must be a PortSpec, not {port!r}")
+        if getattr(port, forbidden) is not None:
+            raise ValueError(f"{field_name} port {name!r} must not set {forbidden}")
     return MappingProxyType(dict(ports))
 
 
@@ -86,7 +93,7 @@ class ToolSpec:
     input_schema: Mapping[str, Any] | None = None  # external: raw JSON schema
     output_model: type[BaseModel] | None = None
 
-    # --- ports (artifact types, see toolkit/artifacts/)
+    # --- ports (see toolkit/ports.py): inputs set param, outputs set extract
     inputs: Mapping[str, PortSpec] = field(default_factory=dict)
     outputs: Mapping[str, PortSpec] = field(default_factory=dict)
 
@@ -147,8 +154,8 @@ class ToolSpec:
         if self.input_schema is not None:
             _set("input_schema", MappingProxyType(dict(self.input_schema)))
 
-        _set("inputs", _freeze_ports(self.inputs, "inputs"))
-        _set("outputs", _freeze_ports(self.outputs, "outputs"))
+        _set("inputs", _freeze_ports(self.inputs, "inputs", forbidden="extract"))
+        _set("outputs", _freeze_ports(self.outputs, "outputs", forbidden="param"))
 
         _set("side_effects", coerce_enum(SideEffects, self.side_effects, "side_effects"))
         _set("cost", coerce_enum(Cost, self.cost, "cost"))

@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
+from agent_system.toolkit.ports import ExtractedArtifact, PortSpec
 from agent_system.toolkit.tools.manifest import (
     Cost,
     DataScope,
@@ -32,6 +33,10 @@ class _Args(BaseModel):
 
 async def _handler(patient_id: str) -> dict[str, Any]:
     return {"status": "ok", "patient_id": patient_id}
+
+
+def _extract(result: Any) -> ExtractedArtifact:
+    return ExtractedArtifact(ref={"cohort_id": result["cohort_id"]})
 
 
 def _spec(**overrides: Any) -> ToolSpec:
@@ -70,7 +75,7 @@ def test_spec_is_immutable():
     with pytest.raises(AttributeError):
         spec.name = "other"  # type: ignore[misc]
     with pytest.raises(TypeError):
-        spec.inputs["cohort"] = object()  # type: ignore[index]
+        spec.inputs["cohort"] = PortSpec("Cohort")  # type: ignore[index]
 
 
 def test_copy_replace_builds_a_revalidated_copy():
@@ -88,10 +93,10 @@ def test_copy_replace_builds_a_revalidated_copy():
 
 
 def test_ports_are_copied_not_aliased():
-    ports: dict[str, Any] = {"cohort": object()}
+    ports = {"cohort": PortSpec("Cohort", param="patient_id")}
     spec = _spec(inputs=ports)
 
-    ports["masks"] = object()
+    ports["masks"] = PortSpec("MaskSet", param="patient_id")
 
     assert set(spec.inputs) == {"cohort"}
 
@@ -173,7 +178,10 @@ def test_spec_is_not_hashed_by_value():
         ({"input_schema": {"type": "object"}}, ValueError, "exactly one"),
         ({"input_model": dict}, TypeError, "input_model"),
         ({"output_model": object}, TypeError, "output_model"),
-        ({"inputs": {"": object()}}, ValueError, "port names"),
+        ({"inputs": {"": PortSpec("Cohort")}}, ValueError, "port names"),
+        ({"inputs": {"cohort": "Cohort"}}, TypeError, "must be a PortSpec"),
+        ({"inputs": {"cohort": PortSpec("Cohort", extract=_extract)}}, ValueError, "set extract"),
+        ({"outputs": {"cohort": PortSpec("Cohort", param="patient_id")}}, ValueError, "set param"),
         ({"execution": "remote"}, ValueError, "execution='remote'"),
         ({"cost": "free"}, ValueError, "cost="),
         ({"side_effects": "maybe"}, ValueError, "side_effects="),

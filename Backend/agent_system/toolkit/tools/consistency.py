@@ -8,8 +8,9 @@ every registered tool and raises with all the violations at once:
 - ``cost="heavy"`` => ``execution="job"``;
 - ``execution="job"`` => ``resources`` is not empty, and the args are JSON only;
 - ``"main"`` in ``visibility`` => ``execution="inline"`` and ``cost`` is not heavy;
-- ``"graph"`` in ``visibility`` => at least one output port, and every input
-  port's ``param`` is an argument of the tool.
+- ``"graph"`` in ``visibility`` => at least one output port, every output port
+  has an ``extract`` (the Node Runner cannot record the artifact without one),
+  and every input port's ``param`` is an argument of the tool.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ class ManifestRule(StrEnum):
     JOB_ARGS_JSON = "job_args_json"
     MAIN_INLINE_NOT_HEAVY = "main_inline_not_heavy"
     GRAPH_OUTPUT_PORT = "graph_output_port"
+    GRAPH_OUTPUT_EXTRACT = "graph_output_extract"
     GRAPH_INPUT_PARAM = "graph_input_param"
 
 
@@ -99,6 +101,12 @@ def check_manifest(spec: ToolSpec) -> list[ManifestViolation]:
     if Visibility.GRAPH in spec.visibility:
         if not spec.outputs:
             fail(ManifestRule.GRAPH_OUTPUT_PORT, '"graph" visibility requires at least one output port')
+        for port_name, port in spec.outputs.items():
+            if port.extract is None:
+                fail(
+                    ManifestRule.GRAPH_OUTPUT_EXTRACT,
+                    f"output port {port_name!r} needs an extract function",
+                )
         arg_names = _arg_names(spec)
         for port_name, port in spec.inputs.items():
             if port.param is None:
