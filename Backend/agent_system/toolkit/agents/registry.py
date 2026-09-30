@@ -17,7 +17,6 @@ class UnknownAgentError(UnknownNameError):
 
 class AgentRegistry(Registry[AgentSpec]):
     item_type = AgentSpec
-    key = "agent_type"
     unknown_error = UnknownAgentError
 
     def of_kind(self, kind: AgentKind | str) -> tuple[AgentSpec, ...]:

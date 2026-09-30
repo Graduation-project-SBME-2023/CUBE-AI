@@ -14,7 +14,7 @@ parameter is not an argument: dispatch fills it (``ToolSpec.context_param``).
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from types import ModuleType
 from typing import Any
 
@@ -143,22 +143,35 @@ class ToolRegistry(Registry[ToolSpec]):
             packs.setdefault(spec.pack, []).append(spec)
         return {pack: tuple(specs) for pack, specs in sorted(packs.items())}
 
+    @staticmethod
+    def audience_of(agent: AgentSpec) -> Visibility:
+        """Control agents choose among the ``main`` tools, every other agent
+        among the ``agent`` tools."""
+        return Visibility.MAIN if agent.kind is AgentKind.CONTROL else Visibility.AGENT
+
+    def screen(self, agent: AgentSpec, names: Iterable[str]) -> tuple[list[str], list[str]]:
+        """Split an allowlist's problems into (unknown names, names ``agent`` may not use)."""
+        audience = self.audience_of(agent)
+        unknown = [name for name in names if name not in self]
+        hidden = [
+            name for name in names if name in self and not self.get(name).visible_to(audience)
+        ]
+        return unknown, hidden
+
     def for_agent(self, agent: AgentSpec, ctx: ToolContext) -> tuple[ToolSpec, ...]:
         """The tools ``agent`` gets for this run, in its allowlist's order.
 
-        Control agents choose among the ``main`` tools, every other agent among
-        the ``agent`` tools; a function-valued allowlist only ever sees those,
-        and a fixed one naming anything else is refused.
+        A function-valued allowlist only ever sees the tools of the agent's
+        audience; a fixed one naming anything else is refused.
         """
-        audience = Visibility.MAIN if agent.kind is AgentKind.CONTROL else Visibility.AGENT
-        candidates = {spec.name: spec for spec in self.visible_to(audience)}
-        names = agent.tools_for(ctx, tuple(candidates.values()))
-        refused = [name for name in names if name not in candidates]
-        for name in refused:
-            self.get(name)  # an unknown name raises UnknownToolError first
-        if refused:
+        candidates = self.visible_to(self.audience_of(agent))
+        names = agent.tools_for(ctx, candidates)
+        unknown, hidden = self.screen(agent, names)
+        if unknown:
+            raise UnknownToolError(unknown[0])
+        if hidden:
             raise ToolNotAllowedError(
-                f"agent {agent.agent_type!r} may not use {refused}: "
-                f"not visible to {audience.value!r}"
+                f"agent {agent.agent_type!r} may not use {hidden}: "
+                f"not visible to {self.audience_of(agent).value!r}"
             )
-        return tuple(candidates[name] for name in names)
+        return tuple(self.get(name) for name in names)

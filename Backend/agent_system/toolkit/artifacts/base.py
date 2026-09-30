@@ -20,7 +20,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from ..ports import ARTIFACT_TYPE_PATTERN, ExtractedArtifact
-from ..registry import Registry, UnknownNameError
+from ..registry import Registry, UnknownNameError, reachable
 
 # Summaries go into the Main Agent's context; refs are pointers. Both stay small.
 MAX_REF_BYTES = 64 * 1024
@@ -141,16 +141,8 @@ class ArtifactTypeRegistry(Registry[ArtifactType]):
     def ancestors(self, name: str) -> frozenset[str]:
         """Every type ``name`` can stand in for, excluding itself (parents,
         their parents, ...). Unknown parents are included; ``problems()`` flags them."""
-        seen: set[str] = set()
-        pending = list(self.get(name).parents)
-        while pending:
-            parent = pending.pop()
-            if parent in seen or parent == name:
-                continue
-            seen.add(parent)
-            if parent in self._items:
-                pending.extend(self._items[parent].parents)
-        return frozenset(seen)
+        self.get(name)
+        return frozenset(reachable(name, self._parents) - {name})
 
     def is_compatible(self, produced: str, expected: str) -> bool:
         """Can an artifact of type ``produced`` fill a port expecting ``expected``?
@@ -164,19 +156,9 @@ class ArtifactTypeRegistry(Registry[ArtifactType]):
             for parent in sorted(artifact_type.parents - self.names()):
                 found.append(f"artifact type {artifact_type.name!r} names unknown parent {parent!r}")
         for artifact_type in self:
-            if self._reaches_itself(artifact_type.name):
+            if artifact_type.name in reachable(artifact_type.name, self._parents):
                 found.append(f"artifact type {artifact_type.name!r} is in an inheritance cycle")
         return found
 
-    def _reaches_itself(self, name: str) -> bool:
-        seen: set[str] = set()
-        pending = list(self._items[name].parents)
-        while pending:
-            parent = pending.pop()
-            if parent == name:
-                return True
-            if parent in seen or parent not in self._items:
-                continue
-            seen.add(parent)
-            pending.extend(self._items[parent].parents)
-        return False
+    def _parents(self, name: str) -> frozenset[str]:
+        return self._items[name].parents if name in self._items else frozenset()

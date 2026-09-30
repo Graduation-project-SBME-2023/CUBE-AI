@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
-from typing import Any, ClassVar
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, ClassVar, Protocol
 
 
 class UnknownNameError(KeyError):
@@ -15,17 +15,33 @@ class UnknownNameError(KeyError):
         return f"unknown {self.kind} {self.args[0]!r}"
 
 
-class Registry[T]:
-    """One item per name, kept in registration order.
+class Named(Protocol):
+    @property
+    def name(self) -> str: ...
 
-    Subclasses set ``item_type``, the ``key`` attribute that names an item, and
-    the ``unknown_error`` raised by ``get()`` (its ``kind`` names the items in
-    every message). Registering the same object twice is harmless; a second
-    object under a taken name is refused.
+
+def reachable(start: str, edges: Callable[[str], Iterable[str]]) -> set[str]:
+    """Every name reachable from ``start`` by following ``edges`` one or more
+    times. ``start`` is in the result only when it lies on a cycle."""
+    seen: set[str] = set()
+    pending = list(edges(start))
+    while pending:
+        name = pending.pop()
+        if name not in seen:
+            seen.add(name)
+            pending.extend(edges(name))
+    return seen
+
+
+class Registry[T: Named]:
+    """One item per ``name``, kept in registration order.
+
+    Subclasses set ``item_type`` and the ``unknown_error`` raised by ``get()``
+    (its ``kind`` names the items in every message). Registering the same
+    object twice is harmless; a second object under a taken name is refused.
     """
 
     item_type: ClassVar[type]
-    key: ClassVar[str] = "name"
     unknown_error: ClassVar[type[UnknownNameError]] = UnknownNameError
 
     def __init__(self, items: Iterable[T] = ()) -> None:
@@ -36,7 +52,7 @@ class Registry[T]:
     def register(self, item: T) -> T:
         if not isinstance(item, self.item_type):
             raise TypeError(f"{self.item_type.__name__} expected, not {item!r}")
-        name = getattr(item, self.key)
+        name = item.name
         existing = self._items.get(name)
         if existing is not None and existing is not item:
             raise ValueError(f"{self.unknown_error.kind} {name!r} is already registered")

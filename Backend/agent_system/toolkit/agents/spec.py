@@ -186,6 +186,11 @@ class AgentSpec:
     # --- derived fields
 
     @property
+    def name(self) -> str:
+        """The agent's name in the catalog, shared with tools: its ``agent_type``."""
+        return self.agent_type
+
+    @property
     def is_graph_node(self) -> bool:
         """Only execution agents can be submitted as graph nodes."""
         return self.kind is AgentKind.EXECUTION
