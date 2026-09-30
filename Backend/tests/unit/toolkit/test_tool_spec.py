@@ -12,7 +12,7 @@ import pytest
 from pydantic import BaseModel
 
 from agent_system.toolkit.ports import ExtractedArtifact, PortSpec
-from agent_system.toolkit.tools.manifest import (
+from agent_system.toolkit.manifest import (
     Cost,
     DataScope,
     Execution,

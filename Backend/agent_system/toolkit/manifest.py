@@ -1,16 +1,6 @@
-"""The manifest vocabulary: the enums and constants a tool manifest is written in.
-
-Kept apart from ``ToolSpec`` because other parts of the toolkit speak the same
-vocabulary without needing the class: ``AgentSpec`` declares ``resources``, the
-sandbox policy (Plan 4) maps ``TrustLevel`` to ``IsolationLevel``, the job
-platform (Plan 5) routes by resource, and the Guardrails (Plan 11) read
-``DataScope`` and ``Visibility``.
-
-No AutoGen, LangGraph, or MCP imports: the toolkit is framework-neutral.
-"""
-
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from enum import StrEnum
 
@@ -96,6 +86,11 @@ RESOURCE_QUEUES: tuple[tuple[Resource, str], ...] = (
 # Celery's Redis transport supports priorities 0-9.
 MIN_PRIORITY = 0
 MAX_PRIORITY = 9
+
+# Tools and agents share one name space (the catalog refuses a name used by
+# both), and every name may reach a model as a tool name or an enum value:
+# this is the strictest common rule across chat-model tool APIs.
+TOOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 def coerce_enum[E: StrEnum](enum_cls: type[E], value: object, field_name: str) -> E:
