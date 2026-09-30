@@ -29,7 +29,7 @@ from typing import Annotated, Any, Literal, Protocol, runtime_checkable
 
 from pydantic import Field, ValidationError, create_model
 
-from ..agents.engine import AgentEngine, AgentStatus
+from ..agents.engine import AgentEngine, AgentResult, AgentStatus
 from ..agents.registry import AgentRegistry
 from ..agents.spec import AgentKind, AgentSpec
 from ..context import ToolContext
@@ -53,6 +53,29 @@ class AgentRuntime(Protocol):
 
     agents: AgentRegistry
     engine: AgentEngine
+
+
+def agent_runtime(ctx: ToolContext) -> AgentRuntime | None:
+    """The session's agent runtime, when the harness provided one."""
+    return ctx.session_handle if isinstance(ctx.session_handle, AgentRuntime) else None
+
+
+def no_runtime_result() -> dict[str, Any]:
+    return error_result("delegation_unavailable", "this session cannot start agents")
+
+
+def failed_result(agent_type: str, result: AgentResult) -> dict[str, Any]:
+    """The error result for a child run that did not complete."""
+    reason = result.summary or f"{agent_type} {result.status}"
+    return error_result(result.error_code or "error", reason, agent_type=agent_type)
+
+
+def invalid_output_result(agent_type: str, exc: ValidationError) -> dict[str, Any]:
+    return error_result(
+        "invalid_output",
+        f"{agent_type} output does not match its contract: {validation_message(exc)}",
+        agent_type=agent_type,
+    )
 
 
 def max_agent_depth() -> int:
@@ -105,16 +128,11 @@ async def delegate(
         )  # fmt: skip
 
     if result.status is not AgentStatus.COMPLETED:
-        reason = result.summary or f"{agent_type} {result.status}"
-        return error_result(result.error_code or "error", reason, agent_type=agent_type)
+        return failed_result(agent_type, result)
     try:
         output = _checked_output(target, result.output)
     except ValidationError as exc:
-        return error_result(
-            "invalid_output",
-            f"{agent_type} output does not match its contract: {validation_message(exc)}",
-            agent_type=agent_type,
-        )
+        return invalid_output_result(agent_type, exc)
     return {
         "status": "completed",
         "agent_type": agent_type,
@@ -160,7 +178,7 @@ async def run_agent(
     inputs: Annotated[dict[str, Any] | None, Field(description=INPUTS_DOC)] = None,
 ) -> dict[str, Any]:
     """Run one of your internal agents on a sub-task and return its result."""
-    runtime = ctx.session_handle
-    if not isinstance(runtime, AgentRuntime):
-        return error_result("delegation_unavailable", "this session cannot start agents")
+    runtime = agent_runtime(ctx)
+    if runtime is None:
+        return no_runtime_result()
     return await delegate(runtime, agent_type, task, inputs or {}, ctx, ctx.cancel)

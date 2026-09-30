@@ -74,7 +74,10 @@ def tool[F: ToolHandler](
 
 
 def spec_of(obj: object) -> ToolSpec | None:
-    """The spec ``@tool`` recorded on ``obj``, if any."""
+    """``obj`` itself when it is a ``ToolSpec`` (built by a factory such as
+    ``make_agent_tool``), or the spec ``@tool`` recorded on it, if any."""
+    if isinstance(obj, ToolSpec):
+        return obj
     spec = getattr(obj, TOOL_SPEC_ATTR, None)
     return spec if isinstance(spec, ToolSpec) else None
 
