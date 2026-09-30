@@ -27,7 +27,6 @@ from ..manifest import TOOL_NAME_PATTERN, Resource, coerce_enum, coerce_enum_set
 from ..ports import PortSpec, freeze_ports
 
 if TYPE_CHECKING:
-    # Filled by a later step of Phase 1.1. Annotation-only.
     from ..context import ToolContext
     from ..tools.spec import ToolSpec
 
