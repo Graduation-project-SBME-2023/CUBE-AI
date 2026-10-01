@@ -236,6 +236,27 @@ def test_an_unknown_parent():
     ]
 
 
+def test_a_control_agent_cannot_own_internal_agents():
+    critic = _agent("graph_critic", "internal", parent="composer")
+    agents = [*_replace(AGENTS, "composer", delegates=["graph_critic"]), critic]
+
+    assert _catalog(agents=agents).problems() == [
+        "agent 'composer': a control agent has no delegates, not ['graph_critic']",
+        "agent 'graph_critic': parent 'composer' is a control agent; "
+        "only execution and internal agents start internal agents",
+    ]
+
+
+def test_an_internal_agent_can_own_internal_agents():
+    checker = _agent("label_checker_agent", "internal", parent="mask_resolution_agent")
+    agents = [
+        *_replace(AGENTS, "mask_resolution_agent", delegates=["label_checker_agent"]),
+        checker,
+    ]
+
+    assert _catalog(agents=agents).problems() == []
+
+
 def test_delegation_cycles():
     agents = _replace(AGENTS, "mask_resolution_agent", delegates=["segmentation_agent"])
 

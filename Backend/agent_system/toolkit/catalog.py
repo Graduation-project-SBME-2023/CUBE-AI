@@ -143,9 +143,18 @@ class Catalog:
             yield "an internal agent needs a parent"
         if not internal and agent.parent is not None:
             yield f"only internal agents have a parent, not {agent.kind} agents"
-        if agent.parent is not None and agent.parent not in self.agents:
-            yield f"unknown parent {agent.parent!r}"
+        if agent.parent is not None:
+            if agent.parent not in self.agents:
+                yield f"unknown parent {agent.parent!r}"
+            elif internal and self.agents.get(agent.parent).kind is AgentKind.CONTROL:
+                yield (
+                    f"parent {agent.parent!r} is a control agent; "
+                    "only execution and internal agents start internal agents"
+                )
 
+        # Control agents never get run_agent, so their delegates could never run.
+        if agent.kind is AgentKind.CONTROL and agent.delegates:
+            yield f"a control agent has no delegates, not {list(agent.delegates)}"
         for name in agent.delegates:
             if name not in self.agents:
                 yield f"unknown delegate {name!r}"
