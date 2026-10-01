@@ -414,6 +414,7 @@ Some plans can move:
 - **`ToolContext`:**
   - It has a fourth live field, `cancel` (the call's `CancelToken`), which is left out of the payload like the other live fields.
   - `for_tool()` and `for_subagent()` derive child contexts.
+  - `execution_mode` defaults to `auto`, the same as the session default (Phase 11.2).
 - **`ToolRegistry`:**
   - `for_main()` takes no `ctx`.
   - `screen(agent, names)` is shared by `for_agent()` and the catalog.
@@ -809,7 +810,7 @@ A smoke test runs every tool with a fake context and a mocked domain API. It che
 ## Phase 6.1 — Schema (Alembic `o1f0a2c3d4e5_v1_o_session_graph.py`, `down_revision = n1f0a2c3d4e5`)
 
 1. **`sessions`:**
-   - add `execution_mode` (`plan|auto`, default `plan`), `privacy_mode` (`standard|phi_local`, default `standard`) and `context_summary` (text);
+   - add `execution_mode` (`plan|auto`, default `auto`; existing rows also get `auto`), `privacy_mode` (`standard|phi_local`, default `standard`) and `context_summary` (text);
    - add `context_summary_upto_message_id` (FK `chat_messages`), the last message the summary covers, so compaction knows where to continue;
    - extend the status CHECK with `idle`, `awaiting_approval` and `blocked`.
 2. **`session_graphs`:** `session_id` (PK/FK), `current_version` (int, default 0), `next_node_seq` (int, default 1, used for readable node ids such as `seg_42`), `updated_at`.
@@ -1320,7 +1321,7 @@ Work added after the graph went idle simply starts a new Executor.
 
 ## Phase 11.2 — Modes (Plan / Auto)
 
-- `execution_mode` is set per session (`PATCH /session/{id}/settings` on the Agent System, which calls the Application API). The default is `plan`.
+- `execution_mode` is set per session (`PATCH /session/{id}/settings` on the Agent System, which calls the Application API). **The default is `auto`** (decided 2026-10-01). Plan mode is opt-in, for users who want to approve every piece of work. The mandatory approvals below still apply in Auto mode, so the risky actions keep a human gate either way.
 - **Plan mode:**
   - diffs that add, modify, restart or release work → `propose` + an approval row, and the session becomes `awaiting_approval`;
   - diffs that only remove pending nodes or cancel work are `allowed`;
@@ -1345,6 +1346,7 @@ Work added after the graph went idle simply starts a new Executor.
 
 **Tests (`tests/unit/harness/test_guardrails.py`, `test_approvals.py`):**
 - each rule outcome; order and short-circuit;
+- a new session is in Auto mode;
 - Plan vs Auto on the same diff; removals allowed in Plan mode;
 - mandatory approvals in Auto mode;
 - the chat commands never reach the LLM; `APPROVE` with 0, 1 or 2 pending approvals;
