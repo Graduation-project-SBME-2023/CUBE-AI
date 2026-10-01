@@ -42,8 +42,8 @@ class Caller(StrEnum):
 
 
 class ExecutionMode(StrEnum):
-    PLAN = "plan"  # work waits for approval
-    AUTO = "auto"
+    AUTO = "auto"  # the default: valid work is applied at once (Plan 11.2)
+    PLAN = "plan"  # opt-in: work waits for approval
 
 
 class PrivacyMode(StrEnum):
@@ -76,7 +76,7 @@ class ToolContext:
     workspace_dir: Path | None = None
     tool_name: str | None = None  # the tool being called
     job_id: str | None = None
-    execution_mode: ExecutionMode = ExecutionMode.PLAN
+    execution_mode: ExecutionMode = ExecutionMode.AUTO
     privacy_mode: PrivacyMode = PrivacyMode.STANDARD
 
     # --- live objects: excluded from the payload, equality and repr

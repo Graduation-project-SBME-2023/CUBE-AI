@@ -47,7 +47,7 @@ def test_defaults_and_normalisation():
     ctx = ToolContext(session_id="s1", caller="main")
 
     assert ctx.caller is Caller.MAIN
-    assert ctx.execution_mode is ExecutionMode.PLAN
+    assert ctx.execution_mode is ExecutionMode.AUTO
     assert ctx.privacy_mode is PrivacyMode.STANDARD
     assert ctx.depth == 0
     assert ctx.agent_run_id is ctx.node_id is ctx.step_id is ctx.job_id is None
@@ -114,7 +114,7 @@ def test_for_subagent_goes_one_level_deeper():
 def test_payload_is_json_and_leaves_out_live_objects():
     ctx = _ctx(
         caller="node",
-        execution_mode="auto",
+        execution_mode="plan",
         privacy_mode="phi_local",
         job_id="job-1",
         event_sink=_Sink(),
@@ -127,7 +127,7 @@ def test_payload_is_json_and_leaves_out_live_objects():
     assert json.loads(json.dumps(payload)) == payload
     assert not {"event_sink", "session_handle", "mailbox"} & payload.keys()
     assert payload["caller"] == "node"
-    assert payload["execution_mode"] == "auto"
+    assert payload["execution_mode"] == "plan"
     assert payload["privacy_mode"] == "phi_local"
     assert payload["workspace_dir"] == str(Path("/storage/hypotheses/workspace_x"))
 
