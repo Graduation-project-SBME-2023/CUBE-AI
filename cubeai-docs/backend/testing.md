@@ -32,11 +32,12 @@ local PowerShell scripts.
 
 | Option | Values | Purpose |
 |---|---|---|
-| `-Suite` | `deterministic` | Fast unit, contract, and mocked full-pipeline tests. This is the PR gate. |
+| `-Suite` | `deterministic` | Fast unit, contract, and mocked full-pipeline tests, minus `legacy_autogen`. This is the PR gate. |
+| `-Suite` | `legacy-autogen` | Tests of the AutoGen pipeline the toolkit replaces; outside the PR gate while it is migrated. |
 | `-Suite` | `agent-regression` | Consolidated agent-system resilience and segmentation regression tests. |
 | `-Suite` | `radiology` | Radiology unit tests plus model-artifact and VoxTell geometry tests in the MONAI/Torch image. |
 | `-Suite` | `integration` | Health checks against running Docker services. |
-| `-Suite` | `all` | Runs deterministic, agent regression, then radiology. |
+| `-Suite` | `all` | Runs deterministic, legacy-autogen, agent regression, then radiology. |
 | `-Runtime` | `docker` | Default. Uses the correct project container image. |
 | `-Runtime` | `local` | Uses the Python command supplied by `-Python`. |
 | `-Python` | executable/path | Local Python command; default is `python`. |
@@ -86,7 +87,7 @@ Run only deterministic tests:
 python -m pytest -c Backend/pytest.ini `
   Backend/tests/unit Backend/tests/contracts Backend/tests/pipeline `
   --ignore=Backend/tests/unit/radiology `
-  -m "unit or contract or pipeline"
+  -m "(unit or contract or pipeline) and not legacy_autogen"
 ```
 
 Run agent regressions:
@@ -111,9 +112,10 @@ python -m pytest -c Backend/pytest.ini `
 | File | Function |
 |---|---|
 | `Backend/pytest.ini` | Test discovery, strict markers, asyncio behavior, and suite marker definitions. |
-| `Backend/conftest.py` | Canonical import order, temporary storage isolation, shared workspaces, fake MCP tool descriptors, agent-constructor capture, and automatic regression/radiology markers. |
+| `Backend/conftest.py` | Canonical import order, temporary storage isolation, shared workspaces, fake MCP tool descriptors, agent-constructor capture, and automatic regression/radiology/legacy_autogen markers (`LEGACY_AUTOGEN_TESTS`). |
 | `Backend/requirements/test.txt` | Test-only packages: pytest, asyncio support, coverage, mocks, timeouts, and HTTP mocking. |
 | `Backend/tests/run_tests.ps1` | Unified Docker/local runner, suite selection, JUnit reports, coverage, and integration-service URLs. |
+| `Backend/tests/support/toolkit_fixtures.py` | Toolkit fakes: `fake_context`, `fake_event_sink`, `fake_catalog`, `fake_domain_api` (respx), `fake_chat_model` (Plan 9), plus `call_tool` and `fake_runtime`. Imported by `tests/unit/toolkit/conftest.py`, not the root conftest, because the toolkit needs Python 3.13. |
 | `Backend/tests/support/mcp_loader.py` | Loads repository MCP tool modules privately without colliding with the installed `mcp` SDK or legacy `tools` package. |
 
 ### Execution-agent unit tests

@@ -318,6 +318,15 @@ def _agent(kind: str, allowed_tools: Any) -> AgentSpec:
     )
 
 
+def test_an_agent_is_not_a_tool():
+    agent = _agent("execution", [])
+
+    assert not isinstance(agent, ToolSpec)
+    assert spec_of(agent) is None  # so the catalog never collects it as a tool
+    with pytest.raises(TypeError, match="ToolSpec expected"):
+        ToolRegistry().register(agent)  # type: ignore[arg-type]
+
+
 def test_for_agent_keeps_the_allowlist_order():
     agent = _agent("execution", ["list_models", "get_patient", "run_segmentation_with_guard"])
 

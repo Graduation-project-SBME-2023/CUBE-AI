@@ -2,6 +2,7 @@
 param(
     [ValidateSet(
         "deterministic",
+        "legacy-autogen",
         "agent-regression",
         "radiology",
         "integration",
@@ -33,7 +34,19 @@ $Suites = [ordered]@{
             "Backend/tests/pipeline"
         )
         ExtraArgs = @("--ignore=Backend/tests/unit/radiology")
-        Marker = "unit or contract or pipeline"
+        Marker = "(unit or contract or pipeline) and not legacy_autogen"
+        Environment = @{}
+    }
+    "legacy-autogen" = @{
+        Description = "Tests of the AutoGen pipeline the toolkit replaces (kept out of the PR gate)."
+        Image = $AgentImage
+        Paths = @(
+            "Backend/tests/unit",
+            "Backend/tests/pipeline",
+            "Backend/tests/regression/agent_system"
+        )
+        ExtraArgs = @("--ignore=Backend/tests/unit/radiology")
+        Marker = "legacy_autogen"
         Environment = @{}
     }
     "agent-regression" = @{
@@ -75,7 +88,7 @@ function Show-Suites {
         Write-Host "  $($entry.Key): $($entry.Value.Description)"
         Write-Host "    $($entry.Value.Paths -join ', ')"
     }
-    Write-Host "  all: deterministic + agent-regression + radiology"
+    Write-Host "  all: deterministic + legacy-autogen + agent-regression + radiology"
 }
 
 function Get-CoverageArguments([string]$Name) {
@@ -169,7 +182,7 @@ if ($Coverage -and $Suite -notin @("deterministic", "all")) {
 }
 
 if ($Suite -eq "all") {
-    foreach ($suiteName in @("deterministic", "agent-regression", "radiology")) {
+    foreach ($suiteName in @("deterministic", "legacy-autogen", "agent-regression", "radiology")) {
         Invoke-Suite $suiteName
     }
 }

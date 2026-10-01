@@ -40,7 +40,7 @@ jobs:
           Backend/tests/unit
           Backend/tests/contracts
           Backend/tests/pipeline
-          -m "unit or contract or pipeline"
+          -m "(unit or contract or pipeline) and not legacy_autogen"
           --junitxml=Backend/test-results/backend-deterministic.xml
 
       - name: Upload test results

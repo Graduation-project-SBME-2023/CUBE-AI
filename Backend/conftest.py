@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import tempfile
+from fnmatch import fnmatchcase
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -140,9 +141,40 @@ def capture_agent_init(monkeypatch: pytest.MonkeyPatch):
     return _install
 
 
+# Tests of the AutoGen pipeline the toolkit replaces; the deterministic suite
+# leaves them out. Patterns are relative to Backend/tests; ``::Class`` limits a
+# file to the test classes that drive AutoGen agents or the GraphFlow monitor.
+LEGACY_AUTOGEN_TESTS = (
+    "unit/agents/test_*_agent.py",
+    "pipeline/test_pipeline_builder.py",
+    "pipeline/test_pipeline_orchestration.py",
+    "regression/agent_system/test_pipeline_failure_guard.py",
+    "regression/agent_system/test_segmentation_hardening.py::SegmentationPlannerTests",
+    "regression/agent_system/test_segmentation_hardening.py::PipelineFailureTests",
+)
+TESTS_ROOT = BACKEND_ROOT / "tests"
+
+
+def _is_legacy_autogen(item: pytest.Item) -> bool:
+    try:
+        relative = Path(item.path).resolve().relative_to(TESTS_ROOT.resolve()).as_posix()
+    except ValueError:
+        return False
+    test_class = getattr(item, "cls", None)
+    for pattern in LEGACY_AUTOGEN_TESTS:
+        path, _, class_name = pattern.partition("::")
+        if fnmatchcase(relative, path) and (
+            not class_name or (test_class is not None and test_class.__name__ == class_name)
+        ):
+            return True
+    return False
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Classify consolidated legacy suites without editing every old file."""
     for item in items:
+        if _is_legacy_autogen(item):
+            item.add_marker(pytest.mark.legacy_autogen)
         normalized_path = str(item.path).replace("\\", "/")
         if "/tests/regression/agent_system/" in normalized_path:
             item.add_marker(pytest.mark.regression)
