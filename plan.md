@@ -149,7 +149,7 @@ Backend/
       graph_store.py fingerprint.py diff_engine.py executor.py node_runner.py
       resources.py expectations.py watchdog.py recovery.py
     config/                       data only: models.yaml (9) resources.yaml (10) mcp_servers.yaml (14)
-  application_api/                Plan 6: graph + supporting models, repositories, schemas, routes; migrations "o", "p", "q"
+  application_api/                Plan 6: graph models, repositories, schemas, routes, migration "o"
   jobs_core/                      Plan 5 (backends/monai_http.py: Plan 15)
   compute_worker/                 Plan 5 (Celery app)
   sandbox/                        Plan 4
@@ -175,7 +175,7 @@ Backend/
 | 13 | Recovery and Privacy | M4 Hardening | 10, 11, 12 | system Phase 3 | Not started |
 | 14 | MCP Outbound Edge | M4 | 1, 4, 11 | tools P7 | Not started |
 | 15 | MONAI Jobs + Segmentation Client | M5 Job fixes | 5 (Phase 5.1 only) | tools P8 | Not started |
-| 16 | Other Job Systems | M5 | 5, 6 (Phase 6.5), 15 | tools P9 | Not started |
+| 16 | Other Job Systems | M5 | 5, 15 | tools P9 | Not started |
 | 17 | Cut-over, AutoGen Removal, Cleanup, Docs | M6 | all | tools P10; your decision | Not started |
 
 **Progress (2026-10-01):** Plan 1 is done: all five phases, 505 toolkit tests passing on Python 3.13 (see "Plan 1 — as built" at the end of Plan 1). Plan 1 was done **before** Plan 0, so the order above was not followed. The toolkit is written for 3.13, but the agents image is still `python:3.11.3`. Until Plan 0 lands, run the toolkit tests from a local 3.13 venv: in Docker, the deterministic suite cannot collect `tests/unit/toolkit/`.
@@ -789,59 +789,31 @@ A smoke test runs every tool with a fake context and a mocked domain API. It che
 
 # Plan 6 — Session State Store (Application API)
 
-**Goal:** durable state for Graphs, Nodes, Runs, Artifacts and Approvals (system §4 "State"), owned by the Application API. The Agent System reaches it only over HTTP. This plan also adds **every other database part that the later plans need and that does not exist yet** (Phase 6.5), so that all schema work lives in one plan.
-
-**Database map (checked against `application_api/db/models/`):**
-
-| Need (plan) | Exists today? | Where it goes |
-|---|---|---|
-| Sessions, chats, chat messages with `role` (Plan 12) | Yes (`sessions`, `chats`, `chat_messages` with `user`/`assistant`/`system` roles) | Reused; `sessions` gets new columns (6.1) |
-| Runs for every node, with error code and usage (Plans 5, 10) | Partly (`agent_runs` is tied to `plan_steps`) | Extended (6.1) |
-| Session Graph, versions, nodes, artifacts, approvals (Plans 8, 10, 11) | No | New tables (6.1) |
-| Stored `plan` / `recover` proposals (Plans 12, 13) | No | New `graph_proposals` (6.1) |
-| LLM token usage for Main, Composer and Recovery turns, which are not node runs (Plans 9, 11) | No | New `llm_usage` (6.1) |
-| Reused radiomics rows linked to the current run (Plan 7, H12) | No (reads only `created_by_agent_run_id`, `repositories/radiomics.py:261`) | New `radiomics_feature_links` (6.5) |
-| A stored PDF for a report (`ReportDocument.has_pdf`, `latex_to_pdf` as a node; Plans 2, 16) | No (the PDF is compiled on demand and returned as bytes, `repositories/reports.py:433-469`) | `reports.pdf_artifact_id` + artifact kind `report_pdf` (6.5) |
-| A server-side training job on the workflow row (Plan 16, T1) | No (`workflow` has `dataset_id` and `status` only) | New `workflow` training columns (6.5) |
-| Durable ingestion job records, with what each attempt created (Plan 16, G1/G7/G8) | No (JSON files under `storage/jobs/ingestion`, `ingestion/jobs.py`) | New `ingestion_jobs` (6.5) |
-| Compute job state (Plan 5) | – | **Redis, not PostgreSQL**; `agent_runs.job_id` links a run to its job |
-| MONAI inference job state (Plan 15) | MONAI file store | **Stays in MONAI's file store**: MONAI must never get DB access |
+**Goal:** durable state for Graphs, Nodes, Runs, Artifacts and Approvals (system §4 "State"), owned by the Application API. The Agent System reaches it only over HTTP.
 
 ## Phase 6.1 — Schema (Alembic `o1f0a2c3d4e5_v1_o_session_graph.py`, `down_revision = n1f0a2c3d4e5`)
 
 1. **`sessions`:**
    - add `execution_mode` (`plan|auto`, default `auto`; existing rows also get `auto`), `privacy_mode` (`standard|phi_local`, default `standard`) and `context_summary` (text);
-   - add `context_summary_upto_message_id` (FK `chat_messages`), the last message the summary covers, so compaction knows where to continue;
    - extend the status CHECK with `idle`, `awaiting_approval` and `blocked`.
-2. **`session_graphs`:** `session_id` (PK/FK), `current_version` (int, default 0), `next_node_seq` (int, default 1, used for readable node ids such as `seg_42`), `updated_at`.
+2. **`session_graphs`:** `session_id` (PK/FK), `current_version` (int, default 0), `updated_at`.
 3. **`graph_versions`:** `(session_id, version)` PK, `base_version`, `author` (`main|composer|recovery|user|harness`), `status` (`proposed|applied|rejected|superseded`), `diff` (JSONB), `summary`, `created_at`, `applied_at`.
 4. **`graph_nodes`:**
    - `node_id` (PK, readable, e.g. `seg_42`, allocated from a per-session sequence), `session_id`, `kind` (`agent|tool`), `ref_name`, `ref_version`;
    - `params`, `bindings` (`{port: {node_id, port} | {artifact_id}}`), `after` (control dependencies) and `expectations`, all JSONB;
    - `status`: `pending|ready|awaiting_approval|queued|running|waiting_for_user|done|failed|cancelled|invalidated|held|removed`;
-   - `hold_reason`, `fingerprint`, `current_run_id` (FK `agent_runs`), `cache_source_run_id`, `added_in_version`, `removed_in_version`;
-   - `notified_at`: when the Main Agent was last told about this node's failure or violation. After a restart, the harness uses it so that it does not notify the same event twice.
-   - indexes: `(session_id, status)` for `ready()` and the restart scan.
+   - `hold_reason`, `fingerprint`, `current_run_id` (FK `agent_runs`), `cache_source_run_id`, `added_in_version`, `removed_in_version`.
 5. **`agent_runs`, generalized to hold every node run:**
    - `step_id` becomes nullable (legacy rows keep it);
-   - add `node_id` (FK), `attempt`, `producer_kind` (`agent|tool`), `producer_name`, `fingerprint`, `job_id`, `usage` (JSONB token totals for the run), `heartbeat_at` and `error_code` (`error|timeout|queue_timeout|oom|interrupted|cancelled|max_iterations|resource_unavailable|run_not_running`), with a unique `(node_id, attempt)`;
-   - the existing `error` JSONB keeps the message and details; `error_code` is a plain column so that the Watchdog and the Recovery Agent can filter by it;
-   - the existing `input_refs` JSONB stores the resolved input artifacts of the run;
-   - indexes: `(session_id, fingerprint, status)` for the Executor's cache lookup, and `(status, heartbeat_at)` for the Watchdog;
+   - add `node_id` (FK), `attempt`, `producer_kind` (`agent|tool`), `producer_name`, `fingerprint`, `job_id`, `usage` (JSONB tokens/cost) and `heartbeat_at`, with a unique `(node_id, attempt)`;
    - the status set gains `cancelled` (from `pending` or `running`);
    - the "compiled prompt before start" check applies only when `producer_kind='agent'`;
    - update the transition trigger (`f1f0a2c3d4e5...:100-108`) to match.
 6. **`graph_artifacts`:** `artifact_id`, `session_id`, `type`, `type_version`, `produced_by_run_id` (FK `agent_runs`), `node_id`, `port`, `ref` (JSONB), `summary` (JSONB), `content_hash`, `phi`, `superseded_at`.
 
    It is a separate table from the existing `artifacts` (figures and exports), which stays as it is.
-7. **`approvals`:** `approval_id`, `session_id`, `subject_type` (`graph_version|node|tool_call`), `subject_ref`, `reason` (`plan_mode` or `guardrail:<code>`), `status` (`pending|approved|rejected|expired|superseded`), `payload`, `requested_at`, `expires_at` (from `APPROVAL_TTL_H`), `decided_at`, `decided_via` (`rest|chat_command`), `decision_comment`. Index `(session_id, status)`.
-8. **`graph_proposals`:** `proposal_id`, `session_id`, `author` (`composer|recovery`), `base_version`, `diff` (JSONB), `rationale`, `errors` (JSONB, the Validator errors that remain), `status` (`draft|submitted|discarded|expired`), `submitted_version` (the version made from it), `created_at`, `expires_at`.
-
-   **Why:** `plan` and `recover` return a proposal id, and Main later calls `graph_apply(proposal_id=...)`. The proposal must survive a restart between those two calls, and it is useful audit data.
-9. **`llm_usage`:** `usage_id`, `session_id`, `agent_run_id` (nullable), `source` (`main|composer|recovery|node|extraction|summarizer`), `profile`, `provider`, `model`, `locality`, `prompt_tokens`, `completion_tokens`, `created_at`. Index `(session_id, created_at)`.
-
-   **Why:** Main, Composer and Recovery turns are not node runs, so `agent_runs.usage` cannot hold them. The session token budget (Plan 11) sums this table, and the `locality` column proves afterwards that no external model was used in a `phi_local` session.
-10. **Producer rules** (checked by capability, not by step): `require_producer_run(db, run_id, allowed_producers)` checks `agent_runs.producer_name` (falling back to `step.agent_type` for legacy rows) and `status='running'`:
+7. **`approvals`:** `approval_id`, `session_id`, `subject_type` (`graph_version|node|tool_call`), `subject_ref`, `reason` (`plan_mode` or `guardrail:<code>`), `status` (`pending|approved|rejected|expired|superseded`), `payload`, `requested_at`, `decided_at`, `decision_comment`.
+8. **Producer rules** (checked by capability, not by step): `require_producer_run(db, run_id, allowed_producers)` checks `agent_runs.producer_name` (falling back to `step.agent_type` for legacy rows) and `status='running'`:
 
    | Table | Allowed producers |
    |---|---|
@@ -853,17 +825,13 @@ A smoke test runs every tool with a fake context and a mocked domain API. It che
 ## Phase 6.2 — Models, schemas, repositories
 
 Follow the Application API layering:
-- one file per entity in `db/models/`, `schemas/` and `repositories/`: `session_graph.py`, `graph_nodes.py`, `graph_artifacts.py`, `approvals.py`, `graph_proposals.py`, `llm_usage.py`;
+- one file per entity in `db/models/`, `schemas/` and `repositories/`: `session_graph.py`, `graph_nodes.py`, `graph_artifacts.py`, `approvals.py`;
 - commit inside `try`, and roll back on `SQLAlchemyError`;
 - return `(success, error)`.
 
 Key operations:
 - **`apply_version(session_id, base_version, author, diff, node_upserts, run_changes)`:** one transaction inside `services/publication.py` `publication()`. It locks `session_graphs` `FOR UPDATE`. If `current_version != base_version`, it returns `(False, "STALE_BASE:<current>")`. Otherwise it writes the upserts, increments the version and stages the durable events.
-- **The rest:** `propose_version` (status `proposed` + an approval row), `decide_approval`, `create_node_run`, `cancel_run`, `heartbeat_run`, `record_artifacts` / `supersede_artifacts`, `list_active_runs(session_id?)`, `set_session_settings`;
-  - `allocate_node_ids(session_id, n)` (increments `next_node_seq` inside the same lock);
-  - `save_proposal` / `get_proposal` / `mark_proposal(status, submitted_version)`;
-  - `record_usage` (a batch of rows) / `usage_totals(session_id)`;
-  - `mark_notified(node_id)`.
+- **The rest:** `propose_version` (status `proposed` + an approval row), `decide_approval`, `create_node_run`, `cancel_run`, `heartbeat_run`, `record_artifacts` / `supersede_artifacts`, `list_active_runs(session_id?)`, and `set_session_settings`.
 - **Transitions:** update `_ALLOWED_TRANSITIONS` (`repositories/sessions.py:109-143`) for `idle`, `awaiting_approval` and `blocked`.
 
 ## Phase 6.3 — Routes (thin; registered in `application_api/main.py`)
@@ -879,46 +847,12 @@ Key operations:
 | POST / GET | `/graph-artifacts`, `/graph-artifacts/session/{id}` | Record and list artifacts |
 | GET / POST | `/approvals/session/{id}`, `/approvals/{id}/decision` | Pending approvals; decide |
 | PATCH | `/sessions/{id}/settings` | `execution_mode`, `privacy_mode` |
-| PUT | `/sessions/{id}/context-summary` | Main's rolling summary + `upto_message_id` |
-| POST / GET / PATCH | `/graph-proposals`, `/graph-proposals/{id}` | Save, read and mark `plan` / `recover` proposals |
-| POST / GET | `/llm-usage` (batch), `/llm-usage/session/{id}/totals` | Record usage; totals for budgets |
-| POST | `/radiomics/links` | Link reused radiomics rows to the current run (6.5) |
-| PUT / GET | `/reports/{id}/pdf` | Store and read the compiled report PDF (6.5) |
-| POST / GET / PATCH | `/workflows/{task_name}/training` | Start, read and update the server-side training job (6.5) |
-| POST / GET / PATCH | `/ingestion-jobs`, `/ingestion-jobs/{id}` | Ingestion job records (6.5) |
+| PUT | `/sessions/{id}/context-summary` | Main's rolling summary |
 
 ## Phase 6.4 — Agent System client
 
 1. **`clients/backend_client.py`:** add one method per route above, plus `add_chat_message` / `list_chat_messages` for the Context Manager.
 2. **`execution/graph_store.py`:** a typed facade (`GraphStore`) over those methods, plus `InMemoryGraphStore` for the tests of Plans 8–13.
-
-## Phase 6.5 — Supporting schema for later plans
-
-These are the database parts that other plans need and that do not exist today. They are added here so that every schema change sits in one plan and follows the same migration chain. Each migration is small, so the tables can move to another migration if needed.
-
-**Migration `p1f0a2c3d4e5_v1_p_domain_links.py`** (used by Plans 2, 7 and 16):
-
-1. **`radiomics_feature_links`:** `agent_run_id` (FK `agent_runs`), `radiomics_id` (FK `radiomics_features`), `session_id`, `reason` (`reused`), `created_at`; PK `(agent_run_id, radiomics_id)`.
-   - **Why:** H12. When feature extraction reuses rows that an older run created, the analysis (`repositories/radiomics.py:261`) only sees rows whose `created_by_agent_run_id` is the current run. The link table lets the current run "own" reused rows without copying or re-writing them.
-   - `list_radiomics(agent_run_id=...)` reads created rows **plus** linked rows.
-2. **Stored report PDFs:**
-   - add `report_pdf` to the `artifacts.kind` CHECK (`db/models/artifacts.py:76`);
-   - add `reports.pdf_artifact_id` (FK `artifacts`, nullable) and `reports.pdf_source_version` (the `source_version` the PDF was built from);
-   - **why:** today `latex_to_pdf` compiles and returns the bytes without saving them. A graph node needs a durable output (`ReportDocument.has_pdf`). Knowing the `source_version` of the PDF lets the system detect a stale PDF after the LaTeX changes (S13).
-
-**Migration `q1f0a2c3d4e5_v1_q_job_records.py`** (used by Plan 16):
-
-3. **`workflow` training columns:** `training_job_id`, `training_status` (the `jobs_core.status` set), `training_stage` (`prepare|create_model|train`), `training_attempt`, `training_error` (JSONB), `training_started_at`, `training_finished_at`.
-   - **Why:** T1. Training becomes one server-side job orchestrated by the Application API; the browser only reads this state. T4 ("freeze after accept") and T7 (granular cancel) also read and write these columns.
-4. **`ingestion_jobs`:** `job_id` (PK, the Celery job id), `checksum`, `modality`, `body_part`, `status` (`jobs_core.status`), `stage`, `attempt`, `created_series_uids` (JSONB), `warnings` (JSONB), `error` (JSONB), `created_at`, `started_at`, `finished_at`, `heartbeat_at`.
-   - **Why:** today ingestion records are JSON files (`ingestion/jobs.py`), and Redis job records expire after `JOB_RETENTION_HOURS`. The table keeps history for the list endpoint (G7), a single status and stage vocabulary (G8), and `created_series_uids`, so a failed re-run deletes only what **this attempt** created (G1).
-   - The Agent System writes it through the Application API, as with every other table.
-
-**Stays outside PostgreSQL, on purpose:**
-- **Compute job state** lives in Redis (Plan 5). The link is `agent_runs.job_id`.
-- **MONAI inference jobs** stay in MONAI's file store, because MONAI must never gain DB access.
-- **The inbox, mailboxes and Idempotency-Key dedupe** are process-local. User messages are durable anyway in `chat_messages`, and notifications can be derived again from `graph_nodes` (`notified_at`).
-- **The MCP audit** is a log line (Plan 14), not a table.
 
 **Tests:**
 - **Contract:** extend `tests/contracts/test_v1_schema_contract.py` (new tables, CHECKs, FKs); add a new contract test showing that every producer in the allowlists exists in the catalog (Plans 2 and 7).
@@ -927,12 +861,9 @@ These are the database parts that other plans need and that do not exist today. 
   - the migration runs up and down;
   - of two concurrent applies on the same base, one wins and the other gets `STALE_BASE`;
   - a tool node run starts without a prompt; the `cancelled` transitions work;
-  - the producer trigger accepts `run_modeling` and refuses a wrong producer;
-  - migrations `p` and `q` run up and down; the `report_pdf` kind is accepted; a linked radiomics row appears in `list_radiomics(agent_run_id=...)`;
-  - `allocate_node_ids` never returns the same id twice under concurrent calls; `usage_totals` sums all sources;
-  - an expired proposal cannot be submitted.
+  - the producer trigger accepts `run_modeling` and refuses a wrong producer.
 
-**Done when:** migrations `o`, `p` and `q` apply, and all the tests above pass.
+**Done when:** the migration applies, and all the tests above pass.
 
 ---
 
@@ -1036,7 +967,7 @@ The worker runs the same handlers, so no wrapper code is needed.
 ## Phase 7.4 — Correctness for jobs
 
 Fix H1–H18 (Appendix C). Two of them change code outside the tools:
-- H12 links reused rows to the current run through the new `radiomics_feature_links` table (Phase 6.5), and `repositories/radiomics.py` reads created rows plus linked rows.
+- H12 changes `application_api/repositories/radiomics.py`, so that reused rows are linked to the current run.
 - H13 changes `toolpacks/bookkeeping/agent_output.py`: skip the temp cleanup while `JobClient.list(run_id, active_only=True)` is not empty.
 
 ## Phase 7.5 — Progress and hooks
@@ -1154,7 +1085,7 @@ Fix H1–H18 (Appendix C). Two of them change code outside the tools:
    - retries with the delays from `LLM_RETRY_DELAYS_SECONDS`, reusing `client_config._retry_delays`.
 4. **User settings:** the existing `/client-config` settings (`ClientSettingsPanel`) still override the default entry.
 5. **`locality_filter(ctx)` hook:** empty now; Plan 13 fills it for PHI-Local.
-6. **Usage:** a usage callback records one `llm_usage` row per model call (`POST /llm-usage` in batches) with its source, model and locality. For node runs it also adds the totals to `agent_runs.usage`. The budgets in Plan 11 use `usage_totals(session_id)`.
+6. **Usage:** a usage callback writes token counts to `agent_runs.usage` through the run's context. The budgets in Plan 11 use them.
 
 ## Phase 9.3 — LangGraph engine (`toolkit/engines/langgraph_engine.py`)
 
@@ -1312,7 +1243,7 @@ Work added after the graph went idle simply starts a new Executor.
    | Main calls a tool directly that is not `inline`, or that is `heavy` | `invalid: REQUIRES_NODE` |
    | Sandbox `runtime_check` (Plan 4) | `permission_denied` / `resource_unavailable` |
    | A pool or queue is not alive (`cubeai:queue:*:alive`, MONAI health) | `resource_unavailable` |
-   | Budgets: session tokens (`SESSION_TOKEN_BUDGET`, summed from `llm_usage`), active nodes, `max_attempts` | `permission_denied: BUDGET_EXCEEDED` |
+   | Budgets: session tokens (`SESSION_TOKEN_BUDGET`), active nodes, `max_attempts` | `permission_denied: BUDGET_EXCEEDED` |
    | Mandatory approvals: `destructive=True`, `trust != first_party` (unless the tool is in the MCP `auto_approve` list), `generated_code` | `approval_required` |
    | Plan mode (Phase 11.2) | `approval_required: PLAN_MODE` |
    | PHI / privacy (Plan 13), external access (Plan 14) | `permission_denied` |
@@ -1423,7 +1354,7 @@ All control tools are `light`, except `plan` and `recover`, which are `medium` w
 
 1. **`plan`** = `make_agent_tool("plan", "composer", GraphProposal, post=validate_and_repair)`.
 2. **`validate_and_repair`** runs the Validator. When there are errors, it sends them back to the Composer for up to `PLAN_REPAIR_ROUNDS` rounds. It then returns the proposal together with any errors that remain.
-3. **The proposal is never applied by `plan`.** It is saved as a `graph_proposals` row (`draft`, Phase 6.1), and its id is returned. Main decides, and then calls `graph_apply(proposal_id=...)`, which marks the proposal `submitted` with the version made from it. Unused proposals expire.
+3. **The proposal is never applied by `plan`.** Main decides, and then calls `graph_apply(proposal_id=...)`.
 
 ## Phase 12.6 — Skills Loader (`harness/skills_loader.py`)
 
@@ -1460,7 +1391,7 @@ All control tools are `light`, except `plan` and `recover`, which are `medium` w
 
 ## Phase 13.1 — Recovery Agent (`execution/recovery.py`, control tool `recover`)
 
-1. **`recover(node_id)`** = `make_agent_tool("recover", "recovery_agent", RecoveryProposal, post=validate)`. It is visible only to Main. A diff it returns is saved as a `graph_proposals` row with `author="recovery"`. It reads the failure from `agent_runs.error_code` / `error`.
+1. **`recover(node_id)`** = `make_agent_tool("recover", "recovery_agent", RecoveryProposal, post=validate)`. It is visible only to Main.
 2. **Its context:** the node spec and params, the `error_code`, the log tail (the job dir or the agent run notes) and the graph neighbourhood.
 3. **What it returns:** a diagnosis, an optional validated `GraphDiff` (e.g. new params, a smaller cohort, another model) and a message for the user. It **never applies anything**; Main decides.
 4. **Order:** the deterministic retries of Phase 10.5 always run first. Only failures that remain reach Main.
@@ -1589,16 +1520,15 @@ Fix these in place. MONAI keeps its own file store, and its status strings must 
 - **S11:** the review long-poll server is keyed by batch, leaks no waiters, and checks for disconnects.
 - **S13 (server side):** compile before taking the row lock, with `asyncio.create_subprocess_exec` in its own process group, killed on timeout.
 - **S13 (client side):** `latex_to_pdf` retries and resolves the 409 `stale_version`.
-- **The compiled PDF is stored:** as an `artifacts` row of kind `report_pdf`, linked from `reports.pdf_artifact_id` together with `pdf_source_version` (Phase 6.5). A PDF whose `pdf_source_version` is older than `source_version` counts as stale.
 - **S8:** PATCH only the changed pair.
 
 ## Phase 16.2 — Training
 
-Fix T1–T9. T1 becomes one server-side training job (prepare → create-model → train), orchestrated by the Application API, with the job id and state in the new `workflow.training_*` columns (Phase 6.5, migration `q`). Training stays outside the Session Graph; it belongs to the MONAI training UI.
+Fix T1–T9. T1 becomes one server-side training job (prepare → create-model → train), orchestrated by the Application API, with the job id on the workflow row (an Alembic migration after "o"). Training stays outside the Session Graph; it belongs to the MONAI training UI.
 
 ## Phase 16.3 — Ingestion on Celery
 
-Ingestion conversion becomes a Celery job (`job_name="ingest_convert"`, registered as a `harness`-visible job tool). This fixes G2, G3 and G6 by design. Each job also has an `ingestion_jobs` row (Phase 6.5), which replaces the JSON files in `storage/jobs/ingestion`. Then fix G1 (using `created_series_uids`), G4, G5, G7 (list and cancel from the table; one frontend upload client) and G8.
+Ingestion conversion becomes a Celery job (`job_name="ingest_convert"`, registered as a `harness`-visible job tool). This fixes G2, G3 and G6 by design. Then fix G1, G4, G5, G7 (one frontend upload client) and G8.
 
 ## Phase 16.4 — Agent System tasks
 
