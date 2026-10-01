@@ -18,6 +18,7 @@ from agent_system.toolkit.runtime.cancel import CancelToken
 from agent_system.toolkit.runtime.dispatch import Dispatcher, validate_arguments
 from agent_system.toolkit.tools.registry import spec_of, tool
 from agent_system.toolkit.tools.spec import ToolSpec
+from tests.support.toolkit_fixtures import FakeEventSink
 
 pytestmark = pytest.mark.unit
 
@@ -29,22 +30,6 @@ READ = {
     "visibility": {"agent"},
     "read_only": True,
 }
-
-
-class _Sink:
-    def __init__(self) -> None:
-        self.events: list[ToolEvent] = []
-        self.views: list[ViewEvent] = []
-
-    async def emit(self, event: ToolEvent) -> None:
-        self.events.append(event)
-
-    async def emit_view(self, event: ViewEvent) -> None:
-        self.views.append(event)
-
-    @property
-    def types(self) -> list[str]:
-        return [event.event_type for event in self.events]
 
 
 def _ctx(sink: Any = None) -> ToolContext:
@@ -77,7 +62,7 @@ async def get_patient(patient_id: str, ctx: ToolContext) -> dict[str, Any]:
 
 
 def test_a_call_runs_with_its_context():
-    sink = _Sink()
+    sink = FakeEventSink()
 
     result = _invoke(_spec(get_patient), {"patient_id": "p1"}, _ctx(sink))
 
@@ -92,7 +77,7 @@ def test_a_call_runs_with_its_context():
 
 
 def test_a_call_emits_one_start_and_one_finish():
-    sink = _Sink()
+    sink = FakeEventSink()
 
     _invoke(_spec(get_patient), {"patient_id": "p1"}, _ctx(sink))
 
@@ -120,7 +105,7 @@ async def train(params: TrainParams) -> dict[str, Any]:
 
 
 def test_invalid_arguments_are_refused_before_the_call():
-    sink = _Sink()
+    sink = FakeEventSink()
 
     result = _invoke(_spec(get_patient), {"patient": "p1"}, _ctx(sink))
 
@@ -156,7 +141,7 @@ def test_validate_arguments_leaves_raw_schema_tools_to_their_runner():
 
 
 def test_a_hook_can_answer_instead_of_the_tool():
-    sink, calls, seen = _Sink(), [], []
+    sink, calls, seen = FakeEventSink(), [], []
 
     async def handler(patient_id: str) -> dict[str, Any]:
         """Read."""
@@ -210,7 +195,7 @@ async def slow(seconds: float) -> dict[str, Any]:
 
 
 def test_a_call_over_its_budget_times_out():
-    sink = _Sink()
+    sink = FakeEventSink()
 
     result = _invoke(_spec(slow, timeout_s=0.05), {"seconds": 5}, _ctx(sink))
 
@@ -229,7 +214,7 @@ def test_the_budget_includes_the_queue_time():
 
 
 def test_an_exception_becomes_an_error_result():
-    sink = _Sink()
+    sink = FakeEventSink()
 
     async def broken(patient_id: str) -> dict[str, Any]:
         """Break."""
@@ -253,7 +238,7 @@ def test_a_tools_own_timeout_error_is_not_a_budget_timeout():
 
 
 def test_an_error_result_from_the_tool_is_reported_as_an_error():
-    sink, views = _Sink(), []
+    sink, views = FakeEventSink(), []
 
     async def missing(patient_id: str) -> dict[str, Any]:
         """Report missing."""
@@ -303,7 +288,7 @@ def test_runners_are_chosen_by_execution():
 
 
 def test_a_cancel_token_stops_a_running_call():
-    sink, stopped = _Sink(), []
+    sink, stopped = FakeEventSink(), []
 
     async def long_task(seconds: float) -> dict[str, Any]:
         """Run long."""
@@ -329,7 +314,7 @@ def test_a_cancel_token_stops_a_running_call():
 
 
 def test_an_already_cancelled_token_does_not_start_the_call():
-    sink, token = _Sink(), CancelToken()
+    sink, token = FakeEventSink(), CancelToken()
     token.cancel()
 
     result = _invoke(_spec(get_patient), {"patient_id": "p1"}, _ctx(sink), cancel=token)
@@ -339,7 +324,7 @@ def test_an_already_cancelled_token_does_not_start_the_call():
 
 
 def test_cancelling_the_task_propagates_and_still_closes_the_call():
-    sink = _Sink()
+    sink = FakeEventSink()
 
     async def scenario() -> None:
         call = asyncio.create_task(Dispatcher().invoke(_spec(slow), {"seconds": 5}, _ctx(sink)))
@@ -356,7 +341,7 @@ def test_cancelling_the_task_propagates_and_still_closes_the_call():
 
 
 def test_on_result_sends_view_events():
-    sink, received = _Sink(), []
+    sink, received = FakeEventSink(), []
 
     async def on_result(result: Any, ctx: ToolContext) -> list[ViewEvent]:
         received.append((result["patient_id"], ctx.tool_name))
@@ -376,11 +361,11 @@ def test_a_failing_on_result_does_not_fail_the_call():
 
     spec = _spec(get_patient, on_result=on_result)
 
-    assert _invoke(spec, {"patient_id": "p1"}, _ctx(_Sink()))["patient_id"] == "p1"
+    assert _invoke(spec, {"patient_id": "p1"}, _ctx(FakeEventSink()))["patient_id"] == "p1"
 
 
 def test_a_failing_event_sink_does_not_fail_the_call():
-    class BrokenSink(_Sink):
+    class BrokenSink(FakeEventSink):
         async def emit(self, event: ToolEvent) -> None:
             raise ConnectionError("websocket closed")
 

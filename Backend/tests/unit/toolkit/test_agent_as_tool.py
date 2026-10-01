@@ -3,24 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from types import ModuleType
 from typing import Any
 
 import pytest
 from pydantic import BaseModel
 
-from agent_system.toolkit.agents.engine import AgentEngine, AgentResult, FakeAgentEngine
+from agent_system.toolkit.agents.engine import AgentResult
 from agent_system.toolkit.agents.registry import AgentRegistry
 from agent_system.toolkit.agents.spec import AgentSpec
 from agent_system.toolkit.catalog import Catalog
 from agent_system.toolkit.context import ToolContext
 from agent_system.toolkit.delegation.agent_as_tool import make_agent_tool
-from agent_system.toolkit.events import ToolEvent, ViewEvent
 from agent_system.toolkit.results import error_result
 from agent_system.toolkit.runtime.cancel import CancelToken
 from agent_system.toolkit.runtime.dispatch import Dispatcher
 from agent_system.toolkit.tools.registry import ToolRegistry, spec_of, tool, tools_in
+from tests.support.toolkit_fixtures import FakeAgentRuntime, FakeEventSink, fake_runtime
 
 pytestmark = pytest.mark.unit
 
@@ -46,14 +45,8 @@ SEGMENTATION = _agent("segmentation_agent", "execution")
 PLAN = make_agent_tool("plan", "composer", GraphProposal)
 
 
-@dataclass
-class _Runtime:
-    agents: AgentRegistry
-    engine: AgentEngine
-
-
-def _runtime(**scripts: Any) -> _Runtime:
-    return _Runtime(AgentRegistry([COMPOSER, RECOVERY, SEGMENTATION]), FakeAgentEngine(scripts))
+def _runtime(**scripts: Any) -> FakeAgentRuntime:
+    return fake_runtime([COMPOSER, RECOVERY, SEGMENTATION], **scripts)
 
 
 def _ctx(runtime: Any, **fields: Any) -> ToolContext:
@@ -254,15 +247,6 @@ def test_a_failure_while_repairing_is_reported():
 
 
 def test_the_agents_tool_calls_are_attributed_to_main_and_name_the_agent():
-    class Sink:
-        def __init__(self) -> None:
-            self.events: list[ToolEvent] = []
-
-        async def emit(self, event: ToolEvent) -> None:
-            self.events.append(event)
-
-        async def emit_view(self, event: ViewEvent) -> None: ...
-
     @tool(pack="control", side_effects="none", cost="light", execution="inline",
           visibility={"main"}, read_only=True)  # fmt: skip
     async def registry_search(query: str) -> dict[str, Any]:
@@ -273,7 +257,7 @@ def test_the_agents_tool_calls_are_attributed_to_main_and_name_the_agent():
         await Dispatcher().invoke(spec_of(registry_search), {"query": "segment"}, ctx, cancel)
         return _proposal()
 
-    sink = Sink()
+    sink = FakeEventSink()
     _call(PLAN, {"request": "x"}, _ctx(_runtime(composer=composer), event_sink=sink))
 
     assert [(e.tool_name, e.event_type, e.source, e.subagent) for e in sink.events] == [

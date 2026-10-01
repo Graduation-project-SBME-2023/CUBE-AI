@@ -72,7 +72,9 @@ project images, so no local Python is needed.
 powershell -NoProfile -ExecutionPolicy Bypass -File Backend/tests/run_tests.ps1 -Suite deterministic
 ```
 
-Suites: `deterministic` (unit + contract + pipeline — **the PR gate**), `agent-regression`,
+Suites: `deterministic` (unit + contract + pipeline, minus `legacy_autogen` — **the PR gate**),
+`legacy-autogen` (the AutoGen-pipeline tests, auto-marked by `LEGACY_AUTOGEN_TESTS` in
+`Backend/conftest.py`), `agent-regression`,
 `radiology`, `integration` (needs running services), `all`, `list`. Flags: `-Coverage`,
 `-Runtime local -Python <exe>`. JUnit goes to `Backend/test-results/`, coverage to
 `Backend/coverage.xml` and `Backend/htmlcov/`.
@@ -80,7 +82,7 @@ Suites: `deterministic` (unit + contract + pipeline — **the PR gate**), `agent
 Direct pytest (always pass `-c Backend/pytest.ini`; markers are strict):
 
 ```bash
-python -m pytest -c Backend/pytest.ini Backend/tests/unit Backend/tests/contracts Backend/tests/pipeline -m "unit or contract or pipeline"
+python -m pytest -c Backend/pytest.ini Backend/tests/unit Backend/tests/contracts Backend/tests/pipeline -m "(unit or contract or pipeline) and not legacy_autogen"
 ```
 
 ```bash

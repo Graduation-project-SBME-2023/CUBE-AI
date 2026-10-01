@@ -4,23 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import copy
-from dataclasses import dataclass
 from typing import Any
 
 import pytest
 from pydantic import BaseModel
 
-from agent_system.toolkit.agents.engine import AgentEngine, AgentResult, FakeAgentEngine
+from agent_system.toolkit.agents.engine import AgentResult
 from agent_system.toolkit.agents.registry import AgentRegistry
 from agent_system.toolkit.agents.spec import AgentSpec
 from agent_system.toolkit.catalog import PACK_PACKAGES, build
 from agent_system.toolkit.context import ToolContext
 from agent_system.toolkit.delegation.run_agent import delegate, max_agent_depth, run_agent
-from agent_system.toolkit.events import ToolEvent, ViewEvent
 from agent_system.toolkit.results import error_result
 from agent_system.toolkit.runtime.cancel import CancelToken
 from agent_system.toolkit.runtime.dispatch import Dispatcher
 from agent_system.toolkit.tools.registry import ToolRegistry, spec_of, tool
+from tests.support.toolkit_fixtures import FakeAgentRuntime, FakeEventSink, fake_runtime
 
 pytestmark = pytest.mark.unit
 
@@ -62,25 +61,8 @@ CHECKER = _agent(
 LITERATURE = _agent("literature_review_agent", "execution")
 
 
-@dataclass
-class _Runtime:
-    agents: AgentRegistry
-    engine: AgentEngine
-
-
-class _Sink:
-    def __init__(self) -> None:
-        self.events: list[ToolEvent] = []
-
-    async def emit(self, event: ToolEvent) -> None:
-        self.events.append(event)
-
-    async def emit_view(self, event: ViewEvent) -> None: ...
-
-
-def _runtime(**scripts: Any) -> _Runtime:
-    agents = AgentRegistry([SEGMENTATION, MASK, INTENT, CHECKER, LITERATURE])
-    return _Runtime(agents, FakeAgentEngine(scripts))
+def _runtime(**scripts: Any) -> FakeAgentRuntime:
+    return fake_runtime([SEGMENTATION, MASK, INTENT, CHECKER, LITERATURE], **scripts)
 
 
 def _ctx(runtime: Any, **fields: Any) -> ToolContext:
@@ -271,7 +253,7 @@ def test_a_session_without_an_agent_runtime():
 # --- nesting and depth
 
 
-def _nested_runtime(outcomes: list[Any]) -> _Runtime:
+def _nested_runtime(outcomes: list[Any]) -> FakeAgentRuntime:
     """Each internal agent calls run_agent on its first delegate, the way a
     model would, and records what that call returned."""
 
@@ -358,7 +340,7 @@ def test_cancelling_the_node_stops_the_child():
 
 
 def test_the_childs_tool_events_keep_the_node_source_and_name_the_subagent():
-    sink = _Sink()
+    sink = FakeEventSink()
 
     @tool(pack="segmentation", side_effects="none", cost="light", execution="inline",
           visibility={"agent"}, read_only=True)  # fmt: skip
