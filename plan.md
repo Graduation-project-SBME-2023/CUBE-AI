@@ -423,6 +423,7 @@ Some plans can move:
   - `describe()` reports an agent's kind as `agent_kind`.
   - `build()` skips pack packages that do not exist yet (`toolpacks`, `agentpacks`), but re-raises a broken import.
   - It reports `agent.md` files found without a loader (Plan 3 adds the loader).
+  - It refuses a control agent with `delegates`, and an internal agent whose `parent` is a control agent. Control agents never get `run_agent`, so they cannot own internal agents; a control agent that needs a review step uses `post` in `make_agent_tool`.
 - **Dispatch:**
   - `Dispatcher(before_invoke=…, runners={Execution.INLINE: run_inline})`. The job and external runners plug in through `runners` (Plans 5 and 14).
   - The budget is `timeout_s + queue_timeout_s`.
