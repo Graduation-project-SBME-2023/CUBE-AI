@@ -19,6 +19,7 @@ DEFAULT_DOMAIN_API_TIMEOUT_S = 30.0
 MIN_LONG_TIMEOUT_S = 120.0
 DEFAULT_CONNECT_TIMEOUT_S = 5.0
 DEFAULT_POOL_TIMEOUT_S = 5.0
+DEFAULT_LLM_CONCURRENCY = 5
 
 
 def positive_float(name: str, default: float) -> float:
@@ -53,3 +54,9 @@ def connect_timeout() -> float:
 def pool_timeout() -> float:
     """How long a request may wait for a free connection in the shared pool."""
     return positive_float("TOOL_HTTP_POOL_SECONDS", DEFAULT_POOL_TIMEOUT_S)
+
+
+def llm_concurrency_limit() -> int:
+    """How many LLM calls one tool call may have in flight at once."""
+    # A fraction below one would make a semaphore of zero, which never opens.
+    return max(1, int(positive_float("LLM_CONCURRENCY_LIMIT", DEFAULT_LLM_CONCURRENCY)))

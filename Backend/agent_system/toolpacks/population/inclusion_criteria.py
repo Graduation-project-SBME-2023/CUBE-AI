@@ -1,4 +1,3 @@
-import os
 from typing import Annotated
 
 from pydantic import Field
@@ -19,7 +18,6 @@ async def write_inclusion_criteria(
     modality: Annotated[str, Field(description="The imaging modality associated with these criteria (e.g., 'CT', 'MRI').")]
 ) -> dict:
     """Records the study's inclusion/exclusion criteria and modality on the population cohort, then broadcasts them to the frontend."""
-    session_id = os.environ.get("SESSION_ID")
     try:
         cohort = await domain_api.upsert_population_cohort(
             criteria={
@@ -40,7 +38,6 @@ async def write_inclusion_criteria(
             "exclusion_criteria": exclusion_criteria,
             "modality": modality,
         },
-        session_id,
     )
 
     return {

@@ -1,4 +1,3 @@
-import os
 from typing import Any
 import logging
 
@@ -8,16 +7,11 @@ logger = logging.getLogger(__name__)
 
 from .._toolkit import tool
 from ..common.manifests import READ_ONLY
+from ..common.domain_api import agent_type, run_id, session_id
 from ..common.emit import emit
 from ..common.http_client import shared_client, timeout
 from ..common.service_urls import app_api_url
 
-SESSION_ID = os.environ.get("SESSION_ID", "")
-AGENT_ID = os.environ.get("AGENT_ID", "")
-# The approved step and run this agent instance was created for. When it
-# is present there is nothing to resolve: identity is the run, not the name.
-RUN_ID = os.environ.get("RUN_ID", "")
-NODE_ID = os.environ.get("NODE_ID", "")
 
 
 REQUEST_TIMEOUT = 20.0
@@ -38,29 +32,29 @@ async def _get_json(path: str) -> Any:
 )
 async def read_agent_task_context() -> dict[str, Any]:
     """Return this agent's task: the session's prompt and intent, its own plan step, and the compiled prompt of the run executing it."""
-    if not SESSION_ID:
+    if not session_id():
         return {
             "status": "error",
-            "message": "SESSION_ID is not set in MCP environment.",
+            "message": "This call belongs to no session.",
         }
 
-    if not AGENT_ID and not RUN_ID:
+    if not agent_type() and not run_id():
         return {
             "status": "error",
-            "message": "Neither RUN_ID nor AGENT_ID is set in MCP environment.",
+            "message": "This call belongs to neither a run nor an agent.",
         }
 
     emit("tool_started", "Reading task context from DB")
 
     try:
-        session = await _get_json(f"/sessions/{SESSION_ID}")
+        session = await _get_json(f"/sessions/{session_id()}")
 
         steps_sharing = 1
-        if RUN_ID:
-            run = await _get_json(f"/runs/{RUN_ID}")
+        if run_id():
+            run = await _get_json(f"/runs/{run_id()}")
         else:
             resolved = await _get_json(
-                f"/runs/session/{SESSION_ID}/by-target/{AGENT_ID}",
+                f"/runs/session/{session_id()}/by-target/{agent_type()}",
             )
             run = resolved.get("run") or {}
             steps_sharing = resolved.get("nodes_sharing_this_target", 1)
@@ -69,12 +63,12 @@ async def read_agent_task_context() -> dict[str, Any]:
         params = node.get("params") or {}
         task_message = params.get("task_message") or {}
 
-        emit("tool_finished", f"Task context loaded for {AGENT_ID}")
+        emit("tool_finished", f"Task context loaded for {agent_type()}")
 
         return {
             "status": "ok",
-            "session_id": SESSION_ID,
-            "agent_id": AGENT_ID or node.get("target_name", ""),
+            "session_id": session_id(),
+            "agent_id": agent_type() or node.get("target_name", ""),
             # The user's own words, plus the planner's structured reading
             # of them — beside each other, not one on top of the other.
             "prompt": session.get("prompt", ""),
@@ -110,13 +104,13 @@ async def read_agent_task_context() -> dict[str, Any]:
             "status": "error",
             "message": f"HTTP error while loading task context: {status_code}",
             "details": body[:500],
-            "session_id": SESSION_ID,
-            "agent_id": AGENT_ID,
+            "session_id": session_id(),
+            "agent_id": agent_type(),
         }
     except Exception as e:
         return {
             "status": "error",
             "message": f"Unexpected error while loading task context: {str(e)}",
-            "session_id": SESSION_ID,
-            "agent_id": AGENT_ID,
+            "session_id": session_id(),
+            "agent_id": agent_type(),
         }

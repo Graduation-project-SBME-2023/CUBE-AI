@@ -55,6 +55,18 @@ def attempt_id() -> str:
     return str(ctx.attempt_id) if ctx is not None and ctx.attempt_id else ""
 
 
+def node_id() -> str:
+    """The graph node this call runs in, or ""."""
+    ctx = _context()
+    return str(ctx.node_id) if ctx is not None and ctx.node_id else ""
+
+
+def agent_type() -> str:
+    """The agent of that node (e.g. ``segmentation_agent``), or ""."""
+    ctx = _context()
+    return str(ctx.agent_type) if ctx is not None and ctx.agent_type else ""
+
+
 def require_run() -> str:
     value = run_id()
     if not value:

@@ -46,26 +46,11 @@ def emit_progress(current: int | float, total: int, label: str | None = None) ->
     )
 
 
-async def emit_view(
-    view_type: str, payload: Mapping[str, Any], session_id: str | None = None
-) -> bool:
-    """Send one view update; ``True`` when it was sent.
-
-    ``session_id`` is only cross-checked against the context: a view naming
-    another session is dropped. It goes away with the call sites' env reads
-    (Phase 2.3).
-    """
+async def emit_view(view_type: str, payload: Mapping[str, Any]) -> bool:
+    """Send one view update to the current call's session; ``True`` when it was sent."""
     ctx = _context()
     if ctx is None or ctx.event_sink is None:
         logger.debug("no tool context or event sink; dropped view %s", view_type)
-        return False
-    if session_id is not None and str(session_id) != str(ctx.session_id):
-        logger.warning(
-            "view %s names session %s but the tool runs for session %s; dropped",
-            view_type,
-            session_id,
-            ctx.session_id,
-        )
         return False
     try:
         await ctx.event_sink.emit_view(_toolkit.ViewEvent(view_type, payload))

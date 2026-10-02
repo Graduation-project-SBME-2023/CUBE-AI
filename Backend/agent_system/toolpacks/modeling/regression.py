@@ -18,12 +18,7 @@ from ..common.workspace import WorkspacePath, get_workspace
 from . import results
 from .evaluation import cv_row as _cv_row, regression_metrics as _regression_metrics
 from .holdout import resolve_selection_holdout
-from storage_paths import HYPOTHESES_DIR, TEMP_DIR
-
-# ── Constants ──────────────────────────────────────────────────────────────────
-
-WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", str(HYPOTHESES_DIR / "workspace_default"))
-
+from storage_paths import TEMP_DIR
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 

@@ -17,7 +17,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from agent_system.toolkit.context import use_context
 from agent_system.toolpacks.bookkeeping import agent_output as module
+from tests.support.toolkit_fixtures import make_context
 
 pytestmark = pytest.mark.unit
 
@@ -32,7 +34,6 @@ def _base_params(**overrides) -> dict:
 
 @pytest.mark.asyncio
 async def test_removes_this_runs_temp_dirs_after_a_successful_write(monkeypatch, tmp_path):
-    monkeypatch.setattr(module, "RUN_ID", RUN_ID)
     monkeypatch.setattr(module, "TEMP_DIR", tmp_path)
 
     modeling_dir = tmp_path / "modeling" / RUN_ID
@@ -49,7 +50,8 @@ async def test_removes_this_runs_temp_dirs_after_a_successful_write(monkeypatch,
         module, "shared_client", lambda: _FakeClient({"run_id": RUN_ID, "node_id": "s1"})
     )
 
-    result = json.loads(await module.write_agent_output(_base_params()))
+    with use_context(make_context(run_id=RUN_ID)):
+        result = json.loads(await module.write_agent_output(_base_params()))
 
     assert result["status"] == "ok"
     assert not modeling_dir.exists()
@@ -59,13 +61,13 @@ async def test_removes_this_runs_temp_dirs_after_a_successful_write(monkeypatch,
 
 @pytest.mark.asyncio
 async def test_a_run_with_no_temp_scratch_is_not_an_error(monkeypatch, tmp_path):
-    monkeypatch.setattr(module, "RUN_ID", RUN_ID)
     monkeypatch.setattr(module, "TEMP_DIR", tmp_path)
     monkeypatch.setattr(
         module, "shared_client", lambda: _FakeClient({"run_id": RUN_ID, "node_id": "s1"})
     )
 
-    result = json.loads(await module.write_agent_output(_base_params()))
+    with use_context(make_context(run_id=RUN_ID)):
+        result = json.loads(await module.write_agent_output(_base_params()))
 
     assert result["status"] == "ok"
 
