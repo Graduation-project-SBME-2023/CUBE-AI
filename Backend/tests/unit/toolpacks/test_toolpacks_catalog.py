@@ -57,10 +57,14 @@ MOVED_TOOLS: dict[str, set[str]] = {
     },
     "segmentation": {"run_segmentation", "check_having_mask", "list_models"},
 }
+# Tools Plan 2 adds on top of the moved ones (Phase 2.4).
+ADDED_TOOLS: dict[str, set[str]] = {
+    "segmentation": {"run_segmentation_with_guard"},
+}
 # Plan 7 turns these into cost="heavy" job tools; until then INTERIM_HEAVY.
 INTERIM_HEAVY_TOOLS = {
     "radiomics_extract_features", "radiomics_analyze_importance", "run_segmentation",
-    *MOVED_TOOLS["modeling"],
+    "run_segmentation_with_guard", *MOVED_TOOLS["modeling"],
 }
 HARNESS_TOOLS = {"scratchpad_register_agent", "scratchpad_set_status"}
 
@@ -79,10 +83,11 @@ def pack_tools(catalog):
 
 def test_the_catalog_finds_every_moved_tool_in_its_pack(catalog, pack_tools):
     assert sum(len(names) for names in MOVED_TOOLS.values()) == 55
+    expected = {pack: names | ADDED_TOOLS.get(pack, set()) for pack, names in MOVED_TOOLS.items()}
     found = {pack: {spec.name for spec in specs} for pack, specs in catalog.tools.by_pack().items()}
     found.pop("delegation")  # run_agent, Plan 1
-    assert found == MOVED_TOOLS
-    assert len(pack_tools) == 55
+    assert found == expected
+    assert len(pack_tools) == 55 + sum(len(names) for names in ADDED_TOOLS.values())
 
 
 def test_the_interim_heavy_tools_are_marked_for_plan_7(pack_tools):
@@ -160,4 +165,4 @@ def test_the_container_root_builds_the_same_catalog(tmp_path):
         capture_output=True, text=True, env=env, timeout=120, check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["55", "False"]
+    assert result.stdout.split() == ["56", "False"]
