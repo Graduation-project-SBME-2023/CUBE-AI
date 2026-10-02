@@ -11,7 +11,7 @@ from pydantic import Field
 from .._toolkit import tool
 from ..common.manifests import WRITES
 from ..common.service_urls import APP_API_URL
-from ..common.emit import TextPayload, ToolEvent, log_tool_state
+from ..common.emit import emit
 
 
 def _api_base() -> str:
@@ -77,7 +77,7 @@ async def latex_to_pdf(
     ] = [],
 ) -> str:
     """Compile LaTeX and publish to the reports table."""
-    log_tool_state(ToolEvent("tool_started", "text", TextPayload(message="Publishing report…")))
+    emit("tool_started", "Publishing report…")
 
     api_base = _api_base()
     publish_url = f"{api_base}/reports/{report_id}/publish"
@@ -89,9 +89,7 @@ async def latex_to_pdf(
 
     try:
         async with httpx.AsyncClient(timeout=90.0) as client:
-            log_tool_state(
-                ToolEvent("tool_progress", "text", TextPayload(message="Compiling LaTeX…"))
-            )
+            emit("tool_progress", "Compiling LaTeX…")
             resp = await client.post(publish_url, json=payload)
 
         if resp.status_code == 200:
@@ -104,9 +102,7 @@ async def latex_to_pdf(
                 if agents_base
                 else f"{api_base}/reports/{report_id}/download"
             )
-            log_tool_state(
-                ToolEvent("tool_finished", "text", TextPayload(message="PDF published successfully."))
-            )
+            emit("tool_finished", "PDF published successfully.")
             return json.dumps(
                 {
                     "status": "success",
@@ -127,9 +123,7 @@ async def latex_to_pdf(
             detail = body.get("detail", body) if isinstance(body, dict) else body
         except Exception:
             detail = resp.text[:2000]
-        log_tool_state(
-            ToolEvent("error", "text", TextPayload(message="Report publication failed."))
-        )
+        emit("error", "Report publication failed.")
 
         if resp.status_code == 409:
             code = detail.get("code", "conflict") if isinstance(detail, dict) else "conflict"

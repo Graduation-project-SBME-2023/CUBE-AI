@@ -9,7 +9,7 @@ from .._toolkit import tool
 from ..common.manifests import WRITES
 from ..common import domain_api
 from storage_paths import workspace_subpath
-from ..common.emit import broadcast_ws_message
+from ..common.emit import emit_view
 
 # Confidence keeps the observed categories; "manual override" is a label
 # SOURCE, not a confidence.
@@ -348,7 +348,7 @@ async def extract_cohort_labels() -> dict:
 
     session_id = os.environ.get("SESSION_ID", "")
     if session_id:
-        await broadcast_ws_message(
+        await emit_view(
             "cohort_labels_output",
             {
                 "tool": "extract_cohort_labels",

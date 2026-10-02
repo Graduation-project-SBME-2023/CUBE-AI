@@ -6,7 +6,7 @@ from pydantic import Field
 from .._toolkit import tool
 from ..common.manifests import WRITES
 from ..common import domain_api
-from ..common.emit import broadcast_ws_message
+from ..common.emit import emit_view
 
 
 # ── Anatomy group mapping ───────────────────────────────────────────────────
@@ -79,7 +79,7 @@ async def _save_and_broadcast_cohort(
     )
     await domain_api.set_cohort_members(cohort["cohort_id"], validated_uids)
 
-    await broadcast_ws_message(
+    await emit_view(
         "population_output",
         {
             "tool": "validate_population_anatomy",

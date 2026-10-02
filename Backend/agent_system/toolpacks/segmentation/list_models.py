@@ -8,7 +8,7 @@ import httpx
 from agent_system.agents.execution_agents.segmentation.model_catalog import (
     get_enabled_segmentation_model_paths,
 )
-from ..common.emit import ToolEvent, log_tool_state, TextPayload
+from ..common.emit import emit
 
 base_url = os.environ.get(
     "INFERENCE_API_URL",
@@ -24,8 +24,7 @@ async def list_models():
     type (automatic or interactive), modality, anatomy, labels, params schema
     and description."""
 
-    payload = TextPayload(message="Fetching models info")
-    log_tool_state(ToolEvent("tool_started", "text", payload))
+    emit("tool_started", "Fetching models info")
 
     try:
         async with httpx.AsyncClient() as client:
@@ -37,8 +36,7 @@ async def list_models():
 
     formatted = []
 
-    payload = TextPayload(message="Formatting models")
-    log_tool_state(ToolEvent("tool_progress", "text", payload))
+    emit("tool_progress", "Formatting models")
 
     enabled_model_names = {
         name.casefold()
@@ -60,7 +58,6 @@ async def list_models():
         })
 
     model_word = "model" if len(formatted) == 1 else "models"
-    payload = TextPayload(message=f"Fetched {len(formatted)} {model_word}")
-    log_tool_state(ToolEvent("tool_finished", "text", payload))
+    emit("tool_finished", f"Fetched {len(formatted)} {model_word}")
 
     return json.dumps(formatted)

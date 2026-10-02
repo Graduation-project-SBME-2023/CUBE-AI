@@ -3,7 +3,7 @@ from ..._toolkit import tool
 from ...common.manifests import READ_ONLY
 from typing import Annotated
 from pydantic import Field
-from ...common.emit import ToolEvent, log_tool_state, TextPayload
+from ...common.emit import emit
 import os
 from ...common.service_urls import CONTROL_API_URL
 
@@ -27,11 +27,8 @@ async def get_patient(
     2. To browse or list multiple patients when no specific ID is known (uses pagination).
     """
     async with httpx.AsyncClient() as client:
-        payload = TextPayload(message='Checking patients\' demographics...')
-        start_event = ToolEvent('tool_started', 'text', payload)
-        log_tool_state(start_event)
-        log_event = ToolEvent('tool_progress', 'text', payload)
-        log_tool_state(log_event)
+        emit('tool_started', 'Checking patients\' demographics...')
+        emit('tool_progress', 'Checking patients\' demographics...')
         if patient_id is not None:
             response = await client.get(f"{base_url}/patients/{patient_id}")
         else:
@@ -46,7 +43,5 @@ async def get_patient(
         except ValueError:
             return {"error": "Invalid JSON returned", "raw": response.text}
 
-        payload = TextPayload(message='Checking patients\' demographics...')
-        finished_event = ToolEvent('tool_finished', 'text', payload)
-        log_tool_state(finished_event)
+        emit('tool_finished', 'Checking patients\' demographics...')
         return {"data": data}

@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from .._toolkit import tool
 from ..common.manifests import READ_ONLY
 from ..common import domain_api
-from ..common.emit import ToolEvent, log_tool_state, TextPayload
+from ..common.emit import emit
 
 _HEADLINE_METRICS = ("accuracy", "auc", "f1", "precision", "recall", "specificity", "sensitivity")
 
@@ -110,7 +110,7 @@ def _comparison_section(entry: dict[str, Any]) -> str:
 )
 async def get_modeling_results() -> str:
     """Retrieves the recorded feature sets and modeling results of this session in one request — everything needed to write the results report."""
-    log_tool_state(ToolEvent("tool_started", "text", TextPayload(message="fetching results")))
+    emit("tool_started", "fetching results")
     try:
         feature_sets = await domain_api.list_feature_sets()
         summary = await domain_api.model_results_summary()
@@ -122,7 +122,5 @@ async def get_modeling_results() -> str:
         sections += [_comparison_section(entry) for entry in summary]
     else:
         sections.append("### Modeling\n*No model result is recorded for this session.*")
-    log_tool_state(
-        ToolEvent("tool_finished", "text", TextPayload(message="study data results Fetched"))
-    )
+    emit("tool_finished", "study data results Fetched")
     return "\n\n".join(sections)

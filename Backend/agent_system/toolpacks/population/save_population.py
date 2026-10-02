@@ -1,6 +1,6 @@
 from .._toolkit import tool
 from ..common.manifests import WRITES
-from ..common.emit import ToolEvent, log_tool_state, TextPayload
+from ..common.emit import emit
 from ..common import domain_api
 
 
@@ -18,7 +18,7 @@ async def save_final_output(data: dict):
         return {"status": "error", "message": f"The cohort was not recorded: {exc}"}
 
     patients = {member["subject_key"] for member in cohort.get("members") or []}
-    payload = TextPayload(message=f"Selected {len(datasetlist)} volumes from {len(patients)} patients.")
-    log_tool_state(ToolEvent("tool_started", "text", payload))
-    log_tool_state(ToolEvent("tool_finished", "text", payload))
+    message = f"Selected {len(datasetlist)} volumes from {len(patients)} patients."
+    emit("tool_started", message)
+    emit("tool_finished", message)
     return {"status": "success", "cohort_id": cohort["cohort_id"]}

@@ -4,10 +4,9 @@ import asyncio
 
 from .._toolkit import tool
 from ..common.manifests import WRITES
-from ..common.emit import ToolEvent, log_tool_state, TextPayload
+from ..common.emit import emit, emit_view
 from ..bookkeeping.scratchpad import scratchpad_raise_flag, scratchpad_write_note
 from ..common import domain_api
-from ..common.emit import broadcast_ws_message
 
 APPROVAL_POLL_SECONDS = float(os.environ.get("COHORT_APPROVAL_POLL_SECONDS", "2"))
 
@@ -31,11 +30,10 @@ async def _wait_for_cohort_approval(timeout_seconds: int = 3600) -> dict:
 
     if not _IS_WAITING_FOR_APPROVAL:
         _IS_WAITING_FOR_APPROVAL = True
-        payload = TextPayload(message="Waiting for doctor to review and approve final cohort in UI...")
-        log_tool_state(ToolEvent(event_type='tool_started', content_type='text', content=payload))
+        emit("tool_started", "Waiting for doctor to review and approve final cohort in UI...")
         session_id = os.environ.get("SESSION_ID")
         if session_id:
-            await broadcast_ws_message(
+            await emit_view(
                 "agent_waiting_for_user_input",
                 {
                     "agent": "study_population_planner_agent",
@@ -66,8 +64,7 @@ async def _wait_for_cohort_approval(timeout_seconds: int = 3600) -> dict:
 )
 async def generate_targets() -> str:
     """Prepares the cohort's target labels for review and acts as the Human-in-the-Loop approval gate before segmentation."""
-    log_tool_state(ToolEvent(event_type='tool_started', content_type='text',
-                             content=TextPayload(message='preparing targets & awaiting cohort approval')))
+    emit('tool_started', 'preparing targets & awaiting cohort approval')
 
     try:
         cohort = await domain_api.require_population_cohort()
@@ -134,8 +131,7 @@ async def generate_targets() -> str:
         )
     )
 
-    log_tool_state(ToolEvent(event_type='tool_finished', content_type='text',
-                             content=TextPayload(message=f"Cohort Approved & Targets Locked! ({final_count} volumes)")))
+    emit('tool_finished', f"Cohort Approved & Targets Locked! ({final_count} volumes)")
     return json.dumps({
         "status": "success",
         "cohort_id": approved["cohort_id"],

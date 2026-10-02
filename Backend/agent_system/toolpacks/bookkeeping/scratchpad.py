@@ -9,8 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .._toolkit import tool
 from ..common.manifests import READ_ONLY, WRITES
-from ..common.emit import log_tool_state, ToolEvent, TextPayload
-from ..common.emit import broadcast_ws_message
+from ..common.emit import emit, emit_view
 
 AgentStatus = Literal["in_progress", "done", "blocked", "failed"]
 FlagLevel = Literal["info", "warning", "error", "critical"]
@@ -174,15 +173,11 @@ async def scratchpad_register_agent(role: str = "agent") -> str:
     except Exception as exc:
         return _error(str(exc))
 
-    try:
-        payload = TextPayload(message=f"Registering agent {AGENT_ID}.")
-        log_tool_state(ToolEvent("tool_started", "text", payload))
-        log_tool_state(ToolEvent("tool_finished", "text", payload))
-    except Exception as exc:
-        print(f"Warning: Could not connect to logging server: {exc}")
+    emit("tool_started", f"Registering agent {AGENT_ID}.")
+    emit("tool_finished", f"Registering agent {AGENT_ID}.")
 
     if SESSION_ID:
-        await broadcast_ws_message(
+        await emit_view(
             "scratchpad_update",
             {
                 "type": "agent_registered",
@@ -222,7 +217,7 @@ async def scratchpad_write_note(content: str) -> str:
 
     notes = _notes(run).get("notes", [])
     if SESSION_ID:
-        await broadcast_ws_message(
+        await emit_view(
             "scratchpad_update",
             {
                 "type": "agent_note",
@@ -256,7 +251,7 @@ async def scratchpad_raise_flag(level: str = "warning", message: str = "No messa
 
     flags = _flags(run)
     if SESSION_ID:
-        await broadcast_ws_message(
+        await emit_view(
             "scratchpad_update",
             {
                 "type": "agent_flag",
@@ -294,7 +289,7 @@ async def scratchpad_set_status(status: str) -> str:
 
     if SESSION_ID:
         activity_log = _notes(run).get("activity_log") or []
-        await broadcast_ws_message(
+        await emit_view(
             "scratchpad_update",
             {
                 "type": "agent_status",
@@ -327,7 +322,7 @@ async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str
         return _error(str(exc))
 
     if SESSION_ID:
-        await broadcast_ws_message(
+        await emit_view(
             "scratchpad_update",
             {
                 "type": "agent_summary",
@@ -341,12 +336,8 @@ async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str
             SESSION_ID,
         )
 
-    try:
-        payload = TextPayload(message="Writing a Summary.")
-        log_tool_state(ToolEvent("tool_started", "text", payload))
-        log_tool_state(ToolEvent("tool_finished", "text", payload))
-    except Exception as exc:
-        print(f"Warning: Could not connect to logging server: {exc}")
+    emit("tool_started", "Writing a Summary.")
+    emit("tool_finished", "Writing a Summary.")
 
     return json.dumps({"status": "ok", "message": "Summary saved."}, indent=2)
 
@@ -389,12 +380,8 @@ async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True
     if include_notes:
         section["notes"] = notes.get("notes", [])
 
-    try:
-        payload = TextPayload(message=f"Reading {target_agent_id}'s notes.")
-        log_tool_state(ToolEvent("tool_started", "text", payload))
-        log_tool_state(ToolEvent("tool_finished", "text", payload))
-    except Exception as exc:
-        print(f"Warning: Could not connect to logging server: {exc}")
+    emit("tool_started", f"Reading {target_agent_id}'s notes.")
+    emit("tool_finished", f"Reading {target_agent_id}'s notes.")
 
     return json.dumps(section, indent=2)
 
