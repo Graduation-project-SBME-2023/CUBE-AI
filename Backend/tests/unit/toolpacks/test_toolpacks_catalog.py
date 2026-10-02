@@ -60,6 +60,10 @@ MOVED_TOOLS: dict[str, set[str]] = {
 # Tools Plan 2 adds on top of the moved ones (Phase 2.4).
 ADDED_TOOLS: dict[str, set[str]] = {
     "segmentation": {"run_segmentation_with_guard"},
+    "literature": {
+        "search_pubmed", "search_arxiv", "search_semantic_scholar", "search_europe_pmc",
+        "score_paper_relevance", "save_literature_output",
+    },
 }
 # Plan 7 turns these into cost="heavy" job tools; until then INTERIM_HEAVY.
 INTERIM_HEAVY_TOOLS = {
@@ -165,4 +169,4 @@ def test_the_container_root_builds_the_same_catalog(tmp_path):
         capture_output=True, text=True, env=env, timeout=120, check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.split() == ["56", "False"]
+    assert result.stdout.split() == ["62", "False"]  # 55 moved + 7 added
