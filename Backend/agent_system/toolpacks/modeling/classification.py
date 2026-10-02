@@ -8,10 +8,11 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from .. import mcp
-from ..feature_extraction.digests import bytes_digest
-from ..helpers import domain_api
-from ..helpers.workspace import WorkspacePath, get_workspace
+from .._toolkit import tool
+from ..common.manifests import INTERIM_HEAVY
+from ..radiomics.digests import bytes_digest
+from ..common import domain_api
+from ..common.workspace import WorkspacePath, get_workspace
 from . import results
 from .evaluation import (
     chart_data_from_recorded as _chart_data_from_recorded,
@@ -20,7 +21,7 @@ from .evaluation import (
 )
 from .holdout import resolve_selection_holdout
 from storage_paths import TEMP_DIR, workspace_subpath
-from tool_logging import ToolEvent, log_tool_state, TextPayload, ProgressPayload
+from ..common.emit import ToolEvent, log_tool_state, TextPayload, ProgressPayload
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -137,15 +138,11 @@ class RunInferenceInput(BaseModel):
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
 
-@mcp.tool(
+@tool(
     name="pycaret_train_classifier",
-    annotations={
-        "title": "Train a PyCaret Classification Pipeline",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **INTERIM_HEAVY,
 )
 async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
     """Compare, tune, and blend classification models with PyCaret."""
@@ -781,15 +778,11 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         }, indent=2)
 
 
-@mcp.tool(
+@tool(
     name="pycaret_run_inference",
-    annotations={
-        "title": "Run Inference with a Saved PyCaret Model",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **INTERIM_HEAVY,
 )
 async def pycaret_run_inference(params: RunInferenceInput) -> str:
     """Load a recorded PyCaret model and generate predictions on new data."""

@@ -9,9 +9,7 @@ import pytest
 import respx
 from pydantic import ValidationError
 
-from tests.support.mcp_loader import load_mcp_tool
-
-module = load_mcp_tool("agent_output")
+from agent_system.toolpacks.bookkeeping import agent_output as module
 
 API = "http://application-api.test"
 SESSION_ID = "11111111-1111-4111-8111-111111111111"

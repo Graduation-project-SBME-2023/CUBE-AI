@@ -12,7 +12,7 @@ pytestmark = pytest.mark.contract
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = BACKEND_ROOT.parent
 APPLICATION_ROOT = BACKEND_ROOT / "application_api"
-MCP_ROOT = BACKEND_ROOT / "mcp"
+TOOLPACKS_ROOT = BACKEND_ROOT / "agent_system" / "toolpacks"
 AGENT_ROOT = BACKEND_ROOT / "agent_system"
 VERSIONS = APPLICATION_ROOT / "migrations" / "versions"
 MODELING_VIEW = (
@@ -146,7 +146,7 @@ def test_only_modeling_writes_model_results_and_replays_do_not_overwrite():
 # ----------------------------------------------------------------------
 @pytest.mark.parametrize("tool", ["classification.py", "regression.py"])
 def test_the_training_tools_record_rows_not_csvs(tool):
-    source = _source(MCP_ROOT / "tools/modeling" / tool)
+    source = _source(TOOLPACKS_ROOT / "modeling" / tool)
     assert "domain_api.record_model_comparison" in source
     # A replay reads the recorded comparison instead of training again.
     assert "domain_api.get_model_comparison" in source
@@ -164,22 +164,23 @@ def test_the_training_tools_record_rows_not_csvs(tool):
 
 def test_a_lost_pipeline_is_refitted_as_a_new_variant_from_verified_input():
     """A lost.pkl is refitted, not reloaded — from verified input, and recorded beside the original rather than over it."""
-    source = _source(MCP_ROOT / "tools/modeling/refit.py")
+    source = _source(TOOLPACKS_ROOT / "modeling/refit.py")
     assert "domain_api.record_model_comparison" in source
     assert "__refit_" in source
     assert "dataset_digest" in source and "refusing to refit" in source
-    assert "from tools.modeling.refit import pycaret_refit_model" in _source(MCP_ROOT / "server.py")
+    # Registered as a tool (the catalog discovers it; there is no import list).
+    assert 'name="pycaret_refit_model"' in source and "@tool(" in source
 
 
 def test_a_generic_csv_is_captured_not_turned_into_a_fake_feature_set():
-    source = _source(MCP_ROOT / "tools/modeling/results.py")
+    source = _source(TOOLPACKS_ROOT / "modeling/results.py")
     assert 'kind="input_csv"' in source
     assert 'MODEL_BINARY_LOGICAL_ROOT = "modeling/models"' in source
     assert "create_feature_set" not in source
 
 
 def test_the_reporter_reads_rows_not_files():
-    source = _source(MCP_ROOT / "tools/get_modeling_results.py")
+    source = _source(TOOLPACKS_ROOT / "reporting/get_modeling_results.py")
     assert "domain_api.model_results_summary" in source
     assert "domain_api.list_feature_sets" in source
     for gone in ("read_csv", "workspace_subpath", "top_10_features.csv", "model_summary.csv"):

@@ -155,7 +155,7 @@ def test_the_agent_system_still_accepts_the_wire_shape():
 
 
 def test_an_old_producer_event_still_parses():
-    # What Backend/mcp/tool_logging.py posts today: asdict() with a float timestamp.
+    # What Backend/mcp/tool_logging.py posted (deleted in Plan 2.1): asdict() with a float timestamp.
     old = {
         "event_type": "tool_progress",
         "content_type": "progress",

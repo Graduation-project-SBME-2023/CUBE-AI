@@ -1,24 +1,28 @@
-from . import mcp
+from .._toolkit import tool
+from ..common.manifests import READ_ONLY
 import requests
 import sys
 import os
 import json
 import httpx
-backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../", ".."))
-sys.path.append(backend_dir)
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
 from agent_system.agents.execution_agents.segmentation.model_catalog import (
     get_enabled_segmentation_model_paths,
 )
-from tool_logging import ToolEvent, log_tool_state, TextPayload
+from ..common.emit import ToolEvent, log_tool_state, TextPayload
 
 base_url = os.environ.get(
     "INFERENCE_API_URL",
     os.environ.get("MONAI_URL", "http://localhost:8000"),
 )
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def list_models():
+    """List the enabled segmentation models on the inference service: name,
+    type (automatic or interactive), modality, anatomy, labels, params schema
+    and description."""
 
     payload = TextPayload(message="Fetching models info")
     log_tool_state(ToolEvent("tool_started", "text", payload))

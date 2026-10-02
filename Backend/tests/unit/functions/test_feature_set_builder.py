@@ -6,11 +6,9 @@ import math
 
 import pytest
 
-from tests.support.mcp_loader import load_mcp_tool
-
 pd = pytest.importorskip("pandas")
-builder = load_mcp_tool("feature_extraction.feature_set_builder")
-split_module = load_mcp_tool("feature_extraction.selection_split")
+from agent_system.toolpacks.radiomics import feature_set_builder as builder
+from agent_system.toolpacks.radiomics import selection_split as split_module
 
 pytestmark = pytest.mark.unit
 

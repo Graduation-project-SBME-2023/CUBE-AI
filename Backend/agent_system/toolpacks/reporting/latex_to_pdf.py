@@ -8,9 +8,10 @@ from typing import Annotated
 import httpx
 from pydantic import Field
 
-from .. import mcp
-from service_urls import APP_API_URL
-from tool_logging import TextPayload, ToolEvent, log_tool_state
+from .._toolkit import tool
+from ..common.manifests import WRITES
+from ..common.service_urls import APP_API_URL
+from ..common.emit import TextPayload, ToolEvent, log_tool_state
 
 
 def _api_base() -> str:
@@ -22,7 +23,10 @@ def _api_base() -> str:
     return APP_API_URL
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent"},
+    **WRITES,
+)
 async def latex_to_pdf(
     latex_text: Annotated[
         str,

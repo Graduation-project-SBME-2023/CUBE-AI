@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
-from ..feature_extraction.digests import bytes_digest, document_digest
-from ..helpers import domain_api
+from ..radiomics.digests import bytes_digest, document_digest
+from ..common import domain_api
 
 MODEL_RESULT_SCHEMA_VERSION = 1
 # exception 2: fitted research pipelines stay on disk, under this logical
@@ -351,7 +351,7 @@ def model_path_for(variant: Mapping[str, Any]) -> Optional[str]:
     """The path PyCaret's `load_model` takes for a recorded variant."""
     from storage_paths import workspace_subpath
 
-    from ..helpers.workspace import get_workspace
+    from ..common.workspace import get_workspace
 
     name = variant.get("model_file_name")
     if not name:
@@ -433,7 +433,7 @@ async def recorded_variant_for(model_path: str) -> Optional[dict[str, Any]]:
     """The recorded model result whose fitted pipeline is this file."""
     from storage_paths import workspace_subpath
 
-    from ..helpers.workspace import get_workspace
+    from ..common.workspace import get_workspace
 
     target = os.path.normcase(os.path.abspath(model_path + ".pkl"))
     rows = await domain_api.request(

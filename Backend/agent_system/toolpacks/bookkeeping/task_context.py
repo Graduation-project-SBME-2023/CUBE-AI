@@ -6,13 +6,14 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-from . import mcp
-from tool_logging import ToolEvent, log_tool_state, TextPayload
+from .._toolkit import tool
+from ..common.manifests import READ_ONLY
+from ..common.emit import ToolEvent, log_tool_state, TextPayload
 
 def _app_api_url() -> str:
     """The Application API base URL."""
     try:
-        from service_urls import APP_API_URL
+        from ..common.service_urls import APP_API_URL
 
         return APP_API_URL
     except ImportError:
@@ -37,15 +38,11 @@ async def _get_json(client: httpx.AsyncClient, path: str) -> Any:
     return response.json()
 
 
-@mcp.tool(
+@tool(
     name="read_agent_task_context",
-    annotations={
-        "title": "Read Agent Task Context",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **READ_ONLY,
 )
 async def read_agent_task_context() -> dict[str, Any]:
     """Return this agent's task: the session's prompt and intent, its own plan step, and the compiled prompt of the run executing it."""

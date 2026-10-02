@@ -9,7 +9,8 @@ from typing import Any, Dict, List, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import mcp
+from .._toolkit import tool
+from ..common.manifests import READ_ONLY, WRITES
 from storage_paths import TEMP_DIR
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ def _cleanup_run_temp_dirs(run_id: str) -> None:
 def _app_api_url() -> str:
     """The Application API base URL."""
     try:
-        from service_urls import APP_API_URL
+        from ..common.service_urls import APP_API_URL
 
         return APP_API_URL
     except ImportError:
@@ -159,15 +160,11 @@ async def _session_runs() -> List[Dict[str, Any]]:
 
 # -- Tools ---------------------------------------------------------------------
 
-@mcp.tool(
+@tool(
     name="write_agent_output",
-    annotations={
-        "title": "Write Structured Agent Output",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **WRITES,
 )
 async def write_agent_output(params: WriteAgentOutputInput) -> str:
     """Write this agent's structured output."""
@@ -223,15 +220,11 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
     )
 
 
-@mcp.tool(
+@tool(
     name="read_agent_output",
-    annotations={
-        "title": "Read a Single Agent's Output",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **READ_ONLY,
 )
 async def read_agent_output(params: ReadAgentOutputInput) -> str:
     """Read the structured output of an agent in this session.: when several plan steps name one agent, this resolves the FIRST in plan order and says how many matched."""
@@ -255,15 +248,11 @@ async def read_agent_output(params: ReadAgentOutputInput) -> str:
     return json.dumps(document, indent=2)
 
 
-@mcp.tool(
+@tool(
     name="read_all_agent_outputs",
-    annotations={
-        "title": "Read All Agent Outputs",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **READ_ONLY,
 )
 async def read_all_agent_outputs() -> str:
     """Read every agent's structured output for this session, in plan order."""

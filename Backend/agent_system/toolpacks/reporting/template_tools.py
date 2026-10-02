@@ -2,7 +2,7 @@
 LaTeX Template MCP Tool
 
 Provides tools for reading LaTeX templates and their filling guides.
-Templates are stored in Backend/mcp/tools/latex/templates/.
+Templates are stored in templates/, next to this module.
 
 Available templates:
   - ieee_research_paper  (full 6-10 page IEEE conference paper)
@@ -13,7 +13,8 @@ Available templates:
 import json
 import os
 
-from .. import mcp
+from .._toolkit import tool
+from ..common.manifests import READ_ONLY
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -41,15 +42,11 @@ class GetTemplateInput(BaseModel):
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
 
-@mcp.tool(
+@tool(
     name="list_latex_templates",
-    annotations={
-        "title": "List Available LaTeX Templates",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **READ_ONLY,
 )
 async def list_latex_templates() -> str:
     """List all available LaTeX templates with their descriptions and selection criteria.
@@ -97,15 +94,11 @@ async def list_latex_templates() -> str:
         }, indent=2)
 
 
-@mcp.tool(
+@tool(
     name="get_latex_template",
-    annotations={
-        "title": "Get LaTeX Template and Filling Guide",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **READ_ONLY,
 )
 async def get_latex_template(params: GetTemplateInput) -> str:
     """Load a specific LaTeX template and its per-placeholder filling guide.

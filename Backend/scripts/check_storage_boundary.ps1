@@ -14,7 +14,7 @@ function Is-Under([string]$Path, [string]$Root) {
 
 function Is-AllowedSourceArtifact([string]$Path) {
     $allowedRoots = @(
-        (Join-Path $BackendRoot "mcp\test_data"),
+        (Join-Path $BackendRoot "tests\fixtures\sample_data"),
         (Join-Path $BackendRoot "agent_system\tests"),
         (Join-Path $BackendRoot "apps\radiology\tests"),
         (Join-Path $BackendRoot "apps\radiology\lib\configs"),

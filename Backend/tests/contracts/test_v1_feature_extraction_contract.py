@@ -12,7 +12,7 @@ pytestmark = pytest.mark.contract
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 REPO_ROOT = BACKEND_ROOT.parent
 APPLICATION_ROOT = BACKEND_ROOT / "application_api"
-MCP_ROOT = BACKEND_ROOT / "mcp"
+TOOLPACKS_ROOT = BACKEND_ROOT / "agent_system" / "toolpacks"
 AGENT_ROOT = BACKEND_ROOT / "agent_system"
 VERSIONS = APPLICATION_ROOT / "migrations" / "versions"
 FEATURES_VIEW = (
@@ -221,9 +221,8 @@ def test_the_api_and_the_tool_compute_the_same_source_digest():
     """The API recomputes a set's source_digest from its rows; it must be the
     exact function the extraction tool uses."""
     from application_api.repositories.feature_sets import rows_source_digest
-    from tests.support.mcp_loader import load_mcp_tool
 
-    tool = load_mcp_tool("feature_extraction.digests")
+    from agent_system.toolpacks.radiomics import digests as tool
     sample = ["c" * 64, "a" * 64, "b" * 64]
     assert rows_source_digest(sample) == tool.rows_source_digest(sample)
 
@@ -232,7 +231,7 @@ def test_the_api_and_the_tool_compute_the_same_source_digest():
 # The writer
 # ----------------------------------------------------------------------
 def test_the_extraction_tool_records_rows_with_their_digests():
-    source = _source(MCP_ROOT / "tools/feature_extraction/features.py")
+    source = _source(TOOLPACKS_ROOT / "radiomics/features.py")
     assert "domain_api.record_radiomics_rows" in source
     for digest in ("image_digest", "segmentation_digest", "config_digest", "source_digest"):
         assert f"provenance.{digest}(" in source, digest
@@ -242,7 +241,7 @@ def test_the_extraction_tool_records_rows_with_their_digests():
 
 
 def test_the_selection_tool_freezes_feature_sets_instead_of_writing_csvs():
-    source = _source(MCP_ROOT / "tools/feature_extraction/features.py")
+    source = _source(TOOLPACKS_ROOT / "radiomics/features.py")
     assert "domain_api.create_feature_set" in source
     assert "domain_api.freeze_feature_set" in source
     for retired in (
@@ -262,7 +261,7 @@ def test_the_selection_tool_freezes_feature_sets_instead_of_writing_csvs():
 
 
 def test_the_extraction_cache_is_content_addressed():
-    source = _source(MCP_ROOT / "tools/feature_extraction/cache_utils.py")
+    source = _source(TOOLPACKS_ROOT / "radiomics/cache_utils.py")
     assert "st_mtime" not in source
     assert "def get_cache_key(image_digest: str, segmentation_digest: str, config_digest: str)" in source
 

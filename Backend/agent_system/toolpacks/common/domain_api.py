@@ -24,10 +24,9 @@ class DomainApiError(RuntimeError):
 
 
 def app_api_url() -> str:
-    """Same resolution as `service_urls` (importable only inside the MCP
-    subprocess, where Backend/mcp is on sys.path)."""
+    """Same resolution as `service_urls`."""
     try:
-        from service_urls import APP_API_URL
+        from .service_urls import APP_API_URL
 
         return APP_API_URL
     except ImportError:

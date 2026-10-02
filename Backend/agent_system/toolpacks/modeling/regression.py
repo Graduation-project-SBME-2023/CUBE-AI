@@ -10,10 +10,11 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .. import mcp  # same import pattern as scratchpad
-from ..feature_extraction.digests import bytes_digest
-from ..helpers import domain_api
-from ..helpers.workspace import WorkspacePath, get_workspace
+from .._toolkit import tool
+from ..common.manifests import INTERIM_HEAVY
+from ..radiomics.digests import bytes_digest
+from ..common import domain_api
+from ..common.workspace import WorkspacePath, get_workspace
 from . import results
 from .evaluation import cv_row as _cv_row, regression_metrics as _regression_metrics
 from .holdout import resolve_selection_holdout
@@ -181,15 +182,11 @@ class RunRegressionInferenceInput(BaseModel):
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
 
-@mcp.tool(
+@tool(
     name="pycaret_train_regressor",
-    annotations={
-        "title": "Train a PyCaret Regression Pipeline",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **INTERIM_HEAVY,
 )
 async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
     """Compare, tune, and blend regression models with PyCaret."""
@@ -605,15 +602,11 @@ async def pycaret_train_regressor(params: TrainRegressorInput) -> str:
         }, indent=2)
 
 
-@mcp.tool(
+@tool(
     name="pycaret_run_regression_inference",
-    annotations={
-        "title": "Run Inference with a Saved PyCaret Regression Model",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **INTERIM_HEAVY,
 )
 async def pycaret_run_regression_inference(params: RunRegressionInferenceInput) -> str:
     """Load a recorded PyCaret regression model and predict on new data."""
@@ -739,8 +732,3 @@ async def pycaret_run_regression_inference(params: RunRegressionInferenceInput) 
             "model_path": params.model_path,
         }, indent=2)
 
-
-# ── Entry point ────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    mcp.run()

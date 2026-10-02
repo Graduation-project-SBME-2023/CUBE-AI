@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.support.mcp_loader import load_mcp_tool
-
-
-module = load_mcp_tool("feature_extraction.cache_utils")
+from agent_system.toolpacks.radiomics import cache_utils as module
 
 IMAGE = "a" * 64
 SEGMENT = "b" * 64

@@ -1,15 +1,19 @@
-from ... import mcp 
+from ..._toolkit import tool
+from ...common.manifests import READ_ONLY
 from typing import Annotated
 from pydantic import Field
 import httpx
 import os
-from service_urls import CONTROL_API_URL
+from ...common.service_urls import CONTROL_API_URL
 
 from ..result_shape import keep_model_id
 
 base_url = CONTROL_API_URL
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def search_segmentation(
     series_description: Annotated[str | None, Field(description="Text from the DICOM SeriesDescription, which usually names the anatomical structure or region (e.g., 'Liver', 'Tumor').")] = None,
     generation_method: Annotated[str | None, Field(description="How the mask was generated, as recorded on the row (e.g., 'modification', 'unknown').")] = None,

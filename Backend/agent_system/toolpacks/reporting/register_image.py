@@ -13,19 +13,15 @@ from typing import Annotated
 
 from pydantic import Field
 
-from .. import mcp
-from ..helpers import domain_api
+from .._toolkit import tool
+from ..common.manifests import WRITES
+from ..common import domain_api
 
 
-@mcp.tool(
+@tool(
     name="register_report_image",
-    annotations={
-        "title": "Register a Figure Artifact for the Report",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": False,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    **WRITES,
 )
 async def register_report_image(
     report_id: Annotated[

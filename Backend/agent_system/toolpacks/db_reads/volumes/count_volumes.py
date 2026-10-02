@@ -1,13 +1,17 @@
-from ... import mcp 
+from ..._toolkit import tool
+from ...common.manifests import READ_ONLY
 from pydantic import Field
 from typing import Annotated
 import httpx
 import os
-from service_urls import CONTROL_API_URL
+from ...common.service_urls import CONTROL_API_URL
 
 base_url = CONTROL_API_URL
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def count_volumes_in_study(
     study_uid: Annotated[str, Field(description="The unique identifier of the medical study. This is required to count the number of volumes associated with it.")]
 ):

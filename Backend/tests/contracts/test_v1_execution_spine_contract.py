@@ -11,7 +11,7 @@ pytestmark = pytest.mark.contract
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 APPLICATION_ROOT = BACKEND_ROOT / "application_api"
 AGENT_ROOT = BACKEND_ROOT / "agent_system"
-MCP_ROOT = BACKEND_ROOT / "mcp"
+TOOLPACKS_ROOT = BACKEND_ROOT / "agent_system" / "toolpacks"
 VERSIONS = APPLICATION_ROOT / "migrations" / "versions"
 
 
@@ -296,7 +296,7 @@ def test_the_mcp_environment_carries_the_run_identity():
 # — two files that stop being files
 # ----------------------------------------------------------------------
 def test_the_scratchpad_is_the_run_not_a_json_file():
-    source = _source(MCP_ROOT / "tools" / "scratchpad.py")
+    source = _source(TOOLPACKS_ROOT / "bookkeeping" / "scratchpad.py")
     assert "SCRATCHPAD_FILE" not in source
     assert "/runs/" in source
     assert "RUN_ID" in source
@@ -314,7 +314,7 @@ def test_the_scratchpad_is_the_run_not_a_json_file():
 
 
 def test_agent_output_is_the_run_not_a_json_file():
-    source = _source(MCP_ROOT / "tools" / "agent_output.py")
+    source = _source(TOOLPACKS_ROOT / "bookkeeping" / "agent_output.py")
     assert "OUTPUTS_DIR" not in source
     # No file is opened or written; the only mention left is the docstring
     # that says where the document used to live.
@@ -332,7 +332,7 @@ def test_agent_output_is_the_run_not_a_json_file():
 
 
 def test_task_context_reads_the_run(monkeypatch):
-    source = _source(MCP_ROOT / "tools" / "task_context.py")
+    source = _source(TOOLPACKS_ROOT / "bookkeeping" / "task_context.py")
     assert "/runs/" in source
     assert "compiled_prompt" in source
     assert "/task-messages/" not in source

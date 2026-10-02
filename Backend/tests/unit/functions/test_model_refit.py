@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from tests.support.mcp_loader import load_mcp_tool
-
-core = load_mcp_tool("modeling.refit_core")
-results = load_mcp_tool("modeling.results")
+from agent_system.toolpacks.modeling import refit_core as core
+from agent_system.toolpacks.modeling import results
 
 pytestmark = pytest.mark.unit
 

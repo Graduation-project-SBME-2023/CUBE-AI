@@ -3,12 +3,16 @@ from typing import Annotated
 
 from pydantic import Field
 
-from .. import mcp
-from ..helpers import domain_api
-from internal_emitter import broadcast_ws_message
+from .._toolkit import tool
+from ..common.manifests import WRITES
+from ..common import domain_api
+from ..common.emit import broadcast_ws_message
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent"},
+    **WRITES,
+)
 async def write_inclusion_criteria(
     inclusion_criteria: Annotated[list[str], Field(description="List of clinical inclusion criteria rules to define the population.")],
     exclusion_criteria: Annotated[list[str], Field(description="List of clinical exclusion criteria rules to filter out patients.")],

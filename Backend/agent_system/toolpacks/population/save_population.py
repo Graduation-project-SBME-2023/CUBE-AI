@@ -1,9 +1,13 @@
-from . import mcp
-from tool_logging import ToolEvent, log_tool_state, TextPayload
-from .helpers import domain_api
+from .._toolkit import tool
+from ..common.manifests import WRITES
+from ..common.emit import ToolEvent, log_tool_state, TextPayload
+from ..common import domain_api
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent"},
+    **WRITES,
+)
 async def save_final_output(data: dict):
     """Record the population agent's selected volumes as the cohort membership."""
     datasetlist = [str(uid) for uid in (data.get("datasetlist") or [])]

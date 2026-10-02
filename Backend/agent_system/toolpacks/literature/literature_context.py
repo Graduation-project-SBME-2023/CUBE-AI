@@ -8,22 +8,19 @@ the only copy; there is no workspace file any more).
 
 import json
 
-from . import mcp
-from tool_logging import ToolEvent, log_tool_state, TextPayload
-from .helpers import domain_api
+from .._toolkit import tool
+from ..common.manifests import READ_ONLY
+from ..common.emit import ToolEvent, log_tool_state, TextPayload
+from ..common import domain_api
 
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
 
-@mcp.tool(
+@tool(
     name="read_literature_context",
-    annotations={
-        "title": "Read Literature Review Context",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **READ_ONLY,
 )
 async def read_literature_context() -> str:
     """Read the literature review recorded during the planning phase.

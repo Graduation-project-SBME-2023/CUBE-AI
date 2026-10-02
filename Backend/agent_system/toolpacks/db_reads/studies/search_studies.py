@@ -1,15 +1,19 @@
-from ... import mcp 
+from ..._toolkit import tool
+from ...common.manifests import READ_ONLY
 from typing import Annotated
 from pydantic import Field
 import httpx
 import os
-from service_urls import CONTROL_API_URL
+from ...common.service_urls import CONTROL_API_URL
 
 
 base_url = CONTROL_API_URL
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def search_studies(
     modality: Annotated[str | None, Field(description="The imaging modality to filter by (e.g., 'CT', 'MRI', 'X-RAY'). If omitted, includes all modalities.")] = None,
     keyword: Annotated[str | None, Field(description="A specific keyword to search for within the study descriptions (e.g., 'chest', 'contrast').")] = None

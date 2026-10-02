@@ -11,10 +11,11 @@ import tempfile
 
 import pandas as pd
 
-from .. import mcp
-from ..feature_extraction.digests import bytes_digest, document_digest
-from ..helpers import domain_api
-from ..helpers.workspace import get_workspace
+from .._toolkit import tool
+from ..common.manifests import INTERIM_HEAVY
+from ..radiomics.digests import bytes_digest, document_digest
+from ..common import domain_api
+from ..common.workspace import get_workspace
 from . import evaluation, refit_core, results
 from storage_paths import TEMP_DIR
 
@@ -53,15 +54,10 @@ async def _training_data(result: dict) -> tuple[pd.DataFrame, pd.DataFrame | Non
     return pd.read_csv(io.BytesIO(payload)), holdout
 
 
-@mcp.tool(
+@tool(
     name="pycaret_refit_model",
-    annotations={
-        "title": "Refit a Recorded Model From Its Record",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": False,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    **INTERIM_HEAVY,
 )
 async def pycaret_refit_model(model_result_id: str) -> str:
     """Refit a recorded model whose fitted pipeline was lost or corrupted."""

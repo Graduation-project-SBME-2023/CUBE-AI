@@ -1,16 +1,20 @@
 import httpx
-from ... import mcp
+from ..._toolkit import tool
+from ...common.manifests import READ_ONLY
 from typing import Annotated
 from pydantic import Field
-from tool_logging import ToolEvent, log_tool_state, TextPayload
+from ...common.emit import ToolEvent, log_tool_state, TextPayload
 import os
-from service_urls import CONTROL_API_URL
+from ...common.service_urls import CONTROL_API_URL
 
 
 base_url = CONTROL_API_URL
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def get_patient(
     patient_id: Annotated[int | None, Field(description="The unique ID of the patient. If provided, fetches a single detailed record. If omitted, fetches a list of all patients.")] = None,
     skip: Annotated[int, Field(description="Pagination offset: The number of patient records to skip before starting the list.")] = 0,

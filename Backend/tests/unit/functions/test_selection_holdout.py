@@ -8,10 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.support.mcp_loader import load_mcp_tool
-
-
-module = load_mcp_tool("modeling.holdout")
+from agent_system.toolpacks.modeling import holdout as module
 
 
 @pytest.mark.unit

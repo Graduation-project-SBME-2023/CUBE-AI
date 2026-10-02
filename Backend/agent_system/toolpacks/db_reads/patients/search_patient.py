@@ -1,14 +1,18 @@
-from ... import mcp 
+from ..._toolkit import tool
+from ...common.manifests import READ_ONLY
 from typing import Annotated
 from pydantic import Field
 import httpx
 import os
-from service_urls import CONTROL_API_URL
+from ...common.service_urls import CONTROL_API_URL
 
 base_url = CONTROL_API_URL
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def search_patient(
     name: Annotated[str|None, Field(description="The name (or partial name) of the patient to search for.")] = None,
     gender: Annotated[str|None, Field(description="The gender of the patient. Strictly accepts only 'M' for Male or 'F' for Female.")] = None

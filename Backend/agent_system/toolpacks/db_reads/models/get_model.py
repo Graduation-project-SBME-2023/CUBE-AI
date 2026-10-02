@@ -1,16 +1,20 @@
-from ... import mcp
+from ..._toolkit import tool
+from ...common.manifests import READ_ONLY
 import httpx
 from typing import Annotated
 from pydantic import Field
 import os
-from service_urls import CONTROL_API_URL
+from ...common.service_urls import CONTROL_API_URL
 
 from ..result_shape import keep_model_id
 
 base_url = CONTROL_API_URL
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def get_model(
     model_id: Annotated[int | None, Field(description="The unique identifier of the AI model. If provided, fetches a single detailed record. If omitted, fetches a list of all models.")] = None,
     skip: Annotated[int, Field(description="Pagination offset: The number of model records to skip before starting the list.")] = 0,
