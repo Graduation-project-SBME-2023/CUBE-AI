@@ -1,5 +1,6 @@
 """Agent Output MCP Tool."""
 
+import asyncio
 import json
 import logging
 import shutil
@@ -194,8 +195,10 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
         return _error(f"Failed to write output: {exc}")
 
     # This agent's output is now durable in Postgres — its working scratch
-    # under temp/ (if any) has nothing left it's the only copy of.
-    _cleanup_run_temp_dirs(run_id())
+    # under temp/ (if any) has nothing left it's the only copy of. rmtree of a
+    # large scratch tree would block the event loop (L12); H13 (keep the dirs
+    # while the run's jobs are active) comes with the job platform (Plan 5).
+    await asyncio.to_thread(_cleanup_run_temp_dirs, run_id())
 
     return json.dumps(
         {

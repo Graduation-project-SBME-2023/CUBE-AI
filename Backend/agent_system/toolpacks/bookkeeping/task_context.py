@@ -44,7 +44,7 @@ async def read_agent_task_context() -> dict[str, Any]:
             "message": "This call belongs to neither a run nor an agent.",
         }
 
-    emit("tool_started", "Reading task context from DB")
+    emit("tool_log", "Reading task context from DB")
 
     try:
         session = await _get_json(f"/sessions/{session_id()}")
@@ -63,7 +63,7 @@ async def read_agent_task_context() -> dict[str, Any]:
         params = node.get("params") or {}
         task_message = params.get("task_message") or {}
 
-        emit("tool_finished", f"Task context loaded for {agent_type()}")
+        emit("tool_log", f"Task context loaded for {agent_type()}")
 
         return {
             "status": "ok",

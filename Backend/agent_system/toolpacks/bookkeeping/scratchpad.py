@@ -151,8 +151,7 @@ async def scratchpad_register_agent(role: str = "agent") -> str:
     except Exception as exc:
         return _error(str(exc))
 
-    emit("tool_started", f"Registering agent {agent_type()}.")
-    emit("tool_finished", f"Registering agent {agent_type()}.")
+    emit("tool_log", f"Registering agent {agent_type()}.")
 
     await emit_view(
         "scratchpad_update",
@@ -304,8 +303,7 @@ async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str
         },
     )
 
-    emit("tool_started", "Writing a Summary.")
-    emit("tool_finished", "Writing a Summary.")
+    emit("tool_log", "Writing a Summary.")
 
     return json.dumps({"status": "ok", "message": "Summary saved."}, indent=2)
 
@@ -348,8 +346,7 @@ async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True
     if include_notes:
         section["notes"] = notes.get("notes", [])
 
-    emit("tool_started", f"Reading {target_agent_id}'s notes.")
-    emit("tool_finished", f"Reading {target_agent_id}'s notes.")
+    emit("tool_log", f"Reading {target_agent_id}'s notes.")
 
     return json.dumps(section, indent=2)
 

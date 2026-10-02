@@ -11,6 +11,8 @@ import json as jsonlib
 from typing import Any
 from urllib.parse import quote
 
+import httpx
+
 from .. import _toolkit
 from . import settings
 from .http_client import shared_client, timeout as http_timeout, write_path_headers
@@ -22,12 +24,30 @@ POPULATION_AGENT_TYPE = "study_population_planner_agent"
 
 
 class DomainApiError(RuntimeError):
-    """A domain read or write the Application API refused or could not serve."""
+    """A domain read or write the Application API refused or could not serve.
+    ``status_code`` is ``None`` when the API could not be reached at all."""
 
     def __init__(self, message: str, status_code: int | None = None, body: Any = None):
         super().__init__(message)
         self.status_code = status_code
         self.body = body
+
+    @property
+    def error_code(self) -> str:
+        """The ``error_result`` code for this failure."""
+        if self.status_code is None:
+            return "unavailable"
+        if self.status_code == 404:
+            return "not_found"
+        if self.status_code == 409:
+            return "conflict"
+        return "upstream_error" if self.status_code >= 500 else "bad_request"
+
+
+def error_result_from(exc: DomainApiError, context: str | None = None, **extra: Any) -> dict[str, Any]:
+    """``exc`` as the tools' error envelope; ``context`` says what failed."""
+    message = f"{context}: {exc}" if context else str(exc)
+    return _toolkit.error_result(exc.error_code, message, **extra)
 
 
 def _context() -> _toolkit.ToolContext | None:
@@ -98,15 +118,20 @@ async def request(
     headers = dict(kwargs.pop("headers", None) or {})
     if method not in READ_METHODS:
         headers.update(write_path_headers())
-    response = await shared_client().request(
-        method,
-        f"{app_api_url()}{path}",
-        json=json,
-        params=params,
-        headers=headers,
-        timeout=http_timeout(timeout),
-        **kwargs,
-    )
+    try:
+        response = await shared_client().request(
+            method,
+            f"{app_api_url()}{path}",
+            json=json,
+            params=params,
+            headers=headers,
+            timeout=http_timeout(timeout),
+            **kwargs,
+        )
+    except httpx.HTTPError as exc:
+        raise DomainApiError(
+            f"{method} {path}: the Application API could not be reached ({type(exc).__name__})"
+        ) from exc
     if allow_404 and response.status_code == 404:
         return None
     if response.status_code >= 400:
@@ -335,10 +360,16 @@ async def list_session_artifacts(kind: str | None = None) -> list[dict[str, Any]
 
 async def artifact_content(file_id: str) -> bytes:
     """Retained bytes, e.g. a model's per-case predictions."""
-    response = await shared_client().get(
-        f"{app_api_url()}/files/{file_id}/content",
-        timeout=http_timeout(settings.domain_api_long_timeout()),
-    )
+    try:
+        response = await shared_client().get(
+            f"{app_api_url()}/files/{file_id}/content",
+            timeout=http_timeout(settings.domain_api_long_timeout()),
+        )
+    except httpx.HTTPError as exc:
+        raise DomainApiError(
+            f"GET /files/{file_id}/content: the Application API could not be reached "
+            f"({type(exc).__name__})"
+        ) from exc
     if response.status_code >= 400:
         raise DomainApiError(
             f"GET /files/{file_id}/content -> {response.status_code}",

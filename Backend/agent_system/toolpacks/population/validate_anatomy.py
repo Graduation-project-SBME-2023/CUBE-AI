@@ -2,7 +2,7 @@
 
 from typing import Annotated
 from pydantic import Field
-from .._toolkit import tool
+from .._toolkit import error_result, tool
 from ..common.manifests import WRITES
 from ..common import domain_api
 from ..common.emit import emit_view
@@ -48,14 +48,21 @@ ANATOMY_GROUPS = {
 }
 
 
+# A region shorter than this names nothing: "" is a substring of every keyword
+# and "a" of most of them, so a short text would match the first group (L5).
+MIN_REGION_LENGTH = 3
+
+
 def _resolve_anatomy_group(text: str) -> tuple[str | None, list[str]]:
     """Resolve a free-text body region to an anatomy group and its keywords."""
     text_lower = text.lower().strip()
+    if len(text_lower) < MIN_REGION_LENGTH:
+        return None, []
     for group, keywords in ANATOMY_GROUPS.items():
         # Direct group name match
         if group in text_lower:
             return group, keywords
-        # Keyword match
+        # Keyword match (a keyword in the text, or the text as a keyword prefix)
         for kw in keywords:
             if kw in text_lower or text_lower in kw:
                 return group, keywords
@@ -113,6 +120,26 @@ async def validate_population_anatomy(
     ],
 ) -> dict:
     """Validates that candidate volumes anatomically match the research hypothesis."""
+    if len(hypothesis_body_region.strip()) < MIN_REGION_LENGTH:
+        return error_result(
+            "invalid_args",
+            f"hypothesis_body_region {hypothesis_body_region!r} is too short to name a body region "
+            f"(at least {MIN_REGION_LENGTH} characters, e.g. 'lung', 'kidney', 'brain').",
+        )
+    missing = [index for index, vol in enumerate(volume_details) if not vol.get("uid")]
+    if missing:
+        return error_result(
+            "invalid_args",
+            f"volume_details entries {missing[:10]} have no 'uid'; pass the dicts "
+            "search_volumes_by_description returned.",
+        )
+    try:
+        return await _validate(hypothesis_body_region, volume_details)
+    except domain_api.DomainApiError as exc:
+        return domain_api.error_result_from(exc, "The validated cohort was not recorded")
+
+
+async def _validate(hypothesis_body_region: str, volume_details: list[dict]) -> dict:
     if not volume_details:
         save_meta = await _save_and_broadcast_cohort(
             [], {"hypothesis_body_region": hypothesis_body_region, "total_input": 0}

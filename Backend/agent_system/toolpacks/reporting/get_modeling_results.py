@@ -110,17 +110,17 @@ def _comparison_section(entry: dict[str, Any]) -> str:
 )
 async def get_modeling_results() -> str:
     """Retrieves the recorded feature sets and modeling results of this session in one request — everything needed to write the results report."""
-    emit("tool_started", "fetching results")
+    emit("tool_log", "fetching results")
     try:
         feature_sets = await domain_api.list_feature_sets()
         summary = await domain_api.model_results_summary()
     except domain_api.DomainApiError as exc:
-        return f"Error: the modeling results could not be read from the Application API: {exc}"
+        return domain_api.error_result_from(exc, "the modeling results could not be read")
 
     sections = [_feature_section(feature_sets)]
     if summary:
         sections += [_comparison_section(entry) for entry in summary]
     else:
         sections.append("### Modeling\n*No model result is recorded for this session.*")
-    emit("tool_finished", "study data results Fetched")
+    emit("tool_log", "study data results Fetched")
     return "\n\n".join(sections)
