@@ -22,6 +22,8 @@ from ..common import domain_api
     name="create_report",
     visibility={"agent"},
     idempotent=True,
+    data_scopes={"db_write"},
+    timeout_s=150,
     **WRITES,
 )
 async def create_report(

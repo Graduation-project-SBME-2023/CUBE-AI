@@ -3,22 +3,48 @@
 import asyncio
 import json
 import os
+import re
 from typing import Annotated
 
 import httpx
 from pydantic import Field
 
-from .._toolkit import tool
+from .._toolkit import ExtractedArtifact, PortSpec, error_result, tool
 from ..common.manifests import WRITES
 from ..common.emit import emit
 from ..common.http_client import shared_client, timeout, write_path_headers
 from ..common.service_urls import app_api_url
 
 PUBLISH_TIMEOUT_S = 90.0
+_ERROR_CODE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+def _error(code: object, message: str, **extra: object) -> dict:
+    """The tool's failures as error results; the API's own code when it is a
+    valid error code, else ``publish_failed``."""
+    code = str(code).lower()
+    return error_result(
+        code if _ERROR_CODE.match(code) else "publish_failed",
+        message or "Report publication failed.",
+        **extra,
+    )
+
+
+def _published_report(result: object) -> ExtractedArtifact:
+    """The report the publish produced (the ``report`` output port)."""
+    data = json.loads(result) if isinstance(result, str) else result
+    return ExtractedArtifact(
+        ref={"report_id": data["report_id"]},
+        summary={"source_version": data["new_version"], "has_pdf": True},
+    )
 
 
 @tool(
-    visibility={"agent"},
+    visibility={"agent", "graph"},
+    inputs={"report": PortSpec("ReportDocument", param="report_id")},
+    outputs={"report": PortSpec("ReportDocument", extract=_published_report)},
+    data_scopes={"db_write"},
+    timeout_s=PUBLISH_TIMEOUT_S + 30,
     **WRITES,
 )
 async def latex_to_pdf(
@@ -125,19 +151,12 @@ async def latex_to_pdf(
 
         if resp.status_code == 409:
             code = detail.get("code", "conflict") if isinstance(detail, dict) else "conflict"
-            return json.dumps(
-                {
-                    "status": "error",
-                    "code": code,
-                    "message": (
-                        detail.get("message", str(detail))
-                        if isinstance(detail, dict)
-                        else str(detail)
-                    ),
-                    "current_version": (
-                        detail.get("current_version") if isinstance(detail, dict) else None
-                    ),
-                }
+            return _error(
+                code,
+                detail.get("message", str(detail)) if isinstance(detail, dict) else str(detail),
+                current_version=(
+                    detail.get("current_version") if isinstance(detail, dict) else None
+                ),
             )
 
         if resp.status_code == 422:
@@ -146,54 +165,31 @@ async def latex_to_pdf(
             if isinstance(detail, dict):
                 stdout = detail.get("stdout", "")
                 stderr = detail.get("stderr", "")
-            return json.dumps(
-                {
-                    "status": "error",
-                    "code": "latex_compile_error",
-                    "message": (
-                        "LaTeX compilation failed.  The report source is unchanged (A19). "
-                        "Fix the LaTeX errors below and retry with the same expected_version."
-                    ),
-                    "stdout": stdout,
-                    "stderr": stderr,
-                }
+            return _error(
+                "latex_compile_error",
+                "LaTeX compilation failed.  The report source is unchanged (A19). "
+                "Fix the LaTeX errors below and retry with the same expected_version.",
+                stdout=stdout,
+                stderr=stderr,
             )
 
         if resp.status_code == 503:
             code = detail.get("code", "unavailable") if isinstance(detail, dict) else "unavailable"
-            return json.dumps(
-                {
-                    "status": "error",
-                    "code": code,
-                    "message": (
-                        detail.get("message", str(detail))
-                        if isinstance(detail, dict)
-                        else str(detail)
-                    ),
-                }
+            return _error(
+                code,
+                detail.get("message", str(detail)) if isinstance(detail, dict) else str(detail),
             )
 
-        return json.dumps(
-            {
-                "status": "error",
-                "code": f"http_{resp.status_code}",
-                "message": str(detail)[:2000],
-            }
-        )
+        return _error(f"http_{resp.status_code}", str(detail)[:2000])
 
     except httpx.TimeoutException:
-        return json.dumps(
-            {
-                "status": "error",
-                "code": "timeout",
-                "message": (
-                    "The publish request timed out.  The compilation may still be "
-                    "running; check the report source_version before retrying."
-                ),
-            }
+        return _error(
+            "timeout",
+            "The publish request timed out.  The compilation may still be "
+            "running; check the report source_version before retrying.",
         )
-    except Exception as exc:  # noqa: BLE001
-        return json.dumps({"status": "error", "message": str(exc)})
+    except httpx.HTTPError as exc:
+        return _error("unavailable", f"The Application API could not be reached: {exc}")
 
 
 if __name__ == "__main__":

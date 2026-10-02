@@ -7,6 +7,8 @@ from pydantic import Field
 
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def search_studies(

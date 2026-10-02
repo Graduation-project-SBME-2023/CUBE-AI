@@ -100,6 +100,8 @@ async def _save_and_broadcast_cohort(
 
 @tool(
     visibility={"agent"},
+    data_scopes={"db_write", "phi_write"},
+    timeout_s=90,
     **WRITES,
 )
 async def validate_population_anatomy(

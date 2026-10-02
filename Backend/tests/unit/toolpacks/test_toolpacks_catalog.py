@@ -6,6 +6,7 @@ interim manifest of ``toolpacks/common/manifests.py``.
 
 from __future__ import annotations
 
+import inspect
 import os
 import re
 import subprocess
@@ -109,9 +110,43 @@ def test_every_moved_tool_is_inline_and_none_is_heavy_yet(pack_tools):
     assert not any(spec.cost is Cost.HEAVY for spec in pack_tools.values())
 
 
-def test_no_tool_is_a_graph_tool_before_it_has_ports(pack_tools):
-    # "graph" needs output ports, which Phase 2.4 adds.
-    assert not any(Visibility.GRAPH in spec.visibility for spec in pack_tools.values())
+def test_the_graph_tools_are_the_two_with_ports(pack_tools):
+    graph = {name for name, spec in pack_tools.items() if Visibility.GRAPH in spec.visibility}
+    assert graph == {"run_segmentation_with_guard", "latex_to_pdf"}
+    segmentation = pack_tools["run_segmentation_with_guard"]
+    assert segmentation.inputs["cohort"].artifact_type == "Cohort"
+    assert segmentation.outputs["masks"].artifact_type == "MaskSet"
+    report = pack_tools["latex_to_pdf"]
+    assert report.inputs["report"].artifact_type == report.outputs["report"].artifact_type == "ReportDocument"
+
+
+def test_every_light_tool_states_its_budget_and_scopes(pack_tools):
+    """Phase 2.4: a full manifest on every light tool. A tool that reads or
+    writes nothing outside the process may leave data_scopes empty, but every
+    one states its timeout instead of inheriting the default."""
+    light = {n: s for n, s in pack_tools.items() if n not in INTERIM_HEAVY_TOOLS}
+    assert len(light) == 53
+    implicit = [
+        n for n, s in light.items()
+        # getsource() of an @tool function starts at its decorator.
+        if not re.search(r"timeout_s=|LITERATURE_TOOL", inspect.getsource(s.handler).split("async def")[0])
+    ]
+    assert not implicit
+    # It keeps the run's files in process memory (literature/run_state.py).
+    in_memory_writers = {"save_literature_output"}
+    writers_without_scope = [
+        n for n, s in light.items()
+        if s.side_effects is SideEffects.WRITES and not s.write_scopes and n not in in_memory_writers
+    ]
+    assert not writers_without_scope
+
+
+def test_the_tools_that_touch_patient_data_say_so(pack_tools):
+    for name in ("get_patient", "get_volume", "check_having_mask", "extract_cohort_labels",
+                 "validate_population_anatomy", "run_segmentation_with_guard"):
+        assert pack_tools[name].phi, name
+    for name in ("get_model", "score_paper_relevance", "list_latex_templates"):
+        assert not pack_tools[name].phi, name
 
 
 def test_only_the_run_bookkeeping_is_harness_only(pack_tools):

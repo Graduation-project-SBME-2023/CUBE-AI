@@ -8,6 +8,7 @@ base_url = CONTROL_API_URL
 
 @tool(
     visibility={"agent"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_unique_series_descriptions() -> dict:

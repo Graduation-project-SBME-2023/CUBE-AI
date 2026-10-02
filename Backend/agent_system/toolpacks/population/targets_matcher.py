@@ -64,6 +64,8 @@ async def _wait_for_cohort_approval(timeout_seconds: float = APPROVAL_TIMEOUT_S)
 
 @tool(
     visibility={"agent"},
+    data_scopes={"phi_read", "db_write"},
+    timeout_s=3660,
     **WRITES,
 )
 async def generate_targets() -> str:

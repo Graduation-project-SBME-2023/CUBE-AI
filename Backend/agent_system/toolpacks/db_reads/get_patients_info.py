@@ -9,6 +9,8 @@ from . import _api
 
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_all_patients_info(

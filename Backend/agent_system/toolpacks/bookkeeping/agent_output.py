@@ -151,6 +151,8 @@ async def _session_runs() -> List[Dict[str, Any]]:
     name="write_agent_output",
     visibility={"agent"},
     idempotent=True,
+    data_scopes={"db_write", "fs_write"},
+    timeout_s=60,
     **WRITES,
 )
 async def write_agent_output(params: WriteAgentOutputInput) -> str:
@@ -215,6 +217,7 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
     name="read_agent_output",
     visibility={"agent"},
     idempotent=True,
+    timeout_s=45,
     **READ_ONLY,
 )
 async def read_agent_output(params: ReadAgentOutputInput) -> str:
@@ -243,6 +246,7 @@ async def read_agent_output(params: ReadAgentOutputInput) -> str:
     name="read_all_agent_outputs",
     visibility={"agent"},
     idempotent=True,
+    timeout_s=45,
     **READ_ONLY,
 )
 async def read_all_agent_outputs() -> str:

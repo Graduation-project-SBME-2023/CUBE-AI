@@ -6,6 +6,8 @@ from ..common import domain_api
 
 @tool(
     visibility={"agent"},
+    data_scopes={"db_write", "phi_write"},
+    timeout_s=60,
     **WRITES,
 )
 async def save_final_output(data: dict):

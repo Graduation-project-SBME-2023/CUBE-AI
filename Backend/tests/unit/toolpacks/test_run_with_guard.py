@@ -70,8 +70,28 @@ def test_one_name_critical_and_no_identity_arguments():
     spec = spec_of(run_segmentation_with_guard)
     assert spec.name == "run_segmentation_with_guard"
     assert spec.critical is True
-    # Session, run and workspace come from the context, never from the model.
-    assert not spec.arg_names
+    # Session, run and workspace come from the context, never from the model;
+    # the one argument receives the Cohort input port.
+    assert spec.arg_names == {"cohort_id"}
+    assert spec.inputs["cohort"].param == "cohort_id"
+
+
+def test_the_mask_set_port_reads_the_result():
+    spec = spec_of(run_segmentation_with_guard)
+    [artifact] = spec.outputs["masks"].extract_artifacts(
+        {"segmentation_batch_id": "b1", "accepted_count": 3, "ready_count": 3, "failures": [{}]}
+    )
+    assert dict(artifact.ref) == {"segmentation_batch_id": "b1"}
+    assert dict(artifact.summary) == {"n_masks": 3, "n_failed": 1, "review_status": "submitted"}
+
+
+def test_another_cohort_is_refused(module, ctx, fake_domain_api):
+    fake_domain_api.get(f"/cohorts/session/{SESSION}/population").respond(json={"cohort_id": "c1"})
+
+    result = call_tool(run_segmentation_with_guard, {"cohort_id": "c2"}, ctx)
+
+    assert result["error_code"] == "invalid_args"
+    assert module.calls == []
 
 
 def test_it_segments_the_contexts_session_and_records_the_output(module, ctx, fake_domain_api):

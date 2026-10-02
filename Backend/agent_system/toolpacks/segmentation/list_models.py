@@ -9,6 +9,7 @@ from ..common.service_urls import inference_api_url
 
 @tool(
     visibility={"agent", "main"},
+    timeout_s=30,
     **READ_ONLY,
 )
 async def list_models():

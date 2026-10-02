@@ -56,6 +56,7 @@ LITERATURE_TOOL = dict(
     read_only=True,
     data_scopes={"network_egress"},
     visibility={"agent"},
+    timeout_s=120,  # rate-limit delays plus three 20 s attempts
 )
 
 
@@ -289,6 +290,7 @@ _SCORE_WEIGHTS = {"population": 0.20, "intervention": 0.25, "comparison": 0.15,
     read_only=True,
     idempotent=True,
     visibility={"agent"},
+    timeout_s=10,
 )
 async def score_paper_relevance(paper_json: str, pico_json: str) -> str | dict:
     """Score a paper's relevance vs. the PICO hypothesis (0-100): weighted
@@ -322,6 +324,7 @@ async def score_paper_relevance(paper_json: str, pico_json: str) -> str | dict:
     execution="inline",
     idempotent=True,
     visibility={"agent"},
+    timeout_s=10,
 )
 async def save_literature_output(filename: str, content: str) -> str | dict:
     """Capture a generated literature output (context.json,

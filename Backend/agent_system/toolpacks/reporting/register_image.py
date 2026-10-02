@@ -21,6 +21,8 @@ from ..common import domain_api
 @tool(
     name="register_report_image",
     visibility={"agent"},
+    data_scopes={"db_write"},
+    timeout_s=150,
     **WRITES,
 )
 async def register_report_image(

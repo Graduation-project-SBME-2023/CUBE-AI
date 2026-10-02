@@ -187,7 +187,12 @@ def _bounded_record(record: dict) -> dict:
 
 @tool(
     visibility={"agent"},
-    **WRITES,
+    side_effects="writes",
+    cost="medium",
+    execution="inline",
+    resources={"llm"},
+    data_scopes={"phi_read", "phi_write", "db_write"},
+    timeout_s=1800,
 )
 async def extract_cohort_labels() -> dict:
     """Extracts binary disease-presence labels from clinical reports (JSON or CSV) using an LLM Clinical Adjudicator, for every volume of the population cohort."""

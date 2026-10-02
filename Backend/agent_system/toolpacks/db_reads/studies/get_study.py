@@ -7,6 +7,8 @@ from pydantic import Field
 
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_study(
@@ -27,6 +29,8 @@ async def get_study(
     
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_study_by_patient(

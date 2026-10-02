@@ -23,11 +23,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
+from pydantic import Field
 from storage_paths import workspace_subpath
 
-from .._toolkit import error_result, tool
+from .._toolkit import ExtractedArtifact, PortSpec, error_result, tool
 from ..common import domain_api
 from ..common.manifests import INTERIM_HEAVY
 from ..common.workspace import workspace_dir
@@ -76,6 +77,20 @@ def _agent_output(result: dict[str, Any], workspace: str) -> dict[str, Any]:
     }
 
 
+def _mask_set(result: dict[str, Any]) -> ExtractedArtifact:
+    """The batch this run produced (the ``masks`` output port). The module
+    returns only once the review of its ready masks is submitted, so a batch
+    with ready masks is ``submitted``; one without any never reached review."""
+    return ExtractedArtifact(
+        ref={"segmentation_batch_id": result["segmentation_batch_id"]},
+        summary={
+            "n_masks": result.get("accepted_count", 0),
+            "n_failed": len(result.get("failures", [])),
+            "review_status": "submitted" if result.get("ready_count", 0) else "not_ready",
+        },
+    )
+
+
 def _segmentation_module(session_id: str, run_id: str) -> Any:
     # Imported when called: the module pulls in SimpleITK and, until Phase 9.7,
     # AutoGen; neither belongs in the catalog's import of the pack.
@@ -86,11 +101,26 @@ def _segmentation_module(session_id: str, run_id: str) -> Any:
 
 @tool(
     name="run_segmentation_with_guard",
-    visibility={"agent"},
+    visibility={"agent", "graph"},
     critical=True,
+    inputs={"cohort": PortSpec("Cohort", param="cohort_id")},
+    outputs={"masks": PortSpec("MaskSet", extract=_mask_set)},
+    resources={"monai_inference", "orthanc_io"},
+    data_scopes={"phi_read", "phi_write", "db_write", "fs_write"},
+    timeout_s=4 * 3600,  # inference of a whole cohort, plus the review gate
     **INTERIM_HEAVY,
 )
-async def run_segmentation_with_guard() -> dict[str, Any]:
+async def run_segmentation_with_guard(
+    cohort_id: Annotated[
+        str | None,
+        Field(
+            description=(
+                "The cohort to segment; omit it for this session's approved population "
+                "cohort (the only cohort segmentation takes)."
+            )
+        ),
+    ] = None,
+) -> dict[str, Any]:
     """The main segmentation tool: segments every volume of this session's
     approved cohort (reusing valid masks, generating the rest, with the review
     gate inside), records the batch and this node's output, and returns the
@@ -103,6 +133,17 @@ async def run_segmentation_with_guard() -> dict[str, Any]:
             "Segmentation runs only inside a node: this call belongs to no run, so its "
             "result could not be recorded.",
         )
+    if cohort_id is not None:
+        try:
+            cohort = await domain_api.require_population_cohort()
+        except domain_api.DomainApiError as exc:
+            return domain_api.error_result_from(exc)
+        if str(cohort["cohort_id"]) != str(cohort_id):
+            return error_result(
+                "invalid_args",
+                f"cohort {cohort_id} is not this session's population cohort "
+                f"({cohort['cohort_id']}); segmentation segments that cohort only.",
+            )
     workspace = workspace_dir()
     if not Path(workspace).is_dir():
         return error_result("not_found", f"The session workspace does not exist: {workspace}")
