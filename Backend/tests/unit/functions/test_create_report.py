@@ -59,9 +59,7 @@ async def test_returns_an_error_when_not_bound_to_a_run(monkeypatch):
 
     result = await module.create_report(source_text="\\documentclass{article}")
 
-    import json
-
-    payload = json.loads(result)
+    payload = result  # an error_result, not JSON text
     assert payload["status"] == "error"
     assert "RUN_ID" in payload["error_message"]
 
@@ -78,8 +76,6 @@ async def test_returns_an_error_when_the_application_api_rejects_the_write(monke
 
     result = await module.create_report(source_text="\\documentclass{article}")
 
-    import json
-
-    payload = json.loads(result)
+    payload = result  # an error_result, not JSON text
     assert payload["status"] == "error"
     assert "422" in payload["error_message"]

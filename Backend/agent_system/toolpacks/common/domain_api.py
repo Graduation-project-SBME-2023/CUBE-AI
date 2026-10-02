@@ -201,7 +201,8 @@ async def require_population_cohort(for_session: str | None = None) -> dict[str,
     if cohort is None:
         raise DomainApiError(
             "The population step has not defined a cohort yet. Run the population "
-            "planner (write_inclusion_criteria / validate_population_anatomy) first."
+            "planner (write_inclusion_criteria / validate_population_anatomy) first.",
+            status_code=404,  # no cohort is "not found", not an unreachable API
         )
     return cohort
 

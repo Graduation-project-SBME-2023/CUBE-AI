@@ -62,7 +62,7 @@ async def search_volumes_by_description(
             }
         )
     except domain_api.DomainApiError as exc:
-        return {"status": "error", "message": f"The search could not be recorded: {exc}"}
+        return domain_api.error_result_from(exc, "The search could not be recorded")
 
     # 3. Return results without broadcasting via WebSocket
     # (Broadcast will occur AFTER validate_population_anatomy executes)

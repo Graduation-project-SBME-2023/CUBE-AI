@@ -54,11 +54,9 @@ async def test_returns_an_error_when_the_image_key_is_already_taken(monkeypatch)
 
     monkeypatch.setattr(module.domain_api, "request", _fail)
 
-    result = json.loads(
-        await module.register_report_image(
-            report_id=REPORT_ID, artifact_id=ARTIFACT_ID, image_key="roc.png"
-        )
+    result = await module.register_report_image(
+        report_id=REPORT_ID, artifact_id=ARTIFACT_ID, image_key="roc.png"
     )
 
-    assert result["status"] == "error"
+    assert result["status"] == "error"  # an error_result, not JSON text
     assert "409" in result["error_message"]

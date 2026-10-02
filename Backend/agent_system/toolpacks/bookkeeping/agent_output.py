@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .._toolkit import tool
+from .._toolkit import error_result, tool
 from ..common import views
 from ..common.manifests import READ_ONLY, WRITES
 from ..common.domain_api import run_id, session_id
@@ -110,8 +110,8 @@ class ReadAgentOutputInput(BaseModel):
 
 # -- Helpers -------------------------------------------------------------------
 
-def _error(message: str) -> str:
-    return json.dumps({"status": "error", "message": message}, indent=2)
+def _error(message: str, code: str = "error") -> dict:
+    return error_result(code, message)
 
 
 def _document(run: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,7 +162,8 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
     if not run_id():
         return _error(
             "This call belongs to no run; only an agent running inside a node "
-            "can record its output."
+            "can record its output.",
+            "no_run",
         )
     payload = {
         "agent_role": params.agent_role,
@@ -187,16 +188,18 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
             # may quote it verbatim in a generated report.
             return _error(
                 f"{response.status_code} from the Application API: an internal "
-                "error occurred and the request could not complete."
+                "error occurred and the request could not complete.",
+                "upstream_error",
             )
         if response.status_code >= 400:
             return _error(
                 f"{response.status_code} from the Application API: "
-                f"{response.text[:400]}"
+                f"{response.text[:400]}",
+                "bad_request",
             )
         run = response.json()
     except Exception as exc:
-        return _error(f"Failed to write output: {exc}")
+        return _error(f"Failed to write output: {exc}", "unavailable")
 
     # This agent's output is now durable in Postgres — its working scratch
     # under temp/ (if any) has nothing left it's the only copy of. rmtree of a
@@ -225,7 +228,7 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
 async def read_agent_output(params: ReadAgentOutputInput) -> str:
     """Read the structured output of an agent in this session.: when several plan steps name one agent, this resolves the FIRST in plan order and says how many matched."""
     if not session_id():
-        return _error("This call belongs to no session.")
+        return _error("This call belongs to no session.", "no_session")
     try:
         response = await shared_client().get(
             f"{app_api_url()}/runs/session/{session_id()}"
@@ -233,11 +236,11 @@ async def read_agent_output(params: ReadAgentOutputInput) -> str:
             timeout=timeout(REQUEST_TIMEOUT),
         )
         if response.status_code == 404:
-            return _error(f"No output found for agent '{params.agent_id}'.")
+            return _error(f"No output found for agent '{params.agent_id}'.", "not_found")
         response.raise_for_status()
         resolved = response.json()
     except Exception as exc:
-        return _error(f"Failed to read output: {exc}")
+        return _error(f"Failed to read output: {exc}", "unavailable")
 
     document = _document(resolved.get("run") or {})
     document["steps_sharing_this_agent_type"] = resolved.get("nodes_sharing_this_target")
@@ -254,11 +257,11 @@ async def read_agent_output(params: ReadAgentOutputInput) -> str:
 async def read_all_agent_outputs() -> str:
     """Read every agent's structured output for this session, in plan order."""
     if not session_id():
-        return _error("This call belongs to no session.")
+        return _error("This call belongs to no session.", "no_session")
     try:
         runs = await _session_runs()
     except Exception as exc:
-        return _error(f"Failed to read outputs: {exc}")
+        return _error(f"Failed to read outputs: {exc}", "unavailable")
 
     agents: Dict[str, Any] = {}
     statuses = set()

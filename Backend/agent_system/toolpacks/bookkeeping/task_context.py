@@ -5,7 +5,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-from .._toolkit import tool
+from .._toolkit import error_result, tool
 from ..common.manifests import READ_ONLY
 from ..common.domain_api import agent_type, run_id, session_id
 from ..common.emit import emit
@@ -34,16 +34,10 @@ async def _get_json(path: str) -> Any:
 async def read_agent_task_context() -> dict[str, Any]:
     """Return this agent's task: the session's prompt and intent, its own plan step, and the compiled prompt of the run executing it."""
     if not session_id():
-        return {
-            "status": "error",
-            "message": "This call belongs to no session.",
-        }
+        return error_result("no_session", "This call belongs to no session.")
 
     if not agent_type() and not run_id():
-        return {
-            "status": "error",
-            "message": "This call belongs to neither a run nor an agent.",
-        }
+        return error_result("no_run", "This call belongs to neither a run nor an agent.")
 
     emit("tool_log", "Reading task context from DB")
 
@@ -101,17 +95,19 @@ async def read_agent_task_context() -> dict[str, Any]:
     except httpx.HTTPStatusError as e:
         status_code = e.response.status_code if e.response is not None else None
         body = e.response.text if e.response is not None else ""
-        return {
-            "status": "error",
-            "message": f"HTTP error while loading task context: {status_code}",
-            "details": body[:500],
-            "session_id": session_id(),
-            "agent_id": agent_type(),
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Unexpected error while loading task context: {str(e)}",
-            "session_id": session_id(),
-            "agent_id": agent_type(),
-        }
+        server_error = status_code is None or status_code >= 500
+        return error_result(
+            "upstream_error" if server_error else "bad_request",
+            f"HTTP error while loading task context: {status_code}",
+            # A 5xx body may hold stack frames or SQL: never shown to the model.
+            details="" if server_error else body[:500],
+            session_id=session_id(),
+            agent_id=agent_type(),
+        )
+    except httpx.HTTPError as e:
+        return error_result(
+            "unavailable",
+            f"The Application API could not be reached while loading task context: {e}",
+            session_id=session_id(),
+            agent_id=agent_type(),
+        )

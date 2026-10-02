@@ -41,7 +41,7 @@ async def list_report_figures() -> str:
         for kind in _FIGURE_KINDS:
             figures.extend(await domain_api.list_session_artifacts(kind=kind))
     except domain_api.DomainApiError as exc:
-        return json.dumps({"status": "error", "error_message": str(exc)}, indent=2)
+        return domain_api.error_result_from(exc)
 
     figures.sort(key=lambda item: item.get("created_at", ""))
     return json.dumps(

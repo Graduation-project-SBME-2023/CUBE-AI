@@ -17,7 +17,7 @@ async def save_final_output(data: dict):
         cohort = await domain_api.upsert_population_cohort()
         cohort = await domain_api.set_cohort_members(cohort["cohort_id"], datasetlist)
     except domain_api.DomainApiError as exc:
-        return {"status": "error", "message": f"The cohort was not recorded: {exc}"}
+        return domain_api.error_result_from(exc, "The cohort was not recorded")
 
     patients = {member["subject_key"] for member in cohort.get("members") or []}
     message = f"Selected {len(datasetlist)} volumes from {len(patients)} patients."

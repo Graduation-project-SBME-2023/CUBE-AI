@@ -1,10 +1,6 @@
-import httpx
-from .._toolkit import tool
+from .._toolkit import is_error_result, tool
 from ..common.manifests import READ_ONLY
-import os
-from ..common.service_urls import CONTROL_API_URL
-
-base_url = CONTROL_API_URL
+from ..db_reads import _api
 
 @tool(
     visibility={"agent"},
@@ -19,34 +15,11 @@ async def get_unique_series_descriptions() -> dict:
     This is highly useful before performing a search to see exactly how protocols or 
     body parts are named (e.g., checking if it's 'CT Head' vs 'Head CT').
     """
-    async with httpx.AsyncClient() as client:
-        try:
-            # Make the request to your new FastAPI endpoint
-            response = await client.get(f"{base_url}/volumes/descriptions/unique/")
-            response.raise_for_status()
-            
-            # Parse the list of strings
-            descriptions = response.json()
-            
-            return {
-                "status": "success",
-                "count": len(descriptions),
-                "unique_descriptions": descriptions
-            }
-            
-        except httpx.HTTPStatusError as e:
-             return {
-                 "status": "error", 
-                 "message": f"HTTP error occurred: {str(e)}"
-             }
-        except ValueError:
-            return {
-                "status": "error", 
-                "message": "Invalid JSON returned from API", 
-                "raw": response.text
-            }
-        except Exception as e:
-            return {
-                "status": "error",
-                "message": f"An unexpected error occurred: {str(e)}"
-            }
+    descriptions = await _api.get_json("/volumes/descriptions/unique/")
+    if is_error_result(descriptions):
+        return descriptions
+    return {
+        "status": "success",
+        "count": len(descriptions),
+        "unique_descriptions": descriptions,
+    }

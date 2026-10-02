@@ -126,10 +126,10 @@ async def test_output_is_written_to_this_run_and_read_back(api):
 @pytest.mark.asyncio
 async def test_an_agent_with_no_run_cannot_write_an_output(api):
     with use_context(make_context(session_id=SESSION_ID, agent_type="segmentation_agent")):
-        result = json.loads(await module.write_agent_output(_input("segmentation_agent")))
+        result = await module.write_agent_output(_input("segmentation_agent"))
 
-    assert result["status"] == "error"
-    assert "no run" in result["message"]
+    assert result["error_code"] == "no_run"  # an error_result, not JSON text
+    assert "no run" in result["error_message"]
 
 
 @pytest.mark.contract
