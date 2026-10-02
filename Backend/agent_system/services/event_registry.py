@@ -61,7 +61,7 @@ DURABLE_EVENT_TYPES: frozenset[str] = frozenset({
     "modeling_output",
     "report_output",
     "latex_output",
-    # MCP-tool view refreshes (Backend/mcp/tools/**) -- each mirrors a write
+    # Tool-pack view refreshes (agent_system/toolpacks/**) -- each mirrors a write
     # the tool already made through the domain API; durable so the view
     # renders the completed state after a reload, not just a live toast.
     "cohort_labels_output",

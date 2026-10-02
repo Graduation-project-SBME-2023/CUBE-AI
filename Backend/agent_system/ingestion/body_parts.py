@@ -8,14 +8,13 @@ to go on.
 
 The values below are what that check already looks for: it lowercases
 BodyPartExamined, concatenates it with the series description and searches for
-the keywords in ANATOMY_GROUPS (mcp/tools/population/validate_anatomy.py). Each
+the keywords in ANATOMY_GROUPS (toolpacks/population/validate_anatomy.py). Each
 value here contains the keyword for its group, so declaring one is enough to
 place the volume in the right region. They are also DICOM defined terms for
 BodyPartExamined, which is a CS -- uppercase, 16 characters at most.
 
-Kept as data here rather than imported from validate_anatomy: the agent system
-reaches MCP tools over the wire, not by importing them, and a boundary test
-enforces that.
+Kept as data here rather than imported from validate_anatomy, so ingestion does
+not depend on a tool pack (the packs are loaded by the tool catalog).
 """
 
 from __future__ import annotations

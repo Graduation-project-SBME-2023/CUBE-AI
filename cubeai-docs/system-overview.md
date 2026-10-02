@@ -21,7 +21,7 @@ The platform separates four kinds of state:
 | OpenResty | viewer recipe Nginx config | Production static hosting and same-origin reverse proxy | `80`, `443` |
 | Application API | `Backend/application_api/` | PostgreSQL CRUD, chats/plans, workflow metadata, Orthanc synchronization | `8001` |
 | Agent System | `Backend/agent_system/` | LLM planning, pipeline execution, WebSocket sessions, reviews, reports | `8150` |
-| Agent MCP tools | `Backend/mcp/` | Population, radiomics, modeling, scratchpad, and report tools | internal |
+| Agent tools | `Backend/agent_system/toolpacks/` | Population, DB reads, segmentation, radiomics, modeling, literature, scratchpad, and report tools, registered with `@tool` (`agent_system/toolkit/`) and run in the Agent System process | internal |
 | MONAI Label | `Backend/monailabel/`, `Backend/apps/radiology/` | Inference, data preparation, training jobs, dynamic models | `8000` |
 | Orthanc | `Backend/orthanc/` plus container image | PACS, DICOMweb, stable-series notification | `8043 -> 8042` |
 | PostgreSQL | container image | Structured system of record | `5433 -> 5432` |
@@ -57,7 +57,8 @@ OHIF-Standalone/
 |-- Backend/
 |   |-- application_api/              database-owning FastAPI service
 |   |-- agent_system/                 multi-agent orchestrator
-|   |-- mcp/                          tools callable by execution agents
+|   |   |-- toolkit/                  tool/agent specs, catalog, dispatch
+|   |   `-- toolpacks/                the tools, one package per pack
 |   |-- monailabel/                   MONAI server startup/custom routes
 |   |-- apps/radiology/               inference, trainers, models, transforms
 |   |-- orthanc/                      Orthanc JSON and Lua hooks
@@ -89,7 +90,7 @@ OHIF-Standalone/
 2. Planning turns the user's clinical question into a structured hypothesis and execution plan; an optional literature review adds evidence context.
 3. The user reviews the plan. Population selection and segmentation may also pause for explicit review.
 4. The execution graph selects registered agents for population, segmentation, feature extraction, modeling, result reporting, and LaTeX reporting.
-5. Agents use MCP tools, persist records through the Application API, submit compute to MONAI, and write artifacts to their session workspace.
+5. Agents call tools from the tool catalog (`agent_system/toolpacks/`, run in-process through `toolkit/runtime/dispatch.py`), persist records through the Application API, submit compute to MONAI, and write artifacts to their session workspace.
 6. Node state, logs, resource waits, user-input requests, and completion events stream back over the WebSocket.
 
 Every connection, message, event, plan, execution monitor, and replay operation is scoped to a session. The backend bounds connections and queues; the frontend rejects cross-session traffic, deduplicates event identifiers, and uses bounded reconnect buffers.
@@ -153,7 +154,7 @@ Do not run load, GPU, radiology, live-LLM, or end-to-end suites without their do
 | CRUD/schema | `Backend/application_api/` | migration, schema, API docs, frontend caller |
 | DICOM synchronization | Application API `sync.py`, Orthanc Lua | stable-series behavior and integration tests |
 | Inference/model | `Backend/apps/radiology/` | MONAI routes, CPU/GPU images, job limits, storage |
-| Agent/pipeline stage | planning agents, `execution_team.py`, MCP | I/O contract, session isolation, resource state |
+| Agent/pipeline stage | planning agents, `execution_team.py`, `agent_system/toolpacks/` | I/O contract, session isolation, resource state, the tool's Definition of Ready test |
 | Research canvas/events | research-playground extension | WebSocket protocol, replay/reconnect, Jest/build |
 | Public route/service | OpenResty and Compose | direct dev URL, production prefix, health check |
 | Runtime path | `Backend/storage_paths.py` | migration compatibility and boundary test |

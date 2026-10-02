@@ -3,7 +3,7 @@
 Cut-over 1 renamed the schema and the code to the Appendix P vocabulary in one
 change. This scan keeps the old names from coming back: it fails on any
 retired name in the production source of the Application API, the Agent
-System, the MCP tools and the frontend.
+System (its tool packs included) and the frontend.
 
 Where an old name may still appear, and why:
 
