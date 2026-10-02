@@ -127,7 +127,7 @@ def test_the_reply_is_derived_from_the_recorded_comparison():
                 "status": "ready",
                 "selected": False,
                 "model_file_name": "modeling/models/cmp/tuned_model_1.pkl",
-                "predictions_artifact_id": "p1",
+                "predictions_file_id": "p1",
                 "split_definition": {"kind": "selection_holdout"},
                 "metrics": {"evaluation": {"generalisation_estimate": True}},
             },
@@ -138,7 +138,7 @@ def test_the_reply_is_derived_from_the_recorded_comparison():
                 "status": "ready",
                 "selected": True,
                 "model_file_name": "modeling/models/cmp/blended_model.pkl",
-                "predictions_artifact_id": "p2",
+                "predictions_file_id": "p2",
                 "split_definition": {"kind": "selection_holdout"},
                 "metrics": {"evaluation": {"generalisation_estimate": True}},
             },
@@ -149,7 +149,7 @@ def test_the_reply_is_derived_from_the_recorded_comparison():
     assert reply["selected_variant"] == "blended_model"
     assert reply["final_model_path"].replace("\\", "/").endswith("modeling/models/cmp/blended_model")
     assert reply["model_test_predictions"] == {"tuned_model_1": "p1", "blended_model": "p2"}
-    assert reply["exports"]["predictions_blended_model"] == "/artifacts/p2/content?download=true"
+    assert reply["exports"]["predictions_blended_model"] == "/files/p2/content?download=true"
     assert reply["selection_holdout_used"] is True
     assert reply["generalisation_estimate"] is True
 

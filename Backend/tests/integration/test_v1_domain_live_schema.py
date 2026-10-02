@@ -20,6 +20,11 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 ALEMBIC_INI = BACKEND_ROOT / "application_api" / "alembic.ini"
 LIVE_DSN = os.environ.get("V1_LIVE_DATABASE_URL")
 
+# These checks exercise the V1 migrations (steps B-N) on the vocabulary they
+# were written in, so they stop at the last revision before Cut-over 1
+# (o1f0a2c3d4e5_v1_o_renames, which test_v1_o_renames_live.py covers).
+V1_HEAD = "n1f0a2c3d4e5"
+
 pytestmark.append(
     pytest.mark.skipif(
         not LIVE_DSN,
@@ -208,7 +213,7 @@ def world():
         cursor.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
     connection.commit()
     connection.close()
-    _alembic("upgrade", "head")
+    _alembic("upgrade", V1_HEAD)
 
     connection = _connect()
     state = World(connection)
@@ -740,7 +745,7 @@ def test_legacy_radiomics_rows_keep_null_provenance_and_never_enter_a_frozen_set
         )
     )
     legacy_connection.close()
-    output = _alembic("upgrade", "head")
+    output = _alembic("upgrade", V1_HEAD)
     assert "never invented" in output
 
     world.connection = _connect()
@@ -987,7 +992,7 @@ def test_domain_revisions_are_reversible_on_a_populated_database(world):
     }
     probe.close()
     _alembic("downgrade", "g1f0a2c3d4e5")
-    _alembic("upgrade", "head")
+    _alembic("upgrade", V1_HEAD)
     probe = _connect()
     after = {
         row[0]

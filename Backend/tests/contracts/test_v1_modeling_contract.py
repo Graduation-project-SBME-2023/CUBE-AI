@@ -46,7 +46,7 @@ def test_model_results_have_the_v1_shape():
     columns = set(_table("model_results").columns.keys())
     assert columns == {
         "model_result_id",
-        "created_by_agent_run_id",
+        "created_by_run_id",
         "cohort_id",
         "feature_set_id",
         "comparison_key",
@@ -60,8 +60,8 @@ def test_model_results_have_the_v1_shape():
         "environment",
         "metrics",
         "dataset_digest",
-        "predictions_artifact_id",
-        "input_artifact_id",
+        "predictions_file_id",
+        "input_file_id",
         "selected",
         "model_file_name",
         "model_file_digest",
@@ -88,7 +88,7 @@ def test_a_variant_is_a_natural_key_and_one_is_selected():
         for constraint in table.constraints
         if constraint.__class__.__name__ == "UniqueConstraint"
     }
-    assert ("created_by_agent_run_id", "comparison_key", "variant_key") in uniques
+    assert ("created_by_run_id", "comparison_key", "variant_key") in uniques
     partial = next(index for index in table.indexes if index.name == "uq_model_results_one_selected")
     assert partial.unique is True
     assert str(partial.dialect_options["postgresql"]["where"]) == "selected"

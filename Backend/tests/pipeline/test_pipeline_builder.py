@@ -88,16 +88,16 @@ def _runs(*agent_ids: str, statuses: dict[int, str] | None = None):
     return planned_runs(
         [
             {
-                "agent_run_id": f"run-{order}",
-                "step_id": f"step-{order}",
+                "run_id": f"run-{order}",
+                "node_id": f"step-{order}",
                 "session_id": "11111111-1111-4111-8111-111111111111",
                 "status": statuses.get(order, "pending"),
-                "step": {
-                    "step_id": f"step-{order}",
-                    "step_order": order,
-                    "agent_type": agent_id,
+                "node": {
+                    "node_id": f"step-{order}",
+                    "position": order,
+                    "target_name": agent_id,
                     "title": agent_id,
-                    "instructions": {
+                    "params": {
                         "task_message": {
                             "task_id": f"task-{order}",
                             "instructions": f"Execute {agent_id}",
@@ -135,8 +135,8 @@ async def test_builder_creates_one_node_per_approved_run(isolated_builder):
     # Every node carries the run it will claim, and the factory was told which
     # run and step it belongs to so its MCP subprocess writes the right row.
     for (_, kwargs), node in zip(isolated_builder, builder.recorded_nodes):
-        assert kwargs["agent_run_id"] == node.run.agent_run_id
-        assert kwargs["step_id"] == node.run.step_id
+        assert kwargs["run_id"] == node.run.run_id
+        assert kwargs["node_id"] == node.run.node_id
         assert kwargs["node_name"] == node.name
 
 
@@ -186,15 +186,15 @@ async def test_builder_resumes_at_a_step_not_at_an_agent_name(isolated_builder):
         runs=runs,
         model_client="model",
         session_id="session-1",
-        start_step_id="step-3",
+        start_node_id="step-3",
     )
 
     assert [agent_id for agent_id, _ in isolated_builder] == [
         "feature_extraction_agent",
         "modeling_agent",
     ]
-    assert [run.step_id for run in builder.runs] == ["step-3", "step-4"]
-    assert builder.entry_run.step_id == "step-3"
+    assert [run.node_id for run in builder.runs] == ["step-3", "step-4"]
+    assert builder.entry_run.node_id == "step-3"
 
 
 @pytest.mark.pipeline
@@ -219,7 +219,7 @@ async def test_builder_rejects_invalid_resume_target(isolated_builder):
     with pytest.raises(ValueError, match="Cannot resume"):
         await module.BasicPipelineBuilder.create(
             runs=_runs("segmentation_agent", "modeling_agent"),
-            start_step_id="step-99",
+            start_node_id="step-99",
         )
 
 

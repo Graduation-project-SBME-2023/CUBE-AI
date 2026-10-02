@@ -23,12 +23,12 @@ module = load_mcp_tool("latex.list_plots")
 pytestmark = pytest.mark.unit
 
 
-def _artifact(artifact_id: str, filename: str, kind: str = "figure_png") -> dict:
+def _artifact(file_id: str, filename: str, kind: str = "figure_png") -> dict:
     return {
-        "artifact_id": artifact_id,
+        "file_id": file_id,
         "display_filename": filename,
         "logical_key": f"features/run/{filename}",
-        "created_by_agent_run_id": "22222222-2222-4222-8222-222222222222",
+        "created_by_run_id": "22222222-2222-4222-8222-222222222222",
         "created_at": "2026-09-16T20:31:56Z",
         "kind": kind,
     }

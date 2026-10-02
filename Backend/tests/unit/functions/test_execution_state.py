@@ -10,9 +10,9 @@ from services import execution_state as module
 @pytest.mark.unit
 def test_first_incomplete_run_preserves_original_mapping():
     runs = [
-        {"step_id": "population", "status": "completed"},
-        {"step_id": "segmentation", "status": "running"},
-        {"step_id": "features", "status": "pending"},
+        {"node_id": "population", "status": "completed"},
+        {"node_id": "segmentation", "status": "running"},
+        {"node_id": "features", "status": "pending"},
     ]
 
     assert module.find_first_incomplete_run(runs) is runs[1]

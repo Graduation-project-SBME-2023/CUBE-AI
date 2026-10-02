@@ -44,19 +44,19 @@ def _agent_http_source() -> str:
 # agent_runs — execution state only
 # ----------------------------------------------------------------------
 def test_agent_runs_exists_with_the_a16_shape():
-    table = _metadata().tables["agent_runs"]
+    table = _metadata().tables["node_runs"]
     columns = set(table.columns.keys())
 
     assert columns == {
-        "agent_run_id",
-        "step_id",
+        "run_id",
+        "node_id",
         "session_id",
         "compiled_prompt",
-        "input_refs",
+        "resolved_inputs",
         "status",
-        "durable_notes",
-        "warnings",
-        "output_summary",
+        "scratchpad_notes",
+        "scratchpad_warnings",
+        "scratchpad_summary",
         "error",
         "started_at",
         "completed_at",
@@ -65,7 +65,7 @@ def test_agent_runs_exists_with_the_a16_shape():
 
 def test_agent_runs_keeps_no_copy_of_the_step_definition():
     """removed the snapshots; `plan_steps` is the sole definition."""
-    columns = set(_metadata().tables["agent_runs"].columns.keys())
+    columns = set(_metadata().tables["node_runs"].columns.keys())
     for removed in (
         "attempt_number",
         "agent_type_snapshot",
@@ -82,27 +82,27 @@ def test_agent_runs_keeps_no_copy_of_the_step_definition():
 
 
 def test_one_run_per_step_is_a_schema_fact():
-    table = _metadata().tables["agent_runs"]
+    table = _metadata().tables["node_runs"]
     uniques = {
         tuple(column.name for column in constraint.columns)
         for constraint in table.constraints
         if constraint.__class__.__name__ == "UniqueConstraint"
     }
-    # UNIQUE(step_id) is what enforces plan_step 1: 0..1 agent_run.
-    assert ("step_id",) in uniques
+    # UNIQUE(node_id) is what enforces plan_step 1: 0..1 agent_run.
+    assert ("node_id",) in uniques
     # The supporting tuple domain rows use to prove same-session alignment.
-    assert ("agent_run_id", "session_id") in uniques
+    assert ("run_id", "session_id") in uniques
 
 
 def test_session_id_is_guarded_by_a_composite_fk_to_the_step():
     """The one deliberate copy of a `plan_steps` column, proven by FK."""
-    table = _metadata().tables["agent_runs"]
+    table = _metadata().tables["node_runs"]
     composite = [
         constraint
         for constraint in table.foreign_key_constraints
-        if {column.name for column in constraint.columns} == {"step_id", "session_id"}
+        if {column.name for column in constraint.columns} == {"node_id", "session_id"}
     ]
-    assert composite, "agent_runs needs the (step_id, session_id) composite FK"
+    assert composite, "agent_runs needs the (node_id, session_id) composite FK"
     assert all(
         foreign_key.ondelete == "RESTRICT"
         for constraint in table.foreign_key_constraints
@@ -113,16 +113,16 @@ def test_session_id_is_guarded_by_a_composite_fk_to_the_step():
 def test_run_status_and_start_rules_are_named_checks():
     checks = {
         constraint.name
-        for constraint in _metadata().tables["agent_runs"].constraints
+        for constraint in _metadata().tables["node_runs"].constraints
         if constraint.__class__.__name__ == "CheckConstraint"
     }
     assert {
-        "ck_agent_runs_status",
-        "ck_agent_runs_started_iff_not_pending",
-        "ck_agent_runs_completed_at_iff_terminal",
-        "ck_agent_runs_compiled_before_start",
-        "ck_agent_runs_failed_has_error",
-        "ck_agent_runs_json_bounded",
+        "ck_node_runs_status",
+        "ck_node_runs_started_iff_not_pending",
+        "ck_node_runs_completed_at_iff_terminal",
+        "ck_node_runs_compiled_before_start",
+        "ck_node_runs_failed_has_error",
+        "ck_node_runs_json_bounded",
     } <= checks
 
 
@@ -135,10 +135,10 @@ def test_no_jobs_table_exists():
 # — approval creates exactly one run per step, atomically
 # ----------------------------------------------------------------------
 def test_approval_inserts_the_runs_in_the_same_transaction():
-    repo = _source(APPLICATION_ROOT / "repositories" / "plan.py")
-    approve = repo[repo.index("async def approve_plan") : repo.index("async def delete_plan")]
+    repo = _source(APPLICATION_ROOT / "repositories" / "session_graphs.py")
+    approve = repo[repo.index("async def approve_session_graph") : repo.index("async def delete_session_graph")]
     assert "create_pending_runs" in approve
-    assert "lock_session_and_plan" not in approve or "_require_draft" in approve
+    assert "lock_session_and_graph" not in approve or "_require_draft" in approve
     # One commit: the approval and its run rows are one transaction.
     assert approve.count("await db.commit()") == 1
     assert "unknown_agent_types" in approve
@@ -174,7 +174,7 @@ def test_a_run_is_never_deleted_and_a_completed_one_is_frozen():
     assert "agent_runs_enforce_row_rules" in migration
     assert "cannot be deleted" in migration
     assert "completed and immutable" in migration
-    assert "immutable once" in migration  # compiled_prompt / input_refs
+    assert "immutable once" in migration  # compiled_prompt / resolved_inputs
 
 
 # ----------------------------------------------------------------------
@@ -211,11 +211,11 @@ def test_the_compiled_task_message_is_folded_into_the_step_definition():
 # ws_log — the replay cursor and
 # ----------------------------------------------------------------------
 def test_ws_log_is_keyed_by_a_global_event_id():
-    table = _metadata().tables["ws_log"]
+    table = _metadata().tables["session_events"]
     assert "event_id" in table.columns
     assert "uuid" not in table.columns
     assert table.columns["event_id"].primary_key
-    assert table.columns["msg_type"].nullable is False
+    assert table.columns["event_type"].nullable is False
     assert table.columns["payload"].nullable is False
 
 
@@ -231,7 +231,7 @@ def test_every_publisher_locks_the_session_before_allocating_an_event_id():
     # The point of the lock, stated where the code is.
     assert "commit order" in publication
 
-    repo = _source(APPLICATION_ROOT / "repositories" / "Wslog.py")
+    repo = _source(APPLICATION_ROOT / "repositories" / "session_events.py")
     assert "publication(" in repo
     # An event log has no update, no payload append and no delete.
     for removed in ("async def update_ws_log", "async def append_ws_payload", "async def delete_ws_log"):
@@ -239,9 +239,9 @@ def test_every_publisher_locks_the_session_before_allocating_an_event_id():
 
 
 def test_replay_reads_from_a_cursor_not_from_the_whole_log():
-    repo = _source(APPLICATION_ROOT / "repositories" / "Wslog.py")
+    repo = _source(APPLICATION_ROOT / "repositories" / "session_events.py")
     assert "after_event_id" in repo
-    assert "WSLogModel.event_id > after_event_id" in repo
+    assert "SessionEvent.event_id > after_event_id" in repo
 
     app = _agent_http_source()
     assert "after_event_id" in app
@@ -263,7 +263,7 @@ def test_the_runner_builds_one_node_per_run():
     team = _source(AGENT_ROOT / "teams" / "execution_team.py")
     assert "PlannedRun" in team
     assert "RunBoundAgent" in team
-    assert "start_step_id" in team
+    assert "start_node_id" in team
     # The legacy de-duplication by agent id is gone.
     assert "planned_ids" not in team
     assert "start_agent_id" not in team
@@ -287,8 +287,8 @@ def test_the_mcp_environment_carries_the_run_identity():
         "reporter_agent",
     ):
         source = _source(AGENT_ROOT / "agents" / "execution_agents" / f"{name}.py")
-        assert '"AGENT_RUN_ID"' in source, name
-        assert '"STEP_ID"' in source, name
+        assert '"RUN_ID"' in source, name
+        assert '"NODE_ID"' in source, name
         assert "node_name" in source, name
 
 
@@ -298,8 +298,8 @@ def test_the_mcp_environment_carries_the_run_identity():
 def test_the_scratchpad_is_the_run_not_a_json_file():
     source = _source(MCP_ROOT / "tools" / "scratchpad.py")
     assert "SCRATCHPAD_FILE" not in source
-    assert "agent-runs/" in source
-    assert "AGENT_RUN_ID" in source
+    assert "/runs/" in source
+    assert "RUN_ID" in source
     # The MCP signatures are unchanged so the agents' prompts keep working.
     for tool in (
         "scratchpad_register_agent",
@@ -320,7 +320,7 @@ def test_agent_output_is_the_run_not_a_json_file():
     # that says where the document used to live.
     assert "open(" not in source
     assert "write_text" not in source
-    assert "/agent-runs/" in source
+    assert "/runs/" in source
 
     # The in-process writer (the segmentation tool) was cut over too, with no
     # file fallback.
@@ -333,7 +333,7 @@ def test_agent_output_is_the_run_not_a_json_file():
 
 def test_task_context_reads_the_run(monkeypatch):
     source = _source(MCP_ROOT / "tools" / "task_context.py")
-    assert "/agent-runs/" in source
+    assert "/runs/" in source
     assert "compiled_prompt" in source
     assert "/task-messages/" not in source
     assert "steps_sharing_this_agent_type" in source

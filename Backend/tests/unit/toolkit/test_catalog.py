@@ -46,7 +46,7 @@ async def _noop(**_: Any) -> dict[str, Any]:
 
 
 def _masks(result: Any) -> ExtractedArtifact:
-    return ExtractedArtifact(ref={"segmentation_run_id": result["run"]})
+    return ExtractedArtifact(ref={"segmentation_batch_id": result["run"]})
 
 
 def _tool(name: str, visibility: set[str], **overrides: Any) -> ToolSpec:

@@ -27,7 +27,7 @@ def test_create_requires_exactly_one_source():
     with pytest.raises(Exception, match="Exactly one|exclusive"):
         ReportCreate(
             session_id=session,
-            created_by_agent_run_id=run_id,
+            created_by_run_id=run_id,
             literature_review_id=lit_id,
             source_text=r"\documentclass{article}\begin{document}Hi\end{document}",
         )
@@ -46,10 +46,10 @@ def test_create_agent_run_source():
     run_id = "00000000-0000-0000-0000-000000000002"
     report = ReportCreate(
         session_id=session,
-        created_by_agent_run_id=run_id,
+        created_by_run_id=run_id,
         source_text=r"\documentclass{article}\begin{document}Hi\end{document}",
     )
-    assert report.created_by_agent_run_id is not None
+    assert report.created_by_run_id is not None
     assert report.literature_review_id is None
 
 
@@ -63,7 +63,7 @@ def test_create_literature_review_source():
         source_text=r"\documentclass{article}\begin{document}Hi\end{document}",
     )
     assert report.literature_review_id is not None
-    assert report.created_by_agent_run_id is None
+    assert report.created_by_run_id is None
 
 
 @pytest.mark.unit
@@ -71,7 +71,7 @@ def test_create_source_text_cannot_be_blank():
     with pytest.raises(Exception):
         ReportCreate(
             session_id="00000000-0000-0000-0000-000000000001",
-            created_by_agent_run_id="00000000-0000-0000-0000-000000000002",
+            created_by_run_id="00000000-0000-0000-0000-000000000002",
             source_text="",
         )
 
@@ -80,7 +80,7 @@ def test_create_source_text_cannot_be_blank():
 def test_create_source_format_default_is_latex():
     report = ReportCreate(
         session_id="00000000-0000-0000-0000-000000000001",
-        created_by_agent_run_id="00000000-0000-0000-0000-000000000002",
+        created_by_run_id="00000000-0000-0000-0000-000000000002",
         source_text=r"\documentclass{article}\begin{document}.\end{document}",
     )
     assert report.source_format == "latex"
@@ -91,7 +91,7 @@ def test_create_source_format_validates():
     with pytest.raises(Exception):
         ReportCreate(
             session_id="00000000-0000-0000-0000-000000000001",
-            created_by_agent_run_id="00000000-0000-0000-0000-000000000002",
+            created_by_run_id="00000000-0000-0000-0000-000000000002",
             source_text=r"\documentclass{article}\begin{document}.\end{document}",
             source_format="docx",   # not in (latex, markdown)
         )
@@ -143,7 +143,7 @@ def test_publish_image_keys_defaults_empty():
 def test_image_in_requires_non_blank_key():
     with pytest.raises(Exception):
         ReportImageIn(
-            artifact_id="00000000-0000-0000-0000-000000000010",
+            file_id="00000000-0000-0000-0000-000000000010",
             image_key="",
         )
 
@@ -151,7 +151,7 @@ def test_image_in_requires_non_blank_key():
 @pytest.mark.unit
 def test_image_in_valid():
     img = ReportImageIn(
-        artifact_id="00000000-0000-0000-0000-000000000010",
+        file_id="00000000-0000-0000-0000-000000000010",
         image_key="spleen_heatmap.png",
     )
     assert img.image_key == "spleen_heatmap.png"

@@ -21,7 +21,7 @@ from agent_system.toolkit.tools.spec import ToolSpec
 
 pytestmark = pytest.mark.unit
 
-CTX: Any = SimpleNamespace(session_id="s1", agent_run_id="r1")
+CTX: Any = SimpleNamespace(session_id="s1", run_id="r1")
 
 
 class _Proposal(BaseModel):
@@ -29,7 +29,7 @@ class _Proposal(BaseModel):
 
 
 def _masks(result: Any) -> ExtractedArtifact:
-    return ExtractedArtifact(ref={"segmentation_run_id": result["run"]})
+    return ExtractedArtifact(ref={"segmentation_batch_id": result["run"]})
 
 
 async def _handoff_issues(ctx: Any) -> list[str]:

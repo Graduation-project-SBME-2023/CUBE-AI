@@ -44,18 +44,18 @@ class FakeGraphFlow:
 def _api_runs():
     return [
         {
-            "agent_run_id": f"run-{order}",
-            "step_id": f"step-{order}",
+            "run_id": f"run-{order}",
+            "node_id": f"step-{order}",
             "session_id": SESSION_ID,
             "status": "pending",
             "compiled_prompt": None,
-            "output_summary": None,
-            "step": {
-                "step_id": f"step-{order}",
-                "step_order": order,
-                "agent_type": agent_id,
+            "scratchpad_summary": None,
+            "node": {
+                "node_id": f"step-{order}",
+                "position": order,
+                "target_name": agent_id,
                 "title": agent_id,
-                "instructions": {
+                "params": {
                     "task_message": {
                         "task_id": f"task-{order}",
                         "instructions": f"Execute {agent_id}",
@@ -74,7 +74,7 @@ async def test_run_pipeline_builds_the_graph_from_the_approved_runs(monkeypatch)
 
     monkeypatch.setattr(
         runners.BackendClient,
-        "get_agent_runs",
+        "get_node_runs",
         AsyncMock(return_value=_api_runs()),
     )
     monkeypatch.setattr(
@@ -84,7 +84,7 @@ async def test_run_pipeline_builds_the_graph_from_the_approved_runs(monkeypatch)
     )
     monkeypatch.setattr(
         runners.BackendClient,
-        "get_agent_run_status",
+        "get_node_status",
         AsyncMock(return_value={"schema_version": 1, "agents": []}),
     )
 
@@ -117,7 +117,7 @@ async def test_run_pipeline_builds_the_graph_from_the_approved_runs(monkeypatch)
     create_builder.assert_awaited_once()
     call = create_builder.await_args
     assert [run.agent_type for run in call.kwargs["runs"]] == list(AGENT_ORDER)
-    assert [run.agent_run_id for run in call.kwargs["runs"]] == [
+    assert [run.run_id for run in call.kwargs["runs"]] == [
         f"run-{order}" for order in range(1, len(AGENT_ORDER) + 1)
     ]
     assert call.kwargs["session_id"] == session.session_id
@@ -140,7 +140,7 @@ async def test_run_pipeline_refuses_a_session_with_no_approved_runs(monkeypatch)
     """A draft plan owns no runs, so there is nothing to execute — and nothing to reconstruct from a file either."""
     session = Session(SESSION_ID)
     monkeypatch.setattr(
-        runners.BackendClient, "get_agent_runs", AsyncMock(return_value=[])
+        runners.BackendClient, "get_node_runs", AsyncMock(return_value=[])
     )
 
     with pytest.raises(RuntimeError, match="no approved agent runs"):
@@ -151,20 +151,20 @@ async def test_run_pipeline_refuses_a_session_with_no_approved_runs(monkeypatch)
 @pytest.mark.asyncio
 async def test_run_pipeline_resumes_at_the_recorded_step(monkeypatch):
     session = Session(SESSION_ID)
-    session.resume_from_step_id = "step-3"
+    session.resume_from_node_id = "step-3"
 
     runs = _api_runs()
     runs[0]["status"] = "completed"
     runs[1]["status"] = "completed"
     monkeypatch.setattr(
-        runners.BackendClient, "get_agent_runs", AsyncMock(return_value=runs)
+        runners.BackendClient, "get_node_runs", AsyncMock(return_value=runs)
     )
     monkeypatch.setattr(
         runners.BackendClient, "get_session", AsyncMock(return_value={})
     )
     monkeypatch.setattr(
         runners.BackendClient,
-        "get_agent_run_status",
+        "get_node_status",
         AsyncMock(return_value=None),
     )
 
@@ -193,4 +193,4 @@ async def test_run_pipeline_resumes_at_the_recorded_step(monkeypatch):
 
     await runners.run_pipeline(session)
 
-    assert create_builder.await_args.kwargs["start_step_id"] == "step-3"
+    assert create_builder.await_args.kwargs["start_node_id"] == "step-3"

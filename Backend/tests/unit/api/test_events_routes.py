@@ -4,7 +4,7 @@ WEBSOCKET_FIX_PLAN.md W12/WS-01).
 The router's WS_INTERNAL_TOKEN dependency runs before either handler body, so
 the missing/wrong-token cases below never touch BackendClient or
 session_service -- nothing to mock. The accepted-token cases do reach the
-handler, so BackendClient.save_log and session_service.persist_agent_status
+handler, so BackendClient.save_event and session_service.persist_agent_status
 are patched out; this suite must not touch the network or a database.
 """
 

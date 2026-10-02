@@ -126,9 +126,9 @@ def test_an_uploaded_targets_file_labels_members_and_reports_the_rest():
 
 def test_the_review_payload_and_snapshot_are_derived_from_the_pairs():
     batch = {
-        "segmentation_run_id": "run-1",
+        "segmentation_batch_id": "run-1",
         "review_status": "submitted",
-        "config": {"correlation_run_id": "corr-1", "final_plan": {"targets": [], "selected_models": []}},
+        "config": {"batch_correlation_id": "corr-1", "final_plan": {"targets": [], "selected_models": []}},
         "pairs": [
             {
                 "pair_key": "v1__spleen",
@@ -155,5 +155,5 @@ def test_the_review_payload_and_snapshot_are_derived_from_the_pairs():
     }
     manifest = population_review.snapshot_manifest(batch)
     assert manifest["stage"] == "reviewed"
-    assert manifest["run_id"] == "corr-1"
+    assert manifest["batch_correlation_id"] == "corr-1"
     assert [item["pair_id"] for item in manifest["pairs"]] == ["v1__spleen", "v2__spleen"]

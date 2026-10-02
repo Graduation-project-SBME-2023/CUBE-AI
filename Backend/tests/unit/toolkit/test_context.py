@@ -33,9 +33,9 @@ def _ctx(**overrides: Any) -> ToolContext:
     fields: dict[str, Any] = {
         "session_id": "5f0c1c3e-6f7e-4d7a-9c55-0d8f7c0e2a11",
         "caller": "agent",
-        "agent_run_id": "run-1",
         "node_id": "node-1",
-        "graph_version": 3,
+        "run_id": "run-1",
+        "attempt_id": "attempt-1",
         "agent_type": "segmentation_agent",
         "workspace_dir": "/storage/hypotheses/workspace_x",
     }
@@ -50,7 +50,7 @@ def test_defaults_and_normalisation():
     assert ctx.execution_mode is ExecutionMode.AUTO
     assert ctx.privacy_mode is PrivacyMode.STANDARD
     assert ctx.depth == 0
-    assert ctx.agent_run_id is ctx.node_id is ctx.step_id is ctx.job_id is None
+    assert ctx.node_id is ctx.run_id is ctx.attempt_id is ctx.job_id is None
     assert ctx.event_sink is ctx.session_handle is ctx.mailbox is None
     assert _ctx().workspace_dir == Path("/storage/hypotheses/workspace_x")
 
@@ -70,8 +70,6 @@ def test_context_is_immutable():
         ({"privacy_mode": "private"}, "privacy_mode="),
         ({"depth": -1}, "depth"),
         ({"depth": True}, "depth"),
-        ({"graph_version": -1}, "graph_version"),
-        ({"graph_version": "3"}, "graph_version"),
     ],
 )
 def test_malformed_fields_are_refused(overrides, match):

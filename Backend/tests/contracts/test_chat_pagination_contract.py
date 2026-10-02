@@ -29,7 +29,7 @@ def test_session_collection_is_bounded_and_does_not_eager_load_children():
     # A session list must not drag every chat, event and plan row with it.
     assert "selectinload(SessionModel.chats)" not in list_section
     assert "noload(SessionModel.chats)" in list_section
-    assert "noload(SessionModel.ws_logs)" in list_section
+    assert "noload(SessionModel.events)" in list_section
     assert ".offset(skip)" in list_section and ".limit(limit)" in list_section
 
 
@@ -70,6 +70,6 @@ def test_new_sessions_create_their_plan_in_the_same_transaction():
         crud_source.index("async def create_session"):crud_source.index("async def get_session")
     ]
 
-    assert "Plan(session_id=session.session_id" in create_section
+    assert "SessionGraph(session_id=session.session_id" in create_section
     # One commit for both rows.
     assert create_section.count("await db.commit()") == 1

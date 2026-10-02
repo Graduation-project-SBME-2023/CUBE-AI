@@ -32,8 +32,8 @@ class _Manager:
     def __init__(self) -> None:
         self.frames: list[tuple[str, Any, str]] = []
 
-    async def send_ws_message(self, msg_type: str, payload: Any, session_id: str = "") -> None:
-        self.frames.append((msg_type, payload, session_id))
+    async def send_ws_message(self, event_type: str, payload: Any, session_id: str = "") -> None:
+        self.frames.append((event_type, payload, session_id))
 
 
 @dataclass
@@ -68,8 +68,8 @@ def test_without_a_monitor_tool_events_go_straight_to_the_socket():
 
     asyncio.run(SessionEventSink(_Session(), manager).emit(_event()))
 
-    ((msg_type, payload, session_id),) = manager.frames
-    assert (msg_type, session_id) == ("tool_update", SESSION_ID)
+    ((event_type, payload, session_id),) = manager.frames
+    assert (event_type, session_id) == ("tool_update", SESSION_ID)
     assert payload["source"] == "segmentation_agent"
     assert payload["tool_name"] == "list_models"
     assert isinstance(payload["timestamp"], str)  # JSON-ready
@@ -130,7 +130,7 @@ def test_a_dispatched_call_reaches_the_socket():
 
     asyncio.run(Dispatcher().invoke(spec_of(get_patient), {"patient_id": "p1"}, ctx))
 
-    assert [(msg_type, session_id) for msg_type, _, session_id in manager.frames] == [
+    assert [(event_type, session_id) for event_type, _, session_id in manager.frames] == [
         ("tool_update", SESSION_ID),
         ("tool_update", SESSION_ID),
         ("population_output", SESSION_ID),

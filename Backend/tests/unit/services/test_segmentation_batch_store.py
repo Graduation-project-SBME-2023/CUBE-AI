@@ -72,7 +72,7 @@ def test_work_items_round_trip_through_the_stored_pairs():
                 "volume_series_instance_uid": "volume-1",
                 "target_key": "spleen",
                 "status": payload["status"],
-                "external_job_id": payload["external_job_id"],
+                "inference_job_id": payload["inference_job_id"],
                 "candidate_segmentation_uid": payload["candidate_segmentation_uid"],
                 "selected_segmentation_uid": None,
                 "review_decision": None,
@@ -113,7 +113,7 @@ def test_a_submitted_rejection_comes_back_as_a_rejected_work_item():
 
 def test_a_batch_cannot_be_recorded_without_the_run_that_produced_it():
     """/: identity is the run. There is no manifest to fall back to."""
-    with pytest.raises(RuntimeError, match="agent_run_id"):
+    with pytest.raises(RuntimeError, match="run_id"):
         batch_store.SegmentationBatchStore(None)
 
 
@@ -165,7 +165,7 @@ class BatchStoreRetryTests(unittest.IsolatedAsyncioTestCase):
         client = _FlakyClient(fail_count=2)
         store = batch_store.SegmentationBatchStore("run-1", client=client)
 
-        response = await store._request("GET", "/segmentation-runs/run/run-1/segmentation")
+        response = await store._request("GET", "/segmentation-batches/run/run-1/segmentation")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(client.calls, 3)
@@ -177,4 +177,4 @@ class BatchStoreRetryTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(httpx.ReadError):
-            await store._request("GET", "/segmentation-runs/run/run-1/segmentation")
+            await store._request("GET", "/segmentation-batches/run/run-1/segmentation")

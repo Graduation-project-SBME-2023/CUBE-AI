@@ -64,7 +64,7 @@ def _fetch_all_segmentations(client: httpx.Client) -> list[dict[str, Any]]:
     skip = 0
     while True:
         response = client.get(
-            f"{CONTROL_BASE_URL.rstrip('/')}/segmentations/",
+            f"{CONTROL_BASE_URL.rstrip('/')}/segmentation-masks/",
             params={"skip": skip, "limit": PAGE_SIZE},
         )
         response.raise_for_status()

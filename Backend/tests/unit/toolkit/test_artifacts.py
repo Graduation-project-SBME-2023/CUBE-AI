@@ -52,12 +52,12 @@ PLAN_TABLE = {
     # type: (ref fields, summary fields, phi_default)
     "Cohort": ({"cohort_id"}, {"size", "label_counts", "frozen"}, True),
     "ImageSet": ({"series_uids"}, {"n_series", "modalities"}, True),
-    "MaskSet": ({"segmentation_run_id"}, {"n_masks", "n_failed", "review_status"}, True),
+    "MaskSet": ({"segmentation_batch_id"}, {"n_masks", "n_failed", "review_status"}, True),
     "FeatureTable": ({"feature_set_id"}, {"n_rows", "n_features"}, True),
     "FeatureImportance": ({"feature_set_id", "method"}, {"top_features"}, False),
     "ModelingOutput": ({"model_result_ids"}, {"metric_name", "best_metric", "n_models"}, False),
     "LiteratureContext": ({"literature_review_id"}, {"n_papers"}, False),
-    "ResultSummary": ({"agent_run_id"}, {"n_findings"}, False),
+    "ResultSummary": ({"run_id"}, {"n_findings"}, False),
     "ReportDocument": ({"report_id"}, {"source_version", "has_pdf"}, False),
 }
 
@@ -95,12 +95,12 @@ def test_builtin_registry_is_fresh_each_time():
     [
         ("Cohort", {"cohort_id": ID}, {"size": 40, "label_counts": {"true": 12}, "frozen": True}),
         ("ImageSet", {"series_uids": ["1.2.840.113619.2.55"]}, {"n_series": 1, "modalities": ["CT"]}),
-        ("MaskSet", {"segmentation_run_id": ID}, {"n_masks": 40, "review_status": "submitted"}),
+        ("MaskSet", {"segmentation_batch_id": ID}, {"n_masks": 40, "review_status": "submitted"}),
         ("FeatureTable", {"feature_set_id": ID}, {"n_rows": 40, "n_features": 1409}),
         ("FeatureImportance", {"feature_set_id": ID, "method": "rf"}, {"top_features": ["a"]}),
         ("ModelingOutput", {"model_result_ids": [ID]}, {"metric_name": "AUC", "n_models": 3}),
         ("LiteratureContext", {"literature_review_id": ID}, {"n_papers": 25}),
-        ("ResultSummary", {"agent_run_id": ID}, {"n_findings": 4}),
+        ("ResultSummary", {"run_id": ID}, {"n_findings": 4}),
         ("ReportDocument", {"report_id": ID}, {"source_version": 2, "has_pdf": True}),
     ],
 )
@@ -131,7 +131,7 @@ def test_validation_normalises_to_json():
         ("Cohort", {"cohort_id": ID}, {"size": 1}),
         ("ImageSet", {"series_uids": []}, {"n_series": 0}),
         ("ImageSet", {"series_uids": ["not a uid"]}, {"n_series": 1}),
-        ("MaskSet", {"segmentation_run_id": ID}, {"n_masks": 1, "review_status": "approved"}),
+        ("MaskSet", {"segmentation_batch_id": ID}, {"n_masks": 1, "review_status": "approved"}),
         ("ModelingOutput", {"model_result_ids": []}, {"metric_name": "AUC", "n_models": 0}),
         ("ReportDocument", {"report_id": ID}, {"source_version": 0}),
     ],
@@ -164,7 +164,7 @@ def test_describe_gives_the_composer_the_schemas():
 
     assert described["name"] == "MaskSet"
     assert described["phi"] is True
-    assert "segmentation_run_id" in described["ref"]["properties"]
+    assert "segmentation_batch_id" in described["ref"]["properties"]
     assert described["summary"]["properties"]["review_status"]["enum"] == [
         "not_ready", "pending", "submitting", "submitted",
     ]

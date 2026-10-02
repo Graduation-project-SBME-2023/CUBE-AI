@@ -46,7 +46,7 @@ def stub_handshake_catchup(monkeypatch):
     import socket_store
 
     monkeypatch.setattr(
-        socket_store.BackendClient, "replay_logs", AsyncMock(return_value=[])
+        socket_store.BackendClient, "replay_events", AsyncMock(return_value=[])
     )
     monkeypatch.setattr(
         sessions_routes.population_review, "current_batch", AsyncMock(return_value=None)
@@ -116,7 +116,7 @@ def test_after_event_id_reaches_replay_logs_as_the_cursor(client, isolated_manag
         seen["after_event_id"] = after_event_id
         return []
 
-    monkeypatch.setattr(socket_store.BackendClient, "replay_logs", fake_replay_logs)
+    monkeypatch.setattr(socket_store.BackendClient, "replay_events", fake_replay_logs)
 
     with client.websocket_connect(f"/ws?session_id={VALID_SESSION_ID}&after_event_id=42"):
         pass
@@ -138,7 +138,7 @@ def test_a_malformed_after_event_id_defaults_to_a_full_replay_not_a_rejection(
         seen["after_event_id"] = after_event_id
         return []
 
-    monkeypatch.setattr(socket_store.BackendClient, "replay_logs", fake_replay_logs)
+    monkeypatch.setattr(socket_store.BackendClient, "replay_events", fake_replay_logs)
 
     with client.websocket_connect(
         f"/ws?session_id={VALID_SESSION_ID}&after_event_id={after_event_id}"
@@ -157,7 +157,7 @@ def test_a_replay_failure_closes_with_the_replay_failed_code(client, isolated_ma
     async def failing_replay_logs(session_id, after_event_id=0, limit=500):
         raise RuntimeError("application_api unreachable")
 
-    monkeypatch.setattr(socket_store.BackendClient, "replay_logs", failing_replay_logs)
+    monkeypatch.setattr(socket_store.BackendClient, "replay_events", failing_replay_logs)
 
     # accept() already happened (unlike the 1008 case) before the failure,
     # so the client only observes the close once it tries to read: first the

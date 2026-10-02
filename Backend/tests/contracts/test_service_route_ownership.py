@@ -46,16 +46,16 @@ def test_application_api_owns_database_workflow_and_sync_routes():
         "patient.router",
         "study.router",
         "volume.router",
-        "model.router",
-        "segmentation.router",
+        "inference_models.router",
+        "segmentation_masks.router",
         "radiomics.router",
-        "chat_sessions.router",
         "chat_messages.router",
         "workflow.router",
         "sync.router",
     }
 
     assert required <= registered
+    assert "chat_sessions.router" not in registered
     assert "training_jobs.router" not in registered
     assert 'title="CUBE.AI Application API"' in source
 
