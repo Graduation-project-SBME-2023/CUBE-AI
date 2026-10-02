@@ -24,7 +24,7 @@ flowchart TB
 |---|---:|---|---|
 | OHIF + Nginx | `80/443` | Public | UI and same-origin routing |
 | Application API | `8001` | `/api/*` | PostgreSQL CRUD, chat, workflow metadata, Orthanc sync |
-| Agents Backend | `8150` | `/agents/*`, `/ws` | Agent planning/execution, MCP, population workflows, events |
+| Agents Backend | `8150` | `/agents/*`, `/ws` | Agent planning/execution, the tool catalog, population workflows, events |
 | MONAI Inference | `8000` | `/inference/*` | Model loading, inference, dataset preparation and training jobs |
 | Orthanc | `8042`, DICOM `4242` | `/pacs/*` | PACS and DICOMweb |
 | PostgreSQL | `5432` | None | Single system of record |

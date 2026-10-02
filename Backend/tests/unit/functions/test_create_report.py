@@ -1,9 +1,9 @@
-"""`create_report` — the MCP tool the latex_reporter_agent was missing.
+"""`create_report` — the tool the latex_reporter_agent was missing.
 
 `latex_to_pdf` requires an existing `report_id` (its own docstring says so) but no
 tool ever created one, so every manuscript run invented an id and failed with 404.
 This is the regression coverage for the fix: the tool resolves the run/session from
-the MCP environment and posts to `POST /reports/`.
+its ToolContext and posts to `POST /reports/`.
 """
 
 from __future__ import annotations

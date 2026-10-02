@@ -1,9 +1,9 @@
 """Shared-secret auth for internal-only routes (`/events`, `/ws-broadcast`).
 
 Both routes exist to receive events from processes the operator controls --
-MCP tool subprocesses, each authenticating through
-`Backend/mcp/internal_emitter.py` -- but nothing verified that before this
-module. In-process agent-system code no longer goes through either route at
+originally the MCP tool subprocesses (gone since Plan 2.1: tools now run in
+this process and report through their ToolContext's event sink) -- but
+nothing verified that before this module. In-process agent-system code no longer goes through either route at
 all (WS-06 replaced its HTTP self-calls with direct
 `socket_store.manager.send_ws_message` calls); these two remain the only
 entry points because nothing outside this process can reach the connection

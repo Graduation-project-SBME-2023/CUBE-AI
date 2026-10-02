@@ -1,4 +1,9 @@
-"""Event ingress from MCP tools and other internal producers.
+"""Event ingress from internal producers outside this process.
+
+The MCP tool subprocesses that posted here are gone (Plan 2.1): tools run in
+this process now and report through their ToolContext's event sink. Nothing
+in the repository posts to these routes any more except the manual view
+harness (tests/manual/view_payload_harness.py); they go in Plan 17.3.
 
 OpenResty blocks /agents/events and /agents/ws-broadcast at public ingress,
 which covers the public path but not calls from inside the docker-compose

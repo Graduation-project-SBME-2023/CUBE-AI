@@ -112,11 +112,11 @@ python -m pytest -c Backend/pytest.ini `
 | File | Function |
 |---|---|
 | `Backend/pytest.ini` | Test discovery, strict markers, asyncio behavior, and suite marker definitions. |
-| `Backend/conftest.py` | Canonical import order, temporary storage isolation, shared workspaces, fake MCP tool descriptors, agent-constructor capture, and automatic regression/radiology/legacy_autogen markers (`LEGACY_AUTOGEN_TESTS`). |
+| `Backend/conftest.py` | Canonical import order, temporary storage isolation, shared workspaces, fake MCP tool descriptors (for the legacy AutoGen agent tests), agent-constructor capture, and automatic regression/radiology/legacy_autogen markers (`LEGACY_AUTOGEN_TESTS`). |
 | `Backend/requirements/test.txt` | Test-only packages: pytest, asyncio support, coverage, mocks, timeouts, and HTTP mocking. |
 | `Backend/tests/run_tests.ps1` | Unified Docker/local runner, suite selection, JUnit reports, coverage, and integration-service URLs. |
-| `Backend/tests/support/toolkit_fixtures.py` | Toolkit fakes: `fake_context`, `fake_event_sink`, `fake_catalog`, `fake_domain_api` (respx), `fake_chat_model` (Plan 9), plus `call_tool` and `fake_runtime`. Imported by `tests/unit/toolkit/conftest.py`, not the root conftest, because the toolkit needs Python 3.13. |
-| `Backend/tests/support/mcp_loader.py` | Loads repository MCP tool modules privately without colliding with the installed `mcp` SDK or legacy `tools` package. |
+| `Backend/tests/support/toolkit_fixtures.py` | Toolkit fakes: `fake_context`, `fake_event_sink`, `fake_catalog`, `fake_domain_api` (respx), `fake_chat_model` (Plan 9), plus `call_tool` and `fake_runtime`. Imported by `tests/unit/toolkit/conftest.py` and `tests/unit/toolpacks/conftest.py`, not the root conftest, because the toolkit needs Python 3.13. |
+| `Backend/tests/fixtures/sample_data/` | Synthetic radiomics and volume fixtures (was `Backend/mcp/test_data/`); allow-listed by the storage-boundary check. |
 
 ### Execution-agent unit tests
 
@@ -143,7 +143,19 @@ python -m pytest -c Backend/pytest.ini `
 | `unit/functions/test_execution_state.py` | Status normalization, first-incomplete-step selection, safe recovered states, and restart rules. |
 | `unit/functions/test_feature_validation.py` | Minimum mask voxels and NIfTI image/mask affine alignment warnings. |
 | `unit/functions/test_feature_cache.py` | Stable cache keys, invalidation by mtime/bin width, JSON round trips, and corrupt-cache fallback. |
-| `unit/functions/test_workspace_helpers.py` | Logical/legacy workspace path mapping and empty input behavior. |
+| `unit/functions/test_workspace_helpers.py` | Logical/legacy workspace path mapping (against the ToolContext's workspace) and empty input behavior. |
+
+### Tool-pack tests (`unit/toolpacks/`, Python 3.13)
+
+| File | Function |
+|---|---|
+| `toolpacks/light/test_definition_of_ready.py` | The Definition of Ready of every light tool: one success and one error case each through dispatch, the `error_result` envelope, no identity environment read, first-party inline manifests. **Add a case when you add a light tool.** |
+| `toolpacks/test_toolpacks_catalog.py` | The catalog finds every tool in its pack, validates, keeps the interim heavy tools and the graph tools explicit, and loads the same way under the container import root. |
+| `toolpacks/test_common_helpers.py` | Lazy settings, service URLs, the shared HTTP client, the D24 write headers, identity from the context, `WorkspacePath`. |
+| `toolpacks/test_context_identity.py` | Tools ignore identity environment variables; the extraction LLM follows `client_config`. |
+| `toolpacks/test_emit.py`, `test_view_hooks.py` | `emit`/`emit_view`, and the `on_result` hooks golden-tested against the legacy pipeline monitor. |
+| `toolpacks/test_db_reads.py`, `test_light_fixes.py`, `test_polling.py` | The Appendix D fixes L1-L12 and S12, and `poll_until`. |
+| `toolpacks/test_run_with_guard.py`, `test_latex_to_pdf.py`, `test_literature_tools.py` | The graph tools and their ports; the literature tools against respx mocks. |
 
 ### Data-contract tests
 
@@ -215,7 +227,8 @@ frontend, agent API, Application API, MONAI Label, and Orthanc DICOMweb.
 - Generated files must use `tmp_path`, `workspace_dir`, or a test-specific
   temporary directory.
 - Fixtures must use synthetic data, never patient data.
-- Model clients and MCP discovery are mocked in deterministic tests.
+- Model clients, MCP discovery (legacy AutoGen tests) and the Application API
+  (`fake_domain_api`, tool-pack tests) are mocked in deterministic tests.
 - Tests must not depend on execution order.
 - Every agent handoff should be asserted as a persisted schema or explicit
   contract.

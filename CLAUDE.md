@@ -16,9 +16,12 @@ Parts of it are stale — see **Gotchas**.
 
 ## Tech Stack
 
-- **Backend:** Python 3.11.3, FastAPI, async SQLAlchemy + asyncpg, Alembic, Pydantic v2
-  (`pydantic-settings`), AutoGen (`autogen_agentchat` `GraphFlow`/`DiGraphBuilder`), FastMCP,
-  PyRadiomics, PyCaret, MONAI Label / nnUNetv2 / VISTA3D / SAM2 / VoxTell, PyTorch.
+- **Backend:** Python 3.11.3 in the images (Plan 0 moves them to 3.13), FastAPI, async
+  SQLAlchemy + asyncpg, Alembic, Pydantic v2 (`pydantic-settings`), AutoGen
+  (`autogen_agentchat` `GraphFlow`/`DiGraphBuilder`; the legacy pipeline, frozen until its
+  removal in Plan 17), PyRadiomics, PyCaret, MONAI Label / nnUNetv2 / VISTA3D / SAM2 / VoxTell,
+  PyTorch. The framework-neutral tool platform (`agent_system/toolkit/` and
+  `agent_system/toolpacks/`, see **Tool packs**) is written for **Python 3.13**.
 - **Frontend:** OHIF Viewer monorepo — React **17**, TypeScript 4.6, **Webpack 5** (not Vite),
   Lerna + Yarn 1 workspaces (`platform/*`, `extensions/*`, `modes/*`), Jest, ReactFlow
   (`@xyflow/react`), Recharts, Cornerstone3D.
@@ -95,6 +98,17 @@ python -m pytest -c Backend/pytest.ini Backend/tests/unit -k "test_name"
 
 Test deps: `python -m pip install -r Backend/requirements/test.txt` (plus
 `Backend/agent_system/requirements.txt` for the runtime).
+
+**The toolkit and the tool packs need Python 3.13** (PEP 695 syntax), but the project images
+are still 3.11.3 until Plan 0. Until then the 3.11 image — and so CI — cannot collect
+`tests/unit/toolkit/`, `tests/unit/toolpacks/`, or the tests that import
+`agent_system.toolpacks` (`tests/unit/functions/`, several `tests/contracts/`). Run those with a
+local 3.13 interpreter that has the test deps plus `pydantic httpx numpy pandas scikit-learn
+requests_toolbelt pyyaml aiofiles fastapi greenlet` (`py -3.13` instead of `python3.13` on Windows):
+
+```bash
+python3.13 -m pytest -c Backend/pytest.ini Backend/tests/unit/toolkit Backend/tests/unit/toolpacks Backend/tests/unit/functions Backend/tests/contracts
+```
 
 ### Frontend
 
@@ -229,12 +243,19 @@ canonical agent ids to factories, in this order:
 
 **Adding an agent = adding an entry to `AGENT_FACTORIES` plus its factory**; the dynamic
 builder picks it up. Agent ids must stay identical across team wiring, scratchpad
-reads/writes, planner output and `write_agent_output()` payloads. Agents act through MCP tools
-in `Backend/mcp/tools/` (population, radiomics, modeling, LaTeX, scratchpad, DB reads).
+reads/writes, planner output and `write_agent_output()` payloads.
 Per-agent I/O contracts are in `cubeai-docs/agent-system/io-contracts/`.
 
-Agent-to-agent state is now **database-backed, not file-backed**. The `scratchpad_*` MCP tools
-(`Backend/mcp/tools/scratchpad.py`) read and write `node_runs` rows — `scratchpad_notes`,
+**The tools moved out of `Backend/mcp/` (deleted in Plan 2).** They live in
+`agent_system/toolpacks/<pack>/`, registered with `@tool` and found by the catalog
+(`toolkit/catalog.py`), and run in the Agent System process through
+`toolkit/runtime/dispatch.py` — see **Tool packs** under Conventions. The AutoGen agents above
+still point their MCP workbench at the deleted `Backend/mcp/server.py`, so **the legacy
+pipeline cannot run its tools**; it stays frozen until the cut-over (Plan 17). The same holds
+for `SegmentationModule.initialize()` until Phase 9.7.
+
+Agent-to-agent state is now **database-backed, not file-backed**. The `scratchpad_*` tools
+(`agent_system/toolpacks/bookkeeping/scratchpad.py`) read and write `node_runs` rows — `scratchpad_notes`,
 `scratchpad_warnings`, `scratchpad_summary` — keyed by the run, not the agent name. `state/scratchpad.json`,
 `state/state.json` and `outputs/agents/*_output.json` are **retired**: writing them raises at
 runtime (see the write guard below). Do not reintroduce a workspace file for state that now
@@ -277,10 +298,13 @@ in your checkout; it documents the design below ticket by ticket.
   start/pause/resume/stop (`/plan`, `/run`, `/pause`, `/resume`, `/stop`) remain REST, as before.
 - **In-process emitters never call the agent system's own HTTP port.** Code running inside the
   agent-system process (the segmentation module, the view emitter, the planner) calls
-  `socket_store.manager` directly. Only MCP subprocesses are out-of-process, and they emit
-  through `Backend/mcp/internal_emitter.py`, authenticated with `WS_INTERNAL_TOKEN`
-  (`X-Internal-Token` header, `hmac.compare_digest`) — the Agent System refuses to start with
-  this unset unless `WS_INTERNAL_TOKEN_DEV_BYPASS=1` is also set.
+  `socket_store.manager` directly, and a tool reports through its `ToolContext`'s event sink
+  (`toolpacks/common/emit.py`: `emit`, `emit_progress`, `emit_view`; the sink is
+  `toolkit/runtime/session_sink.py`). The internal routes `/events` and `/ws-broadcast` have no
+  producer in the repository any more (the MCP subprocesses were their only one); they stay,
+  authenticated with `WS_INTERNAL_TOKEN` (`X-Internal-Token` header, `hmac.compare_digest`),
+  until Plan 17.3 — and the Agent System still refuses to start with the token unset unless
+  `WS_INTERNAL_TOKEN_DEV_BYPASS=1` is also set.
 - **There is exactly one WebSocket client**: `extensions/research-playground/src/utils/WebsocketService.ts`.
   The old `platform/app/src/utils/WebsocketService.ts` copy and the dead `<ChatWidget />` that
   imported it are deleted. The client opens one socket per session, sends its stored replay
@@ -328,6 +352,40 @@ exactly one Agent System worker.** Multi-worker needs a shared broker/store firs
   `session_events.py`, ...). A few older files are not (`patient.py`, `volume.py`) — match the
   existing file you are editing rather than renaming it.
 
+### Tool packs (`agent_system/toolpacks/`)
+
+One package per pack (`bookkeeping`, `db_reads`, `literature`, `modeling`, `population`,
+`radiomics`, `reporting`, `segmentation`); `common/` holds the shared helpers and registers no
+tools. The catalog walks the packages, so a new module is picked up with no import list. Every
+tool meets the **Definition of Ready** (`plan.md`, end of the roadmap), and
+`tests/unit/toolpacks/light/test_definition_of_ready.py` enforces it for every light tool.
+
+- **Imports:** a pack imports the toolkit only through `toolpacks/_toolkit.py`
+  (`from .._toolkit import tool, error_result, ...`), never `agent_system.toolkit` or `toolkit`
+  directly: the catalog loads the packs under the toolkit's own import root, and a pack that
+  loaded the other copy of `ToolSpec` would silently drop out of the catalog.
+- **`@tool(...)` with a full manifest:** the presets in `common/manifests.py` (`READ_ONLY`,
+  `WRITES`; `INTERIM_HEAVY` only for the heavy tools Plan 7 moves to jobs) plus explicit
+  `visibility`, `data_scopes` (`phi_read`/`phi_write` whenever patient identifiers are read or
+  written), `resources` and `timeout_s`. Graph-visible tools declare ports (`PortSpec`, input
+  `param` = the handler argument; output `extract`). Tool names never change.
+- **Identity comes from the context**, never the environment: `domain_api.session_id()`,
+  `run_id()`, `attempt_id()`, `node_id()`, `agent_type()`, and `common/workspace.py`
+  (`workspace_dir()`, `WorkspacePath`). No module constant may hold an identity.
+- **HTTP:** `common/domain_api.request()` for the Application API (shared client, explicit
+  timeouts, and the D24 write-path header — `X-Attempt-Id`, or `X-Run-Id` for a job — on every
+  write); `db_reads/_api.py` for plain reads; `common/http_client.shared_client()` otherwise.
+  URLs from `common/service_urls.py` (`app_api_url()`, `inference_api_url()`), settings from
+  `common/settings.py` — both read when used, never at import.
+- **Failures return `toolkit.results.error_result(code, message, **extra)`** (snake_case codes;
+  `domain_api.error_result_from(exc)` maps a `DomainApiError`). Never a bare
+  `{"status": "error"}`, never a traceback or a 5xx body in what the model sees. A success keeps
+  the tool's existing result shape.
+- **Events:** dispatch already sends `tool_started` / `tool_finished` / `error` for every call;
+  a tool adds only `emit("tool_log" | "tool_progress", ...)` / `emit_progress(...)`, and frontend
+  view updates come from its `on_result` hook (`common/views.py`), not from the tool body.
+- **New light tool -> add a success and an error case** to the Definition of Ready table.
+
 ### Frontend
 
 - TypeScript `.tsx`/`.ts` for new code (older MONAI-label files are still `.js` — leave them).
@@ -349,7 +407,10 @@ exactly one Agent System worker.** Multi-worker needs a shared broker/store firs
 ### Tests
 
 Unit/contract/pipeline tests must not contact Ollama, the DB, Orthanc, MONAI, or the network;
-mock model clients and MCP discovery. Write only to `tmp_path` or the `workspace_dir` fixture —
+mock model clients and MCP discovery (legacy AutoGen tests), and the Application API with the
+`fake_domain_api` respx fixture (tool-pack tests; fixtures in `tests/support/toolkit_fixtures.py`:
+call a tool through dispatch with `call_tool` and a `make_context(...)`). Synthetic sample data
+lives in `Backend/tests/fixtures/sample_data/`. Write only to `tmp_path` or the `workspace_dir` fixture —
 `Backend/conftest.py` redirects every storage env var to a temp tree at import time. Use
 synthetic data only, never patient data. Every live-service, LLM, GPU, or slow test needs its
 marker (`pytest.ini` runs with `--strict-markers`). Assert agent handoffs as a persisted schema
@@ -387,7 +448,9 @@ or explicit contract.
   get overwritten. Python must be 3.11.3 (`Backend/agent_system/.python-version`).
 - `Backend/conftest.py` deliberately reorders `sys.path` so `Backend/monailabel/` does not shadow
   the installed `monailabel` package; leave that block alone. Both `agent_system.*` and legacy
-  bare (`agents.*`, `services.*`, `tools.*`) imports are supported.
+  bare (`agents.*`, `services.*`) imports are supported (the old `agent_system/tools/` package
+  is gone). The tool packs follow whichever root the toolkit was imported under — see
+  `toolpacks/_toolkit.py`.
 - Agent workspace paths and the `WAITING_FOR_RESOURCE` status are frequently misread — see
   Architecture Notes before "fixing" either.
 - The root `package.json` (React 19 / Tailwind, no scripts) is unrelated to the OHIF monorepo;

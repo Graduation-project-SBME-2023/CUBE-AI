@@ -58,4 +58,4 @@ Call `write_agent_output` with:
 - Missing target column in exported feature CSV.
 
 ## Integration note
-- Ensure scratchpad reads use the correct argument key expected by MCP schema.
+- Ensure scratchpad reads use the correct argument key expected by the tool schema (`scratchpad_read_agent(target_agent_id=...)`).

@@ -45,8 +45,8 @@ def _canonical(value: Any) -> bytes:
 
 
 def rows_source_digest(source_digests: list[str]) -> str:
-    """Verbatim twin of `mcp/tools/feature_extraction/digests.rows_source_digest`
-    (the API cannot import MCP code; a contract test pins them together)."""
+    """Verbatim twin of `agent_system/toolpacks/radiomics/digests.rows_source_digest`
+    (the API cannot import Agent System code; a contract test pins them together)."""
     return hashlib.sha256(
         _canonical(
             {
