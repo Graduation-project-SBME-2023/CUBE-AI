@@ -16,11 +16,9 @@ from autogen_core import CancellationToken
 from descriptions.models_descriptions import MODELING_AGENT_DESCRIPTION
 from system_prompts.system_messages import MODELING_AGENT_SYSTEM_PROMPT
 from autogen_ext.tools.mcp import mcp_server_tools, StdioServerParams
-from tools.classification_tool import classification_modelling
 from autogen_core.tools import FunctionTool
 from services.timeout_policy import MCP_COMPUTE_READ_SECONDS
 
-modelling_classification_tool = classification_modelling
 logger = logging.getLogger(__name__)
 
 

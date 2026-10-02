@@ -4,10 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.support.mcp_loader import load_mcp_tool
-
-
-module = load_mcp_tool("helpers.workspace")
+from agent_system.toolpacks.common import workspace as module
 
 
 @pytest.mark.unit

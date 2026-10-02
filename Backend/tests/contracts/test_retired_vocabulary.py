@@ -69,7 +69,6 @@ ALLOWED: dict[str, set[str]] = {
 PYTHON_ROOTS = (
     BACKEND_ROOT / "application_api",
     BACKEND_ROOT / "agent_system",
-    BACKEND_ROOT / "mcp",
     BACKEND_ROOT / "scripts",
 )
 PYTHON_FILES = (

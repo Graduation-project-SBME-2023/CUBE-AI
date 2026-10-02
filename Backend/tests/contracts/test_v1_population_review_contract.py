@@ -11,7 +11,7 @@ pytestmark = pytest.mark.contract
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 APPLICATION_ROOT = BACKEND_ROOT / "application_api"
 AGENT_ROOT = BACKEND_ROOT / "agent_system"
-MCP_ROOT = BACKEND_ROOT / "mcp"
+TOOLPACKS_ROOT = BACKEND_ROOT / "agent_system" / "toolpacks"
 VERSIONS = APPLICATION_ROOT / "migrations" / "versions"
 
 
@@ -221,11 +221,11 @@ def test_the_population_tools_write_the_cohort_not_config_json():
         "population/inclusion_criteria.py",
         "population/validate_anatomy.py",
         "population/cohort_labels.py",
-        "targets_matcher.py",
-        "save_population.py",
-        "database/volumes/search_volumes.py",
+        "population/targets_matcher.py",
+        "population/save_population.py",
+        "db_reads/volumes/search_volumes.py",
     ):
-        source = _source(MCP_ROOT / "tools" / name)
+        source = _source(TOOLPACKS_ROOT / name)
         assert "domain_api" in source, name
         # No path building and no writer for the retired files. (The prose in
         # a docstring may still name them — that is what explains the change.)
@@ -237,7 +237,7 @@ def test_the_population_tools_write_the_cohort_not_config_json():
 
 def test_extract_cohort_labels_never_invents_a_label():
     """A failed extraction is not a negative finding, and an unmatched clinical record is never assigned to a volume by position."""
-    source = _source(MCP_ROOT / "tools" / "population" / "cohort_labels.py")
+    source = _source(TOOLPACKS_ROOT / "population" / "cohort_labels.py")
     assert "positional" not in source.lower()
     assert "patient sex" not in source.lower()
     assert '"has_target_disease": None' in source
@@ -285,7 +285,7 @@ def test_an_edited_mask_is_published_as_a_seg_and_never_reshaped_by_guessing():
 
 
 def test_feature_extraction_reads_reviewed_pairs_instead_of_another_agents_manifest():
-    source = _source(MCP_ROOT / "tools" / "feature_extraction" / "features.py")
+    source = _source(TOOLPACKS_ROOT / "radiomics" / "features.py")
     assert "reviewed_masks" in source
     assert 'base_on_workspace_dir("segmentation_manifest.json")' not in source
     assert "cohort_analysis_rows" in source
@@ -327,8 +327,8 @@ def test_the_retired_population_and_review_paths_raise():
 
 
 def test_the_guard_is_installed_where_agents_and_tools_write():
+    # The tools run inside the Agent System process, so app.py covers them too.
     assert "install_write_guard()" in _source(AGENT_ROOT / "app.py")
-    assert "install_write_guard()" in _source(MCP_ROOT / "server.py")
 
 
 def test_the_json_bounds_the_migration_writes_match_the_application():

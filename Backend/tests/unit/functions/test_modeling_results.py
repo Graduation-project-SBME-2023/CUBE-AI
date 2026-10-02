@@ -7,11 +7,9 @@ import math
 
 import pytest
 
-from tests.support.mcp_loader import load_mcp_tool
-
 pd = pytest.importorskip("pandas")
-results = load_mcp_tool("modeling.results")
-evaluation = load_mcp_tool("modeling.evaluation")
+from agent_system.toolpacks.modeling import results
+from agent_system.toolpacks.modeling import evaluation
 
 pytestmark = pytest.mark.unit
 

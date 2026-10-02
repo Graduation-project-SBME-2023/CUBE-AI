@@ -97,7 +97,6 @@ function Get-CoverageArguments([string]$Name) {
     }
     return @(
         "--cov=Backend/agent_system",
-        "--cov=Backend/mcp",
         "--cov-branch",
         "--cov-report=term-missing",
         "--cov-report=xml:Backend/coverage.xml",

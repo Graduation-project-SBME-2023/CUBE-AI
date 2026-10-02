@@ -7,9 +7,10 @@ from typing import Any, Dict, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import mcp
-from tool_logging import log_tool_state, ToolEvent, TextPayload
-from internal_emitter import broadcast_ws_message
+from .._toolkit import tool
+from ..common.manifests import READ_ONLY, WRITES
+from ..common.emit import log_tool_state, ToolEvent, TextPayload
+from ..common.emit import broadcast_ws_message
 
 AgentStatus = Literal["in_progress", "done", "blocked", "failed"]
 FlagLevel = Literal["info", "warning", "error", "critical"]
@@ -17,7 +18,7 @@ FlagLevel = Literal["info", "warning", "error", "critical"]
 def _app_api_url() -> str:
     """The Application API base URL."""
     try:
-        from service_urls import APP_API_URL
+        from ..common.service_urls import APP_API_URL
 
         return APP_API_URL
     except ImportError:
@@ -161,15 +162,10 @@ class ReadAgentInput(BaseModel):
 
 # -- Tools ---------------------------------------------------------------------
 
-@mcp.tool(
+@tool(
     name="scratchpad_register_agent",
-    annotations={
-        "title": "Register Agent in Scratchpad",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": False,
-        "openWorldHint": False,
-    },
+    visibility={"harness"},
+    **WRITES,
 )
 async def scratchpad_register_agent(role: str = "agent") -> str:
     """Register an agent in the scratchpad at the start of its work."""
@@ -212,15 +208,10 @@ async def scratchpad_register_agent(role: str = "agent") -> str:
     )
 
 
-@mcp.tool(
+@tool(
     name="scratchpad_write_note",
-    annotations={
-        "title": "Write Private Working Note",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": False,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    **WRITES,
 )
 async def scratchpad_write_note(content: str) -> str:
     """Append a private working note to this run's scratchpad section."""
@@ -247,15 +238,10 @@ async def scratchpad_write_note(content: str) -> str:
     return json.dumps({"status": "ok", "note_index": len(notes) - 1}, indent=2)
 
 
-@mcp.tool(
+@tool(
     name="scratchpad_raise_flag",
-    annotations={
-        "title": "Raise a Flag for the Reporting Agent",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": False,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    **WRITES,
 )
 async def scratchpad_raise_flag(level: str = "warning", message: str = "No message provided.") -> str:
     """Raise a flag so the reporting agent sees an issue."""
@@ -287,15 +273,11 @@ async def scratchpad_raise_flag(level: str = "warning", message: str = "No messa
     return json.dumps({"status": "ok", "flag_index": len(flags) - 1}, indent=2)
 
 
-@mcp.tool(
+@tool(
     name="scratchpad_set_status",
-    annotations={
-        "title": "Set Agent Status",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"harness"},
+    idempotent=True,
+    **WRITES,
 )
 async def scratchpad_set_status(status: str) -> str:
     """Update this run's self-reported working status."""
@@ -331,15 +313,11 @@ async def scratchpad_set_status(status: str) -> str:
     )
 
 
-@mcp.tool(
+@tool(
     name="scratchpad_write_summary",
-    annotations={
-        "title": "Write Final Work Summary",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **WRITES,
 )
 async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str:
     """Write this run's final work summary."""
@@ -373,15 +351,11 @@ async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str
     return json.dumps({"status": "ok", "message": "Summary saved."}, indent=2)
 
 
-@mcp.tool(
+@tool(
     name="scratchpad_read_agent",
-    annotations={
-        "title": "Read a Single Agent's Scratchpad Section",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **READ_ONLY,
 )
 async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True) -> str:
     """Read the scratchpad section of an agent in this session.: several plan steps may name the same agent. This resolves the FIRST such step in plan order and reports how many matched, rather than pretending the agent name is a unique key."""
@@ -425,15 +399,11 @@ async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True
     return json.dumps(section, indent=2)
 
 
-@mcp.tool(
+@tool(
     name="scratchpad_read_report",
-    annotations={
-        "title": "Read Full Cross-Agent Report View",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **READ_ONLY,
 )
 async def scratchpad_read_report() -> str:
     """Read the reporter-focused view of this session's scratchpad."""
@@ -445,6 +415,3 @@ async def scratchpad_read_report() -> str:
         return _error(f"Could not read the scratchpad report: {exc}")
     return json.dumps(report, indent=2)
 
-
-if __name__ == "__main__":
-    mcp.run()

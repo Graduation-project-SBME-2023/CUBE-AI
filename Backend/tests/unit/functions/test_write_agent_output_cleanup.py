@@ -17,9 +17,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from tests.support.mcp_loader import load_mcp_tool
-
-module = load_mcp_tool("agent_output")
+from agent_system.toolpacks.bookkeeping import agent_output as module
 
 pytestmark = pytest.mark.unit
 

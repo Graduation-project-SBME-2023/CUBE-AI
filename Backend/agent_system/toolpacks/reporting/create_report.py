@@ -13,19 +13,16 @@ from typing import Annotated, Optional
 
 from pydantic import Field
 
-from .. import mcp
-from ..helpers import domain_api
+from .._toolkit import tool
+from ..common.manifests import WRITES
+from ..common import domain_api
 
 
-@mcp.tool(
+@tool(
     name="create_report",
-    annotations={
-        "title": "Create the Report Row for the Manuscript PDF",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    idempotent=True,
+    **WRITES,
 )
 async def create_report(
     source_text: Annotated[

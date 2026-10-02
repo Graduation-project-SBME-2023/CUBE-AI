@@ -1,12 +1,16 @@
-from . import mcp
+from .._toolkit import tool
+from ..common.manifests import READ_ONLY
 import httpx
 
-from service_urls import CONTROL_API_URL
+from ..common.service_urls import CONTROL_API_URL
 
-from .database.result_shape import keep_model_id
+from ..db_reads.result_shape import keep_model_id
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def check_having_mask(volume_uid: str):
     """
     Checks if a segmentation mask exists for the given volume SeriesInstanceUID (volume_uid).

@@ -1,16 +1,20 @@
-from ... import mcp 
+from ..._toolkit import tool
+from ...common.manifests import READ_ONLY
 from typing import Annotated
 from pydantic import Field
 import httpx
 import os
-from service_urls import CONTROL_API_URL
-from ...helpers import domain_api
+from ...common.service_urls import CONTROL_API_URL
+from ...common import domain_api
 
 base_url = CONTROL_API_URL
 session_id = os.environ.get("SESSION_ID")
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def search_volumes(
     modality: Annotated[str | None, Field(description="The imaging modality to filter volumes by (e.g., 'CT', 'MRI'). If omitted, includes all modalities.")] = None,
     keyword: Annotated[str | None, Field(description="A specific keyword to search for within the volume descriptions.")] = None
@@ -36,7 +40,10 @@ async def search_volumes(
         return {"data": data}
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def search_volumes_by_description(
     words_to_include: Annotated[list[str], Field(description="List of keywords that MUST be present in the volume description or body part examined.")],
     words_to_exclude: Annotated[list[str] | None, Field(description="Optional list of keywords that MUST NOT be present in the volume description.")] = None

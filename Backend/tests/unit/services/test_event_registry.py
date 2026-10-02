@@ -24,7 +24,7 @@ pytestmark = pytest.mark.unit
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 AGENT_ROOT = BACKEND_ROOT / "agent_system"
-MCP_ROOT = BACKEND_ROOT / "mcp"
+TOOLPACKS_ROOT = BACKEND_ROOT / "agent_system" / "toolpacks"
 APPLICATION_ROOT = BACKEND_ROOT / "application_api"
 
 REGISTERED = DURABLE_EVENT_TYPES | EPHEMERAL_EVENT_TYPES
@@ -48,16 +48,16 @@ _SOURCES: list[tuple[Path, str]] = [
     (AGENT_ROOT / "api" / "runners.py", r'send_ws_message\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (AGENT_ROOT / "api" / "routes" / "execution.py", r'send_ws_message\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (AGENT_ROOT / "api" / "routes" / "events.py", r'event_type\s*=\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    # MCP subprocess emitters: each POSTs `{"type": "<literal>", ...}` to
-    # /ws-broadcast as its own top-level dict, not nested in a payload.
-    (MCP_ROOT / "tools" / "population" / "cohort_labels.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    (MCP_ROOT / "tools" / "targets_matcher.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    (MCP_ROOT / "tools" / "population" / "validate_anatomy.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    (MCP_ROOT / "tools" / "population" / "inclusion_criteria.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    # Tool-pack view emitters: each sends `{"type": "<literal>", ...}` as its
+    # own top-level dict, not nested in a payload.
+    (TOOLPACKS_ROOT / "population" / "cohort_labels.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (TOOLPACKS_ROOT / "population" / "targets_matcher.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (TOOLPACKS_ROOT / "population" / "validate_anatomy.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (TOOLPACKS_ROOT / "population" / "inclusion_criteria.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     # scratchpad.py's own top-level type is the first arg to _emit_ws_message;
     # its payload's nested "type": "agent_status"/"agent_summary" keys are
     # NOT top-level event types and must not be scanned by the generic pattern.
-    (MCP_ROOT / "tools" / "scratchpad.py", r'_emit_ws_message\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (TOOLPACKS_ROOT / "bookkeeping" / "scratchpad.py", r'_emit_ws_message\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     # application_api's own durable-event writers (session_events rows committed
     # alongside the domain change) -- reach the WS envelope's `type` field
     # via replay in agent_system/api/routes/sessions.py.
@@ -98,7 +98,7 @@ def test_scratchpad_updates_own_payload_subtype_is_not_mistaken_for_its_msg_type
     scratchpad_update's payload, not the event_type passed to
     broadcast_ws_message. If this ever changes, the scoped regex above would
     start silently under-scanning; this pins the current shape."""
-    source = _source(MCP_ROOT / "tools" / "scratchpad.py")
+    source = _source(TOOLPACKS_ROOT / "bookkeeping" / "scratchpad.py")
     assert re.search(r'broadcast_ws_message\(\s*"scratchpad_update"', source)
     assert '"type": "agent_status"' in source
     assert '"type": "agent_summary"' in source

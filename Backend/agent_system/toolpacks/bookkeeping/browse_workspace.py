@@ -1,6 +1,7 @@
-from . import mcp
+from .._toolkit import tool
+from ..common.manifests import READ_ONLY
 from pydantic import BaseModel, ConfigDict, Field
-from .helpers.workspace import WorkspacePath, WORKSPACE_DIR, base_on_workspace_dir
+from ..common.workspace import WorkspacePath, WORKSPACE_DIR, base_on_workspace_dir
 from pathlib import Path
 import json
 
@@ -24,15 +25,11 @@ class BrowseWorkspaceInput(BaseModel):
     )
 
 
-@mcp.tool(
+@tool(
     name="browse_workspace",
-    annotations={
-        "title": "Browse Workspace Files",
-        "readOnlyHint": True,
-        "destructiveHint": False,
-        "idempotentHint": True,
-        "openWorldHint": False,
-    },
+    visibility={"agent", "main"},
+    idempotent=True,
+    **READ_ONLY,
 )
 async def browse_workspace(params: BrowseWorkspaceInput) -> str:
     """Browse files in a workspace directory, filtered by file extension.

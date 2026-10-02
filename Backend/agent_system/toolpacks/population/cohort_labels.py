@@ -5,10 +5,11 @@ import httpx
 import asyncio
 from datetime import datetime, timezone
 
-from .. import mcp
-from ..helpers import domain_api
+from .._toolkit import tool
+from ..common.manifests import WRITES
+from ..common import domain_api
 from storage_paths import workspace_subpath
-from internal_emitter import broadcast_ws_message
+from ..common.emit import broadcast_ws_message
 
 # Confidence keeps the observed categories; "manual override" is a label
 # SOURCE, not a confidence.
@@ -135,10 +136,10 @@ def _load_clinical_records(workspace_dir: str | None) -> tuple[list[tuple[str, d
             str(workspace_subpath(workspace_dir, "clinical_data.json")),
             str(workspace_subpath(workspace_dir, "clinical_data.csv")),
         ]
-    mcp_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
     candidates += [
-        os.path.join(mcp_dir, "medical_report", "kits23_reduced.json"),
-        os.path.join(mcp_dir, "medical_report", "kits23_reduced.csv"),
+        os.path.join(data_dir, "kits23_reduced.json"),
+        os.path.join(data_dir, "kits23_reduced.csv"),
     ]
     for path in candidates:
         if not os.path.exists(path):
@@ -180,7 +181,10 @@ def _bounded_record(record: dict) -> dict:
     return {"schema_version": 1, "record": json.loads(text)}
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent"},
+    **WRITES,
+)
 async def extract_cohort_labels() -> dict:
     """Extracts binary disease-presence labels from clinical reports (JSON or CSV) using an LLM Clinical Adjudicator, for every volume of the population cohort."""
     workspace_dir = os.environ.get("WORKSPACE_DIR")
@@ -207,7 +211,7 @@ async def extract_cohort_labels() -> dict:
             "cohort_id": cohort_id,
         }
 
-    from service_urls import CONTROL_API_URL
+    from ..common.service_urls import CONTROL_API_URL
 
     # ── Resolve each member's patient identifiers ───────────────────────────────
     member_ids: dict[str, set[str]] = {}

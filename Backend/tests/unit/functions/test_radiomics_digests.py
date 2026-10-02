@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from tests.support.mcp_loader import load_mcp_tool
-
 np = pytest.importorskip("numpy")
-digests = load_mcp_tool("feature_extraction.digests")
+from agent_system.toolpacks.radiomics import digests
 
 pytestmark = pytest.mark.unit
 

@@ -3,9 +3,10 @@
 import os
 from typing import Annotated
 from pydantic import Field
-from .. import mcp
-from ..helpers import domain_api
-from internal_emitter import broadcast_ws_message
+from .._toolkit import tool
+from ..common.manifests import WRITES
+from ..common import domain_api
+from ..common.emit import broadcast_ws_message
 
 
 # ── Anatomy group mapping ───────────────────────────────────────────────────
@@ -93,7 +94,10 @@ async def _save_and_broadcast_cohort(
     return {"cohort_updated": True, "cohort_id": cohort["cohort_id"]}
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent"},
+    **WRITES,
+)
 async def validate_population_anatomy(
     hypothesis_body_region: Annotated[
         str,

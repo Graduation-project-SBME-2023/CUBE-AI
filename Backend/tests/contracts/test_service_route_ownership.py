@@ -107,7 +107,7 @@ def test_application_image_owns_alembic_and_database_dependencies():
 
 
 def test_application_service_url_never_falls_back_to_monai():
-    source = (BACKEND_ROOT / "mcp" / "service_urls.py").read_text(encoding="utf-8")
+    source = (BACKEND_ROOT / "agent_system" / "toolpacks" / "common" / "service_urls.py").read_text(encoding="utf-8")
     app_assignment = source[source.index("APP_API_URL"):source.index("# Compatibility aliases")]
 
     assert "APP_API_URL" in app_assignment

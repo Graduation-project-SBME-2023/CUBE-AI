@@ -1,13 +1,15 @@
 import httpx
-from .. import mcp
+from .._toolkit import tool
+from ..common.manifests import READ_ONLY
 import os
-from service_urls import CONTROL_API_URL
+from ..common.service_urls import CONTROL_API_URL
 
-# Assuming your mcp instance is imported here
-# from your_mcp_server import mcp
 base_url = CONTROL_API_URL
 
-@mcp.tool()
+@tool(
+    visibility={"agent"},
+    **READ_ONLY,
+)
 async def get_unique_series_descriptions() -> dict:
     """
     Retrieve a list of all unique volume series descriptions available in the database.

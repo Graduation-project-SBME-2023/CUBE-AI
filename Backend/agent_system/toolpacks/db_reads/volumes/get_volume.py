@@ -1,14 +1,18 @@
 from pydantic import Field
 from typing import Annotated
-from ... import mcp
+from ..._toolkit import tool
+from ...common.manifests import READ_ONLY
 import httpx
-from tool_logging import ToolEvent, log_tool_state, TextPayload
+from ...common.emit import ToolEvent, log_tool_state, TextPayload
 import os
-from service_urls import CONTROL_API_URL
+from ...common.service_urls import CONTROL_API_URL
 
 base_url = CONTROL_API_URL
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def get_volume(
     volume_series_instance_uid: Annotated[str | None, Field(description="The unique identifier (Series Instance UID) of the volume. If provided, fetches a single detailed record. If omitted, fetches a list of all volumes.")] = None,
     skip: Annotated[int, Field(description="Pagination offset: The number of volume records to skip before starting the list.")] = 0,
@@ -46,7 +50,10 @@ async def get_volume(
         log_tool_state(finished_event)
         return {"data": data}
     
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def get_volumes_by_study(
     study_uid: Annotated[str, Field(description="The unique identifier of the medical study. This is required to fetch all image volumes associated with that specific study.")]
 ):

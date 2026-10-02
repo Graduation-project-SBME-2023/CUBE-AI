@@ -11,13 +11,17 @@ catalogue instead, which is the only place a figure actually lives.
 
 import json
 
-from .. import mcp
-from ..helpers import domain_api
+from .._toolkit import tool
+from ..common.manifests import READ_ONLY
+from ..common import domain_api
 
 _FIGURE_KINDS = ("figure_png", "figure_jpeg")
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent"},
+    **READ_ONLY,
+)
 async def list_report_figures() -> str:
     """List this session's figure artifacts available to embed in the report.
 

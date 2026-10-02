@@ -12,9 +12,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from tests.support.mcp_loader import load_mcp_tool
-
-module = load_mcp_tool("latex.register_image")
+from agent_system.toolpacks.reporting import register_image as module
 
 pytestmark = pytest.mark.unit
 

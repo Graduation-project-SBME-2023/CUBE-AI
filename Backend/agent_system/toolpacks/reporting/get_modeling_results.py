@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from . import mcp
-from .helpers import domain_api
-from tool_logging import ToolEvent, log_tool_state, TextPayload
+from .._toolkit import tool
+from ..common.manifests import READ_ONLY
+from ..common import domain_api
+from ..common.emit import ToolEvent, log_tool_state, TextPayload
 
 _HEADLINE_METRICS = ("accuracy", "auc", "f1", "precision", "recall", "specificity", "sensitivity")
 
@@ -103,7 +104,10 @@ def _comparison_section(entry: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def get_modeling_results() -> str:
     """Retrieves the recorded feature sets and modeling results of this session in one request — everything needed to write the results report."""
     log_tool_state(ToolEvent("tool_started", "text", TextPayload(message="fetching results")))

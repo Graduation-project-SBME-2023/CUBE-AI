@@ -16,12 +16,13 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field
 
-from .. import mcp
-from ..helpers import domain_api
-from ..helpers.workspace import WorkspacePath, base_on_workspace_dir
+from .._toolkit import tool
+from ..common.manifests import INTERIM_HEAVY
+from ..common import domain_api
+from ..common.workspace import WorkspacePath, base_on_workspace_dir
 from storage_paths import CACHE_DIR, TEMP_DIR
 
-from tool_logging import ToolEvent, log_tool_state, TextPayload, ProgressPayload
+from ..common.emit import ToolEvent, log_tool_state, TextPayload, ProgressPayload
 
 FEATURE_EXTRACTION_TIMEOUT_SECONDS = float(
     os.environ.get("FEATURE_EXTRACTION_TIMEOUT_SECONDS", "600")
@@ -292,15 +293,10 @@ class AnalyzeImportanceInput(BaseModel):
 
 # ── Tools ──────────────────────────────────────────────────────────────────────
 
-@mcp.tool(
+@tool(
     name="radiomics_extract_features",
-    annotations={
-        "title": "Extract Radiomic Features from Medical Images",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": False,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    **INTERIM_HEAVY,
 )
 async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
     """Extract radiomic features from medical images and segmentation masks using PyRadiomics."""
@@ -1069,15 +1065,10 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 pass
 
 
-@mcp.tool(
+@tool(
     name="radiomics_analyze_importance",
-    annotations={
-        "title": "Analyse Feature Importance and Select Top Features",
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": False,
-        "openWorldHint": False,
-    },
+    visibility={"agent"},
+    **INTERIM_HEAVY,
 )
 async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
     """Perform feature importance analysis. Returns chart_data for frontend rendering."""
@@ -1754,6 +1745,3 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             "output_dir": output_dir,
         }, indent=2)
 
-
-if __name__ == "__main__":
-    mcp.run()

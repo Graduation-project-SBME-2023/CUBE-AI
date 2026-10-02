@@ -2,7 +2,8 @@ import httpx
 from requests_toolbelt.multipart import decoder
 import json
 from datetime import datetime
-from . import mcp
+from .._toolkit import tool
+from ..common.manifests import INTERIM_HEAVY
 import re
 from pathlib import Path
 import logging
@@ -125,7 +126,10 @@ async def _await_inference_job(
 
 from typing import List, Dict, Any, Union
 
-@mcp.tool()
+@tool(
+    visibility={"agent"},
+    **INTERIM_HEAVY,
+)
 async def run_segmentation(
     model: Annotated[
         str,

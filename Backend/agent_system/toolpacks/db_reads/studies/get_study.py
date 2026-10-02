@@ -1,14 +1,18 @@
 import httpx
-from ... import mcp
+from ..._toolkit import tool
+from ...common.manifests import READ_ONLY
 from typing import Annotated
 from pydantic import Field
 import os
-from service_urls import CONTROL_API_URL
+from ...common.service_urls import CONTROL_API_URL
 
 base_url = CONTROL_API_URL
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def get_study(
     study_uid: Annotated[str | None, Field(description="The unique identifier of the medical study. If provided, fetches a single detailed record. If omitted, fetches a list of all studies.")] = None,
     skip: Annotated[int, Field(description="Pagination offset: The number of study records to skip before starting the list.")] = 0,
@@ -38,7 +42,10 @@ async def get_study(
 
         return {"data": data}
     
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def get_study_by_patient(
     patient_id: Annotated[int, Field(description="The unique ID of the patient. This is required to fetch all medical studies associated with that specific individual.")]
 ):

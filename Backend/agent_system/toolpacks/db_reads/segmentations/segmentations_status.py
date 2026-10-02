@@ -1,11 +1,15 @@
-from ... import mcp 
+from ..._toolkit import tool
+from ...common.manifests import READ_ONLY
 import httpx
 import os
-from service_urls import CONTROL_API_URL
+from ...common.service_urls import CONTROL_API_URL
 
 base_url = CONTROL_API_URL
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def get_segmentation_stats():
     """
     Retrieves the breakdown of segmentation counts.

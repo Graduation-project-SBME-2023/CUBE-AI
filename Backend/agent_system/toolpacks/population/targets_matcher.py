@@ -2,11 +2,12 @@ import os
 import json
 import asyncio
 
-from . import mcp
-from tool_logging import ToolEvent, log_tool_state, TextPayload
-from .scratchpad import scratchpad_raise_flag, scratchpad_write_note
-from .helpers import domain_api
-from internal_emitter import broadcast_ws_message
+from .._toolkit import tool
+from ..common.manifests import WRITES
+from ..common.emit import ToolEvent, log_tool_state, TextPayload
+from ..bookkeeping.scratchpad import scratchpad_raise_flag, scratchpad_write_note
+from ..common import domain_api
+from ..common.emit import broadcast_ws_message
 
 APPROVAL_POLL_SECONDS = float(os.environ.get("COHORT_APPROVAL_POLL_SECONDS", "2"))
 
@@ -59,7 +60,10 @@ async def _wait_for_cohort_approval(timeout_seconds: int = 3600) -> dict:
             )
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent"},
+    **WRITES,
+)
 async def generate_targets() -> str:
     """Prepares the cohort's target labels for review and acts as the Human-in-the-Loop approval gate before segmentation."""
     log_tool_state(ToolEvent(event_type='tool_started', content_type='text',

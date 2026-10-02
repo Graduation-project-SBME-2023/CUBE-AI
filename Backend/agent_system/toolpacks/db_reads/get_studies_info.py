@@ -1,9 +1,13 @@
-from . import mcp
+from .._toolkit import tool
+from ..common.manifests import READ_ONLY
 import httpx
-from service_urls import CONTROL_API_URL
+from ..common.service_urls import CONTROL_API_URL
 
 
-@mcp.tool()
+@tool(
+    visibility={"agent", "main"},
+    **READ_ONLY,
+)
 async def get_all_studies_info():
     """
     This tool returns all the studies info that could be used in 
