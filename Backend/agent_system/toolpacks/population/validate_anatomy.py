@@ -1,6 +1,5 @@
 """Anatomy Validation Gate for the Population Agent."""
 
-import os
 from typing import Annotated
 from pydantic import Field
 from .._toolkit import tool
@@ -68,7 +67,6 @@ async def _save_and_broadcast_cohort(
     validation: dict | None = None,
 ) -> dict:
     """Records the validated cohort (even an empty 0-cohort) as the population cohort's membership and broadcasts it so the Population tab renders the post-validation result."""
-    session_id = os.environ.get("SESSION_ID")
     cohort = await domain_api.upsert_population_cohort(
         selection_summary={
             "anatomy_validation": {
@@ -88,7 +86,6 @@ async def _save_and_broadcast_cohort(
             "uid_list": validated_uids,
             "cohort_id": cohort["cohort_id"],
         },
-        session_id,
     )
 
     return {"cohort_updated": True, "cohort_id": cohort["cohort_id"]}

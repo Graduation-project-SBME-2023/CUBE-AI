@@ -9,7 +9,9 @@ import pytest
 import respx
 from pydantic import ValidationError
 
+from agent_system.toolkit.context import use_context
 from agent_system.toolpacks.bookkeeping import agent_output as module
+from tests.support.toolkit_fixtures import make_context
 
 API = "http://application-api.test"
 SESSION_ID = "11111111-1111-4111-8111-111111111111"
@@ -19,10 +21,9 @@ RUN_ID = "22222222-2222-4222-8222-222222222222"
 @pytest.fixture
 def api(monkeypatch):
     monkeypatch.setenv("APP_API_URL", API)  # read per request
-    monkeypatch.setattr(module, "SESSION_ID", SESSION_ID)
-    monkeypatch.setattr(module, "RUN_ID", RUN_ID)
-    monkeypatch.setattr(module, "AGENT_ID", "segmentation_agent")
-    with respx.mock(assert_all_called=False) as router:
+    # Identity is the tool context's, as dispatch sets it for a node's call.
+    ctx = make_context(session_id=SESSION_ID, run_id=RUN_ID, agent_type="segmentation_agent")
+    with use_context(ctx), respx.mock(assert_all_called=False) as router:
         yield router
 
 
@@ -123,13 +124,12 @@ async def test_output_is_written_to_this_run_and_read_back(api):
 
 @pytest.mark.contract
 @pytest.mark.asyncio
-async def test_an_agent_with_no_run_cannot_write_an_output(api, monkeypatch):
-    monkeypatch.setattr(module, "RUN_ID", "")
-
-    result = json.loads(await module.write_agent_output(_input("segmentation_agent")))
+async def test_an_agent_with_no_run_cannot_write_an_output(api):
+    with use_context(make_context(session_id=SESSION_ID, agent_type="segmentation_agent")):
+        result = json.loads(await module.write_agent_output(_input("segmentation_agent")))
 
     assert result["status"] == "error"
-    assert "RUN_ID" in result["message"]
+    assert "no run" in result["message"]
 
 
 @pytest.mark.contract

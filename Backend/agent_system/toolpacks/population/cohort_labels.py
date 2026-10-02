@@ -10,6 +10,8 @@ from ..common.manifests import WRITES
 from ..common import domain_api
 from storage_paths import workspace_subpath
 from ..common.emit import emit_view
+from ..common import llm, settings
+from ..common.workspace import get_workspace
 
 # Confidence keeps the observed categories; "manual override" is a label
 # SOURCE, not a confidence.
@@ -187,7 +189,7 @@ def _bounded_record(record: dict) -> dict:
 )
 async def extract_cohort_labels() -> dict:
     """Extracts binary disease-presence labels from clinical reports (JSON or CSV) using an LLM Clinical Adjudicator, for every volume of the population cohort."""
-    workspace_dir = os.environ.get("WORKSPACE_DIR")
+    workspace_dir = get_workspace()
     try:
         cohort = await domain_api.require_population_cohort()
     except domain_api.DomainApiError as exc:
@@ -254,15 +256,13 @@ async def extract_cohort_labels() -> dict:
 
     results: list[dict] = []
     llm_unavailable = False
-    model_name = os.environ.get("MODEL_NAME", "llama3.1")
+    endpoint = llm.extraction_endpoint()
+    model_name = endpoint.model
     if matches:
         from openai import AsyncOpenAI
 
-        llm_base_url = os.environ.get("MODEL_BASE_URL")
-        if not llm_base_url:
-            return {"status": "error", "message": "LLM base_url is not configured (MODEL_BASE_URL env var missing)."}
-        client_llm = AsyncOpenAI(base_url=llm_base_url, api_key=os.environ.get("MODEL_API_KEY", "ollama"))
-        sem = asyncio.Semaphore(int(os.environ.get("LLM_CONCURRENCY_LIMIT", "5")))
+        client_llm = AsyncOpenAI(base_url=endpoint.base_url, api_key=endpoint.api_key)
+        sem = asyncio.Semaphore(settings.llm_concurrency_limit())
         batch = await asyncio.gather(
             *[
                 _process_patient_record(client_llm, model_name, uid, _flatten(record), context_prompt, sem)
@@ -346,19 +346,16 @@ async def extract_cohort_labels() -> dict:
     except domain_api.DomainApiError as exc:
         return {"status": "error", "message": f"Labels were not recorded: {exc}"}
 
-    session_id = os.environ.get("SESSION_ID", "")
-    if session_id:
-        await emit_view(
-            "cohort_labels_output",
-            {
-                "tool": "extract_cohort_labels",
-                "status": "completed",
-                "extracted_count": len(results),
-                "llm_unavailable": llm_unavailable,
-                "cohort_id": cohort_id,
-            },
-            session_id,
-        )
+    await emit_view(
+        "cohort_labels_output",
+        {
+            "tool": "extract_cohort_labels",
+            "status": "completed",
+            "extracted_count": len(results),
+            "llm_unavailable": llm_unavailable,
+            "cohort_id": cohort_id,
+        },
+    )
 
     return {
         "status": "success",

@@ -1,7 +1,7 @@
 from .._toolkit import tool
 from ..common.manifests import READ_ONLY
 from pydantic import BaseModel, ConfigDict, Field
-from ..common.workspace import WorkspacePath, WORKSPACE_DIR, base_on_workspace_dir
+from ..common.workspace import WorkspacePath, workspace_dir
 from pathlib import Path
 import json
 
@@ -9,7 +9,8 @@ class BrowseWorkspaceInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
     directory: WorkspacePath = Field(
-        default=WORKSPACE_DIR,
+        default=".",  # the workspace root, resolved like any other path
+        validate_default=True,
         description=(
             "Directory to browse. Can be absolute, relative, or workspace-relative "
             "(e.g. 'data/exports'). Defaults to the workspace root."
@@ -34,7 +35,7 @@ class BrowseWorkspaceInput(BaseModel):
 async def browse_workspace(params: BrowseWorkspaceInput) -> str:
     """Browse files in a workspace directory, filtered by file extension.
 
-    Paths are resolved relative to WORKSPACE_DIR via the WorkspacePath validator.
+    Paths are resolved against the session workspace by the WorkspacePath validator.
 
     Args:
         params (BrowseWorkspaceInput):
@@ -60,7 +61,7 @@ async def browse_workspace(params: BrowseWorkspaceInput) -> str:
     glob_pattern = f"**/*{ext}" if params.recursive else f"*{ext}"
     matches = sorted(resolved.glob(glob_pattern))
 
-    workspace_root = Path(WORKSPACE_DIR)
+    workspace_root = workspace_dir()
     files = []
     for f in matches:
         try:

@@ -147,7 +147,7 @@ def test_a_view_reaches_the_sink():
     ctx = make_context(tool_name="t", event_sink=sink)
 
     async def call() -> bool:
-        return await emit.emit_view("population_output", {"n": 3}, ctx.session_id)
+        return await emit.emit_view("population_output", {"n": 3})
 
     assert _run(call, ctx) is True
     [view] = sink.views
@@ -155,31 +155,9 @@ def test_a_view_reaches_the_sink():
     assert dict(view.payload) == {"n": 3}
 
 
-def test_a_view_without_a_session_argument_uses_the_contexts():
-    sink = FakeEventSink()
-    ctx = make_context(tool_name="t", event_sink=sink)
-
-    async def call() -> bool:
-        return await emit.emit_view("population_output", {})
-
-    assert _run(call, ctx) is True
-    assert len(sink.views) == 1
-
-
-def test_a_view_for_another_session_is_dropped():
-    sink = FakeEventSink()
-    ctx = make_context(tool_name="t", event_sink=sink)
-
-    async def call() -> bool:
-        return await emit.emit_view("population_output", {}, "another-session")
-
-    assert _run(call, ctx) is False
-    assert sink.views == []
-
-
 def test_a_view_without_a_context_is_dropped():
     async def call() -> bool:
-        return await emit.emit_view("population_output", {}, "s1")
+        return await emit.emit_view("population_output", {})
 
     assert _run(call) is False
 

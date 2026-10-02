@@ -6,20 +6,13 @@ a tool argument against it while dispatch validates the arguments (dispatch
 sets the context first), so a path can never point into another session.
 """
 
-import os
 from pathlib import Path
 
 from typing import Annotated, Optional
 from pydantic import BeforeValidator
-from storage_paths import HYPOTHESES_DIR, workspace, workspace_subpath
+from storage_paths import workspace, workspace_subpath
 
 from .. import _toolkit
-
-# Read at import by browse_workspace until Phase 2.3 moves it to the context.
-WORKSPACE_DIR = os.environ.get(
-    "WORKSPACE_DIR",
-    str(HYPOTHESES_DIR / "workspace_default"),
-)
 
 
 def workspace_dir() -> Path:

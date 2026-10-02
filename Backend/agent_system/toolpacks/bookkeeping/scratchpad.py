@@ -1,7 +1,6 @@
 """Multi-Agent Scratchpad MCP Tool."""
 
 import json
-import os
 from typing import Any, Dict, Literal
 
 import httpx
@@ -9,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .._toolkit import tool
 from ..common.manifests import READ_ONLY, WRITES
+from ..common.domain_api import agent_type, node_id, run_id, session_id
 from ..common.emit import emit, emit_view
 from ..common.http_client import shared_client, timeout, write_path_headers
 from ..common.service_urls import app_api_url
@@ -16,12 +16,6 @@ from ..common.service_urls import app_api_url
 AgentStatus = Literal["in_progress", "done", "blocked", "failed"]
 FlagLevel = Literal["info", "warning", "error", "critical"]
 
-SESSION_ID = os.environ.get("SESSION_ID", "")
-AGENT_ID = os.environ.get("AGENT_ID", "")
-# The run this MCP subprocess belongs to. Set by the agent factory from the
-# approved `node_runs` row: identity is the run, not the agent name.
-RUN_ID = os.environ.get("RUN_ID", "")
-NODE_ID = os.environ.get("NODE_ID", "")
 
 REQUEST_TIMEOUT = 20.0
 
@@ -30,22 +24,16 @@ def _error(message: str) -> str:
     return json.dumps({"status": "error", "message": message}, indent=2)
 
 
-def _require_run() -> str | None:
-    if not RUN_ID:
-        return None
-    return RUN_ID
-
-
 async def _post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Write to this run's scratchpad. A failed write is an error, not a warning: there is no file to fall back to, and silently losing an agent's own record of its work is what current removes."""
-    run_id = _require_run()
-    if run_id is None:
+    run = run_id()
+    if not run:
         raise RuntimeError(
-            "RUN_ID is not set in the MCP environment; this agent is not "
-            "bound to an approved plan step and cannot write its scratchpad."
+            "This call belongs to no run; only an agent running inside a node "
+            "can write its scratchpad."
         )
     response = await shared_client().post(
-        f"{app_api_url()}/runs/{run_id}/scratchpad/{path}",
+        f"{app_api_url()}/runs/{run}/scratchpad/{path}",
         json=payload,
         headers=write_path_headers(),
         timeout=timeout(REQUEST_TIMEOUT),
@@ -163,30 +151,28 @@ async def scratchpad_register_agent(role: str = "agent") -> str:
     except Exception as exc:
         return _error(str(exc))
 
-    emit("tool_started", f"Registering agent {AGENT_ID}.")
-    emit("tool_finished", f"Registering agent {AGENT_ID}.")
+    emit("tool_started", f"Registering agent {agent_type()}.")
+    emit("tool_finished", f"Registering agent {agent_type()}.")
 
-    if SESSION_ID:
-        await emit_view(
-            "scratchpad_update",
-            {
-                "type": "agent_registered",
-                "agent_id": AGENT_ID,
-                "run_id": RUN_ID,
-                "node_id": NODE_ID,
-                "role": role,
-                "status": "in_progress",
-                "timestamp": _notes(run).get("registered_at"),
-                "content": f"Agent {AGENT_ID} registered as {role}",
-            },
-            SESSION_ID,
-        )
+    await emit_view(
+        "scratchpad_update",
+        {
+            "type": "agent_registered",
+            "agent_id": agent_type(),
+            "run_id": run_id(),
+            "node_id": node_id(),
+            "role": role,
+            "status": "in_progress",
+            "timestamp": _notes(run).get("registered_at"),
+            "content": f"Agent {agent_type()} registered as {role}",
+        },
+    )
 
     return json.dumps(
         {
             "status": "ok",
-            "agent_id": AGENT_ID,
-            "agent_run_id": RUN_ID,  # tool result key, kept (plan.md: no success result shape changes)
+            "agent_id": agent_type(),
+            "agent_run_id": run_id(),  # tool result key, kept (plan.md: no success result shape changes)
             "role": role,
         },
         indent=2,
@@ -206,20 +192,18 @@ async def scratchpad_write_note(content: str) -> str:
         return _error(str(exc))
 
     notes = _notes(run).get("notes", [])
-    if SESSION_ID:
-        await emit_view(
-            "scratchpad_update",
-            {
-                "type": "agent_note",
-                "agent_id": AGENT_ID,
-                "run_id": RUN_ID,
-                "role": _notes(run).get("role", ""),
-                "content": content,
-                "timestamp": notes[-1]["created_at"] if notes else None,
-                "note_index": len(notes) - 1,
-            },
-            SESSION_ID,
-        )
+    await emit_view(
+        "scratchpad_update",
+        {
+            "type": "agent_note",
+            "agent_id": agent_type(),
+            "run_id": run_id(),
+            "role": _notes(run).get("role", ""),
+            "content": content,
+            "timestamp": notes[-1]["created_at"] if notes else None,
+            "note_index": len(notes) - 1,
+        },
+    )
     return json.dumps({"status": "ok", "note_index": len(notes) - 1}, indent=2)
 
 
@@ -240,21 +224,19 @@ async def scratchpad_raise_flag(level: str = "warning", message: str = "No messa
         return _error(str(exc))
 
     flags = _flags(run)
-    if SESSION_ID:
-        await emit_view(
-            "scratchpad_update",
-            {
-                "type": "agent_flag",
-                "agent_id": AGENT_ID,
-                "run_id": RUN_ID,
-                "role": _notes(run).get("role", ""),
-                "level": level,
-                "content": message,
-                "timestamp": flags[-1]["created_at"] if flags else None,
-                "flag_index": len(flags) - 1,
-            },
-            SESSION_ID,
-        )
+    await emit_view(
+        "scratchpad_update",
+        {
+            "type": "agent_flag",
+            "agent_id": agent_type(),
+            "run_id": run_id(),
+            "role": _notes(run).get("role", ""),
+            "level": level,
+            "content": message,
+            "timestamp": flags[-1]["created_at"] if flags else None,
+            "flag_index": len(flags) - 1,
+        },
+    )
     return json.dumps({"status": "ok", "flag_index": len(flags) - 1}, indent=2)
 
 
@@ -271,28 +253,26 @@ async def scratchpad_set_status(status: str) -> str:
             f"Invalid status '{status}'. Must be one of: in_progress, done, blocked, failed."
         )
     try:
-        current = await _get(f"{app_api_url()}/runs/{RUN_ID}") if RUN_ID else {}
+        current = await _get(f"{app_api_url()}/runs/{run_id()}") if run_id() else {}
         previous = _notes(current).get("status")
         run = await _post("status", {"status": status})
     except Exception as exc:
         return _error(str(exc))
 
-    if SESSION_ID:
-        activity_log = _notes(run).get("activity_log") or []
-        await emit_view(
-            "scratchpad_update",
-            {
-                "type": "agent_status",
-                "agent_id": AGENT_ID,
-                "run_id": RUN_ID,
-                "role": _notes(run).get("role", ""),
-                "status": status,
-                "previous_status": previous,
-                "content": f"Status changed: {previous} -> {status}",
-                "timestamp": activity_log[-1]["timestamp"] if activity_log else None,
-            },
-            SESSION_ID,
-        )
+    activity_log = _notes(run).get("activity_log") or []
+    await emit_view(
+        "scratchpad_update",
+        {
+            "type": "agent_status",
+            "agent_id": agent_type(),
+            "run_id": run_id(),
+            "role": _notes(run).get("role", ""),
+            "status": status,
+            "previous_status": previous,
+            "content": f"Status changed: {previous} -> {status}",
+            "timestamp": activity_log[-1]["timestamp"] if activity_log else None,
+        },
+    )
     return json.dumps(
         {"status": "ok", "previous_status": previous, "new_status": status}, indent=2
     )
@@ -311,20 +291,18 @@ async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str
     except Exception as exc:
         return _error(str(exc))
 
-    if SESSION_ID:
-        await emit_view(
-            "scratchpad_update",
-            {
-                "type": "agent_summary",
-                "agent_id": AGENT_ID,
-                "run_id": RUN_ID,
-                "role": _notes(run).get("role", ""),
-                "content": summary,
-                "timestamp": (_summary(run) or {}).get("updated_at"),
-                "summary_length": len(summary),
-            },
-            SESSION_ID,
-        )
+    await emit_view(
+        "scratchpad_update",
+        {
+            "type": "agent_summary",
+            "agent_id": agent_type(),
+            "run_id": run_id(),
+            "role": _notes(run).get("role", ""),
+            "content": summary,
+            "timestamp": (_summary(run) or {}).get("updated_at"),
+            "summary_length": len(summary),
+        },
+    )
 
     emit("tool_started", "Writing a Summary.")
     emit("tool_finished", "Writing a Summary.")
@@ -340,11 +318,11 @@ async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str
 )
 async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True) -> str:
     """Read the scratchpad section of an agent in this session.: several plan steps may name the same agent. This resolves the FIRST such step in plan order and reports how many matched, rather than pretending the agent name is a unique key."""
-    if not SESSION_ID:
-        return _error("SESSION_ID is not set in the MCP environment.")
+    if not session_id():
+        return _error("This call belongs to no session.")
     try:
         resolved = await _get(
-            f"{app_api_url()}/runs/session/{SESSION_ID}/by-target/{target_agent_id}"
+            f"{app_api_url()}/runs/session/{session_id()}/by-target/{target_agent_id}"
         )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
@@ -384,10 +362,10 @@ async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True
 )
 async def scratchpad_read_report() -> str:
     """Read the reporter-focused view of this session's scratchpad."""
-    if not SESSION_ID:
-        return _error("SESSION_ID is not set in the MCP environment.")
+    if not session_id():
+        return _error("This call belongs to no session.")
     try:
-        report = await _get(f"{app_api_url()}/runs/session/{SESSION_ID}/scratchpad")
+        report = await _get(f"{app_api_url()}/runs/session/{session_id()}/scratchpad")
     except Exception as exc:
         return _error(f"Could not read the scratchpad report: {exc}")
     return json.dumps(report, indent=2)

@@ -31,16 +31,13 @@ async def _wait_for_cohort_approval(timeout_seconds: int = 3600) -> dict:
     if not _IS_WAITING_FOR_APPROVAL:
         _IS_WAITING_FOR_APPROVAL = True
         emit("tool_started", "Waiting for doctor to review and approve final cohort in UI...")
-        session_id = os.environ.get("SESSION_ID")
-        if session_id:
-            await emit_view(
-                "agent_waiting_for_user_input",
-                {
-                    "agent": "study_population_planner_agent",
-                    "status": "WAITING_FOR_REVIEW",
-                },
-                session_id,
-            )
+        await emit_view(
+            "agent_waiting_for_user_input",
+            {
+                "agent": "study_population_planner_agent",
+                "status": "WAITING_FOR_REVIEW",
+            },
+        )
 
     elapsed = 0.0
     while True:

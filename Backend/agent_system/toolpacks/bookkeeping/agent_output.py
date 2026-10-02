@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import shutil
 from typing import Any, Dict, List, Literal
 
@@ -10,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .._toolkit import tool
 from ..common.manifests import READ_ONLY, WRITES
+from ..common.domain_api import run_id, session_id
 from ..common.http_client import shared_client, timeout, write_path_headers
 from ..common.service_urls import app_api_url
 from storage_paths import TEMP_DIR
@@ -36,9 +36,6 @@ def _cleanup_run_temp_dirs(run_id: str) -> None:
             except Exception as exc:
                 logger.warning("Failed to clean up temp dir %s: %s", run_dir, exc)
 
-SESSION_ID = os.environ.get("SESSION_ID", "")
-AGENT_ID = os.environ.get("AGENT_ID", "")
-RUN_ID = os.environ.get("RUN_ID", "")
 REQUEST_TIMEOUT = 30.0
 
 OutputStatus = Literal["completed", "failed", "partial"]
@@ -141,7 +138,7 @@ def _document(run: Dict[str, Any]) -> Dict[str, Any]:
 
 async def _session_runs() -> List[Dict[str, Any]]:
     response = await shared_client().get(
-        f"{app_api_url()}/runs/session/{SESSION_ID}", timeout=timeout(REQUEST_TIMEOUT)
+        f"{app_api_url()}/runs/session/{session_id()}", timeout=timeout(REQUEST_TIMEOUT)
     )
     response.raise_for_status()
     return response.json()
@@ -157,10 +154,10 @@ async def _session_runs() -> List[Dict[str, Any]]:
 )
 async def write_agent_output(params: WriteAgentOutputInput) -> str:
     """Write this agent's structured output."""
-    if not RUN_ID:
+    if not run_id():
         return _error(
-            "RUN_ID is not set in the MCP environment; this agent is not "
-            "bound to an approved plan step and cannot record its output."
+            "This call belongs to no run; only an agent running inside a node "
+            "can record its output."
         )
     payload = {
         "agent_role": params.agent_role,
@@ -174,7 +171,7 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
     }
     try:
         response = await shared_client().put(
-            f"{app_api_url()}/runs/{RUN_ID}/output",
+            f"{app_api_url()}/runs/{run_id()}/output",
             json=payload,
             headers=write_path_headers(),
             timeout=timeout(REQUEST_TIMEOUT),
@@ -198,7 +195,7 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
 
     # This agent's output is now durable in Postgres — its working scratch
     # under temp/ (if any) has nothing left it's the only copy of.
-    _cleanup_run_temp_dirs(RUN_ID)
+    _cleanup_run_temp_dirs(run_id())
 
     return json.dumps(
         {
@@ -219,11 +216,11 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
 )
 async def read_agent_output(params: ReadAgentOutputInput) -> str:
     """Read the structured output of an agent in this session.: when several plan steps name one agent, this resolves the FIRST in plan order and says how many matched."""
-    if not SESSION_ID:
-        return _error("SESSION_ID is not set in the MCP environment.")
+    if not session_id():
+        return _error("This call belongs to no session.")
     try:
         response = await shared_client().get(
-            f"{app_api_url()}/runs/session/{SESSION_ID}"
+            f"{app_api_url()}/runs/session/{session_id()}"
             f"/by-target/{params.agent_id}",
             timeout=timeout(REQUEST_TIMEOUT),
         )
@@ -247,8 +244,8 @@ async def read_agent_output(params: ReadAgentOutputInput) -> str:
 )
 async def read_all_agent_outputs() -> str:
     """Read every agent's structured output for this session, in plan order."""
-    if not SESSION_ID:
-        return _error("SESSION_ID is not set in the MCP environment.")
+    if not session_id():
+        return _error("This call belongs to no session.")
     try:
         runs = await _session_runs()
     except Exception as exc:

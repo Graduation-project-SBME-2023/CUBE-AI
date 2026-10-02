@@ -299,7 +299,7 @@ def test_the_scratchpad_is_the_run_not_a_json_file():
     source = _source(TOOLPACKS_ROOT / "bookkeeping" / "scratchpad.py")
     assert "SCRATCHPAD_FILE" not in source
     assert "/runs/" in source
-    assert "RUN_ID" in source
+    assert "run_id()" in source  # the run comes from the tool context
     # The MCP signatures are unchanged so the agents' prompts keep working.
     for tool in (
         "scratchpad_register_agent",

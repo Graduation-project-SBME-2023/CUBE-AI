@@ -3,12 +3,10 @@ from ...common.manifests import READ_ONLY
 from typing import Annotated
 from pydantic import Field
 import httpx
-import os
 from ...common.service_urls import CONTROL_API_URL
 from ...common import domain_api
 
 base_url = CONTROL_API_URL
-session_id = os.environ.get("SESSION_ID")
 
 
 @tool(
