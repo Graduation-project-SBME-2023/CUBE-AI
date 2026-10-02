@@ -20,7 +20,7 @@ class ToolLogSnapshotTests(unittest.IsolatedAsyncioTestCase):
             published["payload"] = log.payload
             return SimpleNamespace(event_id=7, payload=log.payload)
 
-        with patch.object(socket_store.BackendClient, "save_log", fake_save):
+        with patch.object(socket_store.BackendClient, "save_event", fake_save):
             payload = {"value": 1}
             # A durable type: "tool_progress" is registered ephemeral
             # (WS-05) and would skip persistence entirely, which is not what
@@ -40,7 +40,7 @@ class ToolLogSnapshotTests(unittest.IsolatedAsyncioTestCase):
             published["payload"] = log.payload
             return SimpleNamespace(event_id=8, payload=log.payload)
 
-        with patch.object(socket_store.BackendClient, "save_log", fake_save):
+        with patch.object(socket_store.BackendClient, "save_event", fake_save):
             payload = {"items": ["original"]}
             # Unregistered types default to durable (event_registry.py's fail
             # -safe default), so this still exercises the persist path.
@@ -73,7 +73,7 @@ class ToolLogSnapshotTests(unittest.IsolatedAsyncioTestCase):
         async def failing_save(_log):
             raise RuntimeError("application api unavailable")
 
-        with patch.object(socket_store.BackendClient, "save_log", failing_save):
+        with patch.object(socket_store.BackendClient, "save_event", failing_save):
             await manager.send_ws_message("hypothesis", {"v": 1}, session_id="s1")
             await asyncio.wait_for(received.wait(), timeout=1.0)
 

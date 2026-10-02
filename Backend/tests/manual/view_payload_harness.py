@@ -307,23 +307,23 @@ def _generate_labels(n_labels: int):
 
 # ── HTTP broadcast ─────────────────────────────────────────────────────────────
 
-async def broadcast(client: httpx.AsyncClient, base_url: str, msg_type: str, payload: dict, session_id: str):
+async def broadcast(client: httpx.AsyncClient, base_url: str, event_type: str, payload: dict, session_id: str):
     """POST to /ws-broadcast — same path the app uses internally.
 
     /ws-broadcast requires WS_INTERNAL_TOKEN (see WEBSOCKET_FIX_PLAN.md W12);
     export it in this shell before running the script against a real server.
     """
-    body = {"type": msg_type, "payload": payload, "session_id": session_id}
+    body = {"type": event_type, "payload": payload, "session_id": session_id}
     token = os.environ.get("WS_INTERNAL_TOKEN", "")
     headers = {"X-Internal-Token": token} if token else {}
     try:
         r = await client.post(f"{base_url}/ws-broadcast", json=body, headers=headers, timeout=10)
         r.raise_for_status()
-        print(f"  ✓  {msg_type}")
+        print(f"  ✓  {event_type}")
     except httpx.HTTPStatusError as e:
-        print(f"  ✗  {msg_type}  →  HTTP {e.response.status_code}: {e.response.text[:120]}")
+        print(f"  ✗  {event_type}  →  HTTP {e.response.status_code}: {e.response.text[:120]}")
     except httpx.RequestError as e:
-        print(f"  ✗  {msg_type}  →  Connection error: {e}")
+        print(f"  ✗  {event_type}  →  Connection error: {e}")
         sys.exit(1)
 
 

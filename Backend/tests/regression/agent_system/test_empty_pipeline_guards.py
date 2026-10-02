@@ -121,7 +121,7 @@ class ExecutionPlanGuardTests(unittest.IsolatedAsyncioTestCase):
     def _service(self, runs=None, approve=None):
         service = SessionService(_NoopWebSocketManager())
         service.tasks.start_execution = AsyncMock()
-        session_service_module.BackendClient.get_agent_runs = AsyncMock(
+        session_service_module.BackendClient.get_node_runs = AsyncMock(
             return_value=runs or []
         )
         session_service_module.BackendClient.approve_plan = AsyncMock(
@@ -141,25 +141,25 @@ class ExecutionPlanGuardTests(unittest.IsolatedAsyncioTestCase):
                     description="Select the study cohort",
                     module="study_population_planner_agent",
                     id="step-1",
-                    step_order=1,
+                    position=1,
                 )
             ],
         )
         return session
 
     @staticmethod
-    def _run(step_order, status, step_id=None):
+    def _run(position, status, node_id=None):
         return {
-            "agent_run_id": f"run-{step_order}",
-            "step_id": step_id or f"step-{step_order}",
+            "run_id": f"run-{position}",
+            "node_id": node_id or f"step-{position}",
             "session_id": ExecutionPlanGuardTests.SESSION_ID,
             "status": status,
-            "step": {
-                "step_id": step_id or f"step-{step_order}",
-                "step_order": step_order,
-                "agent_type": "study_population_planner_agent",
+            "node": {
+                "node_id": node_id or f"step-{position}",
+                "position": position,
+                "target_name": "study_population_planner_agent",
                 "title": "Cohort",
-                "instructions": {},
+                "params": {},
             },
         }
 
@@ -198,7 +198,7 @@ class ExecutionPlanGuardTests(unittest.IsolatedAsyncioTestCase):
             return_value=approved
         )
         # No runs before approval, one pending after.
-        session_service_module.BackendClient.get_agent_runs = AsyncMock(
+        session_service_module.BackendClient.get_node_runs = AsyncMock(
             side_effect=[[], [self._run(1, "pending")]]
         )
 
@@ -206,7 +206,7 @@ class ExecutionPlanGuardTests(unittest.IsolatedAsyncioTestCase):
 
         session_service_module.BackendClient.approve_plan.assert_awaited_once()
         service.tasks.start_execution.assert_awaited_once()
-        self.assertIsNone(session.resume_from_step_id)
+        self.assertIsNone(session.resume_from_node_id)
 
     async def test_a_completed_session_cannot_run_again(self):
         service = self._service(runs=[self._run(1, "completed")])

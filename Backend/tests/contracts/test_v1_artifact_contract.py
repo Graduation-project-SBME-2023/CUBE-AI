@@ -44,11 +44,11 @@ def _agent_http_source() -> str:
 # The table
 # ----------------------------------------------------------------------
 def test_artifacts_has_the_a13_shape():
-    columns = set(_metadata().tables["artifacts"].columns.keys())
+    columns = set(_metadata().tables["stored_files"].columns.keys())
     assert {
-        "artifact_id",
+        "file_id",
         "session_id",
-        "created_by_agent_run_id",
+        "created_by_run_id",
         "kind",
         "logical_key",
         "display_filename",
@@ -66,7 +66,7 @@ def test_artifacts_has_the_a13_shape():
 
 def test_bytes_live_in_the_row_not_behind_a_storage_key():
     """rejected `body -> storage_key`: a key commits separately from the bytes it names."""
-    table = _metadata().tables["artifacts"]
+    table = _metadata().tables["stored_files"]
     assert "storage_key" not in table.columns
     assert table.columns["body"].type.__class__.__name__ in {"LargeBinary", "BYTEA"}
     # Nothing collects in current, so no deadline column ships ahead of the
@@ -77,7 +77,7 @@ def test_bytes_live_in_the_row_not_behind_a_storage_key():
 def test_one_artifact_per_logical_key_per_session():
     uniques = {
         tuple(column.name for column in constraint.columns)
-        for constraint in _metadata().tables["artifacts"].constraints
+        for constraint in _metadata().tables["stored_files"].constraints
         if constraint.__class__.__name__ == "UniqueConstraint"
     }
     assert ("session_id", "logical_key") in uniques
@@ -86,27 +86,27 @@ def test_one_artifact_per_logical_key_per_session():
 def test_the_retention_check_is_a_constraint_not_a_convention():
     checks = {
         constraint.name
-        for constraint in _metadata().tables["artifacts"].constraints
+        for constraint in _metadata().tables["stored_files"].constraints
         if constraint.__class__.__name__ == "CheckConstraint"
     }
     assert {
-        "ck_artifacts_retention_shape",
-        "ck_artifacts_render_path_is_relative",
-        "ck_artifacts_byte_size_positive",
-        "ck_artifacts_sha256_is_a_digest",
-        "ck_artifacts_body_matches_byte_size",
+        "ck_stored_files_retention_shape",
+        "ck_stored_files_render_path_is_relative",
+        "ck_stored_files_byte_size_positive",
+        "ck_stored_files_sha256_is_a_digest",
+        "ck_stored_files_body_matches_byte_size",
     } <= checks
 
 
 def test_an_artifacts_run_link_must_belong_to_its_session():
-    table = _metadata().tables["artifacts"]
+    table = _metadata().tables["stored_files"]
     composite = [
         constraint
         for constraint in table.foreign_key_constraints
         if {column.name for column in constraint.columns}
-        == {"created_by_agent_run_id", "session_id"}
+        == {"created_by_run_id", "session_id"}
     ]
-    assert composite, "artifacts needs the (created_by_agent_run_id, session_id) FK"
+    assert composite, "artifacts needs the (created_by_run_id, session_id) FK"
 
 
 def test_report_pdfs_and_model_binaries_are_not_artifact_kinds():
@@ -126,31 +126,31 @@ def test_binary_reads_use_their_own_bounded_pool():
     assert "statement_timeout" in source
     assert "Semaphore" in source
 
-    limits = _source(APPLICATION_ROOT / "core" / "artifact_limits.py")
+    limits = _source(APPLICATION_ROOT / "core" / "stored_file_limits.py")
     assert "BINARY_READ_CONCURRENCY" in limits
     # The bound is load-bearing, and the reason is written where the number is.
     assert "memory ceiling" in limits
 
 
 def test_saturation_is_a_bounded_503_with_retry_after():
-    source = _source(APPLICATION_ROOT / "api" / "routes" / "artifacts.py")
+    source = _source(APPLICATION_ROOT / "api" / "routes" / "stored_files.py")
     assert "status_code=503" in source
     assert "Retry-After" in source
 
 
 def test_listing_artifacts_never_selects_the_body():
     """A `SELECT *` for a listing drags every body TOAST would keep out."""
-    source = _source(APPLICATION_ROOT / "repositories" / "artifacts.py")
-    listing = source[source.index("async def list_artifacts") : source.index("async def get_artifact")]
+    source = _source(APPLICATION_ROOT / "repositories" / "stored_files.py")
+    listing = source[source.index("async def list_stored_files") : source.index("async def get_stored_file")]
     assert "_CATALOGUE_COLUMNS" in listing
-    assert "Artifact.body" not in listing
+    assert "StoredFile.body" not in listing
 
-    catalogue = source[source.index("_CATALOGUE_COLUMNS = (") : source.index("async def list_artifacts")]
-    assert "Artifact.body" not in catalogue
+    catalogue = source[source.index("_CATALOGUE_COLUMNS = (") : source.index("async def list_stored_files")]
+    assert "StoredFile.body" not in catalogue
 
 
 def test_same_key_identical_bytes_is_reuse_and_different_bytes_is_a_conflict():
-    source = _source(APPLICATION_ROOT / "repositories" / "artifacts.py")
+    source = _source(APPLICATION_ROOT / "repositories" / "stored_files.py")
     assert "_reuse_or_conflict" in source
     assert "status_code=409" in source
     # Zero length is a failed write that looks successful.
@@ -177,7 +177,7 @@ def test_gif_overlays_are_catalogued_as_renders_not_uploaded():
 
 
 def test_render_paths_are_resolved_through_storage_paths():
-    source = _source(APPLICATION_ROOT / "repositories" / "artifacts.py")
+    source = _source(APPLICATION_ROOT / "repositories" / "stored_files.py")
     assert "from storage_paths import" in source
     assert "escapes the session workspace" in source
 

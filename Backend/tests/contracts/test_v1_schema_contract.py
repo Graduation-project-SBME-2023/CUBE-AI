@@ -79,7 +79,7 @@ def test_v1_revision_is_present_and_reversible(revision: str):
 # Step B — imaging safety
 # ----------------------------------------------------------------------
 @pytest.mark.parametrize(
-    "table", ["patients", "studies", "volume_series", "segmentations"]
+    "table", ["patients", "studies", "volume_series", "segmentation_masks"]
 )
 def test_archive_tables_carry_archive_status(table: str):
     """Orthanc loss marks a row, it never deletes scientific history. is why `segmentations` is in this list."""
@@ -93,8 +93,8 @@ def test_archive_tables_carry_archive_status(table: str):
     [
         ("studies", "patient_id"),
         ("volume_series", "study_uid"),
-        ("segmentations", "volume_series_instance_uid"),
-        ("segmentations", "model_id"),
+        ("segmentation_masks", "volume_series_instance_uid"),
+        ("segmentation_masks", "inference_model_id"),
         ("radiomics_features", "label_series_instance_uid"),
         ("workflow_details", "task_name"),
         ("workflow_details", "label_series_instance_uid"),
@@ -106,12 +106,12 @@ def test_research_dicom_foreign_keys_are_restrict(table: str, column: str):
 
 
 def test_segmentations_columns_match_the_v1_shape():
-    columns = set(_metadata().tables["segmentations"].columns.keys())
+    columns = set(_metadata().tables["segmentation_masks"].columns.keys())
     # Renamed (the old names described neither the content nor the provenance).
     assert "series_description" in columns and "segmentation_type" not in columns
     assert "generation_method" in columns and "method" not in columns
     # Added: origin is what closes the "every synced SEG is reusable" bug.
-    assert {"origin", "is_empty_mask", "model_id"} <= columns
+    assert {"origin", "is_empty_mask", "inference_model_id"} <= columns
     # Dropped only after model_id was backfilled from the exact name.
     assert "name" not in columns
     # Dropped: no producer ever wrote them, no consumer ever read them (V1 plan #14).
@@ -125,7 +125,7 @@ def test_segmentations_columns_match_the_v1_shape():
 
 def test_models_gains_no_columns_without_a_producer():
     """MONAI's /info/ returns type, labels, dimension, description and config — nothing that could populate a version or a weights digest."""
-    columns = set(_metadata().tables["models"].columns.keys())
+    columns = set(_metadata().tables["inference_models"].columns.keys())
     assert "updated_at" in columns  # — the sync writer mutates the row
     for dead in ("current_version", "weights_digest", "weights_registered_at", "status"):
         assert dead not in columns

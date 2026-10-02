@@ -61,13 +61,13 @@ def _composite_fks(table: str) -> set[tuple[str, ...]]:
 def test_radiomics_features_have_the_v1_provenance_columns():
     columns = set(_table("radiomics_features").columns.keys())
     assert columns == {
-        "id",
+        "radiomics_feature_id",
         "session_id",
         "label_series_instance_uid",
         "source_volume_uid",
         "segment_number",
         "segmentation_pair_id",
-        "created_by_agent_run_id",
+        "created_by_run_id",
         "features",
         "extractor_name",
         "extractor_version",
@@ -86,9 +86,9 @@ def test_radiomics_features_have_the_v1_provenance_columns():
 
 
 def test_only_the_run_link_is_nullable_for_a_new_row():
-    """/: `created_by_agent_run_id` stays nullable in current for legacy and new rows alike; every other provenance field is required."""
+    """/: `created_by_run_id` stays nullable in current for legacy and new rows alike; every other provenance field is required."""
     table = _table("radiomics_features")
-    assert table.columns["created_by_agent_run_id"].nullable is True
+    assert table.columns["created_by_run_id"].nullable is True
     assert table.columns["segmentation_pair_id"].nullable is True
     for column in (
         "session_id",
@@ -119,7 +119,7 @@ def test_the_extraction_is_content_addressed():
     # The measured SEG is a mask of the named source volume.
     assert ("label_series_instance_uid", "source_volume_uid") in composites
     # The producing run is a run of the row's session.
-    assert ("created_by_agent_run_id", "session_id") in composites
+    assert ("created_by_run_id", "session_id") in composites
 
 
 # ----------------------------------------------------------------------
@@ -129,7 +129,7 @@ def test_feature_sets_have_the_a14_shape():
     columns = set(_table("feature_sets").columns.keys())
     assert columns == {
         "feature_set_id",
-        "created_by_agent_run_id",
+        "created_by_run_id",
         "cohort_id",
         "set_key",
         "schema_version",
@@ -154,7 +154,7 @@ def test_feature_sets_have_the_a14_shape():
     # A feature set cannot be created without a cohort.
     assert table.columns["cohort_id"].nullable is False
     assert table.columns["selection"].nullable is False
-    assert ("created_by_agent_run_id", "set_key") in _uniques("feature_sets")
+    assert ("created_by_run_id", "set_key") in _uniques("feature_sets")
     # The supporting tuple model_results' composite FK targets.
     assert ("feature_set_id", "cohort_id") in _uniques("feature_sets")
 
@@ -271,7 +271,7 @@ def test_radiomics_rows_cannot_be_created_without_provenance_or_deleted():
     routes = _source(APPLICATION_ROOT / "api/routes/radiomics.py")
     assert '@router.post("/", ' not in routes
     assert "@router.delete" not in routes
-    assert '@router.post("/run/{agent_run_id}/batch"' in routes
+    assert '@router.post("/run/{run_id}/batch"' in routes
     repository = _source(APPLICATION_ROOT / "repositories/radiomics.py")
     assert "reconciliation_required" in repository
     assert "FEATURE_EXTRACTION_AGENT_TYPE" in repository

@@ -25,7 +25,7 @@ ARTIFACT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 @pytest.mark.asyncio
 async def test_registers_the_artifact_under_the_given_image_key(monkeypatch):
     request = AsyncMock(
-        return_value={"image_key": "roc.png", "artifact_id": ARTIFACT_ID}
+        return_value={"image_key": "roc.png", "file_id": ARTIFACT_ID}
     )
     monkeypatch.setattr(module.domain_api, "request", request)
 
@@ -41,7 +41,7 @@ async def test_registers_the_artifact_under_the_given_image_key(monkeypatch):
     assert method == "POST"
     assert path == f"/reports/{REPORT_ID}/images"
     assert request.await_args.kwargs["json"] == {
-        "artifact_id": ARTIFACT_ID,
+        "file_id": ARTIFACT_ID,
         "image_key": "roc.png",
     }
 

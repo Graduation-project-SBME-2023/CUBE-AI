@@ -20,7 +20,7 @@ def _cohort(result: dict[str, Any]) -> ExtractedArtifact:
 
 
 def _masks(result: dict[str, Any]) -> list[ExtractedArtifact]:
-    return [ExtractedArtifact(ref={"segmentation_run_id": run}) for run in result["runs"]]
+    return [ExtractedArtifact(ref={"segmentation_batch_id": run}) for run in result["runs"]]
 
 
 # --- PortSpec
@@ -114,7 +114,7 @@ def test_many_port_accepts_a_list():
 
     artifacts = port.extract_artifacts({"runs": ["r1", "r2"]})
 
-    assert [a.ref["segmentation_run_id"] for a in artifacts] == ["r1", "r2"]
+    assert [a.ref["segmentation_batch_id"] for a in artifacts] == ["r1", "r2"]
 
 
 def test_single_port_accepts_a_one_item_list():

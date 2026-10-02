@@ -53,10 +53,10 @@ def _ready_cohort(**overrides):
 
 def _ready_run(**overrides):
     run = {
-        "agent_run_id": RUN_ID,
+        "run_id": RUN_ID,
         "status": "running",
-        "durable_notes": {"status": "done", "role": "population"},
-        "output_summary": {
+        "scratchpad_notes": {"status": "done", "role": "population"},
+        "scratchpad_summary": {
             "scratchpad_summary": {"content": "Doctor approved one labeled volume."},
             "agent_output": {"status": "completed", "agent_role": "population"},
         },
@@ -96,16 +96,16 @@ class PopulationHandoffContractTests(unittest.IsolatedAsyncioTestCase):
             ),
             "population scratchpad status is not done": (
                 _ready_cohort(),
-                _ready_run(durable_notes={"status": "in_progress"}),
+                _ready_run(scratchpad_notes={"status": "in_progress"}),
             ),
             "population scratchpad summary is missing": (
                 _ready_cohort(),
-                _ready_run(output_summary={"agent_output": {"status": "completed"}}),
+                _ready_run(scratchpad_summary={"agent_output": {"status": "completed"}}),
             ),
             "population structured output status is not completed": (
                 _ready_cohort(),
                 _ready_run(
-                    output_summary={
+                    scratchpad_summary={
                         "scratchpad_summary": {"content": "done"},
                         "agent_output": {"status": "partial"},
                     }
@@ -168,14 +168,14 @@ class PopulationPlannerCompletionTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
 
-        async def fake_issues(session_id, agent_run_id, **kwargs):
-            assert (session_id, agent_run_id) == (SESSION_ID, RUN_ID)
+        async def fake_issues(session_id, run_id, **kwargs):
+            assert (session_id, run_id) == (SESSION_ID, RUN_ID)
             return [] if state["complete"] else ["doctor cohort approval has not completed"]
 
         agent = PopulationPlannerAgent.__new__(PopulationPlannerAgent)
         agent._workspace_folder = "/workspace"
         agent._session_id = SESSION_ID
-        agent._agent_run_id = RUN_ID
+        agent._run_id = RUN_ID
         agent._population_completion_retries = 2
 
         with patch.object(AssistantAgent, "on_messages_stream", fake_parent_stream), patch(
@@ -203,13 +203,13 @@ class PopulationPlannerCompletionTests(unittest.IsolatedAsyncioTestCase):
             calls += 1
             yield Response(chat_message=TextMessage(source=POPULATION_AGENT_ID, content=""))
 
-        async def always_incomplete(session_id, agent_run_id, **kwargs):
+        async def always_incomplete(session_id, run_id, **kwargs):
             return ["doctor cohort approval has not completed"]
 
         agent = PopulationPlannerAgent.__new__(PopulationPlannerAgent)
         agent._workspace_folder = "/workspace"
         agent._session_id = SESSION_ID
-        agent._agent_run_id = RUN_ID
+        agent._run_id = RUN_ID
         agent._population_completion_retries = 1
 
         with patch.object(AssistantAgent, "on_messages_stream", fake_parent_stream), patch(
@@ -235,7 +235,7 @@ class PopulationPlannerCompletionTests(unittest.IsolatedAsyncioTestCase):
         agent = PopulationPlannerAgent.__new__(PopulationPlannerAgent)
         agent._workspace_folder = None
         agent._session_id = None
-        agent._agent_run_id = None
+        agent._run_id = None
         agent._population_completion_retries = 0
 
         with patch.object(AssistantAgent, "on_messages_stream", fake_parent_stream):

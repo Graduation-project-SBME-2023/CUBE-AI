@@ -25,7 +25,7 @@ def _analysis(*members):
 
 def _row(row_id, volume, features, *, target="spleen", segment=1, digest="d"):
     return {
-        "id": row_id,
+        "radiomics_feature_id": row_id,
         "source_volume_uid": volume,
         "segment_number": segment,
         "target_key": target,

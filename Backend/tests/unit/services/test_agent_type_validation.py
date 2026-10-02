@@ -44,7 +44,7 @@ def test_duplicates_are_reported_once_and_order_is_preserved():
 
 
 def test_the_same_agent_twice_is_legitimate():
-    """Two distinct steps may name one agent and execute separately — runner identity is step_id, not the agent selector."""
+    """Two distinct steps may name one agent and execute separately — runner identity is node_id, not the agent selector."""
     assert unknown_agent_types(["segmentation_agent", "segmentation_agent"]) == []
 
 

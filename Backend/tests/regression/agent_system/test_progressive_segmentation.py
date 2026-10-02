@@ -278,7 +278,7 @@ class ProgressiveSnapshotTests(unittest.TestCase):
                         "pair_id": pair_id,
                         "artifact_key": artifact_key,
                         "sequence_index": index,
-                        "run_id": "review-run-1",
+                        "batch_correlation_id": "review-run-1",
                         "volume_uid": pair_id.split("__", 1)[0],
                         "target_id": pair_id.split("__", 1)[1],
                         "canonical_label": pair_id.split("__", 1)[1],

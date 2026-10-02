@@ -20,7 +20,7 @@ frontend_data = {
 
 async def send_pdf(session_id=None):
     await send_ws_message_remote(
-        msg_type="latex_output",
+        event_type="latex_output",
         payload=frontend_data,
         session_id=session_id
     )

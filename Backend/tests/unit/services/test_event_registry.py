@@ -6,7 +6,7 @@ Static source scan, not an import of the emitting modules: several of them
 stack, which unit tests must not touch. Each pattern below is scoped to one
 file and the one call shape that file uses to emit, so a `"type"` key that
 means something else in that file (a payload sub-field, an unrelated dict)
-is never mistaken for the top-level msg_type -- see event_registry.py's own
+is never mistaken for the top-level event_type -- see event_registry.py's own
 note on `scratchpad_update` vs. the `agent_status`/`agent_summary` strings
 nested inside its payload, which must NOT be picked up here.
 """
@@ -42,12 +42,12 @@ def _find(pattern: str, text: str) -> set[str]:
 # scoped to the exact call shape that file uses to emit).
 _SOURCES: list[tuple[Path, str]] = [
     (AGENT_ROOT / "view_emitter.py", r'emit_view_update\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    (AGENT_ROOT / "services" / "pipeline_monitor.py", r'msg_type\s*=\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (AGENT_ROOT / "services" / "pipeline_monitor.py", r'event_type\s*=\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (AGENT_ROOT / "agents" / "planning_agents" / "planner.py", r'self\._send\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (AGENT_ROOT / "services" / "session_service.py", r'self\._ws_send\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (AGENT_ROOT / "api" / "runners.py", r'send_ws_message\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (AGENT_ROOT / "api" / "routes" / "execution.py", r'send_ws_message\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    (AGENT_ROOT / "api" / "routes" / "events.py", r'msg_type\s*=\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (AGENT_ROOT / "api" / "routes" / "events.py", r'event_type\s*=\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     # MCP subprocess emitters: each POSTs `{"type": "<literal>", ...}` to
     # /ws-broadcast as its own top-level dict, not nested in a payload.
     (MCP_ROOT / "tools" / "population" / "cohort_labels.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
@@ -56,18 +56,18 @@ _SOURCES: list[tuple[Path, str]] = [
     (MCP_ROOT / "tools" / "population" / "inclusion_criteria.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     # scratchpad.py's own top-level type is the first arg to _emit_ws_message;
     # its payload's nested "type": "agent_status"/"agent_summary" keys are
-    # NOT top-level msg_types and must not be scanned by the generic pattern.
+    # NOT top-level event types and must not be scanned by the generic pattern.
     (MCP_ROOT / "tools" / "scratchpad.py", r'_emit_ws_message\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    # application_api's own durable-event writers (Wslog rows committed
+    # application_api's own durable-event writers (session_events rows committed
     # alongside the domain change) -- reach the WS envelope's `type` field
     # via replay in agent_system/api/routes/sessions.py.
-    (APPLICATION_ROOT / "repositories" / "agent_runs.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (APPLICATION_ROOT / "repositories" / "node_runs.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (APPLICATION_ROOT / "repositories" / "cohorts.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (APPLICATION_ROOT / "repositories" / "literature.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (APPLICATION_ROOT / "repositories" / "feature_sets.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (APPLICATION_ROOT / "repositories" / "model_results.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (APPLICATION_ROOT / "repositories" / "reports.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    (APPLICATION_ROOT / "repositories" / "segmentation_runs.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (APPLICATION_ROOT / "repositories" / "segmentation_batches.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
 ]
 
 
@@ -95,7 +95,7 @@ def test_every_literal_event_type_emitted_is_registered(path: Path, pattern: str
 
 def test_scratchpad_updates_own_payload_subtype_is_not_mistaken_for_its_msg_type():
     """agent_status/agent_summary are values of a "type" key *inside*
-    scratchpad_update's payload, not the msg_type passed to
+    scratchpad_update's payload, not the event_type passed to
     broadcast_ws_message. If this ever changes, the scoped regex above would
     start silently under-scanning; this pins the current shape."""
     source = _source(MCP_ROOT / "tools" / "scratchpad.py")

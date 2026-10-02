@@ -16,7 +16,7 @@ import pytest
 
 import socket_store
 from socket_store import ConnectionManager, WS_CLOSE_OVERFLOW
-from models.logs import WS_Log
+from models.logs import SessionEvent
 
 pytestmark = pytest.mark.unit
 
@@ -69,7 +69,7 @@ def stub_save_log(monkeypatch):
         from types import SimpleNamespace
         return SimpleNamespace(event_id=1, payload=log.payload)
 
-    monkeypatch.setattr(socket_store.BackendClient, "save_log", fake_save)
+    monkeypatch.setattr(socket_store.BackendClient, "save_event", fake_save)
 
 
 @pytest.mark.asyncio
@@ -109,7 +109,7 @@ async def test_multiple_sockets_on_the_same_session_all_receive_it():
 
 
 @pytest.mark.asyncio
-async def test_envelope_v1_shape():
+async def test_envelope_v2_shape():
     manager = ConnectionManager()
     socket = _FakeSocket()
     await manager.connect(socket, "session-a")
@@ -120,7 +120,7 @@ async def test_envelope_v1_shape():
     await _wait(socket.received_event)
 
     frame = socket.received[0]
-    assert frame["v"] == 1
+    assert frame["v"] == 2
     assert frame["session_id"] == "session-a"
     assert frame["event_id"] == 42
     assert frame["type"] == "msg"
@@ -129,8 +129,8 @@ async def test_envelope_v1_shape():
     assert isinstance(frame["ts"], str) and frame["ts"]
     # Nullable now; no emitter supplies these yet (WEBSOCKET_FIX_PLAN.md WS-13).
     assert frame["run_id"] is None
-    assert frame["step_id"] is None
-    assert frame["agent_run_id"] is None
+    assert frame["node_id"] is None
+    assert frame["run_id"] is None
 
 
 @pytest.mark.asyncio
@@ -143,16 +143,16 @@ async def test_identity_fields_are_carried_through_when_a_caller_supplies_them()
         "msg",
         {"n": 1},
         session_id="session-a",
+        node_id="node-1",
         run_id="run-1",
-        step_id="step-1",
-        agent_run_id="agent-run-1",
+        attempt_id="attempt-1",
     )
     await _wait(socket.received_event)
 
     frame = socket.received[0]
+    assert frame["node_id"] == "node-1"
     assert frame["run_id"] == "run-1"
-    assert frame["step_id"] == "step-1"
-    assert frame["agent_run_id"] == "agent-run-1"
+    assert frame["attempt_id"] == "attempt-1"
 
 
 @pytest.mark.asyncio
@@ -271,16 +271,16 @@ async def test_a_durable_event_is_persisted_before_send():
 
     async def fake_save(log):
         from types import SimpleNamespace
-        calls.append(log.msg_type)
+        calls.append(log.event_type)
         return SimpleNamespace(event_id=7, payload=log.payload)
 
     import socket_store as ss
-    orig = ss.BackendClient.save_log
-    ss.BackendClient.save_log = fake_save
+    orig = ss.BackendClient.save_event
+    ss.BackendClient.save_event = fake_save
     try:
         await manager.send_ws_message("hypothesis", {"title": "x"}, session_id="session-a")
     finally:
-        ss.BackendClient.save_log = orig
+        ss.BackendClient.save_event = orig
     await _wait(socket.received_event)
 
     assert calls == ["hypothesis"]
@@ -295,16 +295,16 @@ async def test_an_ephemeral_event_is_never_persisted():
     calls = []
 
     async def fake_save(log):
-        calls.append(log.msg_type)
+        calls.append(log.event_type)
         raise AssertionError("ephemeral events must not be persisted")
 
     import socket_store as ss
-    orig = ss.BackendClient.save_log
-    ss.BackendClient.save_log = fake_save
+    orig = ss.BackendClient.save_event
+    ss.BackendClient.save_event = fake_save
     try:
         await manager.send_ws_message("tool_update", {"tick": 1}, session_id="session-a")
     finally:
-        ss.BackendClient.save_log = orig
+        ss.BackendClient.save_event = orig
     await _wait(socket.received_event)
 
     assert calls == []
@@ -331,8 +331,8 @@ async def test_an_unregistered_type_does_not_raise_and_is_persisted_as_durable()
 # ----------------------------------------------------------------------
 
 
-def _log(event_id: int, msg_type: str = "hypothesis", payload=None) -> WS_Log:
-    return WS_Log(session_id="session-a", msg_type=msg_type, payload=payload or {"n": event_id}, event_id=event_id)
+def _log(event_id: int, event_type: str = "hypothesis", payload=None) -> SessionEvent:
+    return SessionEvent(session_id="session-a", event_type=event_type, payload=payload or {"n": event_id}, event_id=event_id)
 
 
 async def _drain(socket: _FakeSocket, count: int, timeout: float = 1.0) -> list[dict]:
@@ -355,7 +355,7 @@ async def test_replay_pages_the_full_history_in_order_then_sends_replay_complete
         page = [log for log in all_logs if log.event_id > after_event_id][:limit]
         return page
 
-    monkeypatch.setattr(socket_store.BackendClient, "replay_logs", fake_replay_logs)
+    monkeypatch.setattr(socket_store.BackendClient, "replay_events", fake_replay_logs)
 
     manager = ConnectionManager()
     socket = _FakeSocket()
@@ -381,7 +381,7 @@ async def test_reconnect_replay_delivers_exactly_the_events_since_the_cursor(mon
         assert after_event_id == 90
         return missed if after_event_id == 90 else []
 
-    monkeypatch.setattr(socket_store.BackendClient, "replay_logs", fake_replay_logs)
+    monkeypatch.setattr(socket_store.BackendClient, "replay_events", fake_replay_logs)
 
     manager = ConnectionManager()
     socket = _FakeSocket()
@@ -426,7 +426,7 @@ async def test_an_event_committed_during_replay_is_delivered_exactly_once(monkey
             return [_log(page_size + 1)]
         return []
 
-    monkeypatch.setattr(socket_store.BackendClient, "replay_logs", fake_replay_logs)
+    monkeypatch.setattr(socket_store.BackendClient, "replay_events", fake_replay_logs)
 
     last_event_id = await manager.replay(connection, after_event_id=0)
 
@@ -443,10 +443,10 @@ async def test_msg_type_rows_are_excluded_from_replay(monkeypatch):
     must not be replayed a second time from ws_logs."""
     async def fake_replay_logs(session_id, after_event_id=0, limit=500):
         if after_event_id == 0:
-            return [_log(1, msg_type="msg"), _log(2, msg_type="hypothesis")]
+            return [_log(1, event_type="msg"), _log(2, event_type="hypothesis")]
         return []
 
-    monkeypatch.setattr(socket_store.BackendClient, "replay_logs", fake_replay_logs)
+    monkeypatch.setattr(socket_store.BackendClient, "replay_events", fake_replay_logs)
 
     manager = ConnectionManager()
     socket = _FakeSocket()
@@ -465,7 +465,7 @@ async def test_a_replay_failure_sends_an_error_frame_and_returns_none_not_an_emp
     async def failing_replay_logs(session_id, after_event_id=0, limit=500):
         raise RuntimeError("application_api unreachable")
 
-    monkeypatch.setattr(socket_store.BackendClient, "replay_logs", failing_replay_logs)
+    monkeypatch.setattr(socket_store.BackendClient, "replay_events", failing_replay_logs)
 
     manager = ConnectionManager()
     socket = _FakeSocket()
@@ -485,7 +485,7 @@ async def test_replay_never_reaches_a_sibling_socket_on_the_same_session(monkeyp
     async def fake_replay_logs(session_id, after_event_id=0, limit=500):
         return [_log(1)] if after_event_id == 0 else []
 
-    monkeypatch.setattr(socket_store.BackendClient, "replay_logs", fake_replay_logs)
+    monkeypatch.setattr(socket_store.BackendClient, "replay_events", fake_replay_logs)
 
     manager = ConnectionManager()
     socket_a, socket_b = _FakeSocket(), _FakeSocket()

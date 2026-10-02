@@ -67,7 +67,7 @@ def test_cohorts_have_the_a10_shape_without_a_session_or_a_title():
     columns = set(_table("cohorts").columns.keys())
     assert columns == {
         "cohort_id",
-        "created_by_agent_run_id",
+        "created_by_run_id",
         "cohort_key",
         "criteria",
         "label_definition",
@@ -79,7 +79,7 @@ def test_cohorts_have_the_a10_shape_without_a_session_or_a_title():
     assert "session_id" not in columns
     # Frozen_at is the transition that matters.: no title.
     assert "updated_at" not in columns and "title" not in columns
-    assert ("created_by_agent_run_id", "cohort_key") in _uniques("cohorts")
+    assert ("created_by_run_id", "cohort_key") in _uniques("cohorts")
 
 
 def test_cohort_members_carry_the_label_its_source_and_its_evidence():
@@ -108,10 +108,10 @@ def test_a_member_ordinal_key_is_deferrable_so_a_reorder_can_compact():
 
 
 def test_segmentation_runs_are_cohort_backed_with_a_review_hash():
-    columns = set(_table("segmentation_runs").columns.keys())
+    columns = set(_table("segmentation_batches").columns.keys())
     assert columns == {
-        "segmentation_run_id",
-        "created_by_agent_run_id",
+        "segmentation_batch_id",
+        "created_by_run_id",
         "cohort_id",
         "batch_key",
         "config",
@@ -123,22 +123,22 @@ def test_segmentation_runs_are_cohort_backed_with_a_review_hash():
     # No cohort mode, and the cohort is never nullable — segmentation
     # cannot run without the population planner's volume list.
     assert "cohort_mode" not in columns
-    assert _table("segmentation_runs").columns["cohort_id"].nullable is False
+    assert _table("segmentation_batches").columns["cohort_id"].nullable is False
     assert "updated_at" not in columns
-    assert ("created_by_agent_run_id", "batch_key") in _uniques("segmentation_runs")
+    assert ("created_by_run_id", "batch_key") in _uniques("segmentation_batches")
     # The supporting tuple the pairs' composite FK targets.
-    assert ("segmentation_run_id", "cohort_id") in _uniques("segmentation_runs")
+    assert ("segmentation_batch_id", "cohort_id") in _uniques("segmentation_batches")
 
 
 def test_segmentation_targets_have_no_created_at_and_no_model_version():
     columns = set(_table("segmentation_targets").columns.keys())
     assert columns == {
         "target_id",
-        "segmentation_run_id",
+        "segmentation_batch_id",
         "target_key",
         "label",
         "specification",
-        "model_id",
+        "inference_model_id",
     }
     # A target is dated by its parent batch.: no model version/digest.
     assert "created_at" not in columns
@@ -149,12 +149,12 @@ def test_segmentation_pairs_prove_every_alignment_with_a_composite_fk():
     columns = set(_table("segmentation_pairs").columns.keys())
     assert {
         "pair_id",
-        "segmentation_run_id",
+        "segmentation_batch_id",
         "target_id",
         "volume_series_instance_uid",
         "cohort_id",
         "cohort_member_id",
-        "external_job_id",
+        "inference_job_id",
         "status",
         "candidate_segmentation_uid",
         "selected_segmentation_uid",
@@ -171,8 +171,8 @@ def test_segmentation_pairs_prove_every_alignment_with_a_composite_fk():
     assert ("target_id", "volume_series_instance_uid") in _uniques("segmentation_pairs")
 
     composites = _composite_fks("segmentation_pairs")
-    assert ("segmentation_run_id", "target_id") in composites
-    assert ("segmentation_run_id", "cohort_id") in composites
+    assert ("segmentation_batch_id", "target_id") in composites
+    assert ("segmentation_batch_id", "cohort_id") in composites
     assert ("cohort_id", "cohort_member_id", "volume_series_instance_uid") in composites
     assert ("candidate_segmentation_uid", "volume_series_instance_uid") in composites
     assert ("selected_segmentation_uid", "volume_series_instance_uid") in composites
@@ -181,17 +181,17 @@ def test_segmentation_pairs_prove_every_alignment_with_a_composite_fk():
 def test_review_state_lives_on_the_pair_not_on_the_mask():
     """`segmentations` has no lifecycle column; the decision is here."""
     assert "review_decision" in _table("segmentation_pairs").columns
-    assert "review_status" not in _table("segmentations").columns
-    assert "review_decision" not in _table("segmentations").columns
+    assert "review_status" not in _table("segmentation_masks").columns
+    assert "review_decision" not in _table("segmentation_masks").columns
     # The supporting tuple the pair's SEG FKs target.
     assert (
         "label_series_instance_uid",
         "volume_series_instance_uid",
-    ) in _uniques("segmentations")
+    ) in _uniques("segmentation_masks")
 
 
 def test_every_domain_fk_of_step_h_is_restrict():
-    for table in ("cohorts", "cohort_members", "segmentation_runs", "segmentation_targets", "segmentation_pairs"):
+    for table in ("cohorts", "cohort_members", "segmentation_batches", "segmentation_targets", "segmentation_pairs"):
         for constraint in _table(table).foreign_key_constraints:
             assert constraint.ondelete == "RESTRICT", f"{table}.{constraint.name}"
 
@@ -250,7 +250,7 @@ def test_the_segmentation_module_checkpoints_into_the_batch():
     assert "workspace_subpath(workspace_dir, \"segmentation_manifest.json\")" not in module
     # The volume list and the instructions come from PostgreSQL.
     assert "get_population_cohort" in module and "get_cohort_analysis_rows" in module
-    assert "get_agent_run" in module
+    assert "get_node_run" in module
 
     store = _source(AGENT_ROOT / "agents/execution_agents/segmentation/batch_store.py")
     # A candidate SEG is only named once the archive row exists.
@@ -297,13 +297,13 @@ def test_the_population_handoff_contract_is_checked_against_rows():
     assert "workspace_subpath" not in source
     assert "open(" not in source and "read_text" not in source
     assert "frozen_at" in source and "anatomy_validation" in source
-    assert "agent_run_id" in source
+    assert "run_id" in source
 
 
 def test_the_reuse_gate_promotes_a_pipeline_mask_only_on_a_review_decision():
     source = _source(AGENT_ROOT / "agents/execution_agents/segmentation/resolution.py")
     assert 'review_decision not in {"accepted", "modified"}' in source
-    repository = _source(APPLICATION_ROOT / "repositories" / "segmentation.py")
+    repository = _source(APPLICATION_ROOT / "repositories" / "segmentation_masks.py")
     assert "review_status = 'submitted'" in repository
 
 
@@ -350,4 +350,4 @@ def test_the_json_bounds_the_migration_writes_match_the_application():
 
 def test_the_application_api_owns_the_domain_routes():
     main = _source(APPLICATION_ROOT / "main.py")
-    assert "cohorts.router" in main and "segmentation_runs.router" in main
+    assert "cohorts.router" in main and "segmentation_batches.router" in main

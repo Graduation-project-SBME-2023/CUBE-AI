@@ -19,6 +19,11 @@ ALEMBIC_INI = BACKEND_ROOT / "application_api" / "alembic.ini"
 
 LIVE_DSN = os.environ.get("V1_LIVE_DATABASE_URL")
 
+# These checks exercise the V1 migrations (steps B-N) on the vocabulary they
+# were written in, so they stop at the last revision before Cut-over 1
+# (o1f0a2c3d4e5_v1_o_renames, which test_v1_o_renames_live.py covers).
+V1_HEAD = "n1f0a2c3d4e5"
+
 pytestmark.append(
     pytest.mark.skipif(
         not LIVE_DSN,
@@ -169,7 +174,7 @@ def migrated():
     _seed_pre_f(connection)
     connection.close()
 
-    output = _alembic("upgrade", "head")
+    output = _alembic("upgrade", V1_HEAD)
 
     connection = _connect()
     try:
@@ -611,7 +616,7 @@ def test_every_v1_revision_is_reversible_on_a_populated_database(migrated):
         )
     )
     _alembic("downgrade", "c9d0e1f2a3b4")
-    _alembic("upgrade", "head")
+    _alembic("upgrade", V1_HEAD)
     after = set(
         row[0]
         for row in _rows(

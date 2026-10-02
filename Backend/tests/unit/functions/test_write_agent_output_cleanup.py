@@ -2,7 +2,7 @@
 output is confirmed durable in Postgres.
 
 Regression coverage: PyRadiomics/PyCaret write their working files (logs,
-params, plots, train.csv) under `TEMP_DIR/<category>/<agent_run_id>/` and
+params, plots, train.csv) under `TEMP_DIR/<category>/<run_id>/` and
 nothing ever deleted them, so every feature-extraction and modeling run left
 scratch behind forever. None of it is the durable copy — measurements are
 `radiomics_features` rows, metrics are `model_results` rows, plots are
@@ -34,7 +34,7 @@ def _base_params(**overrides) -> dict:
 
 @pytest.mark.asyncio
 async def test_removes_this_runs_temp_dirs_after_a_successful_write(monkeypatch, tmp_path):
-    monkeypatch.setattr(module, "AGENT_RUN_ID", RUN_ID)
+    monkeypatch.setattr(module, "RUN_ID", RUN_ID)
     monkeypatch.setattr(module, "TEMP_DIR", tmp_path)
 
     modeling_dir = tmp_path / "modeling" / RUN_ID
@@ -49,7 +49,7 @@ async def test_removes_this_runs_temp_dirs_after_a_successful_write(monkeypatch,
 
     monkeypatch.setattr(
         module.httpx, "AsyncClient",
-        lambda **_: _FakeClient({"agent_run_id": RUN_ID, "step_id": "s1"}),
+        lambda **_: _FakeClient({"run_id": RUN_ID, "node_id": "s1"}),
     )
 
     result = json.loads(await module.write_agent_output(_base_params()))
@@ -62,11 +62,11 @@ async def test_removes_this_runs_temp_dirs_after_a_successful_write(monkeypatch,
 
 @pytest.mark.asyncio
 async def test_a_run_with_no_temp_scratch_is_not_an_error(monkeypatch, tmp_path):
-    monkeypatch.setattr(module, "AGENT_RUN_ID", RUN_ID)
+    monkeypatch.setattr(module, "RUN_ID", RUN_ID)
     monkeypatch.setattr(module, "TEMP_DIR", tmp_path)
     monkeypatch.setattr(
         module.httpx, "AsyncClient",
-        lambda **_: _FakeClient({"agent_run_id": RUN_ID, "step_id": "s1"}),
+        lambda **_: _FakeClient({"run_id": RUN_ID, "node_id": "s1"}),
     )
 
     result = json.loads(await module.write_agent_output(_base_params()))

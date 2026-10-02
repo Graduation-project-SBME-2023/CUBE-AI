@@ -47,7 +47,7 @@ async def test_creates_the_report_with_the_bound_run_and_session(monkeypatch):
     assert path == "/reports/"
     body = request.await_args.kwargs["json"]
     assert body["session_id"] == SESSION_ID
-    assert body["created_by_agent_run_id"] == RUN_ID
+    assert body["created_by_run_id"] == RUN_ID
     assert body["source_format"] == "latex"
     assert body["title"] == "A Study"
 
@@ -55,7 +55,7 @@ async def test_creates_the_report_with_the_bound_run_and_session(monkeypatch):
 @pytest.mark.asyncio
 async def test_returns_an_error_when_not_bound_to_a_run(monkeypatch):
     def _raise():
-        raise module.domain_api.DomainApiError("AGENT_RUN_ID is not set")
+        raise module.domain_api.DomainApiError("RUN_ID is not set")
 
     monkeypatch.setattr(module.domain_api, "require_run", _raise)
 
@@ -65,7 +65,7 @@ async def test_returns_an_error_when_not_bound_to_a_run(monkeypatch):
 
     payload = json.loads(result)
     assert payload["status"] == "error"
-    assert "AGENT_RUN_ID" in payload["error_message"]
+    assert "RUN_ID" in payload["error_message"]
 
 
 @pytest.mark.asyncio

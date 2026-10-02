@@ -79,7 +79,7 @@ async def test_segmentation_tool_closes_module_and_writes_structured_output(
         run=AsyncMock(
             return_value={
                 "status": "completed",
-                "segmentation_run_id": "seg-run-1",
+                "segmentation_batch_id": "seg-run-1",
                 "segmentation_method": "cached",
                 "targets": ["spleen"],
                 "pair_count": 2,
@@ -92,7 +92,7 @@ async def test_segmentation_tool_closes_module_and_writes_structured_output(
         close=AsyncMock(),
     )
     monkeypatch.setattr(
-        module, "SegmentationModule", lambda session_id, agent_run_id=None: fake_module
+        module, "SegmentationModule", lambda session_id, run_id=None: fake_module
     )
     written = AsyncMock(return_value={})
     monkeypatch.setattr(module.BackendClient, "write_agent_output", written)
@@ -100,7 +100,7 @@ async def test_segmentation_tool_closes_module_and_writes_structured_output(
     result = await module.segmentation_tool(
         workspace_folder=str(workspace_dir),
         session_id="session-seg",
-        agent_run_id="run-seg",
+        run_id="run-seg",
     )
 
     assert result["status"] == "completed"
@@ -112,7 +112,7 @@ async def test_segmentation_tool_closes_module_and_writes_structured_output(
     assert run_id == "run-seg"
     assert output["status"] == "completed"
     assert output["output_metrics"]["accepted_count"] == 2
-    assert output["output_files"]["segmentation_run_id"] == "seg-run-1"
+    assert output["output_files"]["segmentation_batch_id"] == "seg-run-1"
 
 
 @pytest.mark.unit
@@ -127,9 +127,9 @@ async def test_segmentation_tool_refuses_to_run_without_a_run_to_record_on(
         close=AsyncMock(),
     )
     monkeypatch.setattr(
-        module, "SegmentationModule", lambda session_id, agent_run_id=None: fake_module
+        module, "SegmentationModule", lambda session_id, run_id=None: fake_module
     )
-    with pytest.raises(RuntimeError, match="agent_run_id"):
+    with pytest.raises(RuntimeError, match="run_id"):
         await module.segmentation_tool(
             workspace_folder=str(workspace_dir),
             session_id="session-seg",

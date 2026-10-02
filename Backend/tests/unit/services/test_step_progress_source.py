@@ -8,7 +8,7 @@ from services.execution_state import execution_has_started, infer_recovered_sess
 from services.run_context import (
     agent_type_of,
     build_compiled_prompt,
-    build_input_refs,
+    build_resolved_inputs,
     first_incomplete,
     planned_runs,
 )
@@ -18,12 +18,12 @@ pytestmark = pytest.mark.unit
 
 def _api_run(order: int, agent_type: str, status: str, summary: str | None = None):
     return {
-        "agent_run_id": f"run-{order}",
-        "step_id": f"step-{order}",
+        "run_id": f"run-{order}",
+        "node_id": f"step-{order}",
         "session_id": "11111111-1111-4111-8111-111111111111",
         "status": status,
         "compiled_prompt": None,
-        "output_summary": (
+        "scratchpad_summary": (
             {
                 "schema_version": 1,
                 "agent_output": {
@@ -38,12 +38,12 @@ def _api_run(order: int, agent_type: str, status: str, summary: str | None = Non
             if summary
             else None
         ),
-        "step": {
-            "step_id": f"step-{order}",
-            "step_order": order,
-            "agent_type": agent_type,
+        "node": {
+            "node_id": f"step-{order}",
+            "position": order,
+            "target_name": agent_type,
             "title": f"Step {order}",
-            "instructions": {
+            "params": {
                 "description": f"do {agent_type} work",
                 "task_message": {
                     "schema_version": 1,
@@ -68,8 +68,8 @@ def test_runs_are_ordered_by_step_and_keep_run_identity():
         ]
     )
 
-    assert [run.step_order for run in runs] == [1, 2]
-    assert [run.agent_run_id for run in runs] == ["run-1", "run-2"]
+    assert [run.position for run in runs] == [1, 2]
+    assert [run.run_id for run in runs] == ["run-1", "run-2"]
 
 
 def test_two_steps_sharing_an_agent_type_are_two_distinct_nodes():
@@ -98,7 +98,7 @@ def test_resume_continues_the_first_incomplete_run():
     resume_point = first_incomplete(runs)
 
     assert resume_point is not None
-    assert resume_point.step_id == "step-2"
+    assert resume_point.node_id == "step-2"
     assert execution_has_started([{"status": run.status} for run in runs])
 
 
@@ -142,7 +142,7 @@ def test_compiled_prompt_carries_the_step_and_its_upstream_results():
     assert "targets.csv" in prompt
 
 
-def test_input_refs_record_source_ids_not_their_contents():
+def test_resolved_inputs_record_source_ids_not_their_contents():
     runs = planned_runs(
         [
             _api_run(1, "study_population_planner_agent", "completed", "14 volumes"),
@@ -150,10 +150,10 @@ def test_input_refs_record_source_ids_not_their_contents():
         ]
     )
 
-    refs = build_input_refs(runs[1], runs[:1], {"prompt_kind": "general", "intent": None})
+    refs = build_resolved_inputs(runs[1], runs[:1], {"prompt_kind": "general", "intent": None})
 
     assert refs["schema_version"] == 1
-    assert refs["step"]["step_id"] == "step-2"
-    assert refs["upstream_runs"][0]["agent_run_id"] == "run-1"
+    assert refs["node"]["node_id"] == "step-2"
+    assert refs["upstream_runs"][0]["run_id"] == "run-1"
     assert refs["session"]["prompt_kind"] == "general"
     assert refs["session"]["intent_present"] is False

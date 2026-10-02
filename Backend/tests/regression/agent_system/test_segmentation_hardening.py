@@ -727,7 +727,7 @@ class SegmentationReuseAlignmentTests(unittest.IsolatedAsyncioTestCase):
                         workspace_dir="workspace",
                         resolution_outcome=SimpleNamespace(),
                         work_items=[item],
-                        run_id="run",
+                        batch_correlation_id="run",
                         publisher=publisher,
                     )
 
@@ -820,11 +820,11 @@ class PipelineFailureTests(unittest.IsolatedAsyncioTestCase):
         service = PipelineFailureTests._SessionService()
         session = SimpleNamespace(session_id="test-session")
         run = PlannedRun(
-            agent_run_id="run-1",
-            step_id="step-1",
+            run_id="run-1",
+            node_id="step-1",
             session_id="test-session",
             agent_type="segmentation_agent",
-            step_order=1,
+            position=1,
             title="Segment",
         )
         return PipelineMonitor(service, session, runs=[run]), service, run.node_name
@@ -1128,14 +1128,14 @@ class SegmentationRecoveryTests(unittest.TestCase):
 
     def test_resume_describes_where_to_continue_and_deletes_nothing(self):
         runs = [
-            {"step_id": "step-1", "status": "completed"},
-            {"step_id": "step-2", "status": "running"},
-            {"step_id": "step-3", "status": "pending"},
+            {"node_id": "step-1", "status": "completed"},
+            {"node_id": "step-2", "status": "running"},
+            {"node_id": "step-3", "status": "pending"},
         ]
 
         plan = describe_resume(runs)
 
-        self.assertEqual(plan["resumes_at_step_id"], "step-2")
+        self.assertEqual(plan["resumes_at_node_id"], "step-2")
         self.assertEqual(plan["completed_runs"], 1)
         self.assertEqual(plan["deleted_artifacts"], [])
 
@@ -1150,7 +1150,7 @@ class SegmentationRecoveryTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b"test")
 
-            describe_resume([{"step_id": "step-1", "status": "running"}])
+            describe_resume([{"node_id": "step-1", "status": "running"}])
 
             # The recovery module has no delete path left to exercise.
             self.assertTrue(mask_path.exists())

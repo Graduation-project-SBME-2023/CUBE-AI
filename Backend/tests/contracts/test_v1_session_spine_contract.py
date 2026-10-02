@@ -123,7 +123,7 @@ def test_chats_is_a_separate_table_from_sessions():
     # No `kind` — no distinct chat-kind behaviour exists.
     assert "kind" not in chat.columns
     # REJECTED removal: a dedicated TOUCH endpoint and eight frontend readers.
-    assert "last_activity" in chat.columns
+    assert "last_activity_at" in chat.columns
 
 
 def test_chat_messages_hang_off_a_chat_not_a_session():
@@ -165,7 +165,7 @@ def test_hypotheses_table_does_not_exist():
 def test_plan_is_keyed_by_its_session():
     """Defect 2: `plans.hypothesis_id` NOT NULL UNIQUE meant no hypothesis, no
     plan — which forced every prompt to be a clinical hypothesis."""
-    plans = _metadata().tables["plans"]
+    plans = _metadata().tables["session_graphs"]
     assert [c.name for c in plans.primary_key.columns] == ["session_id"]
     assert "hypothesis_id" not in plans.columns
     fks = {fk.parent.name: str(fk.column) for fk in plans.foreign_keys}
@@ -173,7 +173,7 @@ def test_plan_is_keyed_by_its_session():
 
 
 def test_plans_has_approved_at_and_no_version_or_goal_columns():
-    columns = set(_metadata().tables["plans"].columns.keys())
+    columns = set(_metadata().tables["session_graphs"].columns.keys())
     assert "approved_at" in columns
     # //.
     for dead in ("state", "study_goal", "rationale", "created_at", "version", "plan_version"):
@@ -206,9 +206,9 @@ def test_approval_is_one_way_and_freezes_every_step():
 
 
 def test_plan_steps_match_the_v1_shape():
-    steps = _metadata().tables["plan_steps"]
+    steps = _metadata().tables["graph_nodes"]
     columns = set(steps.columns.keys())
-    assert {"step_id", "session_id", "step_order", "agent_type", "title", "instructions"} <= columns
+    assert {"node_id", "session_id", "position", "target_name", "title", "params"} <= columns
     # folded description into instructions; removed execution state.
     for dead in ("description", "status", "logs", "plan_id", "is_enabled", "created_at"):
         assert dead not in columns
@@ -218,11 +218,11 @@ def test_plan_steps_match_the_v1_shape():
         for constraint in steps.constraints
         if constraint.__class__.__name__ == "UniqueConstraint"
     }
-    reorder_key = uniques[("session_id", "step_order")]
+    reorder_key = uniques[("session_id", "position")]
     # DEFERRABLE so a reorder can swap two steps inside one transaction.
     assert reorder_key.deferrable is True
     # The supporting tuple agent_runs' composite FK targets in this migration.
-    assert ("step_id", "session_id") in uniques
+    assert ("node_id", "session_id") in uniques
 
 
 def test_agent_type_is_validated_against_the_agent_factories():
@@ -243,12 +243,12 @@ def test_agent_type_is_validated_against_the_agent_factories():
         "the new agent to both."
     )
 
-    plan_repo = (APPLICATION_ROOT / "repositories" / "plan.py").read_text(encoding="utf-8")
+    plan_repo = (APPLICATION_ROOT / "repositories" / "session_graphs.py").read_text(encoding="utf-8")
     assert "unknown_agent_types" in plan_repo
     # 's lock, held through commit. Build this migration moved the locking into the
     # publication service so every writer takes session -> plan in that order
     # instead of each choosing its own.
-    assert "lock_session_and_plan" in plan_repo
+    assert "lock_session_and_graph" in plan_repo
     publication = (
         APPLICATION_ROOT / "services" / "publication.py"
     ).read_text(encoding="utf-8")
@@ -258,7 +258,7 @@ def test_agent_type_is_validated_against_the_agent_factories():
 def test_session_and_plan_are_created_in_one_transaction():
     repo = (APPLICATION_ROOT / "repositories" / "sessions.py").read_text(encoding="utf-8")
     create = repo[repo.index("async def create_session") : repo.index("async def get_session")]
-    assert "Plan(session_id=session.session_id" in create
+    assert "SessionGraph(session_id=session.session_id" in create
     assert create.count("await db.commit()") == 1
 
 

@@ -185,6 +185,17 @@ Compose runs one-shot `db-migrate` then `db-seed` before `application-api`.
   does not touch PostgreSQL directly.
 - Orthanc's Lua stable-series hook calls `POST /sync/orthanc-webhook` on the Application API,
   which upserts patient/study/volume metadata.
+- **Schema vocabulary (Phase 6.1, Appendix P of the roadmap).** Cut-over 1
+  (`o1f0a2c3d4e5_v1_o_renames`) renamed `plans` → `session_graphs`, `plan_steps` →
+  `graph_nodes`, `agent_runs` → `node_runs`, `ws_log` → `session_events`, `artifacts` →
+  `stored_files`, `segmentation_runs` → `segmentation_batches`, `segmentations` →
+  `segmentation_masks` and `models` → `inference_models`, with their columns (`run_id`,
+  `node_id`, `created_by_run_id`, `file_id`, `inference_model_id`, `sessions.control_state`,
+  ...) and routes (`/runs`, `/session-graphs`, `/graph-nodes`, `/session-events`, `/files`,
+  `/segmentation-batches`, `/segmentation-masks`, `/inference-models`, `/chat-messages`).
+  `Backend/tests/contracts/test_retired_vocabulary.py` fails the deterministic suite on an old
+  name in production source; old names live only in migrations, the replayed legacy event type
+  `pipeline_agent_status`, and tool contracts that keep their result keys.
 
 ### Generated-data boundary
 
@@ -223,8 +234,8 @@ in `Backend/mcp/tools/` (population, radiomics, modeling, LaTeX, scratchpad, DB 
 Per-agent I/O contracts are in `cubeai-docs/agent-system/io-contracts/`.
 
 Agent-to-agent state is now **database-backed, not file-backed**. The `scratchpad_*` MCP tools
-(`Backend/mcp/tools/scratchpad.py`) read and write `agent_runs` rows — `durable_notes`,
-`warnings`, `output_summary` — keyed by the run, not the agent name. `state/scratchpad.json`,
+(`Backend/mcp/tools/scratchpad.py`) read and write `node_runs` rows — `scratchpad_notes`,
+`scratchpad_warnings`, `scratchpad_summary` — keyed by the run, not the agent name. `state/scratchpad.json`,
 `state/state.json` and `outputs/agents/*_output.json` are **retired**: writing them raises at
 runtime (see the write guard below). Do not reintroduce a workspace file for state that now
 has a table.
@@ -254,9 +265,10 @@ in your checkout; it documents the design below ticket by ticket.
   replayed. `classify()` never raises — an unregistered type logs an error and defaults to
   durable — but a static source scan (`Backend/tests/unit/services/test_event_registry.py`) fails
   the deterministic suite if a new emitted type isn't in the registry.
-- **Envelope v1:** `{v, event_id, session_id, run_id, step_id, agent_run_id, type, payload,
-  replaying, ts}`. `event_id` is `null` for ephemeral events; `run_id`/`step_id`/`agent_run_id`
-  are nullable and populated where the emitter already knows them.
+- **Envelope v2:** `{v, event_id, session_id, node_id, run_id, attempt_id, type, payload,
+  replaying, ts}`. `event_id` is `null` for ephemeral events; `node_id`/`run_id`/`attempt_id`
+  are nullable and populated where the emitter already knows them (Phase 6.1 renamed the v1
+  `run_id`/`step_id`/`agent_run_id` fields).
 - **The client sends nothing over the socket.** User chat, prompt input, and any other
   client-originated text goes over REST — `POST /session/{id}/input` with an `Idempotency-Key`
   header, which feeds the same per-session queue the planner blocks on
@@ -312,8 +324,9 @@ exactly one Agent System worker.** Multi-worker needs a shared broker/store firs
   A new router must be added to the `include_router` loop in `app.py`. Keep `files.router` ahead
   of the `/files` StaticFiles mount, and keep `session_service` re-exported from `app`
   (`tool_logging.py` and `segmentation/pipelines/common.py` import it from there).
-- File naming is inconsistent in `application_api` (`Taskmessage.py`, `Wslog.py` alongside
-  snake_case) — match the existing file you are editing rather than renaming.
+- Model, schema, repository and route files are named after their table (`node_runs.py`,
+  `session_events.py`, ...). A few older files are not (`patient.py`, `volume.py`) — match the
+  existing file you are editing rather than renaming it.
 
 ### Frontend
 

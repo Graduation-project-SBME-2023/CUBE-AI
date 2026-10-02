@@ -46,7 +46,7 @@ chat UI write directly.
 | `patients` | `db/models/patient.py` | One row per Orthanc patient (`orthanc_patient_id`), plus name/DOB/gender |
 | `studies` | `db/models/study.py` | One row per Orthanc study (`orthanc_study_id`), FK to `patients` |
 | `volume_series` | `db/models/volume.py` | One row per non-SEG Orthanc series (`orthanc_series_id`), FK to `studies` |
-| `segmentations` | `db/models/segmentation.py` | One row per DICOM-SEG series (`orthanc_series_id`), FK to `volume_series` |
+| `segmentation_masks` | `db/models/segmentation_masks.py` | One row per DICOM-SEG series (`orthanc_series_id`), FK to `volume_series` |
 
 These four tables are **not** the source of truth for imaging — Orthanc is. They exist so the
 application API can query metadata (patient name, series description, segmentation target) without
@@ -57,24 +57,33 @@ See `cubeai-docs/backend/database_audit.md` for the consistency model and its kn
 
 ### Application data
 
+Names follow the vocabulary of the roadmap's Appendix P (`plan.md`); migration
+`o1f0a2c3d4e5_v1_o_renames` (Phase 6.1, Cut-over 1) renamed the older tables and columns to it.
+
 | Table | Model | Purpose |
 |---|---|---|
-| `models` | `db/models/model.py` | Registered segmentation models (seeded + synced from MONAI Label's `/info/`) |
-| `radiomics_features` | `db/models/radiomics.py` | Extracted radiomics features per segmentation |
-| `chat_sessions` | `db/models/chat_sessions.py` | Research Playground chat sessions |
-| `chat_messages` | `db/models/chat_messages.py` | Messages within a chat session |
-| `chat_study_association` | `db/models/chat_link_study.py` | Many-to-many link between chat sessions and studies |
-| `hypotheses` | `db/models/hypothesis.py` | One research hypothesis per chat session |
-| `plans` | `db/models/plan.py` | One execution plan per hypothesis |
-| `plan_steps` | `db/models/steps.py` | Ordered steps within a plan |
-| `task_messages` | `db/models/Taskmessage.py` | Structured payload per executed step |
-| `context_augmentations` | `db/models/contextaugmentation.py` | Domain-knowledge context attached to a task message |
-| `ws_log` | `db/models/Wslog.py` | WebSocket event log per session |
-| `workflow` | `db/models/workflow.py` | Named annotation-training workflows (nnUNet training queue) |
-| `workflow_details` | `db/models/workflow_details.py` | Study/series membership within a workflow, with `train`/`annotated` flags |
+| `sessions` | `db/models/sessions.py` | One research session: the user's prompt, `intent`, `control_state` |
+| `chats` | `db/models/chats.py` | A conversation inside a session (`last_activity_at`) |
+| `chat_messages` | `db/models/chat_messages.py` | Messages of a chat (`created_at`, `metadata`) |
+| `session_events` | `db/models/session_events.py` | The durable, replayable event log of a session (`event_type`, `payload`) |
+| `session_graphs` | `db/models/session_graphs.py` | The one graph header of a session (was `plans`) |
+| `graph_nodes` | `db/models/graph_nodes.py` | The ordered nodes of a session graph (`position`, `target_name`, `params`) |
+| `node_runs` | `db/models/node_runs.py` | One execution of a node (`run_id`, `resolved_inputs`, scratchpad columns) |
+| `stored_files` | `db/models/stored_files.py` | Retained bytes and catalogued renders (`file_id`, `retention_class` `retained`/`render`) |
+| `cohorts`, `cohort_members` | `db/models/cohorts.py` | The study population a run defined |
+| `segmentation_batches`, `segmentation_targets`, `segmentation_pairs` | `db/models/segmentation_batches.py` | One segmentation batch over a cohort, its targets and per-(target, volume) pairs |
+| `radiomics_features` | `db/models/radiomics.py` | Extracted radiomics features per segment (`radiomics_feature_id`) |
+| `feature_sets` | `db/models/feature_sets.py` | The frozen feature matrix modeling trains on |
+| `model_results` | `db/models/model_results.py` | One variant of a modeling comparison |
+| `reports`, `report_images` | `db/models/reports.py` | Editable report source and its registered figures |
+| `literature_reviews`, `literature_papers` | `db/models/literature.py` | Planning-phase literature search |
+| `inference_models` | `db/models/inference_models.py` | Registered segmentation models (seeded + synced from MONAI Label's `/info/`) |
+| `workflow` | `db/models/workflow.py` | An nnUNet training task (the training queue) |
+| `workflow_details` | `db/models/workflow_details.py` | Study/series membership within a training task, with `train`/`annotated` flags |
 
-`workflow` / `workflow_details` back the nnUNet training endpoints (`/workflow/...`, see below) —
-they are unrelated to the Research Playground's `plans`/`plan_steps`, despite the similar name.
+Every result table records its producing run in `created_by_run_id`. `workflow` /
+`workflow_details` back the nnUNet training endpoints (`/workflow/...`, see below); work inside a
+research session is a *session graph*, never a workflow.
 
 ---
 
