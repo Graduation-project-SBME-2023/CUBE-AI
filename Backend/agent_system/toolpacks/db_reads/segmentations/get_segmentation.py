@@ -1,14 +1,19 @@
-from ..._toolkit import tool
+from ..._toolkit import is_error_result, tool
 from ...common.manifests import READ_ONLY
+from .. import _api
 from typing import Annotated
 from pydantic import Field
-import httpx
-import os
-from ...common.service_urls import CONTROL_API_URL
 
 from ..result_shape import keep_model_id
 
-base_url = CONTROL_API_URL
+
+async def masks_for_volume(volume_uid: str):
+    """The masks of one volume (a list, ``[]`` when the volume has none or is
+    unknown), or an ``error_result``: an unreachable API or a 5xx is never
+    reported as "no mask" (L4). ``check_having_mask`` uses it too."""
+    masks = await _api.get_json(f"/segmentation-masks/by-volume/{volume_uid}", on_not_found=[])
+    return masks if is_error_result(masks) else keep_model_id(masks)
+
 
 @tool(
     visibility={"agent", "main"},
@@ -26,22 +31,11 @@ async def get_segmentation(
     1. To find details for a specific segmentation when you know its 'label_uid'.
     2. To browse or list multiple segmentations when no specific UID is known (uses pagination).
     """
-    async with httpx.AsyncClient() as client:
-        if label_uid is not None:
-            response = await client.get(f"{base_url}/segmentation-masks/{label_uid}")
-        else:
-            response = await client.get(
-                base_url + "/segmentation-masks/",
-                params={"skip": skip, "limit": limit}
-            )
-
-        response.raise_for_status()
-        try:
-            data = response.json()
-        except ValueError:
-            return {"error": "Invalid JSON returned", "raw": response.text}
-
-        return {"data": keep_model_id(data)}
+    if label_uid is not None:
+        return await _api.read(f"/segmentation-masks/{label_uid}", shape=keep_model_id)
+    return await _api.read(
+        "/segmentation-masks/", params={"skip": skip, "limit": limit}, shape=keep_model_id
+    )
     
     
 
@@ -58,15 +52,8 @@ async def get_segmentation_by_volume(
     Use this tool in this specific scenario:
     1. To retrieve the segmentation masks or labels for a known volume using its 'volume_uid' (e.g., "Show me the segmentations for Volume X").
     """
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{base_url}/segmentation-masks/by-volume/{volume_uid}")
-        response.raise_for_status()
-        try:
-            data = response.json()
-        except ValueError:
-            return {"error": "Invalid JSON returned", "raw": response.text}
-
-        return {"data": keep_model_id(data)}
+    masks = await masks_for_volume(volume_uid)
+    return masks if is_error_result(masks) else {"data": masks}
 
 @tool(
     visibility={"agent", "main"},
@@ -81,15 +68,7 @@ async def get_segmentation_by_model(
     Use this tool in this specific scenario:
     1. To filter segmentations based on the model that created them (e.g., "Show me all segmentations produced by Model-X").
     """
-    async with httpx.AsyncClient() as client:
-        response = await client.get(f"{base_url}/segmentation-masks/by-model/{model_name}")
-        response.raise_for_status()
-        try:
-            data = response.json()
-        except ValueError:
-            return {"error": "Invalid JSON returned", "raw": response.text}
-
-        return {"data": keep_model_id(data)}
+    return await _api.read(f"/segmentation-masks/by-model/{model_name}", shape=keep_model_id)
     
     
 @tool(
@@ -106,16 +85,8 @@ async def get_invalidate_segmentations(
     Use this tool in this specific scenario:
     1. To browse or list specific segmentations that have failed validation or need attention (uses pagination).
     """
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-                    base_url + "/segmentation-masks/",
-                    params={"skip": skip, "limit": limit}
-                )
-
-        response.raise_for_status()
-        try:
-            data = response.json()
-        except ValueError:
-            return {"error": "Invalid JSON returned", "raw": response.text}
-
-        return {"data": keep_model_id(data)}
+    return await _api.read(
+        "/segmentation-masks/unvalidated/",
+        params={"skip": skip, "limit": limit},
+        shape=keep_model_id,
+    )

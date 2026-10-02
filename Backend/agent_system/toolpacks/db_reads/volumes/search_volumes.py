@@ -1,12 +1,9 @@
-from ..._toolkit import tool
+from ..._toolkit import is_error_result, tool
 from ...common.manifests import READ_ONLY
+from .. import _api
 from typing import Annotated
 from pydantic import Field
-import httpx
-from ...common.service_urls import CONTROL_API_URL
 from ...common import domain_api
-
-base_url = CONTROL_API_URL
 
 
 @tool(
@@ -18,24 +15,12 @@ async def search_volumes(
     keyword: Annotated[str | None, Field(description="A specific keyword to search for within the volume descriptions.")] = None
 ):
     """Searches for image volumes based on modality or descriptive keywords."""
-    async with httpx.AsyncClient() as client:
-        params = {}
-        if modality is not None:
-            params["modality"] = str(modality)
-        if keyword is not None:
-            params["keyword"] = keyword
-            
-        response = await client.get(
-            base_url + "/volumes/search/",
-            params=params
-        )
-        response.raise_for_status()
-        try:
-            data = response.json()
-        except ValueError:
-            return {"error": "Invalid JSON returned", "raw": response.text}
-
-        return {"data": data}
+    params = {}
+    if modality is not None:
+        params["modality"] = str(modality)
+    if keyword is not None:
+        params["keyword"] = keyword
+    return await _api.read("/volumes/search/", params=params)
 
 
 @tool(
@@ -48,30 +33,14 @@ async def search_volumes_by_description(
 ) -> dict:
     """Search for volumes based on included and excluded words in the series description and body_part_examined fields, and record the search on the population cohort."""
 
-    volume_details = []  # list of dicts from the API
-    uids_list = []       # flat list of candidate UIDs
-
-    # 1. Fetch the data from the FastAPI endpoint
-    async with httpx.AsyncClient() as client:
-        params = {"words_to_include": words_to_include}
-        if words_to_exclude is not None:
-            params["words_to_exclude"] = words_to_exclude
-
-        try:
-            response = await client.get(
-                base_url + "/volumes/search/description/",
-                params=params
-            )
-            response.raise_for_status()
-            volume_details = response.json()  # list of dicts
-            uids_list = [v["uid"] for v in volume_details]
-
-        except httpx.HTTPStatusError as e:
-            return {"status": "error", "message": f"HTTP error occurred: {str(e)}"}
-        except ValueError:
-            return {"status": "error", "message": "Invalid JSON returned from API", "raw": response.text}
-        except Exception as e:
-            return {"status": "error", "message": f"An unexpected API error occurred: {str(e)}"}
+    # 1. Fetch the candidate volumes (a list of dicts)
+    params = {"words_to_include": words_to_include}
+    if words_to_exclude is not None:
+        params["words_to_exclude"] = words_to_exclude
+    volume_details = await _api.get_json("/volumes/search/description/", params=params)
+    if is_error_result(volume_details):
+        return volume_details
+    uids_list = [v["uid"] for v in volume_details]  # flat list of candidate UIDs
 
     # 2. Record the search as selection rationale on the population cohort.
     # Since the database-backed flow there is no `config.json`: the candidate list is not
