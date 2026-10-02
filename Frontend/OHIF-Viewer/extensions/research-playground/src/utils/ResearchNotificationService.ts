@@ -1,5 +1,6 @@
 import { UINotificationService, ServicesManager } from '@ohif/core';
 import websocketService from './WebsocketService';
+import { isNodeStatusEvent } from './nodeStatusEvent';
 
 export type ResearchEventType = 
   | 'literature_complete'
@@ -217,7 +218,7 @@ class ResearchNotificationService {
       return;
     }
 
-    if (type === 'Pipeline_agent_status' || type === 'pipeline_agent_status') {
+    if (isNodeStatusEvent(type)) {
       const agents = payload?.agents || [];
       this.handleAgentStatus(agents);
       return;

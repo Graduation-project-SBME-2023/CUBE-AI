@@ -135,7 +135,7 @@ const ChatSidebar = ({
                 ? [{ id: makeId('init'), role: 'user', text: initialUserMessage, ts: Date.now() }]
                 : [],
               summary: '',
-              last_activity: Date.now(),
+              last_activity_at: Date.now(),
             },
           ];
         }
@@ -166,7 +166,7 @@ const ChatSidebar = ({
             throw new Error('No chat for this session');
           }
           activeChatIdRef.current = chatId;
-          return fetch(`${getBackendApiBaseUrl()}/chat_messages/${chatId}`, {
+          return fetch(`${getBackendApiBaseUrl()}/chat-messages/${chatId}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ role: 'user', text: initialUserMessage }),
@@ -257,7 +257,7 @@ const ChatSidebar = ({
             title: s.title || s.prompt || `Session ${s.session_id}`,
             messages: idx !== -1 && prev[idx].messages.length > 0 ? prev[idx].messages : [],
             summary: '',
-            last_activity: s.updated_at ? new Date(s.updated_at).getTime() : 0,
+            last_activity_at: s.updated_at ? new Date(s.updated_at).getTime() : 0,
           };
           if (idx === -1) return [entry, ...prev];
           return prev.map((x, i) => (i === idx ? entry : x));
@@ -283,7 +283,7 @@ const ChatSidebar = ({
         title: s.title || s.prompt || `Session ${s.session_id}`,
         messages: [],
         summary: '',
-        last_activity: s.updated_at ? new Date(s.updated_at).getTime() : 0,
+        last_activity_at: s.updated_at ? new Date(s.updated_at).getTime() : 0,
       }));
       if (!isMountedRef.current) return;
       setSessions(prev => {
@@ -317,7 +317,7 @@ const ChatSidebar = ({
       const msgs = [];
       for (let skip = 0; ; skip += 100) {
         const res = await fetch(
-          `${getBackendApiBaseUrl()}/chat_messages/${chat_id}?skip=${skip}&limit=100`
+          `${getBackendApiBaseUrl()}/chat-messages/${chat_id}?skip=${skip}&limit=100`
         );
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
@@ -330,7 +330,7 @@ const ChatSidebar = ({
         id: `db_${m.message_id}`,
         role: m.role,
         text: m.text,
-        ts: new Date(m.timestamp).getTime(),
+        ts: new Date(m.created_at).getTime(),
       }));
       if (!isMountedRef.current) return;
       setSessions(prev =>
@@ -396,7 +396,7 @@ const ChatSidebar = ({
           },
         ],
         summary: '',
-        last_activity: Date.now(),
+        last_activity_at: Date.now(),
       };
       if (!isMountedRef.current) return null;
       setSessions(s => [newSession, ...s]);
@@ -466,7 +466,7 @@ const ChatSidebar = ({
     setSessions(prev =>
       prev.map(s =>
         String(s.chat_id) === String(sessionId)
-          ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() }
+          ? { ...s, messages: [...s.messages, userMsg], last_activity_at: Date.now() }
           : s
       )
     );
@@ -481,7 +481,7 @@ const ChatSidebar = ({
         throw new Error('No chat for this session');
       }
       activeChatIdRef.current = chatId;
-      const persisted = await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chatId}`, {
+      const persisted = await fetch(`${getBackendApiBaseUrl()}/chat-messages/${chatId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // The message id is the idempotency key: a retry after a timeout
@@ -542,7 +542,7 @@ const ChatSidebar = ({
         setSessions(prev =>
           prev.map(s =>
             String(s.chat_id) === String(currentSessionId)
-              ? { ...s, messages: [...s.messages, userMsg], last_activity: Date.now() }
+              ? { ...s, messages: [...s.messages, userMsg], last_activity_at: Date.now() }
               : s
           )
         );
@@ -552,7 +552,7 @@ const ChatSidebar = ({
             activeChatIdRef.current || (await resolveChatId(String(currentSessionId)));
           if (chatId) {
             activeChatIdRef.current = chatId;
-            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chatId}`, {
+            await fetch(`${getBackendApiBaseUrl()}/chat-messages/${chatId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ role: 'user', text: userMsg.text }),
@@ -575,7 +575,7 @@ const ChatSidebar = ({
         setSessions(prev =>
           prev.map(s =>
             String(s.chat_id) === String(currentSessionId)
-              ? { ...s, messages: [...s.messages, completionMsg], last_activity: Date.now() }
+              ? { ...s, messages: [...s.messages, completionMsg], last_activity_at: Date.now() }
               : s
           )
         );
@@ -585,7 +585,7 @@ const ChatSidebar = ({
             activeChatIdRef.current || (await resolveChatId(String(currentSessionId)));
           if (chatId) {
             activeChatIdRef.current = chatId;
-            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chatId}`, {
+            await fetch(`${getBackendApiBaseUrl()}/chat-messages/${chatId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ role: 'assistant', text: completionMsg.text }),
@@ -608,7 +608,7 @@ const ChatSidebar = ({
         setSessions(prev =>
           prev.map(s =>
             String(s.chat_id) === String(currentSessionId)
-              ? { ...s, messages: [...s.messages, stoppedMsg], last_activity: Date.now() }
+              ? { ...s, messages: [...s.messages, stoppedMsg], last_activity_at: Date.now() }
               : s
           )
         );
@@ -618,7 +618,7 @@ const ChatSidebar = ({
             activeChatIdRef.current || (await resolveChatId(String(currentSessionId)));
           if (chatId) {
             activeChatIdRef.current = chatId;
-            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chatId}`, {
+            await fetch(`${getBackendApiBaseUrl()}/chat-messages/${chatId}`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ role: 'assistant', text: stoppedMsg.text }),
@@ -668,7 +668,7 @@ const ChatSidebar = ({
             setSessions(prev =>
               prev.map(s =>
                 String(s.chat_id) === String(currentSessionId)
-                  ? { ...s, messages: [...s.messages, planNotifMsg], last_activity: Date.now() }
+                  ? { ...s, messages: [...s.messages, planNotifMsg], last_activity_at: Date.now() }
                   : s
               )
             );
@@ -692,7 +692,7 @@ const ChatSidebar = ({
         if (match) {
           return prev.map(s =>
             String(s.chat_id) === String(currentSessionId)
-              ? { ...s, messages: [...s.messages, assistantMsg], last_activity: Date.now() }
+              ? { ...s, messages: [...s.messages, assistantMsg], last_activity_at: Date.now() }
               : s
           );
         }
@@ -703,7 +703,7 @@ const ChatSidebar = ({
             title: 'Research Session',
             messages: [assistantMsg],
             summary: '',
-            last_activity: Date.now(),
+            last_activity_at: Date.now(),
           },
           ...prev,
         ];
@@ -715,7 +715,7 @@ const ChatSidebar = ({
             activeChatIdRef.current || (await resolveChatId(String(currentSessionId)));
           if (chatIdForMessage) {
             activeChatIdRef.current = chatIdForMessage;
-            await fetch(`${getBackendApiBaseUrl()}/chat_messages/${chatIdForMessage}`, {
+            await fetch(`${getBackendApiBaseUrl()}/chat-messages/${chatIdForMessage}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ role: 'assistant', text: assistantMsg.text }),

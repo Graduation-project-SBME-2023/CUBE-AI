@@ -41,7 +41,7 @@ export interface ModelResultSummary {
     status: string;
     selected: boolean;
     model_file_name?: string | null;
-    predictions_artifact_id?: string | null;
+    predictions_artifact_id?: string | null; // a modeling tool result key (tool result shapes do not change)
 }
 
 export interface ModelingData {

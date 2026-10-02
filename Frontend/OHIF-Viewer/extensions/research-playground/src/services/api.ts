@@ -67,14 +67,14 @@ export async function resumeSessionPipeline(sessionId: string) {
 }
 
 /**
- * Per-step execution status, read from `agent_runs`.
+ * Per-node execution status, read from `node_runs`.
  *
  * This is the durable record: it is the same in a fresh process as in the one
  * that ran the pipeline, which is what makes a reconnect or a restart able to
  * show real progress instead of assuming none.
  */
-export async function fetchAgentRunStatus(sessionId: string) {
-  const res = await fetch(`${BACKEND_API}/agent-runs/session/${sessionId}/status`);
+export async function fetchNodeStatus(sessionId: string) {
+  const res = await fetch(`${BACKEND_API}/runs/session/${sessionId}/status`);
   if (!res.ok) return null;
   return res.json();
 }
