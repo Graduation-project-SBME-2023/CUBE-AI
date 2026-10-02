@@ -21,7 +21,7 @@ from .evaluation import (
 )
 from .holdout import resolve_selection_holdout
 from storage_paths import TEMP_DIR, workspace_subpath
-from ..common.emit import ToolEvent, log_tool_state, TextPayload, ProgressPayload
+from ..common.emit import emit, emit_progress
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -227,12 +227,10 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         n_models = params.n_select
         TOTAL_STAGES = 3 + n_models + 1  # setup | compare | tune×N | blend+finalise
 
-        payload = TextPayload(message=f"Starting classification experiment '{experiment_name}'...")
-        log_tool_state(ToolEvent("tool_started", "text", payload))
+        emit("tool_started", f"Starting classification experiment '{experiment_name}'...")
 
         # ── Stage 1: Load data & PyCaret setup ─────────────────────────────
-        payload = ProgressPayload(current=1, total=TOTAL_STAGES, label="Loading data & configuring PyCaret")
-        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+        emit_progress(current=1, total=TOTAL_STAGES, label="Loading data & configuring PyCaret")
 
         data = pd.read_csv(prepared.train_path)
         logger.info(f"Data loaded: {data.shape[0]} rows × {data.shape[1]} cols")
@@ -468,8 +466,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         generalisation = results.generalisation_estimate(prepared, selection_holdout_used)
 
         # ── Stage 2: Compare models ─────────────────────────────────────────
-        payload = ProgressPayload(current=2, total=TOTAL_STAGES, label="Comparing models")
-        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+        emit_progress(current=2, total=TOTAL_STAGES, label="Comparing models")
 
         compare_kwargs: dict = {"n_select": effective_n_select}
         if is_small_cohort and not params.include_models:
@@ -643,12 +640,11 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             label = _get_model_label(model)
             logger.info(f"Tuning {name} ({i + 1}/{len(best)})")
 
-            payload = ProgressPayload(
+            emit_progress(
                 current=3 + i,
                 total=TOTAL_STAGES,
                 label=f"Tuning & evaluating {label} ({i + 1}/{len(best)})",
             )
-            log_tool_state(ToolEvent("tool_progress", "progress", payload))
 
             try:
                 tuned = tune_model(model)
@@ -673,12 +669,11 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                 })
 
         # ── Final stage: Blend (if applicable) + select the final model ────
-        payload = ProgressPayload(
+        emit_progress(
             current=TOTAL_STAGES,
             total=TOTAL_STAGES,
             label="Blending models & recording results" if len(tuned_models) > 1 else "Recording results",
         )
-        log_tool_state(ToolEvent("tool_progress", "progress", payload))
 
         final_name = None
         if len(tuned_models) > 1:
@@ -752,8 +747,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             }, indent=2)
 
         logger.info("Classification experiment complete.")
-        payload = TextPayload(message="Classification Experiment...Done")
-        log_tool_state(ToolEvent("tool_finished", "text", payload))
+        emit("tool_finished", "Classification Experiment...Done")
 
         return json.dumps(
             results.recorded_response(

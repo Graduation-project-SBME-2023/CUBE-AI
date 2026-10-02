@@ -22,7 +22,7 @@ from ..common import domain_api
 from ..common.workspace import WorkspacePath, base_on_workspace_dir
 from storage_paths import CACHE_DIR, TEMP_DIR
 
-from ..common.emit import ToolEvent, log_tool_state, TextPayload, ProgressPayload
+from ..common.emit import emit, emit_progress
 
 FEATURE_EXTRACTION_TIMEOUT_SECONDS = float(
     os.environ.get("FEATURE_EXTRACTION_TIMEOUT_SECONDS", "600")
@@ -712,8 +712,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         # after the extraction loop completes.
         spatial_warnings: dict[str, str] = {}
 
-        payload = TextPayload(message=f"Extracting features for {len(pairs)} masks...")
-        log_tool_state(ToolEvent("tool_started", "text", payload))
+        emit("tool_started", f"Extracting features for {len(pairs)} masks...")
         for idx, (pair_id, files) in enumerate(pairs.items(), 1):
             subject_id = files["subject_id"]
             target_id = files["target_id"]
@@ -724,12 +723,11 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 idx,
                 len(pairs),
             )
-            payload = ProgressPayload(
+            emit_progress(
                 current=idx,
                 total=len(pairs),
                 label='Processing Volumes'
             )
-            log_tool_state(ToolEvent("tool_progress", "progress", payload))
             try:
                 orig_image = sitk.ReadImage(files["image"])
                 orig_mask  = sitk.ReadImage(files["mask"])
@@ -918,8 +916,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 logger.error(f"Error processing {subject_id}: {exc}")
 
         processing_time = time.time() - start
-        payload = TextPayload(message='Feature Extraction...Done')
-        log_tool_state(ToolEvent('tool_finished', 'text', payload))
+        emit('tool_finished', 'Feature Extraction...Done')
 
         if not radiomics_rows:
             return json.dumps({
@@ -1124,8 +1121,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         source_label = (
             os.path.basename(params.input_path) if params.input_path else "this run's radiomics rows"
         )
-        payload = TextPayload(message=f"Analysing feature importance for {source_label}...")
-        log_tool_state(ToolEvent("tool_started", "text", payload))
+        emit("tool_started", f"Analysing feature importance for {source_label}...")
 
         # ── Input: this run's radiomics rows, labelled from the cohort ──────
         # . The label is the frozen cohort member's; a generic CSV's
@@ -1282,8 +1278,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             f"(importance fitted on {X_fit.shape[0]} row(s))"
         )
 
-        payload = ProgressPayload(current=1, total=TOTAL_STAGES, label="Loading & preprocessing data")
-        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+        emit_progress(current=1, total=TOTAL_STAGES, label="Loading & preprocessing data")
 
         # ── Stage 2: Importance computation ────────────────────────────────
         def _rf_importance(n):
@@ -1319,8 +1314,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         importance_df = pd.DataFrame({"feature": X.columns, "importance": scores})
         importance_df = importance_df.sort_values("importance", ascending=False).reset_index(drop=True)
 
-        payload = ProgressPayload(current=2, total=TOTAL_STAGES, label=f"Computing importance ({params.method}, {task_type})")
-        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+        emit_progress(current=2, total=TOTAL_STAGES, label=f"Computing importance ({params.method}, {task_type})")
 
         # ADDED FOR UI ENHANCEMENT — Task 6: Alternative importance rankings.
         # Compute ANOVA F-test and Mutual Information rankings in addition to the
@@ -1454,8 +1448,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             if i % step == 0 or i == len(cum_pct) - 1
         ]
 
-        payload = ProgressPayload(current=3, total=TOTAL_STAGES, label="Building importance & cumulative chart data")
-        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+        emit_progress(current=3, total=TOTAL_STAGES, label="Building importance & cumulative chart data")
 
         # ── Stage 4: Correlation matrix (top 20) ───────────────────────────
         top20_feats = importance_df["feature"].iloc[:20].tolist()
@@ -1472,8 +1465,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         else:
             chart_data["correlation"] = None
 
-        payload = ProgressPayload(current=4, total=TOTAL_STAGES, label="Computing correlation matrix (top 20 features)")
-        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+        emit_progress(current=4, total=TOTAL_STAGES, label="Computing correlation matrix (top 20 features)")
 
         # ── Stage 5: PCA ───────────────────────────────────────────────────
         top_n_scatter = min(top_features_list[-1], X.shape[1])
@@ -1500,8 +1492,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
             except Exception as exc:
                 logger.warning(f"PCA failed: {exc}")
 
-        payload = ProgressPayload(current=5, total=TOTAL_STAGES, label="Running PCA")
-        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+        emit_progress(current=5, total=TOTAL_STAGES, label="Running PCA")
 
         # ── Stage 6: t-SNE ─────────────────────────────────────────────────
         if len(scatter_feats) >= 2 and len(X_sub) <= 5000:
@@ -1522,8 +1513,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
                 logger.warning(f"t-SNE failed: {exc}")
 
         tsne_label = "Running t-SNE" if (len(scatter_feats) >= 2 and len(X_sub) <= 5000) else "Skipping t-SNE (dataset > 5 000 samples)"
-        payload = ProgressPayload(current=6, total=TOTAL_STAGES, label=tsne_label)
-        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+        emit_progress(current=6, total=TOTAL_STAGES, label=tsne_label)
 
         # ── Stage 7: Archival plots ─────────────────────────────────────────
         plots_dir = os.path.join(output_dir, "plots")
@@ -1570,8 +1560,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
                 except Exception as exc:
                     logger.warning(f"Correlation heatmap failed: {exc}"); plt.close()
 
-        payload = ProgressPayload(current=7, total=TOTAL_STAGES, label="Saving archival plot images")
-        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+        emit_progress(current=7, total=TOTAL_STAGES, label="Saving archival plot images")
 
         # Retained figures are artifacts — bytes in PostgreSQL — so the report
         # binds them by key instead of scanning the workspace.
@@ -1690,12 +1679,10 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         # React's JSON.parse crashes on NaN literals; this prevents that silently.
         chart_data_safe = _json_serializable(chart_data)
 
-        payload = ProgressPayload(current=8, total=TOTAL_STAGES, label="Exporting top-N feature CSVs")
-        log_tool_state(ToolEvent("tool_progress", "progress", payload))
+        emit_progress(current=8, total=TOTAL_STAGES, label="Exporting top-N feature CSVs")
 
         logger.info("Feature importance analysis complete.")
-        payload = TextPayload(message="Feature Importance Analysis...Done")
-        log_tool_state(ToolEvent("tool_finished", "text", payload))
+        emit("tool_finished", "Feature Importance Analysis...Done")
 
         return json.dumps({
             "status": "success",

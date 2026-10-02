@@ -48,16 +48,15 @@ _SOURCES: list[tuple[Path, str]] = [
     (AGENT_ROOT / "api" / "runners.py", r'send_ws_message\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (AGENT_ROOT / "api" / "routes" / "execution.py", r'send_ws_message\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (AGENT_ROOT / "api" / "routes" / "events.py", r'event_type\s*=\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    # Tool-pack view emitters: each sends `{"type": "<literal>", ...}` as its
-    # own top-level dict, not nested in a payload.
-    (TOOLPACKS_ROOT / "population" / "cohort_labels.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    (TOOLPACKS_ROOT / "population" / "targets_matcher.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    (TOOLPACKS_ROOT / "population" / "validate_anatomy.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    (TOOLPACKS_ROOT / "population" / "inclusion_criteria.py", r'"type"\s*:\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    # scratchpad.py's own top-level type is the first arg to _emit_ws_message;
+    # Tool-pack view emitters: the view type is emit_view()'s first argument.
+    (TOOLPACKS_ROOT / "population" / "cohort_labels.py", r'emit_view\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (TOOLPACKS_ROOT / "population" / "targets_matcher.py", r'emit_view\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (TOOLPACKS_ROOT / "population" / "validate_anatomy.py", r'emit_view\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (TOOLPACKS_ROOT / "population" / "inclusion_criteria.py", r'emit_view\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    # scratchpad.py's own top-level type is the first arg to emit_view;
     # its payload's nested "type": "agent_status"/"agent_summary" keys are
     # NOT top-level event types and must not be scanned by the generic pattern.
-    (TOOLPACKS_ROOT / "bookkeeping" / "scratchpad.py", r'_emit_ws_message\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (TOOLPACKS_ROOT / "bookkeeping" / "scratchpad.py", r'emit_view\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     # application_api's own durable-event writers (session_events rows committed
     # alongside the domain change) -- reach the WS envelope's `type` field
     # via replay in agent_system/api/routes/sessions.py.
@@ -96,10 +95,10 @@ def test_every_literal_event_type_emitted_is_registered(path: Path, pattern: str
 def test_scratchpad_updates_own_payload_subtype_is_not_mistaken_for_its_msg_type():
     """agent_status/agent_summary are values of a "type" key *inside*
     scratchpad_update's payload, not the event_type passed to
-    broadcast_ws_message. If this ever changes, the scoped regex above would
+    emit_view. If this ever changes, the scoped regex above would
     start silently under-scanning; this pins the current shape."""
     source = _source(TOOLPACKS_ROOT / "bookkeeping" / "scratchpad.py")
-    assert re.search(r'broadcast_ws_message\(\s*"scratchpad_update"', source)
+    assert re.search(r'emit_view\(\s*"scratchpad_update"', source)
     assert '"type": "agent_status"' in source
     assert '"type": "agent_summary"' in source
     assert "agent_status" not in DURABLE_EVENT_TYPES | EPHEMERAL_EVENT_TYPES

@@ -6,7 +6,7 @@ from pydantic import Field
 from .._toolkit import tool
 from ..common.manifests import WRITES
 from ..common import domain_api
-from ..common.emit import broadcast_ws_message
+from ..common.emit import emit_view
 
 
 @tool(
@@ -31,7 +31,7 @@ async def write_inclusion_criteria(
     except domain_api.DomainApiError as exc:
         return {"status": "error", "message": f"Criteria were not recorded: {exc}"}
 
-    await broadcast_ws_message(
+    await emit_view(
         "population_output",
         {
             "tool": "write_inclusion_criteria",

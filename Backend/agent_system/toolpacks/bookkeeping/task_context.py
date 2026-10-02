@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 from .._toolkit import tool
 from ..common.manifests import READ_ONLY
-from ..common.emit import ToolEvent, log_tool_state, TextPayload
+from ..common.emit import emit
 
 def _app_api_url() -> str:
     """The Application API base URL."""
@@ -58,7 +58,7 @@ async def read_agent_task_context() -> dict[str, Any]:
             "message": "Neither RUN_ID nor AGENT_ID is set in MCP environment.",
         }
 
-    log_tool_state(ToolEvent("tool_started", "text", TextPayload(message="Reading task context from DB")))
+    emit("tool_started", "Reading task context from DB")
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -79,13 +79,7 @@ async def read_agent_task_context() -> dict[str, Any]:
             params = node.get("params") or {}
             task_message = params.get("task_message") or {}
 
-            log_tool_state(
-                ToolEvent(
-                    "tool_finished",
-                    "text",
-                    TextPayload(message=f"Task context loaded for {AGENT_ID}"),
-                )
-            )
+            emit("tool_finished", f"Task context loaded for {AGENT_ID}")
 
             return {
                 "status": "ok",

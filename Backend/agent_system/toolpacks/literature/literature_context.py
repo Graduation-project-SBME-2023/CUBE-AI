@@ -10,7 +10,7 @@ import json
 
 from .._toolkit import tool
 from ..common.manifests import READ_ONLY
-from ..common.emit import ToolEvent, log_tool_state, TextPayload
+from ..common.emit import emit
 from ..common import domain_api
 
 
@@ -38,23 +38,22 @@ async def read_literature_context() -> str:
     Returns:
         str: JSON with 'knowledge_base', 'sources_guide', 'pico', and 'papers' fields.
     """
-    payload = TextPayload(message="Reading literature context.")
-    log_tool_state(ToolEvent("tool_started", "text", payload))
+    emit("tool_started", "Reading literature context.")
 
     try:
         review = await domain_api.latest_literature_review()
     except domain_api.DomainApiError as exc:
-        log_tool_state(ToolEvent("error", "text", TextPayload(message="Failed to read literature context.")))
+        emit("error", "Failed to read literature context.")
         return json.dumps({"status": "error", "message": str(exc)}, indent=2)
 
     if review is None:
-        log_tool_state(ToolEvent("error", "text", TextPayload(message="Literature Review Context not found.")))
+        emit("error", "Literature Review Context not found.")
         return json.dumps({
             "status": "not_available",
             "message": "No literature review found. The planner may not have run the literature review phase.",
         }, indent=2)
 
-    log_tool_state(ToolEvent("tool_finished", "text", TextPayload(message="Literature context successfully retrieved.")))
+    emit("tool_finished", "Literature context successfully retrieved.")
     summary = review.get("result_summary") or {}
     return json.dumps({
         "status": "ok",

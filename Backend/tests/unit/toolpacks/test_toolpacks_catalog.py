@@ -121,7 +121,8 @@ def test_no_pack_still_speaks_mcp():
     legacy = re.compile(
         r"^\s*(?:@mcp\.tool\b"
         r"|(?:from|import)\s+(?:mcp|fastmcp|tool_logging|internal_emitter|service_urls)\b"
-        r"|from\s+\.+\s+import\s+mcp\b)",
+        r"|from\s+\.+\s+import\s+mcp\b"
+        r"|.*\b(?:log_tool_state|broadcast_ws_message)\s*\()",
         re.M,
     )
     offenders = [
