@@ -18,7 +18,7 @@ RUN_ID = "22222222-2222-4222-8222-222222222222"
 
 @pytest.fixture
 def api(monkeypatch):
-    monkeypatch.setattr(module, "APP_API_URL", API)
+    monkeypatch.setenv("APP_API_URL", API)  # read per request
     monkeypatch.setattr(module, "SESSION_ID", SESSION_ID)
     monkeypatch.setattr(module, "RUN_ID", RUN_ID)
     monkeypatch.setattr(module, "AGENT_ID", "segmentation_agent")

@@ -10,17 +10,11 @@ from pydantic import Field
 
 from .._toolkit import tool
 from ..common.manifests import WRITES
-from ..common.service_urls import APP_API_URL
 from ..common.emit import emit
+from ..common.http_client import shared_client, timeout, write_path_headers
+from ..common.service_urls import app_api_url
 
-
-def _api_base() -> str:
-    """Application API base URL — the same resolution every other MCP tool
-    uses (service_urls.APP_API_URL). This used to read a nonexistent
-    APPLICATION_API_URL env var and default to :8000 (MONAI Label's port,
-    not the Application API's 8001), so it never reached a real service in
-    any Docker deployment — every call failed with a connection error."""
-    return APP_API_URL
+PUBLISH_TIMEOUT_S = 90.0
 
 
 @tool(
@@ -79,7 +73,7 @@ async def latex_to_pdf(
     """Compile LaTeX and publish to the reports table."""
     emit("tool_started", "Publishing report…")
 
-    api_base = _api_base()
+    api_base = app_api_url()
     publish_url = f"{api_base}/reports/{report_id}/publish"
     payload = {
         "latex_text": latex_text,
@@ -88,9 +82,13 @@ async def latex_to_pdf(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            emit("tool_progress", "Compiling LaTeX…")
-            resp = await client.post(publish_url, json=payload)
+        emit("tool_progress", "Compiling LaTeX…")
+        resp = await shared_client().post(
+            publish_url,
+            json=payload,
+            headers=write_path_headers(),
+            timeout=timeout(PUBLISH_TIMEOUT_S),
+        )
 
         if resp.status_code == 200:
             # Success: PDF bytes returned as application/pdf.

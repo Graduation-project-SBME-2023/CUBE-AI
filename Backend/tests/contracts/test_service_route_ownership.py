@@ -106,10 +106,15 @@ def test_application_image_owns_alembic_and_database_dependencies():
         assert "DATABASE_URL" not in monai_service
 
 
-def test_application_service_url_never_falls_back_to_monai():
-    source = (BACKEND_ROOT / "agent_system" / "toolpacks" / "common" / "service_urls.py").read_text(encoding="utf-8")
-    app_assignment = source[source.index("APP_API_URL"):source.index("# Compatibility aliases")]
+def test_application_service_url_never_falls_back_to_monai(monkeypatch):
+    from agent_system.toolpacks.common import service_urls
 
-    assert "APP_API_URL" in app_assignment
-    assert "CONTROL_API_URL" in app_assignment
-    assert "MONAI_URL" not in app_assignment
+    for name in ("APP_API_URL", "CONTROL_API_URL", "INFERENCE_API_URL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("MONAI_URL", "http://monailabel:8000")
+
+    assert service_urls.app_api_url() == service_urls.DEFAULT_APP_API_URL
+    monkeypatch.setenv("CONTROL_API_URL", "http://control:8001")
+    assert service_urls.app_api_url() == "http://control:8001"
+    monkeypatch.setenv("APP_API_URL", "http://application-api:8001/")
+    assert service_urls.app_api_url() == "http://application-api:8001"

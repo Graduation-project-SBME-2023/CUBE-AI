@@ -315,7 +315,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
     # The PyRadiomics parameter file and the tool log are disposable
     # diagnostics: they live under temp/, and the measurements are
     # rows in PostgreSQL. `output_dir` is accepted and ignored.
-    output_dir = str(TEMP_DIR / "feature-extraction" / (domain_api.bound_run_id() or "unbound"))
+    output_dir = str(TEMP_DIR / "feature-extraction" / (domain_api.run_id() or "unbound"))
 
     # Resolve image_dir with auto-discovery fallback
     requested_image_dir = base_on_workspace_dir(params.image_dir) if params.image_dir else None
@@ -1084,7 +1084,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
 
     # Plots are rendered here and published as artifacts; nothing under this
     # directory is authoritative.
-    output_dir = str(TEMP_DIR / "feature-selection" / (domain_api.bound_run_id() or "unbound"))
+    output_dir = str(TEMP_DIR / "feature-selection" / (domain_api.run_id() or "unbound"))
     os.makedirs(output_dir, exist_ok=True)
     log_file = os.path.join(output_dir, "feature_importance_analysis.log")
     _setup_logging(log_file)

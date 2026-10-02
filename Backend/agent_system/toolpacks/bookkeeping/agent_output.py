@@ -6,11 +6,12 @@ import os
 import shutil
 from typing import Any, Dict, List, Literal
 
-import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from .._toolkit import tool
 from ..common.manifests import READ_ONLY, WRITES
+from ..common.http_client import shared_client, timeout, write_path_headers
+from ..common.service_urls import app_api_url
 from storage_paths import TEMP_DIR
 
 logger = logging.getLogger(__name__)
@@ -35,19 +36,6 @@ def _cleanup_run_temp_dirs(run_id: str) -> None:
             except Exception as exc:
                 logger.warning("Failed to clean up temp dir %s: %s", run_dir, exc)
 
-def _app_api_url() -> str:
-    """The Application API base URL."""
-    try:
-        from ..common.service_urls import APP_API_URL
-
-        return APP_API_URL
-    except ImportError:
-        return os.environ.get(
-            "APP_API_URL", os.environ.get("CONTROL_API_URL", "http://localhost:8001")
-        ).rstrip("/")
-
-
-APP_API_URL = _app_api_url()
 SESSION_ID = os.environ.get("SESSION_ID", "")
 AGENT_ID = os.environ.get("AGENT_ID", "")
 RUN_ID = os.environ.get("RUN_ID", "")
@@ -152,10 +140,11 @@ def _document(run: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _session_runs() -> List[Dict[str, Any]]:
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        response = await client.get(f"{APP_API_URL}/runs/session/{SESSION_ID}")
-        response.raise_for_status()
-        return response.json()
+    response = await shared_client().get(
+        f"{app_api_url()}/runs/session/{SESSION_ID}", timeout=timeout(REQUEST_TIMEOUT)
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 # -- Tools ---------------------------------------------------------------------
@@ -184,24 +173,26 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
         "warnings": params.warnings,
     }
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            response = await client.put(
-                f"{APP_API_URL}/runs/{RUN_ID}/output", json=payload
+        response = await shared_client().put(
+            f"{app_api_url()}/runs/{RUN_ID}/output",
+            json=payload,
+            headers=write_path_headers(),
+            timeout=timeout(REQUEST_TIMEOUT),
+        )
+        if response.status_code >= 500:
+            # A 5xx body is an unhandled server exception (stack frames,
+            # raw SQL) -- never something to hand back to an agent that
+            # may quote it verbatim in a generated report.
+            return _error(
+                f"{response.status_code} from the Application API: an internal "
+                "error occurred and the request could not complete."
             )
-            if response.status_code >= 500:
-                # A 5xx body is an unhandled server exception (stack frames,
-                # raw SQL) -- never something to hand back to an agent that
-                # may quote it verbatim in a generated report.
-                return _error(
-                    f"{response.status_code} from the Application API: an internal "
-                    "error occurred and the request could not complete."
-                )
-            if response.status_code >= 400:
-                return _error(
-                    f"{response.status_code} from the Application API: "
-                    f"{response.text[:400]}"
-                )
-            run = response.json()
+        if response.status_code >= 400:
+            return _error(
+                f"{response.status_code} from the Application API: "
+                f"{response.text[:400]}"
+            )
+        run = response.json()
     except Exception as exc:
         return _error(f"Failed to write output: {exc}")
 
@@ -231,15 +222,15 @@ async def read_agent_output(params: ReadAgentOutputInput) -> str:
     if not SESSION_ID:
         return _error("SESSION_ID is not set in the MCP environment.")
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            response = await client.get(
-                f"{APP_API_URL}/runs/session/{SESSION_ID}"
-                f"/by-target/{params.agent_id}"
-            )
-            if response.status_code == 404:
-                return _error(f"No output found for agent '{params.agent_id}'.")
-            response.raise_for_status()
-            resolved = response.json()
+        response = await shared_client().get(
+            f"{app_api_url()}/runs/session/{SESSION_ID}"
+            f"/by-target/{params.agent_id}",
+            timeout=timeout(REQUEST_TIMEOUT),
+        )
+        if response.status_code == 404:
+            return _error(f"No output found for agent '{params.agent_id}'.")
+        response.raise_for_status()
+        resolved = response.json()
     except Exception as exc:
         return _error(f"Failed to read output: {exc}")
 

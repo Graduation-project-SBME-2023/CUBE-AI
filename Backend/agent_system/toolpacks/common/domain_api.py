@@ -1,15 +1,22 @@
-"""The Application API, as the MCP tools see it."""
+"""The Application API, as the tools see it.
+
+Identity (session, run, attempt) comes from the current ``ToolContext``, never
+from the environment. Requests go through the shared client, and every write
+declares its D24 path (``http_client.write_path_headers()``).
+"""
 
 from __future__ import annotations
 
 import json as jsonlib
-import os
 from typing import Any
 from urllib.parse import quote
 
-import httpx
+from .. import _toolkit
+from . import settings
+from .http_client import shared_client, timeout as http_timeout, write_path_headers
+from .service_urls import app_api_url
 
-REQUEST_TIMEOUT = float(os.environ.get("DOMAIN_API_TIMEOUT_SECONDS", "30"))
+READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 POPULATION_COHORT_KEY = "population"
 POPULATION_AGENT_TYPE = "study_population_planner_agent"
 
@@ -23,40 +30,45 @@ class DomainApiError(RuntimeError):
         self.body = body
 
 
-def app_api_url() -> str:
-    """Same resolution as `service_urls`."""
+def _context() -> _toolkit.ToolContext | None:
     try:
-        from .service_urls import APP_API_URL
-
-        return APP_API_URL
-    except ImportError:
-        return os.environ.get(
-            "APP_API_URL", os.environ.get("CONTROL_API_URL", "http://localhost:8001")
-        ).rstrip("/")
+        return _toolkit.current_context()
+    except _toolkit.NoToolContextError:
+        return None
 
 
 def session_id() -> str:
-    return os.environ.get("SESSION_ID", "")
+    """The current call's session, or "" outside a dispatched call."""
+    ctx = _context()
+    return str(ctx.session_id) if ctx is not None and ctx.session_id else ""
 
 
-def bound_run_id() -> str:
-    return os.environ.get("RUN_ID", "")
+def run_id() -> str:
+    """The run of the node this call belongs to, or ""."""
+    ctx = _context()
+    return str(ctx.run_id) if ctx is not None and ctx.run_id else ""
+
+
+def attempt_id() -> str:
+    """The running attempt of that run (the D24 fence), or ""."""
+    ctx = _context()
+    return str(ctx.attempt_id) if ctx is not None and ctx.attempt_id else ""
 
 
 def require_run() -> str:
-    run_id = bound_run_id()
-    if not run_id:
+    value = run_id()
+    if not value:
         raise DomainApiError(
-            "RUN_ID is not set in the MCP environment; this tool is not bound to "
-            "an approved plan step and cannot record domain results."
+            "This call belongs to no run; only a tool running inside a node can "
+            "record domain results."
         )
-    return run_id
+    return value
 
 
 def require_session() -> str:
     value = session_id()
     if not value:
-        raise DomainApiError("SESSION_ID is not set in the MCP environment.")
+        raise DomainApiError("This call belongs to no session (it was not dispatched).")
     return value
 
 
@@ -70,10 +82,19 @@ async def request(
     timeout: float | None = None,
     **kwargs: Any,
 ) -> Any:
-    async with httpx.AsyncClient(timeout=timeout or REQUEST_TIMEOUT) as client:
-        response = await client.request(
-            method, f"{app_api_url()}{path}", json=json, params=params, **kwargs
-        )
+    method = method.upper()
+    headers = dict(kwargs.pop("headers", None) or {})
+    if method not in READ_METHODS:
+        headers.update(write_path_headers())
+    response = await shared_client().request(
+        method,
+        f"{app_api_url()}{path}",
+        json=json,
+        params=params,
+        headers=headers,
+        timeout=http_timeout(timeout),
+        **kwargs,
+    )
     if allow_404 and response.status_code == 404:
         return None
     if response.status_code >= 400:
@@ -106,8 +127,8 @@ async def request(
 async def population_run_id(for_session: str | None = None) -> str:
     """The run whose cohort this session's population is. Inside the population agent it is simply this run."""
     target_session = for_session or require_session()
-    if not for_session and bound_run_id():
-        run = await request("GET", f"/runs/{bound_run_id()}")
+    if not for_session and run_id():
+        run = await request("GET", f"/runs/{run_id()}")
         if (run.get("node") or {}).get("target_name") == POPULATION_AGENT_TYPE:
             return str(run["run_id"])
     resolved = await request(
@@ -179,7 +200,6 @@ async def reviewed_masks(for_session: str | None = None) -> list[dict[str, Any]]
 # Large enough that writing a cohort takes a handful of requests, small enough
 # that a batch stays well under the API's per-request row bound.
 RADIOMICS_BATCH_SIZE = 50
-_LONG_TIMEOUT = max(REQUEST_TIMEOUT, 120.0)
 
 
 async def record_radiomics_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -188,7 +208,7 @@ async def record_radiomics_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "POST",
         f"/radiomics/run/{require_run()}/batch",
         json={"rows": rows},
-        timeout=_LONG_TIMEOUT,
+        timeout=settings.domain_api_long_timeout(),
     )
 
 
@@ -209,7 +229,7 @@ async def run_radiomics_rows(
                 "skip": skip,
                 "limit": page,
             },
-            timeout=_LONG_TIMEOUT,
+            timeout=settings.domain_api_long_timeout(),
         ) or []
         rows.extend(batch)
         if len(batch) < page:
@@ -222,12 +242,12 @@ async def create_feature_set(set_key: str, payload: dict[str, Any]) -> dict[str,
         "PUT",
         f"/feature-sets/run/{require_run()}/{quote(set_key, safe='')}",
         json=payload,
-        timeout=_LONG_TIMEOUT,
+        timeout=settings.domain_api_long_timeout(),
     )
 
 
 async def freeze_feature_set(feature_set_id: str) -> dict[str, Any]:
-    return await request("POST", f"/feature-sets/{feature_set_id}/freeze", timeout=_LONG_TIMEOUT)
+    return await request("POST", f"/feature-sets/{feature_set_id}/freeze", timeout=settings.domain_api_long_timeout())
 
 
 async def list_feature_sets(for_session: str | None = None) -> list[dict[str, Any]]:
@@ -246,7 +266,7 @@ async def export_feature_set(
         "GET",
         f"/feature-sets/{feature_set_id}/export",
         params={"part": part, "format": fmt},
-        timeout=_LONG_TIMEOUT,
+        timeout=settings.domain_api_long_timeout(),
     )
 
 
@@ -268,7 +288,7 @@ async def record_model_comparison(comparison_key: str, payload: dict[str, Any]) 
         "PUT",
         f"/model-results/run/{require_run()}/{quote(comparison_key, safe='')}",
         json=payload,
-        timeout=_LONG_TIMEOUT,
+        timeout=settings.domain_api_long_timeout(),
     )
 
 
@@ -297,14 +317,16 @@ async def list_session_artifacts(kind: str | None = None) -> list[dict[str, Any]
     `figure_png`; omit it to list every kind."""
     params = {"kind": kind} if kind else None
     return await request(
-        "GET", f"/files/session/{require_session()}", params=params, timeout=_LONG_TIMEOUT
+        "GET", f"/files/session/{require_session()}", params=params, timeout=settings.domain_api_long_timeout()
     )
 
 
 async def artifact_content(file_id: str) -> bytes:
     """Retained bytes, e.g. a model's per-case predictions."""
-    async with httpx.AsyncClient(timeout=_LONG_TIMEOUT) as client:
-        response = await client.get(f"{app_api_url()}/files/{file_id}/content")
+    response = await shared_client().get(
+        f"{app_api_url()}/files/{file_id}/content",
+        timeout=http_timeout(settings.domain_api_long_timeout()),
+    )
     if response.status_code >= 400:
         raise DomainApiError(
             f"GET /files/{file_id}/content -> {response.status_code}",
@@ -333,8 +355,8 @@ async def publish_artifact(
         "kind": kind,
         "display_filename": filename,
     }
-    if bound_run_id():
-        form["created_by_run_id"] = bound_run_id()
+    if run_id():
+        form["created_by_run_id"] = run_id()
     if metadata:
         form["metadata"] = jsonlib.dumps(metadata, allow_nan=False)
     return await request(
@@ -342,5 +364,5 @@ async def publish_artifact(
         "/files/",
         data=form,
         files={"file": (filename, payload, mime_type)},
-        timeout=_LONG_TIMEOUT,
+        timeout=settings.domain_api_long_timeout(),
     )

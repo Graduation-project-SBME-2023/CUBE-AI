@@ -8,8 +8,10 @@ import math
 import pytest
 
 pd = pytest.importorskip("pandas")
+from agent_system.toolkit.context import use_context
 from agent_system.toolpacks.modeling import results
 from agent_system.toolpacks.modeling import evaluation
+from tests.support.toolkit_fixtures import make_context
 
 pytestmark = pytest.mark.unit
 
@@ -111,7 +113,7 @@ def test_a_swapped_model_file_is_refused(tmp_path):
 # ----------------------------------------------------------------------
 # The tool reply is built from the recorded rows
 # ----------------------------------------------------------------------
-def test_the_reply_is_derived_from_the_recorded_comparison():
+def test_the_reply_is_derived_from_the_recorded_comparison(tmp_path):
     recorded = {
         "comparison_key": "classification:top_10:abc",
         "feature_set_id": "fs",
@@ -142,7 +144,9 @@ def test_the_reply_is_derived_from_the_recorded_comparison():
             },
         ],
     }
-    reply = results.recorded_response(recorded, experiment_name="x", prepared=_prepared(), reused=True)
+    # Model files resolve under the session workspace of the call.
+    with use_context(make_context(workspace_dir=tmp_path)):
+        reply = results.recorded_response(recorded, experiment_name="x", prepared=_prepared(), reused=True)
     assert reply["reused_recorded_results"] is True
     assert reply["selected_variant"] == "blended_model"
     assert reply["final_model_path"].replace("\\", "/").endswith("modeling/models/cmp/blended_model")

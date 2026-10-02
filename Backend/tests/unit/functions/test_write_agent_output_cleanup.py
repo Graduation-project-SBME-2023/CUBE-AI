@@ -46,8 +46,7 @@ async def test_removes_this_runs_temp_dirs_after_a_successful_write(monkeypatch,
     other_run_dir.mkdir(parents=True)
 
     monkeypatch.setattr(
-        module.httpx, "AsyncClient",
-        lambda **_: _FakeClient({"run_id": RUN_ID, "node_id": "s1"}),
+        module, "shared_client", lambda: _FakeClient({"run_id": RUN_ID, "node_id": "s1"})
     )
 
     result = json.loads(await module.write_agent_output(_base_params()))
@@ -63,8 +62,7 @@ async def test_a_run_with_no_temp_scratch_is_not_an_error(monkeypatch, tmp_path)
     monkeypatch.setattr(module, "RUN_ID", RUN_ID)
     monkeypatch.setattr(module, "TEMP_DIR", tmp_path)
     monkeypatch.setattr(
-        module.httpx, "AsyncClient",
-        lambda **_: _FakeClient({"run_id": RUN_ID, "node_id": "s1"}),
+        module, "shared_client", lambda: _FakeClient({"run_id": RUN_ID, "node_id": "s1"})
     )
 
     result = json.loads(await module.write_agent_output(_base_params()))

@@ -9,20 +9,9 @@ logger = logging.getLogger(__name__)
 from .._toolkit import tool
 from ..common.manifests import READ_ONLY
 from ..common.emit import emit
+from ..common.http_client import shared_client, timeout
+from ..common.service_urls import app_api_url
 
-def _app_api_url() -> str:
-    """The Application API base URL."""
-    try:
-        from ..common.service_urls import APP_API_URL
-
-        return APP_API_URL
-    except ImportError:
-        return os.environ.get(
-            "APP_API_URL", os.environ.get("CONTROL_API_URL", "http://localhost:8001")
-        ).rstrip("/")
-
-
-BASE_URL = _app_api_url()
 SESSION_ID = os.environ.get("SESSION_ID", "")
 AGENT_ID = os.environ.get("AGENT_ID", "")
 # The approved step and run this agent instance was created for. When it
@@ -31,9 +20,12 @@ RUN_ID = os.environ.get("RUN_ID", "")
 NODE_ID = os.environ.get("NODE_ID", "")
 
 
-async def _get_json(client: httpx.AsyncClient, path: str) -> Any:
+REQUEST_TIMEOUT = 20.0
+
+
+async def _get_json(path: str) -> Any:
     logger.info(f"GET {path}")
-    response = await client.get(f"{BASE_URL}{path}")
+    response = await shared_client().get(f"{app_api_url()}{path}", timeout=timeout(REQUEST_TIMEOUT))
     response.raise_for_status()
     return response.json()
 
@@ -61,57 +53,55 @@ async def read_agent_task_context() -> dict[str, Any]:
     emit("tool_started", "Reading task context from DB")
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            session = await _get_json(client, f"/sessions/{SESSION_ID}")
+        session = await _get_json(f"/sessions/{SESSION_ID}")
 
-            steps_sharing = 1
-            if RUN_ID:
-                run = await _get_json(client, f"/runs/{RUN_ID}")
-            else:
-                resolved = await _get_json(
-                    client,
-                    f"/runs/session/{SESSION_ID}/by-target/{AGENT_ID}",
-                )
-                run = resolved.get("run") or {}
-                steps_sharing = resolved.get("nodes_sharing_this_target", 1)
+        steps_sharing = 1
+        if RUN_ID:
+            run = await _get_json(f"/runs/{RUN_ID}")
+        else:
+            resolved = await _get_json(
+                f"/runs/session/{SESSION_ID}/by-target/{AGENT_ID}",
+            )
+            run = resolved.get("run") or {}
+            steps_sharing = resolved.get("nodes_sharing_this_target", 1)
 
-            node = run.get("node") or {}
-            params = node.get("params") or {}
-            task_message = params.get("task_message") or {}
+        node = run.get("node") or {}
+        params = node.get("params") or {}
+        task_message = params.get("task_message") or {}
 
-            emit("tool_finished", f"Task context loaded for {AGENT_ID}")
+        emit("tool_finished", f"Task context loaded for {AGENT_ID}")
 
-            return {
-                "status": "ok",
-                "session_id": SESSION_ID,
-                "agent_id": AGENT_ID or node.get("target_name", ""),
-                # The user's own words, plus the planner's structured reading
-                # of them — beside each other, not one on top of the other.
-                "prompt": session.get("prompt", ""),
-                "prompt_kind": session.get("prompt_kind", ""),
-                "intent": session.get("intent") or {},
-                "step": {  # tool result key, kept (plan.md: no success result shape changes)
-                    "step_id": run.get("node_id"),  # tool result key, kept (plan.md: no success result shape changes)
-                    "agent_type": node.get("target_name", ""),
-                    "step_order": node.get("position"),  # tool result key, kept (plan.md: no success result shape changes)
-                    "title": node.get("title", ""),
-                    # The old free-text description lives inside the node
-                    # params rather than as a second, divergent field.
-                    "instructions": params,
-                    "steps_sharing_this_agent_type": steps_sharing,
-                },
-                "run": {
-                    "agent_run_id": run.get("run_id"),  # tool result key, kept (plan.md: no success result shape changes)
-                    "status": run.get("status"),
-                    "started_at": run.get("started_at"),
-                    # Assembled from the step PLUS the upstream results that
-                    # existed when this run started.
-                    "compiled_prompt": run.get("compiled_prompt") or "",
-                    "input_refs": run.get("resolved_inputs") or {},  # tool result key, kept (plan.md: no success result shape changes)
-                },
-                "task_message": task_message,
-                "context_augmentation": task_message.get("context_augmentation") or {},
-            }
+        return {
+            "status": "ok",
+            "session_id": SESSION_ID,
+            "agent_id": AGENT_ID or node.get("target_name", ""),
+            # The user's own words, plus the planner's structured reading
+            # of them — beside each other, not one on top of the other.
+            "prompt": session.get("prompt", ""),
+            "prompt_kind": session.get("prompt_kind", ""),
+            "intent": session.get("intent") or {},
+            "step": {  # tool result key, kept (plan.md: no success result shape changes)
+                "step_id": run.get("node_id"),  # tool result key, kept (plan.md: no success result shape changes)
+                "agent_type": node.get("target_name", ""),
+                "step_order": node.get("position"),  # tool result key, kept (plan.md: no success result shape changes)
+                "title": node.get("title", ""),
+                # The old free-text description lives inside the node
+                # params rather than as a second, divergent field.
+                "instructions": params,
+                "steps_sharing_this_agent_type": steps_sharing,
+            },
+            "run": {
+                "agent_run_id": run.get("run_id"),  # tool result key, kept (plan.md: no success result shape changes)
+                "status": run.get("status"),
+                "started_at": run.get("started_at"),
+                # Assembled from the step PLUS the upstream results that
+                # existed when this run started.
+                "compiled_prompt": run.get("compiled_prompt") or "",
+                "input_refs": run.get("resolved_inputs") or {},  # tool result key, kept (plan.md: no success result shape changes)
+            },
+            "task_message": task_message,
+            "context_augmentation": task_message.get("context_augmentation") or {},
+        }
 
     except httpx.HTTPStatusError as e:
         status_code = e.response.status_code if e.response is not None else None
