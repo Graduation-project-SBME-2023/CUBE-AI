@@ -10,23 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from .._toolkit import tool
 from ..common.manifests import READ_ONLY, WRITES
 from ..common.emit import emit, emit_view
+from ..common.http_client import shared_client, timeout, write_path_headers
+from ..common.service_urls import app_api_url
 
 AgentStatus = Literal["in_progress", "done", "blocked", "failed"]
 FlagLevel = Literal["info", "warning", "error", "critical"]
 
-def _app_api_url() -> str:
-    """The Application API base URL."""
-    try:
-        from ..common.service_urls import APP_API_URL
-
-        return APP_API_URL
-    except ImportError:
-        return os.environ.get(
-            "APP_API_URL", os.environ.get("CONTROL_API_URL", "http://localhost:8001")
-        ).rstrip("/")
-
-
-APP_API_URL = _app_api_url()
 SESSION_ID = os.environ.get("SESSION_ID", "")
 AGENT_ID = os.environ.get("AGENT_ID", "")
 # The run this MCP subprocess belongs to. Set by the agent factory from the
@@ -55,30 +44,31 @@ async def _post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             "RUN_ID is not set in the MCP environment; this agent is not "
             "bound to an approved plan step and cannot write its scratchpad."
         )
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        response = await client.post(
-            f"{APP_API_URL}/runs/{run_id}/scratchpad/{path}", json=payload
+    response = await shared_client().post(
+        f"{app_api_url()}/runs/{run_id}/scratchpad/{path}",
+        json=payload,
+        headers=write_path_headers(),
+        timeout=timeout(REQUEST_TIMEOUT),
+    )
+    if response.status_code >= 500:
+        # A 5xx body is an unhandled server exception (stack frames, raw
+        # SQL) -- never something to hand back to an agent that may quote
+        # it verbatim in a generated report.
+        raise RuntimeError(
+            f"{response.status_code} from the Application API: an internal "
+            "error occurred and the request could not complete."
         )
-        if response.status_code >= 500:
-            # A 5xx body is an unhandled server exception (stack frames, raw
-            # SQL) -- never something to hand back to an agent that may quote
-            # it verbatim in a generated report.
-            raise RuntimeError(
-                f"{response.status_code} from the Application API: an internal "
-                "error occurred and the request could not complete."
-            )
-        if response.status_code >= 400:
-            raise RuntimeError(
-                f"{response.status_code} from the Application API: {response.text[:400]}"
-            )
-        return response.json()
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"{response.status_code} from the Application API: {response.text[:400]}"
+        )
+    return response.json()
 
 
 async def _get(url: str) -> Dict[str, Any]:
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.json()
+    response = await shared_client().get(url, timeout=timeout(REQUEST_TIMEOUT))
+    response.raise_for_status()
+    return response.json()
 
 
 def _notes(run: Dict[str, Any]) -> Dict[str, Any]:
@@ -281,7 +271,7 @@ async def scratchpad_set_status(status: str) -> str:
             f"Invalid status '{status}'. Must be one of: in_progress, done, blocked, failed."
         )
     try:
-        current = await _get(f"{APP_API_URL}/runs/{RUN_ID}") if RUN_ID else {}
+        current = await _get(f"{app_api_url()}/runs/{RUN_ID}") if RUN_ID else {}
         previous = _notes(current).get("status")
         run = await _post("status", {"status": status})
     except Exception as exc:
@@ -354,7 +344,7 @@ async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True
         return _error("SESSION_ID is not set in the MCP environment.")
     try:
         resolved = await _get(
-            f"{APP_API_URL}/runs/session/{SESSION_ID}/by-target/{target_agent_id}"
+            f"{app_api_url()}/runs/session/{SESSION_ID}/by-target/{target_agent_id}"
         )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
@@ -397,7 +387,7 @@ async def scratchpad_read_report() -> str:
     if not SESSION_ID:
         return _error("SESSION_ID is not set in the MCP environment.")
     try:
-        report = await _get(f"{APP_API_URL}/runs/session/{SESSION_ID}/scratchpad")
+        report = await _get(f"{app_api_url()}/runs/session/{SESSION_ID}/scratchpad")
     except Exception as exc:
         return _error(f"Could not read the scratchpad report: {exc}")
     return json.dumps(report, indent=2)
