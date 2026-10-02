@@ -183,7 +183,7 @@ Backend/
 | --- | --------------------------------------------------------- | ------------ | ------------------ | ---------------------------------------------------------------- | ----------------- |
 | 0   | Runtime: Python 3.13, PyCaret removed                     | M0 Runtime   | –                  | your decision (this merge)                                       | Not started       |
 | 1   | Toolkit Core                                              | M1 Toolkit   | –                  | tools P1; system Phase 1 (registries, artifact types, discovery) | ✅ Done (1.1–1.5) |
-| 2   | Tool Packs                                                | M1           | 1                  | tools P2                                                         | Next              |
+| 2   | Tool Packs                                                | M1           | 1                  | tools P2                                                         | ✅ Done (2.1–2.5) |
 | 3   | Agent Definitions and Skills                              | M1           | 1, 2               | tools P3; system §29-30                                          | Not started       |
 | 4   | Sandbox Foundation                                        | M2 Compute   | 1                  | tools P4                                                         | Not started       |
 | 5   | Job Platform (Celery + Redis)                             | M2           | 1, 4               | tools P5                                                         | Not started       |
@@ -203,6 +203,8 @@ Backend/
 **Progress (2026-10-01):** Plan 1 is done: all five phases, 505 toolkit tests passing on Python 3.13 (see "Plan 1 — as built" at the end of Plan 1). Plan 1 was done **before** Plan 0, so the order above was not followed. The toolkit is written for 3.13, but the agents image is still `python:3.11.3`. Until Plan 0 lands, run the toolkit tests from a local 3.13 venv: in Docker, the deterministic suite cannot collect `tests/unit/toolkit/`.
 
 **Progress (2026-10-02):** Phase 6.1 (Cut-over 1: renames) is done: migration `o1f0a2c3d4e5_v1_o_renames` and the mechanical code rename, in commits `0b77fcb2`, `1d0958c2` and `cd7bc7e8` (see "Phase 6.1 — as built" at the end of Phase 6.1). It was also done before Plan 0. Plan 2 is next, and it moves code that already uses the Appendix P names.
+
+**Progress (2026-10-03):** Plan 2 is done: `Backend/mcp/` is gone, the catalog loads 63 tools, and the Definition of Ready smoke test passes for every light tool (see "Plan 2 — as built" at the end of Plan 2). Like Plan 1, it was done before Plan 0, so CI (the 3.11 image) cannot collect the 3.13 tests of the toolkit and the tool packs; **Plan 0 is the recommended next plan.**
 
 **Decision (2026-10-02): LangGraph-native agent nodes.** Plan 9 now also builds the checkpointer, gates, `@task` tool calls, `Send` fan-out, the literature workflow graph and in-node compaction; Appendix P gains D27 (agent checkpoints, suspended attempts, transaction T10) and becomes revision 3.2; Plans 3, 6, 8, 10–17 carry the matching edits. The implementation order does not change: Plan 9 already comes after 6.2–6.5, which now include the checkpoint tables and routes.
 
@@ -477,7 +479,7 @@ Some plans can move:
 **Open follow-ups:**
 
 - Plan 0 (the 3.13 images) is still needed before the toolkit tests can run in CI.
-- Pin `mcp<2` in `Backend/agent_system/requirements.txt`: `mcp>=1.17` now resolves to 2.x, which removed `mcp.server.fastmcp`.
+- ~~Pin `mcp<2` in `Backend/agent_system/requirements.txt`: `mcp>=1.17` now resolves to 2.x, which removed `mcp.server.fastmcp`.~~ No longer needed: Plan 2 deleted the FastMCP server. The `mcp` client is still used by the frozen AutoGen agents (until Plan 17), and Plan 14 pins the version its outbound edge needs.
 - The LangGraph-native decision (2026-10-02) extends four Plan 1 contracts. The work is done in **Phase 9.3**, not by reopening Plan 1, and keeps `toolkit/` free of LangGraph imports: `Dispatcher(passthrough=…)`, `ToolContext.user_gate()` / `ToolContext.durable()`, `AgentStatus.SUSPENDED` with `AgentResult.suspension`, and `AgentEngine.run(..., resume=…)`.
 - ✅ **Done in Phase 6.1 (2026-10-02).** Phase 6.1 renamed the context and result fields that Plan 1 built on the old names: `ToolContext.agent_run_id` → `run_id`; `step_id` and `graph_version` removed; `attempt_id` added (the D24 fence). `RunAccepted` is `{node_id, change_id, status}`, with no `run_id`, because a run is created only when its node starts (D8). The built-in artifact refs are `MaskSet.segmentation_batch_id` and `ResultSummary.run_id`. The toolkit suite now has 503 passing tests and 1 skipped (3 parametrized cases of the removed fields are gone).
 
@@ -571,6 +573,56 @@ A smoke test runs every tool with a fake context and a mocked domain API. It che
 - `Backend/mcp/` no longer exists, and no `@mcp.tool` / `FastMCP` remains;
 - the catalog loads **63 tools**: 62 pack tools (55 moved + `run_segmentation_with_guard` + 6 literature tools), plus `run_agent` from Plan 1;
 - the DoR smoke test passes for all light tools.
+
+## Plan 2 — as built (2026-10-03)
+
+**Status:** done. The catalog loads 63 tools (55 moved, `run_segmentation_with_guard`, the 6 literature tools, `run_agent`). `tests/unit/toolpacks/` has 247 tests and `tests/unit/toolkit/` 504, all passing on Python 3.13; `tests/unit/toolpacks/light/test_definition_of_ready.py` checks every light tool.
+
+| Phase | Commit(s)                                         | What landed                                                                                                                                                                         |
+| ----- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2.1   | `64b5081f` (renames), `e3b538af`, `fdec0d88`      | `git mv` into `toolpacks/<pack>/`; `@tool` with an interim manifest; `toolpacks/_toolkit.py`; `Backend/mcp/` and `classification_tool.py` deleted; the event calls on `emit()`/`emit_view()` |
+| 2.2   | `cf4ad6e6`                                        | `common/settings.py`, `common/service_urls.py` (`app_api_url()`), `common/http_client.py` (shared client, D24 headers), identity from the context in `domain_api`, `WorkspacePath` on the context |
+| 2.3   | `d77d3f8d`                                        | Pattern A and B identity reads replaced by the context; `common/llm.py` (the extraction LLM from `client_config`)                                                                  |
+| 2.4   | `7aa9b7b0`, `a7b24c0f`, `050cf586`, `6fbfbdd6`, `f7f31bb0`, `763df578` | L1–L12 and S12 (`common/polling.py`); `run_segmentation_with_guard`; the 6 literature tools; full manifests and ports; the `on_result` hooks (`common/views.py`)  |
+| 2.5   | `5cafabf6`                                        | Every light-tool failure is an `error_result`; the Definition of Ready smoke test                                                                                                  |
+| docs  | `64bc5744`                                        | `CLAUDE.md` ("Tool packs" conventions), `cubeai-docs`, `deploy/.env.example`, comments                                                                                             |
+
+**Differences from the plan text** (later plans should build on these):
+
+- **Layout:**
+  - `tools/database/**` became `db_reads/` without the `database/` level (`db_reads/patients/`, `db_reads/volumes/`, ...); `tools/latex/*` became `reporting/`, and `tools/helpers/*` became `common/`.
+  - `toolpacks/_toolkit.py` re-exports the toolkit under the import root the packs were loaded with (`agent_system.toolkit` in the tests, bare `toolkit` in the container). A pack that imported the other root would build its `ToolSpec` from a second copy of the class and drop out of the catalog. **Packs import the toolkit only through `_toolkit`.**
+  - `common/` also holds `manifests.py` (`READ_ONLY`, `WRITES`, `INTERIM_HEAVY`), `emit.py`, `polling.py`, `views.py` and `llm.py`; `db_reads/_api.py` is the read helper of the DB tools.
+- **Phase 2.1 in three commits, not two:** the renames; the edit, with a compatibility shim that kept the old `log_tool_state` / `broadcast_ws_message` names; then the 77 event calls rewritten to `emit()` / `emit_progress()` / `emit_view()` and the shim deleted. The `sys.path` hack of `list_models.py` (a Phase 2.2 item) was removed in 2.1, because the move changed what it pointed at.
+- **`ToolSpec` needs four manifest fields** (`side_effects`, `cost`, `execution`, `visibility`), so every tool got a minimal manifest in 2.1 and the full one in 2.4. **`INTERIM_HEAVY`** (`cost="medium"`, `execution="inline"`) marks the 9 heavy tools until Plan 7: radiomics ×2, the 5 PyCaret tools, `run_segmentation`, `run_segmentation_with_guard`.
+- **Events:** dispatch sends `tool_started` and `tool_finished` / `error` for every call, so the tools no longer send them; their own messages became `tool_log`. A tool's view updates come from its `on_result` hook. `emit_view(view_type, payload)` has no `session_id` argument: the session is the context's.
+- **Identity and HTTP:**
+  - `domain_api.session_id()`, `run_id()` (was `bound_run_id()`), `attempt_id()`, `node_id()`, `agent_type()` read the context; `require_run()` / `require_session()` raise when it has none.
+  - Every Application API write sends `X-Attempt-Id` when the context has an attempt, else `X-Run-Id` when it is a job's (`job_id` and `run_id`), else nothing; nothing is refused on the client side (Plan 6's fence decides).
+  - `DomainApiError` wraps an unreachable API too (`status_code=None`), and `error_code` / `error_result_from()` map it to `unavailable`, `not_found`, `conflict`, `bad_request` or `upstream_error`. A missing population cohort is a 404.
+  - The shared client is one `httpx.AsyncClient` per event loop. `aclose_shared_client()` exists; the app lifespan does not call it yet (Plans 10 and 12).
+- **`WorkspacePath`** resolves against `ctx.workspace_dir`, else the session's workspace from `storage_paths`; outside a dispatched call it is invalid.
+- **Fixes on the way (beyond L1–L14):** `search_volumes_by_description` writes the cohort's selection summary, so it is `WRITES` and `{agent}` only; `get_invalidate_segmentations` calls `/segmentation-masks/unvalidated/`; `get_all_patients_info` / `get_all_studies_info` take `skip` / `limit`; `list_models` returns the list itself (L11), which the model sees as the same JSON; `latex_to_pdf` returns `error_result` (it is a graph tool); a failed segmentation is `error_result("segmentation_failed", ...)` after its output is recorded, so `critical=True` fails the node as `CRITICAL_PIPELINE_TOOLS` did.
+- **`run_segmentation_with_guard`** takes no identity argument; its only argument, `cohort_id`, receives the `Cohort` input port, and any cohort other than the session's population cohort is refused. Its `MaskSet` output derives `review_status`: `submitted` when the batch has ready masks (the module returns only once their review is submitted), else `not_ready`.
+- **Literature tools:**
+  - They run on the shared async client; the synchronous `urllib` and `time.sleep` delays are gone, the retry rule (429/5xx, three attempts) is kept.
+  - The closures' state is per run in `literature/run_state.py`: `use_pico(run_id, pico)` sets the domain keywords (else the broad fallback list), `save_literature_output` captures into memory, `release(run_id)` hands the files over and forgets them.
+  - `extract_concepts_from_pico` and its term dictionaries are copied into `literature/pico.py`.
+  - A failed search is an `error_result` that keeps `source`, `query` and `results=[]`.
+- **`on_result` hooks** copy the legacy monitor's branch order exactly (`_branch()`), with one fix: its `_read_agent_output()` read `step.get("position")`, a NameError since Phase 6.1; the copy reads the node.
+- **Known exceptions to the Definition of Ready:** item 4 (module-level state) — `targets_matcher._announced_sessions` (L7's per-session state) and `literature/run_state.py`; items 13 and 15 wait for Plans 9–11; the heavy tools wait for Plan 7.
+- **Tests:** `tests/support/mcp_loader.py` and `tests/unit/mcp/` are deleted; `test_data/` is `tests/fixtures/sample_data/`. The tool-pack tests use `fake_domain_api` (respx) and `call_tool`; the golden view tests need `aiofiles` (`importorskip`).
+
+**Open follow-ups:**
+
+- **Plan 0 first.** The 3.11 image (CI) cannot collect `tests/unit/toolkit/`, `tests/unit/toolpacks/`, `tests/unit/functions/` or the contracts that import `agent_system.toolpacks`. Until then, run them on a local 3.13 interpreter (`CLAUDE.md`, Commands).
+- **The legacy AutoGen pipeline cannot run its tools:** its agents still start the deleted `Backend/mcp/server.py`. Allowed by the global rules until the cut-over (Plan 17).
+- **Phase 9.7:** `SegmentationModule.initialize()` also starts `Backend/mcp/server.py`, so `run_segmentation_with_guard` cannot run until the module uses the agent engine. The module could then return the batch's `review_status` itself instead of the derived one.
+- **Plan 3:** the literature agent's `context_builder` calls `literature.run_state.use_pico(run_id, pico)`, and its output hook calls `release(run_id)` and records the review (`create_literature_review`); a run that is never released stays in memory. The `agent.md` prompts take the L14 fixes (argument names, the agent id; register/status are already `harness`-only).
+- **Phase 5.1:** move `toolpacks/common/polling.py` (`poll_until`, `RetryPolicy`, `PollTimeout`) to `jobs_core/polling.py` and import it from there. `generate_targets` (S12) is its first user.
+- **Plan 7:** replace `INTERIM_HEAVY` on the 9 heavy tools, and move their view branches (radiomics, PyCaret) out of the legacy monitor into `on_result` hooks.
+- **Plans 10–12:** call `aclose_shared_client()` from the app lifespan, and move `targets_matcher._announced_sessions` and `literature/run_state.py` to the runtime that owns per-run state.
+- **Plan 17.3:** `/events` and `/ws-broadcast` have no producer in the repository any more (only `tests/manual/view_payload_harness.py`).
 
 ---
 
