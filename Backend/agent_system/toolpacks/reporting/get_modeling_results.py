@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from .._toolkit import tool
+from ..common import views
 from ..common.manifests import READ_ONLY
 from ..common import domain_api
 from ..common.emit import emit
@@ -108,6 +109,7 @@ def _comparison_section(entry: dict[str, Any]) -> str:
     visibility={"agent", "main"},
     timeout_s=75,
     **READ_ONLY,
+    on_result=views.on_modeling_results,
 )
 async def get_modeling_results() -> str:
     """Retrieves the recorded feature sets and modeling results of this session in one request — everything needed to write the results report."""

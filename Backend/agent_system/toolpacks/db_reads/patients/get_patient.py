@@ -1,4 +1,5 @@
 from ..._toolkit import tool
+from ...common import views
 from ...common.manifests import READ_ONLY
 from .. import _api
 from typing import Annotated
@@ -11,6 +12,7 @@ from ...common.emit import emit
     data_scopes={"phi_read"},
     timeout_s=45,
     **READ_ONLY,
+    on_result=views.on_population_tool,
 )
 async def get_patient(
     patient_id: Annotated[int | None, Field(description="The unique ID of the patient. If provided, fetches a single detailed record. If omitted, fetches a list of all patients.")] = None,
