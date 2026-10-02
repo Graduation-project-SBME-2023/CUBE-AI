@@ -13,7 +13,7 @@ Available templates:
 import json
 import os
 
-from .._toolkit import tool
+from .._toolkit import error_result, tool
 from ..common.manifests import READ_ONLY
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -88,11 +88,8 @@ async def list_latex_templates() -> str:
                     {"name": n} for n in _list_templates()
                 ],
             }, indent=2)
-    except Exception as e:
-        return json.dumps({
-            "status": "error",
-            "message": f"Failed to list templates: {str(e)}",
-        }, indent=2)
+    except (OSError, ValueError) as e:
+        return error_result("unavailable", f"Failed to list templates: {e}")
 
 
 @tool(
@@ -129,11 +126,11 @@ async def get_latex_template(params: GetTemplateInput) -> str:
     guide_path = os.path.join(TEMPLATES_DIR, "template_guide.json")
 
     if not os.path.exists(template_path):
-        return json.dumps({
-            "status": "error",
-            "message": f"Template '{params.template_name}' not found.",
-            "available_templates": _list_templates(),
-        }, indent=2)
+        return error_result(
+            "not_found",
+            f"Template '{params.template_name}' not found.",
+            available_templates=_list_templates(),
+        )
 
     try:
         with open(template_path, "r", encoding="utf-8") as f:
@@ -159,11 +156,8 @@ async def get_latex_template(params: GetTemplateInput) -> str:
             "filling_instructions": filling_instructions,
         }, indent=2)
 
-    except Exception as e:
-        return json.dumps({
-            "status": "error",
-            "message": f"Failed to load template: {str(e)}",
-        }, indent=2)
+    except (OSError, ValueError) as e:
+        return error_result("unavailable", f"Failed to load template: {e}")
 
 
 def _list_templates():

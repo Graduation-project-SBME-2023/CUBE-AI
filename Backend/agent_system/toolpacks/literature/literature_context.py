@@ -45,7 +45,7 @@ async def read_literature_context() -> str:
         review = await domain_api.latest_literature_review()
     except domain_api.DomainApiError as exc:
         emit("error", "Failed to read literature context.")
-        return json.dumps({"status": "error", "message": str(exc)}, indent=2)
+        return domain_api.error_result_from(exc, "The literature context could not be read")
 
     if review is None:
         emit("error", "Literature Review Context not found.")

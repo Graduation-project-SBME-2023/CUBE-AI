@@ -69,7 +69,7 @@ async def test_returns_an_error_when_the_application_api_rejects_the_read(monkey
 
     monkeypatch.setattr(module.domain_api, "list_session_artifacts", _fail)
 
-    result = json.loads(await module.list_report_figures())
+    result = await module.list_report_figures()
 
-    assert result["status"] == "error"
+    assert result["status"] == "error"  # an error_result, not JSON text
     assert "404" in result["error_message"]

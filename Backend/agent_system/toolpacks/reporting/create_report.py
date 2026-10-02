@@ -48,7 +48,7 @@ async def create_report(
         run_id = domain_api.require_run()
         session = domain_api.require_session()
     except domain_api.DomainApiError as exc:
-        return json.dumps({"status": "error", "error_message": str(exc)}, indent=2)
+        return domain_api.error_result_from(exc)
 
     try:
         report = await domain_api.request(
@@ -63,10 +63,7 @@ async def create_report(
             },
         )
     except domain_api.DomainApiError as exc:
-        return json.dumps({
-            "status": "error",
-            "error_message": f"Could not create the report row: {exc}",
-        }, indent=2)
+        return domain_api.error_result_from(exc, "Could not create the report row")
 
     return json.dumps({
         "status": "ok",

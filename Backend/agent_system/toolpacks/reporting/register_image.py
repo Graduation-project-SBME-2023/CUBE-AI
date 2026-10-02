@@ -54,7 +54,7 @@ async def register_report_image(
             json={"file_id": artifact_id, "image_key": image_key},
         )
     except domain_api.DomainApiError as exc:
-        return json.dumps({"status": "error", "error_message": str(exc)}, indent=2)
+        return domain_api.error_result_from(exc)
 
     return json.dumps(
         {

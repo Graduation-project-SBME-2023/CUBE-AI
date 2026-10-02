@@ -6,7 +6,7 @@ from typing import Any, Dict, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-from .._toolkit import tool
+from .._toolkit import error_result, tool
 from ..common.manifests import READ_ONLY, WRITES
 from ..common.domain_api import agent_type, node_id, run_id, session_id
 from ..common.emit import emit, emit_view
@@ -20,8 +20,8 @@ FlagLevel = Literal["info", "warning", "error", "critical"]
 REQUEST_TIMEOUT = 20.0
 
 
-def _error(message: str) -> str:
-    return json.dumps({"status": "error", "message": message}, indent=2)
+def _error(message: str, code: str = "write_failed") -> dict:
+    return error_result(code, message)
 
 
 async def _post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -221,7 +221,8 @@ async def scratchpad_raise_flag(level: str = "warning", message: str = "No messa
     """Raise a flag so the reporting agent sees an issue."""
     if level not in ("info", "warning", "error", "critical"):
         return _error(
-            f"Invalid level '{level}'. Must be one of: info, warning, error, critical."
+            f"Invalid level '{level}'. Must be one of: info, warning, error, critical.",
+            "invalid_args",
         )
     try:
         run = await _post("flags", {"level": level, "message": message})
@@ -257,7 +258,8 @@ async def scratchpad_set_status(status: str) -> str:
     """Update this run's self-reported working status."""
     if status not in ("in_progress", "done", "blocked", "failed"):
         return _error(
-            f"Invalid status '{status}'. Must be one of: in_progress, done, blocked, failed."
+            f"Invalid status '{status}'. Must be one of: in_progress, done, blocked, failed.",
+            "invalid_args",
         )
     try:
         current = await _get(f"{app_api_url()}/runs/{run_id()}") if run_id() else {}
@@ -328,17 +330,17 @@ async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str
 async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True) -> str:
     """Read the scratchpad section of an agent in this session.: several plan steps may name the same agent. This resolves the FIRST such step in plan order and reports how many matched, rather than pretending the agent name is a unique key."""
     if not session_id():
-        return _error("This call belongs to no session.")
+        return _error("This call belongs to no session.", "no_session")
     try:
         resolved = await _get(
             f"{app_api_url()}/runs/session/{session_id()}/by-target/{target_agent_id}"
         )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:
-            return _error(f"Agent '{target_agent_id}' not found in this session.")
-        return _error(f"Could not read agent '{target_agent_id}': {exc}")
+            return _error(f"Agent '{target_agent_id}' not found in this session.", "not_found")
+        return _error(f"Could not read agent '{target_agent_id}': {exc}", "unavailable")
     except Exception as exc:
-        return _error(f"Could not read agent '{target_agent_id}': {exc}")
+        return _error(f"Could not read agent '{target_agent_id}': {exc}", "unavailable")
 
     run = resolved.get("run") or {}
     notes = _notes(run)
@@ -372,10 +374,10 @@ async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True
 async def scratchpad_read_report() -> str:
     """Read the reporter-focused view of this session's scratchpad."""
     if not session_id():
-        return _error("This call belongs to no session.")
+        return _error("This call belongs to no session.", "no_session")
     try:
         report = await _get(f"{app_api_url()}/runs/session/{session_id()}/scratchpad")
     except Exception as exc:
-        return _error(f"Could not read the scratchpad report: {exc}")
+        return _error(f"Could not read the scratchpad report: {exc}", "unavailable")
     return json.dumps(report, indent=2)
 

@@ -29,7 +29,7 @@ async def write_inclusion_criteria(
             }
         )
     except domain_api.DomainApiError as exc:
-        return {"status": "error", "message": f"Criteria were not recorded: {exc}"}
+        return domain_api.error_result_from(exc, "Criteria were not recorded")
 
     await emit_view(
         "population_output",
