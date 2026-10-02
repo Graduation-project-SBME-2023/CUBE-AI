@@ -227,7 +227,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
         n_models = params.n_select
         TOTAL_STAGES = 3 + n_models + 1  # setup | compare | tune×N | blend+finalise
 
-        emit("tool_started", f"Starting classification experiment '{experiment_name}'...")
+        emit("tool_log", f"Starting classification experiment '{experiment_name}'...")
 
         # ── Stage 1: Load data & PyCaret setup ─────────────────────────────
         emit_progress(current=1, total=TOTAL_STAGES, label="Loading data & configuring PyCaret")
@@ -747,7 +747,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             }, indent=2)
 
         logger.info("Classification experiment complete.")
-        emit("tool_finished", "Classification Experiment...Done")
+        emit("tool_log", "Classification Experiment...Done")
 
         return json.dumps(
             results.recorded_response(

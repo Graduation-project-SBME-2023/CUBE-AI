@@ -1,21 +1,33 @@
-import os
 import json
-import asyncio
 
-from .._toolkit import tool
+from .._toolkit import error_result, tool
 from ..common.manifests import WRITES
 from ..common.emit import emit, emit_view
+from ..common.polling import PollTimeout, poll_until
+from ..common.settings import positive_float
 from ..bookkeeping.scratchpad import scratchpad_raise_flag, scratchpad_write_note
 from ..common import domain_api
 
-APPROVAL_POLL_SECONDS = float(os.environ.get("COHORT_APPROVAL_POLL_SECONDS", "2"))
+DEFAULT_APPROVAL_POLL_S = 2.0
+APPROVAL_TIMEOUT_S = 3600.0
 
-_IS_WAITING_FOR_APPROVAL = False
+# The sessions whose UI was already told the gate is waiting, so a second call
+# in the same session does not announce it again (L7: was one global flag,
+# which one session's wait set for every other session).
+_announced_sessions: set[str] = set()
 
 
-async def _wait_for_cohort_approval(timeout_seconds: int = 3600) -> dict:
-    """Wait until the doctor approves (freezes) the population cohort."""
-    global _IS_WAITING_FOR_APPROVAL
+def _is_transient(exc: BaseException) -> bool:
+    """A blip of the Application API must not end the wait (S12)."""
+    return isinstance(exc, domain_api.DomainApiError) and exc.error_code in (
+        "unavailable",
+        "upstream_error",
+    )
+
+
+async def _wait_for_cohort_approval(timeout_seconds: float = APPROVAL_TIMEOUT_S) -> dict:
+    """Wait until the doctor approves (freezes) the population cohort.
+    Raises ``PollTimeout`` after ``timeout_seconds``."""
 
     async def approved_cohort() -> dict | None:
         cohort = await domain_api.get_population_cohort()
@@ -23,14 +35,15 @@ async def _wait_for_cohort_approval(timeout_seconds: int = 3600) -> dict:
             return cohort
         return None
 
+    session = domain_api.session_id()
     cohort = await approved_cohort()
     if cohort is not None:
-        _IS_WAITING_FOR_APPROVAL = False
+        _announced_sessions.discard(session)
         return cohort
 
-    if not _IS_WAITING_FOR_APPROVAL:
-        _IS_WAITING_FOR_APPROVAL = True
-        emit("tool_started", "Waiting for doctor to review and approve final cohort in UI...")
+    if session not in _announced_sessions:
+        _announced_sessions.add(session)
+        emit("tool_log", "Waiting for doctor to review and approve final cohort in UI...")
         await emit_view(
             "agent_waiting_for_user_input",
             {
@@ -38,21 +51,15 @@ async def _wait_for_cohort_approval(timeout_seconds: int = 3600) -> dict:
                 "status": "WAITING_FOR_REVIEW",
             },
         )
-
-    elapsed = 0.0
-    while True:
-        await asyncio.sleep(APPROVAL_POLL_SECONDS)
-        elapsed += APPROVAL_POLL_SECONDS
-        cohort = await approved_cohort()
-        if cohort is not None:
-            _IS_WAITING_FOR_APPROVAL = False
-            return cohort
-        if elapsed >= timeout_seconds:
-            _IS_WAITING_FOR_APPROVAL = False
-            raise RuntimeError(
-                "Execution stopped: Cohort approval timed out waiting for user review in UI. "
-                "Pipeline cannot continue without approval."
-            )
+    try:
+        return await poll_until(
+            approved_cohort,
+            interval_s=positive_float("COHORT_APPROVAL_POLL_SECONDS", DEFAULT_APPROVAL_POLL_S),
+            timeout_s=timeout_seconds,
+            is_transient=_is_transient,
+        )
+    finally:
+        _announced_sessions.discard(session)
 
 
 @tool(
@@ -61,12 +68,21 @@ async def _wait_for_cohort_approval(timeout_seconds: int = 3600) -> dict:
 )
 async def generate_targets() -> str:
     """Prepares the cohort's target labels for review and acts as the Human-in-the-Loop approval gate before segmentation."""
-    emit('tool_started', 'preparing targets & awaiting cohort approval')
-
+    emit('tool_log', 'preparing targets & awaiting cohort approval')
     try:
-        cohort = await domain_api.require_population_cohort()
+        return await _generate_targets()
     except domain_api.DomainApiError as exc:
-        return json.dumps({"status": "error", "message": str(exc)})
+        return domain_api.error_result_from(exc)
+    except PollTimeout:
+        return error_result(
+            "timeout",
+            "Cohort approval timed out waiting for user review in UI. "
+            "Pipeline cannot continue without approval.",
+        )
+
+
+async def _generate_targets() -> str | dict:
+    cohort = await domain_api.require_population_cohort()
 
     members = cohort.get("members") or []
     labelling_mode = (cohort.get("criteria") or {}).get("labelling_mode", "automatic")
@@ -109,14 +125,15 @@ async def generate_targets() -> str:
                 ),
             )
 
-    approved = await _wait_for_cohort_approval(timeout_seconds=3600)
+    approved = await _wait_for_cohort_approval()
     rows = await domain_api.cohort_analysis_rows(approved["cohort_id"])
     final_count = len(rows)
 
     if final_count <= 0:
-        raise RuntimeError(
+        return error_result(
+            "empty_cohort",
             "Cohort approval produced zero labeled volumes. The population stage "
-            "cannot continue until at least one volume is selected and labeled."
+            "cannot continue until at least one volume is selected and labeled.",
         )
     await scratchpad_write_note(
         content=(
@@ -128,7 +145,7 @@ async def generate_targets() -> str:
         )
     )
 
-    emit('tool_finished', f"Cohort Approved & Targets Locked! ({final_count} volumes)")
+    emit('tool_log', f"Cohort Approved & Targets Locked! ({final_count} volumes)")
     return json.dumps({
         "status": "success",
         "cohort_id": approved["cohort_id"],

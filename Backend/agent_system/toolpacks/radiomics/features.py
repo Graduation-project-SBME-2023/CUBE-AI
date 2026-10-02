@@ -712,7 +712,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
         # after the extraction loop completes.
         spatial_warnings: dict[str, str] = {}
 
-        emit("tool_started", f"Extracting features for {len(pairs)} masks...")
+        emit("tool_log", f"Extracting features for {len(pairs)} masks...")
         for idx, (pair_id, files) in enumerate(pairs.items(), 1):
             subject_id = files["subject_id"]
             target_id = files["target_id"]
@@ -916,7 +916,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 logger.error(f"Error processing {subject_id}: {exc}")
 
         processing_time = time.time() - start
-        emit('tool_finished', 'Feature Extraction...Done')
+        emit('tool_log', 'Feature Extraction...Done')
 
         if not radiomics_rows:
             return json.dumps({
@@ -1121,7 +1121,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         source_label = (
             os.path.basename(params.input_path) if params.input_path else "this run's radiomics rows"
         )
-        emit("tool_started", f"Analysing feature importance for {source_label}...")
+        emit("tool_log", f"Analysing feature importance for {source_label}...")
 
         # ── Input: this run's radiomics rows, labelled from the cohort ──────
         # . The label is the frozen cohort member's; a generic CSV's
@@ -1682,7 +1682,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
         emit_progress(current=8, total=TOTAL_STAGES, label="Exporting top-N feature CSVs")
 
         logger.info("Feature importance analysis complete.")
-        emit("tool_finished", "Feature Importance Analysis...Done")
+        emit("tool_log", "Feature Importance Analysis...Done")
 
         return json.dumps({
             "status": "success",

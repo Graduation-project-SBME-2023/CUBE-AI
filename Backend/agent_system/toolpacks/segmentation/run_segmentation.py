@@ -11,20 +11,25 @@ from typing import List, Dict, Any, Union
 from typing import Annotated
 from pydantic import Field
 import os
+import tempfile
 from storage_paths import TEMP_DIR
 import asyncio
 import hashlib
 
+from ..common.service_urls import inference_api_url
+from ..common.settings import positive_float
+
 logger = logging.getLogger(__name__)
 
-MONAI_LABEL_URL = os.environ.get(
-    "INFERENCE_API_URL",
-    os.environ.get("MONAI_URL", "http://localhost:8000"),
-)
-INFERENCE_JOB_TIMEOUT_SECONDS = float(
-    os.environ.get("SEGMENTATION_JOB_TIMEOUT_SECONDS", "1800")
-)
-INFERENCE_POLL_SECONDS = float(os.environ.get("SEGMENTATION_POLL_SECONDS", "3"))
+
+# Read when used and validated (L8): a bad value falls back to the default
+# instead of failing the import of every tool in the pack.
+def _job_timeout_s() -> float:
+    return positive_float("SEGMENTATION_JOB_TIMEOUT_SECONDS", 1800.0)
+
+
+def _poll_s() -> float:
+    return positive_float("SEGMENTATION_POLL_SECONDS", 3.0)
 
 
 def _inference_job_id(model: str, image: str, params: dict) -> str:
@@ -47,16 +52,19 @@ async def _await_inference_job(
     image: str,
     params: dict,
 ) -> tuple[httpx.Response, dict]:
+    base_url = inference_api_url()
+    job_timeout_s = _job_timeout_s()
+    poll_s = _poll_s()
     job_id = _inference_job_id(model, image, params)
-    job_url = f"{MONAI_LABEL_URL}/inference-jobs/{job_id}"
+    job_url = f"{base_url}/inference-jobs/{job_id}"
     start_response = await client.post(
-        f"{MONAI_LABEL_URL}/inference-jobs/",
+        f"{base_url}/inference-jobs/",
         json={
             "job_id": job_id,
             "model": model,
             "image": image,
             "params": params,
-            "max_runtime_seconds": INFERENCE_JOB_TIMEOUT_SECONDS,
+            "max_runtime_seconds": job_timeout_s,
         },
         timeout=30.0,
     )
@@ -69,11 +77,11 @@ async def _await_inference_job(
         while True:
             if (
                 asyncio.get_running_loop().time() - started
-                >= INFERENCE_JOB_TIMEOUT_SECONDS
+                >= job_timeout_s
             ):
                 await client.delete(job_url, timeout=10.0)
                 raise TimeoutError(
-                    f"Inference exceeded {INFERENCE_JOB_TIMEOUT_SECONDS:.0f}s"
+                    f"Inference exceeded {job_timeout_s:.0f}s"
                 )
 
             try:
@@ -98,7 +106,7 @@ async def _await_inference_job(
                         f"Inference service remained unavailable for "
                         f"{UNAVAILABLE_GRACE_SECONDS:.0f}s: {exc}"
                     )
-                await asyncio.sleep(INFERENCE_POLL_SECONDS)
+                await asyncio.sleep(poll_s)
                 continue
 
             job_status = str(job.get("status") or "").upper()
@@ -113,7 +121,7 @@ async def _await_inference_job(
                 raise RuntimeError(
                     str(job.get("error") or f"Inference job {job_status.lower()}")
                 )
-            await asyncio.sleep(INFERENCE_POLL_SECONDS)
+            await asyncio.sleep(poll_s)
     except asyncio.CancelledError:
         try:
             await asyncio.wait_for(
@@ -216,7 +224,7 @@ async def run_segmentation(
     
     logger.info(f"Normalized label_info: {normalized_label_info}")
     
-    infer_url = f"{MONAI_LABEL_URL}/infer/{clean_model}"
+    infer_url = f"{inference_api_url()}/infer/{clean_model}"
     query_params = {"image": series_instance_uid}
 
     inference_params = dict(params or {})
@@ -326,30 +334,30 @@ async def run_segmentation(
             "message": "Segmentation completed successfully"
         })
         
-        # save to temp file
+        # save to a temp file of its own: two runs on the same volume and
+        # model must not share (and overwrite) one fixed name (L8)
         filename = f"seg_{series_instance_uid}_{clean_model}.nii.gz"
-        current_file = Path(__file__)
-        current_dir = current_file.parent.parent.parent
         temp_dir = str(TEMP_DIR / "radiology" / "segmentations")
         os.makedirs(temp_dir, exist_ok=True)
-        temp_file_path = os.path.join(temp_dir, filename)
-        
+        fd, temp_file_path = tempfile.mkstemp(
+            dir=temp_dir, prefix=f"seg_{series_instance_uid}_{clean_model}_", suffix=".nii.gz"
+        )
+
         logger.info(f"Saving segmentation to: {temp_file_path}")
-        with open(temp_file_path, 'wb') as f:
+        with os.fdopen(fd, 'wb') as f:
             f.write(seg_bytes)
         result["temp_file_path"] = str(temp_file_path)
         logger.info("Segmentation file saved successfully")
 
     except Exception as e:
-        import traceback
+        # The traceback goes to the log, never to the model (L8).
+        logger.exception("Multipart parsing failed")
         result.update({
             "error": True,
             "message": "Failed to parse multipart response",
             "exception": str(e),
             "exception_type": type(e).__name__,
-            "traceback": traceback.format_exc()
         })
-        logger.error(f"Multipart parsing failed: {traceback.format_exc()}")
         return result
 
     # save to MONAI Label datastore
@@ -362,7 +370,7 @@ async def run_segmentation(
     if "latencies" in returned_params:
         label_info_payload["latencies"] = returned_params["latencies"]
     
-    save_url = f"{MONAI_LABEL_URL}/datastore/label"
+    save_url = f"{inference_api_url()}/datastore/label"
     save_params = {
         "image": series_instance_uid,
         "tag": "final"  # needed for nifti conversion
@@ -414,11 +422,15 @@ async def run_segmentation(
         result["save_error"] = f"Upload timeout: {str(e)}"
         logger.error(f"Datastore upload timeout: {str(e)}")
     except Exception as e:
-        import traceback
         result["saved"] = False
         result["save_error"] = str(e)
-        result["save_traceback"] = traceback.format_exc()
-        logger.error(f"Exception during datastore save: {traceback.format_exc()}")
+        logger.exception("Exception during datastore save")
+
+    if not result.get("saved"):
+        # The mask was computed but never reached the datastore: the step
+        # failed, whatever the inference said (L8: "error" stayed False here).
+        result["error"] = True
+        result["message"] = "Segmentation ran, but the mask was not saved to the datastore"
 
     # temp_file_path was only ever a scratch copy to upload from — the
     # datastore (or the save-error captured above) is the outcome that

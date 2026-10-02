@@ -1,8 +1,8 @@
 import os
 import json
 import csv
-import httpx
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 from .._toolkit import tool
@@ -12,6 +12,8 @@ from storage_paths import workspace_subpath
 from ..common.emit import emit_view
 from ..common import llm, settings
 from ..common.workspace import get_workspace
+
+logger = logging.getLogger(__name__)
 
 # Confidence keeps the observed categories; "manual override" is a label
 # SOURCE, not a confidence.
@@ -193,7 +195,7 @@ async def extract_cohort_labels() -> dict:
     try:
         cohort = await domain_api.require_population_cohort()
     except domain_api.DomainApiError as exc:
-        return {"status": "error", "message": str(exc)}
+        return domain_api.error_result_from(exc)
 
     cohort_id = cohort["cohort_id"]
     criteria = cohort.get("criteria") or {}
@@ -213,27 +215,28 @@ async def extract_cohort_labels() -> dict:
             "cohort_id": cohort_id,
         }
 
-    from ..common.service_urls import CONTROL_API_URL
-
     # ── Resolve each member's patient identifiers ───────────────────────────────
     member_ids: dict[str, set[str]] = {}
     member_patient: dict[str, dict] = {}
-    async with httpx.AsyncClient(timeout=30.0) as client_http:
-        for member in members:
-            uid = member["volume_series_instance_uid"]
-            identifiers = {uid}
-            try:
-                patient_res = await client_http.get(f"{CONTROL_API_URL}/patients/{member['subject_key']}")
-                if patient_res.status_code == 200:
-                    patient = patient_res.json()
-                    member_patient[uid] = patient
-                    for pid in (patient.get("orthanc_patient_id"), patient.get("name")):
-                        identifiers.update(_normalize_patient_ids(pid))
-            except Exception as exc:
-                print(f"Error fetching patient for volume {uid}: {exc}")
-            member_ids[uid] = identifiers
+    for member in members:
+        uid = member["volume_series_instance_uid"]
+        identifiers = {uid}
+        try:
+            patient = await domain_api.request(
+                "GET", f"/patients/{member['subject_key']}", allow_404=True
+            )
+        except domain_api.DomainApiError as exc:
+            # The volume can still match by its own UID; the doctor labels the rest.
+            logger.warning("could not read the patient of volume %s: %s", uid, exc)
+            patient = None
+        if patient:
+            member_patient[uid] = patient
+            for pid in (patient.get("orthanc_patient_id"), patient.get("name")):
+                identifiers.update(_normalize_patient_ids(pid))
+        member_ids[uid] = identifiers
 
-    records, source_path = _load_clinical_records(workspace_dir)
+    # The clinical files can be large: read them off the event loop.
+    records, source_path = await asyncio.to_thread(_load_clinical_records, workspace_dir)
 
     # ── Match records to members by patient identity only ───────────────────────
     matches: dict[str, tuple[str, dict]] = {}
@@ -270,11 +273,18 @@ async def extract_cohort_labels() -> dict:
             ],
             return_exceptions=True,
         )
-        if any(isinstance(item, Exception) for item in batch):
-            print(f"LLM API Exception: {next(item for item in batch if isinstance(item, Exception))}")
+        # Keep every label that came back: one failed call must not drop the
+        # others (L6). The failed volumes are recorded as "llm_unavailable" below.
+        failures = [item for item in batch if isinstance(item, BaseException)]
+        results = [item for item in batch if not isinstance(item, BaseException)]
+        if failures:
             llm_unavailable = True
-        else:
-            results = list(batch)
+            logger.warning(
+                "%d of %d LLM label extractions failed; first: %r",
+                len(failures),
+                len(batch),
+                failures[0],
+            )
 
     extracted_at = datetime.now(timezone.utc).isoformat()
     by_uid = {item["volume_uid"]: item for item in results}
@@ -344,7 +354,7 @@ async def extract_cohort_labels() -> dict:
     try:
         await domain_api.write_cohort_labels(cohort_id, labels)
     except domain_api.DomainApiError as exc:
-        return {"status": "error", "message": f"Labels were not recorded: {exc}"}
+        return domain_api.error_result_from(exc, "Labels were not recorded")
 
     await emit_view(
         "cohort_labels_output",

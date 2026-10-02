@@ -71,7 +71,7 @@ async def latex_to_pdf(
     ] = [],
 ) -> str:
     """Compile LaTeX and publish to the reports table."""
-    emit("tool_started", "Publishing report…")
+    emit("tool_log", "Publishing report…")
 
     api_base = app_api_url()
     publish_url = f"{api_base}/reports/{report_id}/publish"
@@ -100,7 +100,7 @@ async def latex_to_pdf(
                 if agents_base
                 else f"{api_base}/reports/{report_id}/download"
             )
-            emit("tool_finished", "PDF published successfully.")
+            emit("tool_log", "PDF published successfully.")
             return json.dumps(
                 {
                     "status": "success",

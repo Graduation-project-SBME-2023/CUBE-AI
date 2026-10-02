@@ -1,9 +1,17 @@
-from .._toolkit import tool
+from .._toolkit import error_result, tool
 from ..common.manifests import READ_ONLY
 from pydantic import BaseModel, ConfigDict, Field
 from ..common.workspace import WorkspacePath, workspace_dir
 from pathlib import Path
 import json
+
+def _relative(path: Path, root: Path) -> str:
+    """``path`` relative to the workspace root, or as it is when it lies outside."""
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
+
 
 class BrowseWorkspaceInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
@@ -51,28 +59,27 @@ async def browse_workspace(params: BrowseWorkspaceInput) -> str:
     if ext and not ext.startswith("."):
         ext = f".{ext}"
 
-    resolved = Path(params.directory)
+    # Resolved (L9): "..", symlinks and the drive letter compare like for like
+    # with the workspace root below.
+    resolved = Path(params.directory).resolve()
+    workspace_root = workspace_dir().resolve()
 
     if not resolved.exists():
-        return json.dumps({"status": "error", "message": f"Directory not found: {resolved}"}, indent=2)
+        return error_result("not_found", f"Directory not found: {_relative(resolved, workspace_root)}")
     if not resolved.is_dir():
-        return json.dumps({"status": "error", "message": f"Path is not a directory: {resolved}"}, indent=2)
+        return error_result("invalid_args", f"Path is not a directory: {_relative(resolved, workspace_root)}")
 
     glob_pattern = f"**/*{ext}" if params.recursive else f"*{ext}"
     matches = sorted(resolved.glob(glob_pattern))
 
-    workspace_root = workspace_dir()
-    files = []
-    for f in matches:
-        try:
-            rel = str(f.relative_to(workspace_root))
-        except ValueError:
-            rel = str(f)
-        files.append({"path": rel, "size_kb": round(f.stat().st_size / 1024, 1)})
+    files = [
+        {"path": _relative(f, workspace_root), "size_kb": round(f.stat().st_size / 1024, 1)}
+        for f in matches
+    ]
 
     return json.dumps({
         "status": "ok",
-        "directory": str(resolved.relative_to(workspace_root)),
+        "directory": _relative(resolved, workspace_root),
         "file_type": ext,
         "recursive": params.recursive,
         "count": len(files),

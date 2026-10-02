@@ -38,7 +38,7 @@ async def read_literature_context() -> str:
     Returns:
         str: JSON with 'knowledge_base', 'sources_guide', 'pico', and 'papers' fields.
     """
-    emit("tool_started", "Reading literature context.")
+    emit("tool_log", "Reading literature context.")
 
     try:
         review = await domain_api.latest_literature_review()
@@ -53,7 +53,7 @@ async def read_literature_context() -> str:
             "message": "No literature review found. The planner may not have run the literature review phase.",
         }, indent=2)
 
-    emit("tool_finished", "Literature context successfully retrieved.")
+    emit("tool_log", "Literature context successfully retrieved.")
     summary = review.get("result_summary") or {}
     return json.dumps({
         "status": "ok",

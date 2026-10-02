@@ -1,4 +1,4 @@
-from ..._toolkit import is_error_result, tool
+from ..._toolkit import tool
 from ...common.manifests import READ_ONLY
 from .. import _api
 from typing import Annotated
@@ -21,12 +21,9 @@ async def get_patient(
     1. To find details for a specific person when you know their ID.
     2. To browse or list multiple patients when no specific ID is known (uses pagination).
     """
-    emit("tool_started", "Checking patients' demographics...")
-    emit("tool_progress", "Checking patients' demographics...")
+    emit("tool_log", "Checking patients' demographics...")
     if patient_id is not None:
         result = await _api.read(f"/patients/{patient_id}")
     else:
         result = await _api.read("/patients/", params={"skip": skip, "limit": limit})
-    if not is_error_result(result):
-        emit("tool_finished", "Checking patients' demographics...")
     return result

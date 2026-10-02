@@ -1,6 +1,6 @@
 from pydantic import Field
 from typing import Annotated
-from ..._toolkit import is_error_result, tool
+from ..._toolkit import tool
 from ...common.manifests import READ_ONLY
 from .. import _api
 from ...common.emit import emit
@@ -22,14 +22,11 @@ async def get_volume(
     1. To find details for a specific volume when you know its 'volume_series_instance_uid'.
     2. To browse or list multiple volumes when no specific UID is known (uses pagination).
     """
-    emit('tool_started', 'Checking available study descriptions...')
-    emit('tool_progress', 'Checking available study descriptions...')
+    emit('tool_log', 'Checking available study descriptions...')
     if volume_series_instance_uid is not None:
         result = await _api.read(f"/volumes/{volume_series_instance_uid}")
     else:
         result = await _api.read("/volumes/", params={"skip": skip, "limit": limit})
-    if not is_error_result(result):
-        emit('tool_finished', 'Checking available study descriptions...')
     return result
     
 @tool(

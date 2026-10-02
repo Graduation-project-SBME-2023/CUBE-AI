@@ -1,19 +1,11 @@
-from .._toolkit import tool
+from .._toolkit import error_result, tool
 from ..common.manifests import READ_ONLY
-import requests
-import sys
-import os
-import json
 import httpx
 from agent_system.agents.execution_agents.segmentation.model_catalog import (
     get_enabled_segmentation_model_paths,
 )
 from ..common.emit import emit
-
-base_url = os.environ.get(
-    "INFERENCE_API_URL",
-    os.environ.get("MONAI_URL", "http://localhost:8000"),
-)
+from ..common.service_urls import inference_api_url
 
 @tool(
     visibility={"agent", "main"},
@@ -24,15 +16,15 @@ async def list_models():
     type (automatic or interactive), modality, anatomy, labels, params schema
     and description."""
 
-    emit("tool_started", "Fetching models info")
+    emit("tool_log", "Fetching models info")
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{base_url}/models/")
+            response = await client.get(f"{inference_api_url()}/models/")
             response.raise_for_status()
             models = response.json()
-    except Exception as e:
-        return {"error": str(e)}
+    except (httpx.HTTPError, ValueError) as e:
+        return error_result("unavailable", f"The inference service did not list its models: {e}")
 
     formatted = []
 
@@ -58,6 +50,8 @@ async def list_models():
         })
 
     model_word = "model" if len(formatted) == 1 else "models"
-    emit("tool_finished", f"Fetched {len(formatted)} {model_word}")
+    emit("tool_log", f"Fetched {len(formatted)} {model_word}")
 
-    return json.dumps(formatted)
+    # One type (L11): the list itself, as the model already received it; an
+    # error is an error_result, never a bare dict.
+    return formatted

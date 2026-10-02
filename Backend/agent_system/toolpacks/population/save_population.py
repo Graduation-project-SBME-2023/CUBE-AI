@@ -19,6 +19,5 @@ async def save_final_output(data: dict):
 
     patients = {member["subject_key"] for member in cohort.get("members") or []}
     message = f"Selected {len(datasetlist)} volumes from {len(patients)} patients."
-    emit("tool_started", message)
-    emit("tool_finished", message)
+    emit("tool_log", message)
     return {"status": "success", "cohort_id": cohort["cohort_id"]}
