@@ -146,7 +146,7 @@ export default function HomeDashboard({ onNavigate, onBack }: HomeDashboardProps
           ),
           prompt: session.prompt,
           date: session.updated_at || session.created_at,
-          status: session.status,
+          status: session.control_state,
         }));
         if (!cancelled) {
           setHistory(mapped.slice(0, pageSize));

@@ -22,12 +22,13 @@ import {
   hydrateSession,
 } from '../services/api';
 import { ResearchRouteState } from '../types';
+import { isNodeStatusEvent, NODE_STATUS_EVENT_TYPE } from '../utils/nodeStatusEvent';
 
 const DEFAULT_PHASE = 'planning';
 
 // An output can be emitted several times while an agent works.  A module is
 // considered ready for a user-facing update only after its owning agent has
-// reported COMPLETED through pipeline_agent_status.
+// reported COMPLETED through node_status.
 const OUTPUT_EVENT_AGENTS: Record<string, { agent: string; phase: string }> = {
   lit_review_output: { agent: 'literature_review_agent', phase: 'literature' },
   population_output: { agent: 'study_population_planner_agent', phase: 'data' },
@@ -530,7 +531,7 @@ function ResearchPlaygroundInner() {
       // persisted snapshot last so it cannot roll the UI backwards.
       if (Array.isArray(hydratedExecutionState?.agents)) {
         websocketService.dispatchLocal({
-          type: 'pipeline_agent_status',
+          type: NODE_STATUS_EVENT_TYPE,
           payload: hydratedExecutionState,
           session_id: sessionId,
           replaying: true,
@@ -640,7 +641,7 @@ function ResearchPlaygroundInner() {
       }
 
       // Literature Review is a planning-stage agent, so it does not emit a
-      // pipeline_agent_status entry.  Its own done event is the authoritative
+      // node_status entry.  Its own done event is the authoritative
       // completion signal and follows the same final-data-then-completed flow.
       if (type === 'lit_review_done') {
         updateStateRef.current.completedAgents.add('literature_review_agent');
@@ -672,7 +673,7 @@ function ResearchPlaygroundInner() {
         if (outputForAgent) clearPhaseIndicator(outputForAgent.phase);
       }
 
-      if (type === 'pipeline_agent_status' || type === 'Pipeline_agent_status') {
+      if (isNodeStatusEvent(type)) {
         // Execution has started — unlock the Data & Population tab
         setIsPlanApproved(true);
         const agents = payload?.agents || [];

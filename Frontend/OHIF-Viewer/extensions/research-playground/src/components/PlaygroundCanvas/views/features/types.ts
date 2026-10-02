@@ -6,7 +6,7 @@ export type ExportPaths = Record<string, string>;
 
 export interface FeaturesData {
   status: string;
-  agent_run_id?: string;
+  agent_run_id?: string; // a radiomics tool result key (tool result shapes do not change)
   radiomics_rows?: { created?: number; reused?: number; total?: number };
   exports?: ExportPaths;
   num_subjects?: number;

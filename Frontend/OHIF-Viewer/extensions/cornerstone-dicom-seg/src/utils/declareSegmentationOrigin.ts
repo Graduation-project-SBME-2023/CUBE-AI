@@ -31,7 +31,7 @@ export async function declareAssistedSegmentationOrigin(
   }
 
   try {
-    const response = await fetch(`${getAppApiBaseUrl()}/segmentations/declare-origin`, {
+    const response = await fetch(`${getAppApiBaseUrl()}/segmentation-masks/declare-origin`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

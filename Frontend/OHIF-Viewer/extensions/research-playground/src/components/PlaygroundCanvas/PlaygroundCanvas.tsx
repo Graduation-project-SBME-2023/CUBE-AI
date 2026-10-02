@@ -8,6 +8,7 @@ import FlowEngineWrapper from './FlowEngineWrapper';
 import { registerAllLogRenderers } from './logs/registerRenderers';
 import { getAgentsApiBaseUrl } from '../../utils/apiBase';
 import { resumeSessionPipeline, submitSessionInput } from '../../services/api';
+import { isNodeStatusEvent } from '../../utils/nodeStatusEvent';
 
 interface PlaygroundCanvasProps {
   initialHypothesis?: string;
@@ -553,8 +554,8 @@ export default function PlaygroundCanvas({
         return;
       }
 
-      if (type === 'pipeline_agent_status' || type === 'Pipeline_agent_status') {
-        // Seeing pipeline agent statuses means execution has started — restore mode
+      if (isNodeStatusEvent(type)) {
+        // Seeing node statuses means execution has started — restore mode
         if (modeRef.current === 'planning') {
           setMode('executing');
           modeRef.current = 'executing'; // Update immediately to prevent race conditions
@@ -686,7 +687,7 @@ export default function PlaygroundCanvas({
           // Keep the generic message when the server did not return JSON.
         }
 
-        // current runs each plan step exactly once (UNIQUE(agent_runs.step_id)), so
+        // current runs each plan step exactly once (UNIQUE(node_runs.node_id)), so
         // a session whose steps have already started is *resumed*, not
         // restarted — restarting would mean discarding committed results, which
         // is what the legacy recovery did and what current removed. The backend says
