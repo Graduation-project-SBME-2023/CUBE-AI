@@ -28,6 +28,7 @@ async def _get_json(path: str) -> Any:
     name="read_agent_task_context",
     visibility={"agent"},
     idempotent=True,
+    timeout_s=45,
     **READ_ONLY,
 )
 async def read_agent_task_context() -> dict[str, Any]:

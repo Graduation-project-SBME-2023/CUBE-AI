@@ -9,6 +9,7 @@ from ..result_shape import keep_model_id
 
 @tool(
     visibility={"agent", "main"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_model(

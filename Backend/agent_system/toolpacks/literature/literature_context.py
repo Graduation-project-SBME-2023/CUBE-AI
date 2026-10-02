@@ -20,6 +20,7 @@ from ..common import domain_api
     name="read_literature_context",
     visibility={"agent"},
     idempotent=True,
+    timeout_s=45,
     **READ_ONLY,
 )
 async def read_literature_context() -> str:

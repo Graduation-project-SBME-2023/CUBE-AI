@@ -38,6 +38,8 @@ class BrowseWorkspaceInput(BaseModel):
     name="browse_workspace",
     visibility={"agent", "main"},
     idempotent=True,
+    data_scopes={"phi_read"},
+    timeout_s=30,
     **READ_ONLY,
 )
 async def browse_workspace(params: BrowseWorkspaceInput) -> str:

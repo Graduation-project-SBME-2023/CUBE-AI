@@ -8,6 +8,8 @@ from ...common.emit import emit
 
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_patient(

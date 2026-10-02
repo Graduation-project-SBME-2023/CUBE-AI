@@ -5,6 +5,8 @@ from ..db_reads.segmentations.get_segmentation import masks_for_volume
 
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def check_having_mask(volume_uid: str):

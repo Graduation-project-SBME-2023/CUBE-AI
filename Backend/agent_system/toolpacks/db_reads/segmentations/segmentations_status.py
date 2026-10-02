@@ -5,6 +5,7 @@ from .. import _api
 
 @tool(
     visibility={"agent", "main"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_segmentation_stats():

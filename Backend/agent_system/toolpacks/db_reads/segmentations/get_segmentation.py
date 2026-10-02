@@ -17,6 +17,8 @@ async def masks_for_volume(volume_uid: str):
 
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_segmentation(
@@ -41,6 +43,8 @@ async def get_segmentation(
 
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_segmentation_by_volume(
@@ -57,6 +61,8 @@ async def get_segmentation_by_volume(
 
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_segmentation_by_model(
@@ -73,6 +79,8 @@ async def get_segmentation_by_model(
     
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_invalidate_segmentations(

@@ -8,6 +8,8 @@ from ...common.emit import emit
 
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_volume(
@@ -31,6 +33,8 @@ async def get_volume(
     
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_volumes_by_study(

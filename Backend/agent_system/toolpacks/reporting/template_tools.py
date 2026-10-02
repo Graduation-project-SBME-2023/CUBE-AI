@@ -46,6 +46,7 @@ class GetTemplateInput(BaseModel):
     name="list_latex_templates",
     visibility={"agent"},
     idempotent=True,
+    timeout_s=45,
     **READ_ONLY,
 )
 async def list_latex_templates() -> str:
@@ -98,6 +99,7 @@ async def list_latex_templates() -> str:
     name="get_latex_template",
     visibility={"agent"},
     idempotent=True,
+    timeout_s=45,
     **READ_ONLY,
 )
 async def get_latex_template(params: GetTemplateInput) -> str:

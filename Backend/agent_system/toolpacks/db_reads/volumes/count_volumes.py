@@ -7,6 +7,7 @@ from typing import Annotated
 
 @tool(
     visibility={"agent", "main"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def count_volumes_in_study(

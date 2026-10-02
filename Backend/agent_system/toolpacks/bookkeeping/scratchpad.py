@@ -142,6 +142,8 @@ class ReadAgentInput(BaseModel):
 @tool(
     name="scratchpad_register_agent",
     visibility={"harness"},
+    data_scopes={"db_write"},
+    timeout_s=60,
     **WRITES,
 )
 async def scratchpad_register_agent(role: str = "agent") -> str:
@@ -181,6 +183,8 @@ async def scratchpad_register_agent(role: str = "agent") -> str:
 @tool(
     name="scratchpad_write_note",
     visibility={"agent"},
+    data_scopes={"db_write"},
+    timeout_s=60,
     **WRITES,
 )
 async def scratchpad_write_note(content: str) -> str:
@@ -209,6 +213,8 @@ async def scratchpad_write_note(content: str) -> str:
 @tool(
     name="scratchpad_raise_flag",
     visibility={"agent"},
+    data_scopes={"db_write"},
+    timeout_s=60,
     **WRITES,
 )
 async def scratchpad_raise_flag(level: str = "warning", message: str = "No message provided.") -> str:
@@ -243,6 +249,8 @@ async def scratchpad_raise_flag(level: str = "warning", message: str = "No messa
     name="scratchpad_set_status",
     visibility={"harness"},
     idempotent=True,
+    data_scopes={"db_write"},
+    timeout_s=60,
     **WRITES,
 )
 async def scratchpad_set_status(status: str) -> str:
@@ -281,6 +289,8 @@ async def scratchpad_set_status(status: str) -> str:
     name="scratchpad_write_summary",
     visibility={"agent"},
     idempotent=True,
+    data_scopes={"db_write"},
+    timeout_s=60,
     **WRITES,
 )
 async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str:
@@ -312,6 +322,7 @@ async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str
     name="scratchpad_read_agent",
     visibility={"agent"},
     idempotent=True,
+    timeout_s=45,
     **READ_ONLY,
 )
 async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True) -> str:
@@ -355,6 +366,7 @@ async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True
     name="scratchpad_read_report",
     visibility={"agent"},
     idempotent=True,
+    timeout_s=45,
     **READ_ONLY,
 )
 async def scratchpad_read_report() -> str:

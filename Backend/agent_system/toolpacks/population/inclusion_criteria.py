@@ -10,6 +10,8 @@ from ..common.emit import emit_view
 
 @tool(
     visibility={"agent"},
+    data_scopes={"db_write"},
+    timeout_s=60,
     **WRITES,
 )
 async def write_inclusion_criteria(

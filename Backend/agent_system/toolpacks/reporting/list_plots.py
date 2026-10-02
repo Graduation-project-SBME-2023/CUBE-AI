@@ -20,6 +20,7 @@ _FIGURE_KINDS = ("figure_png", "figure_jpeg")
 
 @tool(
     visibility={"agent"},
+    timeout_s=150,
     **READ_ONLY,
 )
 async def list_report_figures() -> str:

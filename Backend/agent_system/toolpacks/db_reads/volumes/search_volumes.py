@@ -1,5 +1,5 @@
 from ..._toolkit import is_error_result, tool
-from ...common.manifests import READ_ONLY
+from ...common.manifests import READ_ONLY, WRITES
 from .. import _api
 from typing import Annotated
 from pydantic import Field
@@ -8,6 +8,8 @@ from ...common import domain_api
 
 @tool(
     visibility={"agent", "main"},
+    data_scopes={"phi_read"},
+    timeout_s=45,
     **READ_ONLY,
 )
 async def search_volumes(
@@ -24,8 +26,10 @@ async def search_volumes(
 
 
 @tool(
-    visibility={"agent", "main"},
-    **READ_ONLY,
+    visibility={"agent"},
+    data_scopes={"phi_read", "db_write"},
+    timeout_s=90,
+    **WRITES,
 )
 async def search_volumes_by_description(
     words_to_include: Annotated[list[str], Field(description="List of keywords that MUST be present in the volume description or body part examined.")],

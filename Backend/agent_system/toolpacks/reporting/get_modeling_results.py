@@ -106,6 +106,7 @@ def _comparison_section(entry: dict[str, Any]) -> str:
 
 @tool(
     visibility={"agent", "main"},
+    timeout_s=75,
     **READ_ONLY,
 )
 async def get_modeling_results() -> str:
