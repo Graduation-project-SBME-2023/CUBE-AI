@@ -66,10 +66,9 @@ class ToolContext:
 
     session_id: str
     caller: Caller
-    agent_run_id: str | None = None  # the run row of the current node
     node_id: str | None = None
-    graph_version: int | None = None
-    step_id: str | None = None  # legacy plan step, nullable
+    run_id: str | None = None  # the node_runs row of the current node
+    attempt_id: str | None = None  # the run_attempts row: the D24 write fence
     agent_type: str | None = None  # the node's agent (or main_agent)
     subagent: str | None = None  # the internal agent run_agent started
     depth: int = 0  # run_agent nesting; capped by run_agent (MAX_AGENT_DEPTH)
@@ -97,12 +96,6 @@ class ToolContext:
         _set("privacy_mode", coerce_enum(PrivacyMode, self.privacy_mode, "privacy_mode"))
         if isinstance(self.depth, bool) or not isinstance(self.depth, int) or self.depth < 0:
             raise ValueError("depth must be an int >= 0")
-        if self.graph_version is not None and (
-            isinstance(self.graph_version, bool)
-            or not isinstance(self.graph_version, int)
-            or self.graph_version < 0
-        ):
-            raise ValueError("graph_version must be an int >= 0 or None")
         if self.workspace_dir is not None:
             _set("workspace_dir", Path(self.workspace_dir))
 

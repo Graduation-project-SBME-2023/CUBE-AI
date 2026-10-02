@@ -38,7 +38,7 @@ async def emit_view_update(
     """
     try:
         await send_ws_message(
-            msg_type=view_event,
+            event_type=view_event,
             payload=data,
             session_id=session_id,
         )

@@ -53,7 +53,7 @@ async def register_report_image(
         image = await domain_api.request(
             "POST",
             f"/reports/{report_id}/images",
-            json={"artifact_id": artifact_id, "image_key": image_key},
+            json={"file_id": artifact_id, "image_key": image_key},
         )
     except domain_api.DomainApiError as exc:
         return json.dumps({"status": "error", "error_message": str(exc)}, indent=2)
@@ -62,7 +62,7 @@ async def register_report_image(
         {
             "status": "ok",
             "image_key": image["image_key"],
-            "artifact_id": image["artifact_id"],
+            "artifact_id": image["file_id"],  # tool result key, kept
         },
         indent=2,
     )

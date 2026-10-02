@@ -118,7 +118,7 @@ async def approve_cohort(data: dict):
     if event:
         # Broadcast the event PostgreSQL already committed, with its cursor.
         await ws_manager.send_ws_message(
-            event["msg_type"],
+            event["event_type"],
             event["payload"],
             session_id=session_id,
             event_id=event["event_id"],

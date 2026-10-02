@@ -16,11 +16,11 @@ from sqlalchemy import case, func, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from application_api.db.models.agent_runs import AgentRun
+from application_api.db.models.node_runs import NodeRun
 from application_api.db.models.feature_sets import FeatureSet
 from application_api.db.models.radiomics import Radiomics
-from application_api.db.models.steps import PlanStep
-from application_api.repositories import agent_runs as runs_repo
+from application_api.db.models.graph_nodes import GraphNode
+from application_api.repositories import node_runs as runs_repo
 from application_api.repositories import cohorts as cohorts_repo
 from application_api.repositories.radiomics import (
     FEATURE_EXTRACTION_AGENT_TYPE,
@@ -114,7 +114,7 @@ async def _abort(db: AsyncSession, exc: HTTPException) -> HTTPException:
 # ----------------------------------------------------------------------
 _CATALOGUE_COLUMNS = (
     FeatureSet.feature_set_id,
-    FeatureSet.created_by_agent_run_id,
+    FeatureSet.created_by_run_id,
     FeatureSet.cohort_id,
     FeatureSet.set_key,
     FeatureSet.schema_version,
@@ -129,7 +129,7 @@ _CATALOGUE_COLUMNS = (
     case((FeatureSet.frozen_at.isnot(None), "frozen"), else_="building").label("status"),
     FeatureSet.frozen_at,
     FeatureSet.created_at,
-    AgentRun.session_id,
+    NodeRun.session_id,
     func.jsonb_array_length(FeatureSet.feature_names).label("feature_count"),
     # NULL (not zero) when the set was not selected from radiomics rows.
     func.jsonb_array_length(FeatureSet.source_feature_ids).label("source_feature_count"),
@@ -146,7 +146,7 @@ def _catalogue_out(row) -> dict[str, Any]:
 
 def _catalogue_query():
     return select(*_CATALOGUE_COLUMNS).join(
-        AgentRun, AgentRun.agent_run_id == FeatureSet.created_by_agent_run_id
+        NodeRun, NodeRun.run_id == FeatureSet.created_by_run_id
     )
 
 
@@ -185,18 +185,18 @@ async def get_feature_set(
 async def list_session_feature_sets(db: AsyncSession, session_id: UUID) -> list[dict[str, Any]]:
     result = await db.execute(
         _catalogue_query()
-        .join(PlanStep, PlanStep.step_id == AgentRun.step_id)
-        .where(AgentRun.session_id == session_id)
-        .order_by(PlanStep.step_order, FeatureSet.created_at, FeatureSet.set_key)
+        .join(GraphNode, GraphNode.node_id == NodeRun.node_id)
+        .where(NodeRun.session_id == session_id)
+        .order_by(GraphNode.position, FeatureSet.created_at, FeatureSet.set_key)
     )
     return [_catalogue_out(row) for row in result]
 
 
-async def find_feature_set(db: AsyncSession, agent_run_id: UUID, set_key: str) -> FeatureSet | None:
+async def find_feature_set(db: AsyncSession, run_id: UUID, set_key: str) -> FeatureSet | None:
     return (
         await db.execute(
             select(FeatureSet).where(
-                FeatureSet.created_by_agent_run_id == agent_run_id,
+                FeatureSet.created_by_run_id == run_id,
                 FeatureSet.set_key == set_key,
             )
         )
@@ -207,15 +207,15 @@ async def find_feature_set(db: AsyncSession, agent_run_id: UUID, set_key: str) -
 # Create (insert-or-read)
 # ----------------------------------------------------------------------
 async def create_feature_set(
-    db: AsyncSession, agent_run_id: UUID, set_key: str, data: schemas.FeatureSetWrite
+    db: AsyncSession, run_id: UUID, set_key: str, data: schemas.FeatureSetWrite
 ) -> tuple[dict[str, Any], bool]:
     if not set_key.strip():
         raise HTTPException(status_code=422, detail="set_key must not be blank")
-    run = await require_producer_run(db, agent_run_id, FEATURE_EXTRACTION_AGENT_TYPE, "Feature sets")
+    run = await require_producer_run(db, run_id, FEATURE_EXTRACTION_AGENT_TYPE, "Feature sets")
     await lock_session(db, run.session_id)
 
     cohort = await cohorts_repo.get_cohort(db, data.cohort_id)
-    cohort_run = await runs_repo.get_run(db, cohort.created_by_agent_run_id)
+    cohort_run = await runs_repo.get_run(db, cohort.created_by_run_id)
     if cohort_run.session_id != run.session_id:
         raise await _abort(
             db,
@@ -258,12 +258,12 @@ async def create_feature_set(
     if data.source_feature_ids is not None:
         sources = (
             await db.execute(
-                select(Radiomics.id, Radiomics.session_id, Radiomics.source_digest).where(
-                    Radiomics.id.in_(data.source_feature_ids)
+                select(Radiomics.radiomics_feature_id, Radiomics.session_id, Radiomics.source_digest).where(
+                    Radiomics.radiomics_feature_id.in_(data.source_feature_ids)
                 )
             )
         ).all()
-        found = {str(row.id): row for row in sources}
+        found = {str(row.radiomics_feature_id): row for row in sources}
         missing = [item for item in source_ids if item not in found]
         foreign = [item for item, row in found.items() if row.session_id != run.session_id]
         legacy = [item for item, row in found.items() if row.source_digest is None]
@@ -306,7 +306,7 @@ async def create_feature_set(
         source_digest=source_digest,
     )
 
-    existing = await find_feature_set(db, agent_run_id, set_key)
+    existing = await find_feature_set(db, run_id, set_key)
     if existing is not None:
         if existing.manifest_digest != digest:
             raise await _abort(
@@ -328,7 +328,7 @@ async def create_feature_set(
         return await get_feature_set(db, existing.feature_set_id), False
 
     feature_set = FeatureSet(
-        created_by_agent_run_id=agent_run_id,
+        created_by_run_id=run_id,
         cohort_id=data.cohort_id,
         set_key=set_key,
         schema_version=data.schema_version,
@@ -361,7 +361,7 @@ async def create_feature_set(
 async def freeze_feature_set(db: AsyncSession, feature_set_id: UUID) -> tuple[dict[str, Any], Any]:
     """Verify and freeze. Idempotent once frozen; publishes nothing then."""
     feature_set = await _entity(db, feature_set_id)
-    run = await runs_repo.get_run(db, feature_set.created_by_agent_run_id)
+    run = await runs_repo.get_run(db, feature_set.created_by_run_id)
     session_id = run.session_id
     await lock_session(db, session_id)
     await db.execute(
@@ -408,7 +408,7 @@ async def freeze_feature_set(db: AsyncSession, feature_set_id: UUID) -> tuple[di
                     "feature_set_id": str(feature_set_id),
                     "set_key": feature_set.set_key,
                     "cohort_id": str(feature_set.cohort_id),
-                    "created_by_agent_run_id": str(feature_set.created_by_agent_run_id),
+                    "created_by_run_id": str(feature_set.created_by_run_id),
                     "feature_count": len(feature_set.feature_names),
                     "label_supervised_on_full_data": bool(
                         feature_set.selection.get("label_supervised_on_full_data")

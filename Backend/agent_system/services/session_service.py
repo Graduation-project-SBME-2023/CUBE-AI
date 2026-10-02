@@ -11,7 +11,7 @@ from .execution_state import planning_start_allowed
 from .run_context import (
     PlannedRun,
     build_compiled_prompt,
-    build_input_refs,
+    build_resolved_inputs,
     first_incomplete,
     planned_runs,
 )
@@ -30,22 +30,22 @@ class SessionPlanningConflict(RuntimeError):
 # ---------------------------------------------------------------------------
 # Per-step execution state
 #
-# `plan_steps` has no `status` and no `logs` column — a step is a definition,
-# and execution state belongs to `agent_runs`. Between steps E and F this
+# `graph_nodes` has no `status` and no `logs` column — a step is a definition,
+# and execution state belongs to `node_runs`. Between steps E and F this
 # service kept it in memory, which meant a resume after a process restart could
 # not be honoured. It is durable now: every function below reads
-# `/agent-runs/session/{id}`, so a fresh process reports exactly what the
+# `/runs/session/{id}`, so a fresh process reports exactly what the
 # database says happened, and nothing has to be remembered to be recovered.
 # ---------------------------------------------------------------------------
 
 
 async def load_runs(session_id: str) -> list[PlannedRun]:
-    """The session's approved runs, in step order. Empty means "not approved"."""
-    return planned_runs(await BackendClient.get_agent_runs(session_id))
+    """The session's approved runs, in node order. Empty means "not approved"."""
+    return planned_runs(await BackendClient.get_node_runs(session_id))
 
 
 # The in-memory `SessionState` the task manager tracks and the persisted DB
-# `status` (see application_api SESSION_STATUSES) are two different vocabularies.
+# `control_state` (see application_api SESSION_CONTROL_STATES) are two different vocabularies.
 # IDLE has no DB counterpart — a session is never persisted before planning
 # starts, so it is left out on purpose. CANCELLED maps to "failed": the DB has
 # no "cancelled" status, and both mean "stopped without completing".
@@ -236,8 +236,8 @@ class SessionService:
         # that is step 1; after an interruption it is where the work stopped,
         # and **nothing is deleted to get there**.
         resume_point = first_incomplete(runs)
-        session.resume_from_step_id = (
-            resume_point.step_id if resume_point and started else None
+        session.resume_from_node_id = (
+            resume_point.node_id if resume_point and started else None
         )
 
         self._clear_session_input(session_id)
@@ -293,21 +293,21 @@ class SessionService:
             if reset_runtime_state is not None:
                 await reset_runtime_state(session_id, interrupted.agent_type)
 
-            session.resume_from_step_id = interrupted.step_id
+            session.resume_from_node_id = interrupted.node_id
             session.last_error = None
 
-            status = await BackendClient.get_agent_run_status(session_id)
+            status = await BackendClient.get_node_status(session_id)
             if status is not None:
                 await self._ws_send(
-                    "pipeline_agent_status", status, session_id=session_id
+                    "node_status", status, session_id=session_id
                 )
             await self._ws_send(
                 "pipeline_resume_prepared",
                 {
                     "interrupted_agent": interrupted.agent_type,
-                    "step_id": interrupted.step_id,
-                    "agent_run_id": interrupted.agent_run_id,
-                    "step_order": interrupted.step_order,
+                    "node_id": interrupted.node_id,
+                    "run_id": interrupted.run_id,
+                    "position": interrupted.position,
                     # Stated explicitly because the legacy response listed the
                     # artifacts it had just destroyed here.
                     "cleared_artifacts": [],
@@ -325,15 +325,15 @@ class SessionService:
             logger.info(
                 "[%s] Resumed pipeline at step %s (%s), deleting nothing",
                 session_id,
-                interrupted.step_order,
+                interrupted.position,
                 interrupted.agent_type,
             )
             return {
                 "session_id": session_id,
                 "status": "resume_started",
                 "interrupted_agent": interrupted.agent_type,
-                "step_id": interrupted.step_id,
-                "agent_run_id": interrupted.agent_run_id,
+                "node_id": interrupted.node_id,
+                "run_id": interrupted.run_id,
                 "cleared_artifacts": [],
             }
 
@@ -382,8 +382,8 @@ class SessionService:
             # path (running -> pausing -> paused); everything else is one
             # guarded hop from wherever the session currently is.
             if db_status == "paused":
-                await BackendClient.set_session_status(session.session_id, "pausing")
-            result = await BackendClient.set_session_status(session.session_id, db_status)
+                await BackendClient.set_session_control_state(session.session_id, "pausing")
+            result = await BackendClient.set_session_control_state(session.session_id, db_status)
             persisted = result is not None
 
         await self._ws_send(
@@ -603,7 +603,7 @@ class SessionService:
             if not queued:
                 logger.warning(
                     f"[{session.session_id}] No compiled task message for step "
-                    f"{step.step_order} ({step.module}); it will execute on its "
+                    f"{step.position} ({step.module}); it will execute on its "
                     "definition alone"
                 )
                 continue
@@ -612,8 +612,8 @@ class SessionService:
             step.task_message = queued.pop(0)
             attached.append(
                 {
-                    "step_id": step.id,
-                    "step_order": step.step_order,
+                    "node_id": step.id,
+                    "position": step.position,
                     "agent_type": step.module,
                     "task_id": step.task_message.task_id,
                 }
@@ -640,7 +640,7 @@ class SessionService:
     ) -> None:
         """Broadcast the in-flight agent view."""
         await self._ws_send(
-            "pipeline_agent_status", {"agents": agents}, session_id=session.session_id
+            "node_status", {"agents": agents}, session_id=session.session_id
         )
 
     async def update_agent_tool_logs(
@@ -648,8 +648,8 @@ class SessionService:
     ) -> None:
         await self._ws_send(log.get("type"), log.get("payload"), log.get("session_id"))
 
-    async def update_tool_views(self, session, agent, msg_type, payload):
-        await self._ws_send(msg_type, payload, session.session_id)
+    async def update_tool_views(self, session, agent, event_type, payload):
+        await self._ws_send(event_type, payload, session.session_id)
 
     async def persist_agent_status(
         self,
@@ -672,9 +672,9 @@ class SessionService:
             {
                 "state": "RUNNING",
                 "current_agent": run.agent_type,
-                "step_id": run.step_id,
-                "step_order": run.step_order,
-                "agent_run_id": run.agent_run_id,
+                "node_id": run.node_id,
+                "position": run.position,
+                "run_id": run.run_id,
             },
             session_id=session.session_id,
         )
@@ -695,9 +695,9 @@ class SessionService:
     async def claim_run(self, session: Session, run: PlannedRun) -> None:
         """Claim the run immediately before its step starts."""
         current = await load_runs(session.session_id)
-        upstream = [item for item in current if item.step_order < run.step_order]
+        upstream = [item for item in current if item.position < run.position]
         this_run = next(
-            (item for item in current if item.step_id == run.step_id), run
+            (item for item in current if item.node_id == run.node_id), run
         )
 
         if this_run.compiled_prompt:
@@ -708,26 +708,26 @@ class SessionService:
             compiled_prompt = build_compiled_prompt(this_run, upstream)
 
         session_row = await BackendClient.get_session(session.session_id) or {}
-        input_refs = build_input_refs(this_run, upstream, session_row)
+        resolved_inputs = build_resolved_inputs(this_run, upstream, session_row)
 
-        result = await BackendClient.start_agent_run(
-            run.agent_run_id, compiled_prompt, input_refs
+        result = await BackendClient.start_node_run(
+            run.run_id, compiled_prompt, resolved_inputs
         )
         await self._broadcast_committed_event(session, result)
 
     async def finish_run(self, session: Session, run: PlannedRun) -> None:
         """Close the run when its step ends."""
-        result = await BackendClient.complete_agent_run(run.agent_run_id)
+        result = await BackendClient.complete_node_run(run.run_id)
         await self._broadcast_committed_event(session, result)
 
     async def fail_run(
         self, session: Session, run: PlannedRun, error: BaseException
     ) -> None:
-        result = await BackendClient.fail_agent_run(
-            run.agent_run_id,
+        result = await BackendClient.fail_node_run(
+            run.run_id,
             code=type(error).__name__,
             message=str(error) or type(error).__name__,
-            details={"schema_version": 1, "step_order": run.step_order},
+            details={"schema_version": 1, "position": run.position},
         )
         session.last_error = str(error)
         await self._broadcast_committed_event(session, result)
@@ -740,7 +740,7 @@ class SessionService:
         if not event:
             return
         await self.ws.send_ws_message(
-            event.get("msg_type"),
+            event.get("event_type"),
             event.get("payload"),
             session_id=session.session_id,
             event_id=event.get("event_id"),
@@ -748,7 +748,7 @@ class SessionService:
 
     async def recover_execution_state(self, session_id: str) -> dict | None:
         """Replay the per-agent status for a reconnecting frontend."""
-        status = await BackendClient.get_agent_run_status(session_id)
+        status = await BackendClient.get_node_status(session_id)
         if not status or not status.get("agents"):
             return None
         return status

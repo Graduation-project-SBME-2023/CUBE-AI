@@ -135,7 +135,7 @@ class SessionStore:
         )
 
         try:
-            runs = await BackendClient.get_agent_runs(session_id)
+            runs = await BackendClient.get_node_runs(session_id)
         except Exception as e:
             logger.error(
                 f"[{session_id}] Failed to fetch agent runs during hydration: {e}"
@@ -143,18 +143,18 @@ class SessionStore:
             runs = []
 
         if runs:
-            # Execution state comes from `agent_runs` now, so a hydrated
+            # Execution state comes from `node_runs` now, so a hydrated
             # session reports what actually happened instead of assuming
             # nothing did. A persisted RUNNING row cannot mean an asyncio task
             # survived a process restart, so it hydrates as PAUSED: hydration
             # must never imply permission to create a replacement task.
             session.state = SessionState[infer_recovered_session_state(runs)]
-            by_step = {str(run.get("step_id")): run for run in runs}
+            by_step = {str(run.get("node_id")): run for run in runs}
             for plan_step in session.plan.steps:
                 run = by_step.get(str(plan_step.id))
                 if run is None:
                     continue
-                plan_step.agent_run_id = str(run.get("agent_run_id") or "")
+                plan_step.run_id = str(run.get("run_id") or "")
                 plan_step.run_status = str(run.get("status") or "pending")
                 plan_step.started_at = run.get("started_at")
                 plan_step.completed_at = run.get("completed_at")

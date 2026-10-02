@@ -5,6 +5,8 @@ import httpx
 import os
 from service_urls import CONTROL_API_URL
 
+from ..result_shape import keep_model_id
+
 base_url = CONTROL_API_URL
 
 @mcp.tool()
@@ -22,10 +24,10 @@ async def get_segmentation(
     """
     async with httpx.AsyncClient() as client:
         if label_uid is not None:
-            response = await client.get(f"{base_url}/segmentations/{label_uid}")
+            response = await client.get(f"{base_url}/segmentation-masks/{label_uid}")
         else:
             response = await client.get(
-                base_url + "/segmentations/",
+                base_url + "/segmentation-masks/",
                 params={"skip": skip, "limit": limit}
             )
 
@@ -35,7 +37,7 @@ async def get_segmentation(
         except ValueError:
             return {"error": "Invalid JSON returned", "raw": response.text}
 
-        return {"data": data}
+        return {"data": keep_model_id(data)}
     
     
 
@@ -50,14 +52,14 @@ async def get_segmentation_by_volume(
     1. To retrieve the segmentation masks or labels for a known volume using its 'volume_uid' (e.g., "Show me the segmentations for Volume X").
     """
     async with httpx.AsyncClient() as client:
-        response = await client.get(f"{base_url}/segmentations/by-volume/{volume_uid}")
+        response = await client.get(f"{base_url}/segmentation-masks/by-volume/{volume_uid}")
         response.raise_for_status()
         try:
             data = response.json()
         except ValueError:
             return {"error": "Invalid JSON returned", "raw": response.text}
 
-        return {"data": data}
+        return {"data": keep_model_id(data)}
 
 @mcp.tool()
 async def get_segmentation_by_model(
@@ -70,14 +72,14 @@ async def get_segmentation_by_model(
     1. To filter segmentations based on the model that created them (e.g., "Show me all segmentations produced by Model-X").
     """
     async with httpx.AsyncClient() as client:
-        response = await client.get(f"{base_url}/segmentations/by-model/{model_name}")
+        response = await client.get(f"{base_url}/segmentation-masks/by-model/{model_name}")
         response.raise_for_status()
         try:
             data = response.json()
         except ValueError:
             return {"error": "Invalid JSON returned", "raw": response.text}
 
-        return {"data": data}
+        return {"data": keep_model_id(data)}
     
     
 @mcp.tool()
@@ -93,7 +95,7 @@ async def get_invalidate_segmentations(
     """
     async with httpx.AsyncClient() as client:
         response = await client.get(
-                    base_url + "/segmentations/",
+                    base_url + "/segmentation-masks/",
                     params={"skip": skip, "limit": limit}
                 )
 
@@ -103,4 +105,4 @@ async def get_invalidate_segmentations(
         except ValueError:
             return {"error": "Invalid JSON returned", "raw": response.text}
 
-        return {"data": data}
+        return {"data": keep_model_id(data)}

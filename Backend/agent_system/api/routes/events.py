@@ -43,7 +43,7 @@ async def receive_event(event: ToolEvent | latex_output):
     logger.info(f"Received tool event: {event}")
     if isinstance(event, latex_output):
         await send_ws_message(
-            msg_type="latex_output",
+            event_type="latex_output",
             payload=event.content.get("frontend_data"),
             session_id=event.session_id,
         )

@@ -27,10 +27,11 @@ class ChatMessage(Base):
     role = Column(String(50), nullable=False)  # e.g., 'user', 'assistant', 'system'
     text = Column(Text, nullable=False)        # actual message text
 
-    # Optional extra data
-    extra_data = Column(JSONB, nullable=True)   # e.g., attachments, metadata, or any future fields
+    # Optional extra data (`metadata` is reserved on declarative classes,
+    # hence the attribute name).
+    metadata_ = Column("metadata", JSONB, nullable=True)   # e.g., attachments or any future fields
 
-    timestamp = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     chat = relationship("Chat", back_populates="messages")
 

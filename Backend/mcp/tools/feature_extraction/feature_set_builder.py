@@ -147,7 +147,7 @@ def wide_table_from_rows(
                 )
             values[column] = finite_or_none(value)
         present.setdefault(volume, set()).add(target)
-        source_ids.append(str(row["id"]))
+        source_ids.append(str(row["radiomics_feature_id"]))
         if row.get("source_digest"):
             source_digests.append(str(row["source_digest"]))
 

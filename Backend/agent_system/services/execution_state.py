@@ -2,9 +2,9 @@
 
 from collections.abc import Iterable, Mapping
 
-# The four agent_runs statuses. A human-in-the-loop wait is NOT one of them:
+# The four node_runs statuses. A human-in-the-loop wait is NOT one of them:
 # an agent waiting for a review is still running, and the wait is carried as a
-# ws_log event rather than as a fifth status nothing could transition out of.
+# session_events row rather than as a fifth status nothing could transition out of.
 PENDING = "pending"
 RUNNING = "running"
 COMPLETED = "completed"

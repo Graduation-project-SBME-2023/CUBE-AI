@@ -169,7 +169,7 @@ def build_segmentation_snapshot(
 
     return {
         "runId": next(
-            (str(item["run_id"]) for item in ordered if item.get("run_id")),
+            (str(item["batch_correlation_id"]) for item in ordered if item.get("batch_correlation_id")),
             None,
         ),
         "targetRoi": ", ".join(label for label in target_labels if label),

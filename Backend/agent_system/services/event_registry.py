@@ -49,8 +49,8 @@ DURABLE_EVENT_TYPES: frozenset[str] = frozenset({
     "task_messages",  # the only place this is ever produced -- see plan-state's own note
     "planning_complete",
     # Execution status (api/runners.py, services/session_service.py,
-    # application_api/repositories/agent_runs.py via replay)
-    "pipeline_agent_status",
+    # application_api/repositories/node_runs.py via replay)
+    "node_status",
     "run_finished",
     "run_stopped",
     "agent_waiting_for_user_input",  # blocks the pipeline until a human resolves it
@@ -79,10 +79,10 @@ DURABLE_EVENT_TYPES: frozenset[str] = frozenset({
 })
 
 # Superseded by whatever comes next, or a live mirror of state that is
-# already durable elsewhere (a DB column, an agent_runs row) -- replaying
+# already durable elsewhere (a DB column, a node_runs row) -- replaying
 # these would either be redundant or show a stale mid-transition snapshot.
 EPHEMERAL_EVENT_TYPES: frozenset[str] = frozenset({
-    "msg",  # transient chat text; nothing rebuilds a chat log from ws_logs
+    "msg",  # transient chat text; nothing rebuilds a chat log from session_events
     "planning_failed",  # error toast; the durable plan/hypothesis already reflect the real state
     "lit_review_log",  # streaming progress lines
     "lit_review_node",  # "add the canvas node" trigger, superseded by lit_review_output
@@ -90,10 +90,10 @@ EPHEMERAL_EVENT_TYPES: frozenset[str] = frozenset({
     "modules_matched",  # phase-entry flag
     "run_status",  # explicitly "live only" in session_service.py -- the run row is the durable copy
     "pipeline_resume_prepared",  # one-shot resume notice
-    "state_update",  # live mirror of sessions.status, already persisted by set_session_status
+    "state_update",  # live mirror of sessions.control_state, already persisted by set_session_control_state
     "tool_update",  # streaming tool_started/tool_progress/tool_finished ticks
     "agent_waiting_resolved",  # transient unblock signal, paired with the durable *_wait above
-    "scratchpad_update",  # live mirror of agent_runs.durable_notes, already persisted there
+    "scratchpad_update",  # live mirror of node_runs.scratchpad_notes, already persisted there
     # Named by WEBSOCKET_FIX_PLAN.md principle 4 as the canonical ephemeral
     # examples; not emitted as a top-level type by anything today (tool
     # progress currently travels inside "tool_update"'s payload), registered
@@ -110,24 +110,32 @@ EPHEMERAL_EVENT_TYPES: frozenset[str] = frozenset({
     "replay_failed",
 })
 
+# Old durable event types: never emitted any more, but rows of these types
+# stay in session_events (historical payloads are not rewritten) and are
+# replayed as they are. Phase 6.1 renamed `pipeline_agent_status` to
+# `node_status`; the old name lives only here and in the replay consumers.
+LEGACY_DURABLE_EVENT_TYPES: frozenset[str] = frozenset({
+    "pipeline_agent_status",
+})
+
 _OVERLAP = DURABLE_EVENT_TYPES & EPHEMERAL_EVENT_TYPES
 assert not _OVERLAP, f"Event types classified as both durable and ephemeral: {_OVERLAP}"
 
 
-def classify(msg_type: str) -> EventClass:
+def classify(event_type: str) -> EventClass:
     """Durable unless explicitly registered as ephemeral.
 
     An unregistered type is a registry gap, not evidence the event is safe
     to drop -- treating it as durable is the fail-safe default. See the
     module docstring for why this does not raise.
     """
-    if msg_type in EPHEMERAL_EVENT_TYPES:
+    if event_type in EPHEMERAL_EVENT_TYPES:
         return EventClass.EPHEMERAL
-    if msg_type not in DURABLE_EVENT_TYPES:
+    if event_type not in DURABLE_EVENT_TYPES | LEGACY_DURABLE_EVENT_TYPES:
         logger.error(
             "Event type %r is not registered in event_registry.py as durable "
             "or ephemeral (WEBSOCKET_FIX_PLAN.md WS-05); persisting it by "
             "default. Add it to DURABLE_EVENT_TYPES or EPHEMERAL_EVENT_TYPES.",
-            msg_type,
+            event_type,
         )
     return EventClass.DURABLE

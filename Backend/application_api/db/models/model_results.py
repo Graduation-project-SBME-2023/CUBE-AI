@@ -27,9 +27,9 @@ class ModelResult(Base):
     model_result_id = Column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    created_by_agent_run_id = Column(
+    created_by_run_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("agent_runs.agent_run_id", ondelete="RESTRICT"),
+        ForeignKey("node_runs.run_id", ondelete="RESTRICT"),
         nullable=False,
     )
     cohort_id = Column(
@@ -56,15 +56,15 @@ class ModelResult(Base):
     environment = Column(JSONB, nullable=False)
     metrics = Column(JSONB(none_as_null=True), nullable=True)
     dataset_digest = Column(Text, nullable=False)
-    predictions_artifact_id = Column(
+    predictions_file_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("artifacts.artifact_id", ondelete="RESTRICT"),
+        ForeignKey("stored_files.file_id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
     )
-    input_artifact_id = Column(
+    input_file_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("artifacts.artifact_id", ondelete="RESTRICT"),
+        ForeignKey("stored_files.file_id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
     )
@@ -76,10 +76,10 @@ class ModelResult(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "created_by_agent_run_id",
+            "created_by_run_id",
             "comparison_key",
             "variant_key",
-            name="uq_model_results_created_by_agent_run_id",
+            name="uq_model_results_created_by_run_id",
         ),
         # The set belongs to this result's cohort.
         ForeignKeyConstraint(
@@ -91,7 +91,7 @@ class ModelResult(Base):
         # One selected variant per comparison.
         Index(
             "uq_model_results_one_selected",
-            "created_by_agent_run_id",
+            "created_by_run_id",
             "comparison_key",
             unique=True,
             postgresql_where=text("selected"),
@@ -102,7 +102,7 @@ class ModelResult(Base):
         CheckConstraint("status IN ('building', 'ready', 'failed')", name="status"),
         CheckConstraint("dataset_digest ~ '^[0-9a-f]{64}$'", name="dataset_digest_is_sha256"),
         CheckConstraint(
-            "feature_set_id IS NOT NULL OR input_artifact_id IS NOT NULL",
+            "feature_set_id IS NOT NULL OR input_file_id IS NOT NULL",
             name="input_is_captured",
         ),
         CheckConstraint(

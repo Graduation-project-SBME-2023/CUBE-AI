@@ -14,7 +14,7 @@ from sqlalchemy.future import select
 from application_api.db.models.patient import Patient
 from application_api.db.models.study import Study
 from application_api.db.models.volume import Volume
-from application_api.db.models.segmentation import Segmentation
+from application_api.db.models.segmentation_masks import SegmentationMask
 from application_api.services.orthanc_client import ORTHANC_URL, create_orthanc_session
 
 logger = logging.getLogger(__name__)
@@ -226,8 +226,8 @@ async def _get_or_create_segmentation(
     target_label: str | None,
     generation_method: str,
     created_at: datetime = None,
-) -> Segmentation | None:
-    """Find or create a Segmentation record. Returns None if the referenced volume is missing."""
+) -> SegmentationMask | None:
+    """Find or create a SegmentationMask record. Returns None if the referenced volume is missing."""
     created_at = created_at or datetime.now(timezone.utc)
 
     if not volume_uid:
@@ -246,7 +246,7 @@ async def _get_or_create_segmentation(
         return None
 
     stmt = (
-        pg_insert(Segmentation)
+        pg_insert(SegmentationMask)
         .values(
             label_series_instance_uid=label_uid,
             orthanc_series_id=orthanc_series_id,
@@ -258,7 +258,7 @@ async def _get_or_create_segmentation(
             # tell an assisted mask from a pipeline mask — both emit the same
             # `dd/mm/yyyy - model - label` SeriesDescription — so it records
             # `imported`, which is not reusable inventory. A producer declares
-            # the real origin through POST /segmentations/declare-origin.
+            # the real origin through POST /segmentation-masks/declare-origin.
             origin="imported",
             created_at=created_at,
         )
@@ -267,7 +267,7 @@ async def _get_or_create_segmentation(
     await db.execute(stmt)
 
     result = await db.execute(
-        select(Segmentation).where(Segmentation.label_series_instance_uid == label_uid)
+        select(SegmentationMask).where(SegmentationMask.label_series_instance_uid == label_uid)
     )
     seg = result.scalar_one()
 
@@ -573,9 +573,9 @@ async def mark_series_unavailable(db: AsyncSession, dicom_series_uid: str) -> bo
 
 
 async def mark_segmentation_unavailable(db: AsyncSession, dicom_series_uid: str) -> bool:
-    """Mark a Segmentation unavailable after Orthanc lost it."""
+    """Mark a SegmentationMask unavailable after Orthanc lost it."""
     result = await db.execute(
-        select(Segmentation).where(Segmentation.label_series_instance_uid == dicom_series_uid)
+        select(SegmentationMask).where(SegmentationMask.label_series_instance_uid == dicom_series_uid)
     )
     seg = result.scalar_one_or_none()
     if seg:
@@ -602,9 +602,9 @@ async def mark_study_unavailable(db: AsyncSession, dicom_study_uid: str) -> bool
         .values(archive_status="unavailable", updated_at=datetime.now(timezone.utc))
     )
     await db.execute(
-        update(Segmentation)
+        update(SegmentationMask)
         .where(
-            Segmentation.volume_series_instance_uid.in_(
+            SegmentationMask.volume_series_instance_uid.in_(
                 select(Volume.volume_series_instance_uid).where(
                     Volume.study_uid == dicom_study_uid
                 )

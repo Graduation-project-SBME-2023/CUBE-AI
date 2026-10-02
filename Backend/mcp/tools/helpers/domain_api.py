@@ -40,15 +40,15 @@ def session_id() -> str:
     return os.environ.get("SESSION_ID", "")
 
 
-def agent_run_id() -> str:
-    return os.environ.get("AGENT_RUN_ID", "")
+def bound_run_id() -> str:
+    return os.environ.get("RUN_ID", "")
 
 
 def require_run() -> str:
-    run_id = agent_run_id()
+    run_id = bound_run_id()
     if not run_id:
         raise DomainApiError(
-            "AGENT_RUN_ID is not set in the MCP environment; this tool is not bound to "
+            "RUN_ID is not set in the MCP environment; this tool is not bound to "
             "an approved plan step and cannot record domain results."
         )
     return run_id
@@ -107,14 +107,14 @@ async def request(
 async def population_run_id(for_session: str | None = None) -> str:
     """The run whose cohort this session's population is. Inside the population agent it is simply this run."""
     target_session = for_session or require_session()
-    if not for_session and agent_run_id():
-        run = await request("GET", f"/agent-runs/{agent_run_id()}")
-        if (run.get("step") or {}).get("agent_type") == POPULATION_AGENT_TYPE:
-            return str(run["agent_run_id"])
+    if not for_session and bound_run_id():
+        run = await request("GET", f"/runs/{bound_run_id()}")
+        if (run.get("node") or {}).get("target_name") == POPULATION_AGENT_TYPE:
+            return str(run["run_id"])
     resolved = await request(
-        "GET", f"/agent-runs/session/{target_session}/by-agent-type/{POPULATION_AGENT_TYPE}"
+        "GET", f"/runs/session/{target_session}/by-target/{POPULATION_AGENT_TYPE}"
     )
-    return str(resolved["run"]["agent_run_id"])
+    return str(resolved["run"]["run_id"])
 
 
 async def upsert_population_cohort(
@@ -170,7 +170,7 @@ async def cohort_analysis_rows(cohort_id: str) -> list[dict[str, Any]]:
 # ----------------------------------------------------------------------
 async def reviewed_masks(for_session: str | None = None) -> list[dict[str, Any]]:
     return await request(
-        "GET", f"/segmentation-runs/session/{for_session or require_session()}/reviewed-masks"
+        "GET", f"/segmentation-batches/session/{for_session or require_session()}/reviewed-masks"
     )
 
 
@@ -194,10 +194,10 @@ async def record_radiomics_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 async def run_radiomics_rows(
-    agent_run_id: str | None = None, *, include_features: bool = True
+    run_id: str | None = None, *, include_features: bool = True
 ) -> list[dict[str, Any]]:
     """Every row one run recorded, paged."""
-    run_id = agent_run_id or require_run()
+    run_id = run_id or require_run()
     rows: list[dict[str, Any]] = []
     skip, page = 0, 500
     while True:
@@ -205,7 +205,7 @@ async def run_radiomics_rows(
             "GET",
             f"/radiomics/session/{require_session()}",
             params={
-                "agent_run_id": run_id,
+                "run_id": run_id,
                 "include_features": "true" if include_features else "false",
                 "skip": skip,
                 "limit": page,
@@ -298,17 +298,17 @@ async def list_session_artifacts(kind: str | None = None) -> list[dict[str, Any]
     `figure_png`; omit it to list every kind."""
     params = {"kind": kind} if kind else None
     return await request(
-        "GET", f"/artifacts/session/{require_session()}", params=params, timeout=_LONG_TIMEOUT
+        "GET", f"/files/session/{require_session()}", params=params, timeout=_LONG_TIMEOUT
     )
 
 
-async def artifact_content(artifact_id: str) -> bytes:
+async def artifact_content(file_id: str) -> bytes:
     """Retained bytes, e.g. a model's per-case predictions."""
     async with httpx.AsyncClient(timeout=_LONG_TIMEOUT) as client:
-        response = await client.get(f"{app_api_url()}/artifacts/{artifact_id}/content")
+        response = await client.get(f"{app_api_url()}/files/{file_id}/content")
     if response.status_code >= 400:
         raise DomainApiError(
-            f"GET /artifacts/{artifact_id}/content -> {response.status_code}",
+            f"GET /files/{file_id}/content -> {response.status_code}",
             status_code=response.status_code,
             body=response.text[:600],
         )
@@ -327,20 +327,20 @@ async def publish_artifact(
     mime_type: str,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Store retained bytes in `artifacts.body`."""
+    """Store retained bytes in `stored_files.body`."""
     form: dict[str, str] = {
         "session_id": require_session(),
         "logical_key": logical_key,
         "kind": kind,
         "display_filename": filename,
     }
-    if agent_run_id():
-        form["created_by_agent_run_id"] = agent_run_id()
+    if bound_run_id():
+        form["created_by_run_id"] = bound_run_id()
     if metadata:
         form["metadata"] = jsonlib.dumps(metadata, allow_nan=False)
     return await request(
         "POST",
-        "/artifacts/",
+        "/files/",
         data=form,
         files={"file": (filename, payload, mime_type)},
         timeout=_LONG_TIMEOUT,

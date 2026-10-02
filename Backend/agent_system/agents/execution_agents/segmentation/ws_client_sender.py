@@ -8,7 +8,7 @@ BASE_URL = os.environ.get("MAS_BASE_URL", "http://localhost:8150")
 
 
 async def send_ws_message_remote(
-    msg_type: str,
+    event_type: str,
     payload: dict,
     session_id=None,
     *,
@@ -23,7 +23,7 @@ async def send_ws_message_remote(
         response = await request_client.post(
             f"{(base_url or BASE_URL).rstrip('/')}/ws-broadcast",
             json={
-                "type": msg_type,
+                "type": event_type,
                 "payload": payload,
                 "session_id": session_id,
             },
@@ -34,4 +34,4 @@ async def send_ws_message_remote(
     finally:
         if client is None:
             await request_client.aclose()
-    logger.info("[ws_client] sent %r via HTTP broadcast", msg_type)
+    logger.info("[ws_client] sent %r via HTTP broadcast", event_type)

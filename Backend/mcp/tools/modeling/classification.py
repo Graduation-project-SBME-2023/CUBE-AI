@@ -601,7 +601,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
             warnings.extend(figure_warnings)
 
             preds, chart_info = _eval_on_holdout(model, name)
-            predictions_artifact_id = None
+            predictions_file_id = None
             if preds is not None:
                 artifact = await results.publish_predictions(
                     preds,
@@ -610,7 +610,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                     variant=name,
                     metadata={"variant_key": name, "evaluation": eval_kind},
                 )
-                predictions_artifact_id = str(artifact["artifact_id"])
+                predictions_file_id = str(artifact["file_id"])
             evaluation = None
             if chart_info is not None:
                 evaluation = {
@@ -631,7 +631,7 @@ async def pycaret_train_classifier(params: TrainClassifierInput) -> str:
                     "cv": cv_metrics,
                     "evaluation": evaluation,
                 }),
-                "predictions_artifact_id": predictions_artifact_id,
+                "predictions_file_id": predictions_file_id,
                 "model_file_name": model_file["name"] if model_file else None,
                 "model_file_digest": model_file["digest"] if model_file else None,
                 "selected": False,
@@ -865,7 +865,7 @@ async def pycaret_run_inference(params: RunInferenceInput) -> str:
             variant=f"{base_key}__inference_{input_digest[:12]}",
             metadata={"input_digest": input_digest, "model_variant_key": base_key},
         )
-        predictions_artifact_id = str(artifact["artifact_id"])
+        predictions_file_id = str(artifact["file_id"])
 
         metrics: dict = {}
         if has_ground_truth and original_labels is not None:
@@ -920,7 +920,7 @@ async def pycaret_run_inference(params: RunInferenceInput) -> str:
                 base_variant=base_variant,
                 input_bytes=input_bytes,
                 input_name=os.path.basename(params.input_path),
-                predictions_artifact_id=predictions_artifact_id,
+                predictions_file_id=predictions_file_id,
                 n_cases=len(predictions),
                 metrics=metrics,
             )
@@ -932,8 +932,8 @@ async def pycaret_run_inference(params: RunInferenceInput) -> str:
 
         return json.dumps({
             "status": "success",
-            "predictions_artifact_id": predictions_artifact_id,
-            "exports": {"predictions": f"/artifacts/{predictions_artifact_id}/content?download=true"},
+            "predictions_artifact_id": predictions_file_id,  # tool result key, kept (plan.md: no success result shape changes)
+            "exports": {"predictions": f"/files/{predictions_file_id}/content?download=true"},
             "num_predictions": len(predictions),
             "has_ground_truth": has_ground_truth,
             "metrics": results.json_safe(metrics) or None,

@@ -76,7 +76,7 @@ def pair_payload(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "pair_key": str(item["pair_id"]),
         "status": pair_status(item),
-        "external_job_id": item.get("inference_job_id") or None,
+        "inference_job_id": item.get("inference_job_id") or None,
         "candidate_segmentation_uid": candidate or None,
         "execution_checkpoint": checkpoint,
     }
@@ -93,7 +93,7 @@ def work_items_from_batch(batch: dict[str, Any]) -> list[dict[str, Any]]:
         item["pair_id"] = pair["pair_key"]
         item["volume_uid"] = pair["volume_series_instance_uid"]
         item["target_id"] = pair["target_key"]
-        item["inference_job_id"] = pair.get("external_job_id") or item.get("inference_job_id")
+        item["inference_job_id"] = pair.get("inference_job_id") or item.get("inference_job_id")
         if pair.get("candidate_segmentation_uid"):
             item["source_segmentation_uid"] = pair["candidate_segmentation_uid"]
             item["candidate_confirmed"] = True
@@ -109,12 +109,12 @@ def work_items_from_batch(batch: dict[str, Any]) -> list[dict[str, Any]]:
     return items
 
 
-def batch_config(resolution_outcome, *, correlation_run_id: str, schema_version: str) -> dict[str, Any]:
+def batch_config(resolution_outcome, *, batch_correlation_id: str, schema_version: str) -> dict[str, Any]:
     plan = resolution_outcome.plan
     return {
         "schema_version": CONFIG_SCHEMA_VERSION,
         "segmentation_schema_version": schema_version,
-        "correlation_run_id": correlation_run_id,
+        "batch_correlation_id": batch_correlation_id,
         "chosen_path": plan.chosen_path,
         "policy_fingerprint": resolution_outcome.policy_fingerprint,
         "intent_plan": resolution_outcome.intent_plan.model_dump(mode="json"),
@@ -152,13 +152,13 @@ def batch_targets(plan, model_for_target) -> list[dict[str, Any]]:
 class SegmentationBatchStore:
     """The Application API calls behind the module's checkpoints."""
 
-    def __init__(self, agent_run_id: str | None, client: httpx.AsyncClient | None = None):
-        if not agent_run_id:
+    def __init__(self, run_id: str | None, client: httpx.AsyncClient | None = None):
+        if not run_id:
             raise RuntimeError(
-                "Segmentation has no agent_run_id: its batch cannot be recorded, and v1 "
+                "Segmentation has no run_id: its batch cannot be recorded, and v1 "
                 "does not fall back to segmentation_manifest.json."
             )
-        self.agent_run_id = str(agent_run_id)
+        self.run_id = str(run_id)
         self._client = client
 
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
@@ -184,7 +184,7 @@ class SegmentationBatchStore:
 
     async def load(self) -> dict[str, Any] | None:
         response = await self._request(
-            "GET", f"/segmentation-runs/run/{self.agent_run_id}/{BATCH_KEY}"
+            "GET", f"/segmentation-batches/run/{self.run_id}/{BATCH_KEY}"
         )
         if response.status_code == 404:
             return None
@@ -207,19 +207,19 @@ class SegmentationBatchStore:
                     "target_key": str(item["target_id"]),
                     "volume_series_instance_uid": str(item["volume_uid"]),
                     "status": payload["status"],
-                    "external_job_id": payload["external_job_id"],
+                    "inference_job_id": payload["inference_job_id"],
                     "candidate_segmentation_uid": payload["candidate_segmentation_uid"],
                     "execution_checkpoint": payload["execution_checkpoint"],
                 }
             )
         response = await self._request(
             "PUT",
-            f"/segmentation-runs/run/{self.agent_run_id}/{BATCH_KEY}",
+            f"/segmentation-batches/run/{self.run_id}/{BATCH_KEY}",
             json={"cohort_id": cohort_id, "config": config, "targets": targets, "pairs": pairs},
         )
         if response.status_code == 409:
             raise BatchReconciliationRequired(
-                f"The segmentation batch for run {self.agent_run_id} already exists with "
+                f"The segmentation batch for run {self.run_id} already exists with "
                 f"different content: {response.text[:400]}"
             )
         response.raise_for_status()
@@ -227,7 +227,7 @@ class SegmentationBatchStore:
 
     async def sync(
         self,
-        segmentation_run_id: str,
+        segmentation_batch_id: str,
         work_items: list[dict[str, Any]],
         *,
         stage: str | None = None,
@@ -237,12 +237,12 @@ class SegmentationBatchStore:
         if review_status:
             body["review_status"] = review_status
         response = await self._request(
-            "PATCH", f"/segmentation-runs/{segmentation_run_id}/pairs", json=body
+            "PATCH", f"/segmentation-batches/{segmentation_batch_id}/pairs", json=body
         )
         response.raise_for_status()
         return response.json()
 
-    async def read(self, segmentation_run_id: str) -> dict[str, Any]:
-        response = await self._request("GET", f"/segmentation-runs/{segmentation_run_id}")
+    async def read(self, segmentation_batch_id: str) -> dict[str, Any]:
+        response = await self._request("GET", f"/segmentation-batches/{segmentation_batch_id}")
         response.raise_for_status()
         return response.json()

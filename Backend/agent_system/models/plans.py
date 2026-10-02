@@ -43,19 +43,19 @@ class TaskMessage(BaseModel):
 
 
 class StudyStep(BaseModel):
-    # `id` is the persisted step_id. Runner node, checkpoint and scratchpad
+    # `id` is the persisted node_id. Runner node, checkpoint and scratchpad
     # identity is this value, never `module` — two steps may legitimately name
     # the same agent and must execute separately.
     id: str = ""
     title: str
     description: str = ""
     module: Optional[str] = None
-    step_order: int = 0
+    position: int = 0
     task_message: Optional[TaskMessage] = None
-    # Execution state, read from `agent_runs`. It is NOT a
+    # Execution state, read from `node_runs`. It is NOT a
     # second copy that can drift: nothing writes these fields except a read of
-    # the run, and `plan_steps` has no status column at all.
-    agent_run_id: str = ""
+    # the run, and `graph_nodes` has no status column at all.
+    run_id: str = ""
     run_status: str = "pending"
     started_at: Optional[str] = None
     completed_at: Optional[str] = None

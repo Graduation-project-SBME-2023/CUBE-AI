@@ -36,7 +36,7 @@ async def _training_data(result: dict) -> tuple[pd.DataFrame, pd.DataFrame | Non
             return pd.read_csv(io.StringIO(train)), pd.read_csv(io.StringIO(holdout))
         return pd.read_csv(io.StringIO(everything)), None
 
-    payload = await domain_api.artifact_content(str(result["input_artifact_id"]))
+    payload = await domain_api.artifact_content(str(result["input_file_id"]))
     holdout_payload = None
     if split.get("holdout_artifact_id"):
         holdout_payload = await domain_api.artifact_content(str(split["holdout_artifact_id"]))
@@ -109,9 +109,9 @@ async def pycaret_refit_model(model_result_id: str) -> str:
             refit_metrics = evaluation.regression_metrics(predictions)
 
         recorded_predictions = None
-        if result.get("predictions_artifact_id"):
+        if result.get("predictions_file_id"):
             recorded_predictions = pd.read_csv(
-                io.BytesIO(await domain_api.artifact_content(str(result["predictions_artifact_id"])))
+                io.BytesIO(await domain_api.artifact_content(str(result["predictions_file_id"])))
             )
         agreement = refit_core.prediction_agreement(recorded_predictions, predictions)
 
@@ -128,7 +128,7 @@ async def pycaret_refit_model(model_result_id: str) -> str:
             {
                 "cohort_id": str(result["cohort_id"]),
                 "feature_set_id": result.get("feature_set_id"),
-                "input_artifact_id": result.get("input_artifact_id"),
+                "input_file_id": result.get("input_file_id"),
                 "dataset_digest": result["dataset_digest"],
                 "preprocessing": result["preprocessing"],
                 "feature_order": result["feature_order"],
@@ -152,7 +152,7 @@ async def pycaret_refit_model(model_result_id: str) -> str:
                             "metrics": results.json_safe(refit_metrics or {}),
                         },
                     }),
-                    "predictions_artifact_id": str(artifact["artifact_id"]),
+                    "predictions_file_id": str(artifact["file_id"]),
                     "model_file_name": results.model_file_logical_name(result["comparison_key"], variant),
                     "model_file_digest": digest,
                     "selected": False,

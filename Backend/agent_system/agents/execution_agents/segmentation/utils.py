@@ -51,9 +51,9 @@ async def check_having_mask(
 ):
     """
     Checks if a segmentation mask exists for the given volume SeriesInstanceUID (volume_uid).
-    Calls the endpoint /segmentations/by-volume/{volume_uid} and returns the list of segmentations.
+    Calls the endpoint /segmentation-masks/by-volume/{volume_uid} and returns the list of segmentations.
     """
-    url = f"{CONTROL_API_URL}/segmentations/by-volume/{volume_uid}"
+    url = f"{CONTROL_API_URL}/segmentation-masks/by-volume/{volume_uid}"
     request_client = client or httpx.AsyncClient()
     try:
         response = await request_client.get(

@@ -50,7 +50,7 @@ class ResultReporterAgent(AssistantAgent):
         )
 
     @classmethod
-    async def create(cls, model_client=None, workspace_folder=None, session_id=None, node_name=None, agent_run_id=None, step_id=None):
+    async def create(cls, model_client=None, workspace_folder=None, session_id=None, node_name=None, run_id=None, node_id=None):
         model_client = OllamaClient() if not model_client else model_client
         mcp_server_path = os.path.abspath(
             os.path.join(current_dir, "..", "..", "..", "mcp", "server.py")
@@ -62,8 +62,8 @@ class ResultReporterAgent(AssistantAgent):
             "WORKSPACE_DIR": workspace_folder,
             "SESSION_ID": session_id,
             "AGENT_ID": "result_reporter_agent",
-            "AGENT_RUN_ID": str(agent_run_id or ""),
-            "STEP_ID": str(step_id or ""),
+            "RUN_ID": str(run_id or ""),
+            "NODE_ID": str(node_id or ""),
         })
         mcp_server = StdioServerParams(
             command=sys.executable,

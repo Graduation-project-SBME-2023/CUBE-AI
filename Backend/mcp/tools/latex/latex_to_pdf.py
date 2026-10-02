@@ -47,7 +47,7 @@ async def latex_to_pdf(
         Field(
             description=(
                 "The UUID of the ``reports`` row to publish to.  Create one first "
-                "via POST /reports/ with your agent_run_id and initial source_text."
+                "via POST /reports/ with your run_id and initial source_text."
             )
         ),
     ],

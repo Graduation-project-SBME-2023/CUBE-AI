@@ -15,8 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.db.models.cohorts import CohortMember
 from application_api.db.models.radiomics import Radiomics
-from application_api.db.models.segmentation_runs import SegmentationPair, SegmentationTarget
-from application_api.repositories import agent_runs as runs_repo
+from application_api.db.models.segmentation_batches import SegmentationPair, SegmentationTarget
+from application_api.repositories import node_runs as runs_repo
 from application_api.schemas import radiomics as schemas
 from application_api.services.publication import lock_session
 
@@ -38,13 +38,13 @@ _COMPARED_FIELDS = (
 )
 
 _CATALOGUE_COLUMNS = (
-    Radiomics.id,
+    Radiomics.radiomics_feature_id,
     Radiomics.session_id,
     Radiomics.label_series_instance_uid,
     Radiomics.source_volume_uid,
     Radiomics.segment_number,
     Radiomics.segmentation_pair_id,
-    Radiomics.created_by_agent_run_id,
+    Radiomics.created_by_run_id,
     Radiomics.extractor_name,
     Radiomics.extractor_version,
     Radiomics.config_digest,
@@ -56,22 +56,22 @@ _CATALOGUE_COLUMNS = (
 )
 
 
-async def require_producer_run(db: AsyncSession, agent_run_id: UUID, agent_type: str, what: str):
+async def require_producer_run(db: AsyncSession, run_id: UUID, agent_type: str, what: str):
     """A domain is written only by the agent that owns it, while it runs."""
-    run = await runs_repo.get_run(db, agent_run_id)
-    if run.step.agent_type != agent_type:
+    run = await runs_repo.get_run(db, run_id)
+    if run.node.target_name != agent_type:
         raise HTTPException(
             status_code=403,
             detail=(
-                f"{what} are owned by {agent_type}; agent run {agent_run_id} executes "
-                f"{run.step.agent_type} and cannot write them (D17)."
+                f"{what} are owned by {agent_type}; run {run_id} executes "
+                f"{run.node.target_name} and cannot write them (D17)."
             ),
         )
     if run.status != "running":
         raise HTTPException(
             status_code=409,
             detail=(
-                f"Agent run {agent_run_id} is {run.status!r}; results are recorded only "
+                f"Run {run_id} is {run.status!r}; results are recorded only "
                 "while the run is running."
             ),
         )
@@ -95,10 +95,10 @@ def _payload(row: Any) -> dict[str, Any]:
 
 
 async def record_features(
-    db: AsyncSession, agent_run_id: UUID, data: schemas.RadiomicsBatchWrite
+    db: AsyncSession, run_id: UUID, data: schemas.RadiomicsBatchWrite
 ) -> schemas.RadiomicsBatchResult:
     run = await require_producer_run(
-        db, agent_run_id, FEATURE_EXTRACTION_AGENT_TYPE, "Radiomics features"
+        db, run_id, FEATURE_EXTRACTION_AGENT_TYPE, "Radiomics features"
     )
     session_id = run.session_id
 
@@ -165,7 +165,7 @@ async def record_features(
         if key in existing:
             refs.append(
                 schemas.RadiomicsFeatureRef(
-                    id=existing[key].id,
+                    radiomics_feature_id=existing[key].radiomics_feature_id,
                     label_series_instance_uid=key[0],
                     segment_number=key[1],
                     source_digest=key[3],
@@ -175,7 +175,7 @@ async def record_features(
             continue
         record = Radiomics(
             session_id=session_id,
-            created_by_agent_run_id=agent_run_id,
+            created_by_run_id=run_id,
             **row.model_dump(),
         )
         db.add(record)
@@ -186,7 +186,7 @@ async def record_features(
         for record in created_rows:
             refs.append(
                 schemas.RadiomicsFeatureRef(
-                    id=record.id,
+                    radiomics_feature_id=record.radiomics_feature_id,
                     label_series_instance_uid=record.label_series_instance_uid,
                     segment_number=record.segment_number,
                     source_digest=record.source_digest,
@@ -248,7 +248,7 @@ async def list_features(
     db: AsyncSession,
     *,
     session_id: UUID | None = None,
-    agent_run_id: UUID | None = None,
+    run_id: UUID | None = None,
     label_uid: str | None = None,
     include_features: bool = False,
     skip: int = 0,
@@ -257,18 +257,18 @@ async def list_features(
     query = _catalogue_query(include_features)
     if session_id is not None:
         query = query.where(Radiomics.session_id == session_id)
-    if agent_run_id is not None:
-        query = query.where(Radiomics.created_by_agent_run_id == agent_run_id)
+    if run_id is not None:
+        query = query.where(Radiomics.created_by_run_id == run_id)
     if label_uid is not None:
         query = query.where(Radiomics.label_series_instance_uid == label_uid)
     result = await db.execute(
-        query.order_by(Radiomics.created_at, Radiomics.id).offset(skip).limit(limit)
+        query.order_by(Radiomics.created_at, Radiomics.radiomics_feature_id).offset(skip).limit(limit)
     )
     return [_row_out(row) for row in result]
 
 
 async def get_radiomics(db: AsyncSession, radiomics_id: UUID) -> dict[str, Any]:
-    result = await db.execute(_catalogue_query(True).where(Radiomics.id == radiomics_id))
+    result = await db.execute(_catalogue_query(True).where(Radiomics.radiomics_feature_id == radiomics_id))
     row = result.first()
     if row is None:
         raise HTTPException(status_code=404, detail=f"Radiomics {radiomics_id} not found")
@@ -291,19 +291,19 @@ async def search_radiomics(
                 cast(Radiomics.features[feature_key], String).ilike(f"%{feature_value}%")
             )
     result = await db.execute(
-        query.order_by(Radiomics.created_at, Radiomics.id).offset(skip).limit(limit)
+        query.order_by(Radiomics.created_at, Radiomics.radiomics_feature_id).offset(skip).limit(limit)
     )
     return [_row_out(row) for row in result]
 
 
-async def export_run_csv(db: AsyncSession, agent_run_id: UUID) -> str:
+async def export_run_csv(db: AsyncSession, run_id: UUID) -> str:
     """Every row one run measured, one line per (SEG, segment), as CSV."""
     rows = await list_features(
-        db, agent_run_id=agent_run_id, include_features=True, limit=1_000_000
+        db, run_id=run_id, include_features=True, limit=1_000_000
     )
     names = sorted({name for row in rows for name in (row.get("features") or {})})
     identity = [
-        "id",
+        "radiomics_feature_id",
         "subject_key",
         "source_volume_uid",
         "label_series_instance_uid",

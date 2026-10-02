@@ -15,12 +15,12 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from application_api.db.models.agent_runs import AgentRun
+from application_api.db.models.node_runs import NodeRun
 from application_api.db.models.cohorts import Cohort, CohortMember
-from application_api.db.models.steps import PlanStep
+from application_api.db.models.graph_nodes import GraphNode
 from application_api.db.models.study import Study
 from application_api.db.models.volume import Volume
-from application_api.repositories import agent_runs as runs_repo
+from application_api.repositories import node_runs as runs_repo
 from application_api.schemas import cohorts as schemas
 from application_api.services.publication import lock_session, publication
 
@@ -78,10 +78,10 @@ async def get_cohort(db: AsyncSession, cohort_id: UUID) -> Cohort:
     return cohort
 
 
-async def find_cohort(db: AsyncSession, agent_run_id: UUID, cohort_key: str) -> Cohort | None:
+async def find_cohort(db: AsyncSession, run_id: UUID, cohort_key: str) -> Cohort | None:
     result = await db.execute(
         select(Cohort).where(
-            Cohort.created_by_agent_run_id == agent_run_id,
+            Cohort.created_by_run_id == run_id,
             Cohort.cohort_key == cohort_key,
         )
     )
@@ -91,16 +91,16 @@ async def find_cohort(db: AsyncSession, agent_run_id: UUID, cohort_key: str) -> 
 async def list_session_cohorts(db: AsyncSession, session_id: UUID) -> list[Cohort]:
     result = await db.execute(
         select(Cohort)
-        .join(AgentRun, AgentRun.agent_run_id == Cohort.created_by_agent_run_id)
-        .join(PlanStep, PlanStep.step_id == AgentRun.step_id)
-        .where(AgentRun.session_id == session_id)
-        .order_by(PlanStep.step_order, Cohort.created_at)
+        .join(NodeRun, NodeRun.run_id == Cohort.created_by_run_id)
+        .join(GraphNode, GraphNode.node_id == NodeRun.node_id)
+        .where(NodeRun.session_id == session_id)
+        .order_by(GraphNode.position, Cohort.created_at)
     )
     return list(result.scalars().all())
 
 
-async def population_run(db: AsyncSession, session_id: UUID) -> AgentRun:
-    run, _ = await runs_repo.resolve_run_for_agent_type(db, session_id, POPULATION_AGENT_TYPE)
+async def population_run(db: AsyncSession, session_id: UUID) -> NodeRun:
+    run, _ = await runs_repo.resolve_run_for_target(db, session_id, POPULATION_AGENT_TYPE)
     if run is None:
         raise HTTPException(
             status_code=409,
@@ -114,7 +114,7 @@ async def population_run(db: AsyncSession, session_id: UUID) -> AgentRun:
 
 async def get_population_cohort(db: AsyncSession, session_id: UUID) -> Cohort | None:
     run = await population_run(db, session_id)
-    return await find_cohort(db, run.agent_run_id, schemas.POPULATION_COHORT_KEY)
+    return await find_cohort(db, run.run_id, schemas.POPULATION_COHORT_KEY)
 
 
 def _analysis_rows(cohort: Cohort) -> list[dict[str, Any]]:
@@ -172,7 +172,7 @@ def analysis_rows_csv(rows: list[dict[str, Any]]) -> str:
 async def _locked_cohort(db: AsyncSession, cohort_id: UUID) -> Cohort:
     """Lock order: session ->... -> domain parent -> member."""
     cohort = await get_cohort(db, cohort_id)
-    run = await runs_repo.get_run(db, cohort.created_by_agent_run_id)
+    run = await runs_repo.get_run(db, cohort.created_by_run_id)
     await lock_session(db, run.session_id)
     await db.execute(
         text("SELECT cohort_id FROM cohorts WHERE cohort_id = :cid FOR UPDATE"),
@@ -184,18 +184,18 @@ async def _locked_cohort(db: AsyncSession, cohort_id: UUID) -> Cohort:
 
 async def upsert_cohort(
     db: AsyncSession,
-    agent_run_id: UUID,
+    run_id: UUID,
     cohort_key: str,
     data: schemas.CohortUpsert,
 ) -> tuple[Cohort, bool]:
     """Create the draft cohort, or merge into it while it is not frozen."""
-    run = await runs_repo.get_run(db, agent_run_id)
+    run = await runs_repo.get_run(db, run_id)
     await lock_session(db, run.session_id)
 
-    cohort = await find_cohort(db, agent_run_id, cohort_key)
+    cohort = await find_cohort(db, run_id, cohort_key)
     if cohort is None:
         cohort = Cohort(
-            created_by_agent_run_id=agent_run_id,
+            created_by_run_id=run_id,
             cohort_key=cohort_key,
             criteria=_versioned(data.criteria),
             label_definition=_versioned(data.label_definition or schemas.DEFAULT_LABEL_DEFINITION),
@@ -346,7 +346,7 @@ async def freeze_cohort(db: AsyncSession, cohort_id: UUID) -> tuple[Cohort, Any]
     if cohort.frozen_at is not None:
         await db.commit()
         return cohort, None
-    run = await runs_repo.get_run(db, cohort.created_by_agent_run_id)
+    run = await runs_repo.get_run(db, cohort.created_by_run_id)
     session_id = run.session_id
     total = len(cohort.members)
     rows = _analysis_rows(cohort)

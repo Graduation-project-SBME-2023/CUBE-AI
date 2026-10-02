@@ -14,7 +14,7 @@ from storage_paths import TEMP_DIR
 
 logger = logging.getLogger(__name__)
 
-# TEMP_DIR/<category>/<agent_run_id>/ is the convention every scratch-heavy
+# TEMP_DIR/<category>/<run_id>/ is the convention every scratch-heavy
 # tool (PyRadiomics params/log, PyCaret train.csv/log/plots, ...) writes
 # its working files under — see feature_extraction/features.py and
 # modeling/classification.py|regression.py. None of it is durable (the
@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 _RUN_SCOPED_TEMP_CATEGORIES = ("feature-extraction", "feature-selection", "modeling")
 
 
-def _cleanup_run_temp_dirs(agent_run_id: str) -> None:
+def _cleanup_run_temp_dirs(run_id: str) -> None:
     for category in _RUN_SCOPED_TEMP_CATEGORIES:
-        run_dir = TEMP_DIR / category / agent_run_id
+        run_dir = TEMP_DIR / category / run_id
         if run_dir.exists():
             try:
                 shutil.rmtree(run_dir)
@@ -49,7 +49,7 @@ def _app_api_url() -> str:
 APP_API_URL = _app_api_url()
 SESSION_ID = os.environ.get("SESSION_ID", "")
 AGENT_ID = os.environ.get("AGENT_ID", "")
-AGENT_RUN_ID = os.environ.get("AGENT_RUN_ID", "")
+RUN_ID = os.environ.get("RUN_ID", "")
 REQUEST_TIMEOUT = 30.0
 
 OutputStatus = Literal["completed", "failed", "partial"]
@@ -95,7 +95,7 @@ class WriteAgentOutputInput(BaseModel):
             "{'accuracy': 0.92, 'auc': 0.88, 'num_features': 150, 'cohort_size': 45}."
         ),
     )
-    output_summary: str = Field(
+    output_summary: str = Field(  # tool argument name, kept (plan.md global rules)
         default="",
         description="A concise text summary of what the agent accomplished and its key findings.",
         max_length=20_000,
@@ -128,18 +128,18 @@ def _error(message: str) -> str:
 
 def _document(run: Dict[str, Any]) -> Dict[str, Any]:
     """Present a run's stored output in the shape the file had."""
-    step = run.get("step") or {}
-    agent_output = (run.get("output_summary") or {}).get("agent_output") or {}
+    node = run.get("node") or {}
+    agent_output = (run.get("scratchpad_summary") or {}).get("agent_output") or {}
     warnings = [
         item.get("message")
-        for item in (run.get("warnings") or {}).get("items", [])
+        for item in (run.get("scratchpad_warnings") or {}).get("items", [])
         if item.get("message")
     ]
     return {
-        "agent_id": step.get("agent_type"),
-        "agent_run_id": run.get("agent_run_id"),
-        "step_id": run.get("step_id"),
-        "step_order": step.get("step_order"),
+        "agent_id": node.get("target_name"),
+        "agent_run_id": run.get("run_id"),  # tool result key, kept (plan.md: no success result shape changes)
+        "step_id": run.get("node_id"),  # tool result key, kept (plan.md: no success result shape changes)
+        "step_order": node.get("position"),  # tool result key, kept (plan.md: no success result shape changes)
         "agent_role": agent_output.get("agent_role", ""),
         "status": agent_output.get("status", run.get("status")),
         "timestamp": agent_output.get("recorded_at"),
@@ -152,7 +152,7 @@ def _document(run: Dict[str, Any]) -> Dict[str, Any]:
 
 async def _session_runs() -> List[Dict[str, Any]]:
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        response = await client.get(f"{APP_API_URL}/agent-runs/session/{SESSION_ID}")
+        response = await client.get(f"{APP_API_URL}/runs/session/{SESSION_ID}")
         response.raise_for_status()
         return response.json()
 
@@ -171,9 +171,9 @@ async def _session_runs() -> List[Dict[str, Any]]:
 )
 async def write_agent_output(params: WriteAgentOutputInput) -> str:
     """Write this agent's structured output."""
-    if not AGENT_RUN_ID:
+    if not RUN_ID:
         return _error(
-            "AGENT_RUN_ID is not set in the MCP environment; this agent is not "
+            "RUN_ID is not set in the MCP environment; this agent is not "
             "bound to an approved plan step and cannot record its output."
         )
     payload = {
@@ -182,14 +182,14 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
         "inputs": params.inputs,
         "output_files": params.output_files,
         "output_metrics": params.output_metrics,
-        "output_summary": params.output_summary,
+        "summary": params.output_summary,  # tool argument name, kept
         "errors": params.errors,
         "warnings": params.warnings,
     }
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
             response = await client.put(
-                f"{APP_API_URL}/agent-runs/{AGENT_RUN_ID}/output", json=payload
+                f"{APP_API_URL}/runs/{RUN_ID}/output", json=payload
             )
             if response.status_code >= 500:
                 # A 5xx body is an unhandled server exception (stack frames,
@@ -210,14 +210,14 @@ async def write_agent_output(params: WriteAgentOutputInput) -> str:
 
     # This agent's output is now durable in Postgres — its working scratch
     # under temp/ (if any) has nothing left it's the only copy of.
-    _cleanup_run_temp_dirs(AGENT_RUN_ID)
+    _cleanup_run_temp_dirs(RUN_ID)
 
     return json.dumps(
         {
             "status": "ok",
             "message": f"Output saved for agent '{params.agent_id}'.",
-            "agent_run_id": run.get("agent_run_id"),
-            "step_id": run.get("step_id"),
+            "agent_run_id": run.get("run_id"),  # tool result key, kept (plan.md: no success result shape changes)
+            "step_id": run.get("node_id"),  # tool result key, kept (plan.md: no success result shape changes)
         },
         indent=2,
     )
@@ -240,8 +240,8 @@ async def read_agent_output(params: ReadAgentOutputInput) -> str:
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
             response = await client.get(
-                f"{APP_API_URL}/agent-runs/session/{SESSION_ID}"
-                f"/by-agent-type/{params.agent_id}"
+                f"{APP_API_URL}/runs/session/{SESSION_ID}"
+                f"/by-target/{params.agent_id}"
             )
             if response.status_code == 404:
                 return _error(f"No output found for agent '{params.agent_id}'.")
@@ -251,9 +251,7 @@ async def read_agent_output(params: ReadAgentOutputInput) -> str:
         return _error(f"Failed to read output: {exc}")
 
     document = _document(resolved.get("run") or {})
-    document["steps_sharing_this_agent_type"] = resolved.get(
-        "steps_sharing_this_agent_type"
-    )
+    document["steps_sharing_this_agent_type"] = resolved.get("nodes_sharing_this_target")
     return json.dumps(document, indent=2)
 
 
@@ -282,10 +280,10 @@ async def read_all_agent_outputs() -> str:
         document = _document(run)
         if not document.get("timestamp"):
             continue  # this step has not written an output yet
-        key = document["agent_id"] or str(document["step_id"])
+        key = document["agent_id"] or str(document["step_id"])  # tool result key, kept (plan.md: no success result shape changes)
         if key in agents:
             # Two steps share this agent type — keep both, keyed by step.
-            key = f"{key}#{document['step_order']}"
+            key = f"{key}#{document['step_order']}"  # tool result key, kept (plan.md: no success result shape changes)
         agents[key] = document
         statuses.add(document.get("status", "unknown"))
 

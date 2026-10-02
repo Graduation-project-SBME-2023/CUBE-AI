@@ -81,7 +81,7 @@ class BasicPipelineBuilder(DiGraphBuilder):
         runs: Optional[List[PlannedRun]] = None,
         model_client=None,
         session_id=None,
-        start_step_id: Optional[str] = None,
+        start_node_id: Optional[str] = None,
         on_start=None,
         on_finish=None,
         on_failure=None,
@@ -104,32 +104,32 @@ class BasicPipelineBuilder(DiGraphBuilder):
                 "agent runs. Approve the plan first (A21)."
             )
 
-        if start_step_id:
-            step_ids = [run.step_id for run in runs]
-            if start_step_id not in step_ids:
+        if start_node_id:
+            node_ids = [run.node_id for run in runs]
+            if start_node_id not in node_ids:
                 raise ValueError(
-                    f"Cannot resume from step {start_step_id!r}: it is not in this "
+                    f"Cannot resume from step {start_node_id!r}: it is not in this "
                     f"session's approved plan"
                 )
-            runs = runs[step_ids.index(start_step_id):]
+            runs = runs[node_ids.index(start_node_id):]
 
         logger.info(
             "Execution graph: %d step(s): %s",
             len(runs),
-            " -> ".join(f"{run.node_name}({run.agent_run_id[:8]})" for run in runs),
+            " -> ".join(f"{run.node_name}({run.run_id[:8]})" for run in runs),
         )
 
         raw_agents: dict[str, object] = {}
         for run in runs:
             factory = AGENT_FACTORIES[run.agent_type]
-            logger.info("Initialising %s for step %s", run.agent_type, run.step_id)
-            raw_agents[run.step_id] = await factory(
+            logger.info("Initialising %s for step %s", run.agent_type, run.node_id)
+            raw_agents[run.node_id] = await factory(
                 model_client=model_client,
                 workspace_folder=workspace_folder,
                 session_id=session_id,
                 node_name=run.node_name,
-                agent_run_id=run.agent_run_id,
-                step_id=run.step_id,
+                run_id=run.run_id,
+                node_id=run.node_id,
             )
 
         async def _noop(*_args, **_kwargs):
@@ -137,7 +137,7 @@ class BasicPipelineBuilder(DiGraphBuilder):
 
         nodes = []
         for index, run in enumerate(runs):
-            inner = raw_agents[run.step_id]
+            inner = raw_agents[run.node_id]
             if index > 0:
                 # Each step sees only the last message of the step before it —
                 # by NODE name, so two steps sharing an agent type stay
@@ -176,7 +176,7 @@ class BasicPipelineBuilder(DiGraphBuilder):
             task_message = self.entry_run.task_message
             if task_message.get("instructions"):
                 return str(task_message["instructions"])
-            description = str(self.entry_run.instructions.get("description") or "")
+            description = str(self.entry_run.params.get("description") or "")
             if description:
                 return description
         return fallback_hypothesis or "Run the pipeline."

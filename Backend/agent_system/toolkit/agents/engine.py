@@ -29,7 +29,7 @@ class AgentStatus(StrEnum):
 
 @dataclass(frozen=True)
 class Usage:
-    """Model tokens spent by one run (``agent_runs.usage``, Plan 6)."""
+    """Model tokens spent by one run (``run_attempts.usage``, Plan 6)."""
 
     prompt_tokens: int = 0
     completion_tokens: int = 0

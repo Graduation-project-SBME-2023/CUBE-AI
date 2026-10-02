@@ -100,19 +100,19 @@ async def _read_agent_output(session_id: str, agent_type: str) -> dict:
     """Read an agent's structured output from its run."""
     if not session_id or not agent_type:
         return {}
-    for run in await BackendClient.get_agent_runs(session_id):
-        step = run.get("step") or {}
-        if step.get("agent_type") != agent_type:
+    for run in await BackendClient.get_node_runs(session_id):
+        node = run.get("node") or {}
+        if node.get("target_name") != agent_type:
             continue
-        agent_output = (run.get("output_summary") or {}).get("agent_output")
+        agent_output = (run.get("scratchpad_summary") or {}).get("agent_output")
         if not agent_output:
             continue
         outputs = agent_output.get("outputs") or {}
         return {
             "agent_id": agent_type,
-            "agent_run_id": run.get("agent_run_id"),
-            "step_id": run.get("step_id"),
-            "step_order": step.get("step_order"),
+            "run_id": run.get("run_id"),
+            "node_id": run.get("node_id"),
+            "position": step.get("position"),
             "agent_role": agent_output.get("agent_role"),
             "status": agent_output.get("status"),
             "timestamp": agent_output.get("recorded_at"),
@@ -121,7 +121,7 @@ async def _read_agent_output(session_id: str, agent_type: str) -> dict:
             "errors": agent_output.get("errors") or [],
             "warnings": [
                 item.get("message")
-                for item in (run.get("warnings") or {}).get("items", [])
+                for item in (run.get("scratchpad_warnings") or {}).get("items", [])
             ],
         }
     return {}
@@ -135,11 +135,11 @@ async def _emit_tool_result_to_view(
     # the UI speak in agent types, so translate once, here.
     source = agent_type_of(source) or source
     parsed = _parse_tool_content(content)
-    data, msg_type = None, None
+    data, event_type = None, None
 
     # ── Population Planner agent ──────────────────────────────────────────
     if "population" in source.lower() or "study_population" in source.lower():
-        msg_type = "population_output"
+        event_type = "population_output"
         if tool_name == "write_agent_output":
             agent_data = await _read_agent_output(session_id, "study_population_planner_agent")
             payload = agent_data if agent_data else parsed
@@ -156,7 +156,7 @@ async def _emit_tool_result_to_view(
 
     # ── Segmentation agent ────────────────────────────────────────────────
     elif "segmentation" in source.lower():
-        msg_type = "segmentation_output"
+        event_type = "segmentation_output"
         if tool_name == "write_agent_output":
             agent_data = await _read_agent_output(session_id, "segmentation_agent")
             payload = agent_data if agent_data else parsed
@@ -172,7 +172,7 @@ async def _emit_tool_result_to_view(
 
     # ── Feature Extraction agent ──────────────────────────────────────────
     elif "feature_extraction" in source.lower():
-        msg_type = "features_output"
+        event_type = "features_output"
         if tool_name == "write_agent_output":
             agent_data = await _read_agent_output(session_id, "feature_extraction_agent")
             payload = agent_data if agent_data else parsed
@@ -186,7 +186,7 @@ async def _emit_tool_result_to_view(
             data = {
                 "tool": "radiomic_extraction",
                 "status": parsed.get("status", "success"),
-                "agent_run_id": parsed.get("agent_run_id"),
+                "run_id": parsed.get("run_id"),
                 "radiomics_rows": parsed.get("radiomics_rows"),
                 "exports": parsed.get("exports", {}),
                 "num_subjects": parsed.get("num_subjects"),
@@ -225,7 +225,7 @@ async def _emit_tool_result_to_view(
             return None, None
 
         elif tool_name == "pycaret_train_classifier":
-            msg_type = "modeling_output"
+            event_type = "modeling_output"
             # Build a per-experiment entry with chart_data for the frontend.
             # The frontend ModelingView expects Record<string, ModelingData>
             # keyed by experiment_name so each call appends a new accordion.
@@ -253,7 +253,7 @@ async def _emit_tool_result_to_view(
 
     # ── Result Reporter agent ─────────────────────────────────────────────
     elif "result_reporter" in source.lower():
-        msg_type = "report_output"
+        event_type = "report_output"
         if tool_name == "write_agent_output":
             agent_data = await _read_agent_output(session_id, "result_reporter_agent")
             payload = agent_data if agent_data else parsed
@@ -269,7 +269,7 @@ async def _emit_tool_result_to_view(
 
     # ── LaTeX Reporter agent ──────────────────────────────────────────────
     elif "latex" in source.lower() or "reporter" in source.lower():
-        msg_type = "latex_output"
+        event_type = "latex_output"
         if tool_name == "write_agent_output":
             agent_data = await _read_agent_output(session_id, "latex_reporter_agent")
             payload = agent_data if agent_data else parsed
@@ -283,7 +283,7 @@ async def _emit_tool_result_to_view(
             }
             await emit_latex_output(data, session_id)
 
-    return msg_type, data
+    return event_type, data
 
 
 class PipelineMonitor:
@@ -347,16 +347,16 @@ class PipelineMonitor:
         except Exception:
             pass
 
-        msg_type, data = await _emit_tool_result_to_view(
+        event_type, data = await _emit_tool_result_to_view(
             source, tool_name, content,
             self.session.session_id, workspace_folder
         )
 
         if not is_error:
             await self.on_agent_active(source)
-        if msg_type is not None and data is not None:
+        if event_type is not None and data is not None:
             await self.session_service.update_tool_views(
-                self.session, source, msg_type, data
+                self.session, source, event_type, data
             )
         return is_error
 

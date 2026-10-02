@@ -1,8 +1,8 @@
 """The built-in artifact types (merged plan, Phase 1.2 step 2).
 
 Every ref points at an Application API row by its UUID key (``cohorts``,
-``segmentation_runs``, ``feature_sets``, ``model_results``,
-``literature_reviews``, ``agent_runs``, ``reports``), except ``ImageSet``,
+``segmentation_batches``, ``feature_sets``, ``model_results``,
+``literature_reviews``, ``node_runs``, ``reports``), except ``ImageSet``,
 which lists DICOM series UIDs.
 
 ``phi_default`` says whether the data behind the pointer is patient-level:
@@ -72,19 +72,19 @@ IMAGE_SET = ArtifactType(
 
 
 class MaskSetRef(ArtifactRef):
-    segmentation_run_id: UUID
+    segmentation_batch_id: UUID
 
 
 class MaskSetSummary(ArtifactSummary):
     n_masks: Count
     n_failed: Count = 0
-    # segmentation_runs.review_status
+    # segmentation_batches.review_status
     review_status: Literal["not_ready", "pending", "submitting", "submitted"]
 
 
 MASK_SET = ArtifactType(
     name="MaskSet",
-    description="Segmentation masks for a cohort's volumes, from one segmentation run.",
+    description="Segmentation masks for a cohort's volumes, from one segmentation batch.",
     ref_model=MaskSetRef,
     summary_model=MaskSetSummary,
     phi_default=True,
@@ -179,7 +179,7 @@ LITERATURE_CONTEXT = ArtifactType(
 
 
 class ResultSummaryRef(ArtifactRef):
-    agent_run_id: UUID  # the run whose output_summary holds the findings
+    run_id: UUID  # the node run whose scratchpad_summary holds the findings
 
 
 class ResultSummarySummary(ArtifactSummary):

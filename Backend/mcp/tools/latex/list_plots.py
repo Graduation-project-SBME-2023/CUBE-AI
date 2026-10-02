@@ -43,10 +43,10 @@ async def list_report_figures() -> str:
         {
             "figures": [
                 {
-                    "artifact_id": item["artifact_id"],
+                    "artifact_id": item["file_id"],  # tool result key, kept
                     "display_filename": item["display_filename"],
                     "logical_key": item["logical_key"],
-                    "producer": item.get("created_by_agent_run_id"),
+                    "producer": item.get("created_by_run_id"),
                 }
                 for item in figures
             ],

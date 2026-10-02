@@ -16,7 +16,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from application_api.db.models.artifacts import Artifact
+from application_api.db.models.stored_files import StoredFile
 from application_api.db.models.reports import Report, ReportImage
 from application_api.schemas import reports as schemas
 from application_api.services.publication import lock_session, publication
@@ -67,7 +67,7 @@ def _report_out(report: Report, images: list[ReportImage]) -> dict[str, Any]:
     return {
         "report_id": report.report_id,
         "session_id": report.session_id,
-        "created_by_agent_run_id": report.created_by_agent_run_id,
+        "created_by_run_id": report.created_by_run_id,
         "literature_review_id": report.literature_review_id,
         "source_text": report.source_text,
         "source_format": report.source_format,
@@ -84,7 +84,7 @@ def _image_out(image: ReportImage) -> dict[str, Any]:
     return {
         "image_id": image.image_id,
         "report_id": image.report_id,
-        "artifact_id": image.artifact_id,
+        "file_id": image.file_id,
         "image_key": image.image_key,
     }
 
@@ -122,7 +122,7 @@ async def list_session_reports(
         select(
             Report.report_id,
             Report.session_id,
-            Report.created_by_agent_run_id,
+            Report.created_by_run_id,
             Report.literature_review_id,
             Report.source_format,
             Report.source_version,
@@ -150,11 +150,11 @@ async def create_report(
 
     # Check for existing report by the natural key.
     existing: Report | None = None
-    if data.created_by_agent_run_id is not None:
+    if data.created_by_run_id is not None:
         existing = (
             await db.execute(
                 select(Report).where(
-                    Report.created_by_agent_run_id == data.created_by_agent_run_id
+                    Report.created_by_run_id == data.created_by_run_id
                 )
             )
         ).scalar_one_or_none()
@@ -173,7 +173,7 @@ async def create_report(
 
     report = Report(
         session_id=data.session_id,
-        created_by_agent_run_id=data.created_by_agent_run_id,
+        created_by_run_id=data.created_by_run_id,
         literature_review_id=data.literature_review_id,
         source_text=data.source_text,
         source_format=data.source_format,
@@ -207,37 +207,37 @@ async def create_report(
 async def register_image(
     db: AsyncSession, report_id: UUID, data: schemas.ReportImageIn
 ) -> dict[str, Any]:
-    """Register one artifact as a named source image for a report."""
+    """Register one stored file as a named source image for a report."""
     report = await _get_report_entity(db, report_id)
 
-    # Verify the artifact exists, belongs to the same session, and is an image.
+    # Verify the stored file exists, belongs to the same session, and is an image.
     artifact = (
         await db.execute(
-            select(Artifact.artifact_id, Artifact.session_id, Artifact.kind).where(
-                Artifact.artifact_id == data.artifact_id
+            select(StoredFile.file_id, StoredFile.session_id, StoredFile.kind).where(
+                StoredFile.file_id == data.file_id
             )
         )
     ).first()
     if artifact is None:
-        raise HTTPException(status_code=422, detail=f"Artifact {data.artifact_id} not found")
+        raise HTTPException(status_code=422, detail=f"Stored file {data.file_id} not found")
     if artifact.session_id != report.session_id:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"Artifact {data.artifact_id} belongs to session {artifact.session_id}, "
+                f"Stored file {data.file_id} belongs to session {artifact.session_id}, "
                 f"not {report.session_id} (R1)"
             ),
         )
     if artifact.kind not in ("figure_png", "figure_jpeg"):
         raise HTTPException(
             status_code=422,
-            detail=f"Artifact {data.artifact_id} has kind {artifact.kind!r}; "
+            detail=f"Stored file {data.file_id} has kind {artifact.kind!r}; "
                    "must be figure_png or figure_jpeg",
         )
 
     image = ReportImage(
         report_id=report_id,
-        artifact_id=data.artifact_id,
+        file_id=data.file_id,
         image_key=data.image_key,
     )
     db.add(image)
@@ -379,12 +379,12 @@ async def publish_report(
             await db.execute(
                 select(
                     ReportImage.image_key,
-                    ReportImage.artifact_id,
-                    Artifact.session_id,
-                    Artifact.kind,
-                    Artifact.body,
+                    ReportImage.file_id,
+                    StoredFile.session_id,
+                    StoredFile.kind,
+                    StoredFile.body,
                 )
-                .join(Artifact, Artifact.artifact_id == ReportImage.artifact_id)
+                .join(StoredFile, StoredFile.file_id == ReportImage.file_id)
                 .where(
                     ReportImage.report_id == report_id,
                     ReportImage.image_key.in_(declared_keys),

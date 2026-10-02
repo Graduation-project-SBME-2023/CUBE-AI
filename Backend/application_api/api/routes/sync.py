@@ -23,7 +23,7 @@ from application_api.services.orthanc_client import ORTHANC_URL, create_orthanc_
 from application_api.db.models.patient import Patient
 from application_api.db.models.study import Study
 from application_api.db.models.volume import Volume
-from application_api.db.models.segmentation import Segmentation
+from application_api.db.models.segmentation_masks import SegmentationMask
 
 router = APIRouter(prefix="/sync", tags=["orthanc"])
 logger = logging.getLogger(__name__)
@@ -91,7 +91,7 @@ async def get_sync_status(db: AsyncSession = Depends(get_db)):
         patients_count = (await db.execute(select(func.count()).select_from(Patient))).scalar()
         studies_count = (await db.execute(select(func.count()).select_from(Study))).scalar()
         volumes_count = (await db.execute(select(func.count()).select_from(Volume))).scalar()
-        segs_count = (await db.execute(select(func.count()).select_from(Segmentation))).scalar()
+        segs_count = (await db.execute(select(func.count()).select_from(SegmentationMask))).scalar()
 
         # Get counts from Orthanc
         async with create_orthanc_session() as session:
@@ -220,7 +220,7 @@ async def reconcile_with_orthanc(delay_seconds: float = 5.0) -> None:
             db_series = (
                 (await db.execute(select(func.count()).select_from(Volume))).scalar() or 0
             ) + (
-                (await db.execute(select(func.count()).select_from(Segmentation))).scalar() or 0
+                (await db.execute(select(func.count()).select_from(SegmentationMask))).scalar() or 0
             )
 
             if db_studies >= orthanc_studies and db_series >= orthanc_series:
@@ -320,7 +320,7 @@ async def process_webhook_background(change_type: str, resource_id: str, level: 
                     else:
                         # Try as segmentation
                         result = await db.execute(
-                            select(Segmentation).where(Segmentation.orthanc_series_id == resource_id)
+                            select(SegmentationMask).where(SegmentationMask.orthanc_series_id == resource_id)
                         )
                         seg = result.scalar_one_or_none()
                         if seg:

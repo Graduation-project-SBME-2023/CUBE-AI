@@ -55,7 +55,7 @@ async def update_chat(
 
 @router.patch("/{chat_id}/touch", response_model=schemas.Chat)
 async def touch_chat(chat_id: UUID, db: AsyncSession = Depends(get_db)):
-    """Update only `last_activity` — used when a message is sent or received."""
+    """Update only `last_activity_at` — used when a message is sent or received."""
     return await crud.touch_chat(db, chat_id)
 
 

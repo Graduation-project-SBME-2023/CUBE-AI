@@ -42,7 +42,7 @@ class LiveSession(Protocol):
 class WebSocketManager(Protocol):
     """What the sink uses of ``socket_store.ConnectionManager``."""
 
-    async def send_ws_message(self, msg_type: str, payload: Any, session_id: str = ...) -> None: ...
+    async def send_ws_message(self, event_type: str, payload: Any, session_id: str = ...) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -67,5 +67,5 @@ class SessionEventSink:
     async def emit_view(self, event: ViewEvent) -> None:
         await self._send(event.type, dict(event.payload))
 
-    async def _send(self, msg_type: str, payload: dict[str, Any]) -> None:
-        await self.manager.send_ws_message(msg_type, payload, session_id=self.session.session_id)
+    async def _send(self, event_type: str, payload: dict[str, Any]) -> None:
+        await self.manager.send_ws_message(event_type, payload, session_id=self.session.session_id)

@@ -195,7 +195,7 @@ async def publish_figures(
             continue
         figures.append(
             {
-                "artifact_id": str(artifact["artifact_id"]),
+                "artifact_id": str(artifact["file_id"]),
                 "logical_key": artifact["logical_key"],
                 "display_filename": artifact.get("display_filename"),
                 "variant_key": variant,
@@ -214,7 +214,7 @@ class ModelingInput:
     train_path: str
     holdout_path: Optional[str]
     feature_set_id: Optional[str] = None
-    input_artifact_id: Optional[str] = None
+    input_file_id: Optional[str] = None
     holdout_artifact_id: Optional[str] = None
     label_supervised_on_full_data: Optional[bool] = None
     holdout_groups: list[str] = field(default_factory=list)
@@ -289,13 +289,13 @@ async def prepare_input(
         dataset_digest=bytes_digest(payload),
         train_path=input_path,
         holdout_path=None,
-        input_artifact_id=str(artifact["artifact_id"]),
+        input_file_id=str(artifact["file_id"]),
         notes=["trained on a generic CSV; its exact bytes are the captured input artifact"],
     )
     if holdout_path and os.path.exists(holdout_path):
         holdout_payload, holdout_artifact = await _captured_input(holdout_path, run_id, "holdout")
         prepared.holdout_path = holdout_path
-        prepared.holdout_artifact_id = str(holdout_artifact["artifact_id"])
+        prepared.holdout_artifact_id = str(holdout_artifact["file_id"])
         prepared.dataset_digest = document_digest(
             {"input": bytes_digest(payload), "holdout": bytes_digest(holdout_payload)}
         )
@@ -314,7 +314,7 @@ def comparison_payload(
     return {
         "cohort_id": prepared.cohort_id,
         "feature_set_id": prepared.feature_set_id,
-        "input_artifact_id": prepared.input_artifact_id,
+        "input_file_id": prepared.input_file_id,
         "dataset_digest": prepared.dataset_digest,
         "preprocessing": versioned(preprocessing),
         "feature_order": versioned({"features": [str(name) for name in features], "target": "target"}),
@@ -376,9 +376,9 @@ def recorded_response(
     split = (variants[0].get("split_definition") or {}) if variants else {}
     evaluation = ((selected or {}).get("metrics") or {}).get("evaluation") or {}
     predictions = {
-        variant["variant_key"]: str(variant["predictions_artifact_id"])
+        variant["variant_key"]: str(variant["predictions_file_id"])
         for variant in variants
-        if variant.get("predictions_artifact_id")
+        if variant.get("predictions_file_id")
     }
     return {
         "status": "success",
@@ -388,7 +388,7 @@ def recorded_response(
         # it back instead of training a second time.
         "reused_recorded_results": reused,
         "feature_set_id": recorded.get("feature_set_id"),
-        "input_artifact_id": recorded.get("input_artifact_id"),
+        "input_artifact_id": recorded.get("input_file_id"),  # tool result key, kept (plan.md: no success result shape changes)
         "dataset_digest": recorded.get("dataset_digest"),
         "selected_variant": recorded.get("selected_variant_key"),
         "model_results": [
@@ -399,7 +399,7 @@ def recorded_response(
                 "status": variant["status"],
                 "selected": variant["selected"],
                 "model_file_name": variant.get("model_file_name"),
-                "predictions_artifact_id": variant.get("predictions_artifact_id"),
+                "predictions_artifact_id": variant.get("predictions_file_id"),  # tool result key, kept (plan.md: no success result shape changes)
             }
             for variant in variants
         ],
@@ -411,8 +411,8 @@ def recorded_response(
         },
         "model_test_predictions": predictions,
         "exports": {
-            f"predictions_{key}": f"/artifacts/{artifact_id}/content?download=true"
-            for key, artifact_id in predictions.items()
+            f"predictions_{key}": f"/files/{file_id}/content?download=true"
+            for key, file_id in predictions.items()
         },
         # True when evaluation ran on rows feature selection never saw. When
         # False the holdout metrics are optimistic by an unknown amount.
@@ -466,7 +466,7 @@ async def record_independent_evaluation(
     base_variant: Mapping[str, Any],
     input_bytes: bytes,
     input_name: str,
-    predictions_artifact_id: str,
+    predictions_file_id: str,
     n_cases: int,
     metrics: Mapping[str, Any],
 ) -> dict[str, str]:
@@ -488,7 +488,7 @@ async def record_independent_evaluation(
         {
             "cohort_id": str(full["cohort_id"]),
             "feature_set_id": None,
-            "input_artifact_id": str(captured["artifact_id"]),
+            "input_file_id": str(captured["file_id"]),
             "dataset_digest": digest,
             "preprocessing": full["preprocessing"],
             "feature_order": full["feature_order"],
@@ -518,7 +518,7 @@ async def record_independent_evaluation(
                             },
                         }
                     ),
-                    "predictions_artifact_id": predictions_artifact_id,
+                    "predictions_file_id": predictions_file_id,
                     "model_file_name": full["model_file_name"],
                     "model_file_digest": full["model_file_digest"],
                     "selected": False,

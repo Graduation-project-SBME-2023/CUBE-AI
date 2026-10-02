@@ -19,6 +19,6 @@ class Chat(BaseModel):
     session_id: UUID
     title: Optional[str] = None
     created_at: datetime
-    last_activity: datetime
+    last_activity_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

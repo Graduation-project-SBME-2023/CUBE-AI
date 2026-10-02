@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
 
-from application_api.db.models.plan import Plan
+from application_api.db.models.session_graphs import SessionGraph
 from application_api.db.models.sessions import Session as SessionModel
 from application_api.schemas import sessions as schemas
 
@@ -24,17 +24,17 @@ async def create_session(db: AsyncSession, data: schemas.SessionCreate) -> Sessi
             title=data.title,
             prompt=data.prompt,
             prompt_kind=data.prompt_kind,
-            status="planning",
+            control_state="planning",
             created_at=now,
             updated_at=now,
         )
         db.add(session)
         await db.flush()
 
-        # The session and its empty plan are created in ONE transaction.
+        # The session and its empty graph are created in ONE transaction.
         # A deferred constraint trigger rejects a committed session with no
-        # plan, so this is not optional and cannot be deferred to a later call.
-        db.add(Plan(session_id=session.session_id, approved_at=None, updated_at=now))
+        # session graph, so this is not optional and cannot be deferred to a later call.
+        db.add(SessionGraph(session_id=session.session_id, approved_at=None, updated_at=now))
 
         await db.commit()
         await db.refresh(session)
@@ -59,7 +59,7 @@ async def get_session(db: AsyncSession, session_id: UUID) -> SessionModel:
 
 async def get_sessions(
     db: AsyncSession,
-    status: str | None = None,
+    control_state: str | None = None,
     include_archived: bool = False,
     skip: int = 0,
     limit: int = 50,
@@ -67,12 +67,12 @@ async def get_sessions(
     try:
         query = select(SessionModel).options(
             noload(SessionModel.chats),
-            noload(SessionModel.ws_logs),
+            noload(SessionModel.events),
         )
-        if status:
-            query = query.where(SessionModel.status == status)
+        if control_state:
+            query = query.where(SessionModel.control_state == control_state)
         elif not include_archived:
-            query = query.where(SessionModel.status != "archived")
+            query = query.where(SessionModel.control_state != "archived")
 
         query = (
             query.order_by(SessionModel.updated_at.desc().nullslast())
@@ -104,7 +104,7 @@ async def update_session(
 
 
 # Durable pause, expressed as guarded transitions rather than a flag. Each
-# entry is the set of statuses a transition may start from; anything else is a
+# entry is the set of control states a transition may start from; anything else is a
 # 409 rather than a silent overwrite.
 _ALLOWED_TRANSITIONS = {
     "planning": {"planning"},
@@ -114,26 +114,26 @@ _ALLOWED_TRANSITIONS = {
     "paused": {"pausing"},
     "completed": {"running"},
     "failed": {"planning", "ready", "running", "pausing", "paused"},
-    "archived": set(),  # any status may be archived
+    "archived": set(),  # any control state may be archived
 }
 
 
-async def set_session_status(
-    db: AsyncSession, session_id: UUID, new_status: str
+async def set_session_control_state(
+    db: AsyncSession, session_id: UUID, new_state: str
 ) -> SessionModel:
     session = await get_session(db, session_id)
-    allowed = _ALLOWED_TRANSITIONS.get(new_status)
+    allowed = _ALLOWED_TRANSITIONS.get(new_state)
     if allowed is None:
-        raise HTTPException(status_code=400, detail=f"Unknown status {new_status!r}")
-    if allowed and session.status not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unknown control state {new_state!r}")
+    if allowed and session.control_state not in allowed:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"Session {session_id} is {session.status!r}; it cannot move to "
-                f"{new_status!r}."
+                f"Session {session_id} is {session.control_state!r}; it cannot move to "
+                f"{new_state!r}."
             ),
         )
-    session.status = new_status
+    session.control_state = new_state
     try:
         await db.commit()
         await db.refresh(session)
@@ -145,11 +145,11 @@ async def set_session_status(
 
 async def archive_session(db: AsyncSession, session_id: UUID) -> SessionModel:
     """Normal removal. This is what a delete request means in current."""
-    return await set_session_status(db, session_id, "archived")
+    return await set_session_control_state(db, session_id, "archived")
 
 
 async def delete_session(db: AsyncSession, session_id: UUID):
-    """Hard delete — refused while provenance still references the session.: normal removal is `status='archived'`; a hard delete is an admin operation under backup and retained-reference checks. The FKs are RESTRICT, so the database refuses too; this turns that into a usable 409."""
+    """Hard delete — refused while provenance still references the session.: normal removal is `control_state='archived'`; a hard delete is an admin operation under backup and retained-reference checks. The FKs are RESTRICT, so the database refuses too; this turns that into a usable 409."""
     session = await get_session(db, session_id)
     try:
         await db.delete(session)

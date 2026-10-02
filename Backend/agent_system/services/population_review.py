@@ -50,9 +50,9 @@ async def _api(method: str, path: str, *, allow_404: bool = False, **kwargs) -> 
 # ----------------------------------------------------------------------
 async def population_run_id(session_id: str) -> str:
     resolved = await _api(
-        "GET", f"/agent-runs/session/{session_id}/by-agent-type/{POPULATION_AGENT_TYPE}"
+        "GET", f"/runs/session/{session_id}/by-target/{POPULATION_AGENT_TYPE}"
     )
-    return str(resolved["run"]["agent_run_id"])
+    return str(resolved["run"]["run_id"])
 
 
 async def get_cohort(session_id: str) -> dict[str, Any] | None:
@@ -224,7 +224,7 @@ def uploaded_target_writes(cohort: dict[str, Any], csv_bytes: bytes) -> tuple[li
 async def current_batch(session_id: str) -> dict[str, Any] | None:
     """The session's segmentation batch the review UI is about (the last one in
     plan order)."""
-    batches = await _api("GET", f"/segmentation-runs/session/{session_id}")
+    batches = await _api("GET", f"/segmentation-batches/session/{session_id}")
     return batches[-1] if batches else None
 
 
@@ -252,7 +252,7 @@ def snapshot_manifest(batch: dict[str, Any]) -> dict[str, Any]:
     }[batch["review_status"]]
     config = batch.get("config") or {}
     return {
-        "run_id": config.get("correlation_run_id"),
+        "batch_correlation_id": config.get("batch_correlation_id"),
         "stage": stage,
         "resolution": {"final_plan": config.get("final_plan")},
         "pairs": work_items_from_batch(batch),

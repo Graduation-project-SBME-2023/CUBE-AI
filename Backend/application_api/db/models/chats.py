@@ -27,7 +27,7 @@ class Chat(Base):
     # REJECTED the removal of this column: it has a dedicated TOUCH
     # endpoint and eight readers in ChatSidebar.tsx. It is not derived from the
     # message timeline at read time.
-    last_activity = Column(
+    last_activity_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
     )
 
