@@ -44,6 +44,6 @@ def describe_resume(runs: list[Mapping[str, Any]]) -> dict[str, Any]:
     return {
         "completed_runs": len(completed),
         "total_runs": len(runs),
-        "resumes_at_step_id": str(interrupted.get("step_id")) if interrupted else None,
+        "resumes_at_node_id": str(interrupted.get("node_id")) if interrupted else None,
         "deleted_artifacts": [],
     }

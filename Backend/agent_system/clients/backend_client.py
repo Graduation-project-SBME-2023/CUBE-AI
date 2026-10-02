@@ -8,7 +8,7 @@ from models.plans import (
     StudyStep,
     TaskMessage,
 )
-from models.logs import WS_Log
+from models.logs import SessionEvent
 import os
 import json
 from uuid import UUID
@@ -72,7 +72,7 @@ class BackendClient:
         return ClinicalHypothesis(
             id=str(session.get("session_id", "")),
             state="not_confirmed"
-            if session.get("status") == "planning"
+            if session.get("control_state") == "planning"
             else "confirmed",
             title=intent.get("title") or session.get("title") or "",
             population=intent.get("population") or "",
@@ -142,19 +142,19 @@ class BackendClient:
                 return None
 
     @classmethod
-    async def set_session_status(cls, session_id: str, status: str) -> dict | None:
+    async def set_session_control_state(cls, session_id: str, control_state: str) -> dict | None:
         """Guarded transition — this is how pause becomes durable."""
         cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.patch(
-                    f"{BASE_URL}/sessions/{session_id}/status/{status}"
+                    f"{BASE_URL}/sessions/{session_id}/control-state/{control_state}"
                 )
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
                 logger.error(
-                    f"Failed to set session {session_id} status to {status}: {e}"
+                    f"Failed to set session {session_id} control state to {control_state}: {e}"
                 )
                 return None
 
@@ -201,17 +201,17 @@ class BackendClient:
     # ------------------------------------------------------------------
 
     @classmethod
-    def _step_payload(cls, plan: StudyPlan) -> dict:
-        """Map the in-memory plan onto the current draft contract."""
-        steps = []
+    def _nodes_payload(cls, plan: StudyPlan) -> dict:
+        """Map the in-memory plan onto the session graph draft contract."""
+        nodes = []
         for step in plan.steps:
-            instructions: dict[str, Any] = {}
+            params: dict[str, Any] = {}
             if step.description:
-                instructions["description"] = step.description
+                params["description"] = step.description
             if step.task_message is not None:
                 task_message = step.task_message
-                instructions["compiled"] = task_message.instructions
-                instructions["task_message"] = {
+                params["compiled"] = task_message.instructions
+                params["task_message"] = {
                     "schema_version": 1,
                     "source": "context_compiler",
                     "task_id": task_message.task_id,
@@ -226,19 +226,19 @@ class BackendClient:
                         else {}
                     ),
                 }
-            steps.append(
+            nodes.append(
                 {
                     "title": step.title,
-                    "agent_type": step.module or "",
-                    "instructions": instructions,
+                    "target_name": step.module or "",
+                    "params": params,
                 }
             )
-        return {"steps": steps}
+        return {"nodes": nodes}
 
     @staticmethod
-    def _parse_task_message(instructions: dict) -> TaskMessage | None:
-        """Rebuild the compiled task message from the step definition."""
-        raw = (instructions or {}).get("task_message")
+    def _parse_task_message(params: dict) -> TaskMessage | None:
+        """Rebuild the compiled task message from the node definition."""
+        raw = (params or {}).get("task_message")
         if not isinstance(raw, dict):
             return None
         augmentation = raw.get("context_augmentation") or {}
@@ -262,21 +262,21 @@ class BackendClient:
     def _parse_plan(cls, session_id: str, payload: dict) -> StudyPlan:
         steps = []
         for raw in sorted(
-            payload.get("steps") or [], key=lambda r: r.get("step_order", 0)
+            payload.get("nodes") or [], key=lambda r: r.get("position", 0)
         ):
-            instructions = raw.get("instructions") or {}
-            task_message = cls._parse_task_message(instructions)
+            params = raw.get("params") or {}
+            task_message = cls._parse_task_message(params)
             if task_message is not None and not task_message.agent_id:
-                # The agent id is the step's own selector; it is not stored
+                # The agent id is the node's own selector; it is not stored
                 # twice inside the task message.
-                task_message.agent_id = raw.get("agent_type") or ""
+                task_message.agent_id = raw.get("target_name") or ""
             steps.append(
                 StudyStep(
-                    id=str(raw.get("step_id", "")),
+                    id=str(raw.get("node_id", "")),
                     title=raw.get("title") or "",
-                    description=instructions.get("description", ""),
-                    module=raw.get("agent_type"),
-                    step_order=int(raw.get("step_order") or 0),
+                    description=params.get("description", ""),
+                    module=raw.get("target_name"),
+                    position=int(raw.get("position") or 0),
                     task_message=task_message,
                 )
             )
@@ -294,8 +294,8 @@ class BackendClient:
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.put(
-                    f"{BASE_URL}/plans/session/{session_id}/steps",
-                    json=cls._step_payload(plan),
+                    f"{BASE_URL}/session-graphs/session/{session_id}/nodes",
+                    json=cls._nodes_payload(plan),
                 )
                 response.raise_for_status()
                 return cls._parse_plan(session_id, response.json())
@@ -313,7 +313,7 @@ class BackendClient:
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.post(
-                    f"{BASE_URL}/plans/session/{session_id}/approve"
+                    f"{BASE_URL}/session-graphs/session/{session_id}/approve"
                 )
                 response.raise_for_status()
                 return cls._parse_plan(session_id, response.json())
@@ -329,7 +329,7 @@ class BackendClient:
         cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
-                response = await client.get(f"{BASE_URL}/plans/session/{session_id}")
+                response = await client.get(f"{BASE_URL}/session-graphs/session/{session_id}")
                 if response.status_code == 404:
                     return None
                 response.raise_for_status()
@@ -346,12 +346,12 @@ class BackendClient:
     # ------------------------------------------------------------------
 
     @classmethod
-    async def get_plan_steps(cls, session_id: str) -> list[dict]:
+    async def get_graph_nodes(cls, session_id: str) -> list[dict]:
         """Fetch a session's steps in order."""
         cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
-                response = await client.get(f"{BASE_URL}/steps/session/{session_id}")
+                response = await client.get(f"{BASE_URL}/graph-nodes/session/{session_id}")
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
@@ -375,7 +375,7 @@ class BackendClient:
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.get(
-                    f"{BASE_URL}/segmentations/by-volume/{volume_uid}",
+                    f"{BASE_URL}/segmentation-masks/by-volume/{volume_uid}",
                 )
                 response.raise_for_status()
                 return response.json()
@@ -387,17 +387,17 @@ class BackendClient:
                 return []
 
     # ------------------------------------------------------------------
-    # Agent runs — execution state, identity
+    # Node runs — execution state, identity
     # ------------------------------------------------------------------
 
     @classmethod
-    async def get_agent_runs(cls, session_id: str) -> list[dict]:
-        """Every run of the session's approved plan, in step order."""
+    async def get_node_runs(cls, session_id: str) -> list[dict]:
+        """Every run of the session's approved graph, in node order."""
         cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.get(
-                    f"{BASE_URL}/agent-runs/session/{session_id}"
+                    f"{BASE_URL}/runs/session/{session_id}"
                 )
                 response.raise_for_status()
                 return response.json()
@@ -409,10 +409,10 @@ class BackendClient:
                 return []
 
     @classmethod
-    async def get_agent_run(cls, agent_run_id: str) -> dict | None:
-        cls._require_uuid(agent_run_id, "agent_run_id")
+    async def get_node_run(cls, run_id: str) -> dict | None:
+        cls._require_uuid(run_id, "run_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
-            response = await client.get(f"{BASE_URL}/agent-runs/{agent_run_id}")
+            response = await client.get(f"{BASE_URL}/runs/{run_id}")
             if response.status_code == 404:
                 return None
             response.raise_for_status()
@@ -423,13 +423,13 @@ class BackendClient:
     # ------------------------------------------------------------------
 
     @classmethod
-    async def get_agent_run_status(cls, session_id: str) -> dict | None:
-        """The `pipeline_agent_status` view, rebuilt from the runs."""
+    async def get_node_status(cls, session_id: str) -> dict | None:
+        """The `node_status` view, rebuilt from the runs."""
         cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.get(
-                    f"{BASE_URL}/agent-runs/session/{session_id}/status"
+                    f"{BASE_URL}/runs/session/{session_id}/status"
                 )
                 response.raise_for_status()
                 return response.json()
@@ -441,65 +441,65 @@ class BackendClient:
                 return None
 
     @classmethod
-    async def start_agent_run(
-        cls, agent_run_id: str, compiled_prompt: str, input_refs: dict[str, Any]
+    async def start_node_run(
+        cls, run_id: str, compiled_prompt: str, resolved_inputs: dict[str, Any]
     ) -> dict | None:
         """Claim a run immediately before its step starts."""
-        cls._require_uuid(agent_run_id, "agent_run_id")
+        cls._require_uuid(run_id, "run_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             response = await client.post(
-                f"{BASE_URL}/agent-runs/{agent_run_id}/start",
-                json={"compiled_prompt": compiled_prompt, "input_refs": input_refs},
+                f"{BASE_URL}/runs/{run_id}/start",
+                json={"compiled_prompt": compiled_prompt, "resolved_inputs": resolved_inputs},
             )
             response.raise_for_status()
             return response.json()
 
     @classmethod
-    async def complete_agent_run(
-        cls, agent_run_id: str, output_summary: dict[str, Any] | None = None
+    async def complete_node_run(
+        cls, run_id: str, scratchpad_summary: dict[str, Any] | None = None
     ) -> dict | None:
-        cls._require_uuid(agent_run_id, "agent_run_id")
+        cls._require_uuid(run_id, "run_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.post(
-                    f"{BASE_URL}/agent-runs/{agent_run_id}/complete",
-                    json={"output_summary": output_summary},
+                    f"{BASE_URL}/runs/{run_id}/complete",
+                    json={"scratchpad_summary": scratchpad_summary},
                 )
                 response.raise_for_status()
                 return response.json()
             except httpx.HTTPError as e:
                 logger.error(
-                    f"Failed to complete agent run {agent_run_id}: "
+                    f"Failed to complete agent run {run_id}: "
                     f"{type(e).__name__}: {e}"
                 )
                 return None
 
     @classmethod
     async def write_agent_output(
-        cls, agent_run_id: str, output: dict[str, Any]
+        cls, run_id: str, output: dict[str, Any]
     ) -> dict | None:
-        """Record a step's structured result on its run."""
-        cls._require_uuid(agent_run_id, "agent_run_id")
+        """Record a node's structured result on its run."""
+        cls._require_uuid(run_id, "run_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             response = await client.put(
-                f"{BASE_URL}/agent-runs/{agent_run_id}/output", json=output
+                f"{BASE_URL}/runs/{run_id}/output", json=output
             )
             response.raise_for_status()
             return response.json()
 
     @classmethod
-    async def fail_agent_run(
+    async def fail_node_run(
         cls,
-        agent_run_id: str,
+        run_id: str,
         code: str,
         message: str,
         details: dict[str, Any] | None = None,
     ) -> dict | None:
-        cls._require_uuid(agent_run_id, "agent_run_id")
+        cls._require_uuid(run_id, "run_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             try:
                 response = await client.post(
-                    f"{BASE_URL}/agent-runs/{agent_run_id}/fail",
+                    f"{BASE_URL}/runs/{run_id}/fail",
                     json={
                         "code": code,
                         "message": message[:8000],
@@ -510,7 +510,7 @@ class BackendClient:
                 return response.json()
             except httpx.HTTPError as e:
                 logger.error(
-                    f"Failed to record failure for agent run {agent_run_id}: "
+                    f"Failed to record failure for agent run {run_id}: "
                     f"{type(e).__name__}: {e}"
                 )
                 return None
@@ -546,7 +546,7 @@ class BackendClient:
     @classmethod
     async def get_segmentation_batches(cls, session_id: str) -> list[dict]:
         cls._require_uuid(session_id, "session_id")
-        return await cls._domain("GET", f"/segmentation-runs/session/{session_id}")
+        return await cls._domain("GET", f"/segmentation-batches/session/{session_id}")
 
     # ------------------------------------------------------------------
     # Literature reviews — the planning-phase literature agent's durable output
@@ -587,7 +587,7 @@ class BackendClient:
         session_id: str,
         source_text: str,
         *,
-        created_by_agent_run_id: str | None = None,
+        created_by_run_id: str | None = None,
         literature_review_id: str | None = None,
         source_format: str = "latex",
         title: str | None = None,
@@ -600,8 +600,8 @@ class BackendClient:
             "source_text": source_text,
             "source_format": source_format,
         }
-        if created_by_agent_run_id is not None:
-            payload["created_by_agent_run_id"] = created_by_agent_run_id
+        if created_by_run_id is not None:
+            payload["created_by_run_id"] = created_by_run_id
         if literature_review_id is not None:
             payload["literature_review_id"] = literature_review_id
         if title is not None:
@@ -641,36 +641,36 @@ class BackendClient:
                     "prompt": session.get("prompt"),
                     "prompt_kind": session.get("prompt_kind"),
                     "date": session.get("updated_at") or session.get("created_at"),
-                    "status": session.get("status"),
+                    "status": session.get("control_state"),
                 }
             )
         logger.info(f"Fetched session history: {len(history)} items")
         return history
 
     # ------------------------------------------------------------------
-    # WS Stream Logs
+    # Session events
     # ------------------------------------------------------------------
     @classmethod
-    async def save_log(cls, log: WS_Log) -> WS_Log:
+    async def save_event(cls, log: SessionEvent) -> SessionEvent:
         """Persist one event and return it carrying its `event_id`."""
         cls._require_uuid(log.session_id, "log.session_id")
 
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             response = await client.post(
-                f"{BASE_URL}/ws_logs/",
+                f"{BASE_URL}/session-events/",
                 json={
                     "session_id": log.session_id,
-                    "msg_type": log.msg_type,
+                    "event_type": log.event_type,
                     "payload": log.payload,
                 },
             )
             response.raise_for_status()
-            return WS_Log(**response.json())
+            return SessionEvent(**response.json())
 
     @classmethod
-    async def replay_logs(
+    async def replay_events(
         cls, session_id: str, after_event_id: int = 0, limit: int = 2000
-    ) -> list[WS_Log]:
+    ) -> list[SessionEvent]:
         """Replay a session's events in `event_id` order from a cursor.
 
         Raises on failure rather than swallowing it (WEBSOCKET_FIX_PLAN.md
@@ -684,16 +684,16 @@ class BackendClient:
         cls._require_uuid(session_id, "session_id")
         async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
             response = await client.get(
-                f"{BASE_URL}/ws_logs/session/{session_id}",
+                f"{BASE_URL}/session-events/session/{session_id}",
                 params={"after_event_id": after_event_id, "limit": limit},
             )
             response.raise_for_status()
-            return [WS_Log(**item) for item in response.json()]
+            return [SessionEvent(**item) for item in response.json()]
 
     @classmethod
-    async def get_logs(cls, session_id: str) -> list[WS_Log]:
+    async def get_logs(cls, session_id: str) -> list[SessionEvent]:
         """Every event of a session, oldest first (replay from the beginning)."""
-        return await cls.replay_logs(session_id, after_event_id=0)
+        return await cls.replay_events(session_id, after_event_id=0)
 
 
 if __name__ == "__main__":

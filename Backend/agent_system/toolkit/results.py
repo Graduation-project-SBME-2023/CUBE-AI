@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import re
 from enum import StrEnum
-from typing import Any, Self
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 # Error codes are snake_case so the Watchdog, Recovery and the UI can match on them.
 ERROR_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -63,26 +63,16 @@ class NodeStatus(StrEnum):
 class RunAccepted(BaseModel):
     """Returned at once when work is submitted; the Main Agent never waits on it.
 
-    ``run_id`` is None until a run exists (e.g. while awaiting approval).
-    ``approval_id`` is set exactly when ``status`` is ``awaiting_approval``.
+    ``change_id`` is the ``graph_changes`` row that accepted (or still awaits
+    approval for) the node's work; an approval is a decision on that change.
+    There is no ``run_id``: a run is created only when its node starts (D8).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     node_id: str = Field(min_length=1)
-    run_id: str | None = None
+    change_id: str = Field(min_length=1)
     status: NodeStatus
-    graph_version: int = Field(ge=0)
-    approval_id: str | None = None
-
-    @model_validator(mode="after")
-    def _approval_matches_status(self) -> Self:
-        awaiting = self.status is NodeStatus.AWAITING_APPROVAL
-        if awaiting and not self.approval_id:
-            raise ValueError("status 'awaiting_approval' needs an approval_id")
-        if not awaiting and self.approval_id is not None:
-            raise ValueError(f"approval_id is only set while awaiting approval, not {self.status}")
-        return self
 
     def to_result(self) -> dict[str, Any]:
         """The JSON a tool returns to the model."""

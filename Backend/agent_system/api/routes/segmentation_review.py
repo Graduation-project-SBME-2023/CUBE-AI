@@ -59,13 +59,18 @@ async def segmentation_review_draft(data: dict):
         raise HTTPException(status_code=400, detail="Review contains an invalid status")
     try:
         batch = await _review_batch_or_404(session_id)
-        request_run_id = str(data.get("run_id") or "")
-        batch_run_id = str((batch.get("config") or {}).get("correlation_run_id") or "")
-        if request_run_id and batch_run_id and request_run_id != batch_run_id:
-            raise HTTPException(status_code=409, detail="Segmentation run has changed")
+        # The review UI sends the batch correlation id it was shown as `run_id`.
+        request_correlation_id = str(data.get("run_id") or "")
+        batch_correlation_id = str((batch.get("config") or {}).get("batch_correlation_id") or "")
+        if (
+            request_correlation_id
+            and batch_correlation_id
+            and request_correlation_id != batch_correlation_id
+        ):
+            raise HTTPException(status_code=409, detail="Segmentation batch has changed")
         await population_review._api(
             "PUT",
-            f"/segmentation-runs/{batch['segmentation_run_id']}/review/draft",
+            f"/segmentation-batches/{batch['segmentation_batch_id']}/review/draft",
             json={"decisions": {str(key): str(value) for key, value in decisions.items()}},
         )
     except population_review.DomainError as exc:
@@ -106,9 +111,11 @@ async def segmentation_review(data: dict):
 
     try:
         batch = await _review_batch_or_404(session_id)
-        run_id = batch["segmentation_run_id"]
+        batch_id = batch["segmentation_batch_id"]
         batch = await population_review._api(
-            "POST", f"/segmentation-runs/{run_id}/review/begin", json={"request_hash": request_hash}
+            "POST",
+            f"/segmentation-batches/{batch_id}/review/begin",
+            json={"request_hash": request_hash},
         )
     except population_review.DomainError as exc:
         raise domain_http_error(exc)
@@ -143,10 +150,12 @@ async def segmentation_review(data: dict):
         except Exception as exc:
             try:
                 await population_review._api(
-                    "POST", f"/segmentation-runs/{run_id}/review/abort", json={"request_hash": request_hash}
+                    "POST",
+                    f"/segmentation-batches/{batch_id}/review/abort",
+                    json={"request_hash": request_hash},
                 )
             except population_review.DomainError:
-                logger.exception("Could not return review %s to pending", run_id)
+                logger.exception("Could not return review %s to pending", batch_id)
             if isinstance(exc, HTTPException):
                 raise
             logger.exception("Publishing edited masks failed for session %s", session_id)
@@ -160,7 +169,7 @@ async def segmentation_review(data: dict):
     try:
         result = await population_review._api(
             "POST",
-            f"/segmentation-runs/{run_id}/review/complete",
+            f"/segmentation-batches/{batch_id}/review/complete",
             json={"accepted": accepted, "rejected": rejected, "modified": modified, "selected": selected},
         )
     except population_review.DomainError as exc:
@@ -169,7 +178,7 @@ async def segmentation_review(data: dict):
     event = result.get("event")
     if event:
         await ws_manager.send_ws_message(
-            event["msg_type"], event["payload"], session_id=session_id, event_id=event["event_id"]
+            event["event_type"], event["payload"], session_id=session_id, event_id=event["event_id"]
         )
     waiter = review_events.get(session_id)
     if waiter is not None:

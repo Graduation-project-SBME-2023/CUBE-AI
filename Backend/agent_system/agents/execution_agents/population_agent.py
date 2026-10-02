@@ -45,7 +45,7 @@ class PopulationPlannerAgent(AssistantAgent):
         max_tool_iterations,
         workspace_folder=None,
         session_id=None,
-        agent_run_id=None,
+        run_id=None,
     ):
         super().__init__(name=name,
                         model_client=model_client, 
@@ -56,7 +56,7 @@ class PopulationPlannerAgent(AssistantAgent):
         self._workspace_folder = workspace_folder
         # The handoff is checked against THIS step's run.
         self._session_id = session_id
-        self._agent_run_id = agent_run_id
+        self._run_id = run_id
         self._population_completion_retries = self.COMPLETION_RETRIES
 
     async def on_messages_stream(
@@ -88,7 +88,7 @@ class PopulationPlannerAgent(AssistantAgent):
                 yield final_response
                 return
 
-            issues = await population_handoff_issues(self._session_id, self._agent_run_id)
+            issues = await population_handoff_issues(self._session_id, self._run_id)
             if not issues:
                 yield final_response
                 return
@@ -126,7 +126,7 @@ class PopulationPlannerAgent(AssistantAgent):
             ]
     
     @classmethod
-    async def create(cls, model_client = None, workspace_folder=None, session_id=None, node_name=None, agent_run_id=None, step_id=None):
+    async def create(cls, model_client = None, workspace_folder=None, session_id=None, node_name=None, run_id=None, node_id=None):
         model_client = OllamaClient() if not model_client else model_client
         mcp_server_path = os.path.abspath(
             os.path.join(current_dir, "..", "..", "..", "mcp", "server.py")
@@ -149,8 +149,8 @@ class PopulationPlannerAgent(AssistantAgent):
             "WORKSPACE_DIR": workspace_folder,
             "SESSION_ID": session_id,
             "AGENT_ID": "study_population_planner_agent",
-            "AGENT_RUN_ID": str(agent_run_id or ""),
-            "STEP_ID": str(step_id or ""),
+            "RUN_ID": str(run_id or ""),
+            "NODE_ID": str(node_id or ""),
             "MODEL_BASE_URL": base_url,
             "MODEL_NAME": model_name,
             "MODEL_API_KEY": api_key,
@@ -218,7 +218,7 @@ class PopulationPlannerAgent(AssistantAgent):
             max_tool_iterations = 20,
             workspace_folder = workspace_folder,
             session_id = session_id,
-            agent_run_id = str(agent_run_id) if agent_run_id else None,
+            run_id = str(run_id) if run_id else None,
         )
     
     @staticmethod

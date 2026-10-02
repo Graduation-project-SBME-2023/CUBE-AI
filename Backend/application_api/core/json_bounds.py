@@ -9,12 +9,13 @@ from typing import Any
 KIB = 1024
 MIB = 1024 * KIB
 
-# agent_runs.durable_notes / warnings / output_summary / error / input_refs
-AGENT_RUN_JSON_MAX_BYTES = 2 * MIB
-# agent_runs.compiled_prompt (TEXT, but bounded for the same reason)
+# node_runs.scratchpad_notes / scratchpad_warnings / scratchpad_summary / error /
+# resolved_inputs
+NODE_RUN_JSON_MAX_BYTES = 2 * MIB
+# node_runs.compiled_prompt (TEXT, but bounded for the same reason)
 COMPILED_PROMPT_MAX_BYTES = 1 * MIB
-# ws_log.payload — tool events can carry chart payloads.
-WS_LOG_PAYLOAD_MAX_BYTES = 4 * MIB
+# session_events.payload — tool events can carry chart payloads.
+SESSION_EVENT_PAYLOAD_MAX_BYTES = 4 * MIB
 # Default for smaller domain documents (criteria, specifications, metrics…).
 DOMAIN_JSON_MAX_BYTES = 1 * MIB
 # Per-member clinical evidence.

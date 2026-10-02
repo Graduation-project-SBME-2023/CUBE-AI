@@ -1,4 +1,4 @@
-"""Bind one graph node to one `agent_runs` row."""
+"""Bind one graph node to one `node_runs` row."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ FailHook = Callable[[PlannedRun, BaseException], Awaitable[Any]]
 
 
 class RunBoundAgent(BaseChatAgent):
-    """Wraps a graph node so its `agent_runs` row opens and closes with it."""
+    """Wraps a graph node so its `node_runs` row opens and closes with it."""
 
     def __init__(
         self,

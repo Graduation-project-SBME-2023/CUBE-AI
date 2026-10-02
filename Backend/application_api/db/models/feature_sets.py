@@ -30,9 +30,9 @@ class FeatureSet(Base):
     feature_set_id = Column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    created_by_agent_run_id = Column(
+    created_by_run_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("agent_runs.agent_run_id", ondelete="RESTRICT"),
+        ForeignKey("node_runs.run_id", ondelete="RESTRICT"),
         nullable=False,
     )
     cohort_id = Column(
@@ -62,7 +62,7 @@ class FeatureSet(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "created_by_agent_run_id", "set_key", name="uq_feature_sets_created_by_agent_run_id"
+            "created_by_run_id", "set_key", name="uq_feature_sets_created_by_run_id"
         ),
         # The tuple model_results' composite FK targets, so a model result
         # cannot train on a set from another cohort.

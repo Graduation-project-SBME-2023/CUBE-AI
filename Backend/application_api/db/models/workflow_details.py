@@ -28,7 +28,7 @@ class WorkflowDetail(Base):
     label_series_instance_uid = Column(
         "label_series_instance_uid",
         Text,
-        ForeignKey("segmentations.label_series_instance_uid", ondelete="RESTRICT"),
+        ForeignKey("segmentation_masks.label_series_instance_uid", ondelete="RESTRICT"),
         nullable=True,
     )
     annotated = Column("annotated", Boolean, server_default="false")

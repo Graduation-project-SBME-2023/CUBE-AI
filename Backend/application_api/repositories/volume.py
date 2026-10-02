@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.db.models.volume import Volume
-from application_api.db.models.segmentation import Segmentation
+from application_api.db.models.segmentation_masks import SegmentationMask
 from application_api.schemas.volume import VolumeCreate, VolumeUpdate
 from application_api.db.models.study import Study
 from application_api.services.orthanc_client import cleanup_orthanc_resources_after_db_delete
@@ -75,8 +75,8 @@ async def delete_volume(db: AsyncSession, volume_uid: str):
 
     orthanc_series_id = volume.orthanc_series_id
     seg_result = await db.execute(
-        select(Segmentation.orthanc_series_id).where(
-            Segmentation.volume_series_instance_uid == volume_uid
+        select(SegmentationMask.orthanc_series_id).where(
+            SegmentationMask.volume_series_instance_uid == volume_uid
         )
     )
     seg_orthanc_ids = [row[0] for row in seg_result.all()]

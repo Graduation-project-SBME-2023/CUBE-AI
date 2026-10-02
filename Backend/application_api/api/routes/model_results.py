@@ -30,29 +30,29 @@ async def read_session_summary(session_id: UUID, db: AsyncSession = Depends(get_
     return await repo.session_summary(db, session_id)
 
 
-@router.put("/run/{agent_run_id}/{comparison_key}", response_model=ModelComparisonOut)
+@router.put("/run/{run_id}/{comparison_key}", response_model=ModelComparisonOut)
 async def record_comparison(
-    agent_run_id: UUID,
+    run_id: UUID,
     comparison_key: str,
     data: ModelComparisonWrite,
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     """Record every variant of one comparison, or replay it (identical → 200)."""
-    comparison, created = await repo.record_comparison(db, agent_run_id, comparison_key, data)
+    comparison, created = await repo.record_comparison(db, run_id, comparison_key, data)
     response.status_code = 201 if created else 200
     return comparison
 
 
-@router.get("/run/{agent_run_id}/{comparison_key}", response_model=ModelComparisonOut)
+@router.get("/run/{run_id}/{comparison_key}", response_model=ModelComparisonOut)
 async def read_comparison(
-    agent_run_id: UUID, comparison_key: str, db: AsyncSession = Depends(get_db)
+    run_id: UUID, comparison_key: str, db: AsyncSession = Depends(get_db)
 ):
-    comparison = await repo.get_comparison(db, agent_run_id, comparison_key)
+    comparison = await repo.get_comparison(db, run_id, comparison_key)
     if comparison is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Comparison {comparison_key!r} of run {agent_run_id} is not recorded",
+            detail=f"Comparison {comparison_key!r} of run {run_id} is not recorded",
         )
     return comparison
 

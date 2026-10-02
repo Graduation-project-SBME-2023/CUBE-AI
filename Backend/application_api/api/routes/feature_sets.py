@@ -24,16 +24,16 @@ async def list_session_feature_sets(session_id: UUID, db: AsyncSession = Depends
     return await repo.list_session_feature_sets(db, session_id)
 
 
-@router.put("/run/{agent_run_id}/{set_key}", response_model=FeatureSetOut)
+@router.put("/run/{run_id}/{set_key}", response_model=FeatureSetOut)
 async def create_feature_set(
-    agent_run_id: UUID,
+    run_id: UUID,
     set_key: str,
     data: FeatureSetWrite,
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     """Create a run's `building` set, or replay it (identical manifest → 200)."""
-    feature_set, created = await repo.create_feature_set(db, agent_run_id, set_key, data)
+    feature_set, created = await repo.create_feature_set(db, run_id, set_key, data)
     response.status_code = 201 if created else 200
     return feature_set
 

@@ -13,11 +13,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.core.json_bounds import (
-    WS_LOG_PAYLOAD_MAX_BYTES,
+    SESSION_EVENT_PAYLOAD_MAX_BYTES,
     JsonBoundsError,
     check_json,
 )
-from application_api.db.models.Wslog import WSLog
+from application_api.db.models.session_events import SessionEvent
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +37,11 @@ async def lock_session(db: AsyncSession, session_id: UUID | str) -> None:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
 
-async def lock_session_and_plan(db: AsyncSession, session_id: UUID | str) -> None:
-    """Session first, then its plan — the order every writer must use."""
+async def lock_session_and_graph(db: AsyncSession, session_id: UUID | str) -> None:
+    """Session first, then its session graph — the order every writer must use."""
     await lock_session(db, session_id)
     await db.execute(
-        text("SELECT session_id FROM plans WHERE session_id = :sid FOR NO KEY UPDATE"),
+        text("SELECT session_id FROM session_graphs WHERE session_id = :sid FOR NO KEY UPDATE"),
         {"sid": str(session_id)},
     )
 
@@ -49,18 +49,18 @@ async def lock_session_and_plan(db: AsyncSession, session_id: UUID | str) -> Non
 def stage_event(
     db: AsyncSession,
     session_id: UUID | str,
-    msg_type: str,
+    event_type: str,
     payload: Any,
-) -> WSLog:
+) -> SessionEvent:
     """Add one event to the *current* transaction."""
-    if not msg_type or not msg_type.strip():
-        raise HTTPException(status_code=422, detail="msg_type is required")
+    if not event_type or not event_type.strip():
+        raise HTTPException(status_code=422, detail="event_type is required")
     try:
-        check_json(payload, max_bytes=WS_LOG_PAYLOAD_MAX_BYTES, what="event payload")
+        check_json(payload, max_bytes=SESSION_EVENT_PAYLOAD_MAX_BYTES, what="event payload")
     except JsonBoundsError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    event = WSLog(session_id=session_id, msg_type=msg_type, payload=payload)
+    event = SessionEvent(session_id=session_id, event_type=event_type, payload=payload)
     db.add(event)
     return event
 
@@ -69,10 +69,10 @@ def stage_event(
 async def publication(db: AsyncSession, session_id: UUID | str):
     """One publication transaction: lock the session, do the work, commit once."""
     await lock_session(db, session_id)
-    staged: list[WSLog] = []
+    staged: list[SessionEvent] = []
 
-    def publish(msg_type: str, payload: Any) -> WSLog:
-        staged.append(stage_event(db, session_id, msg_type, payload))
+    def publish(event_type: str, payload: Any) -> SessionEvent:
+        staged.append(stage_event(db, session_id, event_type, payload))
         return staged[-1]
 
     try:

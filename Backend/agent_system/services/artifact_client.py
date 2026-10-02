@@ -30,7 +30,7 @@ async def upload_bytes(
     *,
     display_filename: str | None = None,
     mime_type: str = "application/octet-stream",
-    agent_run_id: str | None = None,
+    run_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Publish retained bytes and return the catalogue row."""
@@ -42,14 +42,14 @@ async def upload_bytes(
         "kind": kind,
         "display_filename": display_filename or logical_key,
     }
-    if agent_run_id:
-        form["created_by_agent_run_id"] = str(agent_run_id)
+    if run_id:
+        form["created_by_run_id"] = str(run_id)
     if metadata is not None:
         form["metadata"] = json.dumps(metadata)
 
     async with httpx.AsyncClient(timeout=UPLOAD_TIMEOUT) as client:
         response = await client.post(
-            f"{BASE_URL}/artifacts/",
+            f"{BASE_URL}/files/",
             data=form,
             files={"file": (display_filename or logical_key, payload, mime_type)},
         )
@@ -82,7 +82,7 @@ async def register_render(
     kind: str = "figure_gif",
     mime_type: str = "image/gif",
     display_filename: str | None = None,
-    agent_run_id: str | None = None,
+    run_id: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Catalogue a regenerable render. Returns None if it could not be catalogued — the render itself is unaffected, because it is a cache entry."""
@@ -95,14 +95,14 @@ async def register_render(
     }
     if display_filename:
         payload["display_filename"] = display_filename
-    if agent_run_id:
-        payload["created_by_agent_run_id"] = str(agent_run_id)
+    if run_id:
+        payload["created_by_run_id"] = str(run_id)
     if metadata is not None:
         payload["metadata"] = metadata
 
     try:
         async with httpx.AsyncClient(timeout=CONTROL_HTTP_TIMEOUT) as client:
-            response = await client.post(f"{BASE_URL}/artifacts/renders", json=payload)
+            response = await client.post(f"{BASE_URL}/files/renders", json=payload)
             if response.status_code == 409:
                 logger.info(
                     "Render %s is already catalogued with different content; the "

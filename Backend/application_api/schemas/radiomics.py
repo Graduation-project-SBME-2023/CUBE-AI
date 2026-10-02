@@ -59,7 +59,7 @@ class RadiomicsBatchWrite(BaseModel):
 
 
 class RadiomicsFeatureRef(BaseModel):
-    id: UUID
+    radiomics_feature_id: UUID
     label_series_instance_uid: str
     segment_number: int
     source_digest: str
@@ -75,13 +75,13 @@ class RadiomicsBatchResult(BaseModel):
 class RadiomicsFeatureOut(BaseModel):
     """A catalogue row. Legacy rows carry NULL provenance and say so."""
 
-    id: UUID
+    radiomics_feature_id: UUID
     session_id: Optional[UUID] = None
     label_series_instance_uid: Optional[str] = None
     source_volume_uid: Optional[str] = None
     segment_number: Optional[int] = None
     segmentation_pair_id: Optional[UUID] = None
-    created_by_agent_run_id: Optional[UUID] = None
+    created_by_run_id: Optional[UUID] = None
     extractor_name: Optional[str] = None
     extractor_version: Optional[str] = None
     config_digest: Optional[str] = None

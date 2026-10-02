@@ -36,7 +36,7 @@ class ModelVariantWrite(BaseModel):
     algorithm: str = Field(min_length=1, max_length=500)
     parameters: dict[str, Any]
     metrics: Optional[dict[str, Any]] = None
-    predictions_artifact_id: Optional[UUID] = None
+    predictions_file_id: Optional[UUID] = None
     # Relative to the workspace, e.g. `modeling/models/<comparison>/<variant>.pkl`.
     model_file_name: Optional[str] = Field(default=None, max_length=1024)
     model_file_digest: Optional[Digest] = None
@@ -74,7 +74,7 @@ class ModelVariantWrite(BaseModel):
 class ModelComparisonWrite(BaseModel):
     cohort_id: UUID
     feature_set_id: Optional[UUID] = None
-    input_artifact_id: Optional[UUID] = None
+    input_file_id: Optional[UUID] = None
     dataset_digest: Digest
     preprocessing: dict[str, Any]
     feature_order: dict[str, Any]
@@ -90,10 +90,10 @@ class ModelComparisonWrite(BaseModel):
 
     @model_validator(mode="after")
     def _shape(self) -> "ModelComparisonWrite":
-        if self.feature_set_id is None and self.input_artifact_id is None:
+        if self.feature_set_id is None and self.input_file_id is None:
             raise ValueError(
                 "a model trained without a feature set must capture its exact input bytes "
-                "as an input_csv artifact (R6)"
+                "as an input_csv stored file (R6)"
             )
         keys = [variant.variant_key for variant in self.variants]
         if len(set(keys)) != len(keys):
@@ -108,7 +108,7 @@ class ModelComparisonWrite(BaseModel):
 
 class ModelResultOut(BaseModel):
     model_result_id: UUID
-    created_by_agent_run_id: UUID
+    created_by_run_id: UUID
     session_id: Optional[UUID] = None
     cohort_id: UUID
     feature_set_id: Optional[UUID] = None
@@ -123,8 +123,8 @@ class ModelResultOut(BaseModel):
     environment: Optional[dict[str, Any]] = None
     metrics: Optional[dict[str, Any]] = None
     dataset_digest: str
-    predictions_artifact_id: Optional[UUID] = None
-    input_artifact_id: Optional[UUID] = None
+    predictions_file_id: Optional[UUID] = None
+    input_file_id: Optional[UUID] = None
     selected: bool
     model_file_name: Optional[str] = None
     model_file_digest: Optional[str] = None
@@ -136,11 +136,11 @@ class ModelResultOut(BaseModel):
 
 class ModelComparisonOut(BaseModel):
     comparison_key: str
-    created_by_agent_run_id: UUID
+    created_by_run_id: UUID
     session_id: UUID
     cohort_id: UUID
     feature_set_id: Optional[UUID] = None
-    input_artifact_id: Optional[UUID] = None
+    input_file_id: Optional[UUID] = None
     dataset_digest: str
     selected_variant_key: Optional[str] = None
     variants: list[ModelResultOut]

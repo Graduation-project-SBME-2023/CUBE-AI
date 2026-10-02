@@ -11,7 +11,7 @@ from application_api.repositories.chat_messages import (
     get_chat_messages_by_role
 )
 
-router = APIRouter(prefix="/chat_messages", tags=["Chat Messages"])
+router = APIRouter(prefix="/chat-messages", tags=["Chat Messages"])
 
 
 @router.post("/{chat_id}", response_model=ChatMessageRead)

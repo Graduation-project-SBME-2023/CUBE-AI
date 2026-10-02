@@ -57,13 +57,13 @@ async def post_internal(path: str, json_body: dict) -> bool:
         return False
 
 
-async def broadcast_ws_message(msg_type: str, payload: dict, session_id: str | None) -> bool:
+async def broadcast_ws_message(event_type: str, payload: dict, session_id: str | None) -> bool:
     """The `/ws-broadcast` shape every MCP-tool live-notification call uses."""
     if not session_id:
         return False
     return await post_internal(
         "/ws-broadcast",
-        {"type": msg_type, "payload": payload, "session_id": session_id},
+        {"type": event_type, "payload": payload, "session_id": session_id},
     )
 
 

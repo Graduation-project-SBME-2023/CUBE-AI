@@ -5,6 +5,8 @@ import httpx
 import os
 from service_urls import CONTROL_API_URL
 
+from ..result_shape import keep_model_id
+
 base_url = CONTROL_API_URL
 
 @mcp.tool()
@@ -24,7 +26,7 @@ async def search_segmentation(
             params["generation_method"] = generation_method
 
         response = await client.get(
-            base_url + "/segmentations/search/",
+            base_url + "/segmentation-masks/search/",
             params=params
         )
         response.raise_for_status()
@@ -33,4 +35,4 @@ async def search_segmentation(
         except ValueError:
             return {"error": "Invalid JSON returned", "raw": response.text}
 
-        return {"data": data}
+        return {"data": keep_model_id(data)}

@@ -43,7 +43,7 @@ class Session:
     # Where a resume continues, identified by the STEP rather than by the
     # agent selector: two steps may name the same agent, and resuming "the
     # segmentation agent" would be ambiguous between them.
-    resume_from_step_id: Optional[str] = None
+    resume_from_node_id: Optional[str] = None
 
     hypothesis: ClinicalHypothesis | None = None
     plan: StudyPlan | None = None

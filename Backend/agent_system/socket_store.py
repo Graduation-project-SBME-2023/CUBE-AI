@@ -7,15 +7,16 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Set
 from fastapi import WebSocket
 from clients.backend_client import BackendClient
-from models.logs import WS_Log
+from models.logs import SessionEvent
 from services import event_registry
 from services.timeout_policy import WS_SEND_TIMEOUT_SECONDS, WS_OUTBOUND_QUEUE_MAXSIZE
 
 logger = logging.getLogger(__name__)
 
 # Envelope schema version. Bump this, not the field set silently, if the
-# shape changes again -- see WEBSOCKET_FIX_PLAN.md WS-13.
-ENVELOPE_VERSION = 1
+# shape changes again -- see WEBSOCKET_FIX_PLAN.md WS-13. Version 2 (Phase 6.1)
+# renamed the id fields to the Appendix P vocabulary: node_id, run_id, attempt_id.
+ENVELOPE_VERSION = 2
 
 # Close codes used when the server, not the client, ends a connection.
 WS_CLOSE_OVERFLOW = 1013  # "Try Again Later" -- the socket's own backlog overran
@@ -24,7 +25,7 @@ WS_CLOSE_REPLAY_FAILED = 1011  # the durable log could not be read at handshake 
 
 # Page size for the handshake-cursor replay (WEBSOCKET_FIX_PLAN.md WS-08).
 # Matches the application_api route's own default page size
-# (application_api/api/routes/Wslog.py); looping this many at a time until an
+# (application_api/api/routes/session_events.py); looping this many at a time until an
 # empty page, rather than one bounded call, is what fixes W3 (a session past
 # 2000 events used to lose its newest ones on rehydration).
 REPLAY_PAGE_SIZE = 500
@@ -233,24 +234,24 @@ class ConnectionManager:
 
     @staticmethod
     def _build_envelope(
-        msg_type: str,
+        event_type: str,
         payload: Any,
         session_id: str,
         *,
         replaying: bool,
         event_id: int | None,
+        node_id: str | None = None,
         run_id: str | None = None,
-        step_id: str | None = None,
-        agent_run_id: str | None = None,
+        attempt_id: str | None = None,
     ) -> str:
         return json.dumps({
             "v": ENVELOPE_VERSION,
             "event_id": event_id,
             "session_id": session_id,
+            "node_id": node_id,
             "run_id": run_id,
-            "step_id": step_id,
-            "agent_run_id": agent_run_id,
-            "type": msg_type,
+            "attempt_id": attempt_id,
+            "type": event_type,
             "payload": payload,
             "replaying": replaying,
             "ts": datetime.now(timezone.utc).isoformat(),
@@ -276,21 +277,21 @@ class ConnectionManager:
 
     async def send_ws_message(
         self,
-        msg_type: str,
+        event_type: str,
         payload: Any,
         session_id: str = '',
         replaying: bool = False,
         event_id: int | None = None,
+        node_id: str | None = None,
         run_id: str | None = None,
-        step_id: str | None = None,
-        agent_run_id: str | None = None,
+        attempt_id: str | None = None,
     ):
         """Persist the event, then send it to every one of session_id's own
         sockets.
 
         Routing by session_id is the WS-02 fix for W1: this used to iterate
         every connection in the process regardless of which session it
-        belonged to. run_id/step_id/agent_run_id are the WS-13 envelope
+        belonged to. node_id/run_id/attempt_id are the WS-13 envelope
         fields -- nullable now, populated where a caller already knows them;
         nothing does yet, so they read null until the LangGraph migration
         gives events a run to attach to (WEBSOCKET_FIX_PLAN.md §9.3).
@@ -307,7 +308,7 @@ class ConnectionManager:
         # persisting first does not remove it, it moves it.)
         payload = copy.deepcopy(payload)
         # Callers routinely pass the session's UUID object rather than str;
-        # WS_Log and the outgoing envelope both require a plain string.
+        # SessionEvent and the outgoing envelope both require a plain string.
         session_id = str(session_id) if session_id else session_id
 
         # Only a durable event is worth a commit in front of it -- an
@@ -319,26 +320,26 @@ class ConnectionManager:
         # something already classified (and persisted, if durable) the first
         # time it was emitted.
         if not replaying and event_id is None:
-            event_class = event_registry.classify(msg_type)
+            event_class = event_registry.classify(event_type)
             if event_class is event_registry.EventClass.DURABLE:
                 try:
-                    saved = await BackendClient.save_log(
-                        WS_Log(msg_type=msg_type, payload=payload, session_id=session_id)
+                    saved = await BackendClient.save_event(
+                        SessionEvent(event_type=event_type, payload=payload, session_id=session_id)
                     )
                     event_id = saved.event_id
                 except Exception as exc:
                     logger.error(
                         "Event %s for session %s was not persisted and will not be "
                         "replayable: %s",
-                        msg_type,
+                        event_type,
                         session_id,
                         exc,
                     )
 
         message_data = self._build_envelope(
-            msg_type, payload, session_id,
+            event_type, payload, session_id,
             replaying=replaying, event_id=event_id,
-            run_id=run_id, step_id=step_id, agent_run_id=agent_run_id,
+            node_id=node_id, run_id=run_id, attempt_id=attempt_id,
         )
 
         # A session with no connected socket (nobody has this tab open right
@@ -363,7 +364,7 @@ class ConnectionManager:
     async def send_replaying_frame(
         self,
         connection: Connection,
-        msg_type: str,
+        event_type: str,
         payload: Any,
         *,
         event_id: int | None = None,
@@ -389,7 +390,7 @@ class ConnectionManager:
         dead connection.
         """
         message_data = self._build_envelope(
-            msg_type, payload, connection.session_id,
+            event_type, payload, connection.session_id,
             replaying=True, event_id=event_id,
         )
         try:
@@ -430,7 +431,7 @@ class ConnectionManager:
         connection_gone = False
         try:
             while True:
-                page = await BackendClient.replay_logs(
+                page = await BackendClient.replay_events(
                     session_id, after_event_id=cursor, limit=REPLAY_PAGE_SIZE
                 )
                 if not page:
@@ -444,8 +445,8 @@ class ConnectionManager:
                     # this type only exist from before that, and replaying
                     # them here would duplicate history the chat view already
                     # owns. A real equality check, unlike the historical
-                    # `msg_type in ('msg')` substring bug it replaces (W7).
-                    if log.msg_type == "msg":
+                    # `event_type in ('msg')` substring bug it replaces (W7).
+                    if log.event_type == "msg":
                         continue
                     # Overlap dedup, the other direction: a live send may
                     # already have delivered this exact event_id to this
@@ -458,7 +459,7 @@ class ConnectionManager:
                     ):
                         continue
                     delivered = await self.send_replaying_frame(
-                        connection, log.msg_type, log.payload, event_id=log.event_id
+                        connection, log.event_type, log.payload, event_id=log.event_id
                     )
                     if not delivered:
                         # The connection died mid-replay (send_replaying_frame
@@ -495,22 +496,22 @@ manager = ConnectionManager()
 # --- Helper functions to maintain your existing import signature ---
 
 async def send_ws_message(
-    msg_type: str,
+    event_type: str,
     payload: Any,
     session_id: str | None = None,
     event_id: int | None = None,
+    node_id: str | None = None,
     run_id: str | None = None,
-    step_id: str | None = None,
-    agent_run_id: str | None = None,
+    attempt_id: str | None = None,
 ):
     await manager.send_ws_message(
-        msg_type,
+        event_type,
         payload,
         session_id=session_id,
         event_id=event_id,
+        node_id=node_id,
         run_id=run_id,
-        step_id=step_id,
-        agent_run_id=agent_run_id,
+        attempt_id=attempt_id,
     )
 
 

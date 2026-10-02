@@ -29,7 +29,7 @@ class Radiomics(Base):
 
     __tablename__ = "radiomics_features"
 
-    id = Column(
+    radiomics_feature_id = Column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
     session_id = Column(
@@ -39,7 +39,7 @@ class Radiomics(Base):
     )
     label_series_instance_uid = Column(
         String,
-        ForeignKey("segmentations.label_series_instance_uid", ondelete="RESTRICT"),
+        ForeignKey("segmentation_masks.label_series_instance_uid", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )
@@ -51,9 +51,9 @@ class Radiomics(Base):
         nullable=True,
         index=True,
     )
-    created_by_agent_run_id = Column(
+    created_by_run_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("agent_runs.agent_run_id", ondelete="RESTRICT"),
+        ForeignKey("node_runs.run_id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
     )
@@ -82,17 +82,17 @@ class Radiomics(Base):
         ForeignKeyConstraint(
             ["label_series_instance_uid", "source_volume_uid"],
             [
-                "segmentations.label_series_instance_uid",
-                "segmentations.volume_series_instance_uid",
+                "segmentation_masks.label_series_instance_uid",
+                "segmentation_masks.volume_series_instance_uid",
             ],
             name="fk_radiomics_features_segmentation",
             ondelete="RESTRICT",
         ),
         # when a run produced the row, it is a run of the row's session.
         ForeignKeyConstraint(
-            ["created_by_agent_run_id", "session_id"],
-            ["agent_runs.agent_run_id", "agent_runs.session_id"],
-            name="fk_radiomics_features_created_by_agent_run_id_session_id",
+            ["created_by_run_id", "session_id"],
+            ["node_runs.run_id", "node_runs.session_id"],
+            name="fk_radiomics_features_created_by_run_id_session_id",
             ondelete="RESTRICT",
         ),
         CheckConstraint("segment_number > 0", name="segment_number_positive"),

@@ -116,7 +116,7 @@ class FeatureSetOut(BaseModel):
     TOAST)."""
 
     feature_set_id: UUID
-    created_by_agent_run_id: UUID
+    created_by_run_id: UUID
     session_id: Optional[UUID] = None
     cohort_id: UUID
     set_key: str

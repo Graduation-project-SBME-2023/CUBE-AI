@@ -2,7 +2,7 @@
 
 `latex_to_pdf` (and the underlying `POST /reports/{report_id}/publish`) needs an
 existing `report_id` — its own docstring says "Create one first via POST /reports/
-with your agent_run_id and initial source_text" — but no MCP tool ever did that for
+with your run_id and initial source_text" — but no MCP tool ever did that for
 the latex_reporter_agent. Every run invented a `report_id` (a literal string or a
 random UUID) and `latex_to_pdf` failed with 404 "Report not found", so no manuscript
 was ever published. This tool is that missing first step.
@@ -57,7 +57,7 @@ async def create_report(
             "/reports/",
             json={
                 "session_id": session,
-                "created_by_agent_run_id": run_id,
+                "created_by_run_id": run_id,
                 "source_text": source_text,
                 "source_format": "latex",
                 "title": title,

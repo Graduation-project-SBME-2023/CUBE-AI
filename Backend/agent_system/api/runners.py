@@ -85,7 +85,7 @@ async def run_pipeline(session: Session) -> None:
             f"Session {session.session_id} has no approved agent runs to execute"
         )
 
-    resume_from_step_id = session.resume_from_step_id
+    resume_from_node_id = session.resume_from_node_id
     session_row = await BackendClient.get_session(session.session_id) or {}
     # The user's own words, which current keeps instead of overwriting (defect 1).
     prompt = session_row.get("prompt") or ""
@@ -94,7 +94,7 @@ async def run_pipeline(session: Session) -> None:
         "workspace_folder: %s, steps: %d, resume_from_step: %s",
         workspace_folder,
         len(runs),
-        resume_from_step_id or "-",
+        resume_from_node_id or "-",
     )
 
     # Allow pause / cancel before heavy init
@@ -132,9 +132,9 @@ async def run_pipeline(session: Session) -> None:
         client.create_stream = wrapped_create_stream
         return client
 
-    # Node name -> agent_run_id, so a contract is checked on the run that
+    # Node name -> run_id, so a contract is checked on the run that
     # produced it rather than on "the" agent.
-    run_by_node = {run.node_name: run.agent_run_id for run in runs}
+    run_by_node = {run.node_name: run.run_id for run in runs}
 
     try:
         session.execution_monitor = PipelineMonitor(session_service, session, runs=runs)
@@ -144,7 +144,7 @@ async def run_pipeline(session: Session) -> None:
             runs=runs,
             model_client=make_pausable(create_model_client_from_config()),
             session_id=session.session_id,
-            start_step_id=resume_from_step_id,
+            start_node_id=resume_from_node_id,
             on_start=lambda run: session_service.claim_run(session, run),
             on_finish=lambda run: session_service.finish_run(session, run),
             on_failure=lambda run, error: session_service.fail_run(session, run, error),
@@ -159,10 +159,10 @@ async def run_pipeline(session: Session) -> None:
         pipeline_logger.info(f"Pipeline prompt length: {len(task_prompt)} chars")
         pipeline_logger.info("Starting execution...")
 
-        status = await BackendClient.get_agent_run_status(session.session_id)
+        status = await BackendClient.get_node_status(session.session_id)
         if status is not None:
             await ws_manager.send_ws_message(
-                "pipeline_agent_status", status, session_id=session.session_id
+                "node_status", status, session_id=session.session_id
             )
 
         try:

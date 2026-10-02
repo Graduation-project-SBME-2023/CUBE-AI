@@ -61,15 +61,15 @@ def _agent_output_status(status: str) -> str:
 async def segmentation_tool(
     workspace_folder: str | None = None,
     session_id: str | None = None,
-    agent_run_id: str | None = None,
+    run_id: str | None = None,
 ):
-    """The main segmentation tool, containing all the needed logic:arg workspace_folder: The workspace folder to save outputs to.:arg session_id: The active session ID.:arg agent_run_id: The `agent_runs` row this execution belongs to."""
+    """The main segmentation tool, containing all the needed logic:arg workspace_folder: The workspace folder to save outputs to.:arg session_id: The active session ID.:arg run_id: The `node_runs` row this execution belongs to."""
     try:
         workspace_folder, session_id = _validated_runtime_context(
             workspace_folder,
             session_id,
         )
-        agent = SegmentationModule(session_id=session_id, agent_run_id=agent_run_id)
+        agent = SegmentationModule(session_id=session_id, run_id=run_id)
         try:
             await agent.initialize()
             # current this flow: the volumes, instructions and checkpoint come from
@@ -86,7 +86,7 @@ async def segmentation_tool(
             "status": _agent_output_status(result.get("status", "failed")),
             "inputs": {"workspace_folder": workspace_folder},
             "output_files": {
-                "segmentation_run_id": result.get("segmentation_run_id"),
+                "segmentation_batch_id": result.get("segmentation_batch_id"),
                 "volumes_dir": str(workspace_subpath(workspace_folder, "volumes")),
                 "masks_dir": str(workspace_subpath(workspace_folder, "masks")),
             },
@@ -98,7 +98,7 @@ async def segmentation_tool(
                 "reused_count": result.get("reused_count", 0),
                 "generated_count": result.get("generated_count", 0),
             },
-            "output_summary": (
+            "summary": (
                 f"Segmentation {result.get('status', 'failed')} with "
                 f"{result.get('accepted_count', 0)}/"
                 f"{result.get('pair_count', 0)} accepted segmentation masks."
@@ -120,12 +120,12 @@ async def segmentation_tool(
                 )
             ],
         }
-        if not agent_run_id:
+        if not run_id:
             raise RuntimeError(
-                "segmentation_tool has no agent_run_id: its result cannot be "
+                "segmentation_tool has no run_id: its result cannot be "
                 "recorded, and v1 does not fall back to a workspace file."
             )
-        await BackendClient.write_agent_output(agent_run_id, output_data)
+        await BackendClient.write_agent_output(run_id, output_data)
 
         return result
 
@@ -154,7 +154,7 @@ class SegmentationAgent(AssistantAgent):
         )
 
     @classmethod
-    async def create(cls, model_client=None, workspace_folder=None, session_id=None, node_name=None, agent_run_id=None, step_id=None):
+    async def create(cls, model_client=None, workspace_folder=None, session_id=None, node_name=None, run_id=None, node_id=None):
         model_client = OllamaClient() if not model_client else model_client
         workspace_folder, session_id = _validated_runtime_context(
             workspace_folder,
@@ -168,8 +168,8 @@ class SegmentationAgent(AssistantAgent):
             "WORKSPACE_DIR": workspace_folder,
             "SESSION_ID": session_id,
             "AGENT_ID": "segmentation_agent",
-            "AGENT_RUN_ID": str(agent_run_id or ""),
-            "STEP_ID": str(step_id or "")
+            "RUN_ID": str(run_id or ""),
+            "NODE_ID": str(node_id or "")
         })
         mcp_server = StdioServerParams(
             command=sys.executable,
@@ -214,7 +214,7 @@ class SegmentationAgent(AssistantAgent):
             return await _execute_segmentation_tool(
                 workspace_folder=effective_folder,
                 session_id=effective_id,
-                agent_run_id=env["AGENT_RUN_ID"] or None,
+                run_id=env["RUN_ID"] or None,
             )
 
         function_tools = [

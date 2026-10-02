@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-SessionStatus = Literal[
+SessionControlState = Literal[
     "planning",
     "ready",
     "running",
@@ -37,7 +37,7 @@ class SessionUpdate(BaseModel):
     """`prompt` is deliberately absent: it is immutable once written."""
 
     title: Optional[str] = None
-    status: Optional[SessionStatus] = None
+    control_state: Optional[SessionControlState] = None
     intent: Optional[dict[str, Any]] = None
     error: Optional[dict[str, Any]] = None
 
@@ -49,7 +49,7 @@ class SessionSummary(BaseModel):
     title: Optional[str] = None
     prompt: Optional[str] = None
     prompt_kind: PromptKind = "hypothesis"
-    status: SessionStatus = "planning"
+    control_state: SessionControlState = "planning"
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

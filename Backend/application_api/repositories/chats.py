@@ -27,7 +27,7 @@ async def create_chat(db: AsyncSession, session_id: UUID, title: str | None = No
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
     now = datetime.now(timezone.utc)
-    chat = Chat(session_id=session_id, title=title, created_at=now, last_activity=now)
+    chat = Chat(session_id=session_id, title=title, created_at=now, last_activity_at=now)
     try:
         db.add(chat)
         await db.commit()
@@ -53,7 +53,7 @@ async def get_chats_for_session(
     result = await db.execute(
         select(Chat)
         .where(Chat.session_id == session_id)
-        .order_by(Chat.last_activity.desc(), Chat.chat_id)
+        .order_by(Chat.last_activity_at.desc(), Chat.chat_id)
         .offset(skip)
         .limit(limit)
     )
@@ -63,7 +63,7 @@ async def get_chats_for_session(
 async def list_chats(db: AsyncSession, skip: int = 0, limit: int = 100) -> list[Chat]:
     result = await db.execute(
         select(Chat)
-        .order_by(Chat.last_activity.desc(), Chat.chat_id)
+        .order_by(Chat.last_activity_at.desc(), Chat.chat_id)
         .offset(skip)
         .limit(limit)
     )
@@ -74,7 +74,7 @@ async def update_chat(db: AsyncSession, chat_id: UUID, title: str | None) -> Cha
     chat = await get_chat(db, chat_id)
     if title is not None:
         chat.title = title
-    chat.last_activity = datetime.now(timezone.utc)
+    chat.last_activity_at = datetime.now(timezone.utc)
     try:
         await db.commit()
         await db.refresh(chat)
@@ -85,9 +85,9 @@ async def update_chat(db: AsyncSession, chat_id: UUID, title: str | None) -> Cha
 
 
 async def touch_chat(db: AsyncSession, chat_id: UUID) -> Chat:
-    """Dedicated TOUCH: `last_activity` is stored, not derived at read time."""
+    """Dedicated TOUCH: `last_activity_at` is stored, not derived at read time."""
     chat = await get_chat(db, chat_id)
-    chat.last_activity = datetime.now(timezone.utc)
+    chat.last_activity_at = datetime.now(timezone.utc)
     try:
         await db.commit()
         await db.refresh(chat)

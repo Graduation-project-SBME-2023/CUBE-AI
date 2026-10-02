@@ -60,7 +60,7 @@ def _comparison_section(entry: dict[str, Any]) -> str:
     source = (
         f"feature set `{feature_set.get('set_key')}` ({feature_set.get('feature_count')} features)"
         if feature_set
-        else f"captured input CSV (artifact {entry.get('input_artifact_id')})"
+        else f"captured input CSV (artifact {entry.get('input_file_id')})"
     )
     parts = [
         f"### Comparison `{entry.get('comparison_key')}`",

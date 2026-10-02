@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from application_api.db.models.patient import Patient
 from application_api.db.models.study import Study
 from application_api.db.models.volume import Volume
-from application_api.db.models.segmentation import Segmentation
+from application_api.db.models.segmentation_masks import SegmentationMask
 from application_api.schemas.patient import PatientCreate, PatientUpdate
 from application_api.services.orthanc_client import cleanup_orthanc_resources_after_db_delete
 
@@ -120,8 +120,8 @@ async def delete_patient(db: AsyncSession, patient_id: UUID):
         if volumes:
             volume_uids = [row.volume_series_instance_uid for row in volumes]
             seg_result = await db.execute(
-                select(Segmentation.orthanc_series_id).where(
-                    Segmentation.volume_series_instance_uid.in_(volume_uids)
+                select(SegmentationMask.orthanc_series_id).where(
+                    SegmentationMask.volume_series_instance_uid.in_(volume_uids)
                 )
             )
             seg_orthanc_ids = [row[0] for row in seg_result.all()]

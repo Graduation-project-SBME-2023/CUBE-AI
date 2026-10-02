@@ -20,7 +20,7 @@ async def create_session(
 
 @router.get("/", response_model=list[schemas.SessionSummary])
 async def list_sessions(
-    status_filter: str | None = Query(None, alias="status"),
+    control_state: str | None = None,
     include_archived: bool = False,
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
@@ -28,7 +28,7 @@ async def list_sessions(
 ):
     return await crud.get_sessions(
         db,
-        status=status_filter,
+        control_state=control_state,
         include_archived=include_archived,
         skip=skip,
         limit=limit,
@@ -48,12 +48,12 @@ async def update_session(
     return await crud.update_session(db, session_id, data)
 
 
-@router.patch("/{session_id}/status/{new_status}", response_model=schemas.Session)
-async def set_session_status(
-    session_id: UUID, new_status: str, db: AsyncSession = Depends(get_db)
+@router.patch("/{session_id}/control-state/{new_state}", response_model=schemas.Session)
+async def set_session_control_state(
+    session_id: UUID, new_state: str, db: AsyncSession = Depends(get_db)
 ):
-    """Guarded status transition — this is how pause is made durable."""
-    return await crud.set_session_status(db, session_id, new_status)
+    """Guarded control-state transition — this is how pause is made durable."""
+    return await crud.set_session_control_state(db, session_id, new_state)
 
 
 @router.post("/{session_id}/archive", response_model=schemas.Session)

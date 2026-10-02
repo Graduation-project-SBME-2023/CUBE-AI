@@ -13,25 +13,25 @@ from storage_paths import HYPOTHESES_DIR
 # (glob relative to workspace_<id>/, replacement storage, migration label)
 RETIRED_WORKSPACE_PATHS: tuple[tuple[str, str, str], ...] = (
     # Step F — execution spine.
-    ("state/scratchpad.json", "agent_runs.durable_notes/warnings/output_summary", "F"),
+    ("state/scratchpad.json", "node_runs.scratchpad_notes/scratchpad_warnings/scratchpad_summary", "F"),
     # state.json duplicated what PlannerDbStateStore already reconstructs from
-    # sessions.intent + plans/plan_steps/agent_runs; nothing read most of what
+    # sessions.intent + session_graphs/graph_nodes/node_runs; nothing read most of what
     # it wrote (chat_history, knowledge_base, sources_guide,
     # knowledge_sections), and the one field a caller did read (hypothesis)
     # is available straight from the DB. Retired with no replacement file.
-    ("state/state.json", "sessions.intent + plans/plan_steps/agent_runs (PlannerDbStateStore)", "F"),
-    ("outputs/agents/*_output.json", "agent_runs.output_summary", "F"),
+    ("state/state.json", "sessions.intent + session_graphs/graph_nodes/node_runs (PlannerDbStateStore)", "F"),
+    ("outputs/agents/*_output.json", "node_runs.scratchpad_summary", "F"),
     # Step H — population and segmentation review.
     ("state/config.json", "cohorts.criteria/label_definition/selection_summary", "H"),
     ("data/populations/cohort_labels.csv", "cohort_members.label/label_source", "H"),
     ("data/populations/targets/*", "cohort_members (generated analysis rows)", "H"),
     ("data/populations/clinical_data.json", "cohort_members.clinical_data", "H"),
     ("data/populations/clinical_data.csv", "cohort_members.clinical_data", "H"),
-    ("state/segmentation_manifest.json", "segmentation_runs/targets/pairs", "H"),
-    ("temp/segmentations/segmentation_manifest.json.tmp", "segmentation_runs/targets/pairs", "H"),
+    ("state/segmentation_manifest.json", "segmentation_batches/targets/pairs", "H"),
+    ("temp/segmentations/segmentation_manifest.json.tmp", "segmentation_batches/targets/pairs", "H"),
     ("state/review_draft.json", "segmentation_pairs.review_decision", "H"),
     ("temp/segmentations/review_draft.json.tmp", "segmentation_pairs.review_decision", "H"),
-    ("state/review_result.json", "segmentation_runs.review_status/reviewed_at", "H"),
+    ("state/review_result.json", "segmentation_batches.review_status/reviewed_at", "H"),
     # Step I — feature extraction.
     ("outputs/features/radiomics_features.csv", "radiomics_features (generated export)", "I"),
     ("outputs/features/radiomic_features_target_*.csv", "radiomics_features", "I"),
@@ -44,19 +44,19 @@ RETIRED_WORKSPACE_PATHS: tuple[tuple[str, str, str], ...] = (
     ("outputs/features/categorical_encodings.json", "feature_sets.extraction_config", "I"),
     # Label-derived importance is never feature_sets.analysis;
     # the ranking is the run's result, recorded with its output.
-    ("outputs/features/feature_importance.csv", "agent_runs.output_summary", "I"),
-    ("outputs/features/plots/*", "artifacts (figure_png)", "I"),
+    ("outputs/features/feature_importance.csv", "node_runs.scratchpad_summary", "I"),
+    ("outputs/features/plots/*", "stored_files (figure_png)", "I"),
     # Step J — modeling. The fitted pipelines under outputs/modeling/models/
     # are NOT retired: they are exception 2 and stay on disk.
     ("outputs/modeling/model_comparison_results.csv", "model_results.metrics", "J"),
     ("outputs/modeling/model_summary.csv", "model_results", "J"),
     ("outputs/modeling/models/*/*_results.csv", "model_results.metrics", "J"),
-    ("outputs/modeling/models/*/holdout_predictions_*.csv", "artifacts via model_results.predictions_artifact_id", "J"),
-    ("outputs/modeling/models/*/independent_eval_results_*.csv", "artifacts via model_results.predictions_artifact_id", "J"),
-    ("outputs/modeling/models/*/plots/*", "artifacts (figure_png)", "J"),
-    ("outputs/modeling/output/*", "artifacts + model_results (independent evaluation)", "J"),
-    ("outputs/modeling/predictions*.csv", "artifacts (export_csv)", "J"),
-    ("outputs/modeling/prediction_vs_actual.csv", "artifacts (export_csv)", "J"),
+    ("outputs/modeling/models/*/holdout_predictions_*.csv", "stored_files via model_results.predictions_file_id", "J"),
+    ("outputs/modeling/models/*/independent_eval_results_*.csv", "stored_files via model_results.predictions_file_id", "J"),
+    ("outputs/modeling/models/*/plots/*", "stored_files (figure_png)", "J"),
+    ("outputs/modeling/output/*", "stored_files + model_results (independent evaluation)", "J"),
+    ("outputs/modeling/predictions*.csv", "stored_files (export_csv)", "J"),
+    ("outputs/modeling/prediction_vs_actual.csv", "stored_files (export_csv)", "J"),
     ("outputs/modeling/residual_analysis.csv", "model_results.metrics", "J"),
     ("outputs/modeling/metrics_report.csv", "model_results.metrics", "J"),
     ("outputs/modeling/metrics.json", "model_results.metrics", "J"),

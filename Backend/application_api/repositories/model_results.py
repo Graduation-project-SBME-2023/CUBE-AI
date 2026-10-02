@@ -11,12 +11,12 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from application_api.db.models.agent_runs import AgentRun
-from application_api.db.models.artifacts import Artifact
+from application_api.db.models.node_runs import NodeRun
+from application_api.db.models.stored_files import StoredFile
 from application_api.db.models.feature_sets import FeatureSet
 from application_api.db.models.model_results import ModelResult
-from application_api.db.models.steps import PlanStep
-from application_api.repositories import agent_runs as runs_repo
+from application_api.db.models.graph_nodes import GraphNode
+from application_api.repositories import node_runs as runs_repo
 from application_api.repositories import cohorts as cohorts_repo
 from application_api.repositories.radiomics import require_producer_run
 from application_api.schemas import model_results as schemas
@@ -30,7 +30,7 @@ MODELING_AGENT_TYPE = "modeling_agent"
 _SHARED_FIELDS = (
     "cohort_id",
     "feature_set_id",
-    "input_artifact_id",
+    "input_file_id",
     "dataset_digest",
     "preprocessing",
     "feature_order",
@@ -42,7 +42,7 @@ _VARIANT_FIELDS = (
     "algorithm",
     "parameters",
     "metrics",
-    "predictions_artifact_id",
+    "predictions_file_id",
     "model_file_name",
     "model_file_digest",
     "selected",
@@ -77,8 +77,8 @@ async def _abort(db: AsyncSession, exc: HTTPException) -> HTTPException:
 def _columns(include_documents: bool):
     base = [
         ModelResult.model_result_id,
-        ModelResult.created_by_agent_run_id,
-        AgentRun.session_id,
+        ModelResult.created_by_run_id,
+        NodeRun.session_id,
         ModelResult.cohort_id,
         ModelResult.feature_set_id,
         ModelResult.comparison_key,
@@ -86,8 +86,8 @@ def _columns(include_documents: bool):
         ModelResult.algorithm,
         ModelResult.metrics,
         ModelResult.dataset_digest,
-        ModelResult.predictions_artifact_id,
-        ModelResult.input_artifact_id,
+        ModelResult.predictions_file_id,
+        ModelResult.input_file_id,
         ModelResult.selected,
         ModelResult.model_file_name,
         ModelResult.model_file_digest,
@@ -108,7 +108,7 @@ def _columns(include_documents: bool):
 
 def _query(include_documents: bool = True):
     return select(*_columns(include_documents)).join(
-        AgentRun, AgentRun.agent_run_id == ModelResult.created_by_agent_run_id
+        NodeRun, NodeRun.run_id == ModelResult.created_by_run_id
     )
 
 
@@ -126,11 +126,11 @@ def _comparison_out(rows: list[dict[str, Any]]) -> dict[str, Any]:
     selected = next((row["variant_key"] for row in rows if row["selected"]), None)
     return {
         "comparison_key": first["comparison_key"],
-        "created_by_agent_run_id": first["created_by_agent_run_id"],
+        "created_by_run_id": first["created_by_run_id"],
         "session_id": first["session_id"],
         "cohort_id": first["cohort_id"],
         "feature_set_id": first["feature_set_id"],
-        "input_artifact_id": first["input_artifact_id"],
+        "input_file_id": first["input_file_id"],
         "dataset_digest": first["dataset_digest"],
         "selected_variant_key": selected,
         "variants": rows,
@@ -138,12 +138,12 @@ def _comparison_out(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 async def get_comparison(
-    db: AsyncSession, agent_run_id: UUID, comparison_key: str
+    db: AsyncSession, run_id: UUID, comparison_key: str
 ) -> dict[str, Any] | None:
     result = await db.execute(
         _query()
         .where(
-            ModelResult.created_by_agent_run_id == agent_run_id,
+            ModelResult.created_by_run_id == run_id,
             ModelResult.comparison_key == comparison_key,
         )
         .order_by(ModelResult.variant_key)
@@ -157,9 +157,9 @@ async def list_session_results(
 ) -> list[dict[str, Any]]:
     result = await db.execute(
         _query(include_documents)
-        .join(PlanStep, PlanStep.step_id == AgentRun.step_id)
-        .where(AgentRun.session_id == session_id)
-        .order_by(PlanStep.step_order, ModelResult.comparison_key, ModelResult.variant_key)
+        .join(GraphNode, GraphNode.node_id == NodeRun.node_id)
+        .where(NodeRun.session_id == session_id)
+        .order_by(GraphNode.position, ModelResult.comparison_key, ModelResult.variant_key)
     )
     return [dict(row._mapping) for row in result]
 
@@ -191,7 +191,7 @@ async def session_summary(db: AsyncSession, session_id: UUID) -> list[dict[str, 
             }
     comparisons: dict[tuple, list[dict[str, Any]]] = {}
     for row in rows:
-        comparisons.setdefault((row["created_by_agent_run_id"], row["comparison_key"]), []).append(row)
+        comparisons.setdefault((row["created_by_run_id"], row["comparison_key"]), []).append(row)
     summary = []
     for (_run, key), variants in comparisons.items():
         first = variants[0]
@@ -200,10 +200,10 @@ async def session_summary(db: AsyncSession, session_id: UUID) -> list[dict[str, 
         summary.append(
             {
                 "comparison_key": key,
-                "created_by_agent_run_id": first["created_by_agent_run_id"],
+                "created_by_run_id": first["created_by_run_id"],
                 "cohort_id": first["cohort_id"],
                 "feature_set": feature_set,
-                "input_artifact_id": first["input_artifact_id"],
+                "input_file_id": first["input_file_id"],
                 "dataset_digest": first["dataset_digest"],
                 "split_definition": first["split_definition"],
                 "seeds": first["seeds"],
@@ -212,7 +212,7 @@ async def session_summary(db: AsyncSession, session_id: UUID) -> list[dict[str, 
                         "variant_key": selected["variant_key"],
                         "algorithm": selected["algorithm"],
                         "metrics": selected["metrics"],
-                        "predictions_artifact_id": selected["predictions_artifact_id"],
+                        "predictions_file_id": selected["predictions_file_id"],
                         "model_file_name": selected["model_file_name"],
                     }
                     if selected
@@ -237,10 +237,10 @@ async def session_summary(db: AsyncSession, session_id: UUID) -> list[dict[str, 
 # Record a comparison (insert-or-read)
 # ----------------------------------------------------------------------
 async def _check_inputs(
-    db: AsyncSession, run: AgentRun, data: schemas.ModelComparisonWrite
+    db: AsyncSession, run: NodeRun, data: schemas.ModelComparisonWrite
 ) -> None:
     cohort = await cohorts_repo.get_cohort(db, data.cohort_id)
-    cohort_run = await runs_repo.get_run(db, cohort.created_by_agent_run_id)
+    cohort_run = await runs_repo.get_run(db, cohort.created_by_run_id)
     if cohort_run.session_id != run.session_id:
         raise await _abort(
             db,
@@ -290,28 +290,28 @@ async def _check_inputs(
             )
 
     wanted = {
-        "input": [data.input_artifact_id] if data.input_artifact_id else [],
-        "predictions": [v.predictions_artifact_id for v in data.variants if v.predictions_artifact_id],
+        "input": [data.input_file_id] if data.input_file_id else [],
+        "predictions": [v.predictions_file_id for v in data.variants if v.predictions_file_id],
     }
-    ids = {artifact_id for group in wanted.values() for artifact_id in group}
+    ids = {file_id for group in wanted.values() for file_id in group}
     artifacts: dict[UUID, Any] = {}
     if ids:
         artifacts = {
-            row.artifact_id: row
+            row.file_id: row
             for row in (
                 await db.execute(
                     select(
-                        Artifact.artifact_id, Artifact.session_id, Artifact.kind, Artifact.sha256
-                    ).where(Artifact.artifact_id.in_(ids))
+                        StoredFile.file_id, StoredFile.session_id, StoredFile.kind, StoredFile.sha256
+                    ).where(StoredFile.file_id.in_(ids))
                 )
             ).all()
         }
     for role, kind in (("input", "input_csv"), ("predictions", "export_csv")):
-        for artifact_id in wanted[role]:
-            artifact = artifacts.get(artifact_id)
+        for file_id in wanted[role]:
+            artifact = artifacts.get(file_id)
             if artifact is None:
                 raise await _abort(
-                    db, HTTPException(status_code=422, detail=f"Artifact {artifact_id} not found")
+                    db, HTTPException(status_code=422, detail=f"Stored file {file_id} not found")
                 )
             if artifact.session_id != run.session_id or artifact.kind != kind:
                 raise await _abort(
@@ -319,23 +319,23 @@ async def _check_inputs(
                     HTTPException(
                         status_code=409,
                         detail=(
-                            f"The {role} artifact must be a {kind} of session "
+                            f"The {role} stored file must be a {kind} of session "
                             f"{run.session_id} (R1/R6)."
                         ),
                     ),
                 )
     # the digest verifies the captured bytes when they were the only input.
     if (
-        data.input_artifact_id is not None
+        data.input_file_id is not None
         and not data.split_definition.get("holdout_artifact_id")
-        and artifacts[data.input_artifact_id].sha256 != data.dataset_digest
+        and artifacts[data.input_file_id].sha256 != data.dataset_digest
     ):
         raise await _abort(
             db,
             HTTPException(
                 status_code=409,
                 detail=(
-                    "dataset_digest does not match the captured input artifact; the "
+                    "dataset_digest does not match the captured input stored file; the "
                     "recorded input must be exactly the bytes the model trained on."
                 ),
             ),
@@ -344,13 +344,13 @@ async def _check_inputs(
 
 async def record_comparison(
     db: AsyncSession,
-    agent_run_id: UUID,
+    run_id: UUID,
     comparison_key: str,
     data: schemas.ModelComparisonWrite,
 ) -> tuple[dict[str, Any], bool]:
     if not comparison_key.strip() or "/" in comparison_key:
         raise HTTPException(status_code=422, detail="comparison_key must be non-blank and contain no '/'")
-    run = await require_producer_run(db, agent_run_id, MODELING_AGENT_TYPE, "Model results")
+    run = await require_producer_run(db, run_id, MODELING_AGENT_TYPE, "Model results")
     session_id = run.session_id
     await lock_session(db, session_id)
     await _check_inputs(db, run, data)
@@ -360,7 +360,7 @@ async def record_comparison(
         for row in (
             await db.execute(
                 select(ModelResult).where(
-                    ModelResult.created_by_agent_run_id == agent_run_id,
+                    ModelResult.created_by_run_id == run_id,
                     ModelResult.comparison_key == comparison_key,
                 )
             )
@@ -392,11 +392,11 @@ async def record_comparison(
     fresh = [variant for variant in data.variants if variant.variant_key not in existing]
     if not fresh:
         await db.commit()
-        return await get_comparison(db, agent_run_id, comparison_key), False
+        return await get_comparison(db, run_id, comparison_key), False
 
     rows = [
         ModelResult(
-            created_by_agent_run_id=agent_run_id,
+            created_by_run_id=run_id,
             comparison_key=comparison_key,
             variant_key=variant.variant_key,
             **{field: getattr(data, field) for field in _SHARED_FIELDS},
@@ -416,10 +416,10 @@ async def record_comparison(
             {
                 "schema_version": 1,
                 "comparison_key": comparison_key,
-                "created_by_agent_run_id": str(agent_run_id),
+                "created_by_run_id": str(run_id),
                 "feature_set_id": str(data.feature_set_id) if data.feature_set_id else None,
                 "variant_count": len(rows),
                 "selected_variant_key": selected,
             },
         )
-    return await get_comparison(db, agent_run_id, comparison_key), True
+    return await get_comparison(db, run_id, comparison_key), True

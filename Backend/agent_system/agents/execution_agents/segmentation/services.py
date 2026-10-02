@@ -836,7 +836,7 @@ class SegmentationService:
         deadline = asyncio.get_running_loop().time() + wait_seconds
         while True:
             check = await self.client.get(
-                f"{_app_api_base_url()}/segmentations/{seg_series_uid}",
+                f"{_app_api_base_url()}/segmentation-masks/{seg_series_uid}",
                 timeout=QUICK_TIMEOUT,
             )
             if check.status_code == 200:
@@ -911,7 +911,7 @@ class SegmentationService:
             payload["series_description"] = series_description
         try:
             response = await self.client.post(
-                f"{_app_api_base_url()}/segmentations/declare-origin",
+                f"{_app_api_base_url()}/segmentation-masks/declare-origin",
                 json=payload,
                 timeout=QUICK_TIMEOUT,
             )

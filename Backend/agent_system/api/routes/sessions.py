@@ -8,7 +8,7 @@ from fastapi import APIRouter, Header, HTTPException
 
 from storage_paths import workspace
 from socket_store import manager as ws_manager
-from models.logs import WS_Log
+from models.logs import SessionEvent
 from models.requests import SessionInputRequest
 from services import population_review
 from clients.backend_client import BackendClient
@@ -29,13 +29,13 @@ async def send_segmentation_catchup_snapshot(
     ws_manager, connection, session_id: str
 ) -> None:
     """Reconstruct the current segmentation-review state (from
-    segmentation_runs/pairs, including the doctor's draft decisions) and
+    segmentation_batches/pairs, including the doctor's draft decisions) and
     deliver it to exactly the connection that just completed its handshake
     replay (WEBSOCKET_FIX_PLAN.md WS-08, principle 5 step 2, "the trailing
     segmentation snapshot is sent on this socket only").
 
     This is not the same thing as replaying `segmentation_output` rows from
-    ws_logs: the review may have moved on since the last such event was
+    session_events: the review may have moved on since the last such event was
     emitted (further doctor decisions, pair resolutions), so this always
     rebuilds current truth from the authoritative tables rather than trusting
     the log to still describe it.
@@ -64,7 +64,7 @@ async def send_segmentation_catchup_snapshot(
 
 
 @router.get("/session/{session_id}/replay-logs")
-async def replay_logs(session_id: str, after_event_id: int = 0, limit: int = 2000):
+async def replay_events(session_id: str, after_event_id: int = 0, limit: int = 2000):
     """Read-only: a session's events from a cursor, as JSON.
 
     This used to also broadcast every returned row over every socket in the
@@ -74,7 +74,7 @@ async def replay_logs(session_id: str, after_event_id: int = 0, limit: int = 200
     connecting socket. Nothing here sends anything over any socket; this
     route exists only for tooling/debugging that wants the raw log.
     """
-    logs: list[WS_Log] = await BackendClient.replay_logs(
+    logs: list[SessionEvent] = await BackendClient.replay_events(
         session_id, after_event_id=after_event_id, limit=limit
     )
     return logs
@@ -131,7 +131,7 @@ async def get_session_chat_messages(session_id: str):
         )
         try:
             response = await client.get(
-                f"{monai_url}/chat_messages/{session_id}", timeout=10.0
+                f"{monai_url}/chat-messages/{session_id}", timeout=10.0
             )
             if response.status_code == 200:
                 return response.json()

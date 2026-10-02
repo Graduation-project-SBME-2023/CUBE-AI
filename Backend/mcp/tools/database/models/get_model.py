@@ -5,6 +5,8 @@ from pydantic import Field
 import os
 from service_urls import CONTROL_API_URL
 
+from ..result_shape import keep_model_id
+
 base_url = CONTROL_API_URL
 
 
@@ -23,10 +25,10 @@ async def get_model(
     """
     async with httpx.AsyncClient() as client:
         if model_id is not None:
-            response = await client.get(f"{base_url}/models/{model_id}")
+            response = await client.get(f"{base_url}/inference-models/{model_id}")
         else:
             response = await client.get(
-                base_url + "/models/",
+                base_url + "/inference-models/",
                 params={"skip": skip, "limit": limit}
             )
 
@@ -36,4 +38,4 @@ async def get_model(
         except ValueError:
             return {"error": "Invalid JSON returned", "raw": response.text}
 
-        return {"data": data}
+        return {"data": keep_model_id(data)}

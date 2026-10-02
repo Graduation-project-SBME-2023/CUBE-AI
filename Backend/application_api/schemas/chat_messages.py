@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from typing import List, Optional
 from uuid import UUID
 
@@ -7,7 +7,13 @@ from uuid import UUID
 class ChatMessageBase(BaseModel):
     role: str
     text: str
-    extra_data: Optional[dict] = None
+    # The ORM attribute is `metadata_` (`metadata` is reserved on declarative
+    # classes); the JSON field is `metadata`.
+    metadata: Optional[dict] = Field(
+        default=None,
+        validation_alias=AliasChoices("metadata_", "metadata"),
+        serialization_alias="metadata",
+    )
 
 class ChatMessageCreate(ChatMessageBase):
     # Message ids are idempotency keys. A client that retries
@@ -19,6 +25,6 @@ class ChatMessageCreate(ChatMessageBase):
 class ChatMessage(ChatMessageBase):
     message_id: UUID
     chat_id: UUID
-    timestamp: datetime
+    created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

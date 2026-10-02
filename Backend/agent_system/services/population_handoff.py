@@ -10,10 +10,10 @@ RunFetcher = Callable[[str], Awaitable[dict[str, Any] | None]]
 CohortFetcher = Callable[[str], Awaitable[dict[str, Any] | None]]
 
 
-async def _default_run(agent_run_id: str) -> dict[str, Any] | None:
+async def _default_run(run_id: str) -> dict[str, Any] | None:
     from clients.backend_client import BackendClient
 
-    return await BackendClient.get_agent_run(agent_run_id)
+    return await BackendClient.get_node_run(run_id)
 
 
 async def _default_cohort(session_id: str) -> dict[str, Any] | None:
@@ -33,7 +33,7 @@ def _labelled_count(cohort: dict[str, Any]) -> int:
 
 async def population_handoff_issues(
     session_id: str,
-    agent_run_id: str | None,
+    run_id: str | None,
     *,
     fetch_run: RunFetcher | None = None,
     fetch_cohort: CohortFetcher | None = None,
@@ -43,7 +43,7 @@ async def population_handoff_issues(
     fetch_cohort = fetch_cohort or _default_cohort
     issues: list[str] = []
 
-    if not agent_run_id:
+    if not run_id:
         return ["the population step has no agent run; nothing can be verified"]
 
     cohort = await fetch_cohort(session_id)
@@ -60,17 +60,17 @@ async def population_handoff_issues(
         elif _labelled_count(cohort) == 0:
             issues.append("the approved cohort has no labelled volume")
 
-    run = await fetch_run(agent_run_id)
+    run = await fetch_run(run_id)
     if not run:
         issues.append("the population agent run could not be read")
         return issues
-    notes = run.get("durable_notes") or {}
+    notes = run.get("scratchpad_notes") or {}
     if notes.get("status") != "done":
         issues.append("population scratchpad status is not done")
-    summary = (run.get("output_summary") or {}).get("scratchpad_summary")
+    summary = (run.get("scratchpad_summary") or {}).get("scratchpad_summary")
     if not isinstance(summary, dict) or not str(summary.get("content", "")).strip():
         issues.append("population scratchpad summary is missing")
-    agent_output = (run.get("output_summary") or {}).get("agent_output")
+    agent_output = (run.get("scratchpad_summary") or {}).get("agent_output")
     if not isinstance(agent_output, dict):
         issues.append("population structured output is missing")
     elif agent_output.get("status") != "completed":
@@ -80,10 +80,10 @@ async def population_handoff_issues(
 
 async def require_population_handoff(
     session_id: str,
-    agent_run_id: str | None,
+    run_id: str | None,
     **kwargs: Any,
 ) -> None:
     """Raise when the population agent has not completed its durable contract."""
-    issues = await population_handoff_issues(session_id, agent_run_id, **kwargs)
+    issues = await population_handoff_issues(session_id, run_id, **kwargs)
     if issues:
         raise RuntimeError("Population handoff is incomplete: " + "; ".join(issues))

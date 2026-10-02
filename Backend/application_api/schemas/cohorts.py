@@ -113,7 +113,7 @@ class CohortMemberOut(BaseModel):
 
 class CohortOut(BaseModel):
     cohort_id: UUID
-    created_by_agent_run_id: UUID
+    created_by_run_id: UUID
     cohort_key: str
     criteria: dict[str, Any]
     label_definition: dict[str, Any]

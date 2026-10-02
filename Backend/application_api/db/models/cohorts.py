@@ -32,16 +32,16 @@ def _versioned(column: str, *, nullable: bool) -> str:
 
 
 class Cohort(Base):
-    """The study population one agent run defined."""
+    """The study population one run defined."""
 
     __tablename__ = "cohorts"
 
     cohort_id = Column(
         UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    created_by_agent_run_id = Column(
+    created_by_run_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("agent_runs.agent_run_id", ondelete="RESTRICT"),
+        ForeignKey("node_runs.run_id", ondelete="RESTRICT"),
         nullable=False,
     )
     cohort_key = Column(Text, nullable=False)
@@ -60,7 +60,7 @@ class Cohort(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "created_by_agent_run_id", "cohort_key", name="uq_cohorts_created_by_agent_run_id"
+            "created_by_run_id", "cohort_key", name="uq_cohorts_created_by_run_id"
         ),
         CheckConstraint("length(btrim(cohort_key)) > 0", name="cohort_key_not_blank"),
         CheckConstraint(_versioned("criteria", nullable=False), name="criteria_versioned"),

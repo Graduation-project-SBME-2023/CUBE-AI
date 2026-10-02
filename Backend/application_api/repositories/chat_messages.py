@@ -50,16 +50,16 @@ async def create_chat_message(db: AsyncSession, chat_id: UUID, message: ChatMess
             chat_id=chat_id,
             role=message.role,
             text=message.text,
-            extra_data=message.extra_data,
+            metadata_=message.metadata,
         )
         if message.message_id is not None:
             db_msg.message_id = message.message_id
         db.add(db_msg)
 
-        # The chat owns last_activity (it has a dedicated TOUCH endpoint and
+        # The chat owns last_activity_at (it has a dedicated TOUCH endpoint and
         # eight frontend readers), so a new message advances it here rather
         # than leaving the UI to guess from the message timeline.
-        session.last_activity = datetime.now(timezone.utc)
+        session.last_activity_at = datetime.now(timezone.utc)
         db.add(session)
 
         await db.commit()
@@ -84,7 +84,7 @@ async def get_chat_messages(db: AsyncSession, chat_id: UUID, skip: int = 0, limi
         result = await db.execute(
             select(ChatMessage)
             .filter(ChatMessage.chat_id == chat_id)
-            .order_by(ChatMessage.timestamp.asc(), ChatMessage.message_id.asc())
+            .order_by(ChatMessage.created_at.asc(), ChatMessage.message_id.asc())
             .offset(skip)
             .limit(limit)
         )
@@ -118,7 +118,7 @@ async def get_chat_messages_by_role(
         result = await db.execute(
             select(ChatMessage)
             .filter(ChatMessage.chat_id == chat_id, ChatMessage.role == role)
-            .order_by(ChatMessage.timestamp.asc(), ChatMessage.message_id.asc())
+            .order_by(ChatMessage.created_at.asc(), ChatMessage.message_id.asc())
             .offset(skip)
             .limit(limit)
         )

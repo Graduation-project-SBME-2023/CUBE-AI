@@ -319,7 +319,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
     # The PyRadiomics parameter file and the tool log are disposable
     # diagnostics: they live under temp/, and the measurements are
     # rows in PostgreSQL. `output_dir` is accepted and ignored.
-    output_dir = str(TEMP_DIR / "feature-extraction" / (domain_api.agent_run_id() or "unbound"))
+    output_dir = str(TEMP_DIR / "feature-extraction" / (domain_api.bound_run_id() or "unbound"))
 
     # Resolve image_dir with auto-discovery fallback
     requested_image_dir = base_on_workspace_dir(params.image_dir) if params.image_dir else None
@@ -947,7 +947,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
                 recorded["created"] += int(result["created"])
                 recorded["reused"] += int(result["reused"])
                 ids = {
-                    (item["label_series_instance_uid"], int(item["segment_number"]), item["source_digest"]): item["id"]
+                    (item["label_series_instance_uid"], int(item["segment_number"]), item["source_digest"]): item["radiomics_feature_id"]
                     for item in result["rows"]
                 }
                 for row in batch:
@@ -1037,7 +1037,7 @@ async def radiomics_extract_features(params: ExtractFeaturesInput) -> str:
 
         return json.dumps({
             "status": "success",
-            "agent_run_id": run_id,
+            "agent_run_id": run_id,  # tool result key, kept (plan.md: no success result shape changes)
             "cohort_id": cohort_id,
             # The measurements are rows; this is their count, and the
             # export below is generated from them on request.
@@ -1096,7 +1096,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
 
     # Plots are rendered here and published as artifacts; nothing under this
     # directory is authoritative.
-    output_dir = str(TEMP_DIR / "feature-selection" / (domain_api.agent_run_id() or "unbound"))
+    output_dir = str(TEMP_DIR / "feature-selection" / (domain_api.bound_run_id() or "unbound"))
     os.makedirs(output_dir, exist_ok=True)
     log_file = os.path.join(output_dir, "feature_importance_analysis.log")
     _setup_logging(log_file)
@@ -1615,7 +1615,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
                 selection_warnings.append(f"{figure_name}: kept the earlier published figure ({exc})")
                 continue
             figures.append({
-                "artifact_id": str(artifact["artifact_id"]),
+                "artifact_id": str(artifact["file_id"]),
                 "logical_key": artifact["logical_key"],
                 "display_filename": artifact.get("display_filename"),
             })
@@ -1708,7 +1708,7 @@ async def radiomics_analyze_importance(params: AnalyzeImportanceInput) -> str:
 
         return json.dumps({
             "status": "success",
-            "agent_run_id": run_id,
+            "agent_run_id": run_id,  # tool result key, kept (plan.md: no success result shape changes)
             "task_type": task_type,
             "method": params.method,
             "feature_count": int(X.shape[1]),

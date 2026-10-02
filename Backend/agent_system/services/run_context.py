@@ -1,4 +1,4 @@
-"""What the runner needs to execute one approved plan step."""
+"""What the runner needs to execute one approved graph node."""
 
 from __future__ import annotations
 
@@ -11,26 +11,26 @@ NODE_SEPARATOR = "__s"
 
 @dataclass(frozen=True)
 class PlannedRun:
-    """One approved step and the run that will execute it."""
+    """One approved node and the run that will execute it."""
 
-    agent_run_id: str
-    step_id: str
+    run_id: str
+    node_id: str
     session_id: str
     agent_type: str
-    step_order: int
+    position: int
     title: str
-    instructions: dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
     status: str = "pending"
     compiled_prompt: str | None = None
-    output_summary: dict[str, Any] | None = None
+    scratchpad_summary: dict[str, Any] | None = None
 
     @property
     def node_name(self) -> str:
-        return f"{self.agent_type}{NODE_SEPARATOR}{self.step_order}"
+        return f"{self.agent_type}{NODE_SEPARATOR}{self.position}"
 
     @property
     def task_message(self) -> dict[str, Any]:
-        raw = self.instructions.get("task_message")
+        raw = self.params.get("task_message")
         return raw if isinstance(raw, dict) else {}
 
     @property
@@ -44,25 +44,25 @@ def agent_type_of(node_name: str) -> str:
 
 
 def planned_runs(api_runs: list[dict]) -> list[PlannedRun]:
-    """Map `/agent-runs/session/{id}` onto the runner's view, in step order."""
+    """Map `/runs/session/{id}` onto the runner's view, in node order."""
     runs: list[PlannedRun] = []
     for raw in api_runs:
-        step = raw.get("step") or {}
+        node = raw.get("node") or {}
         runs.append(
             PlannedRun(
-                agent_run_id=str(raw.get("agent_run_id") or ""),
-                step_id=str(raw.get("step_id") or ""),
+                run_id=str(raw.get("run_id") or ""),
+                node_id=str(raw.get("node_id") or ""),
                 session_id=str(raw.get("session_id") or ""),
-                agent_type=str(step.get("agent_type") or ""),
-                step_order=int(step.get("step_order") or 0),
-                title=str(step.get("title") or ""),
-                instructions=step.get("instructions") or {},
+                agent_type=str(node.get("target_name") or ""),
+                position=int(node.get("position") or 0),
+                title=str(node.get("title") or ""),
+                params=node.get("params") or {},
                 status=str(raw.get("status") or "pending"),
                 compiled_prompt=raw.get("compiled_prompt"),
-                output_summary=raw.get("output_summary"),
+                scratchpad_summary=raw.get("scratchpad_summary"),
             )
         )
-    runs.sort(key=lambda run: run.step_order)
+    runs.sort(key=lambda run: run.position)
     return runs
 
 
@@ -76,13 +76,13 @@ def first_incomplete(runs: list[PlannedRun]) -> PlannedRun | None:
 
 def _upstream_digest(run: PlannedRun) -> dict[str, Any]:
     """What a downstream step is told about an upstream one."""
-    summary = run.output_summary or {}
+    summary = run.scratchpad_summary or {}
     agent_output = summary.get("agent_output") or {}
     outputs = agent_output.get("outputs") or {}
     return {
-        "agent_run_id": run.agent_run_id,
-        "step_id": run.step_id,
-        "step_order": run.step_order,
+        "run_id": run.run_id,
+        "node_id": run.node_id,
+        "position": run.position,
         "agent_type": run.agent_type,
         "status": agent_output.get("status") or run.status,
         "summary": outputs.get("summary") or "",
@@ -118,7 +118,7 @@ def build_compiled_prompt(run: PlannedRun, upstream: list[PlannedRun]) -> str:
     else:
         # A step with no compiled task message still executes: its definition
         # is what the plan says it is.
-        description = str(run.instructions.get("description") or "").strip()
+        description = str(run.params.get("description") or "").strip()
         prompt = f"## TASK: {run.title}\n{description}".strip()
 
     completed = [item for item in upstream if item.is_complete]
@@ -127,7 +127,7 @@ def build_compiled_prompt(run: PlannedRun, upstream: list[PlannedRun]) -> str:
         for item in completed:
             digest = _upstream_digest(item)
             prompt += (
-                f"  {item.step_order}. [{item.agent_type}] {digest['status']}: "
+                f"  {item.position}. [{item.agent_type}] {digest['status']}: "
                 f"{str(digest['summary'])[:800]}\n"
             )
             if digest["files"]:
@@ -135,7 +135,7 @@ def build_compiled_prompt(run: PlannedRun, upstream: list[PlannedRun]) -> str:
     return prompt
 
 
-def build_input_refs(
+def build_resolved_inputs(
     run: PlannedRun,
     upstream: list[PlannedRun],
     session: dict[str, Any] | None = None,
@@ -149,9 +149,9 @@ def build_input_refs(
             "prompt_kind": session.get("prompt_kind"),
             "intent_present": bool(session.get("intent")),
         },
-        "step": {
-            "step_id": run.step_id,
-            "step_order": run.step_order,
+        "node": {
+            "node_id": run.node_id,
+            "position": run.position,
             "agent_type": run.agent_type,
             "task_message_id": run.task_message.get("task_id"),
         },

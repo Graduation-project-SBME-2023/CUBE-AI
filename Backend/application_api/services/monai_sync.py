@@ -3,7 +3,7 @@ import os
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
-from application_api.repositories.model import upsert_model
+from application_api.repositories.inference_models import upsert_model
 
 logger = logging.getLogger(__name__)
 

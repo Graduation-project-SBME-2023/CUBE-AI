@@ -82,16 +82,16 @@ class SegmentationModule:
         self,
         model_name: str = "gpt-oss:120b-cloud",
         session_id: str | None = None,
-        agent_run_id: str | None = None,
+        run_id: str | None = None,
     ):
         self.model_name = model_name
         self.session_id = session_id
         # The run this module's work belongs to: identity is the step's
         # run, never the agent name.
-        self.agent_run_id = agent_run_id
-        # current this flow: the checkpoint is the `segmentation_runs` batch.
+        self.run_id = run_id
+        # current this flow: the checkpoint is the `segmentation_batches` batch.
         self.batch_store: SegmentationBatchStore | None = None
-        self.segmentation_run_id: str | None = None
+        self.segmentation_batch_id: str | None = None
         self.model_client = None
         self.discovery_tools = None
         self.UserProxyAgent = None
@@ -114,9 +114,9 @@ class SegmentationModule:
                 "SESSION_ID": self.session_id or "",
                 "AGENT_ID": "segmentation_agent",
                 # Passed down so any tool this module reaches writes to the
-                # same `agent_runs` row.
-                "AGENT_RUN_ID": self.agent_run_id or os.environ.get("AGENT_RUN_ID", ""),
-                "STEP_ID": os.environ.get("STEP_ID", ""),
+                # same `node_runs` row.
+                "RUN_ID": self.run_id or os.environ.get("RUN_ID", ""),
+                "NODE_ID": os.environ.get("NODE_ID", ""),
             }
         )
         server = StdioServerParams(
@@ -164,19 +164,19 @@ class SegmentationModule:
         rows = await BackendClient.get_cohort_analysis_rows(str(cohort["cohort_id"]))
         datasetlist = [str(row["volume_series_instance_uid"]) for row in rows]
 
-        run = await BackendClient.get_agent_run(str(self.agent_run_id)) or {}
-        step = run.get("step") or {}
-        instructions = step.get("instructions") or {}
-        task_message = dict(instructions.get("task_message") or {})
-        if not task_message.get("instructions") and instructions.get("description"):
-            task_message["instructions"] = instructions.get("description")
+        run = await BackendClient.get_node_run(str(self.run_id)) or {}
+        node = run.get("node") or {}
+        params = node.get("params") or {}
+        task_message = dict(params.get("task_message") or {})
+        if not task_message.get("instructions") and params.get("description"):
+            task_message["instructions"] = params.get("description")
         session = await BackendClient.get_session(str(self.session_id)) or {}
         intent = session.get("intent") or {}
         state = {
             "plan": {
                 "steps": [
                     {
-                        "module": step.get("agent_type") or "segmentation_agent",
+                        "module": node.get("target_name") or "segmentation_agent",
                         "task_message": task_message,
                     }
                 ]
@@ -275,13 +275,13 @@ class SegmentationModule:
         work_items: list[dict[str, Any]],
         *,
         stage: str,
-        run_id: str,
+        batch_correlation_id: str,
     ) -> str:
         """Checkpoint every pair onto its `segmentation_pairs` row."""
-        if self.batch_store is None or not self.segmentation_run_id:
+        if self.batch_store is None or not self.segmentation_batch_id:
             raise RuntimeError("The segmentation batch has not been created yet")
-        await self.batch_store.sync(self.segmentation_run_id, work_items, stage=stage)
-        return self.segmentation_run_id
+        await self.batch_store.sync(self.segmentation_batch_id, work_items, stage=stage)
+        return self.segmentation_batch_id
 
     def _create_publisher(
         self,
@@ -302,14 +302,14 @@ class SegmentationModule:
         workspace_dir: str,
         resolution_outcome: TargetResolutionOutcome,
         work_items: list[dict[str, Any]],
-        run_id: str,
+        batch_correlation_id: str,
     ) -> str:
         return await self._write_manifest(
             workspace_dir,
             resolution_outcome,
             work_items,
             stage="processing",
-            run_id=run_id,
+            batch_correlation_id=batch_correlation_id,
         )
 
     async def _resolve_mask_path(
@@ -425,7 +425,7 @@ class SegmentationModule:
         workspace_dir: str,
         resolution_outcome: TargetResolutionOutcome,
         work_items: list[dict[str, Any]],
-        run_id: str,
+        batch_correlation_id: str,
         publisher: ProgressivePreviewPublisher,
     ) -> None:
         item.update(
@@ -438,7 +438,7 @@ class SegmentationModule:
             }
         )
         await self._persist_processing_state(
-            workspace_dir, resolution_outcome, work_items, run_id
+            workspace_dir, resolution_outcome, work_items, batch_correlation_id
         )
         await publisher.publish_failure()
 
@@ -461,13 +461,13 @@ class SegmentationModule:
         workspace_dir: str,
         resolution_outcome: TargetResolutionOutcome,
         work_items: list[dict[str, Any]],
-        run_id: str,
+        batch_correlation_id: str,
         publisher: ProgressivePreviewPublisher,
         allow_reuse_fallback: bool = False,
     ) -> bool:
         item["status"] = "preparing"
         await self._persist_processing_state(
-            workspace_dir, resolution_outcome, work_items, run_id
+            workspace_dir, resolution_outcome, work_items, batch_correlation_id
         )
         artifact_key = ensure_artifact_key(item)
         successful, skipped = await download_and_pair_volumes(
@@ -548,7 +548,7 @@ class SegmentationModule:
                     }
                 )
                 await self._persist_processing_state(
-                    workspace_dir, resolution_outcome, work_items, run_id
+                    workspace_dir, resolution_outcome, work_items, batch_correlation_id
                 )
                 return False
 
@@ -593,7 +593,7 @@ class SegmentationModule:
                 workspace_dir=workspace_dir,
                 resolution_outcome=resolution_outcome,
                 work_items=work_items,
-                run_id=run_id,
+                batch_correlation_id=batch_correlation_id,
                 publisher=publisher,
             )
             return False
@@ -648,7 +648,7 @@ class SegmentationModule:
                     str(item.get("pair_id") or ""), str(artifact_key or "")
                 ),
                 str(preview.get("gifPath") or f"overlays/{artifact_key}.gif"),
-                agent_run_id=self.agent_run_id,
+                run_id=self.run_id,
                 metadata={
                     "schema_version": 1,
                     "pair_id": item.get("pair_id"),
@@ -666,7 +666,7 @@ class SegmentationModule:
                 workspace_dir=workspace_dir,
                 resolution_outcome=resolution_outcome,
                 work_items=work_items,
-                run_id=run_id,
+                batch_correlation_id=batch_correlation_id,
                 publisher=publisher,
             )
             return False
@@ -684,7 +684,7 @@ class SegmentationModule:
                 }
             )
             await self._persist_processing_state(
-                workspace_dir, resolution_outcome, work_items, run_id
+                workspace_dir, resolution_outcome, work_items, batch_correlation_id
             )
             await publisher.publish_ready()
             return True
@@ -701,7 +701,7 @@ class SegmentationModule:
             }
         )
         await self._persist_processing_state(
-            workspace_dir, resolution_outcome, work_items, run_id
+            workspace_dir, resolution_outcome, work_items, batch_correlation_id
         )
         await publisher.publish_ready()
         return True
@@ -711,7 +711,7 @@ class SegmentationModule:
         workspace_dir: str,
         resolution_outcome: TargetResolutionOutcome,
         work_items: list[dict[str, Any]],
-        run_id: str,
+        batch_correlation_id: str,
         publisher: ProgressivePreviewPublisher,
     ) -> None:
         plan = resolution_outcome.plan
@@ -742,14 +742,14 @@ class SegmentationModule:
                 continue
             item["status"] = "reusing"
             await self._persist_processing_state(
-                workspace_dir, resolution_outcome, work_items, run_id
+                workspace_dir, resolution_outcome, work_items, batch_correlation_id
             )
             await self._prepare_pair_preview(
                 item,
                 workspace_dir=workspace_dir,
                 resolution_outcome=resolution_outcome,
                 work_items=work_items,
-                run_id=run_id,
+                batch_correlation_id=batch_correlation_id,
                 publisher=publisher,
                 allow_reuse_fallback=True,
             )
@@ -768,12 +768,12 @@ class SegmentationModule:
                 workspace_dir=workspace_dir,
                 resolution_outcome=resolution_outcome,
                 work_items=work_items,
-                run_id=run_id,
+                batch_correlation_id=batch_correlation_id,
                 publisher=publisher,
             )
 
         await self._persist_processing_state(
-            workspace_dir, resolution_outcome, work_items, run_id
+            workspace_dir, resolution_outcome, work_items, batch_correlation_id
         )
 
         if any(item.get("status") == "ready" for item in ordered):
@@ -792,7 +792,7 @@ class SegmentationModule:
             item = item_by_pair[event["pair_id"]]
             item["status"] = "inferencing"
             await self._persist_processing_state(
-                workspace_dir, resolution_outcome, work_items, run_id
+                workspace_dir, resolution_outcome, work_items, batch_correlation_id
             )
 
         async def on_pair_completed(outcome: dict[str, Any]) -> None:
@@ -813,7 +813,7 @@ class SegmentationModule:
                         workspace_dir=workspace_dir,
                         resolution_outcome=resolution_outcome,
                         work_items=work_items,
-                        run_id=run_id,
+                        batch_correlation_id=batch_correlation_id,
                         publisher=publisher,
                     )
                     return
@@ -832,7 +832,7 @@ class SegmentationModule:
                         workspace_dir=workspace_dir,
                         resolution_outcome=resolution_outcome,
                         work_items=work_items,
-                        run_id=run_id,
+                        batch_correlation_id=batch_correlation_id,
                         publisher=publisher,
                     )
                     return
@@ -869,7 +869,7 @@ class SegmentationModule:
                 )
                 item["status"] = "inference_succeeded"
                 await self._persist_processing_state(
-                    workspace_dir, resolution_outcome, work_items, run_id
+                    workspace_dir, resolution_outcome, work_items, batch_correlation_id
                 )
 
                 if is_empty_mask:
@@ -878,7 +878,7 @@ class SegmentationModule:
                         workspace_dir=workspace_dir,
                         resolution_outcome=resolution_outcome,
                         work_items=work_items,
-                        run_id=run_id,
+                        batch_correlation_id=batch_correlation_id,
                         publisher=publisher,
                     )
                     await self.segmentation_service.purge_inference_job(
@@ -901,7 +901,7 @@ class SegmentationModule:
                         workspace_dir=workspace_dir,
                         resolution_outcome=resolution_outcome,
                         work_items=work_items,
-                        run_id=run_id,
+                        batch_correlation_id=batch_correlation_id,
                         publisher=publisher,
                     )
                     return
@@ -921,7 +921,7 @@ class SegmentationModule:
                     workspace_dir=workspace_dir,
                     resolution_outcome=resolution_outcome,
                     work_items=work_items,
-                    run_id=run_id,
+                    batch_correlation_id=batch_correlation_id,
                     publisher=publisher,
                 )
                 await self.segmentation_service.purge_inference_job(
@@ -937,7 +937,7 @@ class SegmentationModule:
                     workspace_dir=workspace_dir,
                     resolution_outcome=resolution_outcome,
                     work_items=work_items,
-                    run_id=run_id,
+                    batch_correlation_id=batch_correlation_id,
                     publisher=publisher,
                 )
 
@@ -979,7 +979,7 @@ class SegmentationModule:
                 workspace_dir=workspace_dir,
                 resolution_outcome=resolution_outcome,
                 work_items=work_items,
-                run_id=run_id,
+                batch_correlation_id=batch_correlation_id,
                 publisher=publisher,
             )
 
@@ -1077,14 +1077,14 @@ class SegmentationModule:
                 "The stored segmentation batch names volumes outside the approved cohort"
             )
 
-        correlation_run_id = str(config.get("correlation_run_id") or "")
+        batch_correlation_id = str(config.get("batch_correlation_id") or "")
         workspace = Path(workspace_dir).resolve()
         for fallback_index, item in enumerate(work_items):
             pair_id = str(item["pair_id"])
             item.setdefault("artifact_key", artifact_key_for_pair(pair_id))
             item["sequence_index"] = int(item.get("sequence_index", fallback_index))
             item.setdefault("inference_result", None)
-            item["run_id"] = str(item.get("run_id") or correlation_run_id)
+            item["batch_correlation_id"] = str(item.get("batch_correlation_id") or batch_correlation_id)
             item.setdefault("gif_path", None)
             item.setdefault("reuse_candidate_uid", None)
             item.setdefault("reused", False)
@@ -1111,12 +1111,12 @@ class SegmentationModule:
             "submitting": "awaiting_review",
             "submitted": "reviewed",
         }[batch["review_status"]]
-        self.segmentation_run_id = str(batch["segmentation_run_id"])
-        return outcome, work_items, correlation_run_id, stage
+        self.segmentation_batch_id = str(batch["segmentation_batch_id"])
+        return outcome, work_items, batch_correlation_id, stage
 
     @staticmethod
     def _build_result(
-        segmentation_run_id: str | None,
+        segmentation_batch_id: str | None,
         plan,
         work_items: list[dict[str, Any]],
     ) -> dict[str, Any]:
@@ -1136,7 +1136,7 @@ class SegmentationModule:
             status = "failed"
         return {
             "status": status,
-            "segmentation_run_id": segmentation_run_id,
+            "segmentation_batch_id": segmentation_batch_id,
             "segmentation_method": (
                 f"{plan.chosen_path}: {', '.join(plan.selected_models)}"
             ),
@@ -1217,21 +1217,21 @@ class SegmentationModule:
         workspace_dir: str,
         resolution_outcome: TargetResolutionOutcome,
         work_items: list[dict[str, Any]],
-        run_id: str,
+        batch_correlation_id: str,
         publisher: ProgressivePreviewPublisher | None = None,
     ) -> dict[str, Any]:
         plan = resolution_outcome.plan
         publisher = publisher or self._create_publisher(
             plan, work_items, workspace_dir
         )
-        batch = await self.batch_store.read(self.segmentation_run_id)
+        batch = await self.batch_store.read(self.segmentation_batch_id)
         if batch["review_status"] not in {"submitting", "submitted"}:
             await self._write_manifest(
                 workspace_dir,
                 resolution_outcome,
                 work_items,
                 stage="awaiting_review",
-                run_id=run_id,
+                batch_correlation_id=batch_correlation_id,
             )
         ready_items = [
             item
@@ -1251,7 +1251,7 @@ class SegmentationModule:
                 session_id=self.session_id,
             )
             await self._wait_for_review()
-            batch = await self.batch_store.read(self.segmentation_run_id)
+            batch = await self.batch_store.read(self.segmentation_batch_id)
             if batch["review_status"] != "submitted":
                 raise RuntimeError(
                     "The segmentation review wait ended but PostgreSQL has no submitted "
@@ -1264,7 +1264,7 @@ class SegmentationModule:
             ):
                 logger.warning("Human review accepted no segmentation masks")
 
-        result = self._build_result(self.segmentation_run_id, plan, work_items)
+        result = self._build_result(self.segmentation_batch_id, plan, work_items)
         await emit_tool_events(
             event_types=["tool_started", "tool_finished"],
             content=TextPayload(message="Segmentation is done."),
@@ -1291,7 +1291,7 @@ class SegmentationModule:
         ):
             raise RuntimeError("SegmentationModule.initialize() must be called first")
 
-        self.batch_store = SegmentationBatchStore(self.agent_run_id, client=self.http_client)
+        self.batch_store = SegmentationBatchStore(self.run_id, client=self.http_client)
         datasetlist, cohort_id, state = await self._load_run_context()
         if not datasetlist:
             raise ValueError(
@@ -1315,15 +1315,15 @@ class SegmentationModule:
             (
                 resolution_outcome,
                 work_items,
-                run_id,
+                batch_correlation_id,
                 checkpoint_stage,
             ) = checkpoint
             if checkpoint_stage == "reviewed":
                 logger.info("Resuming completed segmentation review checkpoint")
-                batch = await self.batch_store.read(self.segmentation_run_id)
+                batch = await self.batch_store.read(self.segmentation_batch_id)
                 self._apply_submitted_review(workspace_dir, batch, work_items)
                 return self._build_result(
-                    self.segmentation_run_id,
+                    self.segmentation_batch_id,
                     resolution_outcome.plan,
                     work_items,
                 )
@@ -1336,7 +1336,7 @@ class SegmentationModule:
                     workspace_dir,
                     resolution_outcome,
                     work_items,
-                    run_id,
+                    batch_correlation_id,
                     publisher,
                 )
             else:
@@ -1345,12 +1345,12 @@ class SegmentationModule:
                 workspace_dir,
                 resolution_outcome,
                 work_items,
-                run_id,
+                batch_correlation_id,
                 publisher,
             )
 
         instructions, locked_roi_interpretation = self._build_instruction(state)
-        run_id = str(uuid4())
+        batch_correlation_id = str(uuid4())
 
         await emit_tool_events(
             event_types=["tool_started", "tool_progress"],
@@ -1396,7 +1396,7 @@ class SegmentationModule:
             await ws_manager.send_ws_message(
                 "segmentation_output",
                 {
-                    "runId": run_id,
+                    "runId": batch_correlation_id,  # the review UI keys its drafts by it
                     "targetRoi": ", ".join(target_labels),
                     "targets": [
                         {"targetId": t.target_id, "canonicalLabel": t.canonical_label}
@@ -1431,13 +1431,13 @@ class SegmentationModule:
                         "pair_id": pair_id,
                         "artifact_key": artifact_key,
                         "sequence_index": -1,
-                        "run_id": run_id,
-                        "correlation_id": f"{run_id}:{pair_id}",
+                        "batch_correlation_id": batch_correlation_id,
+                        "correlation_id": f"{batch_correlation_id}:{pair_id}",
                         "idempotency_key": artifact_key_for_pair(
-                            f"{run_id}|{pair_id}|{model}|{prompt}"
+                            f"{batch_correlation_id}|{pair_id}|{model}|{prompt}"
                         ),
                         "inference_job_id": artifact_key_for_pair(
-                            f"{run_id}|{pair_id}|{model}|{prompt}"
+                            f"{batch_correlation_id}|{pair_id}|{model}|{prompt}"
                         ),
                         "volume_uid": volume_uid,
                         "target_id": target.target_id,
@@ -1511,13 +1511,13 @@ class SegmentationModule:
             cohort_id=cohort_id,
             config=batch_config(
                 resolution_outcome,
-                correlation_run_id=run_id,
+                batch_correlation_id=batch_correlation_id,
                 schema_version=CURRENT_SCHEMA_VERSION,
             ),
             targets=batch_targets(plan, self._model_for_target),
             work_items=work_items,
         )
-        self.segmentation_run_id = str(batch["segmentation_run_id"])
+        self.segmentation_batch_id = str(batch["segmentation_batch_id"])
         publisher = self._create_publisher(plan, work_items, workspace_dir)
 
         target_count = len(plan.targets)
@@ -1555,13 +1555,13 @@ class SegmentationModule:
             workspace_dir,
             resolution_outcome,
             work_items,
-            run_id,
+            batch_correlation_id,
             publisher,
         )
         return await self._complete_review(
             workspace_dir,
             resolution_outcome,
             work_items,
-            run_id,
+            batch_correlation_id,
             publisher,
         )

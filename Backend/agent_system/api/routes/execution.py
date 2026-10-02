@@ -49,7 +49,7 @@ async def start_execution(request: SessionControlRequest):
     except SessionExecutionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     # Immediately tell the UI that execution has started so tabs unlock
-    # without waiting for the first pipeline_agent_status message.
+    # without waiting for the first node_status message.
     await ws_manager.send_ws_message(
         "run_status",
         {"state": "RUNNING", "current_agent": None},
@@ -130,7 +130,7 @@ async def get_status(session_id: str):
         "execution_active": bool(
             session.execution_task and not session.execution_task.done()
         ),
-        # Per-step progress is durable now: it comes from `agent_runs`, not
+        # Per-step progress is durable now: it comes from `node_runs`, not
         # from what this process remembers.
-        "runs": await BackendClient.get_agent_run_status(session_id),
+        "runs": await BackendClient.get_node_status(session_id),
     }

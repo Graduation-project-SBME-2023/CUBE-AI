@@ -36,16 +36,16 @@ async def read_population_cohort(session_id: UUID, db: AsyncSession = Depends(ge
     return cohort
 
 
-@router.put("/run/{agent_run_id}/{cohort_key}", response_model=CohortOut)
+@router.put("/run/{run_id}/{cohort_key}", response_model=CohortOut)
 async def upsert_cohort(
-    agent_run_id: UUID,
+    run_id: UUID,
     cohort_key: str,
     data: CohortUpsert,
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     """Create a run's draft cohort, or merge criteria/summary into it."""
-    cohort, created = await repo.upsert_cohort(db, agent_run_id, cohort_key, data)
+    cohort, created = await repo.upsert_cohort(db, run_id, cohort_key, data)
     response.status_code = 201 if created else 200
     return cohort
 
@@ -83,7 +83,7 @@ async def freeze_cohort(cohort_id: UUID, db: AsyncSession = Depends(get_db)):
         "event": (
             {
                 "event_id": event.event_id,
-                "msg_type": event.msg_type,
+                "event_type": event.event_type,
                 "payload": event.payload,
                 "created_at": event.created_at.isoformat(),
             }

@@ -16,7 +16,7 @@ class ReportCreate(BaseModel):
     """Create a new report row with initial source content."""
 
     session_id: UUID
-    created_by_agent_run_id: Optional[UUID] = None
+    created_by_run_id: Optional[UUID] = None
     literature_review_id: Optional[UUID] = None
     source_text: str = Field(min_length=1)
     source_format: str = Field(default="latex", pattern=r"^(latex|markdown)$")
@@ -24,11 +24,11 @@ class ReportCreate(BaseModel):
 
     @model_validator(mode="after")
     def _exclusive_source(self) -> "ReportCreate":
-        has_run = self.created_by_agent_run_id is not None
+        has_run = self.created_by_run_id is not None
         has_lit = self.literature_review_id is not None
         if has_run == has_lit:
             raise ValueError(
-                "Exactly one of created_by_agent_run_id and literature_review_id is required (R13)"
+                "Exactly one of created_by_run_id and literature_review_id is required (R13)"
             )
         return self
 
@@ -42,16 +42,16 @@ class ReportPublish(BaseModel):
 
 
 class ReportImageIn(BaseModel):
-    """Register one artifact as a named source image for a report."""
+    """Register one stored file as a named source image for a report."""
 
-    artifact_id: UUID
+    file_id: UUID
     image_key: _Key
 
 
 class ReportImageOut(BaseModel):
     image_id: UUID
     report_id: UUID
-    artifact_id: UUID
+    file_id: UUID
     image_key: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -60,7 +60,7 @@ class ReportImageOut(BaseModel):
 class ReportOut(BaseModel):
     report_id: UUID
     session_id: UUID
-    created_by_agent_run_id: Optional[UUID] = None
+    created_by_run_id: Optional[UUID] = None
     literature_review_id: Optional[UUID] = None
     source_text: str
     source_format: str
@@ -79,7 +79,7 @@ class ReportSummaryOut(BaseModel):
 
     report_id: UUID
     session_id: UUID
-    created_by_agent_run_id: Optional[UUID] = None
+    created_by_run_id: Optional[UUID] = None
     literature_review_id: Optional[UUID] = None
     source_format: str
     source_version: int

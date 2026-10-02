@@ -37,9 +37,9 @@ class Report(Base):
     # Exactly one of the next two is non-NULL. No separate `index=True` here:
     # the unique constraints below already back every non-null lookup on
     # these columns, so a second plain index would only duplicate them.
-    created_by_agent_run_id = Column(
+    created_by_run_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("agent_runs.agent_run_id", ondelete="RESTRICT"),
+        ForeignKey("node_runs.run_id", ondelete="RESTRICT"),
         nullable=True,
     )
     literature_review_id = Column(
@@ -67,12 +67,12 @@ class Report(Base):
         # still allowed (Postgres does not consider NULL to equal NULL in a
         # unique constraint), so this behaves like a partial index over the
         # non-null rows without needing postgresql_where.
-        UniqueConstraint("created_by_agent_run_id", name="uq_reports_created_by_agent_run_id"),
+        UniqueConstraint("created_by_run_id", name="uq_reports_created_by_run_id"),
         # One report per literature review.
         UniqueConstraint("literature_review_id", name="uq_reports_literature_review_id"),
         # exactly one source.
         CheckConstraint(
-            "(created_by_agent_run_id IS NOT NULL) != (literature_review_id IS NOT NULL)",
+            "(created_by_run_id IS NOT NULL) != (literature_review_id IS NOT NULL)",
             name="exclusive_source",
         ),
         CheckConstraint(
@@ -101,9 +101,9 @@ class ReportImage(Base):
         nullable=False,
         index=True,
     )
-    artifact_id = Column(
+    file_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("artifacts.artifact_id", ondelete="RESTRICT"),
+        ForeignKey("stored_files.file_id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )

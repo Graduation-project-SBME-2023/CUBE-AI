@@ -382,7 +382,7 @@ class ClinicalPlanner:
             if self.state.hypothesis.id:
                 self.logger.info(
                     "Loaded planner state from DB for session %s "
-                    "(hypothesis=%s, plan_steps=%d)",
+                    "(hypothesis=%s, steps=%d)",
                     self.session.session_id,
                     self.state.hypothesis.id,
                     len(self.state.plan.steps),
@@ -1121,7 +1121,7 @@ class ClinicalPlanner:
                         # steps first: they are part of the step definition
                         # , and after approval every step is immutable
                         # . Approval itself happens when the user starts
-                        # the run, which is also what creates the agent_runs
+                        # the run, which is also what creates the node_runs
                         # rows — so the plan stays editable through this
                         # revision loop.
                         await self.session_service.save_task_messages_for_plan(

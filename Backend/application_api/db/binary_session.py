@@ -7,7 +7,7 @@ import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from application_api.core.artifact_limits import (
+from application_api.core.stored_file_limits import (
     BINARY_POOL_MAX_OVERFLOW,
     BINARY_POOL_SIZE,
     BINARY_READ_CONCURRENCY,
