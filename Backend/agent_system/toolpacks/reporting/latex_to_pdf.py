@@ -10,6 +10,7 @@ import httpx
 from pydantic import Field
 
 from .._toolkit import ExtractedArtifact, PortSpec, error_result, tool
+from ..common import views
 from ..common.manifests import WRITES
 from ..common.emit import emit
 from ..common.http_client import shared_client, timeout, write_path_headers
@@ -46,6 +47,7 @@ def _published_report(result: object) -> ExtractedArtifact:
     data_scopes={"db_write"},
     timeout_s=PUBLISH_TIMEOUT_S + 30,
     **WRITES,
+    on_result=views.on_latex_pdf,
 )
 async def latex_to_pdf(
     latex_text: Annotated[

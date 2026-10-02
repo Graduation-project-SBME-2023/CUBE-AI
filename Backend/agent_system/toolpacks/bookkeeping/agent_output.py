@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from .._toolkit import tool
+from ..common import views
 from ..common.manifests import READ_ONLY, WRITES
 from ..common.domain_api import run_id, session_id
 from ..common.http_client import shared_client, timeout, write_path_headers
@@ -154,6 +155,7 @@ async def _session_runs() -> List[Dict[str, Any]]:
     data_scopes={"db_write", "fs_write"},
     timeout_s=60,
     **WRITES,
+    on_result=views.on_agent_output,
 )
 async def write_agent_output(params: WriteAgentOutputInput) -> str:
     """Write this agent's structured output."""

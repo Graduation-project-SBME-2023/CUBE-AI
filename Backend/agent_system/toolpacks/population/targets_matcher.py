@@ -1,6 +1,7 @@
 import json
 
 from .._toolkit import error_result, tool
+from ..common import views
 from ..common.manifests import WRITES
 from ..common.emit import emit, emit_view
 from ..common.polling import PollTimeout, poll_until
@@ -67,6 +68,7 @@ async def _wait_for_cohort_approval(timeout_seconds: float = APPROVAL_TIMEOUT_S)
     data_scopes={"phi_read", "db_write"},
     timeout_s=3660,
     **WRITES,
+    on_result=views.on_population_tool,
 )
 async def generate_targets() -> str:
     """Prepares the cohort's target labels for review and acts as the Human-in-the-Loop approval gate before segmentation."""

@@ -1,6 +1,7 @@
 from pydantic import Field
 from typing import Annotated
 from ..._toolkit import tool
+from ...common import views
 from ...common.manifests import READ_ONLY
 from .. import _api
 from ...common.emit import emit
@@ -11,6 +12,7 @@ from ...common.emit import emit
     data_scopes={"phi_read"},
     timeout_s=45,
     **READ_ONLY,
+    on_result=views.on_population_tool,
 )
 async def get_volume(
     volume_series_instance_uid: Annotated[str | None, Field(description="The unique identifier (Series Instance UID) of the volume. If provided, fetches a single detailed record. If omitted, fetches a list of all volumes.")] = None,
