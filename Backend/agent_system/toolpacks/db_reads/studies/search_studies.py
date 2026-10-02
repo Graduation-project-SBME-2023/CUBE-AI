@@ -1,13 +1,8 @@
 from ..._toolkit import tool
 from ...common.manifests import READ_ONLY
+from .. import _api
 from typing import Annotated
 from pydantic import Field
-import httpx
-import os
-from ...common.service_urls import CONTROL_API_URL
-
-
-base_url = CONTROL_API_URL
 
 
 @tool(
@@ -26,21 +21,9 @@ async def search_studies(
     2. To search for studies containing specific terms in their description using 'keyword'.
     3. To narrow down results by using both filters (e.g., "Show me MRI studies mentioning 'brain'").
     """
-    async with httpx.AsyncClient() as client:
-        params = {}
-        if modality is not None:
-            params["modality"] = str(modality)
-        if keyword is not None:
-            params["keyword"] = keyword
-            
-        response = await client.get(
-            base_url + "/studies/search/",
-            params=params
-        )
-        response.raise_for_status()
-        try:
-            data = response.json()
-        except ValueError:
-            return {"error": "Invalid JSON returned", "raw": response.text}
-
-        return {"data": data}
+    params = {}
+    if modality is not None:
+        params["modality"] = str(modality)
+    if keyword is not None:
+        params["keyword"] = keyword
+    return await _api.read("/studies/search/", params=params)

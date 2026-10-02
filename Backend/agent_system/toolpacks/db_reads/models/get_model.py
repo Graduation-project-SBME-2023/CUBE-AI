@@ -1,14 +1,10 @@
 from ..._toolkit import tool
 from ...common.manifests import READ_ONLY
-import httpx
+from .. import _api
 from typing import Annotated
 from pydantic import Field
-import os
-from ...common.service_urls import CONTROL_API_URL
 
 from ..result_shape import keep_model_id
-
-base_url = CONTROL_API_URL
 
 
 @tool(
@@ -27,19 +23,8 @@ async def get_model(
     1. To find details for a specific model when you know its unique 'model_id'.
     2. To browse or list multiple models when no specific ID is known (uses pagination).
     """
-    async with httpx.AsyncClient() as client:
-        if model_id is not None:
-            response = await client.get(f"{base_url}/inference-models/{model_id}")
-        else:
-            response = await client.get(
-                base_url + "/inference-models/",
-                params={"skip": skip, "limit": limit}
-            )
-
-        response.raise_for_status()
-        try:
-            data = response.json()
-        except ValueError:
-            return {"error": "Invalid JSON returned", "raw": response.text}
-
-        return {"data": keep_model_id(data)}
+    if model_id is not None:
+        return await _api.read(f"/inference-models/{model_id}", shape=keep_model_id)
+    return await _api.read(
+        "/inference-models/", params={"skip": skip, "limit": limit}, shape=keep_model_id
+    )

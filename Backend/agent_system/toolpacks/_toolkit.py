@@ -23,10 +23,12 @@ if __name__.startswith("agent_system."):
         ToolEvent,
         ViewEvent,
     )
+    from agent_system.toolkit.results import error_result, is_error_result
     from agent_system.toolkit.tools.registry import tool
 else:
     from toolkit.context import NoToolContextError, ToolContext, current_context
     from toolkit.events import MarkdownPayload, ProgressPayload, TextPayload, ToolEvent, ViewEvent
+    from toolkit.results import error_result, is_error_result
     from toolkit.tools.registry import tool
 
 __all__ = [
@@ -38,5 +40,7 @@ __all__ = [
     "ToolEvent",
     "ViewEvent",
     "current_context",
+    "error_result",
+    "is_error_result",
     "tool",
 ]
