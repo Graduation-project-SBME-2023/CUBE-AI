@@ -31,7 +31,7 @@ RUN pip install --no-cache-dir \
     "pydicom==2.4.4" \
     pydantic-settings \
     python-multipart \
-    sqlalchemy \
+    "sqlalchemy[asyncio]>=2.0,<2.1" \
     "uvicorn[standard]"
 
 COPY Backend/application_api /app/application_api
