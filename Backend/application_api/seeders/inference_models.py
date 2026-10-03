@@ -55,7 +55,9 @@ def _sync_url_from_env() -> str:
     """
     database_url = os.environ["DATABASE_URL"]
     parsed = urlsplit(database_url)
-    scheme = parsed.scheme.replace("+asyncpg", "")
+    # Name the driver explicitly: SQLAlchemy 2.1 made psycopg (v3) the default
+    # for a bare "postgresql://", and the image only ships psycopg2.
+    scheme = parsed.scheme.replace("+asyncpg", "+psycopg2")
     return urlunsplit(parsed._replace(scheme=scheme))
 
 
