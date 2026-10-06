@@ -2,12 +2,12 @@
 
 ## Prerequisites
 
-This project requires **Python 3.11.3**. A `.python-version` file is included in the repo, so if you have [pyenv](https://github.com/pyenv/pyenv) installed it will automatically activate the correct version when you enter the project directory.
+This project requires **Python 3.13**. A `.python-version` file is included in the repo, so if you have [pyenv](https://github.com/pyenv/pyenv) installed it will automatically activate the correct version when you enter the project directory.
 
 If you don't have pyenv, and wish to use it, install it and then run:
 
 ```bash
-pyenv install 3.11.3
+pyenv install 3.13.16
 ```
 
 You can verify the active Python version at any time with:
@@ -26,19 +26,14 @@ python --version
 pip install -r requirements.txt
 ```
 
-**2. Install PyRadiomics from source**
+**2. Install PyRadiomics from source** (the commit `deploy/Dockerfile.agents` pins)
 
 ```bash
-pip install git+https://github.com/AIM-Harvard/pyradiomics.git
+pip install git+https://github.com/AIM-Harvard/pyradiomics.git@8ed5793
 ```
 
-**3. Install pinned numeric libraries**
-
-```bash
-pip install numpy==1.26.4 pandas==2.1.4 pycaret==3.3.2
-```
-
-> These versions must be installed last to avoid being overwritten by other packages.
+> PyCaret is no longer installed: modeling moves to scikit-learn, LightGBM, XGBoost and SHAP,
+> which are in `requirements.txt`.
 
 ---
 

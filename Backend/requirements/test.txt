@@ -10,7 +10,9 @@ respx>=0.22,<1
 # ship these (it has no database access by design — see V1-PLAN §2.1), so the
 # test runtime installs them itself rather than the suite silently skipping the
 # schema contracts it exists to enforce.
-sqlalchemy>=2.0,<3
+# Same range as deploy/Dockerfile.application-api: 2.1 changes the default
+# driver for a bare postgresql:// URL, and the tests must run what ships.
+sqlalchemy>=2.0,<2.1
 alembic>=1.13,<2
 asyncpg>=0.29,<1
 # SQLAlchemy's async layer runs on greenlet; the agents image does not ship it.

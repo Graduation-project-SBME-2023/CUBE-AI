@@ -16,10 +16,12 @@ Parts of it are stale — see **Gotchas**.
 
 ## Tech Stack
 
-- **Backend:** Python 3.11.3 in the images (Plan 0 moves them to 3.13), FastAPI, async
+- **Backend:** Python 3.13 in the images we build (`python:3.13.16-slim` for agents,
+  `python:3.13-slim` for the Application API; the MONAI Label image keeps its own 3.10), FastAPI, async
   SQLAlchemy + asyncpg, Alembic, Pydantic v2 (`pydantic-settings`), AutoGen
   (`autogen_agentchat` `GraphFlow`/`DiGraphBuilder`; the legacy pipeline, frozen until its
-  removal in Plan 17), PyRadiomics, PyCaret, MONAI Label / nnUNetv2 / VISTA3D / SAM2 / VoxTell,
+  removal in Plan 17), PyRadiomics, scikit-learn / LightGBM / XGBoost / SHAP (PyCaret is
+  removed; the `pycaret_*` tools cannot run until Plan 7 rewrites them), MONAI Label / nnUNetv2 / VISTA3D / SAM2 / VoxTell,
   PyTorch. The framework-neutral tool platform (`agent_system/toolkit/` and
   `agent_system/toolpacks/`, see **Tool packs**) is written for **Python 3.13**.
 - **Frontend:** OHIF Viewer monorepo — React **17**, TypeScript 4.6, **Webpack 5** (not Vite),
@@ -99,14 +101,14 @@ python -m pytest -c Backend/pytest.ini Backend/tests/unit -k "test_name"
 Test deps: `python -m pip install -r Backend/requirements/test.txt` (plus
 `Backend/agent_system/requirements.txt` for the runtime).
 
-**The toolkit and the tool packs need Python 3.13** (PEP 695 syntax), but the project images
-are still 3.11.3 until Plan 0. Until then the 3.11 image cannot import
-`tests/unit/toolkit/`, `tests/unit/toolpacks/`, or the tests that import
+**The toolkit and the tool packs need Python 3.13** (PEP 695 syntax). The images and CI run
+3.13, so the deterministic suite collects them. A local interpreter older than 3.13 cannot
+import `tests/unit/toolkit/`, `tests/unit/toolpacks/`, or the tests that import
 `agent_system.toolpacks` (`tests/unit/functions/`, `tests/contracts/test_agent_output_contract.py`);
-`PY313_ONLY_TESTS` in `Backend/conftest.py` leaves them out of collection below 3.13 (the
-report header says so), and CI runs them in the `toolkit-tests` job. Run them locally with a
-3.13 interpreter that has the test deps plus `pydantic httpx numpy pandas scikit-learn
-requests_toolbelt pyyaml aiofiles fastapi greenlet pydicom` (`py -3.13` instead of `python3.13` on Windows):
+`PY313_ONLY_TESTS` in `Backend/conftest.py` leaves them out of collection there (the report
+header says so). Without the full runtime, a 3.13 interpreter with the test deps plus
+`pydantic httpx numpy pandas scikit-learn requests_toolbelt pyyaml aiofiles fastapi greenlet
+pydicom` runs them (`py -3.13` instead of `python3.13` on Windows):
 
 ```bash
 python3.13 -m pytest -c Backend/pytest.ini Backend/tests/unit/toolkit Backend/tests/unit/toolpacks Backend/tests/unit/functions Backend/tests/contracts
@@ -458,9 +460,11 @@ or explicit contract.
   correct. `launcher.linux.sh` has the same probe but no Store aliases, so this is Windows-only.
 - **Never `docker compose down -v`** as a troubleshooting step — it destroys the PostgreSQL and
   Orthanc named volumes.
-- **Python dep install order matters:** install `Backend/agent_system/requirements.txt`, then
-  PyRadiomics from source, then `numpy==1.26.4 pandas==2.1.4 pycaret==3.3.2` **last**, or they
-  get overwritten. Python must be 3.11.3 (`Backend/agent_system/.python-version`).
+- **Python deps:** Python 3.13 (`Backend/agent_system/.python-version`); install
+  `Backend/agent_system/requirements.txt`, then PyRadiomics from source at the commit
+  `deploy/Dockerfile.agents` pins. There are no late numeric pins any more, and nothing installs
+  PyCaret. `Backend/tests/runtime/test_image_smoke.py` checks the built image (it skips outside a
+  container). The MONAI Label image stays on Python 3.10.
 - `Backend/conftest.py` deliberately reorders `sys.path` so `Backend/monailabel/` does not shadow
   the installed `monailabel` package; leave that block alone. Both `agent_system.*` and legacy
   bare (`agents.*`, `services.*`) imports are supported (the old `agent_system/tools/` package
@@ -474,10 +478,10 @@ or explicit contract.
   is no `pull_request` trigger and nothing runs twice). No job depends on `main` or on a published
   `latest`:
   - `backend-tests.yml` first builds the agents image **from the pushed commit**
-    (`build-image.yml`) and runs `deterministic-tests` (the gate, Python 3.11), `live-db-tests`
-    (the `run_live_db_tests.ps1` suites against a `postgres:18-alpine` service; fails if any of
-    them skipped) and `agent-regression-tests` inside it; `toolkit-tests` runs on 3.13 on the
-    runner. Only after those pass are the agents (amd64 + arm64) and application-api images
+    (`build-image.yml`) and runs `deterministic-tests` (the gate, Python 3.13, including the
+    toolkit and tool-pack tests and the image smoke test), `live-db-tests` (the
+    `run_live_db_tests.ps1` suites against a `postgres:18-alpine` service; fails if any of them
+    skipped) and `agent-regression-tests` inside it. Only after those pass are the agents (amd64 + arm64) and application-api images
     published. `radiology-regression-tests` still uses the frozen
     `cubeai1/custom-monailabel:v1.0-cpu`.
   - `frontend-tests.yml` installs from `Frontend/OHIF-Viewer/yarn.lock` (tracked; the rest of
@@ -489,8 +493,6 @@ or explicit contract.
     from the branch in the `LATEST_BRANCH` repository variable (default `New-Architecture`;
     change the variable, not the workflows), from a `v*.*.*` tag, or from a manual MONAI tag —
     and only that branch moves `latest`, which compose pulls.
-  - `deploy/Dockerfile.agents` points apt at `archive.debian.org`: its `python:3.11.3-slim`
-    base is Debian 11, whose packages left the regular mirrors (they 404).
 - External dependencies that must be up for full function: Docker, Ollama (or a configured
   OpenAI/Azure endpoint), and for GPU mode NVIDIA drivers + Container Toolkit. SAM2 checkpoints
   must be downloaded manually into `Backend/apps/radiology/sam2/checkpoints/`.

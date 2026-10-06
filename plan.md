@@ -206,6 +206,8 @@ Backend/
 
 **Progress (2026-10-03):** Plan 2 is done: `Backend/mcp/` is gone, the catalog loads 63 tools, and the Definition of Ready smoke test passes for every light tool (see "Plan 2 — as built" at the end of Plan 2). Like Plan 1, it was done before Plan 0, so CI (the 3.11 image) cannot collect the 3.13 tests of the toolkit and the tool packs; **Plan 0 is the recommended next plan.**
 
+**Progress (2026-10-06):** Plan 0 is implemented and waits for its first CI run (see "Plan 0 — as built" at the end of Plan 0): the agents image is `python:3.13.16-slim` without PyCaret, the Application API image is `python:3.13-slim`, and the deterministic suite now collects the toolkit and tool-pack tests in the image. The images are built by GitHub Actions only; nothing was built locally. Once `backend-tests.yml` passes on the pushed commit, mark Plan 0 done.
+
 **Decision (2026-10-02): LangGraph-native agent nodes.** Plan 9 now also builds the checkpointer, gates, `@task` tool calls, `Send` fan-out, the literature workflow graph and in-node compaction; Appendix P gains D27 (agent checkpoints, suspended attempts, transaction T10) and becomes revision 3.2; Plans 3, 6, 8, 10–17 carry the matching edits. The implementation order does not change: Plan 9 already comes after 6.2–6.5, which now include the checkpoint tables and routes.
 
 **Implementation order:** 0 → 1 ✅ → 6.1 ✅ → 2 → 3 → 4 → 5 → 6.2–6.5 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14 → 15 → 16 → 17.
@@ -265,6 +267,18 @@ Some plans can move:
 **Tests:** the resolve check and the image smoke test above.
 
 **Done when:** the agents and Application API images build on Python 3.13, the smoke test passes, and nothing installs PyCaret.
+
+---
+
+## Plan 0 — as built (2026-10-06)
+
+- **Images:** `deploy/Dockerfile.agents` is `FROM python:3.13.16-slim` (3.13.16 was the newest patch on Docker Hub; Phase 0.1 named 3.13.15), PyRadiomics is pinned to `@8ed5793`, and the step that reinstalled `numpy==1.26.4 pandas==2.1.4 pycaret==3.3.2 shap` last is gone. The new base is Debian 13, so the `archive.debian.org` redirect the 3.11.3 (Debian 11) base needed is removed with it. `deploy/Dockerfile.application-api` is `FROM python:3.13-slim` and no longer installs `pydicom==2.4.4`, which no Application API module imports.
+- **Requirements:** `numpy>=2.3,<3`; `joblib`, `lightgbm`, `xgboost` and `shap` added; still UTF-16 LE with CRLF. `Backend/requirements/test.txt` pins `sqlalchemy>=2.0,<2.1`, the range the Application API image ships.
+- **`.python-version`:** `3.13.16`.
+- **Smoke test:** `Backend/tests/runtime/test_image_smoke.py` (marker `docker`) covers the four checks of Phase 0.2. It skips outside a container (`/.dockerenv`), and the CI step fails if it skipped. It runs in `deterministic-tests`, inside the image built from the pushed commit.
+- **CI:** there is no `docker-build-agents.yml` any more; `backend-tests.yml` builds the agents image per commit (`build-image.yml`), and the separate 3.13 `toolkit-tests` job is folded into `deterministic-tests`. `PY313_ONLY_TESTS` in `Backend/conftest.py` stays for local interpreters older than 3.13.
+- **Not done locally:** the Phase 0.2 resolve check (`uv pip compile`) and the image build. The first CI run is that check.
+- **Still pending:** the `pycaret_*` tools raise `ImportError` until Plan 7 rewrites them, as Plan 0 allows.
 
 ---
 
