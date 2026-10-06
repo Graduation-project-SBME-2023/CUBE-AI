@@ -167,7 +167,8 @@ def upgrade() -> None:
 
     # ── literature_papers ─────────────────────────────────────────────────────
     # No created_at.
-    # PMID/DOI unique constraints use NULLS NOT DISTINCT so NULL does not match NULL.
+    # PMID/DOI unique constraints use NULLS NOT DISTINCT, which makes NULL match
+    # NULL (one PMID-less paper per review); r1f0a2c3d4e5 makes them plain UNIQUE.
     op.execute(
         """
         CREATE TABLE literature_papers (
