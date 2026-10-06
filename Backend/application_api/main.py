@@ -12,11 +12,14 @@ from application_api.db.binary_session import binary_engine
 from application_api.db.session import AsyncSessionLocal, engine
 from application_api.core.config import settings
 from application_api.core.metrics import install_sql_metrics, monitor_event_loop_lag, observe_http, render_metrics
+from application_api.services.retention import purge_checkpoints_forever
 from application_api.api.routes import (
+    agent_checkpoints,
     chat_messages,
     chats,
     cohorts,
     feature_sets,
+    graph_changes,
     graph_nodes,
     inference_models,
     literature,
@@ -33,6 +36,7 @@ from application_api.api.routes import (
     stored_files,
     study,
     sync,
+    training_jobs,
     volume,
     workflow,
 )
@@ -52,10 +56,14 @@ async def lifespan(_app: FastAPI):
         sync.reconcile_with_orthanc_forever(settings.RECONCILIATION_INTERVAL_SECONDS),
         name="orthanc-reconciliation",
     )
+    purge_task = asyncio.create_task(
+        purge_checkpoints_forever(settings.AGENT_CHECKPOINT_PURGE_INTERVAL_SECONDS),
+        name="agent-checkpoint-purge",
+    )
     try:
         yield
     finally:
-        for task in (lag_task, reconcile_task):
+        for task in (lag_task, reconcile_task, purge_task):
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task
@@ -91,6 +99,7 @@ for router in (
     chats.router,
     chat_messages.router,
     session_graphs.router,
+    graph_changes.router,
     graph_nodes.router,
     node_runs.router,
     stored_files.router,
@@ -102,6 +111,8 @@ for router in (
     literature.router,
     session_events.router,
     workflow.router,
+    training_jobs.router,
+    agent_checkpoints.router,
     sync.router,
 ):
     app.include_router(router)

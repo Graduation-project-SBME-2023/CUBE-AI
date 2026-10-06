@@ -44,20 +44,11 @@ async def load_runs(session_id: str) -> list[PlannedRun]:
     return planned_runs(await BackendClient.get_node_runs(session_id))
 
 
-# The in-memory `SessionState` the task manager tracks and the persisted DB
-# `control_state` (see application_api SESSION_CONTROL_STATES) are two different vocabularies.
-# IDLE has no DB counterpart — a session is never persisted before planning
-# starts, so it is left out on purpose. CANCELLED maps to "failed": the DB has
-# no "cancelled" status, and both mean "stopped without completing".
-_STATE_TO_DB_STATUS: dict[SessionState, str] = {
-    SessionState.PLANNING: "planning",
-    SessionState.READY: "ready",
-    SessionState.RUNNING: "running",
-    SessionState.PAUSED: "paused",
-    SessionState.COMPLETED: "completed",
-    SessionState.FAILED: "failed",
-    SessionState.CANCELLED: "failed",
-}
+# `sessions.control_state` holds control intent only: the user
+# pausing or resuming. Progress (planning, running, completed, ...) is derived
+# by the Application API and never written from here.
+_PAUSED = "paused"
+_ACTIVE = "active"
 
 
 class SessionService:
@@ -341,12 +332,14 @@ class SessionService:
         logger.info(f"[{session_id}] Pausing")
         session = self.store.require(session_id)
         self.tasks.pause(session)
+        asyncio.create_task(self._persist_control_state(session, _PAUSED))
         asyncio.create_task(self._sync_state(session))
 
     def resume(self, session_id: str) -> None:
         logger.info(f"[{session_id}] Resuming")
         session = self.store.require(session_id)
         self.tasks.resume(session)
+        asyncio.create_task(self._persist_control_state(session, _ACTIVE))
         asyncio.create_task(self._sync_state(session))
 
     def stop(self, session_id: str) -> None:
@@ -367,33 +360,20 @@ class SessionService:
     # ------------------------------------------------------------------
 
     async def update_state(self, session: Session, state: SessionState) -> None:
-        """
-        Update session state in memory, then best-effort persist + broadcast.
-        The in-memory update always succeeds; HTTP/WS failures are logged only.
-        """
+        """Update the in-memory state and broadcast it. Progress is not persisted:
+        the Application API derives it; only pause/resume intent is stored."""
         prev = session.state
         session.state = state
         logger.info(f"[{session.session_id}] State: {prev.name} -> {state.name}")
-
-        db_status = _STATE_TO_DB_STATUS.get(state)
-        persisted = True
-        if db_status is not None:
-            # Paused is only reachable through the DB's durable two-step
-            # path (running -> pausing -> paused); everything else is one
-            # guarded hop from wherever the session currently is.
-            if db_status == "paused":
-                await BackendClient.set_session_control_state(session.session_id, "pausing")
-            result = await BackendClient.set_session_control_state(session.session_id, db_status)
-            persisted = result is not None
-
         await self._ws_send(
             "state_update", {"state": state.name}, session_id=session.session_id
         )
 
-        if db_status is not None and not persisted:
+    async def _persist_control_state(self, session: Session, control_state: str) -> None:
+        """Best-effort durable pause/resume; a failure is logged, never raised."""
+        if await BackendClient.set_session_control_state(session.session_id, control_state) is None:
             logger.error(
-                f"[{session.session_id}] Failed to persist status '{db_status}' "
-                "to backend"
+                f"[{session.session_id}] Failed to persist control state '{control_state}'"
             )
 
     async def _sync_state(self, session: Session) -> None:

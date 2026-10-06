@@ -83,6 +83,15 @@ for variable, isolated_path in _ISOLATED_PATHS.items():
 # this away for the duration of that one test; every other test gets a fixed
 # synthetic token regardless of what a developer's real deploy/.env has.
 os.environ["WS_INTERNAL_TOKEN"] = "test-internal-token"
+# The Application API reads its settings at import. Deterministic tests never
+# connect: these placeholders only let the app and its repositories import.
+for _name, _value in (
+    ("DATABASE_URL", "postgresql+asyncpg://test:test@localhost:9/unused"),
+    ("ORTHANC_URL", "http://orthanc.invalid"),
+    ("ORTHANC_USER", "test"),
+    ("ORTHANC_PASSWORD", "test"),
+):
+    os.environ.setdefault(_name, _value)
 os.environ.pop("WS_INTERNAL_TOKEN_DEV_BYPASS", None)
 
 

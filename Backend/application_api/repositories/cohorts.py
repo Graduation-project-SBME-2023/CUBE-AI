@@ -22,6 +22,8 @@ from application_api.db.models.study import Study
 from application_api.db.models.volume import Volume
 from application_api.repositories import node_runs as runs_repo
 from application_api.schemas import cohorts as schemas
+from application_api.repositories import run_attempts as attempts_repo
+from application_api.services.fencing import USER, on_path
 from application_api.services.publication import lock_session, publication
 
 logger = logging.getLogger(__name__)
@@ -340,8 +342,10 @@ async def write_labels(db: AsyncSession, cohort_id: UUID, data: schemas.CohortLa
     return await get_cohort(db, cohort_id)
 
 
+@on_path(USER)
 async def freeze_cohort(db: AsyncSession, cohort_id: UUID) -> tuple[Cohort, Any]:
-    """The doctor's approval (the HITL gate) — one-way."""
+    """The doctor's approval (the cohort_approval gate) — one-way. Written on the
+    user gate path with the gate decision of the suspended attempt."""
     cohort = await _locked_cohort(db, cohort_id)
     if cohort.frozen_at is not None:
         await db.commit()
@@ -375,6 +379,7 @@ async def freeze_cohort(db: AsyncSession, cohort_id: UUID) -> tuple[Cohort, Any]
         )
     event = None
     async with publication(db, session_id) as publish:
+        await attempts_repo.resolve_domain_gate(db, run.run_id, "cohort_approval", publish)
         cohort.frozen_at = _now()
         await db.flush()
         event = publish(
