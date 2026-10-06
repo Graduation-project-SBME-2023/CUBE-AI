@@ -1,14 +1,10 @@
-"""Interim manifest presets for the moved tools (merged plan, Phase 2.1).
+"""Manifest presets of the tool packs.
 
 ``ToolSpec`` requires ``side_effects``, ``cost``, ``execution`` and
-``visibility``, so a tool cannot leave ``@mcp.tool`` without them. Phase 2.1
-gives every tool only these, plus the ``read_only`` / ``destructive`` /
-``idempotent`` flags its MCP ``annotations`` already declared. The rest of the
-manifest (``resources``, ``data_scopes``, ``timeout_s``, ports, ``on_result``)
-comes in Phase 2.4 for the light tools and in Plan 7 for the heavy ones.
-
-Visibility is passed per tool, from the Phase 2.4 table. ``"graph"`` needs
-output ports, so no tool gets it before Phase 2.4.
+``visibility``; these presets fix the first three for the common kinds of
+tool. Every tool still states the rest itself: ``visibility``,
+``data_scopes``, ``resources`` and ``timeout_s`` (dispatch enforces it; the
+120 s default suits no heavy tool).
 """
 
 from __future__ import annotations
@@ -30,9 +26,10 @@ WRITES: dict[str, Any] = {
     "execution": "inline",
 }
 
-# PLACEHOLDER until Plan 7, which makes these tools cost="heavy",
-# execution="job" with resources. Kept inline here so the catalog validates;
-# grep for INTERIM_HEAVY to find every tool still waiting for that move.
+# PLACEHOLDER until the job platform (Plan 5), which makes these tools
+# cost="heavy", execution="job". Kept inline so the catalog validates; grep
+# for INTERIM_HEAVY to find every tool still waiting for that move. Each of
+# them states its own timeout_s and resources.
 INTERIM_HEAVY: dict[str, Any] = {
     "side_effects": "compute",
     "cost": "medium",

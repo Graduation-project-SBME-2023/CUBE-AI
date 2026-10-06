@@ -196,15 +196,8 @@ def _down(args: dict | None = None, code: str = "upstream_error") -> Case:
 
 
 ERROR: dict[str, Case] = {
+    # Every Application API failure maps to one code, whichever tool sees it.
     **{name: _down(SUCCESS[name].args) for name in SUCCESS if SUCCESS[name].routes},
-    # Their reads catch the HTTP error themselves and report it as unreachable.
-    **{name: _down(SUCCESS[name].args, "unavailable")
-       for name in ("read_agent_output", "read_all_agent_outputs", "scratchpad_read_agent",
-                    "scratchpad_read_report")},
-    # A scratchpad write that did not land.
-    **{name: _down(SUCCESS[name].args, "write_failed")
-       for name in ("scratchpad_register_agent", "scratchpad_write_note", "scratchpad_raise_flag",
-                    "scratchpad_set_status", "scratchpad_write_summary")},
     "browse_workspace": Case({"params": {"directory": "missing"}}, error_code="not_found"),
     "list_latex_templates": Case(error_code="unavailable", setup=_broken_guide),
     "get_latex_template": Case({"params": {"template_name": "nope"}}, error_code="not_found"),

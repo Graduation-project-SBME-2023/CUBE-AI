@@ -1,8 +1,13 @@
 """The Application API, as the tools see it.
 
 Identity (session, run, attempt) comes from the current ``ToolContext``, never
-from the environment. Requests go through the shared client, and every write
-declares its D24 path (``http_client.write_path_headers()``).
+from the environment. Every request goes through ``send()``: the shared
+client, explicit timeouts, and the D24 write path on every write
+(``http_client.write_path_headers()``). ``request()`` adds the error mapping
+and decodes the body; the domain functions below name the routes the tools use.
+
+Interpolate a caller-supplied value into a path only through ``segment()``, so
+it can never add a path segment or a query string.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ from .service_urls import app_api_url
 READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 POPULATION_COHORT_KEY = "population"
 POPULATION_AGENT_TYPE = "study_population_planner_agent"
+DETAIL_CHARS = 600
 
 
 class DomainApiError(RuntimeError):
@@ -50,6 +56,9 @@ def error_result_from(exc: DomainApiError, context: str | None = None, **extra: 
     return _toolkit.error_result(exc.error_code, message, **extra)
 
 
+# ----------------------------------------------------------------------
+# Identity, from the current call's context
+# ----------------------------------------------------------------------
 def _context() -> _toolkit.ToolContext | None:
     try:
         return _toolkit.current_context()
@@ -104,22 +113,35 @@ def require_session() -> str:
     return value
 
 
-async def request(
+# ----------------------------------------------------------------------
+# Transport
+# ----------------------------------------------------------------------
+def segment(value: object) -> str:
+    """``value`` as one URL path segment: ``/``, ``?``, ``#`` and ``%`` are escaped."""
+    return quote(str(value), safe="")
+
+
+async def send(
     method: str,
     path: str,
     *,
     json: Any = None,
     params: dict[str, Any] | None = None,
-    allow_404: bool = False,
     timeout: float | None = None,
     **kwargs: Any,
-) -> Any:
+) -> httpx.Response:
+    """One request to the Application API; the response whatever its status.
+
+    Raises ``DomainApiError`` (status ``None``) only when the API cannot be
+    reached. Use ``request()`` unless the caller reads non-JSON bodies or
+    error details itself.
+    """
     method = method.upper()
     headers = dict(kwargs.pop("headers", None) or {})
     if method not in READ_METHODS:
         headers.update(write_path_headers())
     try:
-        response = await shared_client().request(
+        return await shared_client().request(
             method,
             f"{app_api_url()}{path}",
             json=json,
@@ -132,30 +154,87 @@ async def request(
         raise DomainApiError(
             f"{method} {path}: the Application API could not be reached ({type(exc).__name__})"
         ) from exc
+
+
+def response_body(response: httpx.Response) -> Any:
+    """The decoded body: JSON when it is JSON, else the text."""
+    try:
+        return response.json()
+    except ValueError:
+        return response.text
+
+
+def raise_for_status(response: httpx.Response, method: str, path: str) -> None:
+    """``DomainApiError`` for a 4xx or 5xx response. A 4xx carries the API's
+    ``detail``; a 5xx never does: its body is an unhandled server exception
+    (stack frames, raw SQL), which an agent would quote into a report."""
+    if response.status_code < 400:
+        return
+    body = response_body(response)
+    if response.status_code >= 500:
+        message = (
+            f"{method.upper()} {path} -> {response.status_code}: the Application API "
+            "encountered an internal error and could not complete this request."
+        )
+    else:
+        detail = body.get("detail") if isinstance(body, dict) else body
+        message = f"{method.upper()} {path} -> {response.status_code}: {str(detail)[:DETAIL_CHARS]}"
+    raise DomainApiError(message, status_code=response.status_code, body=body)
+
+
+async def request(
+    method: str,
+    path: str,
+    *,
+    json: Any = None,
+    params: dict[str, Any] | None = None,
+    allow_404: bool = False,
+    timeout: float | None = None,
+    **kwargs: Any,
+) -> Any:
+    """The decoded body of a successful request (JSON, or text for any other
+    content type, ``None`` when empty); ``None`` for a 404 when ``allow_404``.
+    Every failure raises ``DomainApiError``."""
+    response = await send(method, path, json=json, params=params, timeout=timeout, **kwargs)
     if allow_404 and response.status_code == 404:
         return None
-    if response.status_code >= 400:
-        try:
-            body = response.json()
-        except ValueError:
-            body = response.text
-        detail = body.get("detail") if isinstance(body, dict) else body
-        if response.status_code >= 500:
-            # A 5xx detail is an unhandled server exception (stack frames, raw
-            # SQL, column names) -- useful in the Application API's own logs,
-            # never something an agent should see: it ends up quoted verbatim
-            # in scratchpad flags and, from there, in generated reports.
-            message = (
-                f"{method} {path} -> {response.status_code}: the Application API "
-                "encountered an internal error and could not complete this request."
-            )
-        else:
-            message = f"{method} {path} -> {response.status_code}: {str(detail)[:600]}"
-        raise DomainApiError(message, status_code=response.status_code, body=body)
+    raise_for_status(response, method, path)
     if not response.content:
         return None
-    content_type = response.headers.get("content-type", "")
-    return response.json() if "json" in content_type else response.text
+    if "json" in response.headers.get("content-type", ""):
+        return response.json()
+    return response.text
+
+
+# ----------------------------------------------------------------------
+# Runs (the node's own row: output, scratchpad, task)
+# ----------------------------------------------------------------------
+async def get_session(for_session: str | None = None) -> dict[str, Any]:
+    return await request("GET", f"/sessions/{segment(for_session or require_session())}")
+
+
+async def get_run(run: str | None = None) -> dict[str, Any]:
+    return await request("GET", f"/runs/{segment(run or require_run())}")
+
+
+async def session_runs(for_session: str | None = None) -> list[dict[str, Any]]:
+    """Every run of the session, in plan order."""
+    return await request("GET", f"/runs/session/{segment(for_session or require_session())}") or []
+
+
+async def run_by_target(target_name: str, for_session: str | None = None) -> dict[str, Any] | None:
+    """``{"run": ..., "nodes_sharing_this_target": n}`` for the first node in
+    plan order whose target is ``target_name``, or ``None`` when none is."""
+    return await request(
+        "GET",
+        f"/runs/session/{segment(for_session or require_session())}/by-target/{segment(target_name)}",
+        allow_404=True,
+    )
+
+
+async def record_run_output(output: dict[str, Any]) -> dict[str, Any]:
+    """This run's structured output (``write_agent_output``'s row)."""
+    return await request("PUT", f"/runs/{segment(require_run())}/output", json=output)
 
 
 # ----------------------------------------------------------------------
@@ -165,11 +244,12 @@ async def population_run_id(for_session: str | None = None) -> str:
     """The run whose cohort this session's population is. Inside the population agent it is simply this run."""
     target_session = for_session or require_session()
     if not for_session and run_id():
-        run = await request("GET", f"/runs/{run_id()}")
+        run = await get_run()
         if (run.get("node") or {}).get("target_name") == POPULATION_AGENT_TYPE:
             return str(run["run_id"])
     resolved = await request(
-        "GET", f"/runs/session/{target_session}/by-target/{POPULATION_AGENT_TYPE}"
+        "GET",
+        f"/runs/session/{segment(target_session)}/by-target/{POPULATION_AGENT_TYPE}",
     )
     return str(resolved["run"]["run_id"])
 
@@ -180,10 +260,10 @@ async def upsert_population_cohort(
     selection_summary: dict[str, Any] | None = None,
     for_session: str | None = None,
 ) -> dict[str, Any]:
-    run_id = await population_run_id(for_session)
+    run = await population_run_id(for_session)
     return await request(
         "PUT",
-        f"/cohorts/run/{run_id}/{POPULATION_COHORT_KEY}",
+        f"/cohorts/run/{segment(run)}/{POPULATION_COHORT_KEY}",
         json={"criteria": criteria, "selection_summary": selection_summary},
     )
 
@@ -191,7 +271,7 @@ async def upsert_population_cohort(
 async def get_population_cohort(for_session: str | None = None) -> dict[str, Any] | None:
     return await request(
         "GET",
-        f"/cohorts/session/{for_session or require_session()}/population",
+        f"/cohorts/session/{segment(for_session or require_session())}/population",
         allow_404=True,
     )
 
@@ -210,17 +290,21 @@ async def require_population_cohort(for_session: str | None = None) -> dict[str,
 async def set_cohort_members(cohort_id: str, volume_uids: list[str]) -> dict[str, Any]:
     return await request(
         "PUT",
-        f"/cohorts/{cohort_id}/members",
+        f"/cohorts/{segment(cohort_id)}/members",
         json={"volume_series_instance_uids": list(volume_uids)},
     )
 
 
 async def write_cohort_labels(cohort_id: str, labels: list[dict[str, Any]]) -> dict[str, Any]:
-    return await request("PATCH", f"/cohorts/{cohort_id}/labels", json={"labels": labels})
+    return await request("PATCH", f"/cohorts/{segment(cohort_id)}/labels", json={"labels": labels})
 
 
 async def cohort_analysis_rows(cohort_id: str) -> list[dict[str, Any]]:
-    return await request("GET", f"/cohorts/{cohort_id}/analysis-rows")
+    return await request("GET", f"/cohorts/{segment(cohort_id)}/analysis-rows")
+
+
+async def get_patient(subject_key: str) -> dict[str, Any] | None:
+    return await request("GET", f"/patients/{segment(subject_key)}", allow_404=True)
 
 
 # ----------------------------------------------------------------------
@@ -228,7 +312,8 @@ async def cohort_analysis_rows(cohort_id: str) -> list[dict[str, Any]]:
 # ----------------------------------------------------------------------
 async def reviewed_masks(for_session: str | None = None) -> list[dict[str, Any]]:
     return await request(
-        "GET", f"/segmentation-batches/session/{for_session or require_session()}/reviewed-masks"
+        "GET",
+        f"/segmentation-batches/session/{segment(for_session or require_session())}/reviewed-masks",
     )
 
 
@@ -238,62 +323,67 @@ async def reviewed_masks(for_session: str | None = None) -> list[dict[str, Any]]
 # Large enough that writing a cohort takes a handful of requests, small enough
 # that a batch stays well under the API's per-request row bound.
 RADIOMICS_BATCH_SIZE = 50
+RADIOMICS_PAGE_SIZE = 500
 
 
 async def record_radiomics_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """One all-or-nothing batch; identical replays are reused, not duplicated."""
     return await request(
         "POST",
-        f"/radiomics/run/{require_run()}/batch",
+        f"/radiomics/run/{segment(require_run())}/batch",
         json={"rows": rows},
         timeout=settings.domain_api_long_timeout(),
     )
 
 
 async def run_radiomics_rows(
-    run_id: str | None = None, *, include_features: bool = True
+    run: str | None = None, *, include_features: bool = True
 ) -> list[dict[str, Any]]:
     """Every row one run recorded, paged."""
-    run_id = run_id or require_run()
+    run = run or require_run()
     rows: list[dict[str, Any]] = []
-    skip, page = 0, 500
+    skip = 0
     while True:
         batch = await request(
             "GET",
-            f"/radiomics/session/{require_session()}",
+            f"/radiomics/session/{segment(require_session())}",
             params={
-                "run_id": run_id,
+                "run_id": run,
                 "include_features": "true" if include_features else "false",
                 "skip": skip,
-                "limit": page,
+                "limit": RADIOMICS_PAGE_SIZE,
             },
             timeout=settings.domain_api_long_timeout(),
         ) or []
         rows.extend(batch)
-        if len(batch) < page:
+        if len(batch) < RADIOMICS_PAGE_SIZE:
             return rows
-        skip += page
+        skip += RADIOMICS_PAGE_SIZE
 
 
 async def create_feature_set(set_key: str, payload: dict[str, Any]) -> dict[str, Any]:
     return await request(
         "PUT",
-        f"/feature-sets/run/{require_run()}/{quote(set_key, safe='')}",
+        f"/feature-sets/run/{segment(require_run())}/{segment(set_key)}",
         json=payload,
         timeout=settings.domain_api_long_timeout(),
     )
 
 
 async def freeze_feature_set(feature_set_id: str) -> dict[str, Any]:
-    return await request("POST", f"/feature-sets/{feature_set_id}/freeze", timeout=settings.domain_api_long_timeout())
+    return await request(
+        "POST",
+        f"/feature-sets/{segment(feature_set_id)}/freeze",
+        timeout=settings.domain_api_long_timeout(),
+    )
 
 
 async def list_feature_sets(for_session: str | None = None) -> list[dict[str, Any]]:
-    return await request("GET", f"/feature-sets/session/{for_session or require_session()}")
+    return await request("GET", f"/feature-sets/session/{segment(for_session or require_session())}")
 
 
 async def get_feature_set(feature_set_id: str) -> dict[str, Any]:
-    return await request("GET", f"/feature-sets/{feature_set_id}")
+    return await request("GET", f"/feature-sets/{segment(feature_set_id)}")
 
 
 async def export_feature_set(
@@ -302,7 +392,7 @@ async def export_feature_set(
     """The modeling handoff: features plus the cohort label joined at read time."""
     return await request(
         "GET",
-        f"/feature-sets/{feature_set_id}/export",
+        f"/feature-sets/{segment(feature_set_id)}/export",
         params={"part": part, "format": fmt},
         timeout=settings.domain_api_long_timeout(),
     )
@@ -315,7 +405,7 @@ async def get_model_comparison(comparison_key: str) -> dict[str, Any] | None:
     """The recorded comparison of this run, if a replay already produced it."""
     return await request(
         "GET",
-        f"/model-results/run/{require_run()}/{quote(comparison_key, safe='')}",
+        f"/model-results/run/{segment(require_run())}/{segment(comparison_key)}",
         allow_404=True,
     )
 
@@ -324,65 +414,68 @@ async def record_model_comparison(comparison_key: str, payload: dict[str, Any]) 
     """Every variant of one comparison, in one transaction (insert-or-read)."""
     return await request(
         "PUT",
-        f"/model-results/run/{require_run()}/{quote(comparison_key, safe='')}",
+        f"/model-results/run/{segment(require_run())}/{segment(comparison_key)}",
         json=payload,
         timeout=settings.domain_api_long_timeout(),
     )
 
 
+async def get_model_result(model_result_id: str) -> dict[str, Any]:
+    return await request("GET", f"/model-results/{segment(model_result_id)}")
+
+
+async def session_model_results(for_session: str | None = None) -> list[dict[str, Any]]:
+    return await request(
+        "GET", f"/model-results/session/{segment(for_session or require_session())}"
+    ) or []
+
+
 async def model_results_summary(for_session: str | None = None) -> list[dict[str, Any]]:
     return await request(
-        "GET", f"/model-results/session/{for_session or require_session()}/summary"
+        "GET", f"/model-results/session/{segment(for_session or require_session())}/summary"
     )
 
 
+# ----------------------------------------------------------------------
+# Literature and reports
+# ----------------------------------------------------------------------
 async def latest_literature_review(for_session: str | None = None) -> dict[str, Any] | None:
     """This session's most recent literature review, with its papers — the
     durable replacement for the retired workspace `literature_context.json`.
     `None` if the planner never ran the literature review phase."""
     summaries = await request(
-        "GET", f"/literature-reviews/session/{for_session or require_session()}"
+        "GET", f"/literature-reviews/session/{segment(for_session or require_session())}"
     )
     if not summaries:
         return None
     latest = max(summaries, key=lambda item: item["created_at"])
-    return await request("GET", f"/literature-reviews/{latest['literature_review_id']}")
+    return await request("GET", f"/literature-reviews/{segment(latest['literature_review_id'])}")
 
 
+# ----------------------------------------------------------------------
+# Artifacts (step G) — retained figure and CSV bytes
+# ----------------------------------------------------------------------
 async def list_session_artifacts(kind: str | None = None) -> list[dict[str, Any]]:
     """This session's artifact catalogue (no bytes — `artifact_content` fetches
     those one at a time). `kind` restricts to one artifact kind, e.g.
     `figure_png`; omit it to list every kind."""
     params = {"kind": kind} if kind else None
     return await request(
-        "GET", f"/files/session/{require_session()}", params=params, timeout=settings.domain_api_long_timeout()
+        "GET",
+        f"/files/session/{segment(require_session())}",
+        params=params,
+        timeout=settings.domain_api_long_timeout(),
     )
 
 
 async def artifact_content(file_id: str) -> bytes:
     """Retained bytes, e.g. a model's per-case predictions."""
-    try:
-        response = await shared_client().get(
-            f"{app_api_url()}/files/{file_id}/content",
-            timeout=http_timeout(settings.domain_api_long_timeout()),
-        )
-    except httpx.HTTPError as exc:
-        raise DomainApiError(
-            f"GET /files/{file_id}/content: the Application API could not be reached "
-            f"({type(exc).__name__})"
-        ) from exc
-    if response.status_code >= 400:
-        raise DomainApiError(
-            f"GET /files/{file_id}/content -> {response.status_code}",
-            status_code=response.status_code,
-            body=response.text[:600],
-        )
+    path = f"/files/{segment(file_id)}/content"
+    response = await send("GET", path, timeout=settings.domain_api_long_timeout())
+    raise_for_status(response, "GET", path)
     return response.content
 
 
-# ----------------------------------------------------------------------
-# Artifacts (step G) — retained figure and CSV bytes
-# ----------------------------------------------------------------------
 async def publish_artifact(
     *,
     logical_key: str,

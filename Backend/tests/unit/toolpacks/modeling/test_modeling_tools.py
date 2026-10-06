@@ -227,6 +227,22 @@ def test_inference_predicts_and_records_an_independent_evaluation(fake_domain_ap
     assert is_error_result(wrong) and wrong["error_code"] == "wrong_task"
 
 
+def test_an_unrecorded_model_file_is_never_loaded(fake_domain_api, ctx, workspace_dir):
+    """A pickle runs code when it is loaded: only a recorded model is opened."""
+    FakeApplicationApi(fake_domain_api)
+    stray = workspace_dir / "outputs" / "stray.pkl"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_bytes(b"not a model")
+    new_rows = workspace_dir / "new_rows.csv"
+    _frame("classification", 5, seed=9).to_csv(new_rows, index=False)
+
+    result = call_tool(run_classifier_inference, {"params": {
+        "input_path": str(new_rows), "model_path": str(stray),
+    }}, ctx)
+
+    assert is_error_result(result) and result["error_code"] == "model_not_recorded"
+
+
 def test_a_model_trained_with_pycaret_is_legacy_and_names_refit_model(fake_domain_api, ctx, workspace_dir):
     api = FakeApplicationApi(fake_domain_api)
     reply = _ok(call_tool(train_classifier, _train_args(), ctx))

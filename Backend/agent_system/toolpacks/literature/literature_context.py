@@ -1,20 +1,14 @@
-"""
-Literature Context MCP Tool
-
-Reads the literature review this session's planner persisted through the
-Application API (`literature_reviews` + `literature_papers` — Postgres is
-the only copy; there is no workspace file any more).
-"""
+"""``read_literature_context``: the literature review this session's planner
+recorded (``literature_reviews`` + ``literature_papers``; PostgreSQL is the
+only copy, there is no workspace file any more)."""
 
 import json
 
 from .._toolkit import tool
-from ..common.manifests import READ_ONLY
-from ..common.emit import emit
 from ..common import domain_api
+from ..common.emit import emit
+from ..common.manifests import READ_ONLY
 
-
-# ── Tools ──────────────────────────────────────────────────────────────────────
 
 @tool(
     name="read_literature_context",
@@ -23,7 +17,7 @@ from ..common import domain_api
     timeout_s=45,
     **READ_ONLY,
 )
-async def read_literature_context() -> str:
+async def read_literature_context() -> str | dict:
     """Read the literature review recorded during the planning phase.
 
     This contains the full knowledge base built from PubMed, MeSH, Wikipedia,
@@ -36,19 +30,16 @@ async def read_literature_context() -> str:
     - Comparing study results against published benchmarks
     - Providing clinical context in the Introduction
 
-    Returns:
-        str: JSON with 'knowledge_base', 'sources_guide', 'pico', and 'papers' fields.
+    Returns JSON with 'knowledge_base', 'sources_guide', 'pico', and 'papers' fields.
     """
     emit("tool_log", "Reading literature context.")
-
     try:
         review = await domain_api.latest_literature_review()
     except domain_api.DomainApiError as exc:
-        emit("error", "Failed to read literature context.")
         return domain_api.error_result_from(exc, "The literature context could not be read")
 
     if review is None:
-        emit("error", "Literature Review Context not found.")
+        emit("tool_log", "No literature review is recorded for this session.")
         return json.dumps({
             "status": "not_available",
             "message": "No literature review found. The planner may not have run the literature review phase.",

@@ -13,8 +13,6 @@ nothing left needing the run's temp directory.
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock
-
 import pytest
 
 from agent_system.toolkit.context import use_context
@@ -38,7 +36,7 @@ async def test_removes_this_runs_temp_dirs_after_a_successful_write(monkeypatch,
 
     modeling_dir = tmp_path / "modeling" / RUN_ID
     modeling_dir.mkdir(parents=True)
-    (modeling_dir / "pycaret_classification.log").write_text("log")
+    (modeling_dir / "plots.png").write_text("png")
     feature_dir = tmp_path / "feature-extraction" / RUN_ID
     feature_dir.mkdir(parents=True)
     (feature_dir / "radiomics_extraction.log").write_text("log")
@@ -46,9 +44,10 @@ async def test_removes_this_runs_temp_dirs_after_a_successful_write(monkeypatch,
     other_run_dir = tmp_path / "modeling" / "other-run-id"
     other_run_dir.mkdir(parents=True)
 
-    monkeypatch.setattr(
-        module, "shared_client", lambda: _FakeClient({"run_id": RUN_ID, "node_id": "s1"})
-    )
+    async def recorded(output):
+        return {"run_id": RUN_ID, "node_id": "s1"}
+
+    monkeypatch.setattr(module.domain_api, "record_run_output", recorded)
 
     with use_context(make_context(run_id=RUN_ID)):
         result = json.loads(await module.write_agent_output(_base_params()))
@@ -62,34 +61,13 @@ async def test_removes_this_runs_temp_dirs_after_a_successful_write(monkeypatch,
 @pytest.mark.asyncio
 async def test_a_run_with_no_temp_scratch_is_not_an_error(monkeypatch, tmp_path):
     monkeypatch.setattr(module, "TEMP_DIR", tmp_path)
-    monkeypatch.setattr(
-        module, "shared_client", lambda: _FakeClient({"run_id": RUN_ID, "node_id": "s1"})
-    )
+    async def recorded(output):
+        return {"run_id": RUN_ID, "node_id": "s1"}
+
+    monkeypatch.setattr(module.domain_api, "record_run_output", recorded)
 
     with use_context(make_context(run_id=RUN_ID)):
         result = json.loads(await module.write_agent_output(_base_params()))
 
     assert result["status"] == "ok"
 
-
-class _FakeResponse:
-    def __init__(self, payload: dict):
-        self.status_code = 200
-        self._payload = payload
-
-    def json(self):
-        return self._payload
-
-
-class _FakeClient:
-    def __init__(self, payload: dict):
-        self._payload = payload
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return False
-
-    async def put(self, *args, **kwargs):
-        return _FakeResponse(self._payload)

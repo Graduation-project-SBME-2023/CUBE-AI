@@ -381,21 +381,37 @@ tools. The catalog walks the packages, so a new module is picked up with no impo
 tool meets the **Definition of Ready** (`plan.md`, end of the roadmap), and
 `tests/unit/toolpacks/light/test_definition_of_ready.py` enforces it for every light tool.
 
+- **Layout:** a tool module holds the `@tool` function and its input model; a multi-step tool
+  keeps its steps in a subpackage of plain, synchronous functions (`radiomics/extraction/`,
+  `radiomics/selection/`, `modeling/engine/`, `population/anatomy.py`,
+  `segmentation/monai_client.py`) and only orchestrates them. CPU work and file I/O run off the
+  event loop (`asyncio.to_thread`); PyRadiomics runs in `extraction/worker.ExtractorPool`.
+- **Shared helpers (`common/`):** `values.py` (`json_safe`, `finite_float`, `str_list` /
+  `int_list` / `float_list` for comma-separated list arguments), `failures.py` (`raise
+  fail(code, message)` deep in a tool's steps; the entry point returns `failure.result`),
+  `ml_warnings.install()` (the ML libraries' routine warnings, silenced once per process;
+  never `warnings.catch_warnings()` in code that runs in threads).
+
 - **Imports:** a pack imports the toolkit only through `toolpacks/_toolkit.py`
   (`from .._toolkit import tool, error_result, ...`), never `agent_system.toolkit` or `toolkit`
   directly: the catalog loads the packs under the toolkit's own import root, and a pack that
   loaded the other copy of `ToolSpec` would silently drop out of the catalog.
 - **`@tool(...)` with a full manifest:** the presets in `common/manifests.py` (`READ_ONLY`,
-  `WRITES`; `INTERIM_HEAVY` only for the heavy tools Plan 7 moves to jobs) plus explicit
+  `WRITES`; `INTERIM_HEAVY` only for the heavy tools Plan 5 moves to jobs) plus explicit
   `visibility`, `data_scopes` (`phi_read`/`phi_write` whenever patient identifiers are read or
-  written), `resources` and `timeout_s`. Graph-visible tools declare ports (`PortSpec`, input
+  written), `resources` and `timeout_s` — heavy tools included (dispatch enforces it, and
+  `test_every_heavy_tool_states_a_budget_it_can_finish_in` checks it). Graph-visible tools declare ports (`PortSpec`, input
   `param` = the handler argument; output `extract`). Tool names never change.
 - **Identity comes from the context**, never the environment: `domain_api.session_id()`,
   `run_id()`, `attempt_id()`, `node_id()`, `agent_type()`, and `common/workspace.py`
   (`workspace_dir()`, `WorkspacePath`). No module constant may hold an identity.
-- **HTTP:** `common/domain_api.request()` for the Application API (shared client, explicit
-  timeouts, and the D24 write-path header — `X-Attempt-Id`, or `X-Run-Id` for a job — on every
-  write); `db_reads/_api.py` for plain reads; `common/http_client.shared_client()` otherwise.
+- **HTTP:** the Application API only through `common/domain_api`: `request()` (decoded body,
+  `DomainApiError` on failure) or `send()` (the raw response, for a caller that reads non-JSON
+  bodies or error details itself) — both use the shared client, explicit timeouts, and the D24
+  write-path header (`X-Attempt-Id`, or `X-Run-Id` for a job) on every write. A value in a URL
+  path goes through `domain_api.segment()`. `db_reads/_api.py` (built on `send()`) turns a read
+  into an `error_result` instead of raising. Other services (MONAI Label) use
+  `common/http_client.shared_client()`; no pack creates its own `httpx.AsyncClient`.
   URLs from `common/service_urls.py` (`app_api_url()`, `inference_api_url()`), settings from
   `common/settings.py` — both read when used, never at import.
 - **Failures return `toolkit.results.error_result(code, message, **extra)`** (snake_case codes;

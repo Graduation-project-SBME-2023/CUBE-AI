@@ -3,18 +3,23 @@
 Class imbalance is handled with balanced sample weights (``fix_imbalance``)
 for every estimator that accepts them; PyCaret used SMOTE, which needs
 imbalanced-learn and at least six minority rows per training fold.
+
+The libraries' routine warnings are silenced by ``ml_warnings.install()``, once for
+the process, not per fit (``warnings.catch_warnings`` is not thread-safe).
 """
 
 from __future__ import annotations
 
-import warnings
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from ...common import ml_warnings
 from . import metrics
 from .estimators import CLASSIFICATION
+
+ml_warnings.install()
 
 
 def _final_step(model: Any) -> Any:
@@ -42,20 +47,16 @@ def supports_balance(model: Any) -> bool:
 
 
 def fit(model: Any, X: pd.DataFrame, y: Any, *, balance: bool = False) -> Any:
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        model.fit(X, y, **fit_params(model, y, balance=balance))
+    model.fit(X, y, **fit_params(model, y, balance=balance))
     return model
 
 
 def score(task: str, model: Any, X: pd.DataFrame, y: Any, n_classes: int = 0) -> dict[str, Any]:
     """The task's metrics of a fitted model on ``X``."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        predicted = model.predict(X)
-        if task == CLASSIFICATION:
-            return metrics.classification_scores(y, predicted, metrics.scores_of(model, X), n_classes)
-        return metrics.regression_scores(y, predicted)
+    predicted = model.predict(X)
+    if task == CLASSIFICATION:
+        return metrics.classification_scores(y, predicted, metrics.scores_of(model, X), n_classes)
+    return metrics.regression_scores(y, predicted)
 
 
 def cv_scores(

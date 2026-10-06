@@ -48,15 +48,15 @@ _SOURCES: list[tuple[Path, str]] = [
     (AGENT_ROOT / "api" / "runners.py", r'send_ws_message\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (AGENT_ROOT / "api" / "routes" / "execution.py", r'send_ws_message\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (AGENT_ROOT / "api" / "routes" / "events.py", r'event_type\s*=\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    # Tool-pack view emitters: the view type is emit_view()'s first argument.
-    (TOOLPACKS_ROOT / "population" / "cohort_labels.py", r'emit_view\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    (TOOLPACKS_ROOT / "population" / "targets_matcher.py", r'emit_view\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    (TOOLPACKS_ROOT / "population" / "validate_anatomy.py", r'emit_view\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    (TOOLPACKS_ROOT / "population" / "inclusion_criteria.py", r'emit_view\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
-    # scratchpad.py's own top-level type is the first arg to emit_view;
-    # its payload's nested "type": "agent_status"/"agent_summary" keys are
-    # NOT top-level event types and must not be scanned by the generic pattern.
-    (TOOLPACKS_ROOT / "bookkeeping" / "scratchpad.py", r'emit_view\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    # Tool-pack view emitters: the view type is emit_view()'s first argument,
+    # in every tool-pack module that emits a view. (scratchpad.py's payloads
+    # carry nested "type": "agent_status"/... keys; they are not event types
+    # and the pattern only reads emit_view's first argument.)
+    *[
+        (path, r'emit_view\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"')
+        for path in sorted(TOOLPACKS_ROOT.rglob("*.py"))
+        if "await emit_view(" in path.read_text(encoding="utf-8")
+    ],
     # application_api's own durable-event writers (session_events rows committed
     # alongside the domain change) -- reach the WS envelope's `type` field
     # via replay in agent_system/api/routes/sessions.py.
@@ -103,7 +103,9 @@ def test_scratchpad_updates_own_payload_subtype_is_not_mistaken_for_its_msg_type
     start silently under-scanning; this pins the current shape."""
     source = _source(TOOLPACKS_ROOT / "bookkeeping" / "scratchpad.py")
     assert re.search(r'emit_view\(\s*"scratchpad_update"', source)
-    assert '"type": "agent_status"' in source
-    assert '"type": "agent_summary"' in source
+    # The payload's nested "type" is _show()'s first argument.
+    assert '"type": event' in source
+    assert re.search(r'_show\(\s*"agent_status"', source)
+    assert re.search(r'_show\(\s*"agent_summary"', source)
     assert "agent_status" not in DURABLE_EVENT_TYPES | EPHEMERAL_EVENT_TYPES
     assert "agent_summary" not in DURABLE_EVENT_TYPES | EPHEMERAL_EVENT_TYPES

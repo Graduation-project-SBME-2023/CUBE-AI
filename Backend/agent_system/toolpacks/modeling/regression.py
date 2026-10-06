@@ -7,9 +7,8 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .._toolkit import tool
-from ..common.manifests import INTERIM_HEAVY
 from ..common.workspace import WorkspacePath
-from . import inference, results, training
+from . import inference, manifest, results, training
 from .engine.estimators import REGRESSION
 
 
@@ -121,10 +120,10 @@ class TrainRegressorInput(BaseModel):
 class RunRegressionInferenceInput(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
 
-    input_path: str = Field(
+    input_path: WorkspacePath = Field(
         ..., description="Path to CSV file containing rows to predict."
     )
-    model_path: str = Field(
+    model_path: WorkspacePath = Field(
         ..., description="Path to a recorded model file (with or without .pkl), e.g. final_model_path."
     )
     ground_truth_column: Optional[str] = Field(
@@ -150,7 +149,7 @@ class RunRegressionInferenceInput(BaseModel):
     name="train_regressor",
     visibility={"agent"},
     idempotent=True,
-    **INTERIM_HEAVY,
+    **manifest.TRAINING,
 )
 async def train_regressor(params: TrainRegressorInput) -> str | dict[str, Any]:
     """Compare, tune, and blend regression models (scikit-learn, LightGBM, XGBoost)."""
@@ -161,7 +160,7 @@ async def train_regressor(params: TrainRegressorInput) -> str | dict[str, Any]:
     name="run_regression_inference",
     visibility={"agent"},
     idempotent=True,
-    **INTERIM_HEAVY,
+    **manifest.INFERENCE,
 )
 async def run_regression_inference(params: RunRegressionInferenceInput) -> str | dict[str, Any]:
     """Load a recorded regression model and predict on new data."""
