@@ -4,7 +4,7 @@ import os
 import time
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
@@ -12,6 +12,7 @@ from application_api.db.binary_session import binary_engine
 from application_api.db.session import AsyncSessionLocal, engine
 from application_api.core.config import settings
 from application_api.core.metrics import install_sql_metrics, monitor_event_loop_lag, observe_http, render_metrics
+from application_api.core.schema_version import code_heads, schema_drift
 from application_api.services.retention import purge_checkpoints_forever
 from application_api.api.routes import (
     agent_checkpoints,
@@ -46,8 +47,24 @@ logger = logging.getLogger(__name__)
 install_sql_metrics(engine)
 
 
+async def _warn_on_schema_drift() -> None:
+    """Say at startup, not on the first failing request, that a migration is pending."""
+    try:
+        async with AsyncSessionLocal() as session:
+            revisions = (
+                await session.execute(text("SELECT version_num FROM alembic_version"))
+            ).scalars().all()
+        drift = schema_drift(revisions, code_heads())
+    except Exception:
+        logger.exception("Could not compare the database schema with the migrations")
+        return
+    if drift:
+        logger.error("Schema mismatch: %s", drift)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    await _warn_on_schema_drift()
     lag_task = asyncio.create_task(monitor_event_loop_lag(), name="event-loop-lag-monitor")
     # Orthanc is the source of truth for imaging. This catches up on anything
     # that arrived while the API was down or predates the database entirely,
@@ -150,6 +167,12 @@ async def readiness() -> dict[str, str]:
         revisions = (
             await session.execute(text("SELECT version_num FROM alembic_version"))
         ).scalars().all()
+    # Not ready while the models running here are ahead of (or behind) the
+    # schema: in dev the source is bind-mounted, so this is how an unapplied
+    # migration shows up before a request trips over the missing column.
+    drift = schema_drift(revisions, code_heads())
+    if drift:
+        raise HTTPException(status_code=503, detail={"status": "schema_mismatch", "reason": drift})
     return {"status": "ready", "migration": ",".join(sorted(revisions))}
 
 
