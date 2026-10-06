@@ -84,7 +84,7 @@ async def get_chat_messages(db: AsyncSession, chat_id: UUID, skip: int = 0, limi
         result = await db.execute(
             select(ChatMessage)
             .filter(ChatMessage.chat_id == chat_id)
-            .order_by(ChatMessage.created_at.asc(), ChatMessage.message_id.asc())
+            .order_by(ChatMessage.seq.asc())
             .offset(skip)
             .limit(limit)
         )
@@ -118,7 +118,7 @@ async def get_chat_messages_by_role(
         result = await db.execute(
             select(ChatMessage)
             .filter(ChatMessage.chat_id == chat_id, ChatMessage.role == role)
-            .order_by(ChatMessage.created_at.asc(), ChatMessage.message_id.asc())
+            .order_by(ChatMessage.seq.asc())
             .offset(skip)
             .limit(limit)
         )

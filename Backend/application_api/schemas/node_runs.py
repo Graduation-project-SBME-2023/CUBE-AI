@@ -14,6 +14,7 @@ from application_api.core.json_bounds import (
     JsonBoundsError,
     check_json,
 )
+from application_api.schemas.run_attempts import RunAttemptOut
 
 SCRATCHPAD_SCHEMA_VERSION = 1
 
@@ -33,10 +34,13 @@ class NodeRunNodeOut(BaseModel):
     """The node definition, read through its run — never copied onto it."""
 
     node_id: UUID
+    node_seq: int
     position: int
+    target_kind: str
     target_name: str
     title: str
     params: dict[str, Any] = Field(default_factory=dict)
+    removed_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -45,7 +49,14 @@ class NodeRunOut(BaseModel):
     run_id: UUID
     node_id: UUID
     session_id: UUID
+    accepted_by_change_id: UUID
+    execution_policy: dict[str, Any]
+    target_version: str
     status: str
+    superseded_at: Optional[datetime] = None
+    outputs: Optional[dict[str, Any]] = None
+    downstream_hold: Optional[str] = None
+    hold_released_by_change_id: Optional[UUID] = None
     compiled_prompt: Optional[str] = None
     resolved_inputs: Optional[dict[str, Any]] = None
     scratchpad_notes: Optional[dict[str, Any]] = None
@@ -59,63 +70,84 @@ class NodeRunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class NodeRunEventOut(BaseModel):
-    """The event a transition published,with the cursor it committed at."""
-
-    event_id: int
-    event_type: str
-    payload: Any
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
+class NodeRunWithAttemptsOut(NodeRunOut):
+    attempts: list[RunAttemptOut] = Field(default_factory=list)
 
 
-class NodeRunTransitionOut(BaseModel):
-    run: NodeRunOut
-    event: Optional[NodeRunEventOut] = None
+# ----------------------------------------------------------------------
+# Start a node (first start or retry)
+# ----------------------------------------------------------------------
+class InputPin(BaseModel):
+    """One pinned input port: the selected upstream node and its current
+    completed run. The Application API fills `type` and `ref` from that
+    run's outputs; when the caller sends them they must match."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: UUID
+    run_id: UUID
+    port: str = Field(min_length=1)
+    type: Optional[str] = None
+    ref: Optional[dict[str, Any]] = None
 
 
-class NodeRunStart(BaseModel):
-    """Claim a pending (or interrupted) run."""
+class ResolvedInputs(BaseModel):
+    model_config = ConfigDict(extra="allow")
 
-    compiled_prompt: str = Field(min_length=1)
-    resolved_inputs: dict[str, Any]
+    v: Literal[1] = 1
+    ports: dict[str, InputPin] = Field(default_factory=dict)
+
+
+class ExecutionLimits(BaseModel):
+    """The manifest's limits; the Application API adds `fresh`, `privacy_mode`
+    and `seed_from` and freezes the result as the run's execution_policy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_attempts: int = Field(default=1, ge=1, le=20)
+    timeout_s: Optional[float] = Field(default=None, gt=0)
+    idempotent: bool = False
+    resumable: bool = False
+    gate_timeout_s: Optional[float] = Field(default=None, gt=0)
+
+
+class NodeStart(BaseModel):
+    """POST /runs/start."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: UUID
+    # What the Executor read; a different value means the graph moved on.
+    accepted_by_change_id: UUID
+    dispatch_kind: Literal["in_process", "job", "inline"]
+    limits: ExecutionLimits = Field(default_factory=ExecutionLimits)
+    # First start only.
+    resolved_inputs: Optional[ResolvedInputs] = None
+    compiled_prompt: Optional[str] = Field(default=None, min_length=1)
+    # Job attempts: the exact submitted request, persisted before dispatch.
+    request: Optional[dict[str, Any]] = None
+    # The agent's spec digest, compared with a seed_from checkpoint.
+    spec_digest: Optional[str] = None
+    # A retry by the user or the Recovery Agent.
+    explicit_retry: bool = False
 
     @field_validator("compiled_prompt")
     @classmethod
-    def _prompt_bounded(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > COMPILED_PROMPT_MAX_BYTES:
-            raise ValueError(
-                f"compiled_prompt exceeds {COMPILED_PROMPT_MAX_BYTES} bytes"
-            )
+    def _prompt_bounded(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and len(value.encode("utf-8")) > COMPILED_PROMPT_MAX_BYTES:
+            raise ValueError(f"compiled_prompt exceeds {COMPILED_PROMPT_MAX_BYTES} bytes")
         return value
 
-    @field_validator("resolved_inputs")
+    @field_validator("request")
     @classmethod
-    def _refs_bounded(cls, value: dict[str, Any]) -> dict[str, Any]:
-        if value.get("schema_version") != 1:
-            raise ValueError("resolved_inputs must carry schema_version = 1")
-        return _bounded(value, "resolved_inputs")
+    def _request_bounded(cls, value):
+        return None if value is None else _bounded(value, "attempt request")
 
 
-class NodeRunComplete(BaseModel):
-    scratchpad_summary: Optional[dict[str, Any]] = None
-
-    @field_validator("scratchpad_summary")
-    @classmethod
-    def _bounded_summary(cls, value):
-        return None if value is None else _bounded(value, "scratchpad_summary")
-
-
-class NodeRunFail(BaseModel):
-    code: str = Field(min_length=1, max_length=120)
-    message: str = Field(min_length=1, max_length=8000)
-    details: Optional[dict[str, Any]] = None
-
-    @field_validator("details")
-    @classmethod
-    def _bounded_details(cls, value):
-        return None if value is None else _bounded(value, "error details")
+class NodeStartOut(BaseModel):
+    run: NodeRunOut
+    attempt: RunAttemptOut
+    first_start: bool
 
 
 # ----------------------------------------------------------------------

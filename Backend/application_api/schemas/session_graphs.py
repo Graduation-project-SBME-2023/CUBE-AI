@@ -1,29 +1,36 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
-from .graph_nodes import GraphNodeCreate, GraphNodeOut
+from .graph_changes import GraphChangeOut
+from .graph_nodes import GraphNodeOut
+from .node_runs import NodeRunOut
+from .run_attempts import RunAttemptOut
+from .sessions import Activity
 
 
 class SessionGraphOut(BaseModel):
-    """A session's graph."""
-
     session_id: UUID
-    approved_at: Optional[datetime] = None
+    version: int
     updated_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class SessionGraphWithNodesOut(SessionGraphOut):
-    nodes: List[GraphNodeOut] = []
+class LiveNodeOut(BaseModel):
+    """A live node with its current run and that run's latest attempt."""
 
-    model_config = ConfigDict(from_attributes=True)
+    node: GraphNodeOut
+    run: Optional[NodeRunOut] = None
+    attempt: Optional[RunAttemptOut] = None
 
 
-class SessionGraphDraftUpdate(BaseModel):
-    """Replace the draft's ordered node list."""
+class SessionGraphView(SessionGraphOut):
+    """GET /session-graphs/session/{id}: everything the Executor and the UI
+    read to decide what happens next."""
 
-    nodes: List[GraphNodeCreate]
+    nodes: list[LiveNodeOut] = Field(default_factory=list)
+    pending_change: Optional[GraphChangeOut] = None
+    activity: Activity

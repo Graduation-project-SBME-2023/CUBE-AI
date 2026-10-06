@@ -25,6 +25,8 @@ class ChatMessageCreate(ChatMessageBase):
 class ChatMessage(ChatMessageBase):
     message_id: UUID
     chat_id: UUID
+    # The total transcript order.
+    seq: Optional[int] = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)

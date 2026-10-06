@@ -24,6 +24,8 @@ from application_api.db.models.segmentation_batches import (
 from application_api.repositories import cohorts as cohorts_repo
 from application_api.repositories import node_runs as runs_repo
 from application_api.schemas import segmentation_batches as schemas
+from application_api.repositories import run_attempts as attempts_repo
+from application_api.services.fencing import USER, on_path
 from application_api.services.publication import lock_session, publication
 
 logger = logging.getLogger(__name__)
@@ -410,6 +412,7 @@ async def update_pair_states(
 # ----------------------------------------------------------------------
 # Review
 # ----------------------------------------------------------------------
+@on_path(USER)
 async def save_draft(
     db: AsyncSession, segmentation_batch_id: UUID, data: schemas.ReviewDraft
 ) -> dict[str, Any]:
@@ -435,6 +438,7 @@ async def save_draft(
     return await batch_out(db, await _batch_or_404(db, segmentation_batch_id))
 
 
+@on_path(USER)
 async def begin_review(
     db: AsyncSession, segmentation_batch_id: UUID, request_hash: str
 ) -> dict[str, Any]:
@@ -461,6 +465,7 @@ async def begin_review(
     return await batch_out(db, await _batch_or_404(db, segmentation_batch_id))
 
 
+@on_path(USER)
 async def abort_review(
     db: AsyncSession, segmentation_batch_id: UUID, request_hash: str
 ) -> dict[str, Any]:
@@ -478,6 +483,7 @@ async def abort_review(
     return await batch_out(db, await _batch_or_404(db, segmentation_batch_id))
 
 
+@on_path(USER)
 async def complete_review(
     db: AsyncSession, segmentation_batch_id: UUID, data: schemas.ReviewSubmission
 ) -> tuple[dict[str, Any], Any]:
@@ -534,6 +540,9 @@ async def complete_review(
     event = None
     node_run = await runs_repo.get_run(db, batch.created_by_run_id)
     async with publication(db, node_run.session_id) as publish:
+        await attempts_repo.resolve_domain_gate(
+            db, batch.created_by_run_id, "segmentation_review", publish
+        )
         for key, pair in by_key.items():
             if key in modified:
                 pair.review_decision = "modified"

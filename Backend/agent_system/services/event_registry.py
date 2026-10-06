@@ -76,6 +76,29 @@ DURABLE_EVENT_TYPES: frozenset[str] = frozenset({
     "segmentation_review_submitted",
     "report_created",
     "report_published",
+    # The harness transactions (session, graph, run and attempt changes),
+    # written by application_api/repositories/{sessions,chats,graph_changes,
+    # node_runs,run_attempts}.py in the same transaction as the change.
+    "user_input",
+    "session_state",
+    "session_settings",
+    "graph_change_proposed",
+    "approval_requested",
+    "graph_change_applied",
+    "graph_change_rejected",
+    "graph_change_stale",
+    "graph_change_withdrawn",
+    "graph_change_expired",
+    "node_run_superseded",
+    "run_attempt_started",
+    "run_attempt_ended",
+    "run_attempt_cancel_requested",
+    "run_attempt_suspended",
+    "run_attempt_resumed",
+    "gate_resolved",
+    "expectation_violated",
+    "graph_idle",
+    "node_start_refused",
 })
 
 # Superseded by whatever comes next, or a live mirror of state that is
@@ -90,7 +113,7 @@ EPHEMERAL_EVENT_TYPES: frozenset[str] = frozenset({
     "modules_matched",  # phase-entry flag
     "run_status",  # explicitly "live only" in session_service.py -- the run row is the durable copy
     "pipeline_resume_prepared",  # one-shot resume notice
-    "state_update",  # live mirror of sessions.control_state, already persisted by set_session_control_state
+    "state_update",  # live mirror of the in-memory session state; only pause/resume intent is persisted
     "tool_update",  # streaming tool_started/tool_progress/tool_finished ticks
     "agent_waiting_resolved",  # transient unblock signal, paired with the durable *_wait above
     "scratchpad_update",  # live mirror of node_runs.scratchpad_notes, already persisted there
