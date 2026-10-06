@@ -180,9 +180,9 @@ def _is_legacy_autogen(item: pytest.Item) -> bool:
 
 
 # The tool platform uses Python 3.13 syntax (PEP 695), so these paths cannot even
-# be imported by the 3.11 project images. They are left out of collection there
-# rather than failing it, and CI runs them in a separate 3.13 job. Paths are
-# relative to Backend/; drop the list once the images move to 3.13.
+# be imported by an older interpreter. The images and CI run 3.13; a local venv
+# that is still on 3.11 leaves them out of collection (the report header says
+# so) rather than failing it. Paths are relative to Backend/.
 PY313_ONLY_TESTS = (
     "tests/unit/toolkit",
     "tests/unit/toolpacks",

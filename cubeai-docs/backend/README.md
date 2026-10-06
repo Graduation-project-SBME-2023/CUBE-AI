@@ -18,7 +18,7 @@ The backend is composed of five main services, each running in its own Docker co
 
 ## Agent System
 
-The core backend for the Research Playground. Built with **FastAPI** and **Python 3.11**.
+The core backend for the Research Playground. Built with **FastAPI** and **Python 3.13**.
 
 **Entry point:** `Backend/agent_system/app.py`
 
@@ -45,11 +45,10 @@ Install with:
 ```bash
 cd Backend/agent_system
 pip install -r requirements.txt
-pip install git+https://github.com/AIM-Harvard/pyradiomics.git
-pip install numpy==1.26.4 pandas==2.1.4 pycaret==3.3.2
+pip install git+https://github.com/AIM-Harvard/pyradiomics.git@8ed5793
 ```
 
-> ⚠️ The pinned versions (`numpy`, `pandas`, `pycaret`) **must be installed last** to prevent being overridden.
+> PyCaret is no longer installed; there are no late numeric pins to install last.
 
 ---
 

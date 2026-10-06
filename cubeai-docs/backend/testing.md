@@ -56,11 +56,11 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -File Backend/tests/run_tests.ps1 `
   -Suite agent-regression
 
-# Local Python 3.11 environment
+# Local Python 3.13 environment
 powershell -NoProfile -ExecutionPolicy Bypass `
   -File Backend/tests/run_tests.ps1 `
   -Suite deterministic -Runtime local `
-  -Python C:/Python311/python.exe
+  -Python C:/Python313/python.exe
 
 # Running-service checks after docker compose is healthy
 powershell -NoProfile -ExecutionPolicy Bypass `
@@ -73,7 +73,7 @@ to `Backend/coverage.xml` and `Backend/htmlcov`.
 
 ## Direct pytest commands
 
-Install Python 3.11.3, the backend runtime requirements, and then the separate
+Install Python 3.13, the backend runtime requirements, and then the separate
 test requirements:
 
 ```powershell

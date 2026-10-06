@@ -9,7 +9,7 @@ This guide covers a first local CUBE.AI setup. Use the guided launchers for the 
 | Docker and Docker Compose | Docker 24+ / Compose v2+ | All backend services and production frontend |
 | Ollama | Current supported release | Default LLM provider for the Agent System |
 | Node.js and Yarn Classic | Node 18+ / Yarn 1.22+ | Frontend development; production builds with Node 20 |
-| Python | 3.11.3 recommended | Local agent development, tests, and storage migration |
+| Python | 3.13 | Local agent development, tests, and storage migration |
 | Git | Current supported release | Source checkout |
 
 GPU mode additionally requires an NVIDIA GPU, compatible drivers, and NVIDIA Container Toolkit. CPU mode works without CUDA but is slower for inference.
