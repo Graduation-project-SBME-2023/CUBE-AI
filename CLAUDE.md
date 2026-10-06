@@ -100,11 +100,13 @@ Test deps: `python -m pip install -r Backend/requirements/test.txt` (plus
 `Backend/agent_system/requirements.txt` for the runtime).
 
 **The toolkit and the tool packs need Python 3.13** (PEP 695 syntax), but the project images
-are still 3.11.3 until Plan 0. Until then the 3.11 image — and so CI — cannot collect
+are still 3.11.3 until Plan 0. Until then the 3.11 image cannot import
 `tests/unit/toolkit/`, `tests/unit/toolpacks/`, or the tests that import
-`agent_system.toolpacks` (`tests/unit/functions/`, several `tests/contracts/`). Run those with a
-local 3.13 interpreter that has the test deps plus `pydantic httpx numpy pandas scikit-learn
-requests_toolbelt pyyaml aiofiles fastapi greenlet` (`py -3.13` instead of `python3.13` on Windows):
+`agent_system.toolpacks` (`tests/unit/functions/`, `tests/contracts/test_agent_output_contract.py`);
+`PY313_ONLY_TESTS` in `Backend/conftest.py` leaves them out of collection below 3.13 (the
+report header says so), and CI runs them in the `toolkit-tests` job. Run them locally with a
+3.13 interpreter that has the test deps plus `pydantic httpx numpy pandas scikit-learn
+requests_toolbelt pyyaml aiofiles fastapi greenlet pydicom` (`py -3.13` instead of `python3.13` on Windows):
 
 ```bash
 python3.13 -m pytest -c Backend/pytest.ini Backend/tests/unit/toolkit Backend/tests/unit/toolpacks Backend/tests/unit/functions Backend/tests/contracts
@@ -468,10 +470,27 @@ or explicit contract.
   Architecture Notes before "fixing" either.
 - The root `package.json` (React 19 / Tailwind, no scripts) is unrelated to the OHIF monorepo;
   the real frontend manifest is `Frontend/OHIF-Viewer/package.json`.
-- Backend CI runs inside the published project images (`cubeai1/agents-app:latest`,
-  `cubeai1/custom-monailabel:v1.0-cpu`); the storage-boundary job runs on `windows-latest`.
-  `backend-tests.yml` fires on every PR touching `Backend/**`, but its `push` trigger watches
-  the **`Release`** branch — not `main`.
+- **CI/CD runs on every branch, on push only** (a PR shows its head commit's checks, so there
+  is no `pull_request` trigger and nothing runs twice). No job depends on `main` or on a published
+  `latest`:
+  - `backend-tests.yml` first builds the agents image **from the pushed commit**
+    (`build-image.yml`) and runs `deterministic-tests` (the gate, Python 3.11), `live-db-tests`
+    (the `run_live_db_tests.ps1` suites against a `postgres:18-alpine` service; fails if any of
+    them skipped) and `agent-regression-tests` inside it; `toolkit-tests` runs on 3.13 on the
+    runner. Only after those pass are the agents (amd64 + arm64) and application-api images
+    published. `radiology-regression-tests` still uses the frozen
+    `cubeai1/custom-monailabel:v1.0-cpu`.
+  - `frontend-tests.yml` installs from `Frontend/OHIF-Viewer/yarn.lock` (tracked; the rest of
+    `**/yarn.lock` stays ignored), fails if `yarn install` changes it (Yarn 1's
+    `--frozen-lockfile` wrongly rejects this lockfile), runs `yarn test:unit:ci`, then builds
+    the webapp image. `docker-build-monai.yml` builds the GPU image on its own paths.
+  - **Registries:** every build goes to GHCR (`ghcr.io/<owner>/<image>:<sha>` and `:<branch>`,
+    MONAI with `-gpu`), pruned weekly by `cleanup-ci-images.yml`. Docker Hub gets an image only
+    from the branch in the `LATEST_BRANCH` repository variable (default `New-Architecture`;
+    change the variable, not the workflows), from a `v*.*.*` tag, or from a manual MONAI tag —
+    and only that branch moves `latest`, which compose pulls.
+  - `deploy/Dockerfile.agents` points apt at `archive.debian.org`: its `python:3.11.3-slim`
+    base is Debian 11, whose packages left the regular mirrors (they 404).
 - External dependencies that must be up for full function: Docker, Ollama (or a configured
   OpenAI/Azure endpoint), and for GPU mode NVIDIA drivers + Container Toolkit. SAM2 checkpoints
   must be downloaded manually into `Backend/apps/radiology/sam2/checkpoints/`.

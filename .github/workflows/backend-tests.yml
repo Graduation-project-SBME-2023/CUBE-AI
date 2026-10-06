@@ -1,23 +1,50 @@
 name: Backend tests
 
+# Runs on a push to any branch (a PR shows the checks of its head commit, so
+# there is no separate pull_request run). The agents image is built from this
+# very commit first and every containerised job runs inside it, so the suite
+# never depends on what another branch last published.
 on:
-  pull_request:
-    paths:
-      - "Backend/**"
-      - ".github/workflows/backend-tests.yml"
   push:
     branches:
-      - Release
+      - "**"
+    tags:
+      - "v*.*.*"
     paths:
       - "Backend/**"
+      - "deploy/Dockerfile.agents"
+      - "deploy/Dockerfile.application-api"
       - ".github/workflows/backend-tests.yml"
+      - ".github/workflows/build-image.yml"
+  workflow_dispatch:
+
+# A newer push to the same branch makes the older run moot.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
+  agents-image:
+    uses: ./.github/workflows/build-image.yml
+    with:
+      image: agents-app
+      dockerfile: ./deploy/Dockerfile.agents
+      publish: false
+    secrets: inherit
+
   deterministic-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: agents-image
     container:
-      image: cubeai1/agents-app:latest
+      image: ${{ needs.agents-image.outputs.image-ref }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     env:
       BACKEND_STORAGE_ROOT: /tmp/cubeai-backend-tests
       AGENTS_WORKSPACE_DIR: /tmp/cubeai-backend-tests/hypotheses
@@ -40,6 +67,7 @@ jobs:
           Backend/tests/unit
           Backend/tests/contracts
           Backend/tests/pipeline
+          --ignore=Backend/tests/unit/radiology
           -m "(unit or contract or pipeline) and not legacy_autogen"
           --junitxml=Backend/test-results/backend-deterministic.xml
 
@@ -51,11 +79,141 @@ jobs:
           path: Backend/test-results/backend-deterministic.xml
           if-no-files-found: warn
 
+  # The tool platform needs Python 3.13, which the project images do not have
+  # yet; Backend/conftest.py leaves these paths out of the 3.11 job above.
+  toolkit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BACKEND_STORAGE_ROOT: /tmp/cubeai-backend-tests
+      AGENTS_WORKSPACE_DIR: /tmp/cubeai-backend-tests/hypotheses
+      BACKEND_TEMP_DIR: /tmp/cubeai-backend-tests/temp
+      BACKEND_LOG_DIR: /tmp/cubeai-backend-tests/logs
+      PYTHONPATH: ${{ github.workspace }}/Backend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: Backend/requirements/test.txt
+
+      - name: Install test and tool-platform dependencies
+        run: >-
+          python -m pip install
+          -r Backend/requirements/test.txt
+          pydantic httpx numpy pandas scikit-learn requests_toolbelt pyyaml aiofiles fastapi greenlet pydicom
+
+      - name: Run tool-platform suite
+        run: >-
+          mkdir -p Backend/test-results &&
+          python -m pytest
+          -c Backend/pytest.ini
+          Backend/tests/unit/toolkit
+          Backend/tests/unit/toolpacks
+          Backend/tests/unit/functions
+          Backend/tests/contracts
+          --junitxml=Backend/test-results/backend-toolkit.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-toolkit-test-results
+          path: Backend/test-results/backend-toolkit.xml
+          if-no-files-found: warn
+
+  # Migrations, triggers and fenced transactions against a real PostgreSQL 18,
+  # the same suites Backend/tests/run_live_db_tests.ps1 runs locally.
+  live-db-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: agents-image
+    container:
+      image: ${{ needs.agents-image.outputs.image-ref }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    services:
+      postgres:
+        image: postgres:18-alpine
+        # The role is the compose one: the first migration grants to it.
+        env:
+          POSTGRES_USER: workflow_user
+          POSTGRES_PASSWORD: cubeai
+          POSTGRES_DB: cubeai_test
+        options: >-
+          --health-cmd "pg_isready -U workflow_user -d cubeai_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      BACKEND_STORAGE_ROOT: /tmp/cubeai-backend-tests
+      AGENTS_WORKSPACE_DIR: /tmp/cubeai-backend-tests/hypotheses
+      BACKEND_TEMP_DIR: /tmp/cubeai-backend-tests/temp
+      BACKEND_LOG_DIR: /tmp/cubeai-backend-tests/logs
+      PYTHONPATH: ${{ github.workspace }}/Backend
+    defaults:
+      run:
+        working-directory: Backend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install test-only dependencies
+        run: python -m pip install -r requirements/test.txt psycopg2-binary "psycopg[binary]"
+
+      # The suites skip themselves without V1_LIVE_DATABASE_URL, so it is set
+      # per step rather than relied on from the environment.
+      - name: Run migration suites
+        env:
+          V1_LIVE_DATABASE_URL: postgresql://workflow_user:cubeai@postgres:5432/cubeai_test
+        run: >-
+          mkdir -p test-results &&
+          python -m pytest
+          -c pytest.ini
+          tests/integration/test_v1_o_renames_live.py
+          tests/integration/test_v1_p_session_graph_live.py
+          --junitxml=test-results/backend-live-db-migrations.xml
+
+      - name: Run transaction suites
+        env:
+          V1_LIVE_DATABASE_URL: postgresql+asyncpg://workflow_user:cubeai@postgres:5432/cubeai_test
+        run: >-
+          python -m pytest
+          -c pytest.ini
+          tests/integration/test_v1_p_transactions_live.py
+          tests/integration/test_v1_p_graph_store_live.py
+          --junitxml=test-results/backend-live-db-transactions.xml
+
+      - name: Fail if a live suite skipped
+        run: >-
+          python -c "import glob, sys, xml.etree.ElementTree as ET;
+          skipped = sum(int(s.get('skipped', 0)) for f in glob.glob('test-results/backend-live-db-*.xml') for s in ET.parse(f).iter('testsuite'));
+          print(f'{skipped} skipped live test(s)'); sys.exit(1 if skipped else 0)"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-live-db-test-results
+          path: Backend/test-results/backend-live-db-*.xml
+          if-no-files-found: warn
+
   agent-regression-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: agents-image
     container:
-      image: cubeai1/agents-app:latest
+      image: ${{ needs.agents-image.outputs.image-ref }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     env:
       BACKEND_STORAGE_ROOT: /tmp/cubeai-backend-tests
       AGENTS_WORKSPACE_DIR: /tmp/cubeai-backend-tests/hypotheses
@@ -121,3 +279,25 @@ jobs:
           name: backend-radiology-regression-test-results
           path: Backend/test-results/backend-radiology-regression.xml
           if-no-files-found: warn
+
+  # Docker Hub only gets the image after the suites that ran inside it passed,
+  # and only from LATEST_BRANCH or a release tag (see build-image.yml). The
+  # amd64 half is a cache hit of the agents-image job; arm64 keeps the
+  # multi-platform `latest` this image has always had.
+  publish-agents-image:
+    needs: [deterministic-tests, toolkit-tests, live-db-tests, agent-regression-tests]
+    uses: ./.github/workflows/build-image.yml
+    with:
+      image: agents-app
+      dockerfile: ./deploy/Dockerfile.agents
+      platforms: linux/amd64,linux/arm64
+      only-when-publishing: true
+    secrets: inherit
+
+  application-api-image:
+    needs: [deterministic-tests, live-db-tests]
+    uses: ./.github/workflows/build-image.yml
+    with:
+      image: application-api
+      dockerfile: ./deploy/Dockerfile.application-api
+    secrets: inherit

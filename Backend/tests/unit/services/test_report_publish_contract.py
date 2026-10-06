@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+
 import pytest
 
 from application_api.schemas.reports import (
@@ -213,24 +216,62 @@ _requires_deps = pytest.mark.skipif(
 )
 
 
+class _FakePdflatex:
+    """Stands in for ``asyncio.create_subprocess_exec`` and the process it returns."""
+
+    def __init__(self, returncode=0, stdout=b"", stderr=b"", on_start=None, hang=False):
+        self.returncode = None
+        self.killed = False
+        self.started = asyncio.Event()
+        self._exit_code = returncode
+        self._stdout = stdout
+        self._stderr = stderr
+        self._on_start = on_start
+        self._hang = hang
+
+    async def __call__(self, *cmd, cwd, stdout, stderr):
+        assert cmd[0] == "pdflatex"
+        if self._on_start is not None:
+            self._on_start(Path(cwd))
+        self.started.set()
+        return self
+
+    async def communicate(self):
+        if self._hang and not self.killed:
+            await asyncio.sleep(3600)
+        self.returncode = -9 if self.killed else self._exit_code
+        return self._stdout, self._stderr
+
+    def kill(self):
+        self.killed = True
+
+
+def _patch_pdflatex(fake, tmp_path):
+    from contextlib import ExitStack
+    from unittest.mock import patch
+
+    stack = ExitStack()
+    stack.enter_context(patch("asyncio.create_subprocess_exec", fake))
+    stack.enter_context(patch("shutil.which", return_value="/usr/bin/pdflatex"))
+    stack.enter_context(
+        patch("application_api.repositories.reports.TEMP_DIR", tmp_path, create=True)
+    )
+    return stack
+
+
 @pytest.mark.unit
+@pytest.mark.asyncio
 @_requires_deps
-def test_a19_compile_raises_on_bad_latex(monkeypatch, tmp_path):
+async def test_a19_compile_raises_on_bad_latex(monkeypatch, tmp_path):
     """A compile error must raise HTTPException(422) and write no file."""
-    from unittest.mock import MagicMock, patch
-    import subprocess
     from fastapi import HTTPException
     from application_api.repositories.reports import _compile_latex
 
-    bad_result = MagicMock()
-    bad_result.returncode = 1
-    bad_result.stdout = b"! LaTeX Error: \\begin{document} ended"
-    bad_result.stderr = b""
+    fake = _FakePdflatex(returncode=1, stdout=b"! LaTeX Error: \\begin{document} ended")
 
-    with patch("subprocess.run", return_value=bad_result), \
-         patch("application_api.repositories.reports.TEMP_DIR", tmp_path, create=True):
+    with _patch_pdflatex(fake, tmp_path):
         with pytest.raises(HTTPException) as exc_info:
-            _compile_latex(r"\documentclass{article}\begin{document}", {})
+            await _compile_latex(r"\documentclass{article}\begin{document}", {})
         assert exc_info.value.status_code == 422
         detail = exc_info.value.detail
         assert isinstance(detail, dict)
@@ -241,32 +282,24 @@ def test_a19_compile_raises_on_bad_latex(monkeypatch, tmp_path):
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
 @_requires_deps
-def test_a19_compile_sanitizes_unicode_the_agent_cannot_help_writing(monkeypatch, tmp_path):
+async def test_a19_compile_sanitizes_unicode_the_agent_cannot_help_writing(monkeypatch, tmp_path):
     """A stray '≥' or narrow no-break space must not fail the compile —
     the reporter agent writes plain-English LaTeX and will reproduce these
     characters on the very next attempt too; sanitize instead of retrying."""
-    from pathlib import Path
-    from unittest.mock import MagicMock, patch
     from application_api.repositories.reports import _compile_latex
 
     captured_tex: dict[str, str] = {}
 
-    def _fake_run(cmd, cwd, stdout, stderr, timeout):
-        captured_tex["text"] = (Path(cwd) / "document.tex").read_text(encoding="utf-8")
-        (Path(cwd) / "document.pdf").write_bytes(b"%PDF-1.4 fake")
-        result = MagicMock()
-        result.returncode = 0
-        result.stdout = b""
-        result.stderr = b""
-        return result
+    def _on_start(cwd):
+        captured_tex["text"] = (cwd / "document.tex").read_text(encoding="utf-8")
+        (cwd / "document.pdf").write_bytes(b"%PDF-1.4 fake")
 
     source = "adult patients (≥18 years) were included."
 
-    with patch("subprocess.run", side_effect=_fake_run), \
-         patch("shutil.which", return_value="/usr/bin/pdflatex"), \
-         patch("application_api.repositories.reports.TEMP_DIR", tmp_path, create=True):
-        result = _compile_latex(source, {})
+    with _patch_pdflatex(_FakePdflatex(on_start=_on_start), tmp_path):
+        result = await _compile_latex(source, {})
 
     assert isinstance(result, bytes) and len(result) > 0
     assert "≥" not in captured_tex["text"]
@@ -275,33 +308,100 @@ def test_a19_compile_sanitizes_unicode_the_agent_cannot_help_writing(monkeypatch
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
 @_requires_deps
-def test_a19_successful_compile_returns_bytes(monkeypatch, tmp_path):
+async def test_a19_successful_compile_returns_bytes(monkeypatch, tmp_path):
     """A successful compile must return PDF bytes (not a file path)."""
-    from pathlib import Path
-    from unittest.mock import MagicMock, patch
     from application_api.repositories.reports import _compile_latex
 
     fake_pdf = b"%PDF-1.4 fake"
 
-    def _fake_run(cmd, cwd, stdout, stderr, timeout):
+    def _on_start(cwd):
         # Write the fake document.pdf into the REAL cwd _compile_latex is
         # about to check, not some other directory: a previous version of
         # this test wrote it into the pytest tmp_path fixture instead, which
         # is never what `cwd` actually is, so the "successful" compile it
         # claimed to simulate always looked like a failed one.
-        (Path(cwd) / "document.pdf").write_bytes(fake_pdf)
-        result = MagicMock()
-        result.returncode = 0
-        result.stdout = b""
-        result.stderr = b""
-        return result
+        (cwd / "document.pdf").write_bytes(fake_pdf)
 
-    with patch("subprocess.run", side_effect=_fake_run), \
-         patch("shutil.which", return_value="/usr/bin/pdflatex"), \
-         patch("application_api.repositories.reports.TEMP_DIR", tmp_path, create=True):
-        result = _compile_latex(
+    with _patch_pdflatex(_FakePdflatex(on_start=_on_start), tmp_path):
+        result = await _compile_latex(
             r"\documentclass{article}\begin{document}.\end{document}", {}
         )
         assert isinstance(result, bytes), "compile must return bytes, not a file path"
         assert len(result) > 0
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@_requires_deps
+async def test_a19_compile_timeout_kills_pdflatex_and_returns_422(monkeypatch, tmp_path):
+    """A pdflatex that never finishes is killed and reaped, and the caller gets
+    the same `latex_compile_timeout` 422 as before."""
+    from fastapi import HTTPException
+    from application_api.repositories import reports
+
+    monkeypatch.setattr(reports, "COMPILE_TIMEOUT", 0.01)
+    fake = _FakePdflatex(hang=True, stdout=b"! Emergency stop.")
+
+    with _patch_pdflatex(fake, tmp_path):
+        with pytest.raises(HTTPException) as exc_info:
+            await reports._compile_latex(r"\loop\iftrue\repeat", {})
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "latex_compile_timeout"
+    assert exc_info.value.detail["stdout"] == "! Emergency stop."
+    assert fake.killed
+    assert fake.returncode is not None, "the killed process must be reaped"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@_requires_deps
+async def test_a19_cancelled_compile_kills_pdflatex(monkeypatch, tmp_path):
+    """A cancelled request must not leave pdflatex running after its temp
+    directory is removed."""
+    from application_api.repositories.reports import _compile_latex
+
+    fake = _FakePdflatex(hang=True)
+
+    with _patch_pdflatex(fake, tmp_path):
+        task = asyncio.create_task(_compile_latex(r"\documentclass{article}", {}))
+        await asyncio.wait_for(fake.started.wait(), 5)
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert fake.killed
+    assert fake.returncode is not None, "the killed process must be reaped"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@_requires_deps
+async def test_a19_compile_does_not_block_the_event_loop(monkeypatch, tmp_path):
+    """Other coroutines keep running while pdflatex does: a blocking compile
+    used to freeze every request on the worker, /health included."""
+    from application_api.repositories.reports import _compile_latex
+
+    fake = _FakePdflatex(hang=True)
+    ticks = 0
+
+    async def _ticker():
+        nonlocal ticks
+        while True:
+            ticks += 1
+            await asyncio.sleep(0)
+
+    with _patch_pdflatex(fake, tmp_path):
+        compile_task = asyncio.create_task(_compile_latex(r"\documentclass{article}", {}))
+        ticker = asyncio.create_task(_ticker())
+        await asyncio.wait_for(fake.started.wait(), 5)
+        before = ticks
+        for _ in range(10):
+            await asyncio.sleep(0)
+        assert ticks > before
+        compile_task.cancel()
+        ticker.cancel()
+        await asyncio.gather(compile_task, ticker, return_exceptions=True)

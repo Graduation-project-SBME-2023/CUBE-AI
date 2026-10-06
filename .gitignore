@@ -45,6 +45,8 @@ Backend/volumes
 # node modules
 **/node_modules/
 **/yarn.lock
+# The viewer's lockfile is tracked: CI installs from it and fails if it drifts.
+!Frontend/OHIF-Viewer/yarn.lock
 
 # Frontend build and test artifacts
 Frontend/OHIF-Viewer/platform/app/dist/

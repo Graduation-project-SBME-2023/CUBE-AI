@@ -1,7 +1,7 @@
 name: Backend storage boundary
 
+# Every push to any branch; a PR shows the check of its head commit.
 on:
-  pull_request:
   push:
 
 jobs:

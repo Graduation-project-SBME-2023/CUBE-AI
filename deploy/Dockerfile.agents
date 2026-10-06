@@ -5,7 +5,14 @@ FROM python:3.11.3-slim
 # - texlive-full for pdflatex support
 # - build tools (gcc, g++, cmake) for compiling PyRadiomics C extensions
 # - git for installing PyRadiomics from source
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# python:3.11.3-slim is Debian 11 (bullseye), whose packages have left the
+# regular mirrors for archive.debian.org: the mirrors still serve the package
+# lists but answer 404 for the files, so apt is pointed at the archive.
+RUN sed -i \
+        -e 's|http://deb.debian.org|http://archive.debian.org|g' \
+        -e 's|http://security.debian.org|http://archive.debian.org|g' \
+        /etc/apt/sources.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
     texlive-latex-base \
     texlive-latex-recommended \
     texlive-latex-extra \

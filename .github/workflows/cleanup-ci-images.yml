@@ -1,0 +1,36 @@
+name: Clean up CI images
+
+# Every build pushes <sha> and <branch> tags to GitHub Container Registry
+# (build-image.yml), so the packages grow with every push. This keeps the
+# newest versions of each and deletes the rest; the build caches are kept.
+on:
+  schedule:
+    - cron: "0 3 * * 0" # Sundays 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "Versions to keep per image"
+        required: false
+        default: "30"
+
+permissions:
+  packages: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [agents-app, application-api, webapp, custom-monailabel]
+    steps:
+      # A package that has never been built yet does not exist; that is not
+      # a failure of the cleanup.
+      - name: Prune ${{ matrix.package }}
+        continue-on-error: true
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ matrix.package }}
+          package-type: container
+          min-versions-to-keep: ${{ github.event.inputs.keep || 30 }}
+          ignore-versions: "^buildcache"

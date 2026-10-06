@@ -4,7 +4,7 @@ import secrets
 
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, BackgroundTasks, Header, HTTPException
-from application_api.db.session import get_db, AsyncSessionLocal
+from application_api.db.session import get_db, AsyncSessionLocal, engine
 from application_api.core.config import settings
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -139,28 +139,48 @@ _FULL_SYNC_LOCK_KEY = 0x5CB1A17C
 
 
 async def _run_full_sync_once(db: AsyncSession) -> bool:
-    """Run a full sync unless another worker is already running one.
+    """Run a full sync unless one is already running.
 
-    This API runs several uvicorn workers, and both the startup reconcile and
-    the manual endpoint can fire in each of them at once. A full sync walks every
-    study and upserts it, so two of them racing means duplicated work at best and
-    rows deadlocking against each other at worst.
+    The reconcile timer and the manual endpoint can fire at the same time, in
+    one worker or in several. A full sync walks every study and upserts it, so
+    two of them racing means duplicated work at best and rows deadlocking
+    against each other at worst.
 
     A session-level advisory lock is the cheap fix: it is held in PostgreSQL, so
-    it covers every worker, and it is released when this connection closes even
+    it covers every worker, and it is released when its connection closes even
     if the process is killed mid-sync.
+
+    The lock lives on a connection of its own, not on ``db``'s. An advisory
+    lock belongs to the connection that took it, and ``sync_all_from_orthanc``
+    commits after every study, which hands ``db``'s connection back to the
+    pool. Taken through ``db``, the lock left with that pooled connection, the
+    unlock ran on whichever connection ``db`` checked out next and released
+    nothing, and later syncs skipped themselves until the pool recycled it.
+    AUTOCOMMIT keeps that connection from sitting idle in a transaction for the
+    whole sync.
     """
-    acquired = (
-        await db.execute(select(func.pg_try_advisory_lock(_FULL_SYNC_LOCK_KEY)))
-    ).scalar()
-    if not acquired:
-        logger.info("A full Orthanc sync is already running; skipping this one")
-        return False
-    try:
-        await sync_all_from_orthanc(db)
-        return True
-    finally:
-        await db.execute(select(func.pg_advisory_unlock(_FULL_SYNC_LOCK_KEY)))
+    async with engine.connect() as lock_conn:
+        await lock_conn.execution_options(isolation_level="AUTOCOMMIT")
+        acquired = (
+            await lock_conn.execute(select(func.pg_try_advisory_lock(_FULL_SYNC_LOCK_KEY)))
+        ).scalar()
+        if not acquired:
+            logger.info("A full Orthanc sync is already running; skipping this one")
+            return False
+        try:
+            await sync_all_from_orthanc(db)
+            return True
+        finally:
+            try:
+                await lock_conn.execute(select(func.pg_advisory_unlock(_FULL_SYNC_LOCK_KEY)))
+            except Exception:
+                # Never return a connection that may still hold the lock to
+                # the pool: closing it is what makes PostgreSQL release it.
+                logger.warning(
+                    "Could not release the full-sync lock; dropping its connection",
+                    exc_info=True,
+                )
+                await lock_conn.invalidate()
 
 
 async def run_full_sync_background():
