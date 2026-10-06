@@ -66,14 +66,14 @@ def test_a_successful_read_keeps_its_shape(fake_domain_api):
 
 def test_reads_use_the_shared_client_with_explicit_timeouts(fake_domain_api, monkeypatch):
     seen = []
-    real = _api.shared_client
+    real = _api.domain_api.shared_client
 
     def spy():
         client = real()
         seen.append(client)
         return client
 
-    monkeypatch.setattr(_api, "shared_client", spy)
+    monkeypatch.setattr(_api.domain_api, "shared_client", spy)
     route = fake_domain_api.get("/volumes/v1").respond(json={})
 
     _call(get_volume, {"volume_series_instance_uid": "v1"})

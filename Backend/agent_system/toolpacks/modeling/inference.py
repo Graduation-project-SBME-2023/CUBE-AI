@@ -1,8 +1,10 @@
 """Predicting with a recorded model — the body of ``run_classifier_inference``
 and ``run_regression_inference``.
 
-The model file is identified by the digest recorded for it and never trusted
-otherwise. A model trained with PyCaret (a record without
+Only a model file recorded in this session's model results is loaded, and only
+when its digest matches the record: a pickle runs code when it is loaded, so an
+unrecorded or swapped file is refused before it is opened. A model trained
+with PyCaret (a record without
 ``environment.engine == "sklearn"``) cannot be loaded any more: the tools
 return ``legacy_model_format`` and name ``refit_model``, which rebuilds it on
 the engine from its record.
@@ -23,6 +25,7 @@ from pydantic import BaseModel
 
 from .._toolkit import error_result
 from ..common import domain_api
+from ..common.values import json_safe
 from ..radiomics.digests import bytes_digest
 from . import results
 from .engine import dataset, estimators, persistence
@@ -140,7 +143,15 @@ async def run_inference(task: str, params: BaseModel) -> str | dict[str, Any]:
         base_variant = await results.recorded_variant_for(model_path)
     except domain_api.DomainApiError as exc:
         return domain_api.error_result_from(exc, "the recorded model results could not be read", **failure)
-    if base_variant is not None and not persistence.is_engine_record(base_variant):
+    if base_variant is None:
+        return error_result(
+            "model_not_recorded",
+            "This file is not a recorded model of this session; only a model that a training "
+            "tool (or refit_model) recorded can be loaded. Use a final_model_path or "
+            "individual_model_paths entry a training reply returned.",
+            **failure,
+        )
+    if not persistence.is_engine_record(base_variant):
         return legacy_model_error(params.model_path, base_variant, "it was trained with PyCaret")
     mismatch = results.model_file_mismatch(model_path, base_variant)
     if mismatch:
@@ -176,11 +187,11 @@ async def run_inference(task: str, params: BaseModel) -> str | dict[str, Any]:
         return error_result("prediction_failed", f"Failed to make predictions: {exc}", **failure)
 
     input_digest = bytes_digest(input_bytes)
-    base_key = (base_variant or {}).get("variant_key") or "unrecorded_model"
+    base_key = base_variant["variant_key"]
     artifact = await results.publish_predictions(
         predictions,
         run_id=run_id,
-        comparison=(base_variant or {}).get("comparison_key") or "inference",
+        comparison=base_variant["comparison_key"],
         variant=f"{base_key}__inference_{input_digest[:12]}",
         metadata={"input_digest": input_digest, "model_variant_key": base_key},
     )
@@ -196,8 +207,7 @@ async def run_inference(task: str, params: BaseModel) -> str | dict[str, Any]:
             metrics = regression_metrics(scored, "target")
 
     recorded_evaluation = None
-    warnings: list[str] = []
-    if metrics and base_variant is not None:
+    if metrics:
         recorded_evaluation = await results.record_independent_evaluation(
             base_variant=base_variant,
             input_bytes=input_bytes,
@@ -206,11 +216,6 @@ async def run_inference(task: str, params: BaseModel) -> str | dict[str, Any]:
             n_cases=len(predictions),
             metrics=metrics,
         )
-    elif metrics:
-        warnings.append(
-            "The evaluation was not recorded: this model file is not a recorded model "
-            "result of this session."
-        )
 
     return json.dumps({
         "status": "success",
@@ -218,9 +223,9 @@ async def run_inference(task: str, params: BaseModel) -> str | dict[str, Any]:
         "exports": {"predictions": f"/files/{predictions_file_id}/content?download=true"},
         "num_predictions": len(predictions),
         "has_ground_truth": has_ground_truth,
-        "metrics": results.json_safe(metrics) if metrics else None,
+        "metrics": json_safe(metrics) if metrics else None,
         "recorded_evaluation": recorded_evaluation,
-        "warnings": warnings,
+        "warnings": [],
         "input_path": params.input_path,
         "model_path": params.model_path,
     }, indent=2)

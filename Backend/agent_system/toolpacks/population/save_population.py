@@ -1,3 +1,5 @@
+"""``save_final_output``: the population agent's selected volumes as the cohort membership."""
+
 from .._toolkit import tool
 from ..common.manifests import WRITES
 from ..common.emit import emit

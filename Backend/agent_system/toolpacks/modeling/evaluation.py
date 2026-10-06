@@ -8,13 +8,11 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from ..common.values import finite_float
+
 
 def safe_float(value: Any) -> Optional[float]:
-    try:
-        number = float(value)
-        return None if np.isnan(number) or np.isinf(number) else round(number, 6)
-    except Exception:
-        return None
+    return finite_float(value)
 
 
 def _finite(value: Any) -> Any:

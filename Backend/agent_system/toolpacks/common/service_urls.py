@@ -24,7 +24,13 @@ def inference_api_url() -> str:
     return _base_url(("INFERENCE_API_URL", "MONAI_URL"), DEFAULT_INFERENCE_API_URL)
 
 
-def _base_url(names: tuple[str, ...], default: str) -> str:
+def agents_base_url() -> str | None:
+    """The Agent System's public base URL (``AGENTS_BASE_URL``), or ``None``
+    when it is not published."""
+    return _base_url(("AGENTS_BASE_URL",), None)
+
+
+def _base_url(names: tuple[str, ...], default: str | None) -> str | None:
     for name in names:
         raw = os.environ.get(name, "").strip()
         if raw:
@@ -35,11 +41,3 @@ def _base_url(names: tuple[str, ...], default: str) -> str:
             return url
     return default
 
-
-# Import-time copies for the tools that still read a constant: the DB reads
-# (moved to the shared client in Phase 2.4, L1) and the MONAI tools (Plan 15).
-# Compatibility aliases; application traffic never falls back to inference.
-APP_API_URL = app_api_url()
-INFERENCE_API_URL = inference_api_url()
-MONAI_URL = INFERENCE_API_URL
-CONTROL_API_URL = APP_API_URL

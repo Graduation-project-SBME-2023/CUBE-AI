@@ -32,6 +32,13 @@ def _source(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _tool_source(tool_module: str, steps_package: str) -> str:
+    """A radiomics tool's module and the package of its steps, as one text."""
+    radiomics = TOOLPACKS_ROOT / "radiomics"
+    paths = [radiomics / tool_module, *sorted((radiomics / steps_package).glob("*.py"))]
+    return "\n".join(_source(path) for path in paths)
+
+
 def _migration_path(revision: str) -> Path:
     for path in VERSIONS.glob("*.py"):
         if f'revision: str = "{revision}"' in path.read_text(encoding="utf-8"):
@@ -231,7 +238,7 @@ def test_the_api_and_the_tool_compute_the_same_source_digest():
 # The writer
 # ----------------------------------------------------------------------
 def test_the_extraction_tool_records_rows_with_their_digests():
-    source = _source(TOOLPACKS_ROOT / "radiomics/features.py")
+    source = _tool_source("extract_features.py", "extraction")
     assert "domain_api.record_radiomics_rows" in source
     for digest in ("image_digest", "segmentation_digest", "config_digest", "source_digest"):
         assert f"provenance.{digest}(" in source, digest
@@ -241,7 +248,7 @@ def test_the_extraction_tool_records_rows_with_their_digests():
 
 
 def test_the_selection_tool_freezes_feature_sets_instead_of_writing_csvs():
-    source = _source(TOOLPACKS_ROOT / "radiomics/features.py")
+    source = _tool_source("analyze_importance.py", "selection")
     assert "domain_api.create_feature_set" in source
     assert "domain_api.freeze_feature_set" in source
     for retired in (
@@ -257,7 +264,7 @@ def test_the_selection_tool_freezes_feature_sets_instead_of_writing_csvs():
     assert ".to_csv(" not in source
     # The split group is the cohort's subject key.
     assert "detect_group_column" not in source
-    assert "group_column = SUBJECT_KEY" in source
+    assert "group_column=SUBJECT_KEY" in source and '"group_column": SUBJECT_KEY' in source
 
 
 def test_the_extraction_cache_is_content_addressed():

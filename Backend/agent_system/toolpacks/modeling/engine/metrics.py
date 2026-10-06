@@ -11,7 +11,6 @@ binary classifier's positive class is code 1, the larger label.
 from __future__ import annotations
 
 import math
-import warnings
 from typing import Any
 
 import numpy as np
@@ -87,22 +86,20 @@ def classification_scores(
                 auc = roc_auc_score(y_true, scores, multi_class="ovr", average="weighted", labels=labels)
         except ValueError:
             auc = None
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        kwargs: dict[str, Any] = {"average": average, "zero_division": 0}
-        if binary:
-            kwargs["pos_label"] = 1
-        else:
-            kwargs["labels"] = labels
-        return {
-            "Accuracy": _number(accuracy_score(y_true, y_pred)),
-            "AUC": _number(auc),
-            "Recall": _number(recall_score(y_true, y_pred, **kwargs)),
-            "Prec.": _number(precision_score(y_true, y_pred, **kwargs)),
-            "F1": _number(f1_score(y_true, y_pred, **kwargs)),
-            "Kappa": _number(cohen_kappa_score(y_true, y_pred)),
-            "MCC": _number(matthews_corrcoef(y_true, y_pred)),
-        }
+    kwargs: dict[str, Any] = {"average": average, "zero_division": 0}
+    if binary:
+        kwargs["pos_label"] = 1
+    else:
+        kwargs["labels"] = labels
+    return {
+        "Accuracy": _number(accuracy_score(y_true, y_pred)),
+        "AUC": _number(auc),
+        "Recall": _number(recall_score(y_true, y_pred, **kwargs)),
+        "Prec.": _number(precision_score(y_true, y_pred, **kwargs)),
+        "F1": _number(f1_score(y_true, y_pred, **kwargs)),
+        "Kappa": _number(cohen_kappa_score(y_true, y_pred)),
+        "MCC": _number(matthews_corrcoef(y_true, y_pred)),
+    }
 
 
 def regression_scores(y_true: Any, y_pred: Any) -> dict[str, float | None]:

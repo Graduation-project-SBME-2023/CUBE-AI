@@ -160,9 +160,7 @@ async def run_segmentation_with_guard(
     # The structured result is a row on this node's run. There is deliberately
     # no file fallback: a write failure fails the call.
     try:
-        await domain_api.request(
-            "PUT", f"/runs/{run_id}/output", json=_agent_output(result, str(workspace))
-        )
+        await domain_api.record_run_output(_agent_output(result, str(workspace)))
     except domain_api.DomainApiError as exc:
         return domain_api.error_result_from(exc, "The segmentation output was not recorded")
 

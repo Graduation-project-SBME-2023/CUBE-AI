@@ -19,11 +19,10 @@ from typing import Any
 import pandas as pd
 
 from .._toolkit import error_result, tool
-from ..common.manifests import INTERIM_HEAVY
 from ..radiomics.digests import bytes_digest, document_digest
 from ..common import domain_api, settings
 from ..common.workspace import get_workspace
-from . import evaluation, refit_core, results
+from . import evaluation, manifest, refit_core, results
 from .engine import estimators
 from .engine.preprocessing import TARGET
 
@@ -65,14 +64,14 @@ async def _training_data(result: dict) -> tuple[pd.DataFrame, pd.DataFrame | Non
 @tool(
     name="refit_model",
     visibility={"agent"},
-    **INTERIM_HEAVY,
+    **manifest.REFIT,
 )
 async def refit_model(model_result_id: str) -> str | dict[str, Any]:
     """Refit a recorded model on the scikit-learn engine: a lost or corrupted
     pipeline, or a model trained with PyCaret (which can no longer be loaded)."""
     run_id = domain_api.require_run()
     try:
-        result = await domain_api.request("GET", f"/model-results/{model_result_id}")
+        result = await domain_api.get_model_result(model_result_id)
     except domain_api.DomainApiError as exc:
         return domain_api.error_result_from(exc, "the model result could not be read")
     refusal = refit_core.refit_refusal(result)

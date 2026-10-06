@@ -16,14 +16,12 @@ from agent_system.toolkit.context import use_context
 from agent_system.toolpacks.bookkeeping import agent_output
 from agent_system.toolpacks.bookkeeping.browse_workspace import browse_workspace
 from agent_system.toolpacks.common import domain_api
-from agent_system.toolpacks.population import cohort_labels, targets_matcher
-from agent_system.toolpacks.population.validate_anatomy import (
-    _resolve_anatomy_group,
-    validate_population_anatomy,
-)
+from agent_system.toolpacks.population import cohort_approval, cohort_labels
+from agent_system.toolpacks.population.anatomy import resolve_anatomy_group
+from agent_system.toolpacks.population.validate_anatomy import validate_population_anatomy
 from agent_system.toolpacks.reporting.get_modeling_results import get_modeling_results
 from agent_system.toolpacks.segmentation import list_models as list_models_module
-from agent_system.toolpacks.segmentation import run_segmentation
+from agent_system.toolpacks.segmentation import monai_client
 from tests.support.toolkit_fixtures import FakeEventSink, call_tool, make_context
 
 pytestmark = pytest.mark.unit
@@ -63,7 +61,7 @@ def test_a_domain_error_maps_to_an_error_code(status, code):
 
 @pytest.mark.parametrize("region", ["", "  ", "a", "ab"])
 def test_a_too_short_region_names_nothing(region):
-    assert _resolve_anatomy_group(region) == (None, [])
+    assert resolve_anatomy_group(region) == (None, [])
     result = call_tool(
         validate_population_anatomy,
         {"hypothesis_body_region": region, "volume_details": []},
@@ -73,8 +71,8 @@ def test_a_too_short_region_names_nothing(region):
 
 
 def test_a_real_region_still_resolves():
-    assert _resolve_anatomy_group("kidney")[0] == "abdomen"
-    assert _resolve_anatomy_group("abd")[0] == "abdomen"  # a keyword prefix of 3+ letters
+    assert resolve_anatomy_group("kidney")[0] == "abdomen"
+    assert resolve_anatomy_group("abd")[0] == "abdomen"  # a keyword prefix of 3+ letters
 
 
 def test_a_volume_without_uid_is_refused():
@@ -114,25 +112,31 @@ def test_one_failed_llm_call_keeps_the_other_labels(monkeypatch):
     async def fake_cohort():
         return {"cohort_id": "c1", "criteria": {}, "members": members}
 
-    async def fake_request(method, path, **kwargs):
-        return {"orthanc_patient_id": path.rsplit("/", 1)[1]}
+    async def fake_patient(subject_key):
+        return {"orthanc_patient_id": subject_key}
 
     async def fake_write(cohort_id, labels):
         written["labels"] = labels
 
-    async def fake_process(client, model, uid, text, prompt, sem):
+    async def fake_adjudicate(client, model, uid, text, prompt, limit):
         if uid == "v2":
             raise ConnectionError("LLM down")
         return {"volume_uid": uid, "has_target_disease": True, "confidence": "high", "source_evidence": "e"}
 
     monkeypatch.setattr(cohort_labels.domain_api, "require_population_cohort", fake_cohort)
-    monkeypatch.setattr(cohort_labels.domain_api, "request", fake_request)
+    monkeypatch.setattr(cohort_labels.domain_api, "get_patient", fake_patient)
     monkeypatch.setattr(cohort_labels.domain_api, "write_cohort_labels", fake_write)
-    monkeypatch.setattr(cohort_labels, "_process_patient_record", fake_process)
+    monkeypatch.setattr(cohort_labels, "adjudicate_member", fake_adjudicate)
     monkeypatch.setattr(
-        cohort_labels, "_load_clinical_records", lambda _: ([("p1", {"r": 1}), ("p2", {"r": 2})], "x.json")
+        cohort_labels, "load_clinical_records", lambda _: ([("p1", {"r": 1}), ("p2", {"r": 2})], "x.json")
     )
-    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(AsyncOpenAI=lambda **_: object()))
+    closed = []
+
+    class FakeClient:
+        async def close(self):
+            closed.append(True)
+
+    monkeypatch.setitem(sys.modules, "openai", types.SimpleNamespace(AsyncOpenAI=lambda **_: FakeClient()))
 
     result = call_tool(cohort_labels.extract_cohort_labels, {}, _ctx())
 
@@ -141,6 +145,7 @@ def test_one_failed_llm_call_keeps_the_other_labels(monkeypatch):
     by_uid = {label["volume_series_instance_uid"]: label for label in written["labels"]}
     assert by_uid["v1"]["has_target_disease"] is True  # kept, not dropped with v2
     assert by_uid["v2"]["label_provenance"]["reason"] == "llm_unavailable"
+    assert closed == [True]  # the LLM client is closed after the batch
 
 
 # --- L7 + S12: generate_targets
@@ -162,7 +167,7 @@ def test_a_transient_error_does_not_end_the_cohort_wait(monkeypatch):
     monkeypatch.setenv("COHORT_APPROVAL_POLL_SECONDS", "0.01")
     frozen = {"cohort_id": "c1", "frozen_at": "t"}
     monkeypatch.setattr(
-        targets_matcher.domain_api,
+        cohort_approval.domain_api,
         "get_population_cohort",
         _cohorts({"cohort_id": "c1"}, domain_api.DomainApiError("down", 503), frozen),
     )
@@ -170,7 +175,7 @@ def test_a_transient_error_does_not_end_the_cohort_wait(monkeypatch):
 
     async def wait():
         with use_context(_ctx(tool_name="generate_targets", event_sink=sink)):
-            return await targets_matcher._wait_for_cohort_approval(timeout_seconds=5)
+            return await cohort_approval._wait_for_cohort_approval(timeout_seconds=5)
 
     assert asyncio.run(wait()) == frozen
     assert [view.type for view in sink.views] == ["agent_waiting_for_user_input"]
@@ -178,12 +183,12 @@ def test_a_transient_error_does_not_end_the_cohort_wait(monkeypatch):
 
 def test_the_waiting_view_is_announced_once_per_session(monkeypatch):
     monkeypatch.setenv("COHORT_APPROVAL_POLL_SECONDS", "0.01")
-    monkeypatch.setattr(targets_matcher.domain_api, "get_population_cohort", _cohorts({"cohort_id": "c1"}))
+    monkeypatch.setattr(cohort_approval.domain_api, "get_population_cohort", _cohorts({"cohort_id": "c1"}))
     sinks = {"a": FakeEventSink(), "b": FakeEventSink()}
 
     async def wait(session):
         with use_context(make_context(session_id=session, tool_name="t", event_sink=sinks[session])):
-            await targets_matcher._wait_for_cohort_approval(timeout_seconds=0.05)
+            await cohort_approval._wait_for_cohort_approval(timeout_seconds=0.05)
 
     async def both():
         return await asyncio.gather(wait("a"), wait("b"), return_exceptions=True)
@@ -195,14 +200,14 @@ def test_the_waiting_view_is_announced_once_per_session(monkeypatch):
 
 def test_a_cohort_wait_that_times_out_is_an_error_result(monkeypatch):
     cohort = {"cohort_id": "c1", "members": [{"volume_series_instance_uid": "v1", "label": {"has_target_disease": True}}]}
-    monkeypatch.setattr(targets_matcher.domain_api, "get_population_cohort", _cohorts(cohort))
+    monkeypatch.setattr(cohort_approval.domain_api, "get_population_cohort", _cohorts(cohort))
 
     async def never_approved():
-        raise targets_matcher.PollTimeout("no result")
+        raise cohort_approval.PollTimeout("no result")
 
-    monkeypatch.setattr(targets_matcher, "_wait_for_cohort_approval", never_approved)
+    monkeypatch.setattr(cohort_approval, "_wait_for_cohort_approval", never_approved)
 
-    result = call_tool(targets_matcher.generate_targets, {}, _ctx())
+    result = call_tool(cohort_approval.generate_targets, {}, _ctx())
 
     assert result["error_code"] == "timeout"
 
@@ -214,8 +219,8 @@ def test_a_cohort_wait_that_times_out_is_an_error_result(monkeypatch):
 def test_a_bad_segmentation_setting_falls_back(monkeypatch, raw):
     monkeypatch.setenv("SEGMENTATION_JOB_TIMEOUT_SECONDS", raw)
     monkeypatch.setenv("SEGMENTATION_POLL_SECONDS", raw)
-    assert run_segmentation._job_timeout_s() == 1800.0
-    assert run_segmentation._poll_s() == 3.0
+    assert monai_client.job_timeout_s() == 1800.0
+    assert monai_client.poll_s() == 3.0
 
 
 # --- L9: browse_workspace

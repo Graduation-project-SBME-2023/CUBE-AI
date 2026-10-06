@@ -1,9 +1,10 @@
+from typing import Annotated
+
+from pydantic import Field
+
 from ..._toolkit import tool
 from ...common.manifests import READ_ONLY
 from .. import _api
-from typing import Annotated
-from pydantic import Field
-
 from ..result_shape import keep_model_id
 
 
@@ -14,8 +15,8 @@ from ..result_shape import keep_model_id
 )
 async def get_model(
     model_id: Annotated[int | None, Field(description="The unique identifier of the AI model. If provided, fetches a single detailed record. If omitted, fetches a list of all models.")] = None,
-    skip: Annotated[int, Field(description="Pagination offset: The number of model records to skip before starting the list.")] = 0,
-    limit: Annotated[int, Field(description="Pagination limit: The maximum number of model records to return in one request (max 100).")] = 100
+    skip: _api.Skip = 0,
+    limit: _api.Limit = _api.MAX_PAGE,
 ):
     """
     Retrieves information about available AI models in the system.
@@ -26,6 +27,4 @@ async def get_model(
     """
     if model_id is not None:
         return await _api.read(f"/inference-models/{model_id}", shape=keep_model_id)
-    return await _api.read(
-        "/inference-models/", params={"skip": skip, "limit": limit}, shape=keep_model_id
-    )
+    return await _api.read("/inference-models/", params=_api.page(skip, limit), shape=keep_model_id)

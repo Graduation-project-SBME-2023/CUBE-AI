@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -12,6 +11,7 @@ from typing import Any, Mapping, Optional
 
 from ..radiomics.digests import bytes_digest, document_digest
 from ..common import domain_api
+from ..common.values import json_safe
 
 MODEL_RESULT_SCHEMA_VERSION = 1
 # exception 2: fitted research pipelines stay on disk, under this logical
@@ -23,26 +23,6 @@ _SLUG = re.compile(r"[^A-Za-z0-9_.-]+")
 
 def versioned(document: Mapping[str, Any]) -> dict[str, Any]:
     return {"schema_version": MODEL_RESULT_SCHEMA_VERSION, **json_safe(dict(document))}
-
-
-def json_safe(value: Any) -> Any:
-    """JSON-native, finite values; anything else becomes its string form."""
-    if isinstance(value, Mapping):
-        return {str(key): json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [json_safe(item) for item in value]
-    if isinstance(value, bool) or value is None or isinstance(value, str):
-        return value
-    if hasattr(value, "item") and not isinstance(value, (bytes, bytearray)):
-        try:
-            value = value.item()
-        except Exception:
-            return str(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    return str(value)
 
 
 def slug(value: str) -> str:
@@ -424,10 +404,7 @@ async def recorded_variant_for(model_path: str) -> Optional[dict[str, Any]]:
     from ..common.workspace import get_workspace
 
     target = os.path.normcase(os.path.abspath(model_path + ".pkl"))
-    rows = await domain_api.request(
-        "GET", f"/model-results/session/{domain_api.require_session()}"
-    ) or []
-    for row in rows:
+    for row in await domain_api.session_model_results():
         name = row.get("model_file_name")
         if name and os.path.normcase(
             os.path.abspath(str(workspace_subpath(get_workspace(), name)))
@@ -460,7 +437,7 @@ async def record_independent_evaluation(
 ) -> dict[str, str]:
     """A later evaluation on independent data, as a NEW variant of the model's comparison — the recorded result is never rewritten."""
     run_id = domain_api.require_run()
-    full = await domain_api.request("GET", f"/model-results/{base_variant['model_result_id']}")
+    full = await domain_api.get_model_result(str(base_variant["model_result_id"]))
     digest = bytes_digest(input_bytes)
     captured = await domain_api.publish_artifact(
         logical_key=f"modeling/{run_id}/inputs/{digest[:16]}_{slug(input_name)}",

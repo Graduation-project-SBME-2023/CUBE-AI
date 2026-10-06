@@ -1,3 +1,5 @@
+"""``write_inclusion_criteria``: the study's criteria and modality, recorded on the population cohort."""
+
 from typing import Annotated
 
 from pydantic import Field

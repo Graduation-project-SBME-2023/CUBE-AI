@@ -1,144 +1,144 @@
-"""Multi-Agent Scratchpad MCP Tool."""
+"""The scratchpad tools: an agent's notes, flags, status and summary.
+
+They live on the agent's run (``node_runs.scratchpad_*``), keyed by the run of
+the call's context — never by the agent's name, and never in a workspace file.
+A write that does not land is an error: there is no file to fall back to.
+
+Every change is also shown in the canvas as a ``scratchpad_update`` view.
+``write_note()`` and ``raise_flag()`` are what other packs call; they never
+call the tools themselves.
+"""
+
+from __future__ import annotations
 
 import json
-from typing import Any, Dict, Literal
+from typing import Annotated, Any, Literal
 
-import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import Field, StringConstraints
 
 from .._toolkit import error_result, tool
-from ..common.manifests import READ_ONLY, WRITES
-from ..common.domain_api import agent_type, node_id, run_id, session_id
+from ..common import domain_api
 from ..common.emit import emit, emit_view
-from ..common.http_client import shared_client, timeout, write_path_headers
-from ..common.service_urls import app_api_url
+from ..common.manifests import READ_ONLY, WRITES
 
 AgentStatus = Literal["in_progress", "done", "blocked", "failed"]
 FlagLevel = Literal["info", "warning", "error", "critical"]
 
 
-REQUEST_TIMEOUT = 20.0
+def _text(max_length: int, description: str) -> Any:
+    return Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=max_length),
+        Field(description=description),
+    ]
 
 
-def _error(message: str, code: str = "write_failed") -> dict:
-    return error_result(code, message)
+Role = _text(64, "The agent's role in the system (e.g. 'researcher', 'writer', 'validator').")
+NoteText = _text(10_000, "Private working note — intermediate thoughts, observations, partial results.")
+FlagText = _text(2_000, "Clear description of the issue or observation for the reporting agent.")
+SummaryText = _text(
+    20_000,
+    "Final summary of the agent's completed work. Should cover: what was done, key findings "
+    "or outputs, and any caveats the reporting agent should know about.",
+)
+AgentId = _text(64, "ID of the agent whose section to read.")
 
 
-async def _post(path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Write to this run's scratchpad. A failed write is an error, not a warning: there is no file to fall back to, and silently losing an agent's own record of its work is what current removes."""
-    run = run_id()
-    if not run:
-        raise RuntimeError(
-            "This call belongs to no run; only an agent running inside a node "
-            "can write its scratchpad."
-        )
-    response = await shared_client().post(
-        f"{app_api_url()}/runs/{run}/scratchpad/{path}",
-        json=payload,
-        headers=write_path_headers(),
-        timeout=timeout(REQUEST_TIMEOUT),
+# ----------------------------------------------------------------------
+# The run's scratchpad, through the Application API
+# ----------------------------------------------------------------------
+def _no_run() -> dict[str, Any]:
+    return error_result(
+        "no_run",
+        "This call belongs to no run; only an agent running inside a node can write its scratchpad.",
     )
-    if response.status_code >= 500:
-        # A 5xx body is an unhandled server exception (stack frames, raw
-        # SQL) -- never something to hand back to an agent that may quote
-        # it verbatim in a generated report.
-        raise RuntimeError(
-            f"{response.status_code} from the Application API: an internal "
-            "error occurred and the request could not complete."
-        )
-    if response.status_code >= 400:
-        raise RuntimeError(
-            f"{response.status_code} from the Application API: {response.text[:400]}"
-        )
-    return response.json()
 
 
-async def _get(url: str) -> Dict[str, Any]:
-    response = await shared_client().get(url, timeout=timeout(REQUEST_TIMEOUT))
-    response.raise_for_status()
-    return response.json()
+async def _write(section: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """POST one change to this run's scratchpad; the updated run."""
+    run = domain_api.segment(domain_api.require_run())
+    return await domain_api.request("POST", f"/runs/{run}/scratchpad/{section}", json=payload)
 
 
-def _notes(run: Dict[str, Any]) -> Dict[str, Any]:
+def _notes(run: dict[str, Any]) -> dict[str, Any]:
     return run.get("scratchpad_notes") or {}
 
 
-def _flags(run: Dict[str, Any]) -> list:
+def _flags(run: dict[str, Any]) -> list[dict[str, Any]]:
     return (run.get("scratchpad_warnings") or {}).get("items", [])
 
 
-def _summary(run: Dict[str, Any]) -> Dict[str, Any] | None:
+def _summary(run: dict[str, Any]) -> dict[str, Any] | None:
     return (run.get("scratchpad_summary") or {}).get("scratchpad_summary")
 
 
-# -- Input models (unchanged shapes) -------------------------------------------
-
-class RegisterAgentInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
-
-    role: str = Field(
-        ...,
-        description="The agent's role in the system (e.g. 'researcher', 'writer', 'validator').",
-        min_length=1, max_length=64,
+async def _show(event: str, run: dict[str, Any], **fields: Any) -> None:
+    """The change, as the canvas shows it."""
+    await emit_view(
+        "scratchpad_update",
+        {
+            "type": event,
+            "agent_id": domain_api.agent_type(),
+            "run_id": domain_api.run_id(),
+            "role": _notes(run).get("role", ""),
+            **fields,
+        },
     )
 
 
-class WriteNoteInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+def _ok(**fields: Any) -> str:
+    return json.dumps({"status": "ok", **fields}, indent=2)
 
-    content: str = Field(
-        ...,
-        description="Private working note — intermediate thoughts, observations, partial results.",
-        min_length=1, max_length=10_000,
+
+def _not_written(exc: domain_api.DomainApiError) -> dict[str, Any]:
+    return domain_api.error_result_from(exc, "the scratchpad was not updated")
+
+
+# ----------------------------------------------------------------------
+# For other packs
+# ----------------------------------------------------------------------
+async def write_note(content: str) -> str | dict[str, Any]:
+    """Append a private working note to this run's scratchpad."""
+    if not domain_api.run_id():
+        return _no_run()
+    try:
+        run = await _write("notes", {"content": content})
+    except domain_api.DomainApiError as exc:
+        return _not_written(exc)
+    notes = _notes(run).get("notes", [])
+    await _show(
+        "agent_note",
+        run,
+        content=content,
+        timestamp=notes[-1]["created_at"] if notes else None,
+        note_index=len(notes) - 1,
     )
+    return _ok(note_index=len(notes) - 1)
 
 
-class WriteSummaryInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
-
-    summary: str = Field(
-        ...,
-        description=(
-            "Final summary of the agent's completed work. Should cover: what was done, "
-            "key findings or outputs, and any caveats the reporting agent should know about."
-        ),
-        min_length=1, max_length=20_000,
+async def raise_flag(level: FlagLevel, message: str) -> str | dict[str, Any]:
+    """Raise a flag the reporting agent will see."""
+    if not domain_api.run_id():
+        return _no_run()
+    try:
+        run = await _write("flags", {"level": level, "message": message})
+    except domain_api.DomainApiError as exc:
+        return _not_written(exc)
+    flags = _flags(run)
+    await _show(
+        "agent_flag",
+        run,
+        level=level,
+        content=message,
+        timestamp=flags[-1]["created_at"] if flags else None,
+        flag_index=len(flags) - 1,
     )
-    overwrite: bool = Field(
-        default=False,
-        description="Replace an existing summary. Defaults to False to prevent accidental overwrites.",
-    )
+    return _ok(flag_index=len(flags) - 1)
 
 
-class RaiseFlagInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
-
-    level: FlagLevel = Field(..., description="Severity of the flag.")
-    message: str = Field(
-        ...,
-        description="Clear description of the issue or observation for the reporting agent.",
-        min_length=1, max_length=2_000,
-    )
-
-
-class SetStatusInput(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
-
-    status: AgentStatus = Field(..., description="Agent's current status.")
-
-
-class ReadAgentInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    target_agent_id: str = Field(..., description="ID of the agent whose section to read.", min_length=1, max_length=64)
-    include_notes: bool = Field(
-        default=True,
-        description="Whether to include the agent's private working notes.",
-    )
-
-
-# -- Tools ---------------------------------------------------------------------
-
+# ----------------------------------------------------------------------
+# Tools
+# ----------------------------------------------------------------------
 @tool(
     name="scratchpad_register_agent",
     visibility={"harness"},
@@ -146,37 +146,29 @@ class ReadAgentInput(BaseModel):
     timeout_s=60,
     **WRITES,
 )
-async def scratchpad_register_agent(role: str = "agent") -> str:
+async def scratchpad_register_agent(role: Role = "agent") -> str | dict[str, Any]:
     """Register an agent in the scratchpad at the start of its work."""
+    if not domain_api.run_id():
+        return _no_run()
     try:
-        run = await _post("register", {"role": role})
-    except Exception as exc:
-        return _error(str(exc))
+        run = await _write("register", {"role": role})
+    except domain_api.DomainApiError as exc:
+        return _not_written(exc)
 
-    emit("tool_log", f"Registering agent {agent_type()}.")
-
-    await emit_view(
-        "scratchpad_update",
-        {
-            "type": "agent_registered",
-            "agent_id": agent_type(),
-            "run_id": run_id(),
-            "node_id": node_id(),
-            "role": role,
-            "status": "in_progress",
-            "timestamp": _notes(run).get("registered_at"),
-            "content": f"Agent {agent_type()} registered as {role}",
-        },
+    emit("tool_log", f"Registering agent {domain_api.agent_type()}.")
+    await _show(
+        "agent_registered",
+        run,
+        node_id=domain_api.node_id(),
+        role=role,
+        status="in_progress",
+        timestamp=_notes(run).get("registered_at"),
+        content=f"Agent {domain_api.agent_type()} registered as {role}",
     )
-
-    return json.dumps(
-        {
-            "status": "ok",
-            "agent_id": agent_type(),
-            "agent_run_id": run_id(),  # tool result key, kept (plan.md: no success result shape changes)
-            "role": role,
-        },
-        indent=2,
+    return _ok(
+        agent_id=domain_api.agent_type(),
+        agent_run_id=domain_api.run_id(),  # tool result key, kept (plan.md: no success result shape changes)
+        role=role,
     )
 
 
@@ -187,27 +179,9 @@ async def scratchpad_register_agent(role: str = "agent") -> str:
     timeout_s=60,
     **WRITES,
 )
-async def scratchpad_write_note(content: str) -> str:
+async def scratchpad_write_note(content: NoteText) -> str | dict[str, Any]:
     """Append a private working note to this run's scratchpad section."""
-    try:
-        run = await _post("notes", {"content": content})
-    except Exception as exc:
-        return _error(str(exc))
-
-    notes = _notes(run).get("notes", [])
-    await emit_view(
-        "scratchpad_update",
-        {
-            "type": "agent_note",
-            "agent_id": agent_type(),
-            "run_id": run_id(),
-            "role": _notes(run).get("role", ""),
-            "content": content,
-            "timestamp": notes[-1]["created_at"] if notes else None,
-            "note_index": len(notes) - 1,
-        },
-    )
-    return json.dumps({"status": "ok", "note_index": len(notes) - 1}, indent=2)
+    return await write_note(content)
 
 
 @tool(
@@ -217,33 +191,12 @@ async def scratchpad_write_note(content: str) -> str:
     timeout_s=60,
     **WRITES,
 )
-async def scratchpad_raise_flag(level: str = "warning", message: str = "No message provided.") -> str:
+async def scratchpad_raise_flag(
+    level: Annotated[FlagLevel, Field(description="Severity of the flag.")] = "warning",
+    message: FlagText = "No message provided.",
+) -> str | dict[str, Any]:
     """Raise a flag so the reporting agent sees an issue."""
-    if level not in ("info", "warning", "error", "critical"):
-        return _error(
-            f"Invalid level '{level}'. Must be one of: info, warning, error, critical.",
-            "invalid_args",
-        )
-    try:
-        run = await _post("flags", {"level": level, "message": message})
-    except Exception as exc:
-        return _error(str(exc))
-
-    flags = _flags(run)
-    await emit_view(
-        "scratchpad_update",
-        {
-            "type": "agent_flag",
-            "agent_id": agent_type(),
-            "run_id": run_id(),
-            "role": _notes(run).get("role", ""),
-            "level": level,
-            "content": message,
-            "timestamp": flags[-1]["created_at"] if flags else None,
-            "flag_index": len(flags) - 1,
-        },
-    )
-    return json.dumps({"status": "ok", "flag_index": len(flags) - 1}, indent=2)
+    return await raise_flag(level, message)
 
 
 @tool(
@@ -254,37 +207,28 @@ async def scratchpad_raise_flag(level: str = "warning", message: str = "No messa
     timeout_s=60,
     **WRITES,
 )
-async def scratchpad_set_status(status: str) -> str:
+async def scratchpad_set_status(
+    status: Annotated[AgentStatus, Field(description="Agent's current status.")],
+) -> str | dict[str, Any]:
     """Update this run's self-reported working status."""
-    if status not in ("in_progress", "done", "blocked", "failed"):
-        return _error(
-            f"Invalid status '{status}'. Must be one of: in_progress, done, blocked, failed.",
-            "invalid_args",
-        )
+    if not domain_api.run_id():
+        return _no_run()
     try:
-        current = await _get(f"{app_api_url()}/runs/{run_id()}") if run_id() else {}
-        previous = _notes(current).get("status")
-        run = await _post("status", {"status": status})
-    except Exception as exc:
-        return _error(str(exc))
+        previous = _notes(await domain_api.get_run()).get("status")
+        run = await _write("status", {"status": status})
+    except domain_api.DomainApiError as exc:
+        return _not_written(exc)
 
     activity_log = _notes(run).get("activity_log") or []
-    await emit_view(
-        "scratchpad_update",
-        {
-            "type": "agent_status",
-            "agent_id": agent_type(),
-            "run_id": run_id(),
-            "role": _notes(run).get("role", ""),
-            "status": status,
-            "previous_status": previous,
-            "content": f"Status changed: {previous} -> {status}",
-            "timestamp": activity_log[-1]["timestamp"] if activity_log else None,
-        },
+    await _show(
+        "agent_status",
+        run,
+        status=status,
+        previous_status=previous,
+        content=f"Status changed: {previous} -> {status}",
+        timestamp=activity_log[-1]["timestamp"] if activity_log else None,
     )
-    return json.dumps(
-        {"status": "ok", "previous_status": previous, "new_status": status}, indent=2
-    )
+    return _ok(previous_status=previous, new_status=status)
 
 
 @tool(
@@ -295,29 +239,30 @@ async def scratchpad_set_status(status: str) -> str:
     timeout_s=60,
     **WRITES,
 )
-async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str:
+async def scratchpad_write_summary(
+    summary: SummaryText,
+    overwrite: Annotated[
+        bool,
+        Field(description="Replace an existing summary. Defaults to False to prevent accidental overwrites."),
+    ] = False,
+) -> str | dict[str, Any]:
     """Write this run's final work summary."""
+    if not domain_api.run_id():
+        return _no_run()
     try:
-        run = await _post("summary", {"summary": summary, "overwrite": overwrite})
-    except Exception as exc:
-        return _error(str(exc))
+        run = await _write("summary", {"summary": summary, "overwrite": overwrite})
+    except domain_api.DomainApiError as exc:
+        return _not_written(exc)
 
-    await emit_view(
-        "scratchpad_update",
-        {
-            "type": "agent_summary",
-            "agent_id": agent_type(),
-            "run_id": run_id(),
-            "role": _notes(run).get("role", ""),
-            "content": summary,
-            "timestamp": (_summary(run) or {}).get("updated_at"),
-            "summary_length": len(summary),
-        },
+    await _show(
+        "agent_summary",
+        run,
+        content=summary,
+        timestamp=(_summary(run) or {}).get("updated_at"),
+        summary_length=len(summary),
     )
-
     emit("tool_log", "Writing a Summary.")
-
-    return json.dumps({"status": "ok", "message": "Summary saved."}, indent=2)
+    return _ok(message="Summary saved.")
 
 
 @tool(
@@ -327,24 +272,28 @@ async def scratchpad_write_summary(summary: str, overwrite: bool = False) -> str
     timeout_s=45,
     **READ_ONLY,
 )
-async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True) -> str:
-    """Read the scratchpad section of an agent in this session.: several plan steps may name the same agent. This resolves the FIRST such step in plan order and reports how many matched, rather than pretending the agent name is a unique key."""
-    if not session_id():
-        return _error("This call belongs to no session.", "no_session")
+async def scratchpad_read_agent(
+    target_agent_id: AgentId,
+    include_notes: Annotated[
+        bool, Field(description="Whether to include the agent's private working notes.")
+    ] = True,
+) -> str | dict[str, Any]:
+    """Read the scratchpad section of an agent in this session. Several plan
+    steps may name the same agent: this resolves the FIRST such step in plan
+    order and reports how many matched, rather than pretending the agent name
+    is a unique key."""
+    if not domain_api.session_id():
+        return error_result("no_session", "This call belongs to no session.")
     try:
-        resolved = await _get(
-            f"{app_api_url()}/runs/session/{session_id()}/by-target/{target_agent_id}"
-        )
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code == 404:
-            return _error(f"Agent '{target_agent_id}' not found in this session.", "not_found")
-        return _error(f"Could not read agent '{target_agent_id}': {exc}", "unavailable")
-    except Exception as exc:
-        return _error(f"Could not read agent '{target_agent_id}': {exc}", "unavailable")
+        resolved = await domain_api.run_by_target(target_agent_id)
+    except domain_api.DomainApiError as exc:
+        return domain_api.error_result_from(exc, f"Could not read agent '{target_agent_id}'")
+    if resolved is None:
+        return error_result("not_found", f"Agent '{target_agent_id}' not found in this session.")
 
     run = resolved.get("run") or {}
     notes = _notes(run)
-    section: Dict[str, Any] = {
+    section: dict[str, Any] = {
         "agent_id": target_agent_id,
         "agent_run_id": run.get("run_id"),  # tool result key, kept (plan.md: no success result shape changes)
         "step_id": run.get("node_id"),  # tool result key, kept (plan.md: no success result shape changes)
@@ -360,7 +309,6 @@ async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True
         section["notes"] = notes.get("notes", [])
 
     emit("tool_log", f"Reading {target_agent_id}'s notes.")
-
     return json.dumps(section, indent=2)
 
 
@@ -371,13 +319,14 @@ async def scratchpad_read_agent(target_agent_id: str, include_notes: bool = True
     timeout_s=45,
     **READ_ONLY,
 )
-async def scratchpad_read_report() -> str:
+async def scratchpad_read_report() -> str | dict[str, Any]:
     """Read the reporter-focused view of this session's scratchpad."""
-    if not session_id():
-        return _error("This call belongs to no session.", "no_session")
+    if not domain_api.session_id():
+        return error_result("no_session", "This call belongs to no session.")
     try:
-        report = await _get(f"{app_api_url()}/runs/session/{session_id()}/scratchpad")
-    except Exception as exc:
-        return _error(f"Could not read the scratchpad report: {exc}", "unavailable")
+        report = await domain_api.request(
+            "GET", f"/runs/session/{domain_api.segment(domain_api.session_id())}/scratchpad"
+        )
+    except domain_api.DomainApiError as exc:
+        return domain_api.error_result_from(exc, "Could not read the scratchpad report")
     return json.dumps(report, indent=2)
-

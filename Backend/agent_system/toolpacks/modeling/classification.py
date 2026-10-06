@@ -7,9 +7,8 @@ from typing import Any, Optional
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .._toolkit import tool
-from ..common.manifests import INTERIM_HEAVY
 from ..common.workspace import WorkspacePath
-from . import inference, results, training
+from . import inference, manifest, results, training
 from .engine.estimators import CLASSIFICATION
 
 
@@ -113,7 +112,7 @@ class RunInferenceInput(BaseModel):
     name="train_classifier",
     visibility={"agent"},
     idempotent=True,
-    **INTERIM_HEAVY,
+    **manifest.TRAINING,
 )
 async def train_classifier(params: TrainClassifierInput) -> str | dict[str, Any]:
     """Compare, tune, and blend classification models (scikit-learn, LightGBM, XGBoost)."""
@@ -124,7 +123,7 @@ async def train_classifier(params: TrainClassifierInput) -> str | dict[str, Any]
     name="run_classifier_inference",
     visibility={"agent"},
     idempotent=True,
-    **INTERIM_HEAVY,
+    **manifest.INFERENCE,
 )
 async def run_classifier_inference(params: RunInferenceInput) -> str | dict[str, Any]:
     """Load a recorded classification model and generate predictions on new data."""

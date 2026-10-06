@@ -1,89 +1,40 @@
-"""Anatomy Validation Gate for the Population Agent."""
+"""``validate_population_anatomy``: the anatomy gate of the population step.
 
-from typing import Annotated
+The candidates the volume search found are checked against the hypothesis'
+body region (``anatomy.py``), and the validated ones become the population
+cohort's membership — even an empty one, which the doctor then fills in the UI.
+"""
+
+from __future__ import annotations
+
+from typing import Annotated, Any
+
 from pydantic import Field
+
 from .._toolkit import error_result, tool
-from ..common.manifests import WRITES
 from ..common import domain_api
 from ..common.emit import emit_view
+from ..common.manifests import WRITES
+from .anatomy import MIN_REGION_LENGTH, classify, resolve_anatomy_group
+
+# What the agent must do when no volume is left; it must never stop the pipeline.
+_EMPTY_COHORT_STEPS = (
+    "A 0-volume cohort has been recorded and sent to the interactive UI. "
+    "DO NOT STOP execution or raise a pipeline error! Instead: "
+    "(1) {note} "
+    "(2) Proceed directly to Step 5 (if available) and Step 6 (generate_targets). "
+    "When generate_targets runs, it will remain at the Human-in-the-Loop UI review gate until "
+    "the doctor selects and labels at least one volume. Never hand off a 0-size cohort."
+)
 
 
-# ── Anatomy group mapping ───────────────────────────────────────────────────
-# Maps high-level anatomical regions to lists of keywords that would appear
-# in DICOM series_description or body_part_examined fields.
-ANATOMY_GROUPS = {
-    "chest": [
-        "chest", "thorax", "lung", "pulmonary", "thoracic", "mediastin",
-        "bronch", "pleura", "trachea",
-    ],
-    "abdomen": [
-        "abdomen", "abdominal", "abd", "kidney", "renal", "liver",
-        "hepatic", "spleen", "splenic", "pancrea", "bowel", "intestin",
-        "colon", "pelvis", "pelvic", "gallbladder", "biliary", "adrenal",
-        "retroperitoneal", "mesentery",
-    ],
-    "head": [
-        "head", "brain", "cranial", "neuro", "cerebr", "skull",
-        "intracranial", "orbit", "sella", "temporal",
-    ],
-    "neck": [
-        "neck", "cervical", "thyroid", "laryn", "pharyn", "parotid",
-        "submandibular",
-    ],
-    "spine": [
-        "spine", "spinal", "vertebr", "lumbar", "sacral", "thoracolumbar",
-        "disc", "cord",
-    ],
-    "extremity": [
-        "extremity", "arm", "leg", "femur", "tibia", "humerus", "knee",
-        "ankle", "wrist", "hand", "foot", "shoulder", "hip", "elbow",
-        "musculoskeletal",
-    ],
-    "cardiac": [
-        "cardiac", "heart", "coronary", "aort", "myocard", "pericardi",
-    ],
-    "breast": [
-        "breast", "mammog", "mammo", "axilla",
-    ],
-}
-
-
-# A region shorter than this names nothing: "" is a substring of every keyword
-# and "a" of most of them, so a short text would match the first group (L5).
-MIN_REGION_LENGTH = 3
-
-
-def _resolve_anatomy_group(text: str) -> tuple[str | None, list[str]]:
-    """Resolve a free-text body region to an anatomy group and its keywords."""
-    text_lower = text.lower().strip()
-    if len(text_lower) < MIN_REGION_LENGTH:
-        return None, []
-    for group, keywords in ANATOMY_GROUPS.items():
-        # Direct group name match
-        if group in text_lower:
-            return group, keywords
-        # Keyword match (a keyword in the text, or the text as a keyword prefix)
-        for kw in keywords:
-            if kw in text_lower or text_lower in kw:
-                return group, keywords
-    return None, []
-
-
-async def _save_and_broadcast_cohort(
-    validated_uids: list[str],
-    validation: dict | None = None,
-) -> dict:
-    """Records the validated cohort (even an empty 0-cohort) as the population cohort's membership and broadcasts it so the Population tab renders the post-validation result."""
+async def _record_cohort(validated_uids: list[str], validation: dict[str, Any]) -> dict[str, Any]:
+    """Record the validated volumes (even none) as the population cohort's
+    membership, and show the result in the Population tab."""
     cohort = await domain_api.upsert_population_cohort(
-        selection_summary={
-            "anatomy_validation": {
-                "anatomy_validated": True,
-                **(validation or {}),
-            }
-        }
+        selection_summary={"anatomy_validation": {"anatomy_validated": True, **validation}}
     )
     await domain_api.set_cohort_members(cohort["cohort_id"], validated_uids)
-
     await emit_view(
         "population_output",
         {
@@ -94,8 +45,108 @@ async def _save_and_broadcast_cohort(
             "cohort_id": cohort["cohort_id"],
         },
     )
-
     return {"cohort_updated": True, "cohort_id": cohort["cohort_id"]}
+
+
+async def _no_candidates(region: str) -> dict[str, Any]:
+    recorded = await _record_cohort([], {"hypothesis_body_region": region, "total_input": 0})
+    return {
+        "status": "success",
+        "message": "No candidate volumes were returned by the search (0 cohort). " + _EMPTY_COHORT_STEPS.format(
+            note=(
+                "Note in your scratchpad/summary in the agent execution tab that 0 matching "
+                "studies were automatically found."
+            )
+        ),
+        "validated_uids": [],
+        "rejected_volumes": [],
+        "total_input": 0,
+        "total_validated": 0,
+        "total_rejected": 0,
+        **recorded,
+    }
+
+
+async def _unresolved_region(region: str, volumes: list[dict[str, Any]]) -> dict[str, Any]:
+    """The region names no known group: every volume passes, with a warning."""
+    uids = [volume["uid"] for volume in volumes]
+    recorded = await _record_cohort(
+        uids,
+        {
+            "hypothesis_body_region": region,
+            "matched_anatomy_group": None,
+            "total_input": len(volumes),
+            "warning": "anatomy region could not be resolved; no volume was filtered",
+        },
+    )
+    return {
+        "status": "warning",
+        "message": (
+            f"Could not resolve '{region}' to a known anatomy group. All {len(volumes)} volumes "
+            "passed through without filtering. Manually verify they match your hypothesis."
+        ),
+        "matched_anatomy_group": None,
+        "validated_uids": uids,
+        "validated_volumes": volumes,
+        "rejected_volumes": [],
+        "total_input": len(volumes),
+        "total_validated": len(volumes),
+        "total_rejected": 0,
+        **recorded,
+    }
+
+
+async def _validate(region: str, volumes: list[dict[str, Any]]) -> dict[str, Any]:
+    if not volumes:
+        return await _no_candidates(region)
+    group, keywords = resolve_anatomy_group(region)
+    if not group:
+        return await _unresolved_region(region, volumes)
+
+    result = classify(volumes, group, keywords)
+    recorded = await _record_cohort(
+        result.validated_uids,
+        {
+            "hypothesis_body_region": region,
+            "matched_anatomy_group": group,
+            "total_input": len(volumes),
+            "rejected_volumes": result.rejected[:500],
+        },
+    )
+    if not result.validated:
+        message = (
+            f"0 matching volumes found for anatomy ('{group}'). All {len(volumes)} candidate "
+            "volumes were filtered out because they belong to different body regions "
+            f"({', '.join(sorted(result.conflicting_groups))}). "
+        ) + _EMPTY_COHORT_STEPS.format(
+            note=(
+                "Raise a scratchpad flag with level='warning' (or mention in your execution "
+                "summary) that 0 matching studies were automatically found for this anatomy."
+            )
+        )
+    elif result.rejected:
+        message = (
+            f"Filtered out {len(result.rejected)} volumes that don't match '{group}' anatomy. "
+            f"{len(result.validated)} volumes passed validation and were sent to the UI."
+        )
+    else:
+        message = (
+            f"All {len(result.validated)} volumes match the '{group}' anatomy. "
+            "Sent to the UI. Proceed with confidence."
+        )
+    return {
+        "matched_anatomy_group": group,
+        "anatomy_keywords_used": keywords,
+        "validated_uids": result.validated_uids,
+        "validated_volumes": result.validated,
+        "rejected_volumes": result.rejected,
+        "total_input": len(volumes),
+        "total_validated": len(result.validated),
+        "total_rejected": len(result.rejected),
+        **recorded,
+        "status": "success",
+        "message": message,
+    }
 
 
 @tool(
@@ -110,7 +161,7 @@ async def validate_population_anatomy(
         Field(description=(
             "The anatomical region specified in the research hypothesis "
             "(e.g., 'lung', 'kidney', 'brain', 'abdomen')."
-        ))
+        )),
     ],
     volume_details: Annotated[
         list[dict],
@@ -118,9 +169,9 @@ async def validate_population_anatomy(
             "List of volume detail dicts from search_volumes_by_description. "
             "Each dict must have 'uid', 'series_description', "
             "'body_part_examined', and 'modality' keys."
-        ))
+        )),
     ],
-) -> dict:
+) -> dict[str, Any]:
     """Validates that candidate volumes anatomically match the research hypothesis."""
     if len(hypothesis_body_region.strip()) < MIN_REGION_LENGTH:
         return error_result(
@@ -128,7 +179,7 @@ async def validate_population_anatomy(
             f"hypothesis_body_region {hypothesis_body_region!r} is too short to name a body region "
             f"(at least {MIN_REGION_LENGTH} characters, e.g. 'lung', 'kidney', 'brain').",
         )
-    missing = [index for index, vol in enumerate(volume_details) if not vol.get("uid")]
+    missing = [index for index, volume in enumerate(volume_details) if not volume.get("uid")]
     if missing:
         return error_result(
             "invalid_args",
@@ -139,151 +190,3 @@ async def validate_population_anatomy(
         return await _validate(hypothesis_body_region, volume_details)
     except domain_api.DomainApiError as exc:
         return domain_api.error_result_from(exc, "The validated cohort was not recorded")
-
-
-async def _validate(hypothesis_body_region: str, volume_details: list[dict]) -> dict:
-    if not volume_details:
-        save_meta = await _save_and_broadcast_cohort(
-            [], {"hypothesis_body_region": hypothesis_body_region, "total_input": 0}
-        )
-        return {
-            "status": "success",
-            "message": (
-                "No candidate volumes were returned by the search (0 cohort). "
-                "A 0-volume cohort has been recorded and sent to the interactive UI. "
-                "DO NOT STOP execution or raise a pipeline error! Instead: "
-                "(1) Note in your scratchpad/summary in the agent execution tab that 0 matching studies were automatically found. "
-                "(2) Proceed directly to Step 5 (if available) and Step 6 (generate_targets). "
-                "When generate_targets runs, it will remain at the Human-in-the-Loop UI review gate until the doctor selects and labels at least one volume. Never hand off a 0-size cohort."
-            ),
-            "validated_uids": [],
-            "rejected_volumes": [],
-            "total_input": 0,
-            "total_validated": 0,
-            "total_rejected": 0,
-            **save_meta,
-        }
-
-    # ── Resolve hypothesis anatomy ──────────────────────────────────────
-    matched_group, matched_keywords = _resolve_anatomy_group(hypothesis_body_region)
-
-    if not matched_group:
-        # Cannot resolve anatomy — pass everything with a warning
-        validated_uids = [v["uid"] for v in volume_details]
-        save_meta = await _save_and_broadcast_cohort(
-            validated_uids,
-            {
-                "hypothesis_body_region": hypothesis_body_region,
-                "matched_anatomy_group": None,
-                "total_input": len(volume_details),
-                "warning": "anatomy region could not be resolved; no volume was filtered",
-            },
-        )
-        return {
-            "status": "warning",
-            "message": (
-                f"Could not resolve '{hypothesis_body_region}' to a known anatomy "
-                f"group. All {len(volume_details)} volumes passed through without "
-                f"filtering. Manually verify they match your hypothesis."
-            ),
-            "matched_anatomy_group": None,
-            "validated_uids": validated_uids,
-            "validated_volumes": volume_details,
-            "rejected_volumes": [],
-            "total_input": len(volume_details),
-            "total_validated": len(volume_details),
-            "total_rejected": 0,
-            **save_meta,
-        }
-
-    # ── Classify each volume ────────────────────────────────────────────
-    validated = []
-    rejected = []
-
-    for vol in volume_details:
-        uid = vol.get("uid", "")
-        desc = (vol.get("series_description") or "").lower()
-        body_part = (vol.get("body_part_examined") or "").lower()
-        combined_text = f"{desc} {body_part}"
-
-        # Check if any keyword from the matched anatomy group appears
-        is_match = any(kw in combined_text for kw in matched_keywords)
-
-        # Check for conflicting anatomy (clearly belongs to a DIFFERENT group)
-        conflicting_group = None
-        if not is_match:
-            for other_group, other_keywords in ANATOMY_GROUPS.items():
-                if other_group == matched_group:
-                    continue
-                if any(kw in combined_text for kw in other_keywords):
-                    conflicting_group = other_group
-                    break
-
-        if is_match:
-            validated.append(vol)
-        elif conflicting_group:
-            rejected.append({
-                "uid": uid,
-                "series_description": vol.get("series_description", ""),
-                "body_part_examined": vol.get("body_part_examined", ""),
-                "reason": (
-                    f"Anatomy MISMATCH: volume belongs to '{conflicting_group}' "
-                    f"region, but hypothesis requires '{matched_group}'"
-                ),
-            })
-        else:
-            # No clear anatomy signal — include but it's ambiguous
-            validated.append(vol)
-
-    # ── Save and Broadcast validated UIDs ───────────────────────────────
-    validated_uids = [v["uid"] for v in validated]
-    save_meta = await _save_and_broadcast_cohort(
-        validated_uids,
-        {
-            "hypothesis_body_region": hypothesis_body_region,
-            "matched_anatomy_group": matched_group,
-            "total_input": len(volume_details),
-            "rejected_volumes": rejected[:500],
-        },
-    )
-
-    # ── Build response ──────────────────────────────────────────────────
-    result = {
-        "matched_anatomy_group": matched_group,
-        "anatomy_keywords_used": matched_keywords,
-        "validated_uids": validated_uids,
-        "validated_volumes": validated,
-        "rejected_volumes": rejected,
-        "total_input": len(volume_details),
-        "total_validated": len(validated),
-        "total_rejected": len(rejected),
-        **save_meta,
-    }
-
-    if not validated:
-        result["status"] = "success"
-        reasons_str = ", ".join(set(r["reason"].split("'")[1] for r in rejected if "reason" in r and "'" in r["reason"]))
-        result["message"] = (
-            f"0 matching volumes found for anatomy ('{matched_group}'). "
-            f"All {len(volume_details)} candidate volumes were filtered out because they belong to different body regions "
-            f"({reasons_str}). "
-            f"A 0-volume cohort has been recorded and sent to the interactive UI. "
-            f"DO NOT STOP execution or raise a pipeline error! Instead: "
-            f"(1) Raise a scratchpad flag with level='warning' (or mention in your execution summary) that 0 matching studies were automatically found for this anatomy. "
-            f"(2) Proceed directly to Step 5 (if available) and Step 6 (generate_targets). "
-            f"When generate_targets runs, it will remain at the Human-in-the-Loop UI review gate until the doctor selects and labels at least one volume. Never hand off a 0-size cohort."
-        )
-    elif rejected:
-        result["status"] = "success"
-        result["message"] = (
-            f"Filtered out {len(rejected)} volumes that don't match "
-            f"'{matched_group}' anatomy. {len(validated)} volumes passed validation and were sent to the UI."
-        )
-    else:
-        result["status"] = "success"
-        result["message"] = (
-            f"All {len(validated)} volumes match the "
-            f"'{matched_group}' anatomy. Sent to the UI. Proceed with confidence."
-        )
-
-    return result

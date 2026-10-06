@@ -47,7 +47,7 @@ async def read_agent_output(session_id: str, agent_type: str) -> dict[str, Any]:
     """The structured output an agent recorded on its run, or ``{}``."""
     if not session_id or not agent_type:
         return {}
-    for run in await domain_api.request("GET", f"/runs/session/{session_id}") or []:
+    for run in await domain_api.session_runs(session_id):
         node = run.get("node") or {}
         if node.get("target_name") != agent_type:
             continue
