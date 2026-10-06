@@ -35,7 +35,7 @@ Development publishes `8001`, `8150`, `8000`, host `8043→8042`, and host `5433
 
 - Only the Application API receives `DATABASE_URL` and registers database routers.
 - All PostgreSQL source ownership lives under `Backend/application_api/`, including ORM models, repositories, schemas, seeders, and Alembic migrations.
-- MONAI does not run Alembic or seed the database. One-shot `db-migrate` and `db-seed` services run before the Application API.
+- MONAI does not run Alembic or seed the database. The Application API container migrates (`alembic upgrade head`) and seeds before it starts serving.
 - Inference and training jobs share a bounded queue. Default concurrency is one running job plus eight queued jobs.
 - Application health depends on PostgreSQL, not MONAI or Orthanc. Inference or PACS failures affect only the operations that require them.
 - PostgreSQL remains the only application datastore; MongoDB is not part of this architecture.

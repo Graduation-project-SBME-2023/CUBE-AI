@@ -103,7 +103,7 @@ Inference/training jobs and agent-side GPU/CPU-heavy tasks use separate bounded 
 
 ## Data and generated files
 
-The Application API exclusively owns SQLAlchemy models, repositories, schemas, seeders, and Alembic migrations. Compose runs `db-migrate`, then `db-seed`, before starting it. `/health/ready` verifies database connectivity and the current Alembic revision.
+The Application API exclusively owns SQLAlchemy models, repositories, schemas, seeders, and Alembic migrations. Its container runs `alembic upgrade head`, then the seeders, before the server starts. `/health/ready` verifies database connectivity and the current Alembic revision.
 
 Generated files use the structure documented in [`Backend/storage/README.md`](../Backend/storage/README.md):
 

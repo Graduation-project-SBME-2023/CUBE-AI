@@ -246,7 +246,7 @@ Write-Warn "Starting Docker containers..."
 Write-Warn "First run may take several minutes."
 Write-Host ""
 
-# --build: application-api/db-migrate/db-seed have a `build:` section and
+# --build: application-api has a `build:` section and
 # are meant to always run the current checkout's code. Without it, `up` can
 # reuse an already-built local image tag and silently run stale
 # migrations/code instead of what's on disk (see database_audit.md D-33).
@@ -263,8 +263,8 @@ docker compose `
 $ComposeExit = $LASTEXITCODE
 
 # `docker compose up --wait` returns a non-zero code whenever a run-to-completion
-# service exits - even with code 0. This stack has three such one-shots: db-migrate,
-# db-seed, and startup-complete (the readiness announcer). startup-complete is wired
+# service exits - even with code 0. This stack has one such one-shot:
+# startup-complete (the readiness announcer). startup-complete is wired
 # to start only after every backend and viewer dependency reports healthy, so its
 # exit code - not the aggregate --wait code - is the real readiness signal.
 $StartupId = docker compose `

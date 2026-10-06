@@ -50,52 +50,14 @@ services:
       start_period: 180s
     restart: unless-stopped
 
-  db-migrate:
-    build:
-      context: ${COMPOSE_PROJECT_DIR}
-      dockerfile: deploy/Dockerfile.application-api
-    image: cubeai1/application-api:v1.0
-    # This image is built from the current checkout. Reusing an older local tag can
-    # omit newly added migration files such as application_api/alembic.ini.
-    pull_policy: build
-    command: alembic -c /app/application_api/alembic.ini upgrade head
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      ORTHANC_URL: http://orthanc:8042
-      ORTHANC_USER: ${ORTHANC_USER:-orthanc}
-      ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:-orthanc}
-    env_file:
-      - .env
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: "no"
-
-  db-seed:
-    build:
-      context: ${COMPOSE_PROJECT_DIR}
-      dockerfile: deploy/Dockerfile.application-api
-    image: cubeai1/application-api:v1.0
-    pull_policy: build
-    command: python -m application_api.seeders
-    working_dir: /app
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      ORTHANC_URL: http://orthanc:8042
-      ORTHANC_USER: ${ORTHANC_USER:-orthanc}
-      ORTHANC_PASSWORD: ${ORTHANC_PASSWORD:-orthanc}
-    env_file:
-      - .env
-    depends_on:
-      db-migrate:
-        condition: service_completed_successfully
-    restart: "no"
-
   application-api:
     build:
       context: ${COMPOSE_PROJECT_DIR}
       dockerfile: deploy/Dockerfile.application-api
     image: cubeai1/application-api:v1.0
+    # This image is built from the current checkout. Reusing an older local tag can
+    # omit newly added migration files such as application_api/alembic.ini. The
+    # image's CMD migrates and seeds before it serves (see the Dockerfile).
     pull_policy: build
     container_name: application-api-backend
     ports:
@@ -106,6 +68,11 @@ services:
           - control-api
     environment:
       APP_API_PORT: 8001
+      # Measured against 1 worker (reads at 30 and 150 req/s, with and without
+      # concurrent report publishes): both stay well under 500 ms p95, but two
+      # keep the read tail several times lower under contention and leave CPU
+      # headroom one worker does not have at 150 req/s. Re-measure before
+      # changing it.
       APP_API_WORKERS: 2
       APP_API_URL: http://application-api:8001
       INFERENCE_API_URL: http://monailabel:8000
@@ -135,21 +102,25 @@ services:
       - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
       - ${COMPOSE_PROJECT_DIR}/Backend/apps/radiology/lib/configs:/app/apps/radiology/lib/configs:ro
     depends_on:
-      db-seed:
-        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: [ "CMD", "python", "-c", 'import urllib.request; urllib.request.urlopen("http://localhost:8001/health", timeout=3)' ]
       interval: 30s
       timeout: 10s
       retries: 3
+      # Startup runs the migrations first; on an empty database that is the
+      # whole chain, so failures here do not count against the retries.
+      start_period: 120s
+      start_interval: 5s
     restart: unless-stopped
 
   monailabel:
     # GPU image — amd64 only, CUDA toolkit included
     image: cubeai1/custom-monailabel:v1.0-gpu
     # Override the image's stale baked CMD (it still runs `alembic ... upgrade head`
-    # against a /alembic mount this branch removed — DB migrations are now owned by
-    # the one-shot db-migrate service). Mirrors deploy/Dockerfile.backend.gpu CMD.
+    # against a /alembic mount this branch removed — DB migrations are now run by
+    # application-api at startup). Mirrors deploy/Dockerfile.backend.gpu CMD.
     command:
       - sh
       - -c

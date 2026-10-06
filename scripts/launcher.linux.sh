@@ -216,8 +216,8 @@ if [[ "$FRONTEND_MODE" == "Docker" ]]; then
   warn "Starting Docker containers..."
   warn "First run may take several minutes."
   echo
-  # --build: application-api/db-migrate/db-seed have a `build:` section and
-  # are meant to always run the current checkout's code, not a stale cached
+  # --build: application-api has a `build:` section and
+  # is meant to always run the current checkout's code, not a stale cached
   # local image tag (see database_audit.md D-33).
   docker compose \
     --env-file "$BACKEND_ENV" \

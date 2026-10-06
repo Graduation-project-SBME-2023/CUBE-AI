@@ -101,14 +101,21 @@ def test_application_image_owns_alembic_and_database_dependencies():
     assert "COPY Backend/monailabel" not in dockerfile
     assert "script_location = %(here)s/migrations" in alembic_config
 
+    # The image migrates, then seeds, then serves -- each step only if the one
+    # before it succeeded, so the API never serves a schema that failed to migrate.
+    command = next(line for line in dockerfile.splitlines() if line.startswith("CMD"))
+    migrate = command.index("alembic -c /app/application_api/alembic.ini upgrade head")
+    seed = command.index("python -m application_api.seeders")
+    serve = command.index("exec python -m application_api.start")
+    assert migrate < seed < serve
+    assert command.count("&&") == 2
+
     for compose_file in compose_files:
         compose = compose_file.read_text(encoding="utf-8")
         monai_start = compose.index("\n  monailabel:")
         monai_end = compose.index("\n  orthanc:", monai_start)
         monai_service = compose[monai_start:monai_end]
 
-        assert "/app/application_api/alembic.ini" in compose
-        assert "python -m application_api.seeders" in compose
         assert "DATABASE_URL" not in monai_service
 
 

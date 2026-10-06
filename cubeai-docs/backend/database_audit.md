@@ -1179,6 +1179,11 @@ And add `--build` (or an explicit build step) to both launchers:
 docker compose --env-file deploy/.env -f deploy/docker-compose.backend.cpu.yml up --build --wait
 ```
 
+**Status:** resolved. The source bind mount moved to the `backend.dev` overlay, the launchers pass
+`--build`, and the `db-migrate`/`db-seed` services were then removed altogether: the
+`application-api` image migrates and seeds in its own CMD before it serves, so the code that
+migrates is always the code that runs.
+
 ---
 
 ## Testing & documentation

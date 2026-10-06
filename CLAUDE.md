@@ -63,7 +63,7 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.backend.gpu.yml -
 ```
 
 Overlays: `backend.dev` (bind-mounts `application_api` + `storage` for hot reload; the base
-file deliberately does not, so `db-migrate`/`db-seed` always run the image's baked code),
+file deliberately does not, so production migrates with the image's baked code),
 `backend.prod` (`ports: !reset []` — OpenResty becomes the only published ingress),
 `frontend.prod` (OpenResty + built OHIF). `docker-compose.frontend.dev.yml` exists but is
 marked unused in its own header comment ("react app runs super slow on docker").
@@ -178,7 +178,11 @@ cd Backend && alembic -c application_api/alembic.ini upgrade head
 cd Backend && alembic -c application_api/alembic.ini revision --autogenerate -m "message"
 ```
 
-Compose runs one-shot `db-migrate` then `db-seed` before `application-api`.
+There are no separate migrate/seed services: the `application-api` image's CMD runs
+`alembic upgrade head`, then `python -m application_api.seeders`, then the server, chained
+with `&&` and before uvicorn forks its workers (`deploy/Dockerfile.application-api`). A new
+migration is therefore applied by `docker compose restart application-api`; a migration that
+fails keeps the API from serving, and the restart policy retries it.
 
 ## Architecture Notes
 
