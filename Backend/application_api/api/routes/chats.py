@@ -1,9 +1,11 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from application_api.api.dependencies import owned_session
 from application_api.db.session import get_db
+from application_api.schemas.chat_messages import ChatMessage as ChatMessageOut
 from application_api.repositories import chats as crud
 from application_api.schemas import chats as schemas
 
@@ -16,15 +18,33 @@ router = APIRouter(prefix="/chats", tags=["Chats"])
     status_code=status.HTTP_201_CREATED,
 )
 async def create_chat(
-    session_id: UUID, data: schemas.ChatCreate, db: AsyncSession = Depends(get_db)
+    data: schemas.ChatCreate,
+    session_id: UUID = Depends(owned_session),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Create a chat inside a session. A session may have many."""
+    """A session has one chat, created with it: this returns that chat."""
     return await crud.create_chat(db, session_id, title=data.title)
+
+
+@router.post("/session/{session_id}/input", response_model=ChatMessageOut, status_code=status.HTTP_201_CREATED)
+async def accept_input(
+    data: schemas.InputAccept,
+    response: Response,
+    session_id: UUID = Depends(owned_session),
+    db: AsyncSession = Depends(get_db),
+):
+    """The user's message and its durable `user_input` event, together.
+    Called by the Agent System, which queues the message only after this
+    returns. A replay of the same message id answers 200 with the stored row."""
+    message, created = await crud.accept_input(db, session_id, data)
+    if not created:
+        response.status_code = status.HTTP_200_OK
+    return message
 
 
 @router.get("/session/{session_id}", response_model=list[schemas.Chat])
 async def list_chats_for_session(
-    session_id: UUID,
+    session_id: UUID = Depends(owned_session),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),

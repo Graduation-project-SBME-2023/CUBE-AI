@@ -17,6 +17,7 @@ from application_api.core.stored_file_limits import (
 )
 from application_api.db.binary_session import binary_read_slots, get_binary_db
 from application_api.db.session import get_db
+from application_api.services.fencing import fenced_db
 from application_api.repositories import stored_files as repo
 from application_api.schemas.stored_files import RenderRegistration, StoredFileOut
 
@@ -32,7 +33,7 @@ async def upload_stored_file(
     created_by_run_id: Optional[UUID] = Form(None),
     metadata: Optional[str] = Form(None),
     file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(fenced_db),
 ):
     """Publish retained bytes."""
     payload = await file.read()
@@ -67,7 +68,7 @@ async def upload_stored_file(
 
 @router.post("/renders", response_model=StoredFileOut, status_code=201)
 async def register_render(
-    data: RenderRegistration, db: AsyncSession = Depends(get_db)
+    data: RenderRegistration, db: AsyncSession = Depends(fenced_db)
 ):
     """Catalogue a regenerable render that already exists on disk."""
     stored_file, created = await repo.register_render(db, data)

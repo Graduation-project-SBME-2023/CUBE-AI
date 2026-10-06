@@ -1,10 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Query, Path, status
 from pydantic import BaseModel
-import httpx
 import logging
 from typing import Optional, List
-import os
-from uuid import uuid4
 
 from sqlalchemy import delete as sa_delete, func, select, text, tuple_, update as sa_update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -15,6 +12,7 @@ from application_api.db.models.patient import Patient
 from application_api.db.models.study import Study
 from application_api.db.models.workflow import Workflow
 from application_api.db.models.workflow_details import WorkflowDetail
+from application_api.services import training
 
 
 # The nnUNet dataset id must be allocated under a lock plus the UNIQUE
@@ -65,10 +63,6 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-INFERENCE_API_URL = os.getenv(
-    "INFERENCE_API_URL",
-    os.getenv("MONAI_URL", "http://monailabel:8000"),
-).rstrip("/")
 
 
 # Define the Pydantic model for validation
@@ -102,39 +96,6 @@ class WorkflowDeleteMultipleRequest(BaseModel):
 class ListWorkflowRequest(BaseModel):
     task_name: str
 
-
-
-def _build_dataset_json(workflow: Workflow, rows) -> dict:
-    """Regenerate nnUNet's dataset.json from `workflow` + frozen members."""
-    definition = workflow.definition or {}
-    channel_names = definition.get("channel_names") or definition.get("modality") or {}
-    labels = definition.get("labels") or {}
-    training_cases = sorted({row.case_index for row in rows if row.train})
-    return {
-        "name": workflow.display_title or workflow.task_name,
-        "dataset_id": workflow.dataset_id,
-        "description": workflow.description or "",
-        "channel_names": channel_names,
-        "labels": labels,
-        "numTraining": len(training_cases),
-        "file_ending": definition.get("file_ending", ".nii.gz"),
-    }
-
-
-def _build_instance_mapping(rows) -> list[dict]:
-    """Ordered (case, channel) -> series mapping, regenerated from the rows."""
-    return [
-        {
-            "case_index": row.case_index,
-            "channel_index": row.channel_index,
-            "study_uid": row.study_uid,
-            "volume_series_instance_uid": row.volume_series_instance_uid,
-            "label_series_instance_uid": row.label_series_instance_uid,
-            "subject_key": row.subject_key,
-            "train": row.train,
-        }
-        for row in rows
-    ]
 
 
 @router.post("/{task_name}/add", summary="Add a new workflow record for a specific task")
@@ -487,99 +448,25 @@ async def initialize_training(
     task_name: str = Path(..., description="Task name to start training for"),
     db: AsyncSession = Depends(get_db),
 ):
-    """Start nnUNet training over the complete, frozen, deterministic member set.: training input is **all** members of the task in `(case_index, channel_index)` order. The previous implementation paged the membership with an unsorted `LIMIT 1000`, so a task with more members"""
-    try:
-        workflow = (
-            await db.execute(select(Workflow).where(Workflow.task_name == task_name))
-        ).scalar_one_or_none()
-        if workflow is None:
-            raise HTTPException(status_code=404, detail="Task not found in workflow")
-
-        result = await db.execute(
-            select(
-                WorkflowDetail.study_uid,
-                WorkflowDetail.volume_series_instance_uid,
-                WorkflowDetail.label_series_instance_uid,
-                WorkflowDetail.modality,
-                WorkflowDetail.train,
-                WorkflowDetail.case_index,
-                WorkflowDetail.channel_index,
-                WorkflowDetail.subject_key,
-            )
-            .where(WorkflowDetail.task_name == task_name)
-            .order_by(WorkflowDetail.case_index, WorkflowDetail.channel_index)
-        )
-        rows = result.all()
-        if not rows:
-            raise HTTPException(status_code=404, detail="No records found for the given task")
-
-        job_id = uuid4().hex
-        payload = {
-            "job_id": job_id,
-            "task_name": task_name,
-            "dataset_id": workflow.dataset_id,
-            "definition": workflow.definition or {},
-            "records": [dict(row._mapping) for row in rows],
-            # Regenerated from the rows on demand; nnUNet's dataset.json and
-            # instance_mapping are no longer read back from a file.
-            "dataset_json": _build_dataset_json(workflow, rows),
-            "instance_mapping": _build_instance_mapping(rows),
-        }
-
-        # Freeze on admission — before the request leaves this process, so a
-        # concurrent membership edit loses the race rather than silently
-        # changing what is being trained.
-        if workflow.frozen_at is None:
-            workflow.frozen_at = func.now()
-            db.add(workflow)
-            await db.commit()
-
-        timeout = httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(f"{INFERENCE_API_URL}/training-jobs/", json=payload)
-        if response.status_code == 429:
-            raise HTTPException(
-                status_code=429,
-                detail="Inference queue is full",
-                headers={"Retry-After": response.headers.get("Retry-After", "10")},
-            )
-        response.raise_for_status()
-        job = response.json()
-        return {"job_id": job_id, "task_name": task_name, "status": job["status"]}
-    except HTTPException:
-        raise
-    except httpx.HTTPError as exc:
-        logger.error("Inference service unavailable while starting training: %s", exc)
-        raise HTTPException(status_code=503, detail="Inference service is unavailable") from exc
-    except SQLAlchemyError as exc:
-        logger.exception("Database error starting nnUNet training for %s", task_name)
-        raise HTTPException(status_code=500, detail="Failed to initialize nnUNet training") from exc
+    """Start nnUNet training over the complete, frozen, deterministic member set,
+    with a receipt committed before the submission (`services/training.py`)."""
+    job, backend_status = await training.start_training(db, task_name)
+    return {
+        "job_id": job.job_id,
+        "task_name": task_name,
+        "status": backend_status or "SUBMISSION_UNCERTAIN",
+    }
 
 
 @router.get("/training-jobs/{job_id}", summary="Get training job status")
-async def get_training_job(job_id: str):
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"{INFERENCE_API_URL}/training-jobs/{job_id}")
-        if response.status_code == 404:
-            raise HTTPException(status_code=404, detail="Training job not found")
-        response.raise_for_status()
-        return response.json()
-    except HTTPException:
-        raise
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=503, detail="Inference service is unavailable") from exc
+async def get_training_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    """Reconciles the receipt with MONAI on every read."""
+    job, backend_status = await training.reconcile(db, job_id)
+    return {"job_id": job.job_id, "task_name": job.task_name, "status": backend_status,
+            "outcome": job.outcome, "submitted_at": job.submitted_at, "ended_at": job.ended_at}
 
 
 @router.delete("/training-jobs/{job_id}", summary="Cancel or purge a training job")
-async def cancel_training_job(job_id: str, purge: bool = Query(False)):
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.delete(
-                f"{INFERENCE_API_URL}/training-jobs/{job_id}",
-                params={"purge": str(purge).lower()},
-            )
-        response.raise_for_status()
-        return response.json()
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=503, detail="Inference service is unavailable") from exc
+async def cancel_training_job(job_id: str, purge: bool = Query(False), db: AsyncSession = Depends(get_db)):
+    job, backend_status = await training.cancel(db, job_id, purge)
+    return {"job_id": job.job_id, "status": backend_status, "outcome": job.outcome}

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.db.session import get_db
+from application_api.services.fencing import fenced_db
 from application_api.repositories import radiomics as crud
 from application_api.schemas.radiomics import (
     RadiomicsBatchResult,
@@ -22,7 +23,7 @@ async def record_radiomics_rows(
     run_id: UUID,
     data: RadiomicsBatchWrite,
     response: Response,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(fenced_db),
 ):
     """Record extracted rows for a running feature-extraction run."""
     result = await crud.record_features(db, run_id, data)

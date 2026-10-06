@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.db.session import get_db
+from application_api.services.fencing import fenced_db
 from application_api.repositories import cohorts as repo
 from application_api.schemas.cohorts import (
     CohortAnalysisRow,
@@ -42,7 +43,7 @@ async def upsert_cohort(
     cohort_key: str,
     data: CohortUpsert,
     response: Response,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(fenced_db),
 ):
     """Create a run's draft cohort, or merge criteria/summary into it."""
     cohort, created = await repo.upsert_cohort(db, run_id, cohort_key, data)
@@ -57,7 +58,7 @@ async def read_cohort(cohort_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.put("/{cohort_id}/members", response_model=CohortOut)
 async def set_cohort_members(
-    cohort_id: UUID, data: CohortMembersSet, db: AsyncSession = Depends(get_db)
+    cohort_id: UUID, data: CohortMembersSet, db: AsyncSession = Depends(fenced_db)
 ):
     """Replace the draft membership. Retained volumes keep their labels."""
     return await repo.set_members(db, cohort_id, data)
@@ -65,7 +66,7 @@ async def set_cohort_members(
 
 @router.patch("/{cohort_id}/labels", response_model=CohortOut)
 async def write_cohort_labels(
-    cohort_id: UUID, data: CohortLabelsWrite, db: AsyncSession = Depends(get_db)
+    cohort_id: UUID, data: CohortLabelsWrite, db: AsyncSession = Depends(fenced_db)
 ):
     """Record labels with their source (LLM extraction, manual override, upload)."""
     return await repo.write_labels(db, cohort_id, data)

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
+import re
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.core.json_bounds import (
@@ -20,6 +21,22 @@ from application_api.core.json_bounds import (
 from application_api.db.models.session_events import SessionEvent
 
 logger = logging.getLogger(__name__)
+
+
+_DRIVER_PREFIX = re.compile(r"^<class '[\w.]+'>:\s*")
+
+
+def conflict(code: str, message: str, status_code: int = 409, **extra: Any) -> HTTPException:
+    """A refusal the caller can act on: a stable code plus a readable message."""
+    return HTTPException(status_code=status_code, detail={"code": code, "message": message, **extra})
+
+
+def database_refusal(exc: IntegrityError) -> HTTPException:
+    """A constraint or trigger refused the write: the database states the rule
+    (write-path fencing, row invariants), so its message is the caller's answer."""
+    message = _DRIVER_PREFIX.sub("", str(exc.orig).splitlines()[0] if exc.orig else str(exc))
+    sqlstate = getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)
+    return conflict("REFUSED_BY_DATABASE", message, sqlstate=sqlstate)
 
 
 async def lock_session(db: AsyncSession, session_id: UUID | str) -> None:
@@ -44,6 +61,21 @@ async def lock_session_and_graph(db: AsyncSession, session_id: UUID | str) -> No
         text("SELECT session_id FROM session_graphs WHERE session_id = :sid FOR NO KEY UPDATE"),
         {"sid": str(session_id)},
     )
+
+
+async def lock_run(db: AsyncSession, run_id: UUID | str) -> UUID:
+    """Session first, then the run (the lock order); returns
+    the run's session. 404 if the run is absent."""
+    session_id = (
+        await db.execute(text("SELECT session_id FROM node_runs WHERE run_id = :rid"), {"rid": str(run_id)})
+    ).scalar()
+    if session_id is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    await lock_session(db, session_id)
+    await db.execute(
+        text("SELECT run_id FROM node_runs WHERE run_id = :rid FOR UPDATE"), {"rid": str(run_id)}
+    )
+    return session_id
 
 
 def stage_event(
@@ -81,6 +113,9 @@ async def publication(db: AsyncSession, session_id: UUID | str):
     except HTTPException:
         await db.rollback()
         raise
+    except IntegrityError as exc:
+        await db.rollback()
+        raise database_refusal(exc) from exc
     except SQLAlchemyError as exc:
         await db.rollback()
         logger.exception("Publication failed for session %s", session_id)

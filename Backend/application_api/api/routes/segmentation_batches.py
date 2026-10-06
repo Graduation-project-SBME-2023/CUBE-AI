@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.db.session import get_db
+from application_api.services.fencing import fenced_db
 from application_api.repositories import segmentation_batches as repo
 from application_api.schemas.segmentation_batches import (
     PairOut,
@@ -37,7 +38,7 @@ async def create_batch(
     batch_key: str,
     data: SegmentationBatchCreate,
     response: Response,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(fenced_db),
 ):
     """Insert-or-read the batch on its natural key."""
     batch, created = await repo.create_batch(db, run_id, batch_key, data)
@@ -76,7 +77,7 @@ async def read_batch(segmentation_batch_id: UUID, db: AsyncSession = Depends(get
 
 @router.patch("/{segmentation_batch_id}/pairs", response_model=SegmentationBatchOut)
 async def update_pairs(
-    segmentation_batch_id: UUID, data: PairStatesUpdate, db: AsyncSession = Depends(get_db)
+    segmentation_batch_id: UUID, data: PairStatesUpdate, db: AsyncSession = Depends(fenced_db)
 ):
     """Checkpoint pair progress in place. Pairs are never deleted."""
     return await repo.update_pair_states(db, segmentation_batch_id, data)

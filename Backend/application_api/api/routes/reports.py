@@ -7,6 +7,7 @@ from fastapi.responses import Response as FastAPIResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.db.session import get_db
+from application_api.services.fencing import fenced_db
 from application_api.repositories import reports as repo
 from application_api.schemas.reports import (
     ReportCreate,
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/reports", tags=["Reports"])
 
 
 @router.post("/", response_model=ReportOut, status_code=201)
-async def create_report(data: ReportCreate, response: Response, db: AsyncSession = Depends(get_db)):
+async def create_report(data: ReportCreate, response: Response, db: AsyncSession = Depends(fenced_db)):
     """Create a new report row with initial source content."""
     report, created = await repo.create_report(db, data)
     if not created:
@@ -43,7 +44,7 @@ async def read_report(report_id: UUID, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{report_id}/images", response_model=ReportImageOut, status_code=201)
 async def register_image(
-    report_id: UUID, data: ReportImageIn, db: AsyncSession = Depends(get_db)
+    report_id: UUID, data: ReportImageIn, db: AsyncSession = Depends(fenced_db)
 ):
     """Register a figure artifact as a named source image for a report."""
     return await repo.register_image(db, report_id, data)
@@ -53,7 +54,7 @@ async def register_image(
 async def publish_report(
     report_id: UUID,
     data: ReportPublish,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(fenced_db),
 ):
     """Compile-then-publish."""
     pdf_bytes = await repo.publish_report(db, report_id, data)
