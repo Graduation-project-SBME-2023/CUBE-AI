@@ -264,8 +264,8 @@ Write-Host ""
 #                     that's already here - `--pull never` used to be here,
 #                     but that hard-fails with "No such image" the moment any
 #                     required image hasn't been pulled yet.
-# --build           : application-api/db-migrate/db-seed have a `build:`
-#                     section (pull_policy: build) and are meant to always
+# --build           : application-api has a `build:`
+#                     section (pull_policy: build) and is meant to always
 #                     run the current checkout's code; without --build,
 #                     `up` can reuse an already-built local image tag and
 #                     silently run stale migrations/code instead of what's
@@ -288,8 +288,8 @@ docker compose `
 $ComposeExit = $LASTEXITCODE
 
 # `docker compose up --wait` returns a non-zero code whenever a run-to-completion
-# service exits - even with code 0. This stack has three such one-shots: db-migrate,
-# db-seed, and startup-complete (the readiness announcer). startup-complete is wired
+# service exits - even with code 0. This stack has one such one-shot:
+# startup-complete (the readiness announcer). startup-complete is wired
 # to start only after every dependency reports healthy, so its exit code - not the
 # aggregate --wait code - is the real readiness signal.
 $StartupId = docker compose `

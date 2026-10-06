@@ -44,4 +44,12 @@ COPY Backend/apps/radiology/lib/configs /app/apps/radiology/lib/configs
 
 EXPOSE 8001
 
-CMD ["python", "-m", "application_api.start"]
+# Bring the schema to head and seed the reference rows, then serve. Both steps
+# run once per container start, in this process, before uvicorn forks its
+# workers, so no two workers ever migrate at once; at head they are no-ops.
+# `&&` keeps the API from serving a schema that failed to migrate (Postgres
+# DDL is transactional, so a failed migration leaves nothing half-applied and
+# the restart policy simply retries it). `exec` hands PID 1 to the server so
+# it receives the container's stop signal. A command passed to
+# `docker compose run application-api ...` replaces all of this.
+CMD ["sh", "-c", "alembic -c /app/application_api/alembic.ini upgrade head && python -m application_api.seeders && exec python -m application_api.start"]

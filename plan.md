@@ -181,13 +181,13 @@ Backend/
 
 | #   | Plan                                                      | Milestone    | Depends on         | Comes from                                                       | Status            |
 | --- | --------------------------------------------------------- | ------------ | ------------------ | ---------------------------------------------------------------- | ----------------- |
-| 0   | Runtime: Python 3.13, PyCaret removed                     | M0 Runtime   | –                  | your decision (this merge)                                       | Not started       |
+| 0   | Runtime: Python 3.13, PyCaret removed                     | M0 Runtime   | –                  | your decision (this merge)                                       | 🟡 Implemented; CI not green yet |
 | 1   | Toolkit Core                                              | M1 Toolkit   | –                  | tools P1; system Phase 1 (registries, artifact types, discovery) | ✅ Done (1.1–1.5) |
 | 2   | Tool Packs                                                | M1           | 1                  | tools P2                                                         | ✅ Done (2.1–2.5) |
 | 3   | Agent Definitions and Skills                              | M1           | 1, 2               | tools P3; system §29-30                                          | Not started       |
 | 4   | Sandbox Foundation                                        | M2 Compute   | 1                  | tools P4                                                         | Not started       |
 | 5   | Job Platform (Celery + Redis)                             | M2           | 1, 4               | tools P5                                                         | Not started       |
-| 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | system Phase 1 (State, Graph Versions); Appendix P | 6.1 ✅ Done; 6.2–6.5 not started |
+| 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | system Phase 1 (State, Graph Versions); Appendix P | ✅ Done (6.1–6.5) |
 | 7   | Modeling Engine, Heavy Tools as Jobs + `run_modeling`     | M2           | 0, 2, 5, 6         | tools P6; system `run_modeling`; your decision (PyCaret removed) | Not started       |
 | 8 | Validator and Diff Engine | M3 | 1, 6 | system Phase 1 (Validator), Phase 2 (Diff, Affected Set); Appendix P D23 | Not started |
 | 9   | LangGraph Engine, Checkpoints and Model Gateway           | M3           | 1, 3, 6            | your decisions (LangGraph; LangGraph-native nodes, 2026-10-02); system §4 (Model Gateway); Appendix P D27 | Not started       |
@@ -206,7 +206,9 @@ Backend/
 
 **Progress (2026-10-03):** Plan 2 is done: `Backend/mcp/` is gone, the catalog loads 63 tools, and the Definition of Ready smoke test passes for every light tool (see "Plan 2 — as built" at the end of Plan 2). Like Plan 1, it was done before Plan 0, so CI (the 3.11 image) cannot collect the 3.13 tests of the toolkit and the tool packs; **Plan 0 is the recommended next plan.**
 
-**Progress (2026-10-06):** Plan 0 is implemented and waits for its first CI run (see "Plan 0 — as built" at the end of Plan 0): the agents image is `python:3.13.16-slim` without PyCaret, the Application API image is `python:3.13-slim`, and the deterministic suite now collects the toolkit and tool-pack tests in the image. The images are built by GitHub Actions only; nothing was built locally. Once `backend-tests.yml` passes on the pushed commit, mark Plan 0 done.
+**Progress (2026-10-05):** Phases 6.2–6.5 are done, so Plan 6 is done: migration `p1f0a2c3d4e5_v1_p_session_graph`, the models, repositories and routes of T0–T10 with D24 fencing, and the Agent System's `HarnessClient` and `GraphStore` (see "Phases 6.2–6.5 — as built" at the end of Plan 6). The live database suites (51 tests, now 52) pass against PostgreSQL 18, and on 2026-10-06 also in CI inside the Python 3.13 image.
+
+**Progress (2026-10-06):** Plan 0 is implemented (see "Plan 0 — as built" at the end of Plan 0): the agents image is `python:3.13.16-slim` without PyCaret, the Application API image is `python:3.13-slim`, and the deterministic suite collects the toolkit and tool-pack tests in the image. The first CI run built the 3.13 image and passed `live-db-tests`, but failed to collect every module that imports an AutoGen agent (mcp 2 removed an import `autogen_ext` needs; now `mcp>=1.17,<2`), and the radiology job could not pull the 11 GB MONAI CPU image (it now frees disk first). Mark Plan 0 done once `backend-tests.yml` passes.
 
 **Decision (2026-10-02): LangGraph-native agent nodes.** Plan 9 now also builds the checkpointer, gates, `@task` tool calls, `Send` fan-out, the literature workflow graph and in-node compaction; Appendix P gains D27 (agent checkpoints, suspended attempts, transaction T10) and becomes revision 3.2; Plans 3, 6, 8, 10–17 carry the matching edits. The implementation order does not change: Plan 9 already comes after 6.2–6.5, which now include the checkpoint tables and routes.
 
@@ -499,11 +501,11 @@ Some plans can move:
 
 ---
 
-# Plan 2 — Tool Packs: move every tool and make the light tools ready
+# Plan 2 — Tool Packs: move every tool and make the light tools ready ✅
 
 **Goal:** `Backend/mcp/` is gone. All tools live in `agent_system/toolpacks/<pack>/` and are registered with `@tool` plus a full manifest. They read identity from the context, and the light tools pass the Definition of Ready.
 
-## Phase 2.1 — The big move (one rename commit, then one edit commit)
+## Phase 2.1 — The big move (one rename commit, then one edit commit) ✅
 
 1. **`git mv`:**
 
@@ -532,7 +534,7 @@ Some plans can move:
    - update the paths in the source-scan contracts: `test_v1_modeling_contract.py:15,149-182`, `test_v1_population_review_contract.py:220-245,288,331`, `test_v1_execution_spine_contract.py:298-335`, `test_v1_feature_extraction_contract.py:235-265`, `test_service_route_ownership.py:110`;
    - update `_SOURCES` in `tests/unit/services/test_event_registry.py:43-71`.
 
-## Phase 2.2 — Common helpers
+## Phase 2.2 — Common helpers ✅
 
 In `toolpacks/common/`:
 
@@ -543,13 +545,13 @@ In `toolpacks/common/`:
 - one `app_api_url()`, which removes 4 copies;
 - remove the `sys.path` hack at `list_models.py:7-12`.
 
-## Phase 2.3 — Context migration (all packs, including the identity reads in the heavy files)
+## Phase 2.3 — Context migration (all packs, including the identity reads in the heavy files) ✅
 
 - **Pattern A (the value is copied at import):** `agent_output.py:50-52`, `scratchpad.py:30-35`, `task_context.py:25-30`, `browse_workspace.py:3,11,66`, `search_volumes.py:10` (unused, so delete it), `regression.py:24`.
 - **Pattern B (the env var is read at call time):** `targets_matcher.py:35`, `inclusion_criteria.py:18`, `validate_anatomy.py:70`, `cohort_labels.py:186,345`.
 - The LLM settings in `cohort_labels.py` (`MODEL_BASE_URL`, `MODEL_NAME`, `MODEL_API_KEY`, `LLM_CONCURRENCY_LIMIT`) move to the Model Gateway `extraction` profile in Plan 9. Until then, read them from `client_config.py`.
 
-## Phase 2.4 — Light tool fixes and manifests
+## Phase 2.4 — Light tool fixes and manifests ✅
 
 1. **Fixes:** fix L1–L14 (Appendix D) and the `generate_targets` wait S12. The S12 fix uses `poll_until`, which lands in Phase 5.1; until then, write it against the same signature.
 2. **A manifest on every light tool:** `pack`, `execution="inline"`, `trust="first_party"`, `isolation="inline"`, `side_effects`, `cost`, `resources`, `data_scopes`, `timeout_s` and `visibility`:
@@ -572,7 +574,7 @@ In `toolpacks/common/`:
 
 5. **`on_result` hooks** for `write_agent_output`, `generate_targets`, `get_patient`, `get_volume`, `get_modeling_results` and `latex_to_pdf`. **Copy** them from `pipeline_monitor.py:130-280`; the legacy monitor stays frozen.
 
-## Phase 2.5 — Definition of Ready check
+## Phase 2.5 — Definition of Ready check ✅
 
 A smoke test runs every tool with a fake context and a mocked domain API. It checks the error envelope and the manifest rules. It also checks that no identity env var is read (by monkeypatching `os.environ`).
 
@@ -923,7 +925,7 @@ A smoke test runs every tool with a fake context and a mocked domain API. It che
 
 ---
 
-# Plan 6 — Session State Store: Persistence Design (Application API)
+# Plan 6 — Session State Store: Persistence Design (Application API) ✅
 
 **Goal:** implement Appendix P (the persistence design, revision 3.2): the database, the transactions T0–T10 and the HTTP surface the harness uses. The Application API owns every row, and the Agent System reaches it only over HTTP. Appendix P is the specification; this plan says in which order it is built and how it is tested, and never restates its column lists.
 
@@ -977,7 +979,7 @@ A smoke test runs every tool with a fake context and a mocked domain API. It che
 - Plan 0 (the 3.13 images) is still open; until it lands, the toolkit tests run only in a Python 3.13 container or venv, and the `cubeai1/agents-app` image needs `greenlet` installed to run the gate.
 - Already failing before 6.1, not caused by it: the unmarked env.py test in `test_startup_migration_contract.py`, and `check_storage_boundary.ps1` on local runtime files under `Backend/storage`.
 
-## Phase 6.2 — Cut-over 2: the session-graph schema (migration `p1f0a2c3d4e5_v1_p_session_graph`, `down_revision = o1f0a2c3d4e5`)
+## Phase 6.2 — Cut-over 2: the session-graph schema (migration `p1f0a2c3d4e5_v1_p_session_graph`, `down_revision = o1f0a2c3d4e5`) ✅
 
 Implements Appendix P §P.5–§P.8 with the 12 steps of §P.9 *Cut-over 2* (plus step 7a, D27):
 1. the new tables `users`, `graph_changes`, `run_attempts`, `training_jobs`, `agent_checkpoints`, `agent_checkpoint_writes`;
@@ -999,7 +1001,7 @@ Implements Appendix P §P.5–§P.8 with the 12 steps of §P.9 *Cut-over 2* (plu
 
 The code that stops writing progress statuses (`session_service.py:385-386`) ships in the same release, so the narrowed `control_state` CHECK never meets an old writer.
 
-## Phase 6.3 — Models, schemas, repositories (the transactions)
+## Phase 6.3 — Models, schemas, repositories (the transactions) ✅
 
 Follow the Application API layering (`api/routes` → `repositories` → `db/models` + `schemas`), one file per entity, named after the table. Every transaction runs inside `publication()` with the lock order session → graph → run → attempt → domain row.
 
@@ -1023,7 +1025,7 @@ Follow the Application API layering (`api/routes` → `repositories` → `db/mod
 
 One helper, `fenced_transaction(path)`, opens every transaction on a fenced table and sets the D24 path with `SET LOCAL`. The static scan of §P.5 requires it.
 
-## Phase 6.4 — Routes (thin; registered in `application_api/main.py`)
+## Phase 6.4 — Routes (thin; registered in `application_api/main.py`) ✅
 
 OpenResty strips the `/api` prefix, as today. Every session-scoped route filters by `current_user` (the configured default user until authentication exists). Write routes on the execution path read `X-Attempt-Id` (or `X-Run-Id` for an internal job) and pass it to `fenced_transaction`.
 
@@ -1054,7 +1056,7 @@ OpenResty strips the `/api` prefix, as today. Every session-scoped route filters
 
 The user-gate routes that exist today (`/populations/approve-cohort` and the segmentation review) set the D24 `user gate` path, and run T10's gate-decision step in the same transaction: they record the decision on the suspended attempt and publish `gate_resolved`. The segmentation review long-poll (`/segmentation-review/wait`) gets no new agent caller (Phase 15.4). The old `/plans/…/approve` returns `410 Gone`.
 
-## Phase 6.5 — Agent System client
+## Phase 6.5 — Agent System client ✅
 
 1. **`clients/backend_client.py`:** one method per route above, plus `add_chat_message` / `list_chat_messages` for the Context Manager. Each execution write sends the D24 header taken from `current_context()`.
 2. **`execution/graph_store.py`:** a typed facade (`GraphStore`) over those methods, plus `InMemoryGraphStore` for the tests of Plans 8–13. The in-memory store enforces the same invariants as the database (CAS, one pending change, one current run per node, one active attempt per session, fencing, `suspended` transitions, checkpoint fencing), so the fakes are never looser than the real thing. It also backs the in-memory checkpoint store that `HttpCheckpointSaver` uses in unit tests (Phase 9.5).

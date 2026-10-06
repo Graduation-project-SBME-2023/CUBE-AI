@@ -212,8 +212,8 @@ echo
 #                         `--pull never` used to be here, but that hard-fails
 #                         with "No such image" the moment any required image
 #                         hasn't been pulled yet.
-# --build               : application-api/db-migrate/db-seed have a `build:`
-#                         section and are meant to always run the current
+# --build               : application-api has a `build:`
+#                         section and is meant to always run the current
 #                         checkout's code; without it, `up` can reuse an
 #                         already-built local image tag and silently run
 #                         stale migrations/code (database_audit.md D-33).

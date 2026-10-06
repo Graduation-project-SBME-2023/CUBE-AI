@@ -159,7 +159,7 @@ Do not use identifiable patient data in shared development or test environments 
 | MONAI fails in GPU mode | Check drivers and Container Toolkit, then try the CPU compose file |
 | Studies do not appear | Check Orthanc logs, the stable-series webhook, and Application API sync status |
 | Frontend cannot reach a service | Distinguish direct development ports from production same-origin prefixes |
-| Database is not ready | Inspect `db-migrate`, `db-seed`, `postgres`, then `application-api` logs |
+| Database is not ready | Inspect `postgres`, then `application-api` logs (the API migrates and seeds at startup) |
 
 Avoid `docker compose down -v` as a generic fix: `-v` removes named PostgreSQL and Orthanc volumes and can destroy local data. Use it only for a deliberate full reset with backups.
 
