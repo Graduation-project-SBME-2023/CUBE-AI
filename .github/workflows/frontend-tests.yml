@@ -1,0 +1,68 @@
+name: Frontend tests
+
+# Runs on a push to any branch (a PR shows the checks of its head commit, so
+# there is no separate pull_request run). The webapp image is built only after
+# the unit tests pass; see build-image.yml for where it is pushed.
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*.*.*"
+    paths:
+      - "Frontend/OHIF-Viewer/**"
+      - "deploy/Dockerfile.frontend.prod"
+      - ".github/workflows/frontend-tests.yml"
+      - ".github/workflows/build-image.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: Frontend/OHIF-Viewer
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Same Node major as deploy/Dockerfile.frontend.prod. Yarn 1 is on the
+      # runner already; this repo must not be switched to Yarn 3/4 by corepack.
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+          cache-dependency-path: Frontend/OHIF-Viewer/yarn.lock
+
+      - name: Install dependencies
+        run: yarn install --ignore-engines
+
+      # Yarn 1's --frozen-lockfile wrongly rejects this lockfile (the
+      # `resolutions` fields), so drift is caught by diffing it instead.
+      - name: Fail if yarn.lock is out of date
+        run: >-
+          git diff --exit-code -- yarn.lock
+          || { echo "::error::yarn.lock is out of date: run yarn install in Frontend/OHIF-Viewer and commit it"; exit 1; }
+
+      - name: Run unit tests
+        run: yarn test:unit:ci
+
+  webapp-image:
+    needs: unit-tests
+    uses: ./.github/workflows/build-image.yml
+    with:
+      image: webapp
+      context: ./Frontend/OHIF-Viewer
+      dockerfile: ./deploy/Dockerfile.frontend.prod
+    secrets: inherit

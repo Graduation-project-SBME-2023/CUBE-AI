@@ -179,6 +179,25 @@ def _is_legacy_autogen(item: pytest.Item) -> bool:
     return False
 
 
+# The tool platform uses Python 3.13 syntax (PEP 695), so these paths cannot even
+# be imported by the 3.11 project images. They are left out of collection there
+# rather than failing it, and CI runs them in a separate 3.13 job. Paths are
+# relative to Backend/; drop the list once the images move to 3.13.
+PY313_ONLY_TESTS = (
+    "tests/unit/toolkit",
+    "tests/unit/toolpacks",
+    "tests/unit/functions",
+    "tests/contracts/test_agent_output_contract.py",
+)
+collect_ignore = list(PY313_ONLY_TESTS) if sys.version_info < (3, 13) else []
+
+
+def pytest_report_header() -> str | None:
+    if not collect_ignore:
+        return None
+    return f"Python < 3.13: not collecting {', '.join(collect_ignore)}"
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Classify consolidated legacy suites without editing every old file."""
     for item in items:

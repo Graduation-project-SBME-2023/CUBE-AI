@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -255,7 +255,56 @@ async def register_image(
 
 # ── compile-then-publish ────────────────────────────────────────────────
 
-def _compile_latex(source_text: str, image_paths: dict[str, bytes]) -> bytes:
+def _kill(proc: asyncio.subprocess.Process) -> None:
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass  # it exited on its own between the timeout and the kill
+
+
+async def _run_pdflatex(tex_path: Path, cwd: str) -> tuple[int, bytes, bytes]:
+    """Run pdflatex without blocking the event loop.
+
+    A blocking ``subprocess.run`` here stalled every other request this worker
+    was serving -- /health included -- for up to COMPILE_TIMEOUT.
+
+    On a timeout or a cancelled request the process is killed and its pipes
+    drained before returning, so it never outlives the temp directory it writes
+    into. Draining rather than a bare ``wait()`` matters: once its readers are
+    cancelled, unread output past the stream buffer stops the pipes from ever
+    reaching EOF, and ``wait()`` would hang on a process that is already dead.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        "pdflatex",
+        "-interaction=nonstopmode",
+        str(tex_path),
+        cwd=cwd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), COMPILE_TIMEOUT)
+    except asyncio.TimeoutError:
+        _kill(proc)
+        stdout, stderr = await proc.communicate()
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "latex_compile_timeout",
+                "message": f"pdflatex did not finish within {COMPILE_TIMEOUT:.0f}s; "
+                "source_text unchanged (A19)",
+                "stdout": stdout.decode("utf-8", errors="replace")[-4000:],
+                "stderr": stderr.decode("utf-8", errors="replace")[-2000:],
+            },
+        ) from None
+    except asyncio.CancelledError:
+        _kill(proc)
+        await proc.communicate()
+        raise
+    return proc.returncode, stdout, stderr
+
+
+async def _compile_latex(source_text: str, image_paths: dict[str, bytes]) -> bytes:
     """Compile LaTeX in an isolated temp directory. Returns PDF bytes."""
     try:
         from storage_paths import TEMP_DIR  # type: ignore[import]
@@ -294,36 +343,16 @@ def _compile_latex(source_text: str, image_paths: dict[str, bytes]) -> bytes:
                 },
             )
 
-        try:
-            result = subprocess.run(
-                ["pdflatex", "-interaction=nonstopmode", str(tex_path)],
-                cwd=tmp,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=COMPILE_TIMEOUT,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={
-                    "code": "latex_compile_timeout",
-                    "message": f"pdflatex did not finish within {COMPILE_TIMEOUT:.0f}s; "
-                    "source_text unchanged (A19)",
-                    "stdout": (exc.stdout or b"").decode("utf-8", errors="replace")[-4000:],
-                    "stderr": (exc.stderr or b"").decode("utf-8", errors="replace")[-2000:],
-                },
-            ) from exc
+        returncode, stdout, stderr = await _run_pdflatex(tex_path, tmp)
 
-        if result.returncode != 0 or not (tmp_path / "document.pdf").exists():
-            stdout = result.stdout.decode("utf-8", errors="replace")[-4000:]
-            stderr = result.stderr.decode("utf-8", errors="replace")[-2000:]
+        if returncode != 0 or not (tmp_path / "document.pdf").exists():
             raise HTTPException(
                 status_code=422,
                 detail={
                     "code": "latex_compile_error",
                     "message": "LaTeX compilation failed; source_text unchanged (A19)",
-                    "stdout": stdout,
-                    "stderr": stderr,
+                    "stdout": stdout.decode("utf-8", errors="replace")[-4000:],
+                    "stderr": stderr.decode("utf-8", errors="replace")[-2000:],
                 },
             )
 
@@ -430,7 +459,7 @@ async def publish_report(
         image_paths = {}
 
     # Step 4: compile.  Raises 422 on error; no row is touched before this point.
-    pdf_bytes = _compile_latex(data.latex_text, image_paths)
+    pdf_bytes = await _compile_latex(data.latex_text, image_paths)
 
     # Step 5: commit source + version under the session lock.
     async with publication(db, session_id) as publish:

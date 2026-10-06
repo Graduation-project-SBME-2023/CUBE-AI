@@ -1,0 +1,181 @@
+name: Build image
+
+# Reusable: builds one image from the calling commit.
+#
+# Every build is pushed to GitHub Container Registry as
+#   ghcr.io/<owner>/<image>:<full sha><suffix>  and  :<branch><suffix>
+# so CI can run against exactly what it just built, on any branch, without
+# touching Docker Hub. cleanup-ci-images.yml prunes old versions there.
+#
+# Docker Hub receives an image only when `publish` is true and the run is on
+# the branch named by the LATEST_BRANCH repository variable (default below),
+# on a v*.*.* tag, or carries a manual `extra-tag`. Only the LATEST_BRANCH run
+# moves `latest`, which the compose files pull.
+on:
+  workflow_call:
+    inputs:
+      image:
+        description: Repository name of the image, e.g. agents-app
+        type: string
+        required: true
+      dockerfile:
+        type: string
+        required: true
+      context:
+        type: string
+        default: "."
+      platforms:
+        type: string
+        default: linux/amd64
+      tag-suffix:
+        description: Appended to every tag, e.g. -gpu
+        type: string
+        default: ""
+      dockerhub-image:
+        description: Full Docker Hub name; empty means <CUBE_AI_DOCKERHUB_USERNAME>/<image>
+        type: string
+        default: ""
+      publish:
+        description: Allow the Docker Hub push (still limited to LATEST_BRANCH, tags and extra-tag)
+        type: boolean
+        default: true
+      only-when-publishing:
+        description: Skip the whole build unless this run would push to Docker Hub
+        type: boolean
+        default: false
+      extra-tag:
+        description: An additional Docker Hub tag for a manual run
+        type: string
+        default: ""
+      free-disk-space:
+        type: boolean
+        default: false
+    outputs:
+      image-ref:
+        description: The GHCR reference of this commit's image
+        value: ${{ jobs.build.outputs.image-ref }}
+    secrets:
+      CUBE_AI_DOCKERHUB_USERNAME:
+        required: false
+      CUBE_AI_DOCKERHUB_TOKEN:
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-ref: ${{ steps.plan.outputs.ghcr }}:${{ github.sha }}${{ inputs.tag-suffix }}
+
+    steps:
+      - name: Plan registries and tags
+        id: plan
+        env:
+          IMAGE: ${{ inputs.image }}
+          DOCKERHUB_IMAGE: ${{ inputs.dockerhub-image }}
+          DOCKERHUB_USER: ${{ secrets.CUBE_AI_DOCKERHUB_USERNAME }}
+          LATEST_BRANCH: ${{ vars.LATEST_BRANCH || 'New-Architecture' }}
+          ALLOW_PUBLISH: ${{ inputs.publish }}
+          ONLY_WHEN_PUBLISHING: ${{ inputs.only-when-publishing }}
+          EXTRA_TAG: ${{ inputs.extra-tag }}
+        run: |
+          # GHCR names must be lowercase; the organisation name is not.
+          echo "ghcr=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE}" >> "$GITHUB_OUTPUT"
+
+          on_latest=false
+          [ "$GITHUB_REF" = "refs/heads/$LATEST_BRANCH" ] && on_latest=true
+          publish=false
+          if [ "$ALLOW_PUBLISH" = true ] && { [ "$on_latest" = true ] || [[ "$GITHUB_REF" == refs/tags/v* ]] || [ -n "$EXTRA_TAG" ]; }; then
+            publish=true
+            if [ -z "$DOCKERHUB_USER" ]; then
+              echo "::error::Publishing needs the CUBE_AI_DOCKERHUB_USERNAME and CUBE_AI_DOCKERHUB_TOKEN secrets"
+              exit 1
+            fi
+          fi
+          run=true
+          [ "$ONLY_WHEN_PUBLISHING" = true ] && [ "$publish" = false ] && run=false
+
+          {
+            echo "dockerhub=${DOCKERHUB_IMAGE:-${DOCKERHUB_USER}/${IMAGE}}"
+            echo "on_latest=$on_latest"
+            echo "publish=$publish"
+            echo "run=$run"
+          } >> "$GITHUB_OUTPUT"
+          echo "Latest branch: $LATEST_BRANCH | publish to Docker Hub: $publish | build: $run"
+
+      - name: Check out repository
+        if: steps.plan.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        if: steps.plan.outputs.run == 'true' && inputs.free-disk-space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Set up QEMU
+        if: steps.plan.outputs.run == 'true' && contains(inputs.platforms, 'arm64')
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.plan.outputs.run == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: steps.plan.outputs.run == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: steps.plan.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.CUBE_AI_DOCKERHUB_USERNAME }}
+          password: ${{ secrets.CUBE_AI_DOCKERHUB_TOKEN }}
+
+      - name: Image tags
+        if: steps.plan.outputs.run == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            name=${{ steps.plan.outputs.ghcr }}
+            name=${{ steps.plan.outputs.dockerhub }},enable=${{ steps.plan.outputs.publish }}
+          flavor: |
+            latest=false
+            suffix=${{ inputs.tag-suffix }}
+          tags: |
+            type=sha,format=long,prefix=
+            type=ref,event=branch
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ steps.plan.outputs.on_latest }}
+            type=raw,value=${{ inputs.extra-tag }},enable=${{ inputs.extra-tag != '' }}
+
+      - name: Build and push
+        if: steps.plan.outputs.run == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          platforms: ${{ inputs.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # One manifest per tag, so cleanup-ci-images.yml can prune versions
+          # without leaving orphaned attestation manifests behind.
+          provenance: false
+          # A registry cache has no size cap, unlike the 10 GB Actions cache
+          # the GPU image alone would exhaust.
+          cache-from: type=registry,ref=${{ steps.plan.outputs.ghcr }}:buildcache${{ inputs.tag-suffix }}
+          cache-to: type=registry,ref=${{ steps.plan.outputs.ghcr }}:buildcache${{ inputs.tag-suffix }},mode=max
