@@ -4,6 +4,7 @@ from sqlalchemy import (
     Column,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     Text,
     UniqueConstraint,
@@ -58,4 +59,5 @@ class WorkflowDetail(Base):
         ),
         CheckConstraint("case_index > 0", name="case_index_positive"),
         CheckConstraint("channel_index >= 0", name="channel_index_nonnegative"),
+        Index("ix_workflow_details_task_study", "task_name", "study_uid"),
     )

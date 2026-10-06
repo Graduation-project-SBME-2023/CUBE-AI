@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, Column, Integer, ForeignKey, String, DateTime, Text, text
+from sqlalchemy import BigInteger, CheckConstraint, Column, DateTime, ForeignKey, Identity, Index, String, Text, text as sql_text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -10,7 +10,7 @@ class ChatMessage(Base):
     message_id = Column(
         UUID(as_uuid=True),
         primary_key=True,
-        server_default=text('gen_random_uuid()')
+        server_default=sql_text('gen_random_uuid()')
     )
     
     # Link to the owning chat, not the session. message_id is an
@@ -20,22 +20,37 @@ class ChatMessage(Base):
         UUID(as_uuid=True),
         ForeignKey("chats.chat_id", ondelete="RESTRICT"),
         nullable=False,
-        index=True,
     )
 
-    # Explicit fields for easy querying
-    role = Column(String(50), nullable=False)  # e.g., 'user', 'assistant', 'system'
-    text = Column(Text, nullable=False)        # actual message text
+    # The total transcript order: rows written in one transaction share
+    # created_at, so a call and its result are ordered by seq alone.
+    seq = Column(BigInteger, Identity(always=True), nullable=False, unique=True)
 
-    # Optional extra data (`metadata` is reserved on declarative classes,
-    # hence the attribute name).
-    metadata_ = Column("metadata", JSONB, nullable=True)   # e.g., attachments or any future fields
+    role = Column(String(50), nullable=False)  # user | assistant | system | tool
+    # A tool row's text is a short label; its payload lives in metadata.
+    text = Column(Text, nullable=False)
+
+    # The versioned contract (v2): tool_calls / tool_result rows paired by
+    # (turn_id, call_id), and the context_summary boundary. `metadata` is
+    # reserved on declarative classes, hence the attribute name.
+    metadata_ = Column("metadata", JSONB, nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     chat = relationship("Chat", back_populates="messages")
 
     __table_args__ = (
-        CheckConstraint("role IN ('user', 'assistant', 'system')", name="role"),
+        CheckConstraint("role IN ('user', 'assistant', 'system', 'tool')", name="role"),
         CheckConstraint("length(btrim(text)) > 0", name="text_not_blank"),
+        Index("ix_chat_messages_chat_id_seq", "chat_id", "seq"),
+        Index("ix_chat_messages_chat_id_created_at", "chat_id", "created_at", "message_id"),
+        # One result per call, per turn.
+        Index(
+            "uq_chat_messages_one_tool_result",
+            "chat_id",
+            sql_text("(metadata ->> 'turn_id')"),
+            sql_text("(metadata ->> 'call_id')"),
+            unique=True,
+            postgresql_where=sql_text("metadata ->> 'kind' = 'tool_result'"),
+        ),
     )

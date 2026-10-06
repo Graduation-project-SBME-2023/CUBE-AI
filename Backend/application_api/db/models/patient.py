@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, Column, Date, DateTime, String, text
+from sqlalchemy import CheckConstraint, Column, Date, DateTime, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from application_api.db.base import Base
@@ -12,7 +12,9 @@ class Patient(Base):
         server_default=text('gen_random_uuid()')
     )
 
-    orthanc_patient_id = Column(String, unique=True, index=True, nullable=False)
+    # Nullable: rows synced before the Orthanc ids existed have none, and the
+    # sync fills it in the next time it sees the patient.
+    orthanc_patient_id = Column(String, unique=True, index=True, nullable=True)
 
     # Direct PHI mirrored from Orthanc. Storing it in plaintext is a
     # deliberate deployment decision, documented in
@@ -25,7 +27,7 @@ class Patient(Base):
     gender = Column(String, nullable=True)
 
     # Orthanc loss marks the row unavailable instead of deleting it.
-    archive_status = Column(String, nullable=False, server_default="available", index=True)
+    archive_status = Column(Text, nullable=False, server_default="available", index=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     # (closed 2026-09-15): kept — the Orthanc sync writer genuinely mutates
@@ -41,5 +43,11 @@ class Patient(Base):
         CheckConstraint(
             "archive_status IN ('available', 'unavailable', 'quarantined')",
             name="archive_status",
+        ),
+        Index(
+            "ix_patients_name_trgm",
+            "name",
+            postgresql_using="gin",
+            postgresql_ops={"name": "gin_trgm_ops"},
         ),
     )

@@ -2,10 +2,8 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
-    ForeignKey,
     ForeignKeyConstraint,
     Index,
-    String,
     Text,
     UniqueConstraint,
     text,
@@ -19,52 +17,65 @@ from application_api.core.json_bounds import (
 )
 from application_api.db.base import Base
 
-# current. One execution of the target a graph node selects.
-NODE_RUN_STATUSES = ("pending", "running", "completed", "failed")
+# A projection of the run's attempts. Runs are created
+# started, so there is no `pending`.
+NODE_RUN_STATUSES = ("running", "completed", "failed", "cancelled")
+TERMINAL_RUN_STATUSES = ("completed", "failed", "cancelled")
+EXPECTATION_VIOLATED = "expectation_violated"
 
 
 class NodeRun(Base):
-    """Execution state only — never a copy of the node definition."""
+    """One execution of a node's accepted definition, agent or tool.
+    Created when the node starts, together with its attempt 1."""
 
     __tablename__ = "node_runs"
 
-    run_id = Column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        server_default=text("gen_random_uuid()"),
-    )
-    # No standalone FK here: the composite (node_id, session_id) FK below
-    # already proves existence and same-session ownership together, so a
-    # second single-column FK on node_id would only duplicate it.
-    node_id = Column(
-        UUID(as_uuid=True),
-        nullable=False,
-        unique=True,
-    )
+    run_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    # No standalone FK: the composite (node_id, session_id) FK proves existence
+    # and same-session ownership together.
+    node_id = Column(UUID(as_uuid=True), nullable=False)
     session_id = Column(UUID(as_uuid=True), nullable=False)
 
-    # The compiler's exact output, assembled from the this flowLUS scratchpad
-    # state and upstream results — not reconstructible, and therefore not a
-    # copy of anything. Resolved immediately before the node starts and
-    # immutable after that transition.
+    # The accepted specification, frozen at creation.
+    accepted_by_change_id = Column(UUID(as_uuid=True), nullable=False)
+    # {v, max_attempts, timeout_s, idempotent, fresh, privacy_mode, resumable?,
+    #  gate_timeout_s?, seed_from?}: a deploy or settings change cannot alter it.
+    execution_policy = Column(JSONB, nullable=False)
+    target_version = Column(Text, nullable=False)
+
+    # Frozen at first start: the agent's compiled prompt and the port-level pins
+    # {v, ports: {port: {node_id, run_id, port, type, ref}}, target_version}.
     compiled_prompt = Column(Text, nullable=True)
     resolved_inputs = Column(JSONB(none_as_null=True), nullable=True)
 
-    status = Column(String, nullable=False, server_default="pending")
+    status = Column(Text, nullable=False)
+    # Set when an applied change supersedes it: no longer current, never selectable again; kept as history.
+    superseded_at = Column(DateTime(timezone=True), nullable=True)
+    # {v, ports: {port: {type, ref: {table, ids}, summary, phi}}}, written with
+    # `completed` when the run succeeds, and immutable afterwards.
+    outputs = Column(JSONB(none_as_null=True), nullable=True)
+    # `expectation_violated`, set once at completion; the next live node waits until a
+    # change releases it (hold_released_by_change_id) or reruns this node.
+    downstream_hold = Column(Text, nullable=True)
+    hold_released_by_change_id = Column(UUID(as_uuid=True), nullable=True)
 
-    # file-elimination map: state/scratchpad.json and
-    # outputs/agents/{agent_id}_output.json land here.
+    # The agent's scratchpad: labels, not authority (`outputs` is).
     scratchpad_notes = Column(JSONB(none_as_null=True), nullable=True)
     scratchpad_warnings = Column(JSONB(none_as_null=True), nullable=True)
     scratchpad_summary = Column(JSONB(none_as_null=True), nullable=True)
+    # A copy of the latest attempt's error, written in the same transaction.
     error = Column(JSONB(none_as_null=True), nullable=True)
 
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
-    # The only FK path to graph_nodes is the composite (node_id, session_id)
-    # alignment FK below; the relationship still joins on node_id alone.
-    node = relationship("GraphNode", back_populates="run", foreign_keys=[node_id])
+    node = relationship("GraphNode", back_populates="runs", foreign_keys=[node_id])
+    attempts = relationship(
+        "RunAttempt",
+        back_populates="run",
+        order_by="RunAttempt.attempt_number",
+        lazy="selectin",
+    )
 
     __table_args__ = (
         ForeignKeyConstraint(
@@ -73,27 +84,56 @@ class NodeRun(Base):
             name="fk_node_runs_node_id_session_id_graph_nodes",
             ondelete="RESTRICT",
         ),
-        # Supporting tuple: domain rows prove same-session alignment by
-        # composite FK onto this.
+        ForeignKeyConstraint(
+            ["accepted_by_change_id", "session_id"],
+            ["graph_changes.change_id", "graph_changes.session_id"],
+            name="fk_node_runs_accepted_by_change_id_graph_changes",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["hold_released_by_change_id", "session_id"],
+            ["graph_changes.change_id", "graph_changes.session_id"],
+            name="fk_node_runs_hold_released_by_change_id_graph_changes",
+            ondelete="RESTRICT",
+        ),
+        # Supporting tuple: domain rows and attempts prove same-session
+        # alignment by composite FK onto this.
         UniqueConstraint("run_id", "session_id", name="uq_node_runs_run_id"),
         CheckConstraint(
-            "status IN ('pending', 'running', 'completed', 'failed')",
-            name="status",
+            "status IN ('running', 'completed', 'failed', 'cancelled')", name="status"
         ),
         CheckConstraint(
-            "(status = 'pending') = (started_at IS NULL)",
-            name="started_iff_not_pending",
-        ),
-        CheckConstraint(
-            "(status IN ('completed', 'failed')) = (completed_at IS NOT NULL)",
+            "(status IN ('completed', 'failed', 'cancelled')) = (completed_at IS NOT NULL)",
             name="completed_at_iff_terminal",
         ),
         CheckConstraint(
-            "started_at IS NULL OR (compiled_prompt IS NOT NULL "
-            "AND length(btrim(compiled_prompt)) > 0 AND resolved_inputs IS NOT NULL)",
-            name="compiled_before_start",
+            "started_at IS NOT NULL OR (status = 'cancelled' AND execution_policy ? 'legacy')",
+            name="started_unless_never_started",
+        ),
+        CheckConstraint(
+            "started_at IS NULL OR resolved_inputs IS NOT NULL", name="inputs_before_start"
         ),
         CheckConstraint("status <> 'failed' OR error IS NOT NULL", name="failed_has_error"),
+        CheckConstraint(
+            "downstream_hold IS NULL OR (status = 'completed' "
+            "AND downstream_hold = 'expectation_violated')",
+            name="downstream_hold",
+        ),
+        CheckConstraint(
+            "hold_released_by_change_id IS NULL OR downstream_hold IS NOT NULL",
+            name="hold_release_needs_a_hold",
+        ),
+        CheckConstraint(
+            "outputs IS NULL OR (status = 'completed' AND jsonb_typeof(outputs) = 'object' "
+            "AND outputs ? 'v')",
+            name="outputs_only_when_completed",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(execution_policy) = 'object' AND execution_policy ? 'v' "
+            "AND (resolved_inputs IS NULL OR resolved_inputs ? 'v' OR execution_policy ? 'legacy')",
+            name="versioned",
+        ),
+        CheckConstraint("length(btrim(target_version)) > 0", name="target_version_not_blank"),
         CheckConstraint(
             "compiled_prompt IS NULL OR octet_length(compiled_prompt) <= "
             f"{COMPILED_PROMPT_MAX_BYTES}",
@@ -112,5 +152,23 @@ class NodeRun(Base):
             ),
             name="json_bounded",
         ),
+        CheckConstraint(
+            "pg_column_size(execution_policy) <= 65536 "
+            "AND COALESCE(pg_column_size(outputs), 0) <= 2097152",
+            name="policy_and_outputs_bounded",
+        ),
+        # At most one current run per node.
+        Index(
+            "uq_node_runs_one_current",
+            "node_id",
+            unique=True,
+            postgresql_where=text("superseded_at IS NULL"),
+        ),
+        Index(
+            "ix_node_runs_session_id_current",
+            "session_id",
+            postgresql_where=text("superseded_at IS NULL"),
+        ),
+        Index("ix_node_runs_node_id_started_at", "node_id", "started_at"),
         Index("ix_node_runs_session_id_status", "session_id", "status"),
     )

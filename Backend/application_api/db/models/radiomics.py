@@ -4,8 +4,8 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
-    String,
     Text,
     UniqueConstraint,
     text,
@@ -38,10 +38,9 @@ class Radiomics(Base):
         nullable=False,
     )
     label_series_instance_uid = Column(
-        String,
+        Text,
         ForeignKey("segmentation_masks.label_series_instance_uid", ondelete="RESTRICT"),
         nullable=False,
-        index=True,
     )
     source_volume_uid = Column(Text, nullable=False)
     segment_number = Column(Integer, nullable=False)
@@ -69,6 +68,7 @@ class Radiomics(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
+        Index("idx_radiomics_segmentation_id", "label_series_instance_uid"),
         # The content-addressed natural key.
         UniqueConstraint(
             "session_id",

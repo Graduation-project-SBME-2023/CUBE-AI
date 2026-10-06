@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, String, text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -7,7 +7,7 @@ from application_api.db.base import Base
 
 
 class Chat(Base):
-    """One conversation inside a session."""
+    """The one conversation of a session: created with it."""
 
     __tablename__ = "chats"
 
@@ -28,8 +28,15 @@ class Chat(Base):
     # endpoint and eight readers in ChatSidebar.tsx. It is not derived from the
     # message timeline at read time.
     last_activity_at = Column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
     session = relationship("Session", back_populates="chats")
-    messages = relationship("ChatMessage", back_populates="chat", lazy="selectin")
+    # Paged by the repositories in `seq` order; never loaded implicitly.
+    messages = relationship("ChatMessage", back_populates="chat", lazy="raise")
+
+    # One chat per session; dropping this is the only change many chats need.
+    __table_args__ = (
+        UniqueConstraint("session_id", name="uq_chats_session_id"),
+        Index("ix_chats_last_activity_at", text("last_activity_at DESC")),
+    )
