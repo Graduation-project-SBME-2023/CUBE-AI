@@ -34,6 +34,18 @@ class Settings(BaseSettings):
     # runs from the application lifespan, independent of the Lua webhook.
     RECONCILIATION_INTERVAL_SECONDS: float = 300.0
 
+    # The owner of every session until authentication exists.
+    # Sessions created before the session-graph migration belong to the
+    # `legacy` user; set this to `legacy` to keep working in them.
+    DEFAULT_USERNAME: str = "default"
+    # A pending graph change past this age is `expired`.
+    APPROVAL_TTL_H: float = 72.0
+    # Agent checkpoints of runs terminal for longer than this are purged.
+    AGENT_CHECKPOINT_RETENTION_DAYS: int = 14
+    # How often the lifespan sweep runs that purge (0 disables the sweep;
+    # POST /agent-checkpoints/purge still works).
+    AGENT_CHECKPOINT_PURGE_INTERVAL_SECONDS: float = 3600.0
+
     model_config = SettingsConfigDict(
         env_file=("deploy/.env", "../deploy/.env", "../../deploy/.env"),
         env_file_encoding="utf-8",
