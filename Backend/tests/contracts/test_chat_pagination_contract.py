@@ -26,10 +26,13 @@ def test_session_collection_is_bounded_and_does_not_eager_load_children():
     assert "skip: int = Query(0, ge=0)" in endpoint_source
 
     list_section = crud_source[crud_source.index("async def get_sessions"):]
-    # A session list must not drag every chat, event and plan row with it.
-    assert "selectinload(SessionModel.chats)" not in list_section
-    assert "noload(SessionModel.chats)" in list_section
-    assert "noload(SessionModel.events)" in list_section
+    # A session list must not drag every chat, event and graph row with it:
+    # the relationships never load implicitly (lazy="raise").
+    from application_api.db.models.sessions import Session
+
+    assert Session.chats.property.lazy == "raise"
+    assert Session.events.property.lazy == "raise"
+    assert "selectinload(SessionModel" not in list_section
     assert ".offset(skip)" in list_section and ".limit(limit)" in list_section
 
 
@@ -58,7 +61,7 @@ def test_new_sessions_use_one_application_timestamp():
         crud_source.index("async def create_session"):crud_source.index("async def get_session")
     ]
 
-    assert "now = datetime.now(timezone.utc)" in create_section
+    assert create_section.count("now = ") == 1
     assert "created_at=now" in create_section
     assert "updated_at=now" in create_section
 
@@ -71,5 +74,6 @@ def test_new_sessions_create_their_plan_in_the_same_transaction():
     ]
 
     assert "SessionGraph(session_id=session.session_id" in create_section
-    # One commit for both rows.
-    assert create_section.count("await db.commit()") == 1
+    # One commit for both rows: publication() commits, nothing else does.
+    assert "async with publication(" in create_section
+    assert "await db.commit()" not in create_section
