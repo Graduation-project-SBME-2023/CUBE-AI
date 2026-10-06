@@ -213,32 +213,50 @@ jobs:
           path: Backend/test-results/backend-agent-regression.xml
           if-no-files-found: warn
 
+  # The MONAI CPU image is 11 GB compressed, more than a runner has free, and a
+  # `container:` job pulls it before any step could make room. So the job frees
+  # the disk first and then runs the suite in the image with `docker run`.
   radiology-regression-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    container:
-      image: cubeai1/custom-monailabel:v1.0-cpu
+    timeout-minutes: 45
     env:
-      BACKEND_STORAGE_ROOT: /tmp/cubeai-radiology-tests
-      AGENTS_WORKSPACE_DIR: /tmp/cubeai-radiology-tests/hypotheses
-      BACKEND_TEMP_DIR: /tmp/cubeai-radiology-tests/temp
-      BACKEND_LOG_DIR: /tmp/cubeai-radiology-tests/logs
+      RADIOLOGY_IMAGE: cubeai1/custom-monailabel:v1.0-cpu
 
     steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install test-only dependencies
-        run: python -m pip install -r Backend/requirements/test.txt
+      - name: Pull the MONAI CPU image
+        run: docker pull "$RADIOLOGY_IMAGE"
 
       - name: Run radiology regression suite
         run: >-
           mkdir -p Backend/test-results &&
+          docker run --rm
+          -v "$GITHUB_WORKSPACE:/workspace"
+          -w /workspace
+          -e BACKEND_STORAGE_ROOT=/tmp/cubeai-radiology-tests
+          -e AGENTS_WORKSPACE_DIR=/tmp/cubeai-radiology-tests/hypotheses
+          -e BACKEND_TEMP_DIR=/tmp/cubeai-radiology-tests/temp
+          -e BACKEND_LOG_DIR=/tmp/cubeai-radiology-tests/logs
+          "$RADIOLOGY_IMAGE"
+          sh -c "python -m pip install -r Backend/requirements/test.txt &&
           python -m pytest
           -c Backend/pytest.ini
           Backend/tests/regression/radiology
           -m radiology
-          --junitxml=Backend/test-results/backend-radiology-regression.xml
+          --junitxml=Backend/test-results/backend-radiology-regression.xml"
 
       - name: Upload test results
         if: always()
