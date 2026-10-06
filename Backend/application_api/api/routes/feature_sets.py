@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.db.session import get_db
+from application_api.services.fencing import fenced_db
 from application_api.repositories import feature_sets as repo
 from application_api.schemas.feature_sets import (
     ExportPart,
@@ -30,7 +31,7 @@ async def create_feature_set(
     set_key: str,
     data: FeatureSetWrite,
     response: Response,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(fenced_db),
 ):
     """Create a run's `building` set, or replay it (identical manifest → 200)."""
     feature_set, created = await repo.create_feature_set(db, run_id, set_key, data)
@@ -39,7 +40,7 @@ async def create_feature_set(
 
 
 @router.post("/{feature_set_id}/freeze", response_model=FeatureSetOut)
-async def freeze_feature_set(feature_set_id: UUID, db: AsyncSession = Depends(get_db)):
+async def freeze_feature_set(feature_set_id: UUID, db: AsyncSession = Depends(fenced_db)):
     """Verify counts, digests and cohort keys, then freeze. One-way."""
     feature_set, _event = await repo.freeze_feature_set(db, feature_set_id)
     return feature_set

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.db.session import get_db
+from application_api.services.fencing import fenced_db
 from application_api.repositories import model_results as repo
 from application_api.schemas.model_results import (
     ModelComparisonOut,
@@ -36,7 +37,7 @@ async def record_comparison(
     comparison_key: str,
     data: ModelComparisonWrite,
     response: Response,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(fenced_db),
 ):
     """Record every variant of one comparison, or replay it (identical → 200)."""
     comparison, created = await repo.record_comparison(db, run_id, comparison_key, data)

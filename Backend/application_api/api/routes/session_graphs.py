@@ -1,57 +1,51 @@
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from application_api.api.dependencies import owned_session
 from application_api.db.session import get_db
-from application_api.repositories.session_graphs import (
-    approve_session_graph,
-    delete_session_graph,
-    get_all_session_graphs,
-    get_session_graph,
-    replace_draft_nodes,
-)
-from application_api.schemas.session_graphs import (
-    SessionGraphDraftUpdate,
-    SessionGraphOut,
-    SessionGraphWithNodesOut,
-)
+from application_api.repositories import graph_changes as changes_repo
+from application_api.repositories.session_graphs import graph_view
+from application_api.schemas.graph_changes import GraphChangeResult, GraphChangeSubmit
+from application_api.schemas.session_graphs import SessionGraphView
 
 router = APIRouter(prefix="/session-graphs", tags=["Session graphs"])
 
 
-@router.get("/", response_model=list[SessionGraphWithNodesOut])
-async def list_session_graphs(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=100),
+@router.get("/session/{session_id}", response_model=SessionGraphView)
+async def read_graph_for_session(
+    session_id: UUID = Depends(owned_session), db: AsyncSession = Depends(get_db)
+):
+    """Version, live nodes with their current runs, the pending change and the
+    derived activity."""
+    return await graph_view(db, session_id)
+
+
+@router.post("/session/{session_id}/changes", response_model=GraphChangeResult)
+async def submit_change(
+    data: GraphChangeSubmit,
+    session_id: UUID = Depends(owned_session),
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key", max_length=256),
     db: AsyncSession = Depends(get_db),
 ):
-    return await get_all_session_graphs(db, skip, limit)
+    """Applied at once when no approval reason applies, proposed otherwise
+    (pending). 409 `STALE_BASE` or `IDEMPOTENCY_CONFLICT`; 422 `INVALID_CHANGE`."""
+    return await changes_repo.submit_change(db, session_id, data, idempotency_key)
 
 
-@router.get("/session/{session_id}", response_model=SessionGraphWithNodesOut)
-async def read_graph_for_session(session_id: UUID, db: AsyncSession = Depends(get_db)):
-    """A graph is addressed by its session: `session_graphs.session_id` is the primary key."""
-    return await get_session_graph(db, session_id)
+_GONE = (
+    "The draft-and-approve plan API was replaced by graph changes: "
+    "POST /session-graphs/session/{id}/changes, then POST /graph-changes/{change_id}/decision."
+)
 
 
-@router.put("/session/{session_id}/nodes", response_model=SessionGraphWithNodesOut)
-async def replace_graph_nodes(
-    session_id: UUID, data: SessionGraphDraftUpdate, db: AsyncSession = Depends(get_db)
-):
-    """Replace the draft's ordered node list."""
-    return await replace_draft_nodes(db, session_id, data)
+@router.put("/session/{session_id}/nodes", status_code=410, include_in_schema=False)
+async def replace_graph_nodes(session_id: UUID):
+    raise HTTPException(status_code=410, detail=_GONE)
 
 
-@router.post("/session/{session_id}/approve", response_model=SessionGraphOut)
-async def approve_session_graph_endpoint(
-    session_id: UUID, db: AsyncSession = Depends(get_db)
-):
-    """Approve the graph. One-way, atomic, and 409 on a second call."""
-    return await approve_session_graph(db, session_id)
-
-
-@router.delete("/session/{session_id}")
-async def remove_session_graph(session_id: UUID, db: AsyncSession = Depends(get_db)):
-    """Always 409: a graph is not deletable independently of its session."""
-    return await delete_session_graph(db, session_id)
+@router.post("/session/{session_id}/approve", status_code=410, include_in_schema=False)
+async def approve_session_graph(session_id: UUID):
+    raise HTTPException(status_code=410, detail=_GONE)
