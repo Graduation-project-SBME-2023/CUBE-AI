@@ -61,6 +61,10 @@ _SOURCES: list[tuple[Path, str]] = [
     # alongside the domain change) -- reach the WS envelope's `type` field
     # via replay in agent_system/api/routes/sessions.py.
     (APPLICATION_ROOT / "repositories" / "node_runs.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (APPLICATION_ROOT / "repositories" / "sessions.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (APPLICATION_ROOT / "repositories" / "chats.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (APPLICATION_ROOT / "repositories" / "graph_changes.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
+    (APPLICATION_ROOT / "repositories" / "run_attempts.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (APPLICATION_ROOT / "repositories" / "cohorts.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (APPLICATION_ROOT / "repositories" / "literature.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),
     (APPLICATION_ROOT / "repositories" / "feature_sets.py", r'publish\(\s*"([a-zA-Z_][a-zA-Z0-9_]*)"'),

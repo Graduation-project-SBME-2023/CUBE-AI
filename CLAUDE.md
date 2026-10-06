@@ -210,6 +210,19 @@ Compose runs one-shot `db-migrate` then `db-seed` before `application-api`.
   `Backend/tests/contracts/test_retired_vocabulary.py` fails the deterministic suite on an old
   name in production source; old names live only in migrations, the replayed legacy event type
   `pipeline_agent_status`, and tool contracts that keep their result keys.
+- **Session graph and harness transactions (Phases 6.2–6.5).** Cut-over 2
+  (`p1f0a2c3d4e5_v1_p_session_graph`) adds `users`, `graph_changes`, `run_attempts`,
+  `agent_checkpoints(_writes)` and `training_jobs`. Nodes change **only** through graph changes
+  (`POST /session-graphs/session/{id}/changes`, T1/T2); runs are created **only** by
+  `POST /runs/start` (T4) with their first attempt; the old plan approve route is `410 Gone`.
+  Every write to a fenced table must declare its D24 path: a write route on the execution path
+  takes `Depends(fenced_db)` (the caller's `X-Attempt-Id` / `X-Run-Id`), a harness or gate
+  transaction opens `fenced_transaction(db, HARNESS | USER)` (`services/fencing.py`) — the
+  database refuses anything else, and `tests/contracts/test_v1_harness_contract.py` scans for
+  it. The pure T1/T2 and execution rules are in `application_api/core/graph_content.py` and
+  `core/execution_rules.py`. Agent-side: `clients/harness_client.py` and
+  `execution/graph_store.py` (+ `InMemoryGraphStore`, held to the same scenario table as the
+  live API). Live database suites: `Backend/tests/run_live_db_tests.ps1`.
 
 ### Generated-data boundary
 

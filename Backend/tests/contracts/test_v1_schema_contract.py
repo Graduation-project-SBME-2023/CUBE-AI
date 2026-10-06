@@ -172,14 +172,14 @@ def test_workflow_details_orders_training_input_deterministically():
 def test_training_start_reads_every_member_in_order():
     """The previous implementation capped membership at an unsorted
     `LIMIT 1000`, so a large task trained on an arbitrary subset."""
-    source = (APPLICATION_ROOT / "api" / "routes" / "workflow.py").read_text(
-        encoding="utf-8"
-    )
-    start = source.index("async def initialize_training")
-    body = source[start : source.index("@router.get", start)]
+    source = (APPLICATION_ROOT / "services" / "training.py").read_text(encoding="utf-8")
+    body = source[source.index("async def build_payload") : source.index("async def _submit")]
     assert ".limit(" not in body, "training input must not be paginated"
     assert "order_by(WorkflowDetail.case_index, WorkflowDetail.channel_index)" in body
-    assert "frozen_at" in body, "admitting a training job must freeze the workflow"
+    receipts = (APPLICATION_ROOT / "repositories" / "training_jobs.py").read_text(encoding="utf-8")
+    admit = receipts[receipts.index("async def create_receipt") : receipts.index("async def mark_submitted")]
+    assert "frozen_at" in admit, "admitting a training job must freeze the workflow"
+    assert admit.count("_commit(") == 1, "the receipt and the freeze commit together"
 
 
 def test_orthanc_delete_marks_unavailable_instead_of_deleting():

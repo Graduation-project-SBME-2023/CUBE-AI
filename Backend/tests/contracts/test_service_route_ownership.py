@@ -56,7 +56,13 @@ def test_application_api_owns_database_workflow_and_sync_routes():
 
     assert required <= registered
     assert "chat_sessions.router" not in registered
-    assert "training_jobs.router" not in registered
+    # The Application API keeps the training *receipt* and delegates
+    # the training itself to MONAI over HTTP; it never runs it.
+    if "training_jobs.router" in registered:
+        service = (APPLICATION_ROOT / "services" / "training.py").read_text(encoding="utf-8")
+        assert "INFERENCE_API_URL" in service
+        for heavy in ("import torch", "import monailabel", "from monailabel", "import nnunet"):
+            assert heavy not in service
     assert 'title="CUBE.AI Application API"' in source
 
 

@@ -43,24 +43,15 @@ def _agent_http_source() -> str:
 # ----------------------------------------------------------------------
 # agent_runs — execution state only
 # ----------------------------------------------------------------------
-def test_agent_runs_exists_with_the_a16_shape():
+def test_node_runs_has_the_execution_shape():
     table = _metadata().tables["node_runs"]
-    columns = set(table.columns.keys())
-
-    assert columns == {
-        "run_id",
-        "node_id",
-        "session_id",
-        "compiled_prompt",
-        "resolved_inputs",
-        "status",
-        "scratchpad_notes",
-        "scratchpad_warnings",
-        "scratchpad_summary",
-        "error",
-        "started_at",
-        "completed_at",
+    assert set(table.columns.keys()) == {
+        "run_id", "node_id", "session_id", "accepted_by_change_id", "execution_policy",
+        "target_version", "compiled_prompt", "resolved_inputs", "status", "superseded_at",
+        "outputs", "downstream_hold", "hold_released_by_change_id", "scratchpad_notes",
+        "scratchpad_warnings", "scratchpad_summary", "error", "started_at", "completed_at",
     }
+    assert "run_attempts" in _metadata().tables
 
 
 def test_agent_runs_keeps_no_copy_of_the_step_definition():
@@ -81,17 +72,20 @@ def test_agent_runs_keeps_no_copy_of_the_step_definition():
         assert removed not in columns
 
 
-def test_one_run_per_step_is_a_schema_fact():
+def test_one_current_run_per_node_is_a_schema_fact():
+    """A node has many runs over time and at most one current."""
     table = _metadata().tables["node_runs"]
+    indexes = {index.name: index for index in table.indexes}
+    current = indexes["uq_node_runs_one_current"]
+    assert current.unique and [c.name for c in current.columns] == ["node_id"]
+    assert "superseded_at IS NULL" in str(current.dialect_options["postgresql"]["where"])
     uniques = {
         tuple(column.name for column in constraint.columns)
         for constraint in table.constraints
         if constraint.__class__.__name__ == "UniqueConstraint"
     }
-    # UNIQUE(node_id) is what enforces plan_step 1: 0..1 agent_run.
-    assert ("node_id",) in uniques
-    # The supporting tuple domain rows use to prove same-session alignment.
     assert ("run_id", "session_id") in uniques
+    assert ("node_id",) not in uniques
 
 
 def test_session_id_is_guarded_by_a_composite_fk_to_the_step():
@@ -118,10 +112,12 @@ def test_run_status_and_start_rules_are_named_checks():
     }
     assert {
         "ck_node_runs_status",
-        "ck_node_runs_started_iff_not_pending",
         "ck_node_runs_completed_at_iff_terminal",
-        "ck_node_runs_compiled_before_start",
+        "ck_node_runs_started_unless_never_started",
+        "ck_node_runs_inputs_before_start",
         "ck_node_runs_failed_has_error",
+        "ck_node_runs_downstream_hold",
+        "ck_node_runs_outputs_only_when_completed",
         "ck_node_runs_json_bounded",
     } <= checks
 
@@ -134,14 +130,13 @@ def test_no_jobs_table_exists():
 # ----------------------------------------------------------------------
 # — approval creates exactly one run per step, atomically
 # ----------------------------------------------------------------------
-def test_approval_inserts_the_runs_in_the_same_transaction():
-    repo = _source(APPLICATION_ROOT / "repositories" / "session_graphs.py")
-    approve = repo[repo.index("async def approve_session_graph") : repo.index("async def delete_session_graph")]
-    assert "create_pending_runs" in approve
-    assert "lock_session_and_graph" not in approve or "_require_draft" in approve
-    # One commit: the approval and its run rows are one transaction.
-    assert approve.count("await db.commit()") == 1
-    assert "unknown_agent_types" in approve
+def test_an_applied_change_creates_no_run():
+    """Runs are created lazily, when the node starts, together with their attempt 1."""
+    changes = _source(APPLICATION_ROOT / "repositories" / "graph_changes.py")
+    assert "NodeRun(" not in changes and "RunAttempt(" not in changes
+    runs = _source(APPLICATION_ROOT / "repositories" / "node_runs.py")
+    first_start = runs[runs.index("async def _first_start") : runs.index("async def _retry")]
+    assert "NodeRun(" in first_start and "_attempt(run, 1," in first_start
 
 
 def test_the_deferred_trigger_checks_exact_cardinality():

@@ -13,5 +13,7 @@ respx>=0.22,<1
 sqlalchemy>=2.0,<3
 alembic>=1.13,<2
 asyncpg>=0.29,<1
+# SQLAlchemy's async layer runs on greenlet; the agents image does not ship it.
+greenlet>=3,<4
 pydantic-settings>=2,<3
 aiohttp>=3.9,<4

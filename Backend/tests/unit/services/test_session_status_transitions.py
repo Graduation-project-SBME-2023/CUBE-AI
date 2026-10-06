@@ -1,23 +1,13 @@
-"""Guarded session status transitions."""
+"""Guarded session control-state transitions: intent only."""
 
 from __future__ import annotations
 
 import pytest
 
+from application_api.db.models.sessions import SESSION_CONTROL_STATES
 from application_api.repositories.sessions import _ALLOWED_TRANSITIONS
 
 pytestmark = pytest.mark.unit
-
-STATUSES = (
-    "planning",
-    "ready",
-    "running",
-    "pausing",
-    "paused",
-    "completed",
-    "failed",
-    "archived",
-)
 
 
 def _allowed(current: str, new: str) -> bool:
@@ -25,39 +15,24 @@ def _allowed(current: str, new: str) -> bool:
     return not allowed or current in allowed
 
 
-def test_every_status_has_a_transition_rule():
-    assert set(_ALLOWED_TRANSITIONS) == set(STATUSES)
+def test_the_control_states_are_intent_only():
+    """Progress (planning, running, pausing, completed, failed) is derived, never stored."""
+    assert set(SESSION_CONTROL_STATES) == {"active", "paused", "archived"}
+    assert set(_ALLOWED_TRANSITIONS) == set(SESSION_CONTROL_STATES)
 
 
-def test_pause_is_a_two_step_durable_path():
-    assert _allowed("running", "pausing")
-    assert _allowed("pausing", "paused")
-    # You cannot jump straight from running to paused: the intermediate state
-    # is what makes a pause request durable if the process dies mid-request.
-    assert not _allowed("running", "paused")
-
-
-def test_a_paused_session_resumes_to_running():
-    assert _allowed("paused", "running")
-
-
-def test_completion_only_follows_a_run():
-    assert _allowed("running", "completed")
-    for status in ("planning", "ready", "paused", "failed", "archived"):
-        assert not _allowed(status, "completed")
-
-
-def test_failure_is_reachable_from_every_live_state():
-    for status in ("planning", "ready", "running", "pausing", "paused"):
-        assert _allowed(status, "failed")
+def test_pause_and_resume_are_idempotent_intent_switches():
+    for current in ("active", "paused"):
+        assert _allowed(current, "paused")
+        assert _allowed(current, "active")
 
 
 def test_any_session_can_be_archived():
-    """Archiving is normal removal, so it is never blocked by status."""
-    for status in STATUSES:
-        assert _allowed(status, "archived")
+    """Archiving is normal removal, so it is never blocked by the current state."""
+    for current in SESSION_CONTROL_STATES:
+        assert _allowed(current, "archived")
 
 
-def test_a_completed_session_cannot_go_back_to_running():
-    assert not _allowed("completed", "running")
-    assert not _allowed("archived", "running")
+def test_an_archived_session_is_final():
+    assert not _allowed("archived", "active")
+    assert not _allowed("archived", "paused")

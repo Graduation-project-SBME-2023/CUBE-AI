@@ -172,11 +172,12 @@ def test_plan_is_keyed_by_its_session():
     assert fks["session_id"] == "sessions.session_id"
 
 
-def test_plans_has_approved_at_and_no_version_or_goal_columns():
+def test_session_graphs_is_a_versioned_header_without_goal_columns():
+    """The graph header carries the compare-and-swap version; approved_at
+    stays as a legacy, derived column with no new writers."""
     columns = set(_metadata().tables["session_graphs"].columns.keys())
-    assert "approved_at" in columns
-    # //.
-    for dead in ("state", "study_goal", "rationale", "created_at", "version", "plan_version"):
+    assert {"session_id", "version", "approved_at", "updated_at"} <= columns
+    for dead in ("state", "study_goal", "rationale", "created_at", "plan_version"):
         assert dead not in columns
 
 
@@ -205,24 +206,22 @@ def test_approval_is_one_way_and_freezes_every_step():
     assert "its steps are immutable" in migration
 
 
-def test_plan_steps_match_the_v1_shape():
-    steps = _metadata().tables["graph_nodes"]
-    columns = set(steps.columns.keys())
-    assert {"node_id", "session_id", "position", "target_name", "title", "params"} <= columns
-    # folded description into instructions; removed execution state.
-    for dead in ("description", "status", "logs", "plan_id", "is_enabled", "created_at"):
-        assert dead not in columns
-
+def test_graph_nodes_match_the_session_graph_shape():
+    nodes = _metadata().tables["graph_nodes"]
+    assert set(nodes.columns.keys()) == {
+        "node_id", "session_id", "node_seq", "position", "target_kind", "target_name",
+        "target_version", "title", "params", "input_sources", "expectations",
+        "accepted_by_change_id", "removed_at",
+    }
+    constraints = {constraint.name: constraint for constraint in nodes.constraints}
+    # Live positions are unique, DEFERRABLE so applying a change can reorder in one transaction.
+    assert constraints["ex_graph_nodes_live_position"].deferrable is True
     uniques = {
-        tuple(c.name for c in constraint.columns): constraint
-        for constraint in steps.constraints
+        tuple(c.name for c in constraint.columns)
+        for constraint in nodes.constraints
         if constraint.__class__.__name__ == "UniqueConstraint"
     }
-    reorder_key = uniques[("session_id", "position")]
-    # DEFERRABLE so a reorder can swap two steps inside one transaction.
-    assert reorder_key.deferrable is True
-    # The supporting tuple agent_runs' composite FK targets in this migration.
-    assert ("node_id", "session_id") in uniques
+    assert {("session_id", "node_seq"), ("node_id", "session_id")} <= uniques
 
 
 def test_agent_type_is_validated_against_the_agent_factories():
@@ -243,23 +242,25 @@ def test_agent_type_is_validated_against_the_agent_factories():
         "the new agent to both."
     )
 
-    plan_repo = (APPLICATION_ROOT / "repositories" / "session_graphs.py").read_text(encoding="utf-8")
-    assert "unknown_agent_types" in plan_repo
-    # 's lock, held through commit. Build this migration moved the locking into the
-    # publication service so every writer takes session -> plan in that order
-    # instead of each choosing its own.
-    assert "lock_session_and_graph" in plan_repo
+    # Graph changes lock session -> graph through the publication service, so
+    # every writer takes the locks in one order. Whether a ref names a known
+    # agent or tool is the Validator's check (UNKNOWN_REF).
+    changes_repo = (APPLICATION_ROOT / "repositories" / "graph_changes.py").read_text(encoding="utf-8")
+    assert "lock_session_and_graph" in changes_repo
     publication = (
         APPLICATION_ROOT / "services" / "publication.py"
     ).read_text(encoding="utf-8")
     assert "FOR NO KEY UPDATE" in publication
 
 
-def test_session_and_plan_are_created_in_one_transaction():
+def test_session_graph_and_chat_are_created_in_one_transaction():
+    """Creating a session makes the session, its graph, its one chat and the opening message."""
     repo = (APPLICATION_ROOT / "repositories" / "sessions.py").read_text(encoding="utf-8")
     create = repo[repo.index("async def create_session") : repo.index("async def get_session")]
     assert "SessionGraph(session_id=session.session_id" in create
-    assert create.count("await db.commit()") == 1
+    assert "Chat(session_id=session.session_id" in create
+    assert 'publish("user_input"' in create
+    assert "await db.commit()" not in create, "publication() commits once"
 
 
 # ----------------------------------------------------------------------
