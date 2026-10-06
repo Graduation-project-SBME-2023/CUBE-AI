@@ -188,7 +188,7 @@ Backend/
 | 4   | Sandbox Foundation                                        | M2 Compute   | 1                  | tools P4                                                         | Not started       |
 | 5   | Job Platform (Celery + Redis)                             | M2           | 1, 4               | tools P5                                                         | Not started       |
 | 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | system Phase 1 (State, Graph Versions); Appendix P | ✅ Done (6.1–6.5) |
-| 7   | Modeling Engine, Heavy Tools as Jobs + `run_modeling`     | M2           | 0, 2, 5, 6         | tools P6; system `run_modeling`; your decision (PyCaret removed) | Not started       |
+| 7   | Modeling Engine, Heavy Tools as Jobs + `run_modeling`     | M2           | 0, 2, 5, 6         | tools P6; system `run_modeling`; your decision (PyCaret removed) | 🟡 7.0–7.2 done (engine, rename, legacy records); jobs wait for Plan 5 |
 | 8 | Validator and Diff Engine | M3 | 1, 6 | system Phase 1 (Validator), Phase 2 (Diff, Affected Set); Appendix P D23 | Not started |
 | 9   | LangGraph Engine, Checkpoints and Model Gateway           | M3           | 1, 3, 6            | your decisions (LangGraph; LangGraph-native nodes, 2026-10-02); system §4 (Model Gateway); Appendix P D27 | Not started       |
 | 10 | Executor, Node Runner, Watchdog | M3 | 5, 6, 8, 9 | system Phases 1–3 (Executor, Live changes, Watchdog); Appendix P T4–T7, T10 | Not started |
@@ -280,7 +280,7 @@ Some plans can move:
 - **Smoke test:** `Backend/tests/runtime/test_image_smoke.py` (marker `docker`) covers the four checks of Phase 0.2. It skips outside a container (`/.dockerenv`), and the CI step fails if it skipped. It runs in `deterministic-tests`, inside the image built from the pushed commit.
 - **CI:** there is no `docker-build-agents.yml` any more; `backend-tests.yml` builds the agents image per commit (`build-image.yml`), and the separate 3.13 `toolkit-tests` job is folded into `deterministic-tests`. `PY313_ONLY_TESTS` in `Backend/conftest.py` stays for local interpreters older than 3.13.
 - **Not done locally:** the Phase 0.2 resolve check (`uv pip compile`) and the image build. The first CI run is that check.
-- **Still pending:** the `pycaret_*` tools raise `ImportError` until Plan 7 rewrites them, as Plan 0 allows.
+- **Resolved by Plan 7 (Phases 7.0–7.2, 2026-10-06):** the five modeling tools run on the scikit-learn engine and are renamed (see "Plan 7 — progress").
 
 ---
 
@@ -1236,6 +1236,26 @@ Fix H1–H18 (Appendix C). Two of them change code outside the tools:
 - (`-m "integration and celery"`) each tool, and `run_modeling`, runs in `child.py` on a tiny synthetic CSV or a tiny synthetic NIfTI.
 
 **Done when:** all 8 tools run through the job runtime on the scikit-learn engine, nothing imports `pycaret`, and the heavy and engine tests pass.
+
+## Plan 7 — progress (2026-10-06)
+
+Phases 7.0–7.2 are done; 7.1's job manifest, 7.3 (`run_modeling`), 7.4 and 7.5 wait for the job platform (Plan 5).
+
+- **Engine** (`toolpacks/modeling/engine/`): `estimators`, `preprocessing`, `cv`, `metrics`, `compare`, `tune`, `blend`, `plots`, `persistence`, plus `fitting` (fit and cross-validated scoring shared by compare, tune and blend) and `dataset` (label encoding and predictions frames).
+  - **Tune** draws its candidates with `ParameterSampler` (what `RandomizedSearchCV` samples from, seeded, `n_iter=10`) and scores each with the comparison's own CV loop and metrics, so tuned and compared rows mean the same thing. Like PyCaret's `choose_better`, it keeps the untuned model when nothing beats it.
+  - **`fix_imbalance`** is balanced sample weights (`model__sample_weight`) for every estimator that accepts them. imbalanced-learn is not installed, so there is no SMOTE and no six-minority-rows rule. A blend is fitted unweighted.
+  - **The saved model** is a joblib dict `{engine, format, task, pipeline, features, classes}` around the fitted `Pipeline`, not a bare `Pipeline`. It holds no class of ours, so it loads under either import root of the packs. A classifier predicts the codes `0 … k-1` (which XGBoost needs), and `classes` maps them back to labels. Written to a temp file, then `os.replace` (H1).
+  - **Figures** are drawn on `matplotlib.figure.Figure` with the Agg canvas (no pyplot). The SHAP summary is a mean-|SHAP| bar chart drawn the same way.
+  - **`n_jobs`** comes from `common/settings.compute_cpu_threads()` (`COMPUTE_CPU_THREADS`, capped at the core count).
+- **Tools** (Phase 7.1): `train_classifier`, `train_regressor`, `run_classifier_inference`, `run_regression_inference`, `refit_model`. Input params and success result shapes are unchanged. Failures are now `error_result` envelopes (`invalid_model_id`, `insufficient_data`, `legacy_model_format`, `wrong_task`, ...). The shared bodies are in `modeling/training.py` and `modeling/inference.py`. The tools stay `INTERIM_HEAVY`, `visibility={"agent"}`, until Plan 5.
+  - New records write `parameters.model_id` (not `pycaret_model_id`), `preprocessing.pipeline` (the explicit engine settings) and `environment.engine = "sklearn"`.
+  - The comparison key now includes `engine`.
+- **Legacy records** (Phase 7.2): the inference tools answer `legacy_model_format` for a record without `environment.engine == "sklearn"` (or a file that is not an engine bundle) and name `refit_model` with the record's id.
+  - `refit_model` maps `preprocessing.setup` onto the engine pipeline and maps SMOTE to balanced weights.
+  - It refuses a `pycaret.*` estimator class.
+  - It writes a new variant with `environment.refit_of`.
+- **Not changed:** the frozen AutoGen files still name the old tools: `modeling_agent.py`, `system_prompts/system_messages.py`, and `services/pipeline_monitor.py:227`, which matches `pycaret_train_classifier`. The `on_result` hook that replaces it is Phase 7.5.
+- **Tests:** `tests/unit/toolpacks/modeling/test_modeling_engine.py`, `test_modeling_tools.py` (all five tools through dispatch against a fake Application API), and `tests/unit/functions/test_model_refit.py` (rewritten; no PyCaret).
 
 ---
 

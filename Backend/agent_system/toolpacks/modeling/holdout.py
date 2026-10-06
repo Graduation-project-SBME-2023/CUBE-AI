@@ -1,6 +1,6 @@
 """Locating the evaluation set that feature selection deliberately withheld.
 
-Kept dependency-light (stdlib only) so the rule can be unit-tested without PyCaret,
+Kept dependency-light (stdlib only) so the rule can be unit-tested without
 sklearn or a fitted model, and so both the classification and regression tools share
 one definition instead of drifting apart.
 """
@@ -18,8 +18,8 @@ def resolve_selection_holdout(input_path: str, holdout_path: Optional[str] = Non
     """Return the holdout CSV for ``input_path``, or None when there isn't one.
 
     Feature selection writes ``<name>_train.csv`` / ``<name>_holdout.csv`` beside its
-    top-N export whenever it managed an honest split. Letting PyCaret re-split at
-    random would put rows whose labels shaped the feature set back into the test half,
+    top-N export whenever it managed an honest split. Re-splitting at random
+    would put rows whose labels shaped the feature set back into the test half,
     which is exactly the leak the split exists to prevent.
 
     An explicit ``holdout_path`` wins when it exists; otherwise the sibling file is

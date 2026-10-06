@@ -21,7 +21,7 @@ Parts of it are stale — see **Gotchas**.
   SQLAlchemy + asyncpg, Alembic, Pydantic v2 (`pydantic-settings`), AutoGen
   (`autogen_agentchat` `GraphFlow`/`DiGraphBuilder`; the legacy pipeline, frozen until its
   removal in Plan 17), PyRadiomics, scikit-learn / LightGBM / XGBoost / SHAP (PyCaret is
-  removed; the `pycaret_*` tools cannot run until Plan 7 rewrites them), MONAI Label / nnUNetv2 / VISTA3D / SAM2 / VoxTell,
+  removed; the modeling tools run on the scikit-learn engine in `agent_system/toolpacks/modeling/engine/`), MONAI Label / nnUNetv2 / VISTA3D / SAM2 / VoxTell,
   PyTorch. The framework-neutral tool platform (`agent_system/toolkit/` and
   `agent_system/toolpacks/`, see **Tool packs**) is written for **Python 3.13**.
 - **Frontend:** OHIF Viewer monorepo — React **17**, TypeScript 4.6, **Webpack 5** (not Vite),

@@ -42,8 +42,8 @@ IDENTITY_ENV = frozenset({"SESSION_ID", "RUN_ID", "AGENT_ID", "NODE_ID", "ATTEMP
 # Plan 7 moves these to jobs; they are not light tools.
 HEAVY = {
     "radiomics_extract_features", "radiomics_analyze_importance", "run_segmentation",
-    "run_segmentation_with_guard", "pycaret_train_classifier", "pycaret_run_inference",
-    "pycaret_train_regressor", "pycaret_run_regression_inference", "pycaret_refit_model",
+    "run_segmentation_with_guard", "train_classifier", "run_classifier_inference",
+    "train_regressor", "run_regression_inference", "refit_model",
 }
 TESTS = Path(__file__).resolve().parents[1]
 # A light tool whose success and error tests live with the tool's own tests.

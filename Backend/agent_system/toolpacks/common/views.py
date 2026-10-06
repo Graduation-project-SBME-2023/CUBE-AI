@@ -9,7 +9,7 @@ tool carries its hook, dispatch calls it after a success with the result and
 the context, and the ``EventSink`` sends the returned ``ViewEvent``s. The view
 types and payloads are the legacy ones, so the frontend views do not change.
 
-The views of the heavy tools (radiomics, PyCaret) move with them in Plan 7.
+The views of the heavy tools (radiomics, modeling) move with them in Plan 7.
 """
 
 from __future__ import annotations
