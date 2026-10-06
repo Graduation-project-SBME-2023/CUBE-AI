@@ -1,11 +1,22 @@
 name: CUBE.AI
 services:
-  # Bind-mount live source for hot-reload during development only. The base
-  # compose files intentionally do NOT do this: db-migrate/db-seed always run
-  # the image's baked code, and application-api bind-mounting a different
-  # source tree meant it could silently run code the migrations never saw
-  # (see database_audit.md D-33). Restrict that divergence to this
-  # explicit dev overlay, where it is an accepted, visible trade-off.
+  # Bind-mount live source during development only. The base compose files
+  # intentionally do NOT do this, so in production db-migrate, db-seed and
+  # application-api all run the same baked code.
+  #
+  # Here all three mount the same tree, so `up` (or `up db-migrate`) applies
+  # the migrations that sit next to the models the API runs. A migration added
+  # while the stack is up is still not applied by itself: after editing a
+  # model, generate the revision and run `up db-migrate`, then restart
+  # application-api. Until then /health/ready answers 503 "schema_mismatch".
+  db-migrate:
+    volumes:
+      - ${COMPOSE_PROJECT_DIR}/Backend/application_api:/app/application_api
+
+  db-seed:
+    volumes:
+      - ${COMPOSE_PROJECT_DIR}/Backend/application_api:/app/application_api
+
   application-api:
     volumes:
       - ${COMPOSE_PROJECT_DIR}/Backend/storage:/storage
