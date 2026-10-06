@@ -1,4 +1,14 @@
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.sql import func
 from application_api.db.base import Base
 
@@ -6,21 +16,21 @@ from application_api.db.base import Base
 class Volume(Base):
     __tablename__ = 'volume_series'
 
-    volume_series_instance_uid = Column(String, primary_key=True, index=True)
-    orthanc_series_id = Column(String, unique=True, index=True, nullable=False)
+    volume_series_instance_uid = Column(Text, primary_key=True)
+    # Nullable for rows synced before the Orthanc ids existed (see Patient).
+    orthanc_series_id = Column(String, unique=True, index=True, nullable=True)
     body_part_examined = Column(String, nullable=True)
 
     study_uid = Column(
-        String,
+        Text,
         ForeignKey('studies.study_uid', ondelete="RESTRICT"),
         nullable=False,
-        index=True,
     )
-    series_description = Column(String, nullable=True)
+    series_description = Column(Text, nullable=True)
     modality = Column(String, nullable=True)
-    num_slices = Column(Integer, nullable=True)
+    num_slices = Column(Integer, nullable=False)
 
-    archive_status = Column(String, nullable=False, server_default="available", index=True)
+    archive_status = Column(Text, nullable=False, server_default="available", index=True)
 
     # Renamed from `created_at`: this holds the DICOM SeriesDate/SeriesTime
     # (falling back to sync time only when that tag is missing/unparseable),
@@ -44,5 +54,12 @@ class Volume(Base):
         CheckConstraint(
             "archive_status IN ('available', 'unavailable', 'quarantined')",
             name="archive_status",
+        ),
+        Index("idx_series_study_id", "study_uid"),
+        Index(
+            "ix_volume_series_description_trgm",
+            "series_description",
+            postgresql_using="gin",
+            postgresql_ops={"series_description": "gin_trgm_ops"},
         ),
     )

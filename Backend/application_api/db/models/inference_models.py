@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, text
+from sqlalchemy import Column, Integer, String, DateTime, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 from application_api.db.base import Base
@@ -15,9 +15,9 @@ class InferenceModel(Base):
     name = Column(String, nullable=False, unique=True)
 
     # automatic / interactive
-    type = Column(String, nullable=False)
+    type = Column(String, nullable=True)
 
-    modality = Column(String, nullable=False)  # "CT", "MRI", "any"
+    modality = Column(String, nullable=False, server_default="any")  # "CT", "MRI", "any"
 
     anatomy = Column(JSONB, nullable=True)  # ["spleen", "liver"]
 
@@ -27,9 +27,9 @@ class InferenceModel(Base):
     # so it contain any parameters needed for the model execution
     params_schema = Column(JSONB, nullable=True)
 
-    description = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
 
-    config = Column(JSONB, nullable=True)
+    config = Column(JSONB, nullable=False)
 
     dimension = Column(Integer, nullable=True)
 

@@ -8,7 +8,7 @@ class Workflow(Base):
 
     # Task-name registry that workflow_details FKs into and that the nnUNet
     # training routes read.
-    task_name = Column(String, primary_key=True, nullable=False)
+    task_name = Column(Text, primary_key=True, nullable=False)
 
     #  the numeric nnUNet dataset id is allocated under an application-api
     # lock and this UNIQUE constraint — never from the max local directory,
@@ -17,7 +17,7 @@ class Workflow(Base):
 
     # the training-setup UI reads it directly,
     # and it is distinct from the task_name code key.
-    display_title = Column(String, nullable=True)
+    display_title = Column(Text, nullable=True)
 
     description = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, server_default="active")

@@ -6,6 +6,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     Text,
@@ -77,7 +78,6 @@ class LiteraturePaper(Base):
         UUID(as_uuid=True),
         ForeignKey("literature_reviews.literature_review_id", ondelete="RESTRICT"),
         nullable=False,
-        index=True,
     )
     pmid = Column(Text, nullable=True)
     doi = Column(Text, nullable=True)
@@ -95,7 +95,9 @@ class LiteraturePaper(Base):
     schema_version = Column(Integer, nullable=False, server_default="1")
 
     __table_args__ = (
-        # Deduplication keys — partial so NULLs are not treated as equal.
+        Index("ix_literature_papers_review_id", "literature_review_id"),
+        # Deduplication keys. NULLs stay distinct, so a review can hold many
+        # papers that have only a DOI, or only a PMID.
         UniqueConstraint(
             "literature_review_id",
             "pmid",
