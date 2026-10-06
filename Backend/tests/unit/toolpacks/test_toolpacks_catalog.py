@@ -25,7 +25,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3]
 TOOLPACKS_ROOT = BACKEND_ROOT / "agent_system" / "toolpacks"
 
 # Every tool Backend/mcp registered, by pack. A name may never change here
-# (except in Plan 7's PyCaret rewrite): agent prompts call tools by name.
+# (except Plan 7's rename of the 5 PyCaret tools): agent prompts call tools by name.
 MOVED_TOOLS: dict[str, set[str]] = {
     "bookkeeping": {
         "write_agent_output", "read_agent_output", "read_all_agent_outputs",
@@ -44,8 +44,8 @@ MOVED_TOOLS: dict[str, set[str]] = {
     },
     "literature": {"read_literature_context"},
     "modeling": {
-        "pycaret_train_classifier", "pycaret_run_inference", "pycaret_train_regressor",
-        "pycaret_run_regression_inference", "pycaret_refit_model",
+        "train_classifier", "run_classifier_inference", "train_regressor",
+        "run_regression_inference", "refit_model",
     },
     "population": {
         "write_inclusion_criteria", "get_unique_series_descriptions", "extract_cohort_labels",

@@ -47,7 +47,7 @@ const WAITING_MESSAGES: Record<string, string> = {
 };
 
 /**
- * Modeling updates can arrive as either the raw PyCaret response or the
+ * Modeling updates can arrive as either the raw train_classifier response or the
  * experiment-keyed payload produced by PipelineMonitor. Convert both forms
  * before state is updated so live updates and replayed messages render alike.
  */

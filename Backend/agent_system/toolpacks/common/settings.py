@@ -60,3 +60,9 @@ def llm_concurrency_limit() -> int:
     """How many LLM calls one tool call may have in flight at once."""
     # A fraction below one would make a semaphore of zero, which never opens.
     return max(1, int(positive_float("LLM_CONCURRENCY_LIMIT", DEFAULT_LLM_CONCURRENCY)))
+
+
+def compute_cpu_threads() -> int:
+    """The most threads one modeling fit may use (``n_jobs``); every core by default."""
+    cores = os.cpu_count() or 1
+    return max(1, min(cores, int(positive_float("COMPUTE_CPU_THREADS", float(cores)))))

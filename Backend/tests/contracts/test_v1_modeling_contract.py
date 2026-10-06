@@ -145,8 +145,15 @@ def test_only_modeling_writes_model_results_and_replays_do_not_overwrite():
 # The writers moved
 # ----------------------------------------------------------------------
 @pytest.mark.parametrize("tool", ["classification.py", "regression.py"])
-def test_the_training_tools_record_rows_not_csvs(tool):
+def test_the_training_tools_run_the_shared_engine_bodies(tool):
     source = _source(TOOLPACKS_ROOT / "modeling" / tool)
+    assert "training.train(" in source and "inference.run_inference(" in source
+
+
+def test_the_training_tools_record_rows_not_csvs():
+    source = _source(TOOLPACKS_ROOT / "modeling/training.py") + _source(
+        TOOLPACKS_ROOT / "modeling/inference.py"
+    )
     assert "domain_api.record_model_comparison" in source
     # A replay reads the recorded comparison instead of training again.
     assert "domain_api.get_model_comparison" in source
@@ -169,7 +176,7 @@ def test_a_lost_pipeline_is_refitted_as_a_new_variant_from_verified_input():
     assert "__refit_" in source
     assert "dataset_digest" in source and "refusing to refit" in source
     # Registered as a tool (the catalog discovers it; there is no import list).
-    assert 'name="pycaret_refit_model"' in source and "@tool(" in source
+    assert 'name="refit_model"' in source and "@tool(" in source
 
 
 def test_a_generic_csv_is_captured_not_turned_into_a_fake_feature_set():
