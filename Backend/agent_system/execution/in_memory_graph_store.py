@@ -197,6 +197,11 @@ class InMemoryGraphStore:
                          pending_change=Change.model_validate(pending) if pending else None,
                          activity=self.activity(session_id))
 
+    async def node_runs(self, node_id: str) -> list[Run]:
+        if node_id not in self.nodes:
+            raise _refuse("NOT_FOUND", f"node {node_id}", 404)
+        return [self._run_out(run) for run in self.runs.values() if run.node_id == node_id]
+
     # ------------------------------------------------------------------
     # Propose / apply a change
     # ------------------------------------------------------------------

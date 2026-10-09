@@ -156,6 +156,7 @@ class GraphStore(Protocol):
     async def create_session(self, prompt: str, *, execution_mode: str = "auto") -> str: ...
     async def set_control_state(self, session_id: str, control_state: str) -> None: ...
     async def get_graph(self, session_id: str) -> GraphView: ...
+    async def node_runs(self, node_id: str) -> list[Run]: ...
     async def submit_change(
         self, session_id: str, *, author: str, base_version: int, content: dict[str, Any],
         approval_reasons: tuple[str, ...] = (), tool_call: Optional[dict] = None,
@@ -209,6 +210,9 @@ class HttpGraphStore:
 
     async def get_graph(self, session_id: str) -> GraphView:
         return GraphView.model_validate(await self._call(self.client.get_graph(session_id)))
+
+    async def node_runs(self, node_id: str) -> list[Run]:
+        return [Run.model_validate(run) for run in await self._call(self.client.node_runs(node_id))]
 
     async def submit_change(self, session_id: str, *, author: str, base_version: int, content: dict[str, Any],
                             approval_reasons: tuple[str, ...] = (), tool_call: Optional[dict] = None,

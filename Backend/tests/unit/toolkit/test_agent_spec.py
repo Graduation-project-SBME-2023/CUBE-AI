@@ -91,6 +91,17 @@ def test_defaults_and_normalisation():
     assert spec.parent is None
 
 
+@pytest.mark.parametrize(
+    ("kind", "parent", "resumable"),
+    [("execution", None, True), ("control", None, False), ("internal", "segmentation_agent", False)],
+)
+def test_resumable_defaults_per_kind(kind, parent, resumable):
+    spec = _agent(kind=kind, parent=parent, delegates=[], inputs={}, outputs={})
+
+    assert spec.resumable is resumable
+    assert _agent(resumable=False).resumable is False
+
+
 def test_agent_spec_is_not_a_tool_spec():
     assert not issubclass(AgentSpec, ToolSpec)
     assert not isinstance(_agent(), ToolSpec)
@@ -254,6 +265,7 @@ def test_allowlist_function_result_is_checked():
         ({"context_builder": "build"}, TypeError, "context_builder"),
         ({"ui": ""}, ValueError, "ui"),
         ({"human_in_the_loop": "yes"}, TypeError, "human_in_the_loop"),
+        ({"resumable": "yes"}, TypeError, "resumable"),
         ({"parent": "Segmentation"}, ValueError, "parent"),
     ],
 )
