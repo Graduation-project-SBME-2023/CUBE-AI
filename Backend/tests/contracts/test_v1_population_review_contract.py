@@ -221,9 +221,9 @@ def test_the_population_tools_write_the_cohort_not_config_json():
         "population/inclusion_criteria.py",
         "population/validate_anatomy.py",
         "population/cohort_labels.py",
-        "population/targets_matcher.py",
+        "population/cohort_approval.py",
         "population/save_population.py",
-        "db_reads/volumes/search_volumes.py",
+        "population/volume_search.py",
     ):
         source = _source(TOOLPACKS_ROOT / name)
         assert "domain_api" in source, name
@@ -285,7 +285,10 @@ def test_an_edited_mask_is_published_as_a_seg_and_never_reshaped_by_guessing():
 
 
 def test_feature_extraction_reads_reviewed_pairs_instead_of_another_agents_manifest():
-    source = _source(TOOLPACKS_ROOT / "radiomics" / "features.py")
+    radiomics = TOOLPACKS_ROOT / "radiomics"
+    source = "\n".join(
+        _source(path) for path in [radiomics / "extract_features.py", *(radiomics / "extraction").glob("*.py")]
+    )
     assert "reviewed_masks" in source
     assert 'base_on_workspace_dir("segmentation_manifest.json")' not in source
     assert "cohort_analysis_rows" in source

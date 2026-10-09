@@ -172,12 +172,10 @@ def test_the_scan_sees_the_fenced_repositories():
     assert not _declares("chats", "accept_input")
 
 
-# Producers still to come (the modeling job tools). Each must be absent
-# from the catalog today; when one lands, this list shrinks.
-PLAN_7_PRODUCERS = {
-    "run_modeling", "train_classifier", "train_regressor",
-    "run_classifier_inference", "run_regression_inference", "refit_model",
-}
+# Producers still to come (Plan 7.3). Each must be absent from the catalog
+# today; when one lands, this list shrinks. The five modeling tools landed in
+# Phase 7.1.
+PLAN_7_PRODUCERS = {"run_modeling"}
 
 
 @pytest.mark.skipif(sys.version_info < (3, 13), reason="the tool catalog needs Python 3.13")

@@ -1,3 +1,5 @@
+"""``get_unique_series_descriptions``: the series descriptions the dataset actually uses."""
+
 from .._toolkit import is_error_result, tool
 from ..common.manifests import READ_ONLY
 from ..db_reads import _api

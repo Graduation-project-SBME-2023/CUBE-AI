@@ -122,7 +122,7 @@ def _confusion_matrix(n_labels: int = 2):
 
 def build_modeling_payload(n_labels: int) -> dict:
     """
-    Mimics what pycaret_train_classifier returns (after the agent tool call),
+    Mimics what train_classifier returns (after the agent tool call),
     as processed by _emit_tool_result_to_view → emit_modeling_output.
     """
     model_specs = [
@@ -132,7 +132,7 @@ def build_modeling_payload(n_labels: int) -> dict:
         {"key": "blended_model", "label": "Blended Ensemble",   "auc": 0.93, "acc": 0.89, "f1": 0.88, "prec": 0.90, "rec": 0.87},
     ]
 
-    # Comparison table (mimics PyCaret compare_models pull())
+    # Comparison table (mimics the engine's compare table)
     comparison_table = [
         {
             "Model":     m["label"],

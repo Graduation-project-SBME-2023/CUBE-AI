@@ -328,7 +328,8 @@ def test_agent_output_is_the_run_not_a_json_file():
 
 def test_task_context_reads_the_run(monkeypatch):
     source = _source(TOOLPACKS_ROOT / "bookkeeping" / "task_context.py")
-    assert "/runs/" in source
+    # The run row, through the Application API (domain_api names the /runs/ routes).
+    assert "domain_api.get_run()" in source and "domain_api.run_by_target(" in source
     assert "compiled_prompt" in source
     assert "/task-messages/" not in source
     assert "steps_sharing_this_agent_type" in source

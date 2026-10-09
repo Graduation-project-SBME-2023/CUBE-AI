@@ -1,28 +1,32 @@
-"""Compile LaTeX report source to PDF."""
+"""``latex_to_pdf``: compile a report's LaTeX and publish the PDF.
 
-import asyncio
+The Application API compiles and publishes in one transaction
+(``POST /reports/{report_id}/publish``): the report's source becomes the new
+version only when the compile succeeds, and the PDF is streamed back, never
+written to the workspace.
+"""
+
+from __future__ import annotations
+
 import json
-import os
 import re
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 from pydantic import Field
 
 from .._toolkit import ExtractedArtifact, PortSpec, error_result, tool
-from ..common import views
-from ..common.manifests import WRITES
+from ..common import domain_api, views
 from ..common.emit import emit
-from ..common.http_client import shared_client, timeout, write_path_headers
-from ..common.service_urls import app_api_url
+from ..common.manifests import WRITES
+from ..common.service_urls import agents_base_url, app_api_url
 
 PUBLISH_TIMEOUT_S = 90.0
 _ERROR_CODE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
-def _error(code: object, message: str, **extra: object) -> dict:
-    """The tool's failures as error results; the API's own code when it is a
-    valid error code, else ``publish_failed``."""
+def _error(code: object, message: str, **extra: Any) -> dict[str, Any]:
+    """The API's own code when it is a valid error code, else ``publish_failed``."""
     code = str(code).lower()
     return error_result(
         code if _ERROR_CODE.match(code) else "publish_failed",
@@ -38,6 +42,48 @@ def _published_report(result: object) -> ExtractedArtifact:
         ref={"report_id": data["report_id"]},
         summary={"source_version": data["new_version"], "has_pdf": True},
     )
+
+
+def _detail(response: httpx.Response) -> Any:
+    """FastAPI wraps every HTTPException body as ``{"detail": ...}``; unwrap it once."""
+    body = domain_api.response_body(response)
+    return body.get("detail", body) if isinstance(body, dict) else body
+
+
+def _field(detail: Any, name: str, default: Any = None) -> Any:
+    return detail.get(name, default) if isinstance(detail, dict) else default
+
+
+def _publish_failure(response: httpx.Response) -> dict[str, Any]:
+    """The error result of a publish the API refused."""
+    status = response.status_code
+    if status >= 500 and status != 503:
+        # A 5xx body is an unhandled server exception: never shown to the model.
+        return _error("upstream_error", f"The Application API failed to publish the report ({status}).")
+    detail = _detail(response)
+    message = _field(detail, "message", str(detail)[:2000])
+    if status == 409:
+        return _error(
+            _field(detail, "code", "conflict"), message, current_version=_field(detail, "current_version")
+        )
+    if status == 422:
+        return _error(
+            "latex_compile_error",
+            "LaTeX compilation failed.  The report source is unchanged (A19). "
+            "Fix the LaTeX errors below and retry with the same expected_version.",
+            stdout=_field(detail, "stdout", ""),
+            stderr=_field(detail, "stderr", ""),
+        )
+    if status == 503:
+        return _error(_field(detail, "code", "unavailable"), message)
+    return _error(f"http_{status}", str(detail)[:2000])
+
+
+def _download_url(report_id: str) -> str:
+    """The PDF's download route: through the agents' file server when it is
+    published, else the Application API's own."""
+    base = agents_base_url() or app_api_url()
+    return f"{base}/reports/{report_id}/download"
 
 
 @tool(
@@ -63,19 +109,14 @@ async def latex_to_pdf(
         str,
         Field(
             description=(
-                "The desired PDF filename (basename only, e.g. 'report.pdf'). "
-                "Used for the download Content-Disposition header."
+                "A file name for the PDF (basename only, e.g. 'report.pdf'). The PDF is "
+                "stored and downloaded by its report_id; this name is not used."
             )
         ),
     ],
     report_id: Annotated[
         str,
-        Field(
-            description=(
-                "The UUID of the ``reports`` row to publish to.  Create one first "
-                "via POST /reports/ with your run_id and initial source_text."
-            )
-        ),
+        Field(description="The report_id returned by create_report."),
     ],
     expected_version: Annotated[
         int,
@@ -92,119 +133,40 @@ async def latex_to_pdf(
         Field(
             description=(
                 "The list of image_key values referenced by \\\\includegraphics in "
-                "the LaTeX source.  Each key must be registered via "
-                "POST /reports/{report_id}/images before calling this tool."
+                "the LaTeX source.  Each key must be registered with "
+                "register_report_image before calling this tool."
             )
         ),
     ] = [],
-) -> str:
+) -> str | dict[str, Any]:
     """Compile LaTeX and publish to the reports table."""
     emit("tool_log", "Publishing report…")
-
-    api_base = app_api_url()
-    publish_url = f"{api_base}/reports/{report_id}/publish"
-    payload = {
-        "latex_text": latex_text,
-        "expected_version": expected_version,
-        "image_keys": image_keys,
-    }
-
+    emit("tool_progress", "Compiling LaTeX…")
     try:
-        emit("tool_progress", "Compiling LaTeX…")
-        resp = await shared_client().post(
-            publish_url,
-            json=payload,
-            headers=write_path_headers(),
-            timeout=timeout(PUBLISH_TIMEOUT_S),
+        response = await domain_api.send(
+            "POST",
+            f"/reports/{domain_api.segment(report_id)}/publish",
+            json={"latex_text": latex_text, "expected_version": expected_version, "image_keys": image_keys},
+            timeout=PUBLISH_TIMEOUT_S,
         )
-
-        if resp.status_code == 200:
-            # Success: PDF bytes returned as application/pdf.
-            pdf_size = len(resp.content)
-            # Build a stable download URL via the agents file server.
-            agents_base = os.environ.get("AGENTS_BASE_URL", "").rstrip("/")
-            download_url = (
-                f"{agents_base}/reports/{report_id}/download"
-                if agents_base
-                else f"{api_base}/reports/{report_id}/download"
-            )
-            emit("tool_log", "PDF published successfully.")
-            return json.dumps(
-                {
-                    "status": "success",
-                    "message": "Report published successfully (A19); PDF streamed, no file written.",
-                    "report_id": report_id,
-                    "new_version": expected_version + 1,
-                    "pdf_size_bytes": pdf_size,
-                    "download_url": download_url,
-                }
-            )
-
-        # Non-200 — surface the error to the agent. FastAPI wraps every
-        # HTTPException body as {"detail": <value>}; unwrap it once here so
-        # every branch below can read `code`/`message`/etc. directly instead
-        # of silently falling through to their defaults.
-        try:
-            body = resp.json()
-            detail = body.get("detail", body) if isinstance(body, dict) else body
-        except Exception:
-            detail = resp.text[:2000]
-        emit("error", "Report publication failed.")
-
-        if resp.status_code == 409:
-            code = detail.get("code", "conflict") if isinstance(detail, dict) else "conflict"
+    except domain_api.DomainApiError as exc:
+        if isinstance(exc.__cause__, httpx.TimeoutException):
             return _error(
-                code,
-                detail.get("message", str(detail)) if isinstance(detail, dict) else str(detail),
-                current_version=(
-                    detail.get("current_version") if isinstance(detail, dict) else None
-                ),
+                "timeout",
+                "The publish request timed out.  The compilation may still be "
+                "running; check the report source_version before retrying.",
             )
+        return _error("unavailable", str(exc))
 
-        if resp.status_code == 422:
-            stdout = ""
-            stderr = ""
-            if isinstance(detail, dict):
-                stdout = detail.get("stdout", "")
-                stderr = detail.get("stderr", "")
-            return _error(
-                "latex_compile_error",
-                "LaTeX compilation failed.  The report source is unchanged (A19). "
-                "Fix the LaTeX errors below and retry with the same expected_version.",
-                stdout=stdout,
-                stderr=stderr,
-            )
+    if response.status_code != 200:
+        return _publish_failure(response)
 
-        if resp.status_code == 503:
-            code = detail.get("code", "unavailable") if isinstance(detail, dict) else "unavailable"
-            return _error(
-                code,
-                detail.get("message", str(detail)) if isinstance(detail, dict) else str(detail),
-            )
-
-        return _error(f"http_{resp.status_code}", str(detail)[:2000])
-
-    except httpx.TimeoutException:
-        return _error(
-            "timeout",
-            "The publish request timed out.  The compilation may still be "
-            "running; check the report source_version before retrying.",
-        )
-    except httpx.HTTPError as exc:
-        return _error("unavailable", f"The Application API could not be reached: {exc}")
-
-
-if __name__ == "__main__":
-    # Minimal smoke-test (requires a running Application API and a known report_id).
-    result = asyncio.run(
-        latex_to_pdf(
-            latex_text=(
-                r"\documentclass{article}"
-                r"\begin{document}Hello, world!\end{document}"
-            ),
-            output_filename="test.pdf",
-            report_id="00000000-0000-0000-0000-000000000000",
-            expected_version=1,
-        )
-    )
-    print(result)
+    emit("tool_log", "PDF published successfully.")
+    return json.dumps({
+        "status": "success",
+        "message": "Report published successfully (A19); PDF streamed, no file written.",
+        "report_id": report_id,
+        "new_version": expected_version + 1,
+        "pdf_size_bytes": len(response.content),
+        "download_url": _download_url(report_id),
+    })

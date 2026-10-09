@@ -8,13 +8,11 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
+from ..common.values import finite_float
+
 
 def safe_float(value: Any) -> Optional[float]:
-    try:
-        number = float(value)
-        return None if np.isnan(number) or np.isinf(number) else round(number, 6)
-    except Exception:
-        return None
+    return finite_float(value)
 
 
 def _finite(value: Any) -> Any:
@@ -56,7 +54,8 @@ def compute_pr(y_true, y_prob, pos_label=None) -> Optional[dict]:
 
 def holdout_metrics(predictions: pd.DataFrame, y_true: pd.Series) -> dict:
     """Accuracy, AUC, F1, precision, recall, specificity and the confusion
-    matrix of a classifier's PyCaret `predict_model()` output."""
+    matrix of a classifier's predictions frame (`prediction_label`, and
+    `prediction_score_<label>` per class when it gives probabilities)."""
     from sklearn.metrics import (
         accuracy_score,
         confusion_matrix,
@@ -92,16 +91,15 @@ def holdout_metrics(predictions: pd.DataFrame, y_true: pd.Series) -> dict:
         tn, fp, fn, tp = cm.ravel()
         metrics["specificity"] = safe_float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0
 
-        prob_cols = [c for c in predictions.columns if c.startswith("Score_")]
-        if not prob_cols:
-            prob_cols = [c for c in predictions.columns if "score" in c.lower() or "prob" in c.lower()]
-
-        if prob_cols:
-            pos_class = sorted(unique_classes)[1]
-            prob_col = next(
-                (c for c in prob_cols if str(pos_class) in c or "_1" in c or c.endswith("1")),
-                prob_cols[0],
-            )
+        pos_class = sorted(unique_classes)[1]
+        prob_col = next(
+            (
+                c for c in (f"prediction_score_{pos_class}", "prediction_score")
+                if c in predictions.columns
+            ),
+            None,
+        )
+        if prob_col is not None:
             y_prob = predictions[prob_col]
             try:
                 metrics["auc"] = safe_float(roc_auc_score(y_true, y_prob))
@@ -159,16 +157,6 @@ def regression_metrics(predictions: pd.DataFrame, target_column: str = "target")
     return {key: _finite(value) for key, value in metrics.items()}
 
 
-def cv_row(frame: pd.DataFrame) -> dict:
-    """The mean cross-validation row PyCaret's `pull()` reports."""
-    row = frame.loc["Mean"] if "Mean" in frame.index else frame.iloc[-1]
-    return {
-        str(key): safe_float(value)
-        for key, value in row.items()
-        if key not in ("Model", "TT (Sec)")
-    }
-
-
 def chart_data_from_recorded(recorded: dict) -> dict:
     """The UI's chart payload, derived from the recorded rows."""
     comparison_table: list = []
@@ -198,7 +186,6 @@ __all__ = [
     "chart_data_from_recorded",
     "compute_pr",
     "compute_roc",
-    "cv_row",
     "holdout_metrics",
     "regression_metrics",
     "safe_float",

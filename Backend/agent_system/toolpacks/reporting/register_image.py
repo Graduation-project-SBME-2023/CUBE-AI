@@ -50,7 +50,7 @@ async def register_report_image(
     try:
         image = await domain_api.request(
             "POST",
-            f"/reports/{report_id}/images",
+            f"/reports/{domain_api.segment(report_id)}/images",
             json={"file_id": artifact_id, "image_key": image_key},
         )
     except domain_api.DomainApiError as exc:

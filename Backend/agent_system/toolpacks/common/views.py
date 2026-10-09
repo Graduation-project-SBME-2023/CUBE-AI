@@ -9,7 +9,7 @@ tool carries its hook, dispatch calls it after a success with the result and
 the context, and the ``EventSink`` sends the returned ``ViewEvent``s. The view
 types and payloads are the legacy ones, so the frontend views do not change.
 
-The views of the heavy tools (radiomics, PyCaret) move with them in Plan 7.
+The views of the heavy tools (radiomics, modeling) move with them in Plan 7.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ async def read_agent_output(session_id: str, agent_type: str) -> dict[str, Any]:
     """The structured output an agent recorded on its run, or ``{}``."""
     if not session_id or not agent_type:
         return {}
-    for run in await domain_api.request("GET", f"/runs/session/{session_id}") or []:
+    for run in await domain_api.session_runs(session_id):
         node = run.get("node") or {}
         if node.get("target_name") != agent_type:
             continue

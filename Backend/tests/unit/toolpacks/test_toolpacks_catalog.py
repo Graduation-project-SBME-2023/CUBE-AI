@@ -18,6 +18,7 @@ import pytest
 
 from agent_system.toolkit import catalog as catalog_module
 from agent_system.toolkit.manifest import Cost, Execution, SideEffects, Visibility
+from agent_system.toolkit.tools.spec import DEFAULT_TIMEOUT_S
 
 pytestmark = pytest.mark.unit
 
@@ -25,7 +26,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3]
 TOOLPACKS_ROOT = BACKEND_ROOT / "agent_system" / "toolpacks"
 
 # Every tool Backend/mcp registered, by pack. A name may never change here
-# (except in Plan 7's PyCaret rewrite): agent prompts call tools by name.
+# (except Plan 7's rename of the 5 PyCaret tools): agent prompts call tools by name.
 MOVED_TOOLS: dict[str, set[str]] = {
     "bookkeeping": {
         "write_agent_output", "read_agent_output", "read_all_agent_outputs",
@@ -40,16 +41,18 @@ MOVED_TOOLS: dict[str, set[str]] = {
         "get_segmentation_by_model", "get_invalidate_segmentations", "search_segmentation",
         "get_segmentation_stats", "get_study", "get_study_by_patient", "search_studies",
         "count_volumes_in_study", "get_volume", "get_volumes_by_study", "search_volumes",
-        "search_volumes_by_description",
     },
     "literature": {"read_literature_context"},
     "modeling": {
-        "pycaret_train_classifier", "pycaret_run_inference", "pycaret_train_regressor",
-        "pycaret_run_regression_inference", "pycaret_refit_model",
+        "train_classifier", "run_classifier_inference", "train_regressor",
+        "run_regression_inference", "refit_model",
     },
     "population": {
         "write_inclusion_criteria", "get_unique_series_descriptions", "extract_cohort_labels",
         "validate_population_anatomy", "save_final_output", "generate_targets",
+        # A search that records its rationale on the population cohort: a
+        # population step, not a read-only lookup (moved out of db_reads).
+        "search_volumes_by_description",
     },
     "radiomics": {"radiomics_extract_features", "radiomics_analyze_importance"},
     "reporting": {
@@ -118,6 +121,16 @@ def test_the_graph_tools_are_the_two_with_ports(pack_tools):
     assert segmentation.outputs["masks"].artifact_type == "MaskSet"
     report = pack_tools["latex_to_pdf"]
     assert report.inputs["report"].artifact_type == report.outputs["report"].artifact_type == "ReportDocument"
+
+
+def test_every_heavy_tool_states_a_budget_it_can_finish_in(pack_tools):
+    """Dispatch enforces timeout_s: a heavy tool left on the 120 s default
+    would be cut off on any real cohort."""
+    short = [
+        name for name in INTERIM_HEAVY_TOOLS
+        if pack_tools[name].timeout_s <= DEFAULT_TIMEOUT_S or not pack_tools[name].resources
+    ]
+    assert not short
 
 
 def test_every_light_tool_states_its_budget_and_scopes(pack_tools):
