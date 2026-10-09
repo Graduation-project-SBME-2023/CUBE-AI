@@ -188,6 +188,13 @@ PY313_ONLY_TESTS = (
     "tests/unit/toolpacks",
     "tests/unit/functions",
     "tests/contracts/test_agent_output_contract.py",
+    # Plan 8: the planning code reads the toolkit catalog.
+    "tests/unit/planning/test_graph_model.py",
+    "tests/unit/planning/test_inputs.py",
+    "tests/unit/planning/test_validator.py",
+    "tests/unit/execution/test_affected.py",
+    "tests/unit/execution/test_diff_engine.py",
+    "tests/contracts/test_graph_change_contract.py",
 )
 collect_ignore = list(PY313_ONLY_TESTS) if sys.version_info < (3, 13) else []
 
