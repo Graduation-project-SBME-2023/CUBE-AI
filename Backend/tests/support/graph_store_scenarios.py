@@ -121,6 +121,9 @@ async def a_rerun_supersedes_and_keeps_old_pins(store: GraphStore) -> None:
     assert set(applied.superseded_run_ids) == {first.run.run_id, second.run.run_id}
     fresh = await start(store, session_id, a["node_id"])
     assert fresh.first_start and fresh.run.execution_policy["fresh"] is True
+    history = await store.node_runs(a["node_id"])
+    assert [run.run_id for run in history] == [first.run.run_id, fresh.run.run_id]
+    assert history[0].superseded_at is not None and history[1].superseded_at is None
 
 
 async def a_running_node_is_affected_only_on_restart(store: GraphStore) -> None:

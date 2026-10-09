@@ -123,6 +123,10 @@ class AgentSpec:
     human_in_the_loop: bool = False  # user gates inside the node (cohort approval, review)
     parent: str | None = None  # the owner of an internal agent
 
+    # --- checkpoints (D27): a resumable node's retry continues the run's thread.
+    # None takes the kind's default: true for execution agents, false otherwise.
+    resumable: bool | None = None
+
     def __post_init__(self) -> None:
         # Frozen dataclass: normalised values go through object.__setattr__.
         def _set(name: str, value: Any) -> None:
@@ -180,6 +184,10 @@ class AgentSpec:
             raise ValueError(f"agent {name!r}: ui must be a non-empty string or None")
         if not isinstance(self.human_in_the_loop, bool):
             raise TypeError(f"agent {name!r}: human_in_the_loop must be a bool")
+        if self.resumable is None:
+            _set("resumable", self.kind is AgentKind.EXECUTION)
+        elif not isinstance(self.resumable, bool):
+            raise TypeError(f"agent {name!r}: resumable must be a bool or None")
         if self.parent is not None:
             _check_agent_name(self.parent, f"agent {name!r}: parent")
 

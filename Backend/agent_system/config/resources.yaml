@@ -1,0 +1,15 @@
+# Executor resource pools (merged plan, compatibility decision 11; Plan 10).
+#
+# Each pool is an asyncio semaphore of this size in the one Agent System
+# worker. Pools are runtime only: a node waiting for a pool, or refused at
+# start, is never stored (D19). For job tools the Celery queues stay the real
+# limit. The Validator refuses a node whose target declares a pool missing here
+# (UNKNOWN_RESOURCE). Data only: this directory has no __init__.py.
+v: 1
+pools:
+  llm: 4
+  cpu_heavy: 2
+  gpu: 1
+  highmem: 1
+  monai_inference: 1
+  orthanc_io: 4
