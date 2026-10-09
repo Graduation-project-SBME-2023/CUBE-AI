@@ -46,15 +46,25 @@ GONE = {
 }
 
 
-def _routes():
+def _api_routes(routes):
     from fastapi.routing import APIRoute
 
+    for route in routes:
+        # Newer FastAPI keeps an included router as one wrapper entry instead
+        # of copying its routes into the app; walk into it.
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            yield from _api_routes(included.routes)
+        elif isinstance(route, APIRoute):
+            yield route
+
+
+def _routes():
     from application_api.main import app
 
-    for route in app.routes:
-        if isinstance(route, APIRoute):
-            for method in route.methods:
-                yield method, route.path, route
+    for route in _api_routes(app.routes):
+        for method in route.methods:
+            yield method, route.path, route
 
 
 def _calls(dependant) -> set:
