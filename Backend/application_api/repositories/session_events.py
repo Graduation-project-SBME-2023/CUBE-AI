@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.db.models.session_events import SessionEvent
+from application_api.repositories.users import owned_session_ids
 from application_api.schemas.session_events import SessionEventCreate
 from application_api.services.publication import publication
 
@@ -59,9 +60,12 @@ async def get_events(
     event_type: str | None = None,
     after_event_id: int = 0,
     limit: int = 100,
+    owner: UUID | None = None,
 ) -> list[SessionEvent]:
     try:
         query = select(SessionEvent).where(SessionEvent.event_id > after_event_id)
+        if owner is not None:
+            query = query.where(SessionEvent.session_id.in_(owned_session_ids(owner)))
         if session_id:
             query = query.where(SessionEvent.session_id == session_id)
         if event_type:

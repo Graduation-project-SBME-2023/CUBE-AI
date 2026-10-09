@@ -17,6 +17,7 @@ from application_api.db.models.cohorts import CohortMember
 from application_api.db.models.radiomics import Radiomics
 from application_api.db.models.segmentation_batches import SegmentationPair, SegmentationTarget
 from application_api.repositories import node_runs as runs_repo
+from application_api.repositories.users import owned_session_ids
 from application_api.schemas import radiomics as schemas
 from application_api.services.publication import lock_session
 
@@ -253,8 +254,11 @@ async def list_features(
     include_features: bool = False,
     skip: int = 0,
     limit: int = 100,
+    owner: UUID | None = None,
 ) -> list[dict[str, Any]]:
     query = _catalogue_query(include_features)
+    if owner is not None:
+        query = query.where(Radiomics.session_id.in_(owned_session_ids(owner)))
     if session_id is not None:
         query = query.where(Radiomics.session_id == session_id)
     if run_id is not None:
@@ -281,9 +285,12 @@ async def search_radiomics(
     feature_value: str | None = None,
     skip: int = 0,
     limit: int = 100,
+    owner: UUID | None = None,
 ) -> list[dict[str, Any]]:
     """Rows whose features contain a key (and, optionally, a value)."""
     query = _catalogue_query(True)
+    if owner is not None:
+        query = query.where(Radiomics.session_id.in_(owned_session_ids(owner)))
     if feature_key:
         query = query.where(Radiomics.features.op("?")(feature_key))
         if feature_value:

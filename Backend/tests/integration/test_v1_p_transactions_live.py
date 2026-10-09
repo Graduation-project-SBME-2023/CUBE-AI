@@ -578,6 +578,113 @@ async def test_t9_commits_the_receipt_before_an_uncertain_submission(api: Api):
 
 
 # ----------------------------------------------------------------------
+# Ownership, the user gate path, and a write racing completion
+# ----------------------------------------------------------------------
+async def test_another_users_session_is_invisible(api: Api, monkeypatch):
+    from application_api.core.config import settings
+
+    mine = await api.session()
+    caller = settings.DEFAULT_USERNAME
+    monkeypatch.setattr(settings, "DEFAULT_USERNAME", "another-user")
+    theirs, _, started = await _agent(api)
+    run_id, attempt_id = started["run"]["run_id"], started["attempt"]["attempt_id"]
+    cohort = await api.call("PUT", f"/cohorts/run/{run_id}/population", json={}, attempt=attempt_id, expect=201)
+    chat_id = (await api.call("GET", f"/chats/session/{theirs}"))[0]["chat_id"]
+    their_event = (await api.call("GET", f"/session-events/session/{theirs}"))[0]["event_id"]
+    monkeypatch.setattr(settings, "DEFAULT_USERNAME", caller)
+
+    # 404, never 403: another user's session does not exist for this caller.
+    for url in (
+        f"/session-events/session/{theirs}", f"/session-events/{their_event}",
+        f"/chats/{chat_id}", f"/chat-messages/{chat_id}",
+        f"/cohorts/session/{theirs}", f"/cohorts/{cohort['cohort_id']}",
+        f"/files/session/{theirs}", f"/reports/session/{theirs}", f"/runs/{run_id}",
+    ):
+        await api.call("GET", url, expect=404)
+    await api.call("GET", "/session-events/filter", params={"session_id": theirs}, expect=404)
+    await api.call("PUT", f"/cohorts/run/{run_id}/other", json={}, attempt=attempt_id, expect=404)
+    await api.call("POST", "/session-events/", json={"session_id": theirs, "event_type": "x", "payload": {}},
+                   expect=404)
+
+    # The cross-session listing holds the caller's events and none of theirs.
+    first = (await api.call("GET", f"/session-events/session/{mine}"))[0]["event_id"]
+    rows = await api.call("GET", "/session-events/", params={"after_event_id": first - 1, "limit": 500})
+    listed = {row["session_id"] for row in rows}
+    assert mine in listed and theirs not in listed
+
+
+def _write_on_path(sql: str, params: tuple, **path: str) -> Optional[str]:
+    """Run one statement on a declared write path, always rolled back; the refusal or None."""
+    import psycopg2
+
+    connection = psycopg2.connect(LIVE_DSN.replace("+asyncpg", ""))
+    try:
+        with connection.cursor() as cursor:
+            for name, value in path.items():
+                cursor.execute("SELECT set_config(%s, %s, true)", (f"cubeai.{name}", value))
+            cursor.execute(sql, params)
+        return None
+    except psycopg2.Error as exc:
+        return str(exc)
+    finally:
+        connection.rollback()
+        connection.close()
+
+
+async def test_the_user_gate_path_works_only_on_a_run_suspended_on_its_gate(api: Api):
+    """The database itself, not only the route: the doctor's approval lands only
+    while the run is running, current and suspended on that gate."""
+    _, _, started = await _agent(api)
+    run_id, attempt_id = started["run"]["run_id"], started["attempt"]["attempt_id"]
+    cohort = await api.call("PUT", f"/cohorts/run/{run_id}/population", json={}, attempt=attempt_id, expect=201)
+    freeze = ("UPDATE cohorts SET frozen_at = now() WHERE cohort_id = %s", (cohort["cohort_id"],))
+
+    assert "not suspended on its cohort_approval gate" in _write_on_path(*freeze, actor="user")
+
+    await api.call("PUT", f"/runs/{run_id}/checkpoints", json=_checkpoint("c1"), attempt=attempt_id)
+    gate = {"suspension": {"kind": "gate", "gate": "cohort_approval", "interrupt_id": "i1", "checkpoint_id": "c1"}}
+    await api.call("POST", Api._attempt(started, "suspend"), json=gate)
+    assert _write_on_path(*freeze, actor="user") is None
+    rename = ("UPDATE cohorts SET cohort_key = 'renamed' WHERE cohort_id = %s", (cohort["cohort_id"],))
+    assert "changes only gate columns" in _write_on_path(*rename, actor="user")
+
+    await api.call("POST", Api._attempt(started, "cancel"), json={"reason": "user"})
+    assert "not suspended on its cohort_approval gate" in _write_on_path(*freeze, actor="user")
+
+
+async def test_a_write_racing_completion_holds_it_off_until_it_commits(api: Api):
+    """A fenced write takes FOR SHARE on its attempt, so completing the attempt waits for it."""
+    import psycopg2
+
+    session_id, _, started = await _agent(api)
+    run_id, attempt_id = started["run"]["run_id"], started["attempt"]["attempt_id"]
+    stored_file = (
+        "INSERT INTO stored_files (session_id, created_by_run_id, kind, logical_key, "
+        "display_filename, mime_type, byte_size, sha256, body, retention_class) "
+        "VALUES (%s, %s, 'export_csv', %s, %s, 'text/csv', 3, %s, 'a,b'::bytea, 'retained')"
+    )
+    writer = psycopg2.connect(LIVE_DSN.replace("+asyncpg", ""))
+    try:
+        with writer.cursor() as cursor:
+            cursor.execute("SELECT set_config('cubeai.attempt_id', %s, true)", (attempt_id,))
+            cursor.execute(stored_file, (session_id, run_id, "raced.csv", "raced.csv", "f" * 64))
+        completion = asyncio.create_task(api.complete(started))
+        await asyncio.sleep(1.5)
+        assert not completion.done(), "completion went ahead of an uncommitted write of its attempt"
+        writer.commit()
+        await asyncio.wait_for(completion, timeout=30)
+    finally:
+        writer.rollback()
+        writer.close()
+
+    files = await api.call("GET", f"/files/session/{session_id}")
+    assert [f["logical_key"] for f in files if f["created_by_run_id"] == run_id] == ["raced.csv"]
+    late = _write_on_path(stored_file, (session_id, run_id, "late.csv", "late.csv", "e" * 64),
+                          attempt_id=attempt_id)
+    assert "only a submitted or running attempt writes" in late
+
+
+# ----------------------------------------------------------------------
 # The schema the code relies on
 # ----------------------------------------------------------------------
 HARNESS_TABLES = {

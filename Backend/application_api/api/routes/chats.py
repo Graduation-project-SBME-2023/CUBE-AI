@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from application_api.api.dependencies import owned_session
+from application_api.api.dependencies import owned_chat, owned_session
 from application_api.db.session import get_db
 from application_api.schemas.chat_messages import ChatMessage as ChatMessageOut
 from application_api.repositories import chats as crud
@@ -62,23 +62,32 @@ async def list_chats(
 
 
 @router.get("/{chat_id}", response_model=schemas.Chat)
-async def read_chat(chat_id: UUID, db: AsyncSession = Depends(get_db)):
+async def read_chat(
+    chat_id: UUID, db: AsyncSession = Depends(get_db), _: UUID = Depends(owned_chat)
+):
     return await crud.get_chat(db, chat_id)
 
 
 @router.patch("/{chat_id}", response_model=schemas.Chat)
 async def update_chat(
-    chat_id: UUID, data: schemas.ChatUpdate, db: AsyncSession = Depends(get_db)
+    chat_id: UUID,
+    data: schemas.ChatUpdate,
+    db: AsyncSession = Depends(get_db),
+    _: UUID = Depends(owned_chat),
 ):
     return await crud.update_chat(db, chat_id, data.title)
 
 
 @router.patch("/{chat_id}/touch", response_model=schemas.Chat)
-async def touch_chat(chat_id: UUID, db: AsyncSession = Depends(get_db)):
+async def touch_chat(
+    chat_id: UUID, db: AsyncSession = Depends(get_db), _: UUID = Depends(owned_chat)
+):
     """Update only `last_activity_at` — used when a message is sent or received."""
     return await crud.touch_chat(db, chat_id)
 
 
 @router.delete("/{chat_id}", status_code=status.HTTP_200_OK)
-async def delete_chat(chat_id: UUID, db: AsyncSession = Depends(get_db)):
+async def delete_chat(
+    chat_id: UUID, db: AsyncSession = Depends(get_db), _: UUID = Depends(owned_chat)
+):
     return await crud.delete_chat(db, chat_id)
