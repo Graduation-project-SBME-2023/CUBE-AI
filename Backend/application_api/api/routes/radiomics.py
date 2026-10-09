@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from application_api.api.dependencies import current_user, owned_radiomics, owned_run, owned_session
 from application_api.db.session import get_db
 from application_api.services.fencing import fenced_db
 from application_api.repositories import radiomics as crud
@@ -24,6 +25,7 @@ async def record_radiomics_rows(
     data: RadiomicsBatchWrite,
     response: Response,
     db: AsyncSession = Depends(fenced_db),
+    _: UUID = Depends(owned_run),
 ):
     """Record extracted rows for a running feature-extraction run."""
     result = await crud.record_features(db, run_id, data)
@@ -39,6 +41,7 @@ async def list_session_radiomics(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
+    _: UUID = Depends(owned_session),
 ):
     return await crud.list_features(
         db,
@@ -51,7 +54,9 @@ async def list_session_radiomics(
 
 
 @router.get("/run/{run_id}/export")
-async def export_run_radiomics(run_id: UUID, db: AsyncSession = Depends(get_db)):
+async def export_run_radiomics(
+    run_id: UUID, db: AsyncSession = Depends(get_db), _: UUID = Depends(owned_run)
+):
     """The per-mask feature table one run measured, as a generated CSV."""
     return Response(
         content=await crud.export_run_csv(db, run_id),
@@ -67,10 +72,12 @@ async def read_radiomics_by_label(
     label_uid: str,
     include_features: bool = True,
     db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(current_user),
 ):
-    """Every extraction of one SEG — one per segment and configuration."""
+    """Every extraction of one SEG — one per segment and configuration — in the
+    caller's sessions."""
     return await crud.list_features(
-        db, label_uid=label_uid, include_features=include_features, limit=1000
+        db, label_uid=label_uid, include_features=include_features, limit=1000, owner=user_id
     )
 
 
@@ -81,9 +88,11 @@ async def search_radiomics_entries(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(current_user),
 ):
     return await crud.search_radiomics(
-        db, feature_key=feature_key, feature_value=feature_value, skip=skip, limit=limit
+        db, feature_key=feature_key, feature_value=feature_value, skip=skip, limit=limit,
+        owner=user_id,
     )
 
 
@@ -92,10 +101,13 @@ async def read_radiomics_list(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(current_user),
 ):
-    return await crud.list_features(db, skip=skip, limit=limit)
+    return await crud.list_features(db, skip=skip, limit=limit, owner=user_id)
 
 
 @router.get("/{radiomics_id}", response_model=RadiomicsFeatureOut)
-async def read_radiomics(radiomics_id: UUID, db: AsyncSession = Depends(get_db)):
+async def read_radiomics(
+    radiomics_id: UUID, db: AsyncSession = Depends(get_db), _: UUID = Depends(owned_radiomics)
+):
     return await crud.get_radiomics(db, radiomics_id)

@@ -271,31 +271,61 @@ async def run_steps(run_id: UUID, _: UUID = Depends(owned_run), db: AsyncSession
 # The agent scratchpad (attempt path: the request declares its attempt)
 # ----------------------------------------------------------------------
 @router.post("/{run_id}/scratchpad/register", response_model=NodeRunOut)
-async def scratchpad_register(run_id: UUID, data: ScratchpadRegister, db: AsyncSession = Depends(fenced_db)):
+async def scratchpad_register(
+    run_id: UUID,
+    data: ScratchpadRegister,
+    db: AsyncSession = Depends(fenced_db),
+    _: UUID = Depends(owned_run),
+):
     return await runs_repo.scratchpad_register(db, run_id, data)
 
 
 @router.post("/{run_id}/scratchpad/notes", response_model=NodeRunOut)
-async def scratchpad_note(run_id: UUID, data: ScratchpadNote, db: AsyncSession = Depends(fenced_db)):
+async def scratchpad_note(
+    run_id: UUID,
+    data: ScratchpadNote,
+    db: AsyncSession = Depends(fenced_db),
+    _: UUID = Depends(owned_run),
+):
     return await runs_repo.scratchpad_write_note(db, run_id, data)
 
 
 @router.post("/{run_id}/scratchpad/flags", response_model=NodeRunOut)
-async def scratchpad_flag(run_id: UUID, data: ScratchpadFlag, db: AsyncSession = Depends(fenced_db)):
+async def scratchpad_flag(
+    run_id: UUID,
+    data: ScratchpadFlag,
+    db: AsyncSession = Depends(fenced_db),
+    _: UUID = Depends(owned_run),
+):
     return await runs_repo.scratchpad_raise_flag(db, run_id, data)
 
 
 @router.post("/{run_id}/scratchpad/status", response_model=NodeRunOut)
-async def scratchpad_status(run_id: UUID, data: ScratchpadSetStatus, db: AsyncSession = Depends(fenced_db)):
+async def scratchpad_status(
+    run_id: UUID,
+    data: ScratchpadSetStatus,
+    db: AsyncSession = Depends(fenced_db),
+    _: UUID = Depends(owned_run),
+):
     return await runs_repo.scratchpad_set_status(db, run_id, data)
 
 
 @router.post("/{run_id}/scratchpad/summary", response_model=NodeRunOut)
-async def scratchpad_summary(run_id: UUID, data: ScratchpadSummary, db: AsyncSession = Depends(fenced_db)):
+async def scratchpad_summary(
+    run_id: UUID,
+    data: ScratchpadSummary,
+    db: AsyncSession = Depends(fenced_db),
+    _: UUID = Depends(owned_run),
+):
     return await runs_repo.scratchpad_write_summary(db, run_id, data)
 
 
 @router.put("/{run_id}/output", response_model=NodeRunOut)
-async def write_output(run_id: UUID, data: AgentOutputWrite, db: AsyncSession = Depends(fenced_db)):
+async def write_output(
+    run_id: UUID,
+    data: AgentOutputWrite,
+    db: AsyncSession = Depends(fenced_db),
+    _: UUID = Depends(owned_run),
+):
     """`write_agent_output`. Replaces this run's own document; never another's."""
     return await runs_repo.write_agent_output(db, run_id, data)
