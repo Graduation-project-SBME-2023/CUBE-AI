@@ -16,8 +16,11 @@ Trains and evaluates machine learning classifiers on radiomics features.
   - Target column, typically `target`
 
 ## Tools used
-- `pycaret_train_classifier`
-- `pycaret_run_inference`
+- `train_classifier` (formerly `pycaret_train_classifier`)
+- `run_classifier_inference` (formerly `pycaret_run_inference`)
+- `train_regressor`, `run_regression_inference` and `refit_model` are also available
+  (formerly `pycaret_train_regressor`, `pycaret_run_regression_inference`, `pycaret_refit_model`).
+  All five run on the scikit-learn engine in `agent_system/toolpacks/modeling/engine/`.
 - Scratchpad tools:
   - `scratchpad_register_agent`
   - `scratchpad_read_agent`

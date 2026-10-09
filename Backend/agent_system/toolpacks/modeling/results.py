@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-import math
 import os
-import platform
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +11,7 @@ from typing import Any, Mapping, Optional
 
 from ..radiomics.digests import bytes_digest, document_digest
 from ..common import domain_api
+from ..common.values import json_safe
 
 MODEL_RESULT_SCHEMA_VERSION = 1
 # exception 2: fitted research pipelines stay on disk, under this logical
@@ -24,26 +23,6 @@ _SLUG = re.compile(r"[^A-Za-z0-9_.-]+")
 
 def versioned(document: Mapping[str, Any]) -> dict[str, Any]:
     return {"schema_version": MODEL_RESULT_SCHEMA_VERSION, **json_safe(dict(document))}
-
-
-def json_safe(value: Any) -> Any:
-    """JSON-native, finite values; anything else becomes its string form."""
-    if isinstance(value, Mapping):
-        return {str(key): json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [json_safe(item) for item in value]
-    if isinstance(value, bool) or value is None or isinstance(value, str):
-        return value
-    if hasattr(value, "item") and not isinstance(value, (bytes, bytearray)):
-        try:
-            value = value.item()
-        except Exception:
-            return str(value)
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    return str(value)
 
 
 def slug(value: str) -> str:
@@ -60,14 +39,6 @@ def check_one_source(
         raise ValueError(
             "holdout_path applies to input_path only; a feature set carries its own holdout."
         )
-
-
-def disjoint_indices(train: Any, holdout: Any) -> tuple[Any, Any]:
-    """Train rows first, then the withheld rows, with non-overlapping indices."""
-    train = train.reset_index(drop=True)
-    holdout = holdout.reset_index(drop=True)
-    holdout.index = holdout.index + len(train)
-    return train, holdout
 
 
 def deterministic_seed(dataset_digest: str) -> int:
@@ -87,7 +58,8 @@ def model_file_logical_name(comparison: str, variant: str) -> str:
 
 
 def model_file_base(workspace_dir: str, comparison: str, variant: str) -> str:
-    """The path PyCaret's `save_model` takes (it appends `.pkl`)."""
+    """A variant's model file path without its `.pkl` suffix (the form the
+    tools' `model_path` arguments and replies use)."""
     from storage_paths import workspace_subpath
 
     target = workspace_subpath(workspace_dir, model_file_logical_name(comparison, variant))
@@ -104,27 +76,23 @@ def file_digest(path: str | os.PathLike[str]) -> str:
 
 
 def environment_document() -> dict[str, Any]:
-    """What a refit needs to know it is (or is not) running the same stack.
-    Bit-identical refits across libraries and hardware are not promised."""
-    versions: dict[str, Optional[str]] = {}
-    for module in ("pycaret", "sklearn", "numpy", "pandas", "scipy", "lightgbm", "xgboost"):
-        try:
-            imported = __import__(module)
-            versions[module] = str(getattr(imported, "__version__", "unknown"))
-        except Exception:
-            versions[module] = None
-    return versioned(
-        {
-            "python": platform.python_version(),
-            "platform": platform.platform(),
-            "packages": versions,
-        }
-    )
+    """What a refit needs to know it is (or is not) running the same stack:
+    `engine: "sklearn"` and the library versions. Bit-identical refits across
+    libraries and hardware are not promised."""
+    from .engine.persistence import environment
+
+    return versioned(environment())
+
+
+def _native(value: Any) -> bool:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return True
+    return isinstance(value, (list, tuple)) and all(_native(item) for item in value)
 
 
 def estimator_spec(model: Any) -> dict[str, Any]:
     """The estimator as a refit can rebuild it: its import path and the
-    JSON-native part of its parameters."""
+    JSON-native part of its parameters (lists of plain values included)."""
     estimator = model
     steps = getattr(model, "steps", None)
     if steps:
@@ -133,7 +101,7 @@ def estimator_spec(model: Any) -> dict[str, Any]:
     params: dict[str, Any] = {}
     try:
         for name, value in estimator.get_params(deep=False).items():
-            if value is None or isinstance(value, (bool, int, float, str)):
+            if _native(value):
                 params[name] = json_safe(value)
     except Exception:
         pass
@@ -348,7 +316,7 @@ def generalisation_estimate(prepared: ModelingInput, holdout_used: bool) -> bool
 
 
 def model_path_for(variant: Mapping[str, Any]) -> Optional[str]:
-    """The path PyCaret's `load_model` takes for a recorded variant."""
+    """A recorded variant's model file path, without its `.pkl` suffix."""
     from storage_paths import workspace_subpath
 
     from ..common.workspace import get_workspace
@@ -436,10 +404,7 @@ async def recorded_variant_for(model_path: str) -> Optional[dict[str, Any]]:
     from ..common.workspace import get_workspace
 
     target = os.path.normcase(os.path.abspath(model_path + ".pkl"))
-    rows = await domain_api.request(
-        "GET", f"/model-results/session/{domain_api.require_session()}"
-    ) or []
-    for row in rows:
+    for row in await domain_api.session_model_results():
         name = row.get("model_file_name")
         if name and os.path.normcase(
             os.path.abspath(str(workspace_subpath(get_workspace(), name)))
@@ -472,7 +437,7 @@ async def record_independent_evaluation(
 ) -> dict[str, str]:
     """A later evaluation on independent data, as a NEW variant of the model's comparison — the recorded result is never rewritten."""
     run_id = domain_api.require_run()
-    full = await domain_api.request("GET", f"/model-results/{base_variant['model_result_id']}")
+    full = await domain_api.get_model_result(str(base_variant["model_result_id"]))
     digest = bytes_digest(input_bytes)
     captured = await domain_api.publish_artifact(
         logical_key=f"modeling/{run_id}/inputs/{digest[:16]}_{slug(input_name)}",

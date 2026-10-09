@@ -12,7 +12,10 @@ Gateway's ``extraction`` profile.
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from typing import Any
 
 # The same module object the app's /client-settings route updates: under the
 # root the packs were imported with (see toolpacks/_toolkit.py).
@@ -40,3 +43,17 @@ def extraction_endpoint() -> LlmEndpoint:
         model=config.model,
         api_key=config.api_key or DEFAULT_API_KEY,
     )
+
+
+@asynccontextmanager
+async def openai_client(endpoint: LlmEndpoint) -> AsyncIterator[Any]:
+    """An ``AsyncOpenAI`` client for ``endpoint``, closed when the block ends."""
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(base_url=endpoint.base_url, api_key=endpoint.api_key)
+    try:
+        yield client
+    finally:
+        close = getattr(client, "close", None)
+        if close is not None:
+            await close()

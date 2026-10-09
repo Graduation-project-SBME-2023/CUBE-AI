@@ -1,449 +1,129 @@
-import httpx
-from requests_toolbelt.multipart import decoder
-import json
-from datetime import datetime
-from .._toolkit import tool
-from ..common.manifests import INTERIM_HEAVY
-import re
-from pathlib import Path
-import logging
-from typing import List, Dict, Any, Union
-from typing import Annotated
-from pydantic import Field
-import os
-import tempfile
-from storage_paths import TEMP_DIR
-import asyncio
-import hashlib
+"""``run_segmentation``: segment one series with a MONAI Label model and save
+the mask to the MONAI Label datastore (as DICOM-SEG).
 
+The MONAI Label calls are in ``monai_client``; this module builds the label
+metadata from the requested organs and turns the outcome into the tool's
+result. A mask that was computed but not saved is a failure.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+from typing import Annotated, Any
+
+from pydantic import Field
+
+from .._toolkit import error_result, tool
+from ..common.manifests import INTERIM_HEAVY
 from ..common.service_urls import inference_api_url
-from ..common.settings import positive_float
+from . import monai_client
+from .monai_client import InferenceError
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_COLOR = [255, 0, 0]
+ORGAN_COLORS = {
+    "spleen": [255, 0, 0],
+    "liver": [139, 69, 19],
+    "kidney": [255, 255, 0],
+    "pancreas": [255, 165, 0],
+    "lung": [173, 216, 230],
+    "heart": [255, 192, 203],
+}
+# Inference itself, plus the result download and the datastore upload.
+TOOL_TIMEOUT_S = monai_client.DEFAULT_JOB_TIMEOUT_S + 900
 
-# Read when used and validated (L8): a bad value falls back to the default
-# instead of failing the import of every tool in the pack.
-def _job_timeout_s() -> float:
-    return positive_float("SEGMENTATION_JOB_TIMEOUT_SECONDS", 1800.0)
 
-
-def _poll_s() -> float:
-    return positive_float("SEGMENTATION_POLL_SECONDS", 3.0)
-
-
-def _inference_job_id(model: str, image: str, params: dict) -> str:
-    payload = json.dumps(
+def build_label_info(organs: list[str], model: str) -> list[dict[str, Any]]:
+    """The label metadata MONAI Label and the datastore expect, one entry per organ."""
+    return [
         {
-            "model": model,
-            "image": image,
-            "params": params,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
+            "name": organ,
+            "idx": index,
+            "color": ORGAN_COLORS.get(organ, DEFAULT_COLOR),
+            "description": f"{organ.capitalize()} segmentation",
+            "model_name": model,
+        }
+        for index, organ in enumerate(organs, start=1)
+    ]
+
+
+def _failure(exc: InferenceError, started: float) -> dict[str, Any]:
+    code = {
+        "inference_timeout": "timeout",
+        "parse_response": "invalid_response",
+        "datastore_save": "datastore_save_failed",
+    }.get(exc.stage, "inference_failed")
+    return error_result(
+        code,
+        str(exc),
+        stage=exc.stage,
+        elapsed_seconds=round(time.monotonic() - started, 1),
+        **exc.details,
     )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
-
-async def _await_inference_job(
-    client: httpx.AsyncClient,
-    *,
-    model: str,
-    image: str,
-    params: dict,
-) -> tuple[httpx.Response, dict]:
-    base_url = inference_api_url()
-    job_timeout_s = _job_timeout_s()
-    poll_s = _poll_s()
-    job_id = _inference_job_id(model, image, params)
-    job_url = f"{base_url}/inference-jobs/{job_id}"
-    start_response = await client.post(
-        f"{base_url}/inference-jobs/",
-        json={
-            "job_id": job_id,
-            "model": model,
-            "image": image,
-            "params": params,
-            "max_runtime_seconds": job_timeout_s,
-        },
-        timeout=30.0,
-    )
-    start_response.raise_for_status()
-    started = asyncio.get_running_loop().time()
-    unavailable_since: float | None = None
-    UNAVAILABLE_GRACE_SECONDS = 600
-
-    try:
-        while True:
-            if (
-                asyncio.get_running_loop().time() - started
-                >= job_timeout_s
-            ):
-                await client.delete(job_url, timeout=10.0)
-                raise TimeoutError(
-                    f"Inference exceeded {job_timeout_s:.0f}s"
-                )
-
-            try:
-                status_response = await client.get(job_url, timeout=10.0)
-                status_response.raise_for_status()
-                job = status_response.json()
-                unavailable_since = None
-            except (
-                httpx.HTTPStatusError,
-                httpx.ConnectError,
-                httpx.ReadError,
-                httpx.TimeoutException,
-                httpx.RemoteProtocolError,
-            ) as exc:
-                if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500 and exc.response.status_code != 404:
-                    raise RuntimeError(f"Inference job status failed: HTTP {exc.response.status_code}")
-                
-                now = asyncio.get_running_loop().time()
-                unavailable_since = unavailable_since or now
-                if now - unavailable_since >= UNAVAILABLE_GRACE_SECONDS:
-                    raise RuntimeError(
-                        f"Inference service remained unavailable for "
-                        f"{UNAVAILABLE_GRACE_SECONDS:.0f}s: {exc}"
-                    )
-                await asyncio.sleep(poll_s)
-                continue
-
-            job_status = str(job.get("status") or "").upper()
-            if job_status == "SUCCEEDED":
-                result_response = await client.get(
-                    f"{job_url}/result",
-                    timeout=httpx.Timeout(180.0, connect=15.0),
-                )
-                result_response.raise_for_status()
-                return result_response, job
-            if job_status in {"FAILED", "TIMED_OUT", "CANCELLED"}:
-                raise RuntimeError(
-                    str(job.get("error") or f"Inference job {job_status.lower()}")
-                )
-            await asyncio.sleep(poll_s)
-    except asyncio.CancelledError:
-        try:
-            await asyncio.wait_for(
-                client.delete(job_url, timeout=10.0),
-                timeout=10.0,
-            )
-        except Exception:
-            pass
-        raise
-
-from typing import List, Dict, Any, Union
 
 @tool(
     visibility={"agent"},
+    timeout_s=TOOL_TIMEOUT_S,
+    resources={"monai_inference"},
     **INTERIM_HEAVY,
 )
 async def run_segmentation(
-    model: Annotated[
-        str,
-        Field(description="MONAI Label model name to run inference with")
-    ],
-    series_instance_uid: Annotated[
-        str,
-        Field(description="DICOM SeriesInstanceUID to segment")
-    ],
+    model: Annotated[str, Field(description="MONAI Label model name to run inference with")],
+    series_instance_uid: Annotated[str, Field(description="DICOM SeriesInstanceUID to segment")],
     label_info: Annotated[
         str,
-        Field(description="Comma-separated anatomical labels to segment (e.g. 'spleen' or 'spleen,liver,kidney')")
+        Field(description="Comma-separated anatomical labels to segment (e.g. 'spleen' or 'spleen,liver,kidney')"),
     ],
-    params: Annotated[
-        Dict[str, Any] | None,
-        Field(description="Optional inference parameters")
-    ] = None,
-):
-    """
-    Run MONAI Label segmentation using /infer/{model}, parse the multipart response, 
-    save the segmentation mask, and upload to MONAI Label datastore as DICOM-SEG.
-    
-    Args:
-        model: The segmentation model name (e.g., "segmentation_spleen", "segmentation_liver")
-        series_instance_uid: The DICOM SeriesInstanceUID to segment
-        label_info: REQUIRED list of label metadata 
-    
-    Returns:
-        Dictionary containing:
-        - status_code: HTTP response code
-        - returned_params: Execution metadata from inference
-        - temp_file_path: Path where .nii.gz mask was saved
-        - saved_to_datastore: Whether upload to datastore succeeded
-        - label_id: ID assigned by datastore (if successful)
-    """
-    
-    start_time = datetime.now()
-    logger.info(f"=== TOOL STARTED at {start_time} ===")
-    
+    params: Annotated[dict[str, Any] | None, Field(description="Optional inference parameters")] = None,
+) -> dict[str, Any]:
+    """Run MONAI Label segmentation of one series with one model and save the
+    mask to the MONAI Label datastore as DICOM-SEG. Returns the inference
+    metadata and the datastore's label_id."""
+    started = time.monotonic()
     clean_model = model.strip().rstrip(",")
-    
-    logger.info(f"=== run_segmentation DEBUG ===")
-    logger.info(f"model: {model}")
-    logger.info(f"series_instance_uid: {series_instance_uid}")
-    logger.info(f"label_info type: {type(label_info)}")
-    logger.info(f"label_info content: {label_info}")
-    if label_info and len(label_info) > 0:
-        logger.info(f"label_info[0] type: {type(label_info[0])}")
-        logger.info(f"label_info[0] content: {label_info[0]}")
-    logger.info(f"params: {params}")
-    logger.info(f"==============================")
+    organs = [organ.strip().lower() for organ in label_info.split(",") if organ.strip()]
+    if not organs:
+        return error_result("invalid_args", "label_info must name at least one organ", stage="validation")
 
-    normalized_label_info = []
-
-    if not label_info or label_info.strip() == "":
-        logger.error("label_info is empty!")
-        return {"error": True, "stage": "validation", "message": "label_info cannot be empty"}
-    
-    organ_list = [organ.strip().lower() for organ in label_info.split(',') if organ.strip()]
-    
-    if not organ_list:
-        return {"error": True, "stage": "validation", "message": "No valid organs found in label_info"}
-    
-    logger.info(f"Parsed organs from label_info: {organ_list}")
-    
-    default_colors = {
-        "spleen": [255, 0, 0],      # Red
-        "liver": [139, 69, 19],     # Brown
-        "kidney": [255, 255, 0],    # Yellow
-        "pancreas": [255, 165, 0],  # Orange
-        "lung": [173, 216, 230],    # Light blue
-        "heart": [255, 192, 203],   # Pink
-    }
-    
-    for idx, item in enumerate(organ_list, start=1):
-        organ_name = item.lower()
-        normalized_label_info.append({
-            "name": organ_name,
-            "idx": idx,
-            "color": default_colors.get(organ_name, [255, 0, 0]),  # default to red
-            "description": f"{organ_name.capitalize()} segmentation",
-            "model_name": clean_model
-        })
-    
-    logger.info(f"Normalized label_info: {normalized_label_info}")
-    
-    infer_url = f"{inference_api_url()}/infer/{clean_model}"
-    query_params = {"image": series_instance_uid}
-
-    inference_params = dict(params or {})
-    inference_params["label_info"] = normalized_label_info
-
-    logger.info("Starting inference request...")
-    logger.info(" This may take several minutes for large volumes...")
-    
-    async with httpx.AsyncClient() as client:
-        try:
-            inference_start = datetime.now()
-            response, inference_job = await _await_inference_job(
-                client,
-                model=clean_model,
-                image=series_instance_uid,
-                params=inference_params,
-            )
-            inference_duration = (datetime.now() - inference_start).total_seconds()
-            
-            logger.info(f"Inference completed in {inference_duration:.1f}s with status: {response.status_code}")
-            
-        except (httpx.TimeoutException, TimeoutError) as e:
-            elapsed = (datetime.now() - start_time).total_seconds()
-            logger.error(f"Inference timeout after {elapsed:.1f}s: {str(e)}")
-            return {
-                "error": True, 
-                "stage": "inference_timeout", 
-                "message": f"Inference exceeded timeout after {elapsed:.1f}s. Try with smaller volume or different model.",
-                "elapsed_seconds": elapsed
-            }
-        except Exception as e:
-            logger.error(f"Inference request failed: {str(e)}")
-            return {"error": True, "stage": "inference_request", "message": str(e)}
-
-    result = {
-        "endpoint": infer_url,
-        "query_params": query_params,
-        "sent_params": inference_params,
-        "status_code": response.status_code,
-        "inference_duration_seconds": inference_duration,
-        "inference_job_id": inference_job.get("job_id"),
-        "retry_count": inference_job.get("attempt", 1),
-    }
-
-    if response.status_code != 200:
-        result["error"] = True
-        result["server_response"] = response.text[:500] 
-        logger.error(f"Inference failed with status {response.status_code}: {response.text[:200]}")
-        return result
-
-    # parse the data
-    logger.info("Parsing multipart response...")
+    labels = build_label_info(organs, clean_model)
+    inference_params = {**(params or {}), "label_info": labels}
     try:
-        content_type = response.headers.get('content-type', '')
-        
-        if 'multipart' not in content_type.lower():
-            return {
-                "error": True,
-                "message": "Response is not multipart",
-                "content_type": content_type,
-                "preview": str(response.content[:500])
-            }
-        
-        multipart = decoder.MultipartDecoder(response.content, content_type)
-        
-        if len(multipart.parts) < 2:
-            return {
-                "error": True,
-                "message": f"Expected 2 parts, got {len(multipart.parts)}",
-                "parts_count": len(multipart.parts)
-            }
-        
-        # json part (part 0)
-        try:
-            json_bytes = multipart.parts[0].content
-            json_text = json_bytes.decode('utf-8').strip()
-            returned_params = json.loads(json_text)
-        except UnicodeDecodeError as e:
-            return {
-                "error": True,
-                "message": f"Part 0 is not valid UTF-8: {str(e)}",
-                "part0_preview": str(multipart.parts[0].content[:200])
-            }
-        except json.JSONDecodeError as e:
-            return {
-                "error": True,
-                "message": f"Part 0 is not valid JSON: {str(e)}",
-                "part0_text": json_text[:500]
-            }
-        
-        # segmentation bytes (part 1)
-        seg_bytes = multipart.parts[1].content
-        logger.info(f"Parsed segmentation data: {len(seg_bytes)} bytes")
-        
-        disposition = multipart.parts[1].headers.get(b'Content-Disposition', b'').decode('utf-8')
-        original_filename = "segmentation.nii.gz"  # default
-        if 'filename=' in disposition:
-            match = re.search(r'filename="([^"]+)"', disposition)
-            if match:
-                original_filename = match.group(1)
-
-        result.update({
-            "error": False,
-            "returned_params": returned_params,
-            "original_filename": original_filename,
-            "segmentation_bytes_count": len(seg_bytes),
-            "message": "Segmentation completed successfully"
-        })
-        
-        # save to a temp file of its own: two runs on the same volume and
-        # model must not share (and overwrite) one fixed name (L8)
-        filename = f"seg_{series_instance_uid}_{clean_model}.nii.gz"
-        temp_dir = str(TEMP_DIR / "radiology" / "segmentations")
-        os.makedirs(temp_dir, exist_ok=True)
-        fd, temp_file_path = tempfile.mkstemp(
-            dir=temp_dir, prefix=f"seg_{series_instance_uid}_{clean_model}_", suffix=".nii.gz"
+        inference = await monai_client.run_inference(clean_model, series_instance_uid, inference_params)
+        saved_filename = f"seg_{series_instance_uid}_{clean_model}.nii.gz"
+        upload_started = time.monotonic()
+        label_id = await monai_client.save_label(
+            series_instance_uid,
+            saved_filename,
+            inference.segmentation,
+            {
+                "label_info": labels,
+                **({"latencies": inference.returned_params["latencies"]}
+                   if "latencies" in inference.returned_params else {}),
+            },
         )
+    except InferenceError as exc:
+        logger.warning("run_segmentation %s on %s failed at %s: %s", clean_model, series_instance_uid, exc.stage, exc)
+        return _failure(exc, started)
 
-        logger.info(f"Saving segmentation to: {temp_file_path}")
-        with os.fdopen(fd, 'wb') as f:
-            f.write(seg_bytes)
-        result["temp_file_path"] = str(temp_file_path)
-        logger.info("Segmentation file saved successfully")
-
-    except Exception as e:
-        # The traceback goes to the log, never to the model (L8).
-        logger.exception("Multipart parsing failed")
-        result.update({
-            "error": True,
-            "message": "Failed to parse multipart response",
-            "exception": str(e),
-            "exception_type": type(e).__name__,
-        })
-        return result
-
-    # save to MONAI Label datastore
-    logger.info("Starting datastore save...")
-    
-    label_info_payload = {
-        "label_info": normalized_label_info,
+    return {
+        "endpoint": f"{inference_api_url()}/infer/{clean_model}",
+        "query_params": {"image": series_instance_uid},
+        "sent_params": inference_params,
+        "status_code": 200,
+        "inference_duration_seconds": round(inference.duration_s, 3),
+        "inference_job_id": inference.job.get("job_id"),
+        "retry_count": inference.job.get("attempt", 1),
+        "error": False,
+        "returned_params": inference.returned_params,
+        "original_filename": inference.filename,
+        "segmentation_bytes_count": len(inference.segmentation),
+        "message": "Segmentation completed successfully",
+        "saved": True,
+        "saved_filename": saved_filename,
+        "label_id": label_id,
+        "upload_duration_seconds": round(time.monotonic() - upload_started, 3),
+        "total_duration_seconds": round(time.monotonic() - started, 3),
     }
-
-    if "latencies" in returned_params:
-        label_info_payload["latencies"] = returned_params["latencies"]
-    
-    save_url = f"{inference_api_url()}/datastore/label"
-    save_params = {
-        "image": series_instance_uid,
-        "tag": "final"  # needed for nifti conversion
-    }
-
-    # extended timeout for upload as well
-    upload_timeout = httpx.Timeout(
-        connect=30.0,
-        read=120.0,    # 2 minutes for upload
-        write=120.0,   # 2 minutes to write
-        pool=30.0
-    )
-
-    try:
-        logger.info(f"Reading file for upload: {temp_file_path}")
-        with open(temp_file_path, 'rb') as label_file:
-            label_content = label_file.read()
-        
-        logger.info(f"File read successfully, size: {len(label_content)} bytes")
-        
-        save_files = {
-            "params": (None, json.dumps(label_info_payload), "application/json"),
-            "label": (filename, label_content, "application/octet-stream")
-        }
-        
-        logger.info(f"Uploading to datastore: {save_url}")
-        
-        async with httpx.AsyncClient(timeout=upload_timeout) as client:
-            upload_start = datetime.now()
-            save_resp = await client.put(save_url, params=save_params, files=save_files)
-            upload_duration = (datetime.now() - upload_start).total_seconds()
-            
-            logger.info(f"Datastore upload completed in {upload_duration:.1f}s with status: {save_resp.status_code}")
-            
-            if save_resp.status_code == 200:
-                result["saved"] = True
-                result["saved_filename"] = filename
-                result["label_id"] = save_resp.text.strip()
-                result["upload_duration_seconds"] = upload_duration
-                logger.info(f"Successfully saved to datastore with label_id: {result['label_id']}")
-            else:
-                result["saved"] = False
-                result["save_response"] = save_resp.text[:500]
-                result["save_status_code"] = save_resp.status_code
-                logger.error(f"Datastore save failed: {save_resp.text[:200]}")
-
-    except httpx.TimeoutException as e:
-        result["saved"] = False
-        result["save_error"] = f"Upload timeout: {str(e)}"
-        logger.error(f"Datastore upload timeout: {str(e)}")
-    except Exception as e:
-        result["saved"] = False
-        result["save_error"] = str(e)
-        logger.exception("Exception during datastore save")
-
-    if not result.get("saved"):
-        # The mask was computed but never reached the datastore: the step
-        # failed, whatever the inference said (L8: "error" stayed False here).
-        result["error"] = True
-        result["message"] = "Segmentation ran, but the mask was not saved to the datastore"
-
-    # temp_file_path was only ever a scratch copy to upload from — the
-    # datastore (or the save-error captured above) is the outcome that
-    # matters, so there's nothing left needing the file on disk, saved or not.
-    try:
-        os.remove(temp_file_path)
-    except OSError as exc:
-        logger.warning(f"Failed to clean up temp segmentation file {temp_file_path}: {exc}")
-
-    total_duration = (datetime.now() - start_time).total_seconds()
-    result["total_duration_seconds"] = total_duration
-
-    logger.info(f"=== TOOL COMPLETED at {datetime.now()} ===")
-    logger.info(f"Total execution time: {total_duration:.1f}s")
-
-    return result

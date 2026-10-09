@@ -1,1 +1,1 @@
-"""Modeling pack (PyCaret; rewritten on scikit-learn in Plan 7)."""
+"""Modeling pack: the scikit-learn engine (``engine/``) and the tools on it (Plan 7)."""

@@ -1,9 +1,14 @@
+"""``browse_workspace``: list the files of one directory of the session workspace."""
+
+import json
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field
+
 from .._toolkit import error_result, tool
 from ..common.manifests import READ_ONLY
-from pydantic import BaseModel, ConfigDict, Field
 from ..common.workspace import WorkspacePath, workspace_dir
-from pathlib import Path
-import json
+
 
 def _relative(path: Path, root: Path) -> str:
     """``path`` relative to the workspace root, or as it is when it lies outside."""
@@ -42,47 +47,34 @@ class BrowseWorkspaceInput(BaseModel):
     timeout_s=30,
     **READ_ONLY,
 )
-async def browse_workspace(params: BrowseWorkspaceInput) -> str:
+async def browse_workspace(params: BrowseWorkspaceInput) -> str | dict:
     """Browse files in a workspace directory, filtered by file extension.
 
-    Paths are resolved against the session workspace by the WorkspacePath validator.
-
-    Args:
-        params (BrowseWorkspaceInput):
-            - directory (str): Workspace-relative or absolute path. Defaults to workspace root.
-            - file_type (str): Extension to filter by (default '.csv').
-            - recursive (bool): Search subdirectories recursively (default False).
-
-    Returns:
-        str: JSON list of matching files with sizes, or an error message.
+    The directory is workspace-relative (absolute paths are re-rooted in this
+    session's workspace). Returns the matching files with their sizes.
     """
-    # Normalise extension
-    ext = params.file_type.strip()
-    if ext and not ext.startswith("."):
-        ext = f".{ext}"
+    extension = params.file_type.strip()
+    if extension and not extension.startswith("."):
+        extension = f".{extension}"
 
     # Resolved (L9): "..", symlinks and the drive letter compare like for like
     # with the workspace root below.
-    resolved = Path(params.directory).resolve()
-    workspace_root = workspace_dir().resolve()
+    directory = Path(params.directory).resolve()
+    root = workspace_dir().resolve()
+    if not directory.exists():
+        return error_result("not_found", f"Directory not found: {_relative(directory, root)}")
+    if not directory.is_dir():
+        return error_result("invalid_args", f"Path is not a directory: {_relative(directory, root)}")
 
-    if not resolved.exists():
-        return error_result("not_found", f"Directory not found: {_relative(resolved, workspace_root)}")
-    if not resolved.is_dir():
-        return error_result("invalid_args", f"Path is not a directory: {_relative(resolved, workspace_root)}")
-
-    glob_pattern = f"**/*{ext}" if params.recursive else f"*{ext}"
-    matches = sorted(resolved.glob(glob_pattern))
-
+    pattern = f"**/*{extension}" if params.recursive else f"*{extension}"
     files = [
-        {"path": _relative(f, workspace_root), "size_kb": round(f.stat().st_size / 1024, 1)}
-        for f in matches
+        {"path": _relative(path, root), "size_kb": round(path.stat().st_size / 1024, 1)}
+        for path in sorted(directory.glob(pattern))
     ]
-
     return json.dumps({
         "status": "ok",
-        "directory": _relative(resolved, workspace_root),
-        "file_type": ext,
+        "directory": _relative(directory, root),
+        "file_type": extension,
         "recursive": params.recursive,
         "count": len(files),
         "files": files,

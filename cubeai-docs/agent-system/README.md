@@ -37,7 +37,7 @@ User Research Question (via Chat)
   │       ↓                                  │
   │  Feature Extraction Agent               │  ← PyRadiomics features
   │       ↓                                  │
-  │  Modeling Agent                         │  ← PyCaret ML modeling
+  │  Modeling Agent                         │  ← scikit-learn ML modeling
   │       ↓                                  │
   │  Result Reporter Agent                  │  ← Structures results
   │       ↓                                  │
@@ -90,7 +90,7 @@ User Research Question (via Chat)
 ### Modeling Agent
 - **Input:** Features CSV, target variable definition
 - **Output:** Trained model, performance metrics (AUC, accuracy, etc.)
-- **Mechanism:** PyCaret AutoML, scikit-learn
+- **Mechanism:** scikit-learn, LightGBM and XGBoost (compare, tune, blend), SHAP
 
 ### Result Reporter Agent
 - **Input:** Model results, features analysis

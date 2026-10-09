@@ -1,14 +1,12 @@
-"""
-validation_utils.py — Pre-extraction validation guards.
+"""Pre-extraction checks of one mask.
 
-# ADDED FOR UI ENHANCEMENT — Tasks 2 & 3
-Provides:
-  - check_mask_voxels : guard against degenerate (<10 voxel) masks (Task 2)
-  - check_spatial_alignment : affine-matrix mismatch detection (Task 3)
+- ``check_mask_voxels``: a mask under ``MIN_VOXEL_COUNT`` voxels gives NaN-only
+  features or crashes PyRadiomics, so it is not measured;
+- ``check_spatial_alignment``: a volume and mask whose affines differ are
+  measured anyway, with a warning.
 
-All functions are fully defensive — missing libraries (nibabel) or unexpected
-file formats simply return safe fallback values so the extraction pipeline is
-never blocked.
+Both are defensive: a missing nibabel or an unreadable header never blocks
+an extraction.
 """
 
 import logging
@@ -18,7 +16,6 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Task 2: minimum number of foreground voxels required to run PyRadiomics.
 # Masks below this threshold produce NaN-only features or crash the extractor.
 MIN_VOXEL_COUNT: int = 10
 
