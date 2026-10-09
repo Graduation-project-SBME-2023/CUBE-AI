@@ -457,6 +457,22 @@ def test_the_fencing_trigger_guards_every_table_execution_writes(migrated):
     )])
 
 
+def test_a_selection_cannot_change_after_its_run_completed(migrated):
+    """Approving (freezing) what a completed run produced is refused on every write path."""
+    connection, ids = migrated
+    run, cohort = ids["a_population"], ids["a_cohort"]
+    assert _scalar(connection, "SELECT status FROM node_runs WHERE run_id = %s", (run,)) == "completed"
+    before = _scalar(connection, "SELECT frozen_at FROM cohorts WHERE cohort_id = %s", (cohort,))
+    freeze = [("UPDATE cohorts SET frozen_at = now() WHERE cohort_id = %s", (cohort,))]
+    attempt = _scalar(connection, "SELECT attempt_id::text FROM run_attempts WHERE run_id = %s", (run,))
+
+    assert "not suspended on its cohort_approval gate" in _rejects(connection, freeze, "user")
+    assert "never writes cohorts rows" in _rejects(connection, freeze, "harness")
+    assert "is completed; its internal jobs no longer write" in _rejects(connection, freeze, run_id=run)
+    assert "only a submitted or running attempt writes" in _rejects(connection, freeze, attempt_id=attempt)
+    assert _scalar(connection, "SELECT frozen_at FROM cohorts WHERE cohort_id = %s", (cohort,)) == before
+
+
 def test_graph_nodes_change_only_with_the_graph_version(migrated):
     connection, ids = migrated
     assert "advances the graph version" in _rejects(

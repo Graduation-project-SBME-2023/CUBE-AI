@@ -44,3 +44,8 @@ async def require_owner(db: AsyncSession, session_id: UUID, user_id: UUID) -> No
     ).scalar()
     if owner is None or owner != user_id:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+
+
+def owned_session_ids(user_id: UUID):
+    """The ids of the sessions `user_id` owns, for scoping a cross-session listing."""
+    return select(SessionModel.session_id).where(SessionModel.user_id == user_id)

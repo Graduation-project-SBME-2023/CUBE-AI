@@ -16,8 +16,10 @@ from application_api.core.stored_file_limits import (
     max_bytes_for,
 )
 from application_api.db.binary_session import binary_read_slots, get_binary_db
+from application_api.api.dependencies import current_user, owned_file, owned_file_content, owned_session
 from application_api.db.session import get_db
 from application_api.services.fencing import fenced_db
+from application_api.repositories.users import require_owner
 from application_api.repositories import stored_files as repo
 from application_api.schemas.stored_files import RenderRegistration, StoredFileOut
 
@@ -34,8 +36,10 @@ async def upload_stored_file(
     metadata: Optional[str] = Form(None),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(fenced_db),
+    user_id: UUID = Depends(current_user),
 ):
     """Publish retained bytes."""
+    await require_owner(db, session_id, user_id)
     payload = await file.read()
     cap = max_bytes_for(kind)
     if len(payload) > cap:
@@ -68,9 +72,12 @@ async def upload_stored_file(
 
 @router.post("/renders", response_model=StoredFileOut, status_code=201)
 async def register_render(
-    data: RenderRegistration, db: AsyncSession = Depends(fenced_db)
+    data: RenderRegistration,
+    db: AsyncSession = Depends(fenced_db),
+    user_id: UUID = Depends(current_user),
 ):
     """Catalogue a regenerable render that already exists on disk."""
+    await require_owner(db, data.session_id, user_id)
     stored_file, created = await repo.register_render(db, data)
     return StoredFileOut.model_validate(stored_file)
 
@@ -82,6 +89,7 @@ async def list_session_stored_files(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    _: UUID = Depends(owned_session),
 ):
     """The catalogue. Bytes are fetched one at a time from `/content`."""
     rows = await repo.list_stored_files(db, session_id, kind=kind, skip=skip, limit=limit)
@@ -89,7 +97,9 @@ async def list_session_stored_files(
 
 
 @router.get("/{file_id}", response_model=StoredFileOut)
-async def read_stored_file(file_id: UUID, db: AsyncSession = Depends(get_db)):
+async def read_stored_file(
+    file_id: UUID, db: AsyncSession = Depends(get_db), _: UUID = Depends(owned_file)
+):
     return StoredFileOut.model_validate(await repo.get_stored_file(db, file_id))
 
 
@@ -98,6 +108,7 @@ async def read_stored_file_content(
     file_id: UUID,
     download: bool = Query(False, description="Send as an attachment"),
     db: AsyncSession = Depends(get_binary_db),
+    _: UUID = Depends(owned_file_content),
 ):
     """Stream one stored file's bytes on the bounded binary pool."""
     try:
