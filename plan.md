@@ -8,7 +8,7 @@ Three design documents describe the next version of CUBE.AI:
 - **`tools_plan.md` (Tool Platform)** describes _what the system is built from_. It has a framework-neutral **Toolkit** (`ToolSpec`, `AgentSpec`, registries, catalog), tool packs, **Celery + Redis jobs** for heavy tools, a **sandbox**, an **outbound MCP edge**, and fixes for every known job bug.
 - **`cubeai-persistence-design.md` (Persistence Design, revision 3.2)** describes _how the state is stored_: every table, column, constraint and transaction the Application API owns for the harness. It was written after the first two were merged, and it replaces every database detail they contained. Its full text is merged into this roadmap as **Appendix P**, and **Plan 6** implements it. The standalone file is kept with the same text; a change to one is made to both.
 
-The two documents overlap: both define registries, tool metadata, agents and execution. They also conflict in several places: package names, modeling, synchronous delegation versus asynchronous submission, and the fixed linear plan contract. This roadmap merges them into **one ordered set of 18 small plans (Plan 0 to Plan 17)**, each with phases. The toolkit and job work become the foundation. The harness, the graph and the Executor are built on top of that foundation.
+The two documents overlap: both define registries, tool metadata, agents and execution. They also conflict in several places: package names, modeling, synchronous delegation versus asynchronous submission, and the fixed linear plan contract. This roadmap merges them into **one ordered set of small plans (Plan 0 to Plan 17; Plan 4 was later removed)**, each with phases. The toolkit and job work become the foundation. The harness, the graph and the Executor are built on top of that foundation.
 
 **Decisions taken with you for this merge:**
 
@@ -23,6 +23,7 @@ The two documents overlap: both define registries, tool metadata, agents and exe
 - **Execution is sequential only** in this roadmap (D5). The rules that follow from it are listed as current-phase constraints (Appendix P §P.4), so DAG execution can be added later without a rewrite.
 - **One vocabulary (D20).** The schema and the code are renamed once, in Phase 6.1, before Plan 2 moves the tools. Every plan after that uses the new names (`node_runs`, `run_id`, `graph_nodes`, `node_id`, `session_events`, `stored_files`, `segmentation_batches`, …).
 - **No dual path (D26).** The AutoGen path is not kept working against the new schema; the rows it wrote stay as history.
+- **Jobs run on PostgreSQL with Procrastinate** (decided 2026-10-09), not on Celery + Redis as tools_plan says: one database; only the Application API sends and cancels jobs; the queue rows are the physical job state and `run_attempts` the attempt outcome (D12). There is no sandbox (Plan 4 is removed): a job runs in its own child process, and stdio MCP servers are refused.
 
 **What exists today (checked in the code):** these are the names from before Phase 6.1. Phase 6.1 renamed them in the code, and Appendix P §P.2 maps each one to its name now.
 
@@ -51,7 +52,7 @@ The two documents overlap: both define registries, tool metadata, agents and exe
 4. **The Session Graph is live.** It is versioned, can change during execution, and is never "finished".
 5. **Guardrails decide boundaries, never reasoning.** Each check returns exactly one of `allowed | approval_required | permission_denied | invalid | resource_unavailable`.
 6. **A tool is a callable action (`ToolSpec`).** An agent is a definition (`AgentSpec`) and never a tool. Delegation is a tool.
-7. **Heavy compute runs as Celery jobs** behind one `JobClient` contract. Isolation follows trust.
+7. **Heavy compute runs as jobs on PostgreSQL (Procrastinate)** behind one `JobClient` contract. Only the Application API sends and cancels jobs. Each job runs in its own child process.
 8. **The Application API owns all durable state, and the database enforces the invariants.** Graph changes, runs, attempts, approvals and fencing are rows and constraints (Appendix P), not conventions inside the Agent System.
 
 ## Compatibility decisions (how the two plans fit together)
@@ -68,7 +69,7 @@ The two documents overlap: both define registries, tool metadata, agents and exe
 | 8 | Runs | Nodes have Runs | Job ids use `agent_run_id`; identity comes from `ToolContext` | _Persistence:_ `agent_runs` is renamed `node_runs` and holds every node run, agent or tool. A run is created lazily when its node starts, together with attempt 1 (D8); every try is a row of the new `run_attempts` table (D9). Domain FKs become `created_by_run_id`. The job id is `sha256(run_id\|tool\|args)`, and the submission key adds `.{attempt_number}`. |
 | 9 | Plan contract | Open graph, no fixed order | `planner_steps() == CANONICAL_AGENT_TYPES` | This contract is dropped. The Validator and the registry decide what is valid. A contract test checks the producer allowlists in the Application API against the catalog. _Persistence:_ `plans` and `plan_steps` are renamed `session_graphs` and `graph_nodes` and become the live graph (D4, D6); every mutation is a `graph_changes` row (D7). |
 | 10 | Session status | `idle \| running \| awaiting_approval \| blocked`; nothing is ever "finished" | Uses the current statuses | _Persistence:_ `sessions.status` is renamed `control_state` and holds only intent: `active \| paused \| archived` (D13). The activity (`idle`, `running`, `pausing`, `awaiting_approval`, `blocked`) is derived and never stored. Nothing is ever `completed`. |
-| 11 | Resources | The Executor acquires `resources` (e.g. `cpu_heavy`) | `resource_class` maps to a Celery queue; J5 asks for named pools | `resources` is the manifest field. `resource_class` is derived from it: `cpu_heavy`→`compute.cpu`, `gpu`→`compute.gpu`, `highmem`→`compute.highmem`. Executor pools are set in `config/resources.yaml` and are runtime only: a node waiting for a pool, or refused at start, is not stored; it is published as `node_start_refused` (D19). |
+| 11 | Resources | The Executor acquires `resources` (e.g. `cpu_heavy`) | `resource_class` maps to a Celery queue; J5 asks for named pools | `resources` is the manifest field. `resource_class` is derived from it: `cpu_heavy`→`compute.cpu`, `gpu`→`compute.gpu`, `highmem`→`compute.highmem`; these are the Procrastinate queue names (Plan 5), and each queue's worker concurrency is the real limit. Executor pools are set in `config/resources.yaml` and are runtime only: a node waiting for a pool, or refused at start, is not stored; it is published as `node_start_refused` (D19). |
 | 12 | Cache vs job dedupe | A fingerprint drives cache reuse | `job_id = sha256(agent_run_id\|job_name\|args)` | _Persistence:_ only the **job id** now. It re-attaches an attempt to the same run after a restart. Fingerprints and cross-version caching are deferred (Appendix P §P.10): sequential suffix invalidation keeps the unaffected prefix, and `execution_policy.fresh` covers fresh reruns. |
 | 13 | Human gates | Approvals Panel; Plan mode | Not covered | _Persistence:_ every durable approval is a `graph_changes` row decided by a user who quotes its digest (D7). There is no `approvals` table and no start-time hold; approval reasons are computed when a change is proposed. The gates inside nodes (cohort approval, segmentation review) stay on their domain rows and are written through the D24 `user gate` path. The node waits through `ctx.user_gate()`, which `interrupt()`s the agent graph and **suspends** the attempt (T10): the wait is durable, survives a restart and holds no process. A tool approval inside a node (Phase 11.3) is the same kind of gate. |
 | 14  | PHI                 | `phi` flag; PHI-Local mode                                                              | `data_scopes`; MCP `allow_phi`                                                         | `phi` is derived from `data_scopes`. Artifacts carry a `phi` label. The Model Gateway filters models by locality, and the MCP edge refuses PHI. `gpt-oss:120b-cloud` counts as **external**.                                                                                                                                                                                                                                  |
@@ -102,13 +103,13 @@ The two documents overlap: both define registries, tool metadata, agents and exe
 - **Python 3.13.** New code targets Python 3.13. Code that also runs in the MONAI image (`Backend/storage_paths.py` and every file `Dockerfile.backend.gpu` copies) must stay compatible with Python 3.10.
 - **No PyCaret.** No new code imports `pycaret`, and no new code depends on PyCaret objects or PyCaret setup arguments.
 - **Forbidden package names:** `platform`, `core`, `tools`, `mcp` and `types`, and no regular package named `config`.
-- **Only the Application API gets `DATABASE_URL`.** All graph, change, run, attempt, agent-checkpoint and result state goes through its HTTP API, in the transactions T0–T10 of Appendix P §P.8.
+- **Only the Application API gets `DATABASE_URL`.** All graph, change, run, attempt, agent-checkpoint and result state goes through its HTTP API, in the transactions T0–T10 of Appendix P §P.8. The one exception is the compute workers' `JOBS_DATABASE_URL`, a role limited to the Procrastinate objects (Plan 5); a job's child process never gets it.
 - **LangGraph persistence goes through the Application API only.** The one checkpointer is `execution/checkpointer.py` (`HttpCheckpointSaver`). No `langgraph-checkpoint-postgres`, `PostgresSaver`, LangGraph Server / `langgraph_sdk` or `BaseStore` in this roadmap. A checkpoint is reasoning state, never a result: results are typed rows and `node_runs.outputs` (D27).
 - **Every write on the execution path declares its D24 path** (`attempt`, `internal job`, `user gate`, `harness` or `migration`). The database rejects a write that declares none.
 - **Names after Phase 6.1** follow the vocabulary of Appendix P §P.2. Old names appear only in migrations, in old durable events, and in the problem catalog, which describes today's code. Phase 6.1 renames identifiers inside tool code, never tool names, tool argument names or success result shapes.
 - **Generated files** are resolved through `Backend/storage_paths.py`. Graph or inbox state is never written to workspace files, and the write guard is respected.
-- **Run exactly one Agent System worker.** Main loops, executors and inboxes are process-local asyncio objects. Everything durable lives in the Application API or in Redis.
-- **Tests** use synthetic data. Unit and contract tests use fake chat models, fakeredis and in-memory backends, and never touch the network.
+- **Run exactly one Agent System worker.** Main loops, executors and inboxes are process-local asyncio objects. Everything durable lives in the Application API's PostgreSQL, the job queue included.
+- **Tests** use synthetic data. Unit and contract tests use fake chat models, Procrastinate's `InMemoryConnector` and in-memory backends, and never touch the network.
 - **Strategy-free harness:** no harness rule may read the request text or count steps to choose a strategy. A unit test scans the guardrail rules for this.
 
 ## Architecture after the merge
@@ -132,7 +133,7 @@ EXECUTION PLANE  (agent_system/execution)
                            |     HttpCheckpointSaver --checkpoints (thread = run_id)--> Application API (agent_checkpoints, D27)
                            |     gate / pause -> interrupt() -> attempt suspended (T10) -> Command(resume=...) on decision
                            +-> Tool Node:  dispatch.invoke -> inline
-                                                          -> job      (JobClient -> Celery/Redis -> compute worker -> sandbox runner)
+                                                          -> job      (JobClient -> Application API -> Procrastinate (PostgreSQL) -> compute worker -> child process)
                                                           -> external (MCP edge, Plan 14)
   Watchdog (heartbeats, timeouts, OOM, interrupted; suspended attempts hold no process and are not watched)
   every start / finish / cancel / reconcile / suspend / resume is a transaction of the Application API (T4 / T6 / T7 / T5 / T10)
@@ -171,10 +172,9 @@ Backend/
       graph_store.py affected.py diff_engine.py executor.py node_runner.py
       resources.py expectations.py watchdog.py recovery.py checkpointer.py (Plan 9)
     config/                       data only: models.yaml (9) resources.yaml (10) mcp_servers.yaml (14)
-  application_api/                Plan 6: migrations "o" (renames) and "p" (session graph); models, repositories, schemas, routes (Appendix P)
-  jobs_core/                      Plan 5 (backends/monai_http.py: Plan 15)
-  compute_worker/                 Plan 5 (Celery app)
-  sandbox/                        Plan 4
+  application_api/                Plan 6: migrations "o" (renames) and "p" (session graph); models, repositories, schemas, routes (Appendix P); Plan 5: migration "s" (job queue), the job dispatch, cancel and read routes
+  jobs_core/                      Plan 5 (backends/app_api.py; backends/monai_http.py: Plan 15)
+  compute_worker/                 Plan 5 (Procrastinate app: supervisor, child, periodic tasks)
 ```
 
 ## Milestones, order and dependencies
@@ -185,17 +185,17 @@ Backend/
 | 1   | Toolkit Core                                              | M1 Toolkit   | –                  | tools P1; system Phase 1 (registries, artifact types, discovery) | ✅ Done (1.1–1.5) |
 | 2   | Tool Packs                                                | M1           | 1                  | tools P2                                                         | ✅ Done (2.1–2.5) |
 | 3   | Agent Definitions and Skills                              | M1           | 1, 2               | tools P3; system §29-30                                          | Not started       |
-| 4   | Sandbox Foundation                                        | M2 Compute   | 1                  | tools P4                                                         | Not started       |
-| 5   | Job Platform (Celery + Redis)                             | M2           | 1, 4               | tools P5                                                         | Not started       |
+| 4   | _(removed: no sandbox)_                                   | –            | –                  | tools P4                                                         | –                 |
+| 5   | Job Platform (PostgreSQL + Procrastinate)                 | M2 Compute   | 1, 6               | tools P5; your decision (2026-10-09)                             | Not started       |
 | 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | system Phase 1 (State, Graph Versions); Appendix P | ✅ Done (6.1–6.5) |
 | 7   | Modeling Engine, Heavy Tools as Jobs + `run_modeling`     | M2           | 0, 2, 5, 6         | tools P6; system `run_modeling`; your decision (PyCaret removed) | 🟡 7.0–7.2 done (engine, rename, legacy records); jobs wait for Plan 5 |
 | 8 | Validator and Diff Engine | M3 | 1, 6 | system Phase 1 (Validator), Phase 2 (Diff, Affected Set); Appendix P D23 | Not started |
 | 9   | LangGraph Engine, Checkpoints and Model Gateway           | M3           | 1, 3, 6            | your decisions (LangGraph; LangGraph-native nodes, 2026-10-02); system §4 (Model Gateway); Appendix P D27 | Not started       |
 | 10 | Executor, Node Runner, Watchdog | M3 | 5, 6, 8, 9 | system Phases 1–3 (Executor, Live changes, Watchdog); Appendix P T4–T7, T10 | Not started |
-| 11  | Runtime Guardrails, Modes, Approvals                      | M3           | 4, 6, 8, 10        | system §10, §31                                                  | Not started       |
+| 11  | Runtime Guardrails, Modes, Approvals                      | M3           | 5, 6, 8, 10        | system §10, §31                                                  | Not started       |
 | 12  | Session Layer: Inbox, Main Loop, Context, Skills, Planner | M3           | 8, 9, 10, 11       | system Phase 1 (Main Loop, Context), Phase 2 (Planner)           | Not started       |
 | 13  | Recovery and Privacy                                      | M4 Hardening | 10, 11, 12         | system Phase 3                                                   | Not started       |
-| 14  | MCP Outbound Edge                                         | M4           | 1, 4, 11           | tools P7                                                         | Not started       |
+| 14  | MCP Outbound Edge                                         | M4           | 1, 11              | tools P7                                                         | Not started       |
 | 15  | MONAI Jobs + Segmentation Client                          | M5 Job fixes | 5 (Phase 5.1 only); the review gate of 15.4 needs Phase 9.3 | tools P8                                                         | Not started       |
 | 16  | Other Job Systems                                         | M5           | 5, 15              | tools P9                                                         | Not started       |
 | 17  | Cut-over, AutoGen Removal, Cleanup, Docs                  | M6           | all                | tools P10; your decision                                         | Not started       |
@@ -212,7 +212,9 @@ Backend/
 
 **Decision (2026-10-02): LangGraph-native agent nodes.** Plan 9 now also builds the checkpointer, gates, `@task` tool calls, `Send` fan-out, the literature workflow graph and in-node compaction; Appendix P gains D27 (agent checkpoints, suspended attempts, transaction T10) and becomes revision 3.2; Plans 3, 6, 8, 10–17 carry the matching edits. The implementation order does not change: Plan 9 already comes after 6.2–6.5, which now include the checkpoint tables and routes.
 
-**Implementation order:** 0 → 1 ✅ → 6.1 ✅ → 2 → 3 → 4 → 5 → 6.2–6.5 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14 → 15 → 16 → 17.
+**Decision (2026-10-09): the job platform runs on PostgreSQL with Procrastinate, and there is no sandbox.** Plan 5 replaces Celery + Redis and keeps its phases: only the Application API sends and cancels jobs, the queue lives in its PostgreSQL, the job dir holds each job's progress and result, and Procrastinate's retries are off (a retry is a new attempt). Plan 4 (Sandbox Foundation) is removed: a job runs in its own child process, started by the compute worker's launcher (Phase 5.3), and Plan 14 refuses stdio MCP servers; the other plan numbers do not change. Appendix P becomes revision 3.3 (D12, the T4 dispatch, T6, T7, §P.4, §P.5, §P.6, §P.9, §P.10, §P.11). Plans 7, 10, 11, 13, 14, 15, 16 and 17 carry the matching edits; no other plan became unnecessary.
+
+**Implementation order:** 0 → 1 ✅ → 6.1 ✅ → 2 → 3 → 5 → 6.2–6.5 → 7 → 8 → 9 → 10 → 11 → 12 → 13 → 14 → 15 → 16 → 17.
 
 Phase 6.1 (the renames of Appendix P) comes right after Plan 0 and before Plan 2. The tool move in Plan 2 then moves code that already uses the new names, and no later plan writes an old name. The rest of Plan 6 comes before Plan 7, whose tools write `model_results` through the new fencing.
 
@@ -317,7 +319,7 @@ Some plans can move:
    | `timeout_s`, `queue_timeout_s`, `priority`, `max_attempts` | Budgets and the retry cap                                                                                                                       | tools + system Watchdog                 |
    | `read_only`, `destructive`, `idempotent`, `critical`       | As in tools_plan                                                                                                                                | tools                                   |
 
-   `resource_class` (the Celery queue) is a derived property: `cpu_heavy`→`compute.cpu`, `gpu`→`compute.gpu`, `highmem`→`compute.highmem`.
+   `resource_class` (the job queue name, Plan 5) is a derived property: `cpu_heavy`→`compute.cpu`, `gpu`→`compute.gpu`, `highmem`→`compute.highmem`.
 
 2. **Manifest consistency rules** (enforced in Phase 1.3):
    - `side_effects="none"` ⇔ `read_only=True` and no write scope (`phi_write`, `db_write`, `fs_write`);
@@ -395,7 +397,7 @@ Some plans can move:
      - a `control` agent with ports, or with `run_agent`, `plan` or `recover` in its tools. Main is the only exception: it may use `plan` and `recover`. Only `execution` agents can be graph nodes.
      - `job` tools with non-JSON args, or any manifest rule from Phase 1.1;
      - a port that names an unknown artifact type;
-     - a policy hook (filled by Plan 4).
+     - a policy hook (left empty: there is no sandbox).
    - **`resolve(name)`** returns an `AgentSpec`, a `ToolSpec` or an error. It replaces `node_resolver`.
    - **`index(audience)`** returns compact entries for Main or the Composer (system §33): the name, the kind (agent or tool), a one-line description, the port types and the cost.
    - **`describe(name)`** returns the full schema, the ports and the manifest.
@@ -764,59 +766,26 @@ A smoke test runs every tool with a fake context and a mocked domain API. It che
 
 ---
 
-# Plan 4 — Sandbox Foundation
+# Plan 4 — removed (no sandbox)
 
-**Goal:** an isolation policy, a runner interface, a hardened subprocess runner used now, and a container runner that is ready but switched off.
-
-## Phase 4.1 — Policy
-
-1. **`sandbox/policy.py`:**
-   - `MIN_ISOLATION = {first_party: inline, third_party: container, generated_code: microvm}`;
-   - heavy first-party tools declare `process`;
-   - `SandboxProfile`: network (`none` \| `app_api` \| an allowlist); read-only root; rw mounts (the job dir only); `cpus`, `memory_mb`, `pids`, `timeout_s`; an env allowlist; a non-root user; a seccomp profile; optional `runtime="runsc"` (gVisor);
-   - `check(spec)` (static) refuses under-isolated tools, and tools whose runner is not enabled.
-2. Hook `check()` into `catalog.validate()` (the Plan 1 hook).
-
-## Phase 4.2 — Runners
-
-1. **`runners/base.py`:** the `Runner` protocol (`start(LaunchSpec) -> Handle`, `is_alive`, `wait`, `kill(grace_s)`), plus `select_runner(isolation)`.
-2. **`runners/subprocess_runner.py` (implemented):**
-   - `start_new_session=True`;
-   - an **env allowlist** (no `MODEL_API_KEY`, no Redis password, no tokens);
-   - `setrlimit` for memory, CPU and nproc;
-   - SIGTERM → SIGKILL escalation with `killpg`;
-   - stdout and stderr go to the job dir.
-3. **`runners/container_runner.py`:**
-   - turns a profile into `docker run` arguments: `--network`, `--read-only`, `--tmpfs /tmp`, `--memory`, `--cpus`, `--pids-limit`, `--user`, `--cap-drop ALL`, `--security-opt no-new-privileges`, seccomp, `--runtime runsc`;
-   - starting a container is gated by `SANDBOX_CONTAINER_ENABLED` (default `0`).
-4. **`runners/microvm_runner.py`:** a stub (`NotImplementedError`) with notes on E2B / Firecracker.
-
-## Phase 4.3 — Runtime check for the Guardrails
-
-`sandbox/policy.runtime_check(spec) -> (outcome, code)` confirms, at call time, that the needed runner is enabled and that the profile is valid. Plan 11 uses it as a guardrail rule: `permission_denied` when the tool is under-isolated, `resource_unavailable` when its runner is disabled.
-
-## Phase 4.4 — Threat model
-
-`cubeai-docs/security/sandbox.md` covers:
-
-- the trust levels and data scopes;
-- why the Docker socket is root-equivalent, so enabling containers needs rootless Docker/Podman or a separate launcher;
-- the egress rules for patient data.
-
-**Tests (`tests/unit/sandbox/`):**
-
-- the policy matrix and the `validate()` refusals; `runtime_check` outcomes;
-- profile → docker args (golden test); rlimits applied; env allowlist (no secrets reach the child);
-- kill escalation reaches grandchildren; container start refused while disabled;
-- (`-m docker`) a real container run.
-
-**Done when:** `validate()` enforces the policy, and the subprocess runner passes all its tests.
+The sandbox (isolation policy, container and microVM runners, runtime check, threat model) is not built (decided 2026-10-09). A job runs in its own child process, started by the compute worker's launcher (Phase 5.3), and Plan 14 refuses stdio MCP servers. The number is kept so that the other plan numbers, and the references to them in the code, do not change.
 
 ---
 
-# Plan 5 — Job Platform (Celery + Redis)
+# Plan 5 — Job Platform (PostgreSQL + Procrastinate)
 
-**Goal:** heavy tools run as Celery jobs on Redis behind one `JobClient` contract. Jobs have deterministic ids, real cancel, progress, timeouts, retention, restart recovery, OOM detection and queue liveness.
+**Goal:** heavy tools run as jobs queued in the Application API's PostgreSQL with Procrastinate, behind one `JobClient` contract, each in its own child process. Jobs have deterministic ids, real cancel, progress, timeouts, retention, restart recovery, OOM detection and queue liveness, with no Redis, no Celery and no beat process.
+
+**Decisions (2026-10-09):**
+
+- **One database.** The queue is Procrastinate's tables in the Application API's PostgreSQL. There is no Redis, no Celery, no `compute-beat` and no Flower.
+- **Only the Application API sends and cancels jobs.** The Agent System reaches jobs only through `JobClient` → Application API. It never touches the queue or the database.
+- **One owner per state (D12).** Procrastinate's rows hold the physical queue state (`todo`, `doing`, `succeeded`, `failed`, `cancelled`, `aborted`) and the worker heartbeats. `run_attempts` holds the attempt lifecycle and outcome, written only by T4–T7 from what was observed. Nothing copies one into the other: the Application API reads the queue through one view, `job_execution_status`, so a Procrastinate upgrade changes one migration.
+- **The job dir is the job's record.** `COMPUTE_JOBS_DIR/{submission_key}/` holds `request.json`, `progress.json`, `process.json` and `result.json`. `result.json` is always written, atomically, even on error; a large result stays a file ref in the dir (claim check). **`result.json` wins:** when it exists, it is the job's outcome, whatever the queue row says. The Node Runner reads it through `JobClient.result` and completes the attempt itself (T6), so the worker reports nothing after the work but `result.json`.
+- **No Procrastinate retries** (`retry=False`). A retry is a new attempt opened by T4 (I8, D9). A stalled job is never re-run; it is observed as `INTERRUPTED`, and the Watchdog decides (Phase 10.5).
+- **Queues are the `resource_class` names:** `compute.cpu` (started), `compute.gpu` and `compute.highmem` (declared only). One worker process per queue per machine; its `--concurrency` is that queue's limit on that machine.
+- **MONAI is not a Procrastinate queue.** Segmentation inference (Plan 15) and training (Phase 16.2) stay on MONAI's own job store, which owns the GPU it runs on.
+- **Version-specific behaviour is tested, not assumed:** the abort of a running async task, stalled-job detection, worker heartbeats and `queueing_lock` after a job starts are checked against the pinned Procrastinate version by the integration suite.
 
 ## Phase 5.1 — Job contract and client library (`Backend/jobs_core/`)
 
@@ -827,101 +796,126 @@ A smoke test runs every tool with a fake context and a mocked domain API. It che
      submission_key: f"{job_id}.{attempt_number}"              # = run_attempts.submission_key (Appendix P)
      attempt, job_name (a REGISTERED tool name, never an import path), job_version,
      args (JSON only), context (ToolContext.to_payload()),
-     resource_class (derived from resources), isolation (process|container),
+     resource_class (derived from resources),
      timeout_s, queue_timeout_s, priority
    }
-   JobRecord { id, status, error_code, attempt, input_hash, progress, heartbeat_at, queued_at,
-               started_at, finished_at, error, result | result_ref, host, pgid }
+   JobRecord { id, status, error_code, attempt, input_hash, progress, queued_at,
+               started_at, finished_at, error, result | result_ref, host }   # built from the view row + the job dir
    ```
    `error_code` is one of: `error`, `timeout`, `queue_timeout`, `oom`, `interrupted`, `cancelled`, `run_not_running`.
 2. **`status.py`:** `QUEUED RUNNING CANCELLING SUCCEEDED FAILED TIMED_OUT CANCELLED INTERRUPTED`, plus `TERMINAL`, `ACTIVE` and `is_final()` (an unknown status counts as final).
-3. **`client.py`:** the `JobClient` protocol: `submit` (the same id returns the existing record), `get`, `wait(budgets, on_progress, cancel)`, `result`, `cancel`, `purge`, `list(run_id, active_only)`.
-4. **`polling.py`:** `RetryPolicy` (backoff, jitter, cap, `Retry-After`) and `poll_until()` with a monotonic, pause-aware deadline.
-5. **`budgets.py`:** `JobBudgets(queue_s, run_s, result_s, unavailable_s)`, where the outer budget = the sum of the inner budgets + a margin.
-6. **`backends/in_memory.py`** for tests.
+3. **`derive_status(row, job_dir)`**, the only mapping from queue state to job status:
+   - `result.json` present → its status;
+   - `todo` → `QUEUED`; `doing` with a live worker → `RUNNING` (`CANCELLING` once a cancel is requested);
+   - `doing` with a worker heartbeat older than `JOB_HEARTBEAT_TIMEOUT_S` → `INTERRUPTED`;
+   - `cancelled` before it started → `CANCELLED`, or `TIMED_OUT` (`queue_timeout`) when the queue sweep cancelled it;
+   - `failed` with no `result.json` → `FAILED` (`error`): the supervisor itself crashed;
+   - no row → not found.
+4. **`client.py`:** the `JobClient` protocol: `submit` (the same key returns the existing record), `get`, `wait(budgets, on_progress, cancel)`, `result`, `cancel`, `purge`, `list(run_id, active_only)`.
+5. **`polling.py`** (moved from `toolpacks/common/polling.py`, see the Plan 2 follow-ups): `RetryPolicy` (backoff, jitter, cap, `Retry-After`) and `poll_until()` with a monotonic, pause-aware deadline.
+6. **`budgets.py`:** `JobBudgets(queue_s, run_s, result_s, unavailable_s)`, where the outer budget = the sum of the inner budgets + a margin.
+7. **`backends/in_memory.py`** for tests. The HTTP backend, `backends/app_api.py`, is Phase 5.4.
 
-## Phase 5.2 — Redis backend (client side)
+## Phase 5.2 — Application API: the queue, dispatch and cancel
 
-`backends/celery_redis.py`:
+1. **Dependencies:** `procrastinate` (pinned) and `psycopg[binary,pool]`. A Procrastinate `App` with a `PsycopgConnector` whose DSN is derived from `DATABASE_URL` (without `+asyncpg`), opened and closed in the lifespan.
+2. **Migration "s"** (`s1f0a2c3d4e5_v1_s_job_queue`, after `r1f0a2c3d4e5`):
+   - the Procrastinate schema of the pinned version, applied from its own SQL file, unchanged;
+   - the view `job_execution_status`: `submission_key` (the job's `queueing_lock`), queue, status, queued / started / finished times, worker id, the worker's last heartbeat;
+   - grants on the Procrastinate objects, and nothing else, to the role `cubeai_jobs` (created by the PostgreSQL init script from `JOBS_DB_PASSWORD`).
 
-- uses `redis.asyncio`; the record of one attempt is in `cubeai:job:{submission_key}` (a hash) and the index in `cubeai:jobs:run:{run_id}`, so reconciliation (T5) finds exactly that attempt;
-- dedupes with `SET NX`; the same id with a different `input_hash` → a conflict error;
-- `send_task("compute.run_tool_job", task_id=submission_key, queue=f"compute.{resource_class}", expires=queue_timeout_s)`;
-- never creates an attempt on its own: a retry is a new `run_attempts` row opened by T4, which arrives here as a new `submission_key`. Resubmitting the same key (T5) returns the existing record;
-- `cancel` = a Redis cancel flag + `revoke(terminate=True)`;
-- a terminal record gets its TTL (`JOB_RETENTION_HOURS`, default 24) only when `purge` is called after the Application API recorded the outcome (T6). Until then it never expires, so "record not found" keeps its meaning (Appendix P §P.9, Phase 3).
+   A Procrastinate upgrade is a new migration with its upgrade SQL and the view.
+3. **T4 dispatch for jobs:** `POST /runs/{run_id}/attempts/{attempt_id}/dispatch` (attempt path).
+   - Require the attempt current, `dispatch_kind='job'`, and `preparing` (or `submitted` / `running` for a resend, which changes nothing).
+   - Defer `compute.run_tool_job` with the attempt's stored `request`, `queue = request.resource_class`, `queueing_lock = lock = submission_key`, `retry=False`; then commit `submitted` + `dispatched_at` ("send, then commit", Appendix P T4). The defer runs on Procrastinate's own connection before the T4 dispatch transaction opens, so no transaction spans it.
+   - `AlreadyEnqueued` for the same lock, or a row already present for the key, counts as sent.
+   - `/dispatched` stays for `in_process` and `inline` attempts.
+4. **T7 for jobs:** `request_cancel` on a job attempt also cancels its Procrastinate job in the same request: a `todo` job is cancelled and never starts; a `doing` job gets an abort. The worker also polls `cancel_requested_at` (Phase 5.3).
+5. **Reads:** `GET /runs/{run_id}/attempts/{attempt_id}/job` (the view row for the attempt's key, `owned_run`), and `GET /jobs/queues` (per queue: `todo`, `doing`, live workers) for Plans 11 and 13.
+6. **T5 and T6 do not change:** the Node Runner observes the job through `JobClient.get` and reports the outcome (T5) or completes the attempt (T6), as for any backend.
 
-## Phase 5.3 — Celery worker (`Backend/compute_worker/`)
+## Phase 5.3 — Compute worker (`Backend/compute_worker/`, a Procrastinate app)
 
-1. **`celery_app.py`:**
-   - JSON only (`accept_content=["json"]`);
-   - `task_acks_late=True`, `task_reject_on_worker_lost=False`;
-   - `worker_prefetch_multiplier=1`;
-   - `broker_transport_options={"visibility_timeout": MAX_JOB_SECONDS + 600}` (otherwise Redis re-delivers long jobs);
-   - `task_ignore_result=True` (our Redis record is the source of truth);
-   - soft and hard time limits taken from the request;
-   - queues: `compute.cpu` (started); `compute.gpu` / `compute.highmem` (declared only).
-2. **`tasks.py`:** one task, `compute.run_tool_job(request)`.
-3. **`supervisor.py`:**
-   1. Check the cancel flag and the queue timeout, then move the attempt to `running` through the Application API (`POST /runs/{run_id}/attempts/{attempt_id}/running`). A refusal (the attempt is no longer the run's active one; H20) ends the job as `run_not_running` without starting the child.
-   2. Mark the job `RUNNING` with its host and pgid.
-   3. Pick a runner with `select_runner(isolation)` and launch the child.
-   4. Loop: relay `progress.json` to the record, refresh the heartbeat, watch the cancel flag, and enforce the timeout with `killpg`.
-   5. On exit: read `result.json`. Store the result in Redis if it is ≤ `JOB_RESULT_MAX_BYTES`; otherwise keep a file ref in the job dir. The final status is `SUCCEEDED`, `FAILED`, `TIMED_OUT` or `CANCELLED`.
-   6. **OOM detection:** a child that reports `MemoryError`, or that dies by SIGKILL / exit code 137 near its memory limit, is recorded as `FAILED` with `error_code="oom"`.
+1. **`app.py`:** `App(connector=PsycopgConnector(conninfo=JOBS_DATABASE_URL))`; JSON arguments only; one task, `compute.run_tool_job(request)`, with `retry=False`.
+2. **`launcher.py`** (the child launcher; there is no sandbox):
+   - `asyncio.create_subprocess_exec(..., start_new_session=True)`, so a stop reaches the child's own subprocesses;
+   - an **env allowlist** (no `MODEL_API_KEY`, no `JOBS_DATABASE_URL`, no tokens);
+   - stdout and stderr go to the job dir;
+   - `stop(grace_s)`: `killpg(SIGTERM)` → wait `grace_s` → `killpg(SIGKILL)` → reap.
+3. **`supervisor.py`**, in order:
+   1. **Already done?** A complete `result.json` → return. The work finished before a crash, so nothing is computed again.
+   2. **Queue timeout:** `queued_at + queue_timeout_s` has passed → write a `TIMED_OUT` (`queue_timeout`) result and return.
+   3. **Start:** move the attempt to `running` through the Application API (`POST /runs/{run_id}/attempts/{attempt_id}/running`). A refusal (the attempt is no longer the run's active one; H20) writes `run_not_running` and starts no child.
+   4. **Launch:** start the child through the launcher; `{host, pid, pgid}` go to `process.json`.
+   5. **Watch,** every `JOB_POLL_S`: the attempt's `cancel_requested_at`, the Procrastinate abort, and `timeout_s`. A stop is `launcher.stop(JOB_KILL_GRACE_S)`.
+   6. **Exit:** write `result.json` (`SUCCEEDED`, `FAILED`, `TIMED_OUT` or `CANCELLED`) through a temp file and a rename, then **return normally**, so a queue `failed` means only that the supervisor itself crashed. **OOM:** a child that reports `MemoryError`, or that is killed by SIGKILL (exit code 137) without a stop request, is recorded as `FAILED` with `error_code="oom"`.
+   7. **Cancelled coroutine** (an abort, or the worker shutting down): stop the process group in `except CancelledError` and in `finally`, then write `CANCELLED` (abort) or `INTERRUPTED` (shutdown).
 4. **`child.py`:**
    - calls `ensure_storage_layout()` and `install_write_guard()`, and sets up a per-job log handler;
-   - applies thread caps (`OMP_NUM_THREADS`, `COMPUTE_CPU_THREADS`);
-   - builds `ToolContext.from_payload()` with a `FileProgressSink`. The payload carries `run_id` and `attempt_id`, so every write the handler makes presents the D24 attempt path;
+   - applies thread caps (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `COMPUTE_CPU_THREADS`);
+   - builds `ToolContext.from_payload()` with a `FileProgressSink` (`progress.json`). The payload carries `run_id` and `attempt_id`, so every write the handler makes presents the D24 attempt path;
    - looks up `job_name` in the catalog (an **allowlist**: only `execution="job"` tools);
    - runs the **same tool handler**, and always writes a result, even on error.
-5. **`beat.py`:**
-   - a stale heartbeat → `INTERRUPTED`; TTL cleanup of job dirs;
-   - a `worker_ready` hook kills process groups left over on this host and marks their jobs `INTERRUPTED`.
-6. **Queue liveness:** each worker refreshes `cubeai:queue:{queue}:alive` (TTL 30 s) on `worker_ready` and on a timer. Plan 11 (resource availability) and Plan 13 (resource failures) read it.
-7. **`Backend/storage_paths.py`:** add `COMPUTE_JOBS_DIR` (and document it in `Backend/storage/README.md`).
+5. **Periodic tasks** (Procrastinate periodic tasks on the `compute.cpu` worker):
+   - a `doing` job whose worker heartbeat is older than `JOB_HEARTBEAT_TIMEOUT_S` is marked failed, and reads as `INTERRUPTED` through `derive_status`;
+   - a `todo` job past its `queue_timeout_s` gets its `queue_timeout` result, then is cancelled;
+   - finished jobs older than `JOB_RETENTION_HOURS` are deleted, and so are job dirs left behind that long.
+6. **Start-up:** kill the process groups recorded in `process.json` on this host whose job no live worker holds, and write `INTERRUPTED` for them.
+7. **GPU queue** (declared; started when the first GPU job tool exists): one `compute.gpu` worker per machine, `--concurrency` = the number of GPUs, and an in-worker pool of free GPU indices. A slot takes an index, sets `CUDA_VISIBLE_DEVICES` for its child, and returns it in `finally`. `CUDA_VISIBLE_DEVICES` alone is not a reservation.
+8. **`Backend/storage_paths.py`:** add `COMPUTE_JOBS_DIR` (and document it in `Backend/storage/README.md`). Every output a tool keeps goes through `storage_paths` / `stored_files`, never `/tmp`, so a second machine needs only a shared mount.
 
 ## Phase 5.4 — Toolkit integration
 
-`toolkit/runtime/job.py`:
-
-- builds the `JobRequest` from the spec and the context;
-- runs `JobClient.submit` → `wait` (progress goes to the `EventSink` as `tool_progress`) → `result`, which returns the same JSON as today;
-- maps the cancel token to `JobClient.cancel`, and calls `purge` in `finally`;
-- `dispatch.py` routes `execution="job"` here.
+1. **`toolkit/runtime/job.py`:**
+   - builds the `JobRequest` from the spec and the context;
+   - runs `JobClient.submit` → `wait` (progress goes to the `EventSink` as `tool_progress`) → `result`, which returns the same JSON as today;
+   - maps the cancel token to `JobClient.cancel`, and calls `purge` in `finally`;
+   - `dispatch.py` routes `execution="job"` here.
+2. **`jobs_core/backends/app_api.py` (`AppApiJobClient`):**
+   - `submit` → `…/dispatch`; `get` → `…/job` plus the job dir, through `derive_status`;
+   - `wait` → `poll_until` with the budgets, relaying `progress.json` on each poll (H19);
+   - `cancel` → T7 (`…/cancel`); `result` → `result.json`; `purge` → deletes the job dir after T6; `list` → the run's job attempts.
 
 ## Phase 5.5 — Deploy and CI
 
 1. **Requirements:**
-   - agents image: `celery[redis]>=5.4`, `redis>=5`;
-   - `Backend/requirements/test.txt`: `fakeredis`;
+   - the agents image (the worker) and the application-api image: `procrastinate` (pinned) and `psycopg[binary,pool]`;
+   - no `celery`, `redis` or `fakeredis`;
    - remove `fastmcp`; keep `mcp` (the client, for Plan 14);
    - `Backend/agent_system/requirements.txt` is **UTF-16 LE with CRLF**, so keep that encoding.
 2. **`deploy/docker-compose.backend.gpu.yml`:**
-   - `redis` (`redis:7-alpine`, `--appendonly yes --requirepass ${REDIS_PASSWORD}`, volume `redis-data`, internal network);
-   - `compute-worker-cpu`: the agents image, running `celery -A compute_worker.celery_app worker -Q compute.cpu -c ${COMPUTE_MAX_CONCURRENCY:-1}`. It uses the **same `/storage` mount path**, a non-root user and no Docker socket. Its network reaches only the Application API and Redis.
-   - `compute-beat`;
+   - `compute-worker-cpu`: the agents image, running `procrastinate --app=compute_worker.app.app worker --queues=compute.cpu --concurrency=${COMPUTE_MAX_CONCURRENCY:-1}`, with `JOBS_DATABASE_URL` and `APP_API_URL`. It uses the **same `/storage` mount path**, a non-root user, no Docker socket, and a `mem_limit` (`COMPUTE_MEMORY_LIMIT`), so an out-of-memory job is killed inside the container. Its network reaches only PostgreSQL and the Application API. `init: true`, and a `stop_grace_period` longer than `JOB_KILL_GRACE_S`;
+   - `compute-worker-gpu`: declared under the compose profile `gpu-jobs`, not started;
+   - the PostgreSQL init script creates the role `cubeai_jobs`;
    - remove the `Backend/mcp` bind mount (`:13`).
-3. **Overlays:** the dev overlay adds `flower` and a published Redis port; the prod overlay publishes nothing.
-4. **`deploy/Dockerfile.agents`:** copy `jobs_core`, `compute_worker` and `sandbox`; remove `COPY ./Backend/mcp` (`:40`).
-5. **`deploy/.env.example`:** `REDIS_PASSWORD`, `REDIS_URL`, `COMPUTE_MAX_CONCURRENCY`, `COMPUTE_CPU_THREADS`, `JOB_RETENTION_HOURS`, `JOB_HEARTBEAT_TIMEOUT_S`, `JOB_RESULT_MAX_BYTES`.
-6. **CI:** a Redis service for the `celery` integration job in `backend-tests.yml`; the new packages in `docker-build-agents.yml`.
+3. **`deploy/Dockerfile.agents`:** copy `jobs_core` and `compute_worker`; remove `COPY ./Backend/mcp` (`:40`).
+4. **`deploy/.env.example`:** `JOBS_DB_PASSWORD`, `JOBS_DATABASE_URL`, `COMPUTE_MAX_CONCURRENCY`, `COMPUTE_CPU_THREADS`, `JOB_RETENTION_HOURS`, `JOB_HEARTBEAT_TIMEOUT_S`, `JOB_KILL_GRACE_S`, `JOB_POLL_S`, `COMPUTE_MEMORY_LIMIT`.
+5. **The database boundary:** `DATABASE_URL` only on `application-api`, and `JOBS_DATABASE_URL` only on `compute-worker-*`. The test that checks the compose files, and `CLAUDE.md`, say so.
+6. **pytest:** the `celery` marker (Phase 1.5) becomes `jobs` ("needs PostgreSQL and a compute worker"), and the `sandbox` marker is removed.
+7. **CI:** the jobs integration suite runs in `live-db-tests` against its `postgres:18-alpine` service, with a worker started from the built image. No Redis service.
 
 **Tests:**
 
-- **`tests/unit/jobs/`** (fakeredis + in-memory):
-  - job id and input hash; dedupe; conflict on different args;
-  - one submission key per attempt; resubmitting the same key returns the record; `expires` → `TIMED_OUT(queue)`; the TTL starts only after `purge`;
-  - retry policy / `Retry-After`; pause-aware deadline;
-  - supervisor with a fake runner; result size → file ref; OOM mapping; liveness key refresh.
-- **`tests/integration/jobs/`** (`-m "integration and celery"`, with real Redis and a real worker):
+- **`tests/unit/jobs/`** (in-memory, plus Procrastinate's `InMemoryConnector`):
+  - job id and input hash; dedupe on `queueing_lock`; a conflict for the same id with different args;
+  - one submission key per attempt; resubmitting the same key returns the record;
+  - the `derive_status` table, row by row (`result.json` wins; a stale heartbeat → `INTERRUPTED`; the queue sweep → `TIMED_OUT(queue_timeout)`; a supervisor crash → `FAILED`);
+  - retry policy / `Retry-After`; the pause-aware deadline;
+  - the supervisor with a fake runner: the `result.json` short-circuit, the OOM mapping, the SIGTERM → grace → SIGKILL order, `run_not_running`;
+  - the launcher: no secret and no `JOBS_DATABASE_URL` reach the child; a stop reaches grandchildren; the SIGTERM → grace → SIGKILL order;
+  - the GPU pool: two GPUs and two jobs get different indices, and an index comes back after a failure.
+- **`tests/integration/jobs/`** (`-m "integration and jobs"`, with real PostgreSQL and a real worker, **on the pinned Procrastinate version**):
   - submit → progress → result;
-  - cancel kills the process group (a fake handler that sleeps and starts a child);
-  - soft and hard timeouts;
-  - worker restart → `INTERRUPTED`; the stale-heartbeat sweep;
+  - cancel a queued job: it never starts;
+  - cancel a running job whose handler starts a child and a grandchild: both are gone; a child that ignores SIGTERM is killed after the grace period;
+  - the Procrastinate abort of a running async task reaches the supervisor's `finally`;
+  - soft and hard timeouts; a cancel that arrives after the job finished changes nothing;
+  - the worker killed mid-job → `INTERRUPTED` after the heartbeat timeout; the worker container stopped mid-job → the job stops within the grace period;
+  - the worker killed after `result.json` was written → the outcome is read back, and nothing is computed again;
   - `run_not_running`; a write with a stale `attempt_id` is rejected; the write guard is active in the child.
+- **Contract:** `job_execution_status` exists with the expected columns; `cubeai_jobs` has rights on the Procrastinate objects only; nothing outside `compute_worker/` and the Application API imports `procrastinate`; no `redis` or `celery` import or requirement anywhere.
 
-**Done when:** the unit and integration job suites pass, and `runtime/job.py` works with both the in-memory and the Celery backends.
+**Done when:** the unit and integration job suites pass; `runtime/job.py` works with both the in-memory and the `app_api` backends; and no Redis or Celery is left in the requirements, the compose files or the code.
 
 ---
 
@@ -1113,7 +1107,7 @@ The user-gate routes that exist today (`/populations/approve-cohort` and the seg
 
 # Plan 7 — Modeling Engine, Heavy Tools as Jobs + `run_modeling`
 
-**Goal:** PyCaret is replaced by a scikit-learn modeling engine. The 7 heavy tools and the new `run_modeling` tool run through Celery. They are safe to run twice and at the same time, report progress, and can be used as graph nodes.
+**Goal:** PyCaret is replaced by a scikit-learn modeling engine. The 7 heavy tools and the new `run_modeling` tool run as jobs on the job platform (Plan 5). They are safe to run twice and at the same time, report progress, and can be used as graph nodes.
 
 ## Phase 7.0 — Modeling engine without PyCaret (`toolpacks/modeling/engine/`)
 
@@ -1235,7 +1229,7 @@ Fix H1–H18 (Appendix C). Two of them change code outside the tools:
 - per-job YAML and plots dirs (H9, H14); no global logging changes (H6);
 - `run_modeling`: the `auto` rule, the order of steps, and the producer name sent;
 - the `on_result` golden tests;
-- (`-m "integration and celery"`) each tool, and `run_modeling`, runs in `child.py` on a tiny synthetic CSV or a tiny synthetic NIfTI.
+- (`-m "integration and jobs"`) each tool, and `run_modeling`, runs in `child.py` on a tiny synthetic CSV or a tiny synthetic NIfTI.
 
 **Done when:** all 8 tools run through the job runtime on the scikit-learn engine, nothing imports `pycaret`, and the heavy and engine tests pass.
 
@@ -1492,7 +1486,7 @@ while True:
         continue
     if node is None:
         await next(completion | graph_changed | pause_changed | stop_confirmed | gate_resolved); continue
-    decision = guardrails.check(NodeStart(node))        # budget, resources, sandbox runtime
+    decision = guardrails.check(NodeStart(node))        # budget, resources
     if decision is not allowed:
         publish(node_start_refused(node, decision))     # runtime only, nothing stored (D19)
         await next(graph_changed | pool_released | probe_ok); continue
@@ -1501,7 +1495,7 @@ while True:
     spawn(node_runner.run(node))
 ```
 
-- **Pools:** `execution/resources.py` gives each pool (`llm`, `cpu_heavy`, `gpu`, `monai_inference`, `orthanc_io`) an asyncio semaphore sized from `config/resources.yaml`. They are runtime only; the Celery queues remain the real limit for jobs.
+- **Pools:** `execution/resources.py` gives each pool (`llm`, `cpu_heavy`, `gpu`, `monai_inference`, `orthanc_io`) an asyncio semaphore sized from `config/resources.yaml`. They are runtime only; the concurrency of each queue's compute worker remains the real limit for jobs (Plan 5).
 - **No cache lookup:** reuse is the unaffected prefix that keeps its current runs (Appendix P §P.10).
 - **Suspended attempts:** a `suspended` attempt is non-terminal, so no other node starts in the session while it waits (the session-wide index, a current-phase constraint). That is the same behaviour as a blocking gate today, but with no process. `gate_resolved` wakes the Executor, not the Main.
 - **Important events** (system §22): a node fails after the automatic retries, `expectation_violated`, or `graph_idle`. A normal success is persisted and shown; it does not wake Main. The inbox reads them from the durable log (Plan 12).
@@ -1527,7 +1521,7 @@ On `graph_changed`:
 1. **What it watches:**
    - **agent nodes:** an in-memory heartbeat (`NODE_HEARTBEAT_TIMEOUT_S`, fed by the engine's `updates` stream) and `timeout_s` from the frozen policy, counted from the latest of `started_at` and `resumed_at`, so time spent suspended never counts;
    - **suspended attempts:** no heartbeat, because no process runs. A gate suspension older than the policy's `gate_timeout_s` (when set) gets a T7 cancel request with `error.code='gate_timeout'`; a pause suspension never times out;
-   - **job nodes:** the job record (`heartbeat_at`, `TIMED_OUT`, `INTERRUPTED`, `error_code="oom"`).
+   - **job nodes:** the `JobRecord` from `JobClient.get` (`TIMED_OUT`, `INTERRUPTED` after a stale worker heartbeat, `error_code="oom"`; Plan 5).
 2. **Timeout:** a cancel request with `error.code='timeout'` (T7). The attempt becomes `failed(timeout)` only once the stop is confirmed (D9).
 3. **Automatic retries** (deterministic, not LLM): a new attempt through T4, only for `interrupted` and `resource_unavailable`, only while `attempt_number < execution_policy.max_attempts`, and, for an attempt with `dispatched_at` set, only when the policy says `idempotent`. **For a `resumable` agent run**, the run counts as idempotent unless the latest checkpoint's `pending_tools` lists a tool with `idempotent=False`: every finished tool call is stored and will not run again, so only the pending calls matter (T4 rule (f)). All other failures go to the inbox.
 
@@ -1538,7 +1532,7 @@ On `graph_changed`:
 3. **Restart recovery** (in the app lifespan; Plan 17 wires it): T5 for every non-terminal attempt:
    - `suspended` → unchanged: nothing was running, and the checkpoint holds the state. It resumes when its gate is decided or its pause ends;
    - `in_process` / `inline` → `interrupted`. A `resumable` agent run then gets a retry attempt (Phase 10.5) that continues from its last checkpoint instead of starting over;
-   - job attempts are re-attached by `submission_key`, resubmitted when still `preparing` and unknown to the backend, `record_lost` when the record is gone after dispatch, and `unknown` when the backend is unreachable.
+   - job attempts are re-attached by `submission_key` through `JobClient.get` (the `job_execution_status` view plus the job dir), resubmitted through `JobClient.submit` when still `preparing` and unknown to the queue, and `record_lost` when the job row was purged after dispatch. A Procrastinate job is never `unknown`, because it lives in the Application API's own database; a MONAI job still can be.
 
    Then the Executor restarts the sessions that have ready or resumable work, and an `execution_resumed` notification is sent.
 
@@ -1579,8 +1573,7 @@ On `graph_changed`:
    | Schema / Validator errors                                                                                                             | `invalid` (with the codes)                   |
    | The caller's visibility does not include the tool                                                                                     | `permission_denied`                          |
    | Main calls a tool directly that is not `inline`, or that is `heavy`                                                                   | `invalid: REQUIRES_NODE`                     |
-   | Sandbox `runtime_check` (Plan 4)                                                                                                      | `permission_denied` / `resource_unavailable` |
-   | A pool or queue is not alive (`cubeai:queue:*:alive`, MONAI health)                                                                   | `resource_unavailable`                       |
+   | A pool or queue is not alive (`GET /jobs/queues`, MONAI health)                                                                   | `resource_unavailable`                       |
    | Budgets: session tokens (`SESSION_TOKEN_BUDGET`), active nodes, `max_attempts`                                                        | `permission_denied: BUDGET_EXCEEDED`         |
    | Mandatory approvals: `destructive=True`, `trust != first_party` (unless the tool is in the MCP `auto_approve` list), `generated_code` | `approval_required`                          |
    | Plan mode (Phase 11.2)                                                                                                                | `approval_required: PLAN_MODE`               |
@@ -1597,7 +1590,7 @@ On `graph_changed`:
   - `destructive`, `generated_code`, `untrusted_tool`, `approval_required:<code>`: from the target manifests, computed by the guardrails here.
 - A change with no reasons is applied at once (T2). A change with reasons is proposed (T1) and waits for a user decision.
 - Main's direct calls to `side_effects="writes"` tools are promoted to an `AddNode` change before any effect (D21). Read-only calls are always allowed.
-- Start-time conditions (budget, resources, the sandbox runtime check) are never approvals: the Executor refuses the start and publishes `node_start_refused` (D19).
+- Start-time conditions (budget, resources) are never approvals: the Executor refuses the start and publishes `node_start_refused` (D19).
 
 ## Phase 11.3 — Approvals (`harness/approvals.py`)
 
@@ -1744,7 +1737,7 @@ Their `tool_result` row is written by the Application API in the same transactio
 ## Phase 13.2 — Resource failure handling
 
 1. **Mapping to `resource_unavailable`:**
-   - a queue with no live worker;
+   - a queue with no live worker (`GET /jobs/queues`, from Procrastinate's worker heartbeats, Plan 5);
    - MONAI 429 after the `unavailable_s` budget (Plan 15);
    - a GPU queue that is declared but not started;
    - Orthanc or Application API health failures.
@@ -1792,7 +1785,7 @@ Their `tool_result` row is written by the Application API in the same transactio
    - name `mcp__<server>__<tool>`; `input_schema` from the MCP schema;
    - `trust="third_party"`, `execution="external"`, `visibility={"agent"}`;
    - `side_effects="writes"` unless the MCP annotations say read-only;
-   - stdio servers get `isolation="container"`; HTTP servers get an egress allowlist.
+   - HTTP servers get an egress allowlist. stdio servers are not supported (step 5).
 2. **`policy.py`** (a Guardrails rule provider for `ExternalCall`):
    - deny by default; a tool allowlist per server;
    - no identity or context is sent;
@@ -1802,14 +1795,14 @@ Their `tool_result` row is written by the Application API in the same transactio
    - results are marked `{"untrusted": true, "source": "mcp:<server>"}`.
 3. **`audit.py`:** one log line per call (server, tool, arg digest, duration, status).
 4. **`toolkit/runtime/external.py`:** routes `execution="external"` through the Guardrails and the manager.
-5. **stdio servers are refused** while `SANDBOX_CONTAINER_ENABLED=0` (Plan 4).
+5. **stdio servers are refused:** there is no sandbox to run third-party code in.
 
 **Tests (`tests/unit/toolpacks/external_mcp/`):** a fake server over the SDK's in-memory transport (`mcp.shared.memory`) checks:
 
 - zero servers → zero tools; prefixed names;
 - the deny-by-default allowlist; `phi_read` refused; `approval_required` by default; results marked untrusted;
 - one session reused across calls;
-- a stdio server refused while containers are disabled.
+- a stdio server is refused.
 
 **Done when:** the catalog loads the edge with zero tools, and its tests pass.
 
@@ -1817,7 +1810,7 @@ Their `tool_result` row is written by the Application API in the same transactio
 
 # Plan 15 — MONAI Inference Jobs + Segmentation Client
 
-**Goal:** fix the critical MONAI job bugs, and move the segmentation client onto the shared contract, so that the Executor can cancel it and classify its failures.
+**Goal:** fix the critical MONAI job bugs, and move the segmentation client onto the shared contract, so that the Executor can cancel it and classify its failures. MONAI keeps its own job store and GPU: it is a `JobClient` backend, not a Procrastinate queue (Plan 5).
 
 ## Phase 15.1 — Safety net
 
@@ -1879,9 +1872,9 @@ Fix these in place. MONAI keeps its own file store, and its status strings must 
 
 Fix T1–T9. T1 becomes one server-side training job (prepare → create-model → train), orchestrated by the Application API. Its receipt is a `training_jobs` row committed before the POST (Appendix P D17, transaction T9); the table is created by migration "p" in Plan 6. Training stays outside the Session Graph; it belongs to the MONAI training UI.
 
-## Phase 16.3 — Ingestion on Celery
+## Phase 16.3 — Ingestion as a job
 
-Ingestion conversion becomes a Celery job (`job_name="ingest_convert"`, registered as a `harness`-visible job tool). This fixes G2, G3 and G6 by design. Then fix G1, G4, G5, G7 (one frontend upload client) and G8.
+Ingestion conversion becomes a job on the `compute.cpu` queue (Plan 5) (`job_name="ingest_convert"`, registered as a `harness`-visible job tool). This fixes G2, G3 and G6 by design. Then fix G1, G4, G5, G7 (one frontend upload client) and G8.
 
 ## Phase 16.4 — Agent System tasks
 
@@ -1946,6 +1939,7 @@ Nobody posts to it any more, so remove:
 - No top-level `types`, `tools` or regular `config` package in `agent_system/`.
 - `modeling_agent` appears only in the legacy producer allowlist and in the migrations.
 - No `pycaret` import or requirement anywhere in `Backend/` or `deploy/`, and no `pycaret_*` tool name outside old migrations and docs history.
+- No `celery`, `redis` or `fakeredis` import or requirement anywhere in `Backend/` or `deploy/`, and no `redis` or `compute-beat` service.
 - No backend caller of `/plan` or `/run`, and no `Backend/mcp` in `deploy/`, `scripts/` or the launchers.
 - No retired schema name (the rename map of Appendix P §P.2) outside migrations, old durable events and the problem catalog. The Phase 6.1 source scan stays in the deterministic suite.
 - No `langgraph.checkpoint.postgres`, `langgraph.checkpoint.sqlite`, `PostgresSaver`, `langgraph_sdk` or `langgraph.store` import, and no `BaseCheckpointSaver` subclass other than `HttpCheckpointSaver` (D1, D27).
@@ -1955,11 +1949,11 @@ Nobody posts to it any more, so remove:
 ## Phase 17.5 — Docs
 
 1. **`CLAUDE.md`:**
-   - the service table (Redis, compute worker, compute beat);
+   - the service table (the compute workers on Procrastinate; no Redis, no beat) and the `JOBS_DATABASE_URL` exception to the database rule;
    - the "Agent pipeline" section, rewritten as the harness (Main Agent, Session Graph, Executor, Guardrails, modes);
    - LangGraph-native agent nodes: `HttpCheckpointSaver` (`thread_id = run_id`), gates and pause as suspended attempts, `ctx.user_gate` / `ctx.durable` / `ctx.durable_map`, workflow agents and `Send`, in-node compaction, `seed_from`, and the rule that the Main has no checkpointer;
    - the Toolkit (`ToolSpec` / `AgentSpec` / `run_agent`, packs, catalog, `agent.md`, skills);
-   - the MCP edge; the sandbox; the new env vars;
+   - the MCP edge; the new env vars;
    - the modeling engine (scikit-learn, no PyCaret) and the renamed modeling tools (Python 3.13 itself is documented in Plan 0);
    - replace the "no GPU lease / no `WAITING_FOR_RESOURCE`" note with the runtime resource pools and `node_start_refused` (nothing about resources is stored);
    - the single-worker rule still holds.
@@ -1967,7 +1961,7 @@ Nobody posts to it any more, so remove:
 2. **`cubeai-docs/`:**
    - `agent-system/harness.md` (the architecture above);
    - `agent-system/agent-checkpoints.md`: checkpoints, gates, pause, resume, `seed_from`, retention, and the `langgraph` upgrade procedure (Phase 9.1);
-   - `jobs/README.md` (the runbook) and `security/sandbox.md`;
+   - `jobs/README.md` (the runbook);
    - io-contracts per execution agent, plus a `run_modeling` tool contract;
    - `backend/testing.md`;
    - mark "AG-3 Tool / MCP adapter" in `refactoring/execution-plan.md` as replaced.
@@ -2016,9 +2010,8 @@ Run every suite in the Testing section, plus the final check.
 | Toolkit / agents / engines     | `python -m pytest -c Backend/pytest.ini Backend/tests/unit/toolkit Backend/tests/unit/agentpacks Backend/tests/unit/engines`                                                                                                                                                    |
 | Tool packs                     | `python -m pytest -c Backend/pytest.ini Backend/tests/unit/toolpacks Backend/tests/unit/functions`                                                                                                                                                                              |
 | Harness / planning / execution | `python -m pytest -c Backend/pytest.ini Backend/tests/unit/harness Backend/tests/unit/planning Backend/tests/unit/execution`                                                                                                                                                    |
-| Sandbox                        | `python -m pytest -c Backend/pytest.ini Backend/tests/unit/sandbox` (add `-m docker` for real containers)                                                                                                                                                                       |
 | Jobs (unit)                    | `python -m pytest -c Backend/pytest.ini Backend/tests/unit/jobs`                                                                                                                                                                                                                |
-| Jobs (integration)             | `docker compose --env-file deploy/.env -f deploy/docker-compose.backend.gpu.yml -f deploy/docker-compose.backend.dev.yml up -d redis compute-worker-cpu compute-beat`, then `python -m pytest -c Backend/pytest.ini Backend/tests/integration/jobs -m "integration and celery"` |
+| Jobs (integration)             | `docker compose --env-file deploy/.env -f deploy/docker-compose.backend.gpu.yml -f deploy/docker-compose.backend.dev.yml up -d postgres application-api compute-worker-cpu`, then `python -m pytest -c Backend/pytest.ini Backend/tests/integration/jobs -m "integration and jobs"` |
 | State store (integration) | Start `postgres` + `db-migrate` with the same compose files, then `python -m pytest -c Backend/pytest.ini Backend/tests/integration -m "integration and docker" -k "graph or persistence or checkpoint or suspend"` |
 | Checkpointer conformance | `python -m pytest -c Backend/pytest.ini Backend/tests/unit/execution/test_checkpointer.py Backend/tests/unit/engines -k "checkpoint or resume or gate"` |
 | Persistence contracts | `python -m pytest -c Backend/pytest.ini Backend/tests/contracts -k "schema or fencing"` |
@@ -2071,8 +2064,8 @@ The MCP edge adds zero.
 | P1         | 1, plus 10.1 (RunHarness, DirectToolExecutor) and 6 (the CANONICAL contract replaced)                    |
 | P2         | 2                                                                                                        |
 | P3         | 3 (`modeling_agent` removed; control agents and skills added)                                            |
-| P4         | 4                                                                                                        |
-| P5         | 5                                                                                                        |
+| P4         | – (not built: no sandbox, decided 2026-10-09)                                                            |
+| P5         | 5 (on PostgreSQL + Procrastinate instead of Celery + Redis)                                              |
 | P6         | 7 (on the new engine, with the 5 modeling tools renamed)                                                 |
 | P7         | 14                                                                                                       |
 | P8         | 15                                                                                                       |
@@ -2162,7 +2155,7 @@ The MCP edge adds zero.
 | H16 | RFE keeps all features (`features.py:1319,1647`).                                                                  | `n_features_to_select=top_features`.                                                                        |
 | H17 | `set_key=top_{n}` ignores the method → 409.                                                                        | Add a config digest.                                                                                        |
 | H18 | Code outside `try` raises (`features.py:308,325,344,365,376-377,1084-1103`).                                       | Validate in the input model; the child always writes a result.                                              |
-| H19 | Progress arrives in bursts.                                                                                        | A sync progress file relayed by the supervisor.                                                             |
+| H19 | Progress arrives in bursts.                                                                                        | A sync progress file in the job dir, relayed by `JobClient.wait` (Plan 5).                                                             |
 | H20 | Writes are refused unless the run is `running` (`repositories/radiomics.py:59-78`).                                | The supervisor checks before it starts.                                                                     |
 
 ### D. Light tools (Plan 2)
@@ -2196,12 +2189,12 @@ The MCP edge adds zero.
 - **T8:** the reservation leaks, and `_workflow_locks` grows forever. Fix: `try/finally` and a `WeakValueDictionary`.
 - **T9:** browser polling is fragile. Fix: backoff, and tolerance of transient errors.
 
-### F. Ingestion (Plan 16, moved to Celery)
+### F. Ingestion (Plan 16, moved to the job platform)
 
 - **G1:** a failed re-run deletes a good series. Fix: delete only what this attempt created.
-- **G2:** a long queue looks abandoned. Fix: a Celery queue + a heartbeat.
+- **G2:** a long queue looks abandoned. Fix: a job queue + the worker heartbeat (Plan 5).
 - **G3:** a restart leaves jobs stuck. Fix: `INTERRUPTED` through the sweep.
-- **G4:** prune is never called. Fix: a beat task.
+- **G4:** prune is never called. Fix: a periodic task on the compute worker.
 - **G5:** the webhook token is missing. Fix: send the header.
 - **G6:** a blocking 2 GiB write and hash. Fix: chunked, in a thread.
 - **G7:** no cancel or list endpoints, and two upload clients. Fix: add the endpoints and keep one client.
@@ -2215,12 +2208,12 @@ The MCP edge adds zero.
 
 ---
 
-## Appendix P — Persistence Design (revision 3.2)
+## Appendix P — Persistence Design (revision 3.3)
 
 This appendix is the full text of `outputs/persistence-design/cubeai-persistence-design.md`, merged here so the roadmap is one plan. Only the headings changed: they are one level deeper, and the sections are numbered P.1–P.12, so `§P.4` means section 4 of this appendix. Plan 6 implements it, and every other plan uses its names and transactions. The standalone file is kept with the same text; a change to one is made to both.
 
 
-Date: 1 October 2026 · Branch `Refactor-Version` @ `0c4503e6` · Alembic head `n1f0a2c3d4e5` · Revision 3.1 (after the architecture ↔ database review and its follow-up) · Revision 3.2: 2 October 2026 (LangGraph-native agent nodes)
+Date: 1 October 2026 · Branch `Refactor-Version` @ `0c4503e6` · Alembic head `n1f0a2c3d4e5` · Revision 3.1 (after the architecture ↔ database review and its follow-up) · Revision 3.2: 2 October 2026 (LangGraph-native agent nodes) · Revision 3.3: 9 October 2026 (the job platform on PostgreSQL)
 
 **Scope:** the PostgreSQL persistence owned by the Application API for the CUBE.AI Agent Harness. That covers users, sessions, chats, the session graph, graph changes and approvals, accepted runs and execution attempts, events, and how all of these connect to the typed research tables. Paths are relative to the repository root.
 
@@ -2255,6 +2248,12 @@ Date: 1 October 2026 · Branch `Refactor-Version` @ `0c4503e6` · Alembic head `
 - A new transaction, **T10** (suspend, gate decision, resume). T4 rule (f) reads the checkpoint's `pending_tools` for a resumable run; T4 may copy a `seed_from` checkpoint into a new run; T5 leaves `suspended` attempts alone; T7 confirms a `suspended` attempt at once.
 - D19 no longer lists in-run approvals and agent reasoning as unstored; §P.10 drops the two rows that waited for "a durable agent checkpointer".
 
+**What changed in revision 3.3 (the job platform on PostgreSQL, Plan 5):**
+- Jobs are Procrastinate rows in this database, sent and cancelled only by the Application API. There is no Redis job record and no Celery task id.
+- D12: the queue rows and the job dir are the physical backend state; the harness tables keep identity and the last confirmed outcome, and read the queue through the `job_execution_status` view. Nothing copies queue state into them.
+- T4: for a job, the Application API sends (defers the job with `queueing_lock = submission_key`), then commits `submitted`. T7 also cancels the queued or running job. T6: the job dir is purged after the commit, and the queue deletes finished rows after `JOB_RETENTION_HOURS`.
+- A Procrastinate job is never `unknown` (it lives in this database); `unknown` remains for external backends such as MONAI.
+
 ---
 
 ### P.1 Design decisions and their reasons
@@ -2272,7 +2271,7 @@ Date: 1 October 2026 · Branch `Refactor-Version` @ `0c4503e6` · Alembic head `
 | **D9** | **Execution attempts are a table, `run_attempts`.** One attempt is one real execution try with one submission key, persisted **before** dispatch. A controller restart, a reconnect, or resubmitting an uncertain submission **reuses** the existing attempt. A new attempt is created only when execution must truly start again. **Within a session, at most one attempt is non-terminal at any time.** This is a current-phase constraint that follows from sequential execution, not an architecture invariant (§P.4); the invariant in every phase is at most one non-terminal attempt **per run**. `unknown` and `suspended` count as non-terminal. **An attempt becomes terminal only on evidence that its work stopped.** A timeout is a cancel request, not a failure, until the stop is confirmed. A **suspended** attempt (an agent node waiting on a gate or a pause, D27) has no running work, so it is resumed by the same attempt, and cancelling it is confirmed at once. | Each try needs its own submission identity, uncertainty state, cancellation intent and error history. The Watchdog and the Recovery Agent read that history. Execution is sequential, so a superseded run that is still stopping must block the next start instead of running beside it and doubling GPU work. If an attempt were closed while its process still ran, the next attempt could start next to a live writer. |
 | **D10** | **Segmentation fan-out stays inside one node attempt.** The Segmentation node's attempt is the execution the harness tracks. Its per-(target, volume) MONAI jobs are domain work items on `segmentation_pairs`. Each pair's `inference_job_id` is `sha256(batch_correlation_id\|pair_id\|model\|prompt)`. The `batch_correlation_id` is minted once per batch and stored in `segmentation_batches.config`, and the batch row is keyed by the run (`created_by_run_id`, `batch_key`). | Execution is sequential, so hundreds of pair jobs cannot be graph nodes. Any attempt of the same run finds the same batch row, therefore the same correlation id, and therefore the same pair job ids, so it re-attaches finished and live jobs instead of duplicating GPU work. A new run creates a new batch and new jobs, which is the intended rerun behaviour. |
 | **D11** | **Results live in the typed domain tables.** A run's inputs are pinned per port in `resolved_inputs` at first start (D23). Its port → result selection (the architecture's *artifacts*) is frozen in `node_runs.outputs` at completion. There is no generic artifact-binding table. | The typed tables already carry lineage with composite FKs and producer triggers. A generic binding table would be a weaker second copy that could disagree with them. |
-| **D12** | **Backends own physical execution state:** Celery/Redis records, the MONAI job store, GPU capacity. SQL stores identity and the last *confirmed* outcome. There are no resource-grant or controller-lease tables. | Two owners of the same state drift apart. The one-active-attempt constraint plus attempt fencing already stop duplicate starts and stale writers. |
+| **D12** | **Backends own physical execution state:** the job queue's rows (Procrastinate, in this database but written only by the queue; revision 3.3), the job dir, the MONAI job store, GPU capacity. The harness tables store identity and the last *confirmed* outcome, and nothing copies queue state into them; the Application API reads it through the `job_execution_status` view. There are no resource-grant or controller-lease tables. | Two owners of the same state drift apart. The one-active-attempt constraint plus attempt fencing already stop duplicate starts and stale writers. |
 | **D13** | **`sessions.control_state` holds only control intent:** `active`, `paused`, `archived`. The activity (`idle`, `running`, `pausing`, `awaiting_approval`, `blocked`) is **derived** and never stored. `pausing` means: paused, with an attempt still non-terminal. | A session never permanently finishes; new work can arrive later. User intent must not be overwritten by a progress projection, and derived progress cannot drift. `pausing` is progress, not intent, so storing it would need a second writer. |
 | **D14** | **Accepting user input is one atomic operation.** The Application API stores the chat message and a durable `user_input` event in one transaction. The frontend sends the message to the Agent System, which calls the Application API and enqueues the message only after that commit. The inbox advances `sessions.inbox_handled_through_event_id` only after handling. | Acknowledged input must never be lost between "saved" and "processed", and it must be re-queued after a restart. When the Agent System makes the call, it learns about the input synchronously, so a lost notification cannot leave a message unhandled until the next restart. |
 | **D15** | **Session settings are durable:** `execution_mode` (**default `auto`**, decided 1 October 2026), `privacy_mode`, `tokens_used`. Plan mode is opt-in. The mandatory approval reasons apply in both modes. | If a restart silently switched Auto/Plan, weakened PHI protection or reset a budget, that would be a correctness and privacy failure. |
@@ -2481,13 +2480,13 @@ These rules hold **because execution is sequential today**. They are not archite
 | Execution try, submission identity, uncertainty, cancellation, suspension, error, token usage | `run_attempts` |
 | Agent-node reasoning state (messages, finished tool-call results, fan-out progress) | `agent_checkpoints`, `agent_checkpoint_writes` (D27) |
 | A gate's decision | The domain gate columns (cohort approval, segmentation review), and `run_attempts.suspension.resume` for every gate (the only record for `tool_approval`) |
-| Physical backend state | The backend (Redis/Celery record, MONAI job store) |
+| Physical backend state | The backend: the Procrastinate job row (read through `job_execution_status`) and the job dir; the MONAI job store |
 | Per-pair segmentation jobs | `segmentation_pairs` |
 | Results and lineage | Typed domain rows |
 | Port → result selection | While running: the domain selection columns. After completion: `node_runs.outputs` only |
 | Conversation and its compaction | `chat_messages` |
 | Events and replay | `session_events` |
-| Resource occupancy, start-time refusals | Runtime (Executor semaphores, re-evaluated before every start); physical limits belong to Celery and MONAI |
+| Resource occupancy, start-time refusals | Runtime (Executor semaphores, re-evaluated before every start); physical limits belong to the compute workers' concurrency and to MONAI |
 
 ---
 
@@ -2652,7 +2651,7 @@ These rules hold **because execution is sequential today**. They are not archite
   | Node | Attempt execution | Backend identity |
   |---|---|---|
   | Agent node | In-process agent task (`dispatch_kind='in_process'`); may be `suspended` on a gate or a pause, with no task (D27) | None external. Internal jobs are keyed through the run: segmentation pair jobs through the run's batch (D10), radiomics jobs through `run_id` in their job ids. They therefore survive into the next attempt and are fenced by run (D24). The agent's own state survives through the run's checkpoint thread |
-  | Tool node, `execution=job` | One Celery job | `submission_key = {sha256(run_id\|tool\|args)}.{attempt_number}`. It is also the Celery task id and the key of the Redis job record, so reconciliation finds exactly this attempt |
+  | Tool node, `execution=job` | One Procrastinate job, sent by the Application API | `submission_key = {sha256(run_id\|tool\|args)}.{attempt_number}`. It is also the job's `queueing_lock` and the name of its job dir, so reconciliation finds exactly this attempt |
   | Tool node, `execution=inline` | Inline in the Executor (`dispatch_kind='inline'`) | None |
 
 - **Lifecycle:**
@@ -2850,7 +2849,7 @@ Legend: KEEP · MODIFY · ADD · DERIVE · MOVE · NOT STORED
 | `run_id`, `session_id` | ADD | Composite FK → `node_runs`. `session_id` carries the session-wide active-attempt index |
 | `attempt_number` SMALLINT NOT NULL | ADD | `UNIQUE(run_id, attempt_number)`. Compared with `execution_policy.max_attempts` |
 | `dispatch_kind` TEXT NOT NULL | ADD | `in_process\|job\|inline\|legacy`. Decides how to reconcile after a restart. `legacy` only on backfilled rows |
-| `submission_key` TEXT NULL | ADD | Job attempts: `{job_id}.{attempt_number}`, which is also the Celery task id and the Redis record key. Unique and set-once. Persisted **before** dispatch, and reused for any resubmission of the same attempt |
+| `submission_key` TEXT NULL | ADD | Job attempts: `{job_id}.{attempt_number}`, which is also the Procrastinate job's `queueing_lock` and the name of its job dir. Unique and set-once. Persisted **before** dispatch, and reused for any resubmission of the same attempt |
 | `request` JSONB NULL | ADD | Job attempts: the exact submitted request (tool, args, context), so a lost request can be re-sent identically. Bounded |
 | `state` TEXT NOT NULL | ADD | `preparing → submitted → running → succeeded\|failed\|cancelled\|interrupted`, plus `unknown` and `suspended` (`running ⇄ suspended`, agent attempts only, D27); `preparing → running` allowed. Updated only from observed evidence |
 | `suspension` JSONB NULL | ADD (3.2) | Versioned. `{kind: gate\|pause, gate?, interrupt_id, payload, checkpoint_id, since, resume?}`. Set by T10 suspend; `resume` set by the gate decision (user gate path). Kept after resume as the last suspension; every suspension is also a durable event |
@@ -3169,7 +3168,7 @@ agent_checkpoints, agent_checkpoint_writes (3.2)
 
 #### Transaction boundaries
 
-Lock order: **session → graph → run → attempt → domain row**. Each transaction runs inside `publication()`, so its durable event commits with it. A domain write takes only the attempt lock (`FOR SHARE`) and then its row, which is a suffix of the same order. **No transaction stays open across an HTTP call to MONAI or Celery.**
+Lock order: **session → graph → run → attempt → domain row**. Each transaction runs inside `publication()`, so its durable event commits with it. A domain write takes only the attempt lock (`FOR SHARE`) and then its row, which is a suffix of the same order. **No transaction stays open across an HTTP call to MONAI or a wait on a job.**
 
 | # | Transaction | Atomic effects |
 |---|---|---|
@@ -3177,10 +3176,10 @@ Lock order: **session → graph → run → attempt → domain row**. Each trans
 | **T1 Propose** | Approval reasons present (in Plan mode, or a mandatory reason) | 1. Lock the session; refuse if it is `archived`.<br>2. Check the content: new `node_id`s unused, retained ids live. Compute the digest. Add the reasons the database derives (`PLAN_MODE`, `supersedes_completed`).<br>3. Mark any existing pending change `withdrawn` (or `expired` past the TTL), **then** insert the new `pending` change. A replayed idempotency key returns the existing row when the digests match, otherwise 409.<br>4. When the Main submitted it, insert its `tool_result` row (`{change_id, status:'pending', node_ids}`).<br>5. Publish `graph_change_proposed` + `approval_requested`.<br>Nothing executable changes. |
 | **T2 Decide + apply** | Auto with no reasons, or a user decision quoting the digest | 1. Lock session → graph; refuse if `archived`.<br>2. Check ownership and `base_version = session_graphs.version`; otherwise the change goes `stale`. A pending change past the TTL goes `expired`.<br>3. Validate stable ids, one contiguous sequence, and that every `input_sources` entry names a live node earlier in the new sequence (the Validator has already checked the candidates and types). Recompute the derivable reasons: if applying the change would supersede a completed run and `supersedes_completed` is missing, or the session is in Plan mode and `PLAN_MODE` is missing, the change goes `stale` and is re-proposed.<br>4. Insert new nodes (assigning `node_seq`), update retained nodes **in place**, tombstone removals, reorder.<br>5. **Affected set** = changed, moved, rerun or removed nodes, plus every live node after the first of them in the new sequence.<br>6. Supersede the current runs of affected nodes that have one: `running` → `superseded_at` + active attempt `cancel_requested_at`; `completed`/`failed`/`cancelled` → `superseded_at`. Nodes that never started need nothing.<br>7. Set `accepted_by_change_id` = this change on added, edited and rerun nodes. For `release_hold_node_ids`, set `hold_released_by_change_id` on that node's current run. **No runs are created.**<br>8. `session_graphs.version += 1`; the change becomes `applied` (an Auto change is inserted directly as `applied`); any other pending change becomes `stale`.<br>9. When the Main submitted it, insert its `tool_result` row (`{change_id, status:'applied', node_ids}`).<br>10. Publish. |
 | **T3 Accept input** | A user message, through the Agent System | Insert `chat_messages(message_id)` (a replay compares content; 409 if different), touch `chats.last_activity_at`, and publish durable `user_input {chat_id, message_id}`. Refuse if `archived`. The Agent System enqueues the message only after this commit returns. The frontend makes **one** call, to the Agent System |
-| **T4 Start node / open attempt** | Executor, before dispatch | 1. Lock session → node (→ run).<br>2. Require: the node live; the session `active`; the previous live node's current run `completed` with no active `downstream_hold`; **no non-terminal attempt anywhere in the session**; and the node's `accepted_by_change_id` equal to what the Executor read (otherwise it re-reads the graph).<br>3. **First start (no current run):** check `resolved_inputs`: for every port, the pinned run is the current completed run of the selected live upstream node at resolution time (that node is earlier in the sequence and equals the `input_sources` entry when one exists, and the pinned port is in the run's `outputs`). Then insert the run as `running` with `accepted_by_change_id`, frozen `execution_policy` (including the session's `privacy_mode`), `target_version`, `resolved_inputs` and the prompt for agents, **plus attempt 1**, in the same transaction.<br>4. **Retry.** Allowed only when **all** of these hold:<br>• (a) the checks in step 2 pass;<br>• (b) the current run is `failed`, or it is `cancelled` and the request is an explicit user retry;<br>• (c) no attempt of the run is `preparing`, `submitted`, `running` or `unknown`;<br>• (d) the latest attempt is `failed` or `interrupted`, or `cancelled` under (b). A `cancelled` attempt is never retried automatically;<br>• (e) the latest `attempt_number` < `execution_policy.max_attempts`;<br>• (f) if the latest attempt was `interrupted` with `dispatched_at` set and `execution_policy.idempotent = false`, there is no automatic retry: the Recovery Agent or the user decides, and that explicit retry must still pass (a)–(e). **For a run with `execution_policy.resumable = true` (D27)**, "idempotent" is read from the run's latest checkpoint instead: the retry is automatic unless its `metadata.pending_tools` lists a tool with `idempotent = false`, because every finished tool call is stored and will not run again.<br>Then insert attempt `latest + 1` and set the run to `running`. A retry attempt of a resumable run continues the run's checkpoint thread.<br>6. **Seeded first start (D27):** when the accepting change set `seed_from` for this node, copy that checkpoint (with its pending writes) into the new run's thread as its first checkpoint, with `metadata.seeded_from`, and write attempt 1 as its writer, but only if it still exists, belongs to a run of the same node, and its `spec_digest` and `privacy_mode` match the new run. Otherwise start fresh and freeze `seed_from.applied = false` with the reason.<br>5. Attempts are inserted as `preparing` with `submission_key` and `request`; publish.<br>**Dispatch after commit:**<br>• `in_process`/`inline`: commit `running` + `dispatched_at` first, then spawn;<br>• `job`: send, then commit `submitted` + `dispatched_at`. The worker moves the attempt to `running` itself, from `preparing` or `submitted`, before it writes anything. |
-| **T5 Reconcile** | Restart or lost acknowledgement | `suspended` attempts are **left unchanged**: nothing was running, and their state is in the checkpoint (D27). `in_process` and `inline` attempts that are not suspended → `interrupted` (the process that ran them is gone). Job attempts are queried by `submission_key`:<br>• running or queued → keep and re-attach;<br>• terminal → record the outcome;<br>• not found and `preparing` → resubmit the **same** key and request;<br>• not found and `submitted`/`running` → `interrupted` with `error.code='record_lost'`;<br>• backend unreachable → `unknown`, which blocks T4 for the whole session until a later reconcile succeeds.<br>Each terminal state recorded here is projected onto the run in the same transaction (`interrupted` → run `failed` with `error.code='interrupted'`, so T4 can retry it), and the attempt's `usage` is added to `tokens_used`.<br>**No attempt is created here.** |
-| **T6 Complete / fail** | The attempt presents `attempt_id` | 1. Lock; require the attempt to be current, non-terminal and not `suspended` (a suspended attempt is resumed first, T10).<br>2. **Success:** validate `outputs` (refs against the table allow-list). Attempt `succeeded`; run `completed` + `outputs`. A superseded run stays non-current history. For a current run, evaluate the node's expectations **in the same transaction**: on a violation, set `downstream_hold='expectation_violated'` on **this run** and publish `expectation_violated`. If no live node follows, publish `graph_idle`.<br>3. **Failure:** attempt `failed` + `error`; run `failed` (projection).<br>4. Add `usage` to `tokens_used`.<br>5. The backend purges the job record and files only **after** this commit; their TTL starts at the purge. |
-| **T7 Cancel / timeout / privacy switch** | User, Stop, T2, the Watchdog, or a switch to `phi_local` | **Request:** set the active attempt's `cancel_requested_at`, including when it is `preparing` or `unknown`. A Watchdog timeout also sets `error.code='timeout'`. A switch to `phi_local` requests cancellation of every non-terminal attempt whose policy says `standard`, in the same transaction as the settings change. A node that has not started has no run to cancel; stopping it is a `RemoveNode` change (allowed in Plan mode without approval).<br>**Confirm:** only once the task or job is observed stopped: attempt `failed` if its error is `timeout` or `gate_timeout`, otherwise `cancelled`; then run `failed` or `cancelled` unless it was superseded. Never inferred from a timeout alone. **A `suspended` attempt is confirmed in the same transaction as the request**, because it has no running work (D27) |
+| **T4 Start node / open attempt** | Executor, before dispatch | 1. Lock session → node (→ run).<br>2. Require: the node live; the session `active`; the previous live node's current run `completed` with no active `downstream_hold`; **no non-terminal attempt anywhere in the session**; and the node's `accepted_by_change_id` equal to what the Executor read (otherwise it re-reads the graph).<br>3. **First start (no current run):** check `resolved_inputs`: for every port, the pinned run is the current completed run of the selected live upstream node at resolution time (that node is earlier in the sequence and equals the `input_sources` entry when one exists, and the pinned port is in the run's `outputs`). Then insert the run as `running` with `accepted_by_change_id`, frozen `execution_policy` (including the session's `privacy_mode`), `target_version`, `resolved_inputs` and the prompt for agents, **plus attempt 1**, in the same transaction.<br>4. **Retry.** Allowed only when **all** of these hold:<br>• (a) the checks in step 2 pass;<br>• (b) the current run is `failed`, or it is `cancelled` and the request is an explicit user retry;<br>• (c) no attempt of the run is `preparing`, `submitted`, `running` or `unknown`;<br>• (d) the latest attempt is `failed` or `interrupted`, or `cancelled` under (b). A `cancelled` attempt is never retried automatically;<br>• (e) the latest `attempt_number` < `execution_policy.max_attempts`;<br>• (f) if the latest attempt was `interrupted` with `dispatched_at` set and `execution_policy.idempotent = false`, there is no automatic retry: the Recovery Agent or the user decides, and that explicit retry must still pass (a)–(e). **For a run with `execution_policy.resumable = true` (D27)**, "idempotent" is read from the run's latest checkpoint instead: the retry is automatic unless its `metadata.pending_tools` lists a tool with `idempotent = false`, because every finished tool call is stored and will not run again.<br>Then insert attempt `latest + 1` and set the run to `running`. A retry attempt of a resumable run continues the run's checkpoint thread.<br>6. **Seeded first start (D27):** when the accepting change set `seed_from` for this node, copy that checkpoint (with its pending writes) into the new run's thread as its first checkpoint, with `metadata.seeded_from`, and write attempt 1 as its writer, but only if it still exists, belongs to a run of the same node, and its `spec_digest` and `privacy_mode` match the new run. Otherwise start fresh and freeze `seed_from.applied = false` with the reason.<br>5. Attempts are inserted as `preparing` with `submission_key` and `request`; publish.<br>**Dispatch after commit:**<br>• `in_process`/`inline`: commit `running` + `dispatched_at` first, then spawn;<br>• `job`: the Application API sends it (defers the Procrastinate job with `queueing_lock = submission_key`, Plan 5), then commits `submitted` + `dispatched_at`. The worker moves the attempt to `running` itself, from `preparing` or `submitted`, before it writes anything. |
+| **T5 Reconcile** | Restart or lost acknowledgement | `suspended` attempts are **left unchanged**: nothing was running, and their state is in the checkpoint (D27). `in_process` and `inline` attempts that are not suspended → `interrupted` (the process that ran them is gone). Job attempts are queried by `submission_key`:<br>• running or queued → keep and re-attach;<br>• terminal → record the outcome;<br>• not found and `preparing` → resubmit the **same** key and request;<br>• not found and `submitted`/`running` → `interrupted` with `error.code='record_lost'`;<br>• backend unreachable (only an external backend such as MONAI; a Procrastinate job lives in this database) → `unknown`, which blocks T4 for the whole session until a later reconcile succeeds.<br>Each terminal state recorded here is projected onto the run in the same transaction (`interrupted` → run `failed` with `error.code='interrupted'`, so T4 can retry it), and the attempt's `usage` is added to `tokens_used`.<br>**No attempt is created here.** |
+| **T6 Complete / fail** | The attempt presents `attempt_id` | 1. Lock; require the attempt to be current, non-terminal and not `suspended` (a suspended attempt is resumed first, T10).<br>2. **Success:** validate `outputs` (refs against the table allow-list). Attempt `succeeded`; run `completed` + `outputs`. A superseded run stays non-current history. For a current run, evaluate the node's expectations **in the same transaction**: on a violation, set `downstream_hold='expectation_violated'` on **this run** and publish `expectation_violated`. If no live node follows, publish `graph_idle`.<br>3. **Failure:** attempt `failed` + `error`; run `failed` (projection).<br>4. Add `usage` to `tokens_used`.<br>5. The job dir is purged only **after** this commit (`JobClient.purge`), and the queue deletes the finished job row after `JOB_RETENTION_HOURS`. |
+| **T7 Cancel / timeout / privacy switch** | User, Stop, T2, the Watchdog, or a switch to `phi_local` | **Request:** set the active attempt's `cancel_requested_at`, including when it is `preparing` or `unknown`. For a job attempt, the Application API also cancels its Procrastinate job in the same request: a queued job never starts, and a running one gets an abort (Plan 5). A Watchdog timeout also sets `error.code='timeout'`. A switch to `phi_local` requests cancellation of every non-terminal attempt whose policy says `standard`, in the same transaction as the settings change. A node that has not started has no run to cancel; stopping it is a `RemoveNode` change (allowed in Plan mode without approval).<br>**Confirm:** only once the task or job is observed stopped: attempt `failed` if its error is `timeout` or `gate_timeout`, otherwise `cancelled`; then run `failed` or `cancelled` unless it was superseded. Never inferred from a timeout alone. **A `suspended` attempt is confirmed in the same transaction as the request**, because it has no running work (D27) |
 | **T10 Suspend / gate decision / resume** (3.2, D27) | The Node Runner (suspend, resume), the user (gate decision) | **Suspend** (harness path): lock session → run → attempt; require the attempt `running` and current, and the checkpoint named in `suspension.checkpoint_id` stored by this attempt. Set `suspended` + `suspension`; publish `run_attempt_suspended` (and `node_status` with `waiting_for_user` for a gate).<br>**Gate decision** (user gate path, in the same transaction as the domain gate columns when the gate has them): require the run `running` and current, and the attempt `suspended` on that gate with no `resume` yet; set `suspension.resume = {decision, comment, decided_at}`; publish `gate_resolved`, which wakes the Executor, not the Main.<br>**Resume** (harness path): require the session `active`, the run current, and for a gate `suspension.resume` set; set `running` + `resumed_at`; publish `run_attempt_resumed`. It is the **same** attempt (I8); no attempt is created here. |
 | **T8 Inbox advance** | Main, after handling | `inbox_handled_through_event_id = n` only if every waking event ≤ n has been handled, and only after the reply and changes have committed. Add the turn's Main, Composer and Recovery token usage to `tokens_used` |
 | **T9 Training** | Training route | 1. **Commit:** receipt + `workflow.frozen_at`.<br>2. POST outside any transaction.<br>3. **Commit:** `submitted_at`.<br>Reconciler: 404 → resubmit the same id. Cancel: record the intent, DELETE, and set `ended_at` only on a terminal report. Unfreeze only when no active receipt remains. |
@@ -3286,10 +3285,10 @@ All steps use the new names.
 #### Phase 3: execution-adapter prerequisites
 
 1. **MONAI terminal re-queue.** An explicit re-queue of a terminal job under the same id with an incremented internal attempt, releasing the capacity slot on any error, with tests. Until this lands, a failed segmentation pair cannot be re-executed within the same run.
-2. **Job platform (Celery + Redis).**
-   - `submission_key = {job_id}.{attempt_number}` is both the Celery task id and the key of the Redis job record (one record per attempt).
-   - Redis runs with **AOF persistence**.
-   - A terminal record's TTL starts only when the harness purges it after T6, so "record not found" means "never submitted" for `preparing`, and "lost" (`record_lost`) for anything later.
+2. **Job platform (PostgreSQL + Procrastinate, Plan 5).**
+   - `submission_key = {job_id}.{attempt_number}` is the job's `queueing_lock` and names its job dir (one job per attempt).
+   - Migration "s" adds the Procrastinate schema of the pinned version, the `job_execution_status` view, and the grants of the workers' role (`cubeai_jobs`, the Procrastinate objects only).
+   - A job dir is purged only after T6, and a finished job row only after `JOB_RETENTION_HOURS`, so "not found" means "never sent" for `preparing`, and "lost" (`record_lost`) for anything later.
 
 #### Phase 4: harness rollout
 
@@ -3311,7 +3310,7 @@ All steps use the new names.
 | A generic `approvals` table | Durable approvals of work are `graph_changes`; approvals inside a node are gates on the suspended attempt (D27) | — |
 | Checkpoints for the Main, the Composer and the Recovery Agent | The Main is rebuilt from the chat (D21); the Composer and the Recovery Agent are short agent-as-tool calls with a hard timeout | A Main turn costs minutes or many tokens (see *Main turn record* below) |
 | A LangGraph `BaseStore` (cross-session agent memory) | Not needed now, and memory across sessions needs its own PHI rules | Agents need durable memory across sessions: an `HttpStore` over a new Application API table, with a guardrail that keeps PHI out |
-| Resource grants, pool tables | Celery and MONAI own capacity; the Executor's semaphores are runtime | The harness owns durable reservations |
+| Resource grants, pool tables | The compute workers' concurrency and MONAI own capacity; the Executor's semaphores are runtime | The harness owns durable reservations |
 | Controller lease / fence table | "One non-terminal attempt per session" + attempt fencing prevent duplicate execution and stale writes | More than one controller is deliberately deployed |
 | Fingerprint, reuse link, reuse-policy column | Sequential suffix invalidation keeps the unaffected prefix; `execution_policy.fresh` covers fresh reruns | Cross-version caching |
 | Context summary on `sessions` | A system message in the chat keeps the compaction boundary inside the transcript | — |
@@ -3349,7 +3348,7 @@ All steps use the new names.
 
 | Scenario | Behaviour |
 |---|---|
-| Crash between T4 and dispatch | `in_process`: the attempt is already `running` with `dispatched_at`, so T5 marks it `interrupted` and rule (f) decides. `job`: T5 finds `preparing` and resubmits the same key only if the backend has no record; otherwise it re-attaches. Unreachable → `unknown`, which blocks the session |
+| Crash between T4 and dispatch | `in_process`: the attempt is already `running` with `dispatched_at`, so T5 marks it `interrupted` and rule (f) decides. `job`: T5 finds `preparing` and resubmits the same key only if the queue has no job for it; otherwise it re-attaches. Unreachable → `unknown`, which blocks the session |
 | Timeout while the process is still alive | The attempt stays non-terminal with `cancel_requested_at` and `error.code='timeout'`. No new attempt can start (I9) until the stop is confirmed, so the old process never writes beside a new one |
 | Write from an old attempt that is still alive | Rejected by the trigger: its `attempt_id` is not the run's active attempt (D24) |
 | Write racing with T6/T7 | The trigger holds the attempt row `FOR SHARE`, so the terminal transition waits for the write, or the write sees the terminal state and fails |
@@ -3381,7 +3380,7 @@ All steps use the new names.
 
 **Assumptions:**
 1. One Agent System worker, so `in_process` and `inline` attempts become `interrupted` on restart, except `suspended` ones, which hold no process (D27).
-2. Redis uses AOF once job records are the receipts, and a record's TTL starts only after the harness purges it.
+2. A job's dir is kept until the harness purges it after T6, and its queue row until `JOB_RETENTION_HOURS` after it finished, so "not found" keeps its meaning.
 3. The MONAI terminal re-queue is fixed before failed pairs or jobs are retried.
 4. Execution stays sequential. A DAG follows the five steps in §P.5.
 5. A single default user is acceptable until authentication exists. **Multi-user must not be enabled before verified identity, because `user_id` is only as trustworthy as whatever supplies it.**
@@ -3411,6 +3410,6 @@ All steps use the new names.
 - **`spawn_agent` / `wait_agent`**, and cross-session caching.
 - **DAG or parallel execution.** The roadmap stays sequential; Appendix P §P.4 lists the current-phase constraints and §P.5 the five steps that open the DAG path without a rewrite.
 - **Authentication and multi-user.** One configured default user owns every session until a verified identity exists (Appendix P D2, assumption 5).
-- **Deployment and storage:** enabling the container or microVM runners in production, any real MCP server, and object storage (MinIO/S3); jobs keep the shared `/storage` mount.
-- **Scaling the Agent System:** a multi-worker Agent System (it needs a shared inbox and executor ownership, e.g. in Redis). Agent checkpoints already live in the Application API (D27), so they need no change for it.
+- **Deployment and storage:** a sandbox (container or microVM isolation) for third-party or generated code, any real MCP server, and object storage (MinIO/S3); jobs keep the shared `/storage` mount.
+- **Scaling the Agent System:** a multi-worker Agent System (it needs a shared inbox and executor ownership, e.g. PostgreSQL `LISTEN/NOTIFY` or Redis). Agent checkpoints already live in the Application API (D27), so they need no change for it.
 - **LangGraph `BaseStore`** (cross-session agent memory) and **LangGraph Server / Platform:** not used. A store would be an `HttpStore` over an Application API table with a PHI guardrail (Appendix P §P.10); LangGraph Server brings its own database and is ruled out by D1.
