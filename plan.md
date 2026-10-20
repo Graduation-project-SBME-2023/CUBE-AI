@@ -1,6 +1,6 @@
 # CUBE.AI merged roadmap: Agent Harness + Tool Platform
 
-> **Two-phase version (2026-10-20).** The remaining work is split into **Phase 1 — Essentials** (the backend works end to end) and **Phase 2 — Completion** (everything else). See [team-plan.md](team-plan.md); each plan's Owner line names the phase of each of its parts.
+> **Two-phase version (2026-10-20).** The remaining work is split into **Phase 1 — Essentials** (the backend works end to end) and **Phase 2 — Completion** (everything else). See [team-plan.md](team-plan.md) for the phases and who does what.
 
 ## Context
 
@@ -192,15 +192,13 @@ This is the dependency order. Since 2026-10-20 it is followed inside each of the
 
 ## Two phases and the team
 
-How the remaining work is split into two phases and between five people (what Phase 1 must deliver, the Phase 1 interim rules, the scope of each plan per phase, the frontend rule, who does what, the contracts, the sync points, the working rules and the folder owners) is in [team-plan.md](team-plan.md). Each plan below names its owner and its phase on its **Owner** line.
+How the remaining work is split into two phases and between five people (what Phase 1 must deliver, the Phase 1 interim rules, the scope of each plan per phase, the frontend rule, who does what, the contracts, the sync points, the working rules and the folder owners) is in [team-plan.md](team-plan.md).
 
 ---
 
 ---
 
 # Plan 0 — Runtime: Python 3.13, PyCaret removed
-
-**Owner:** Person 1 · **Phase 1** (what is left: CI green)
 
 **Goal:** every image we build runs Python 3.13, PyCaret and its old pins are gone, and the rest of the roadmap is written and tested on 3.13. The MONAI Label image is not touched.
 
@@ -213,8 +211,6 @@ Built (2026-10-06): the agents image is `python:3.13.16-slim` with PyRadiomics p
 ---
 
 # Plan 1 — Toolkit Core ✅
-
-**Owner:** — (done)
 
 **Goal:** a framework-neutral core for tools, agents, artifact types, context, events, dispatch and delegation.
 
@@ -231,8 +227,6 @@ Built (2026-10-06): the agents image is `python:3.13.16-slim` with PyRadiomics p
 ---
 
 # Plan 2 — Tool Packs: move every tool and make the light tools ready ✅
-
-**Owner:** — (done)
 
 **Goal:** `Backend/mcp/` is gone. All tools live in `agent_system/toolpacks/<pack>/` and are registered with `@tool` plus a full manifest. They read identity from the context, and the light tools pass the Definition of Ready.
 
@@ -251,8 +245,6 @@ Built (2026-10-06): the agents image is `python:3.13.16-slim` with PyRadiomics p
 ---
 
 # Plan 3 — Agent Definitions and Skills
-
-**Owner:** Person 4 (**Phase 1:** 3.1; 3.2 for the population, segmentation and feature-extraction agents; 3.3 for the segmentation internal agents · **Phase 2:** the literature review in 3.2 and 3.3), Person 5 (**Phase 1:** 3.2 for the result and LaTeX reporters; 3.4 `main_agent` · **Phase 2:** 3.5), Person 2 (**Phase 1:** 3.4 `composer` · **Phase 2:** 3.4 `recovery_agent`)
 
 **Goal:** every agent is an `agent.md` file that becomes an `AgentSpec`, and the skills exist. Plan 9 makes the agents run.
 
@@ -361,7 +353,7 @@ Built (2026-10-06): the agents image is `python:3.13.16-slim` with PyRadiomics p
    | `reporting` | The result and LaTeX reporter prompts |
 
 3. **Rule:** a skill is guidance text. It never routes and never forces a workflow.
-4. **Open decision: how the skills reach the agents** (2026-10-20). The owner of Phases 3.5 and 12.6 (Person 5, Phase 2) chooses one option before building them, and records the choice here. The content of item 2 and the rule of item 3 are the same either way.
+4. **Open decision: how the skills reach the agents** (2026-10-20). Whoever builds Phases 3.5 and 12.6 chooses one option before building them, and records the choice here. The content of item 2 and the rule of item 3 are the same either way.
    - **Option A: our own loader** (the design in items 1–3 and Phase 12.6). `skills/*.md` with `applies_to`; `harness/skills_loader.py` builds an index per audience; the index goes into the prompt, and the `skill_load` control tool returns a body. Everything is ours and nothing depends on an SDK feature; it costs the loader, the tool and the index.
    - **Option B: the SDK's own skills.** Each skill is a `SKILL.md` in one read-only local plugin (`agent_system/skills/cubeai/`, holding only `skills/<name>/SKILL.md`), loaded with the SDK's `plugins` option while `setting_sources=[]` stays. Each `agent.md` lists its skills by name (`skills: [modeling]`; none for internal agents), and the engine passes `skills=["cubeai:<name>", …]`, so a session sees only its own skills and never the CLI's bundled ones. The model loads a body with the SDK's `Skill` tool, which is then left out of `disallowed_tools`; the PreToolUse hook lets it through for listed skills only. There is no loader index and no `skill_load` (74 tools instead of 75); `/skills` still reads the front matter. A `SKILL.md` may not carry `allowed-tools` or `` !`command` `` lines (they run a shell command), and a test checks it. **Before choosing it, verify on the pinned SDK:** the plugin loads with `setting_sources=[]`; the `skills` list hides every other skill; leaving `Skill` out of `disallowed_tools` gives back no other built-in tool; a `Skill` call reaches the PreToolUse hook; unknown front-matter fields are ignored; and the `Skill` tool works through LiteLLM on the local Ollama alias.
 
@@ -384,8 +376,6 @@ Built (2026-10-06): the agents image is `python:3.13.16-slim` with PyRadiomics p
 ---
 
 # Plan 5 — Job Platform (PostgreSQL + Procrastinate)
-
-**Owner:** Person 3 · **Phase 2** (all of it; in Phase 1 the heavy tools run inline, see `team-plan.md`, *Phase 1 — interim rules*)
 
 **Goal:** heavy tools run as jobs queued in the Application API's PostgreSQL with Procrastinate, behind one `JobClient` contract, each in its own child process. Jobs have deterministic ids, real cancel, progress, timeouts, retention, restart recovery, OOM detection and queue liveness, with no Redis, no Celery and no beat process.
 
@@ -534,8 +524,6 @@ Built (2026-10-06): the agents image is `python:3.13.16-slim` with PyRadiomics p
 
 # Plan 6 — Session State Store: Persistence Design (Application API) (6.1–6.5 ✅; 6.6 open)
 
-**Owner:** Person 2 · 6.1–6.5 are done · **Phase 2:** 6.6
-
 **Goal:** implement Appendix P (the persistence design, revision 3.4; 6.1–6.5 built revision 3.2, and Phase 6.6 brings it to 3.4): the database, the transactions T0–T10 and the HTTP surface the harness uses. The Application API owns every row, and the Agent System reaches it only over HTTP. Appendix P is the specification; this plan says in which order it is built and how it is tested, and never restates its column lists.
 
 ## Phases 6.1–6.5 — what exists (read the code in `Backend/application_api/`)
@@ -596,8 +584,6 @@ Implements Appendix P revision 3.4 (D27 rewritten, D28 new; §P.9 *Cut-over 3*).
 ---
 
 # Plan 7 — Modeling Engine, Heavy Tools as Jobs + `run_modeling`
-
-**Owner:** Person 5 · 7.0–7.2 are done · **Phase 1:** the ports and `graph` visibility of the 7.1 tools (still `INTERIM_HEAVY`, inline), 7.3 inline, the 7.5 `on_result` hooks · **Phase 2:** the 7.1 job manifests, 7.4, the 7.5 file sink
 
 **Goal:** PyCaret is replaced by a scikit-learn modeling engine. The 7 heavy tools and the new `run_modeling` tool run as jobs on the job platform (Plan 5). They are safe to run twice and at the same time, report progress, and can be used as graph nodes.
 
@@ -677,8 +663,6 @@ Fix H1–H18 (Appendix C). Two of them change code outside the tools:
 ---
 
 # Plan 8 — Validator and Diff Engine
-
-**Owner:** Person 2 · 8.1–8.4 are done · **Phase 2:** the 2026-10-19 follow-up
 
 **Goal:** deterministic graph code for a sequential live graph: a graph model, a Validator that returns only technical errors, the strict input resolution (D23), the affected set, and atomic, versioned changes through T1/T2 (system §9, §26, §27; Appendix P).
 
@@ -771,8 +755,6 @@ Phases 8.1–8.4 are built (`ce5a777e`, `3ac5411c`). The decision of 2026-10-19 
 
 # Plan 9 — Claude Agent SDK Engine, Session Store and Model Gateway (LiteLLM)
 
-**Owner:** Person 1 (**Phase 1:** 9.0 for both the Claude and the local Ollama alias; 9.1; 9.2 items 1–4, 6, 7; 9.3 items 1, 2, 4–6; 9.4 without `defer`, saved sessions, seeds and mirror failures · **Phase 2:** 9.2 item 5 and the locality filter; the rest of 9.4), Person 2 (**Phase 2:** 9.5, 9.6), Person 4 (**Phase 1:** 9.7 with the automatic cohort freeze and mask acceptance · **Phase 2:** 9.3 item 3 `ask_user`; the review and approval parts of 9.7)
-
 **Goal:** real LLM execution for every agent through the Claude Agent SDK (Python, `claude-agent-sdk`), with every model reached through LiteLLM (decided 2026-10-19). Agent nodes keep a saved SDK session per run, stored through the Application API (Appendix P D27), so a retry continues instead of reasoning again. An agent that asks the user, a mandatory tool approval and a pause suspend the attempt instead of holding a process. Internal agents are SDK subagents. The Main runs on the same engine without a saved transcript (D21); the Composer and the Recovery Agent are one-shot calls.
 
 **Where the SDK sits:** the SDK is the loop of one agent (model call → tool calls → results → repeat), with context management, compaction, hooks, subagents and saved sessions. It never decides what runs next in the session; the Executor does. Its tools are CUBE.AI tools served from our process, so every call still goes through `dispatch.invoke` and the Guardrails.
@@ -809,7 +791,7 @@ The findings are written into this plan before Phase 9.4 starts.
    - `env`: `ANTHROPIC_BASE_URL = LITELLM_BASE_URL`, `ANTHROPIC_AUTH_TOKEN = LITELLM_API_KEY`, and `ANTHROPIC_DEFAULT_HAIKU_MODEL` = the same alias, so the CLI's background requests (titles, summaries) never reach another model. For `claude_native: false`, also `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` and `CLAUDE_CODE_ATTRIBUTION_HEADER=0`;
    - `fallback_model` from `fallback_alias`, which must have the same locality;
    - the `locality_filter(ctx)` hook: empty now; Plan 13 fills it for PHI-Local (only `local` aliases).
-5. **User settings:** `/client-config` (and `ClientSettingsPanel`) picks a LiteLLM alias per profile; it no longer holds base URLs or keys. `client_config.py` keeps its retry delays (`LLM_RETRY_DELAYS_SECONDS`) for the plain Messages calls of Phase 9.7. Person 1 updates the panel in Phase 2 (`team-plan.md`, *Frontend: whoever changes the backend changes the frontend*).
+5. **User settings:** `/client-config` (and `ClientSettingsPanel`) picks a LiteLLM alias per profile; it no longer holds base URLs or keys. `client_config.py` keeps its retry delays (`LLM_RETRY_DELAYS_SECONDS`) for the plain Messages calls of Phase 9.7. The panel follows in Phase 2 (`team-plan.md`, *Frontend: whoever changes the backend changes the frontend*).
 6. **Usage:** each SDK session's `ResultMessage.model_usage` (subagents included) is the attempt's usage. It is written once per attempt (`run_attempts.usage`, T5/T6/T7) and once per Main turn (T8), and added to `sessions.tokens_used` there. The budgets in Plan 11 use the persisted total plus the running sessions' counters.
 7. **Known limits, written in the docs:** Anthropic does not support routing Claude Code to non-Claude models through a gateway, so tool use on a local model is measured in the `agent-regression` suite before a local alias serves an agent. Sessions that go through a gateway are not eligible for Anthropic's HIPAA configuration (Plan 13).
 
@@ -911,8 +893,6 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
 ---
 
 # Plan 10 — Executor, Node Runner, Watchdog
-
-**Owner:** Person 3 · **Phase 1:** 10.1 without step 4a, item 9 and `pending_tools`; 10.2 without suspensions and user approvals; 10.4; 10.5 without the suspended and resumable rules; 10.6 with the Phase 1 pause (no new start; a running node runs to its end) · **Phase 2:** the rest, and 10.3
 
 **Goal:** the only component that runs work (system §11-§14, §24), over the persistence of Appendix P. It starts nodes with T4, completes them with T6, cancels with T7, reconciles with T5, and suspends and resumes agent nodes with T10. It absorbs `RunHarness` and `DirectToolExecutor` from tools_plan.
 
@@ -1027,8 +1007,6 @@ On `graph_changed`:
 
 # Plan 11 — Runtime Guardrails, Modes, Approvals
 
-**Owner:** Person 1 · **Phase 1:** 11.1 with every hook point and the rules for schema and Validator errors, visibility, `REQUIRES_NODE` and the session token budget · **Phase 2:** the rest of 11.1, 11.2, 11.3
-
 **Goal:** one place that decides execution boundaries (system §10). It also covers Plan/Auto modes and approvals (§31).
 
 ## Phase 11.1 — Guardrails core (`harness/guardrails.py`)
@@ -1096,8 +1074,6 @@ On `graph_changed`:
 ---
 
 # Plan 12 — Session Layer: Inbox, Main Loop, Context, Skills, Planner
-
-**Owner:** Person 5 (**Phase 1:** 12.1; 12.3 without item 2; 12.4; the input route of 12.7 · **Phase 2:** 12.3 item 2, 12.6), Person 2 (**Phase 1:** 12.2 without `recover` and `skill_load`, with `node_message` to running nodes only; 12.5; 12.7 without the answer and steps routes · **Phase 2:** the rest of 12.2 and 12.7)
 
 **Goal:** the Main Agent as a free, non-blocking orchestrator (system §5-§8, §23, §25, §30, §32, §33).
 
@@ -1209,8 +1185,6 @@ Their `tool_result` row is written by the Application API in the same transactio
 
 # Plan 13 — Recovery and Privacy
 
-**Owner:** Person 2 (13.1, 13.3), Person 3 (13.2) · **Phase 2** (all of it)
-
 **Goal:** system Phase 3: the Recovery Agent, resource failure handling and PHI-Local.
 
 ## Phase 13.1 — Recovery Agent (`execution/recovery.py`, control tool `recover`)
@@ -1262,8 +1236,6 @@ Their `tool_result` row is written by the Application API in the same transactio
 
 # Plan 15 — MONAI Inference Jobs + Segmentation Client
 
-**Owner:** Person 4 · **Phase 1:** 15.1, 15.2 · **Phase 2:** 15.3, 15.4
-
 **Goal:** fix the critical MONAI job bugs, and move the segmentation client onto the shared contract, so that the Executor can cancel it and classify its failures. MONAI keeps its own job store and GPU: it is a `JobClient` backend, not a Procrastinate queue (Plan 5).
 
 ## Phase 15.1 — Safety net
@@ -1313,8 +1285,6 @@ Fix these in place. MONAI keeps its own file store, and its status strings must 
 
 # Plan 16 — Other Job Systems
 
-**Owner:** Person 5 (16.1, 16.3, 16.4), Person 4 (16.2) · **Phase 2** (all of it)
-
 **Goal:** fix the remaining long waits, training, ingestion and background tasks.
 
 ## Phase 16.1 — Long waits
@@ -1352,8 +1322,6 @@ Ingestion conversion becomes a job on the `compute.cpu` queue (Plan 5) (`job_nam
 
 # Plan 17 — Cut-over, AutoGen Removal, Cleanup, Docs
 
-**Owner:** All: each person does the items of their own area (17.1 lifespan: Persons 3 and 5; 17.2–17.4: everyone in their folders; 17.5 docs: everyone, collected by Person 5) · **Phase 1:** 17.1 (the lifespan: Persons 3 and 5; the frontend updates: Persons 2 and 5) · **Phase 2:** 17.2–17.6
-
 **Goal:** the harness becomes the only execution path, AutoGen is deleted, and the docs describe the new system.
 
 ## Phase 17.1 — API cut-over (Agent System)
@@ -1366,7 +1334,7 @@ Ingestion conversion becomes a job on the `compute.cpu` queue (Plan 5) (`job_nam
 2. **`POST /session/{id}/input`** → the Session Inbox (Plan 12).
 3. **`/pause`, `/resume`, `/stop`:** the same paths and bodies, now driving `SessionExecutor` control (Phase 10.6).
 4. **Rebuilt from graph state:** `GET /status/{id}`, `/session/{id}/execution-state` and `/session/{id}/recover`.
-5. **Retired, returning `410 Gone` with a short message:** `/plan`, `/run`, `/session/{id}/resume-pipeline`. The canvas and the chat sidebar stop calling them in the same phase (Persons 2 and 5, `team-plan.md`, *Frontend: whoever changes the backend changes the frontend*).
+5. **Retired, returning `410 Gone` with a short message:** `/plan`, `/run`, `/session/{id}/resume-pipeline`. The canvas and the chat sidebar stop calling them in the same phase (`team-plan.md`, *Frontend: whoever changes the backend changes the frontend*).
 6. **Application API:** the persistence cut-overs already happened in Plan 6 (no dual path, D26). What is left: a final migration drops `sessions.intent` and `session_graphs.approved_at` (read-only legacy columns), and `approve_plan` / `create_pending_runs` and `CANONICAL_AGENT_TYPES` are deleted (the producer allowlists stay, checked against the catalog). **No table is dropped.**
 
 ## Phase 17.2 — Delete AutoGen
