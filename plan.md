@@ -1,22 +1,23 @@
 # CUBE.AI merged roadmap: Agent Harness + Tool Platform
 
-> **Two-phase version (2026-10-20).** The remaining work is split into **Phase 1 — Essentials** (the backend works end to end) and **Phase 2 — Completion** (everything else). See [team-plan.md](team-plan.md) for the phases and who does what.
+> **How we work (2026-10-20):** five people in parallel, one part each, in one phase, with one checkpoint (the first working flow). See [team-plan.md](team-plan.md) for who does what.
 
 ## Context
 
-This roadmap plans the next version of CUBE.AI: an agent harness (a Main Agent, a live Session Graph, an Executor, Runtime Guardrails) built on a framework-neutral tool platform (the Toolkit, tool packs, jobs). The persistence design is **Appendix P**, the only database specification; Plan 6 implements it. The work is Plans 0–17 (4 and 14 removed), each with phases, done in two phases of parallel work (`team-plan.md`).
+This roadmap plans the next version of CUBE.AI: an agent harness (a Main Agent, a live Session Graph, an Executor, Runtime Guardrails) built on a framework-neutral tool platform (the Toolkit, tool packs, jobs). The persistence design is **Appendix P**, the only database specification; Plan 6 implements it. The work is Plans 0–17 (4 and 14 removed), each with phases, built by five people in parallel (`team-plan.md`).
 
 **Decisions:**
 
 - **`run_modeling` is a tool.** There is no `modeling_agent` (system_plan wins over tools_plan here).
 - **The Claude Agent SDK (Python, `claude-agent-sdk`) is the agent engine** for every LLM agent: the Main Agent, the Composer, the Recovery Agent and every execution agent (decided 2026-10-19; it replaces LangGraph). It runs behind the existing `AgentEngine` protocol as `ClaudeAgentEngine` (Plan 9). The SDK supplies the agent loop, context management and compaction, hooks, subagents and saved sessions; CUBE.AI keeps the Session Graph, the Executor, the Diff Engine, the Validator, the Guardrails and every durable state. There is no LangGraph anywhere in the roadmap.
-- **Agent nodes keep a saved SDK session per run** (decided 2026-10-19). The session id is the run id (`session_id = run_id`), and its transcript is stored through the Application API by a `SessionStore` adapter (`HttpSessionStore`, Appendix P D27, revision 3.4). A retry attempt resumes the same session (`resume = run_id`), so an agent node continues after a restart instead of reasoning again, and a finished tool call is never run again. An agent that has to ask the user (`ask_user`), a tool call that needs a mandatory approval, and a pause **suspend** the attempt; no process waits. Internal agents are **SDK subagents** (the literature review's 5 included); `run_agent` is removed. A rerun can start from a point of an earlier run (`seed_from`, through `fork_session` + `resume_session_at`). The Main keeps no transcript of its own (D21): its context is rebuilt from the chat. The Composer and the Recovery Agent are one-shot `query()` calls with structured output and no saved session.
+- **Agent nodes keep a saved SDK session per run** (decided 2026-10-19). The session id is the run id (`session_id = run_id`), and its transcript is stored through the Application API by a `SessionStore` adapter (`HttpSessionStore`, Appendix P D27, revision 3.4). A retry attempt resumes the same session (`resume = run_id`), so an agent node continues after a restart instead of reasoning again, and a finished tool call is never run again. An agent that has to ask the user (`ask_user`), a tool call that needs a mandatory approval, and a pause **suspend** the attempt; no process waits. Internal agents are **SDK subagents** (the literature review's 5 included); `run_agent` is removed. A rerun can start from a point of an earlier run (`seed_from`, through `fork_session` + `resume_session_at`). The Main keeps a saved SDK session too, one per CUBE.AI session (D21, revised 2026-10-20). The Composer and the Recovery Agent are SDK subagents of the Main.
 - **Every model is reached through LiteLLM** (decided 2026-10-19). One `litellm` proxy service, configured from a file and with **no database**, exposes the Anthropic Messages API; the SDK points `ANTHROPIC_BASE_URL` at it. Model aliases route to Claude or to local models on Ollama. The Model Gateway maps a profile to a LiteLLM alias plus the client settings that alias needs (Plan 9.2). Only LiteLLM holds provider credentials.
 - **Approvals come from what the user asks for** (decided 2026-10-19; Appendix P D28). There is no fixed in-node gate: the cohort approval and the segmentation review happen only when the user asked for them. From the user's words, the Main sets `approval: before | after` on the nodes it submits (the node does not start, or the next node does not start, until the user releases it), and every execution agent has an `ask_user` tool for when the user asked to be consulted inside a step. Plan / Auto modes and the Guardrails' mandatory approvals stay as they are.
 - **No MCP edge for now** (decided 2026-10-20). Plan 14 (third-party MCP servers as untrusted tools) is removed; its number is kept. Every tool an agent can call is a CUBE.AI tool.
+- **Use the SDK harness for everything it already does** (decided 2026-10-20). Nothing the Claude Agent SDK provides is rebuilt in CUBE.AI. Concretely: the Main keeps a **saved SDK session** and the SDK compacts it (no context rebuild from the chat, no own summaries); the **Composer and the Recovery Agent are SDK subagents** of the Main (no `plan` / `recover` agent-as-tool, no repair loop of ours); **skills are SDK skills** (`SKILL.md` in a local plugin, no loader of ours); **tool access** is the SDK's own (a session only has the tools its spec lists, so no visibility check of ours for SDK sessions); **limits** are `max_turns` / `max_budget_usd`; **free questions** to the user are the SDK's `AskUserQuestion`; **progress steps** are the SDK's `TaskCreate` / `TaskUpdate`; **PHI filtering of tool results** is a PostToolUse `updatedToolOutput`. CUBE.AI keeps only what the SDK does not do: the Session Graph, the Executor, the Validator and the Diff Engine, the database and its fencing, the job platform, the durable inbox, LiteLLM, the timeouts, and the domain tools. Before building anything around an agent, check the SDK docs first (*Global rules*).
 - **Not used for planning:** `cubeai-docs/architecture/monai-agent-integration.md`. Segmentation stays the execution agent of Plan 3.
-- **Two phases** (decided 2026-10-20). Phase 1 makes the backend work end to end with the fewest pieces: heavy tools inline, no saved agent sessions, no `ask_user`, Auto mode only, and the Composer included. Phase 2 adds the job platform, agent memory across restarts, the user's approvals and questions, recovery, PHI-Local, the literature review, skills, and the AutoGen removal. See `team-plan.md`.
-- The scope includes the **cut-over and AutoGen removal** (Plan 17). The evaluation harness is **not** in this roadmap. The frontend changes that a backend change forces are made by the person who makes the backend change (`team-plan.md`, *Frontend*); a redesign of the frontend Surface is not in this roadmap.
+- **One phase, five parts, one checkpoint** (decided 2026-10-20). Each person owns one part from start to end and builds its simple version first, so the **first working flow** (a question in the chat → the PDF) comes early: until it works, heavy tools run inline, there is no agent memory, no questions to the user, Auto mode only, and synthetic data only. See `team-plan.md`.
+- The scope includes the **cut-over and AutoGen removal** (Plan 17). The evaluation harness is **not** in this roadmap. The frontend changes that a backend change forces are made by the person who makes the backend change (`team-plan.md`); a redesign of the frontend Surface is not in this roadmap.
 - **Python 3.13 for every image we build** (Agent System, compute worker, Application API), done first in Plan 0. The MONAI Label image keeps its own Python 3.10.
 - **PyCaret is removed.** Modeling runs on scikit-learn, with LightGBM, XGBoost and SHAP. The 5 PyCaret tools are rewritten on that engine and **renamed** in Plan 7 (the only rename besides `save_literature_output`).
 - **Appendix P (the persistence design) is the only database specification.** Plan 6 implements it, and every other plan uses its names, its write paths (D24) and its transactions T0–T10.
@@ -47,9 +48,9 @@ The decision in force on each topic the source documents covered.
 | 2 | The word "harness" | "Harness" now means only the system_plan session layer. `RunHarness`, `node_resolver` and `DirectToolExecutor` move into `execution/node_runner.py` and `catalog.resolve()`. |
 | 3 | Tool metadata | One `ToolSpec` with both sets of fields. Derived fields and consistency rules are checked by `catalog.validate()` (Phase 1.1). |
 | 4 | Who may call what | `visibility` is a **set** of `main`, `graph`, `agent` and `harness`. `planner` is renamed `graph` (it may become a Tool Node). Main may call a tool directly only if it is `inline` and not `heavy`. Everything else runs as a node. |
-| 5 | Delegation | Main has **no** delegation tool. It uses `execute` / `graph_apply`, which create an Agent Node and return `RunAccepted`. An execution agent reaches its internal agents as **SDK subagents** (the SDK's `Agent` tool, inside a node that is already tracked); `run_agent` is removed (decided 2026-10-19, Plan 9.6). `plan` and `recover` are short agent-as-tool calls: they return proposals and never execute anything. |
+| 5 | Delegation | Main has **no** delegation tool. It uses `execute` / `graph_apply`, which create an Agent Node and return `RunAccepted`. An execution agent reaches its internal agents as **SDK subagents** (the SDK's `Agent` tool, inside a node that is already tracked); `run_agent` is removed (decided 2026-10-19, Plan 9.6). The Composer and the Recovery Agent are SDK subagents of the Main (decided 2026-10-20): they propose with `graph_propose` and never execute anything. |
 | 6 | Modeling | `run_modeling` is a job tool (manifest from system §15). `modeling_agent` is not created, and its prompt becomes the `modeling` skill. PyCaret is removed: the 5 modeling tools are rewritten on a scikit-learn engine, renamed, and stay graph-visible job tools (Plan 7). |
-| 7 | Agent engine | `ClaudeAgentEngine` (Claude Agent SDK, decided 2026-10-19) implements `AgentEngine` for **every** LLM agent: the Main, the Composer, the Recovery Agent and the execution agents. The SDK is the loop of one agent; the inbox loop, Executor, Diff Engine and Validator stay plain code, because the live graph changes while it runs and must survive restarts, which an agent loop does not own. **Agent nodes keep a saved SDK session per run**: `HttpSessionStore` stores the transcript through the Application API (D1 holds; Appendix P D27), with `session_id = run_id`, so every attempt of a run resumes the same session and a rerun starts fresh. `ask_user`, mandatory tool approvals and pause suspend the attempt (T10). The Main keeps no transcript: each Main session is rebuilt from `chat_messages` (D21). The Composer and the Recovery Agent are one-shot calls. |
+| 7 | Agent engine | `ClaudeAgentEngine` (Claude Agent SDK, decided 2026-10-19) implements `AgentEngine` for **every** LLM agent: the Main, the Composer, the Recovery Agent and the execution agents. The SDK is the loop of one agent; the inbox loop, Executor, Diff Engine and Validator stay plain code, because the live graph changes while it runs and must survive restarts, which an agent loop does not own. **Agent nodes keep a saved SDK session per run**: `HttpSessionStore` stores the transcript through the Application API (D1 holds; Appendix P D27), with `session_id = run_id`, so every attempt of a run resumes the same session and a rerun starts fresh. `ask_user`, mandatory tool approvals and pause suspend the attempt (T10). The Main keeps one saved SDK session per CUBE.AI session, compacted by the SDK (D21, revised 2026-10-20); the Composer and the Recovery Agent are its subagents. |
 | 8 | Runs | _Persistence:_ `agent_runs` is renamed `node_runs` and holds every node run, agent or tool. A run is created lazily when its node starts, together with attempt 1 (D8); every try is a row of the new `run_attempts` table (D9). Domain FKs become `created_by_run_id`. The job id is `sha256(run_id\|tool\|args)`, and the submission key adds `.{attempt_number}`. |
 | 9 | Plan contract | This contract is dropped. The Validator and the registry decide what is valid. A contract test checks the producer allowlists in the Application API against the catalog. _Persistence:_ `plans` and `plan_steps` are renamed `session_graphs` and `graph_nodes` and become the live graph (D4, D6); every mutation is a `graph_changes` row (D7). |
 | 10 | Session status | _Persistence:_ `sessions.status` is renamed `control_state` and holds only intent: `active \| paused \| archived` (D13). The activity (`idle`, `running`, `pausing`, `awaiting_approval`, `blocked`) is derived and never stored. Nothing is ever `completed`. |
@@ -72,14 +73,15 @@ The decision in force on each topic the source documents covered.
 
   The segmentation domain module (`agents/execution_agents/segmentation/`) is **not** frozen; it is domain code.
 
-- **Only the new work is tested, between the phase ends.** The project does not need to run after each plan or each phase of a plan. It must run end to end at the end of Phase 1 (`team-plan.md`, *Phase 1 — done when*), and again at the end of Phase 2 (Sync G).
+- **Only the new work is tested, between the checkpoints.** The project does not need to run after each plan or each phase of a plan. It must run end to end at the first working flow (`team-plan.md`), and again when every part is complete.
 - **No MCP tool is renamed**, and no tool's success result shape changes. The only renames are `save_output` → `save_literature_output` (Plan 2) and the 5 `pycaret_*` tools (Plan 7); their success result shapes still do not change. Agent ids stay the same. For example, `study_population_planner_agent` keeps its id, and "Population Agent" is only its display name.
 - **Python 3.13.** New code targets Python 3.13. Code that also runs in the MONAI image (`Backend/storage_paths.py` and every file `Dockerfile.backend.gpu` copies) must stay compatible with Python 3.10.
 - **No PyCaret.** No new code imports `pycaret`, and no new code depends on PyCaret objects or PyCaret setup arguments.
 - **Forbidden package names:** `platform`, `core`, `tools`, `mcp` and `types`, and no regular package named `config`.
 - **Only the Application API gets `DATABASE_URL`.** All graph, change, run, attempt, agent-transcript and result state goes through its HTTP API, in the transactions T0–T10 of Appendix P §P.8. The one exception is the compute workers' `JOBS_DATABASE_URL`, a role limited to the Procrastinate objects (Plan 5); a job's child process never gets it.
 - **Agent transcripts go through the Application API only.** The one `SessionStore` is `execution/session_store.py` (`HttpSessionStore`); the SDK's example adapters (Postgres, Redis, S3) and `InMemorySessionStore` are never used outside tests. A transcript is reasoning state, never a result: results are typed rows and `node_runs.outputs` (D27). Nothing parses the transcript entries except the SDK itself: their format is internal to the SDK and changes between versions, so reads go through the SDK's store helpers (`get_session_messages_from_store()` and friends).
-- **The Claude Agent SDK is imported only in `toolkit/engines/` and `execution/session_store.py`.** Every SDK session runs with the SDK's built-in tools off (`disallowed_tools` lists them, plus `strict_mcp_config=True` and `setting_sources=[]`), the built-in subagents off, `permission_mode="dontAsk"`, and CUBE.AI tools only, served by an in-process MCP server whose handlers call `dispatch.invoke`. The CLI's own files (`CLAUDE_CONFIG_DIR`, the working directory) are resolved through `storage_paths`; nothing is written to `~/.claude`.
+- **Use the SDK first.** Before building anything around an agent (its loop, context, memory, compaction, subagents, skills, questions to the user, permissions, limits, progress, usage), check the Claude Agent SDK docs. If the SDK does it, use it; CUBE.AI code only configures it. A plan item that rebuilds an SDK feature is a bug in the plan.
+- **The Claude Agent SDK is imported only in `toolkit/engines/` and `execution/session_store.py`.** Every SDK session runs with `strict_mcp_config=True`, `setting_sources=[]`, the built-in subagents off, and CUBE.AI tools served by an in-process MCP server whose handlers call `dispatch.invoke`. Of the SDK's built-in tools, only these are on, and only where Phase 9.4 says: `Agent` (subagents), `Skill` (the `cubeai` skills), `AskUserQuestion` (free questions from an execution agent), `TaskCreate` / `TaskUpdate` (progress steps). Every other built-in tool is in `disallowed_tools`. The CLI's own files (`CLAUDE_CONFIG_DIR`, the working directory) are resolved through `storage_paths`; nothing is written to `~/.claude`.
 - **Every model call goes through LiteLLM** (`ANTHROPIC_BASE_URL` = the `litellm` service). No Agent System code holds a provider key or calls a provider directly.
 - **Every write on the execution path declares its D24 path** (`attempt`, `internal job`, `user gate`, `harness` or `migration`). The database rejects a write that declares none.
 - **Names after Phase 6.1** follow the vocabulary of Appendix P §P.2. Old names appear only in migrations, in old durable events, and in the problem catalog, which describes today's code. Phase 6.1 renames identifiers inside tool code, never tool names, tool argument names or success result shapes.
@@ -93,13 +95,13 @@ The decision in force on each topic the source documents covered.
 ```
 CONTROL PLANE  (agent_system/harness, agent_system/planning)
   User -> POST /session/{id}/input -> Session Inbox -> Main Loop (main_agent: one ClaudeSDKClient per SessionRuntime,
-                                                                  no saved transcript, rebuilt from the chat, D21)
+                                                                  saved SDK session resumed by session id, SDK compaction, D21)
      Main's tools (in-process MCP server; knows every catalog entry from the index, calls only these):
                     main-visible light tools (dispatch.invoke, inline)
-                    control tools: execute, graph_apply, graph_inspect, registry_search/describe,
-                                   plan (-> Composer: one-shot query + output_format -> Validator),
-                                   recover (-> Recovery Agent: one-shot query), node_cancel, node_message,
-                                   artifact_read, skill_load
+                    control tools: execute, graph_apply, graph_propose (-> Validator), graph_inspect,
+                                   registry_search/describe, node_cancel, node_message, artifact_read
+     Main's SDK subagents (the Agent tool): composer, recovery_agent (read-only tools + graph_propose; never apply)
+     SDK skills (the Skill tool, cubeai plugin); graph summary added to every turn by a UserPromptSubmit hook
      every action -> PreToolUse hook -> Runtime Guardrails -> allowed | approval_required | permission_denied | invalid | resource_unavailable
                                     |
                                     |  graph change (full target sequence, base_version; approval: before|after per node) -> RunAccepted {node_id, change_id, status}
@@ -135,7 +137,7 @@ Backend/
       artifacts/base.py artifacts/builtin.py                    (system_plan "types/artifacts.py")
       runtime/dispatch.py runtime/inline.py runtime/cancel.py runtime/session_sink.py
       runtime/job.py (Plan 5)
-      delegation/agent_as_tool.py                               (delegation/run_agent.py removed in Plan 9.6)
+      (delegation/ removed: run_agent in Plan 9.6, agent_as_tool in Plan 12.5; subagents are the SDK's)
       engines/claude_engine.py engines/options.py engines/mcp_bridge.py engines/hooks.py   (Plan 9)
     toolpacks/                    Plans 2, 7, 9, 12 (discovered automatically)
       common/ population/ db_reads/ segmentation/ reporting/ bookkeeping/ literature/   (Plan 2)
@@ -143,12 +145,12 @@ Backend/
       interaction/ (ask_user)                                                             (Plan 9)
       control/                                                                            (Plans 12, 13)
     agentpacks/
-      core/{main_agent,composer,recovery_agent}/agent.md                                 (Plan 3)
+      core/main_agent/agent.md, core/{composer,recovery_agent}/agent.md (Main's subagents) (Plan 3)
       research/<agent_type>/agent.md (+ hooks.py)                                         (Plan 3)
-    skills/*.md                                                                           (Plan 3)
+    skills/cubeai/                (an SDK plugin: skills/<name>/SKILL.md, nothing else)    (Plan 3)
     harness/                      Plans 9, 11, 12, 13
-      model_gateway.py guardrails.py approvals.py inbox.py context_manager.py
-      skills_loader.py main_loop.py session_runtime.py privacy.py
+      model_gateway.py guardrails.py approvals.py inbox.py turn_context.py
+      skills_index.py main_loop.py session_runtime.py privacy.py
     planning/                     Plans 8, 12: graph_model.py validator.py inputs.py proposals.py
     execution/                    Plans 6, 8, 9, 10, 13
       graph_store.py affected.py diff_engine.py executor.py node_runner.py
@@ -163,50 +165,80 @@ deploy/
 
 ## Milestones, order and dependencies
 
-| # | Plan | Milestone | Depends on | Comes from | Status |
-|---|---|---|---|---|---|
-| 0 | Runtime: Python 3.13, PyCaret removed | M0 Runtime | – | your decision (this merge) | 🟡 Implemented; CI not green yet |
-| 1 | Toolkit Core | M1 Toolkit | – | tools P1; system Phase 1 (registries, artifact types, discovery) | ✅ Done (1.1–1.5) |
-| 2 | Tool Packs | M1 | 1 | tools P2 | ✅ Done (2.1–2.5) |
-| 3 | Agent Definitions and Skills | M1 | 1, 2 | tools P3; system §29-30 | Not started |
-| 4 | _(removed: no sandbox)_ | – | – | tools P4 | – |
-| 5 | Job Platform (PostgreSQL + Procrastinate) | M2 Compute | 1, 6 | tools P5; your decision (2026-10-09) | Not started |
-| 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | system Phase 1 (State, Graph Versions); Appendix P | ✅ 6.1–6.5 done; 6.6 (agent transcripts, user approvals; decision 2026-10-19) not started |
-| 7 | Modeling Engine, Heavy Tools as Jobs + `run_modeling` | M2 | 0, 2, 5, 6 | tools P6; system `run_modeling`; your decision (PyCaret removed) | 🟡 7.0–7.2 done (engine, rename, legacy records); jobs wait for Plan 5 |
-| 8 | Validator and Diff Engine | M3 | 1, 6 | system Phase 1 (Validator), Phase 2 (Diff, Affected Set); Appendix P D23 | ✅ 8.1–8.4 done (`ce5a777e`, `3ac5411c`); the 2026-10-19 follow-up (`seed_from`, `approval`) not started |
-| 9 | Claude Agent SDK Engine, Session Store and Model Gateway (LiteLLM) | M3 | 1, 3, 6 (6.6 for 9.5) | your decisions (Claude Agent SDK, LiteLLM, 2026-10-19); system §4 (Model Gateway); Appendix P D27 | Not started |
-| 10 | Executor, Node Runner, Watchdog | M3 | 5, 6, 8, 9 | system Phases 1–3 (Executor, Live changes, Watchdog); Appendix P T4–T7, T10 | Not started |
-| 11 | Runtime Guardrails, Modes, Approvals | M3 | 5, 6, 8, 10 | system §10, §31 | Not started |
-| 12 | Session Layer: Inbox, Main Loop, Context, Skills, Planner | M3 | 8, 9, 10, 11 | system Phase 1 (Main Loop, Context), Phase 2 (Planner) | Not started |
-| 13 | Recovery and Privacy | M4 Hardening | 10, 11, 12 | system Phase 3 | Not started |
-| 14 | _(removed: no MCP edge for now, 2026-10-20)_ | – | – | tools P7 | – |
-| 15 | MONAI Jobs + Segmentation Client | M5 Job fixes | 5 (Phase 5.1 only); the review of 15.4 needs Phases 9.3 (`ask_user`) and 6.6 (`auto` review values) | tools P8 | Not started |
-| 16 | Other Job Systems | M5 | 5, 15 | tools P9 | Not started |
-| 17 | Cut-over, AutoGen Removal, Cleanup, Docs | M6 | all | tools P10; your decision | Not started |
-
-**Phases:** the part of each plan that belongs to Phase 1 and to Phase 2 is in `team-plan.md`, *Scope by plan*.
+| # | Plan | Milestone | Depends on | Status |
+|---|---|---|---|---|
+| 0 | Runtime and cleanup: Python 3.13, PyCaret removed, dead code removed | M0 Runtime | – | 🟡 0.1 implemented, CI not green yet; 0.2 (remove what the SDK replaces) not started |
+| 1 | Toolkit Core | M1 Toolkit | – | ✅ Done (1.1–1.5) |
+| 2 | Tool Packs | M1 | 1 | ✅ Done (2.1–2.5) |
+| 3 | Agent Definitions and Skills | M1 | 1, 2 | Not started |
+| 4 | _(removed: no sandbox)_ | – | – | – |
+| 5 | Job Platform (PostgreSQL + Procrastinate) | M2 Compute | 1, 6 | Not started |
+| 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | ✅ 6.1–6.5 done; 6.6 (agent transcripts, user approvals; decision 2026-10-19) not started |
+| 7 | Modeling Engine, Heavy Tools as Jobs + `run_modeling` | M2 | 0, 2, 5, 6 | 🟡 7.0–7.2 done (engine, rename, legacy records); jobs wait for Plan 5 |
+| 8 | Validator and Diff Engine | M3 | 1, 6 | ✅ 8.1–8.4 done (`ce5a777e`, `3ac5411c`); the 2026-10-19 follow-up (`seed_from`, `approval`) not started |
+| 9 | Claude Agent SDK Engine, Session Store and Model Gateway (LiteLLM) | M3 | 1, 3, 6 (6.6 for 9.5) | Not started |
+| 10 | Executor, Node Runner, Watchdog | M3 | 5, 6, 8, 9 | Not started |
+| 11 | Runtime Guardrails, Modes, Approvals | M3 | 5, 6, 8, 10 | Not started |
+| 12 | Session Layer: Inbox, Main Loop, Context, Skills, Planner | M3 | 8, 9, 10, 11 | Not started |
+| 13 | Recovery and Privacy | M4 Hardening | 10, 11, 12 | Not started |
+| 14 | _(removed: no MCP edge for now, 2026-10-20)_ | – | – | – |
+| 15 | MONAI Jobs + Segmentation Client | M5 Job fixes | 5 (Phase 5.1 only); the review of 15.4 needs Phases 9.3 (`ask_user`) and 6.6 (`auto` review values) | Not started |
+| 16 | Other Job Systems | M5 | 5, 15 | Not started |
+| 17 | Cut-over, AutoGen Removal, Cleanup, Docs | M6 | all | Not started |
 
 **Implementation order:** 0 → 1 ✅ → 6.1 ✅ → 2 → 3 → 5 → 6.2–6.5 → 7 → 8 → 6.6 → 9 → 10 → 11 → 12 → 13 → 15 → 16 → 17.
 
-This is the dependency order. Since 2026-10-20 it is followed inside each of the two phases: Phase 1 takes the Phase 1 parts of Plans 0, 3, 7, 9, 10, 11, 12, 15 and 17; Phase 2 takes Plan 5, Phase 6.6, the Plan 8 follow-up, Plans 13 and 16, and the rest of every plan.
+This is the dependency order. Since 2026-10-20 the five parts of `team-plan.md` are built in parallel against contracts and fakes, so it does not say who works when.
 
-## Two phases and the team
+## The team
 
-How the remaining work is split into two phases and between five people (what Phase 1 must deliver, the Phase 1 interim rules, the scope of each plan per phase, the frontend rule, who does what, the contracts, the sync points, the working rules and the folder owners) is in [team-plan.md](team-plan.md).
-
----
+How the remaining work is split between five people (the five parts, the first working flow, the contracts, the working rules and the folder owners) is in [team-plan.md](team-plan.md).
 
 ---
 
-# Plan 0 — Runtime: Python 3.13, PyCaret removed
+---
 
-**Goal:** every image we build runs Python 3.13, PyCaret and its old pins are gone, and the rest of the roadmap is written and tested on 3.13. The MONAI Label image is not touched.
+# Plan 0 — Runtime and cleanup: Python 3.13, PyCaret removed, dead code removed
 
-## Status
+**Goal:** every image we build runs Python 3.13, PyCaret and its old pins are gone, and the rest of the roadmap is written and tested on 3.13. The MONAI Label image is not touched. Then the built code loses what the Claude Agent SDK and the new harness replace (Phase 0.2), so no later plan builds on it.
+
+## Phase 0.1 — Runtime (status)
 
 Built (2026-10-06): the agents image is `python:3.13.16-slim` with PyRadiomics pinned to `@8ed5793` and no PyCaret; `requirements.txt` (still UTF-16 LE with CRLF) has `numpy>=2.3,<3`, `shap`, `lightgbm`, `xgboost` and `joblib`. The Application API image is `python:3.13-slim`. `Backend/tests/runtime/test_image_smoke.py` (marker `docker`) checks the image inside `deterministic-tests`. The MONAI image stays on Python 3.10. `mcp` is pinned `>=1.17,<2` until AutoGen is deleted (its `autogen_ext` import needs it). Known limit: the `LBP3D` image type produces no features (SciPy 1.17 removed `sph_harm`); the default types are not affected.
 
-**What is left (Phase 1):** `backend-tests.yml` passes; then Plan 0 is done.
+**What is left:** `backend-tests.yml` passes; then Phase 0.1 is done.
+
+## Phase 0.2 — Remove what the SDK and the new harness replace
+
+Code built in Plans 1, 2 and 8 that the Claude Agent SDK (or the Node Runner and Node inputs) now does. Nothing new depends on it, and the frozen AutoGen path cannot run its tools anyway, so it is deleted first, with its tests. Removals that need a replacement to exist first are listed where the replacement is built (*Removed later*, below).
+
+1. **`toolkit/` (Plan 1):**
+   - `delegation/run_agent.py` and `delegation/agent_as_tool.py`, their tests, and the `run_agent` tool: delegation is the SDK's subagents (Phases 9.6, 12.5); the `delegation/` package goes;
+   - `ToolSpec.for_caller` and the binding in `tools/registry.py` (only `run_agent` used it);
+   - `ToolContext.depth` (the SDK limits subagent depth with `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`); `for_subagent()` keeps only the `subagent` tag;
+   - `ToolContext.mailbox` (no user: a message to a running agent is the SDK's streaming input, Phase 12.2 `node_message`);
+   - `AgentSpec.human_in_the_loop` (questions are `AskUserQuestion` and the `ask_user` forms, Phase 9.3);
+   - in `catalog.py`: `CONTROL_FORBIDDEN_TOOLS` (`run_agent`, `plan`, `recover`) and `IndexAudience.COMPOSER` (the Composer is the Main's subagent and uses the Main's index). The comments that say internal agents are reached through `run_agent` now say SDK subagents.
+2. **`planning/graph_model.py` (Plan 8):** `RecoveryProposal` (the Recovery Agent answers in text with an optional `proposal_id`, Phase 13.1).
+3. **`toolpacks/bookkeeping/` (Plan 2):**
+   - `scratchpad_register_agent` and `scratchpad_set_status`: a run's lifecycle is the Node Runner's and T4–T6's;
+   - `scratchpad_read_agent`, `scratchpad_read_report`, `read_agent_output`, `read_all_agent_outputs`: an agent gets upstream results from its **Node inputs**; the reporter's prompt text in `reporting/template_tools.py` that names `read_all_agent_outputs` is updated;
+   - `read_agent_task_context`: the task and the inputs are the first message of the run (`context_builder`), and then they are in the agent's saved SDK session.
+4. **Tests:** the deleted tools leave the Definition of Ready table; the catalog counts and `test_boundary.py` follow.
+
+**Removed later, where their replacement is built:**
+
+| What | Removed in | Replaced by |
+|---|---|---|
+| `write_agent_output` (and its view hook branch) | Phase 10.1 | the SDK's structured output (`output_format`), written by the Node Runner at T6, which also shows the agent's view and clears the run's temp dirs |
+| `scratchpad_write_note` | Phase 12.7 | the SDK's `TaskCreate` / `TaskUpdate`, shown on the canvas as `agent_task` events (the execution view, `views/execution/utils.ts`, reads them instead of the notes) |
+| `scratchpad_write_summary`, `scratchpad_raise_flag` | Phase 3.2 (decided there) | the agent's `output_contract`, if its summary and flags become part of its structured output |
+| `common/llm.py` on `client_config` | Phase 9.7 | the Model Gateway's `extraction` profile through LiteLLM |
+| `client_config.py` provider settings, `/client-config` keys and URLs | Phase 9.2 | LiteLLM aliases per profile |
+| `agent_checkpoints` tables, routes, repositories; the Main's tool-call contract in `chat_messages`; `main_idempotency_key(turn_id, call_id)` | Phase 6.6 (migration "t") | the SDK's transcripts (`agent_transcript_entries`, `main_transcript_entries`) and `sha256(session_id‖tool_use_id)` |
+| `apply(…, turn_id, call_id)` in the Diff Engine | Plan 8 follow-up | `apply(…, session_id, tool_use_id)` |
+
+**Done when:** the deterministic gate passes, the catalog loads with the tools above gone, and no source file names a removed symbol.
 
 ---
 
@@ -218,9 +250,9 @@ Built (2026-10-06): the agents image is `python:3.13.16-slim` with PyRadiomics p
 
 - **Contracts:** `manifest.py` (the manifest enums), `tools/spec.py` (`ToolSpec`: identity, handler, input model, input and output ports, the manifest fields `execution`, `side_effects`, `cost`, `resources`, `trust`, `isolation`, `data_scopes`, `visibility`, `timeout_s`, and hooks such as `on_result`), `tools/consistency.py` (`check_manifest()`), `ports.py`, `agents/spec.py` (`AgentSpec`), `context.py` (`ToolContext`: `session_id`, `run_id`, `attempt_id`, `node_id`, and live fields left out of `to_payload()`, `cancel` among them), `events.py`, `results.py` (`error_result`, `RunAccepted {node_id, change_id, status}`).
 - **Artifact types** (`artifacts/builtin.py`): `Cohort`, `ImageSet`, `MaskSet`, `FeatureTable`, `FeatureImportance`, `ModelingOutput`, `LiteratureContext`, `ResultSummary`, `ReportDocument`.
-- **Registries and catalog:** `registry.py` (a generic `Registry[T]`), `tools/registry.py` (`@tool`), `agents/registry.py`, `catalog.py` (`build()`, `validate()`, `resolve()`, `index(audience)`, `describe()`). `build()` walks the packs and re-raises a broken import; it refuses a control agent with `delegates`.
+- **Registries and catalog:** `registry.py` (a generic `Registry[T]`), `tools/registry.py` (`@tool`), `agents/registry.py`, `catalog.py` (`build()`, `validate()`, `resolve()`, `index(audience)`, `describe()`). `build()` walks the packs and re-raises a broken import; it refuses a control agent with `delegates` (Phase 3.4 lifts this for `main_agent`, whose subagents are the Composer and the Recovery Agent).
 - **Dispatch** (`runtime/dispatch.py`), the one way to run a tool: `Dispatcher(before_invoke=…, runners={Execution.INLINE: run_inline})`; the job runner plugs in through `runners` (Plan 5). A `before_invoke` hook returns `None` to let the call through, or a value that answers instead of the tool (a refusal or an approval request). The budget is `timeout_s + queue_timeout_s`. Dispatch sends `tool_started` / `tool_finished` / `error` for every call. `runtime/session_sink.py` has `SessionEventSink(session, manager)`.
-- **Delegation:** `delegation/agent_as_tool.py` (`make_agent_tool(name, agent, contract, post)`; `post` gets an `ask(feedback)` function that re-runs the agent, which `plan` uses to repair a proposal). `delegation/run_agent.py` is removed in Phase 9.6.
+- **Delegation:** `delegation/agent_as_tool.py` and `delegation/run_agent.py` exist and are both removed (Phases 9.6 and 12.5): delegation is the SDK's subagents.
 - **Engine protocol:** `agents/engine.py` (`AgentEngine`, `FakeAgentEngine`); Phase 9.3 extends it.
 - **Tests:** `tests/support/toolkit_fixtures.py` (`call_tool`, `make_context`), loaded from `tests/unit/toolkit/conftest.py` (the root conftest also runs in the Python 3.10 MONAI image). `test_boundary.py` keeps AutoGen and the Claude Agent SDK out of `toolkit/`, except `engines/`.
 
@@ -273,10 +305,12 @@ Built (2026-10-06): the agents image is `python:3.13.16-slim` with PyRadiomics p
    ```
    **Claude Agent SDK fields** (decision 2026-10-19, used by Plan 9):
    - `resumable` (default `true` for `execution`, `false` for `control` and `internal`): the node keeps a saved SDK session (`session_id = run_id`, `HttpSessionStore`), and a retry attempt resumes it (D27);
-   - `gate_timeout_s` (default `null`, no limit): how long a suspended attempt (an `ask_user` question or a tool approval) may wait before the Watchdog cancels it. It is separate from `timeout_s`, which counts only running time;
+   - `gate_timeout_s` (default `null`, no limit): how long a suspended attempt (a question, a form or a tool approval) may wait before the Watchdog cancels it. It is separate from `timeout_s`, which counts only running time;
    - `effort` (optional): the SDK's reasoning effort for this agent; the profile's default otherwise;
    - `max_context_tokens` (optional): the compaction threshold, kept only if the Phase 9.0 spike finds a per-session setting; otherwise the SDK's automatic compaction applies;
-   - every `execution` agent gets `ask_user` implicitly (Phase 9.3); it is not listed in `allowed_tools`;
+   - `max_tool_iterations` becomes the SDK's `max_turns`; `max_budget_usd` (optional) becomes the SDK's `max_budget_usd` for one run;
+   - `skills` (optional, default none): the SDK skills this agent may load, from the `cubeai` plugin (Phase 3.5);
+   - every `execution` agent gets the SDK's `AskUserQuestion` (free questions) and `TaskCreate` / `TaskUpdate` (progress steps) implicitly; an agent that owns a domain form (population, segmentation) also gets `ask_user` (Phase 9.3). None of them is listed in `allowed_tools`;
    - `delegates` are the agent's SDK subagents (Phase 9.6); there is no `workflow` field and no `gates` field (decision 2026-10-19: approvals come from what the user asks for, D28). `human_in_the_loop` is removed from `AgentSpec`.
 2. **Hooks:** an optional `hooks.py` next to the file exports `completion_check`, `context_builder`, `allowed_tools_fn` and the output-port `extract` functions.
 3. **`toolkit/agents/loader.py`:** reads the front matter with `yaml.safe_load`, validates it with a Pydantic model, attaches the hooks and returns an `AgentSpec`. `catalog.build()` calls it for every `agent.md` file under `agentpacks/`.
@@ -290,7 +324,7 @@ Built (2026-10-06): the agents image is `python:3.13.16-slim` with PyRadiomics p
 | `feature_extraction_agent` | `feature_extraction_agent.py:47-132` | `cohort: Cohort`, `masks: MaskSet` | `features: FeatureTable`, `importance: FeatureImportance` (optional) | Calls the radiomics job tools |
 | `result_reporter_agent` | `result_reporter_agent.py:52-106` | `modeling: ModelingOutput`, `features: FeatureTable` (optional) | `summary: ResultSummary` | Uses its real id (not `"result_agent"`) |
 | `latex_reporter_agent` | `reporter_agent.py:49-105` | `summary: ResultSummary`, `literature: LiteratureContext` (optional) | `report: ReportDocument` | |
-| `literature_review_agent` | `literature_review_agent.py` | – (params: question / PICO) | `literature: LiteratureContext` | An ordinary agent: its 5 internal agents are optional subagents (`delegates`), and nothing fixes their order (Phase 9.6) |
+| `literature_review_agent` | `literature_review_agent.py` | – (params: question / PICO) | `literature: LiteratureContext` | An ordinary agent: its 5 internal agents are optional subagents (`delegates`), and nothing fixes their order (Phase 9.6). **Its first version runs with no `delegates`** (the subagents follow): one prompt covering the PICO, the queries, the search, the ranking and the compiling, over its 6 tools. Its `context_builder` calls `literature.run_state.use_pico(run_id, pico)`; its output hook calls `release(run_id)`, records the review, and sends `lit_review_output` (today only the frozen `planning_agents/planner.py:1022` sends it), so `LiteratureReviewView` keeps working |
 
 **Prompt work** (L14, plus the move to the graph): copy each prompt from `system_prompts/system_messages.py`, which stays frozen, into its `agent.md`. Then:
 
@@ -298,7 +332,9 @@ Built (2026-10-06): the agents image is `python:3.13.16-slim` with PyRadiomics p
 - remove the register / set_status instructions (the Node Runner owns them);
 - use one segmentation tool name;
 - read upstream data from the **"Node inputs"** section that the Node Runner provides, not by reading the scratchpad by agent id;
-- remove every fixed wait for an approval; say instead: "if the node instructions say the user wants to approve or be consulted, use `ask_user` at that point" (D28).
+- remove every fixed wait for an approval; say instead: "if the node instructions say the user wants to approve or be consulted, ask at that point" (`AskUserQuestion` for a question, `ask_user` for the cohort or mask form; D28);
+- say that the agent records its main steps with `TaskCreate` / `TaskUpdate`, which the canvas shows as progress;
+- **decide here:** if an agent's summary and its warnings become part of its `output_contract` (the SDK's structured output), `scratchpad_write_summary` and `scratchpad_raise_flag` are deleted in the same change, and the canvas reads the summary and the warnings from `outputs` (Phase 0.2, *Removed later*).
 
 **There is no `modeling_agent`** (decision 6).
 
@@ -319,54 +355,56 @@ Built (2026-10-06): the agents image is `python:3.13.16-slim` with PyRadiomics p
   All are copied from `literature_review_agent.py:1528-1560`. The parent lists them under `delegates`; they are its SDK subagents (Phase 9.6), and the parent decides whether and when to use each one. `search_executor` and `relevance_ranker` keep a prompt written for one source or one paper, so the parent can run several of them at once.
 
 - **Internal agents become `AgentDefinition`s** (Phase 9.6): their `description` tells the parent when to use them, their prompt is the subagent's system prompt, and their `allowed_tools` are the subagent's tools.
-- **`catalog.validate()` additions:** an internal agent's tools are visible to agents; an internal agent has no `delegates` (subagent depth 1); `ask_user` is never listed explicitly.
+- **`catalog.validate()` additions:** an internal agent's tools are visible to its parent; an internal agent has no `delegates` (subagent depth 1); `ask_user`, `AskUserQuestion` and the task tools are never listed explicitly.
 
-## Phase 3.4 — Control agents (3, in `agentpacks/core/`)
+## Phase 3.4 — The Main Agent and its two subagents (in `agentpacks/core/`)
 
-1. **`main_agent`:**
-   - The prompt states system §1, §5 and §21: decide, never wait, answer directly when that is enough, submit work with `execute` / `graph_apply`, and use `plan` whenever it helps. **No rule forces the planner.**
+1. **`main_agent`** (`kind: control`):
+   - The prompt states system §1, §5 and §21: decide, never wait, answer directly when that is enough, submit work with `execute` / `graph_apply`, and ask the `composer` subagent for a plan whenever it helps (and wait for its answer). **No rule forces the planner.**
    - It also says how to carry the user's approval wishes into the graph (D28): "approve after every step" → `approval: after` on each node it submits; "ask me before each step" → `approval: before`; "ask me about X inside a step" → say so in that node's `params.task`; no wish → no approval. It is guidance, not a harness rule.
-   - `allowed_tools_fn` = all tools with `main` visibility (what it may **call**). What it may **use as a node** comes from the compact index in its context (`catalog.index("main")`, every entry with `use: call` or `use: node`, Plan 12.3), so it can build a plan without the Composer. `model_profile: main`.
-2. **`composer`:**
-   - `output_contract` = `GraphProposal`; `allowed_tools_fn` = the read-only `main` tools, except `plan` and `recover`;
-   - its prompt says it **never** applies or executes anything. `model_profile: composer`.
-3. **`recovery_agent`:**
-   - `output_contract` = `RecoveryProposal {diagnosis, diff | None, user_message}`;
-   - the read-only `main` tools, except `plan` and `recover`. `model_profile: recovery`.
+   - `allowed_tools_fn` = all tools with `main` visibility (what it may **call**). What it may **use as a node** comes from the compact index in its system prompt (`catalog.index("main")`, every entry with `use: call` or `use: node`, Plan 12.3), so it can build a plan without the Composer. `delegates: [composer, recovery_agent]` (its SDK subagents); `skills: [research_study, modeling]`; `model_profile: main`.
+2. **`composer`** (`kind: internal`, `parent: main_agent`):
+   - tools: the read-only `main` tools (`graph_inspect`, `registry_search`, `registry_describe`, `artifact_read`) and `graph_propose`;
+   - its prompt says it **never** applies or executes anything: it proposes with `graph_propose`, reads the Validator's errors in the result, proposes again until there are none, and ends with the `proposal_id` and a short explanation. The repair loop is the SDK's own agent loop; there is no repair code of ours. `skills: [research_study, modeling]`; `model_profile: composer`.
+3. **`recovery_agent`** (`kind: internal`, `parent: main_agent`):
+   - the same tools as the Composer;
+   - its prompt says it diagnoses the failed node it is given, may propose a fix with `graph_propose` (a `RerunNode`, new params, a `seed_from`), and ends with the diagnosis, the optional `proposal_id` and a message for the user. It never applies anything. `model_profile: recovery`.
 
 **Notes:**
 
-- Control agents choose their tools by visibility and never list tool names. This keeps `validate()` passing before the control tools exist (Plans 12–13).
-- This phase creates `planning/graph_model.py` with only the `GraphDiff`, `GraphProposal` and `RecoveryProposal` models, so that the output contracts resolve. Plan 8 fills in the rest of the graph model.
+- `catalog.validate()` accepts `delegates` on `main_agent` only among control agents; the Composer and the Recovery Agent are internal agents of the Main (subagent depth 1).
+- The Main chooses its tools by visibility and never lists tool names, so `validate()` passes before the control tools exist (Plan 12).
+- This phase creates `planning/graph_model.py` with only the `GraphDiff` and `GraphProposal` models (the input of `graph_propose`). Plan 8 fills in the rest of the graph model.
 
-## Phase 3.5 — Skills (`agent_system/skills/*.md`)
+## Phase 3.5 — Skills (the SDK's skills, from `agent_system/skills/cubeai/`)
 
-1. **The format:** front matter with `name`, `description` and `applies_to` (a list of `main`, `composer` or agent types); the body is guidance text.
+1. **The format: the SDK's own skills** (decided 2026-10-20). `agent_system/skills/cubeai/` is a local SDK plugin (`.claude-plugin/plugin.json` with `name: cubeai`) that holds **only** `skills/<name>/SKILL.md` files: no `agents/`, `hooks/`, `commands/` or `.mcp.json`. A `SKILL.md` has front matter with `name` and `description` (the description tells the model when to load it), and its body is guidance text.
+   - **Who gets which skill:** an `agent.md` lists its skills by name (`skills: [modeling]`; the default is none). The engine passes the list to the SDK (Phase 9.4), so a session sees only its own skills and never the CLI's bundled ones.
+   - **How a skill is used:** the SDK shows the listed skills' descriptions to the model, and the model loads a body with the `Skill` tool when it needs it. Nothing of ours builds an index, and there is no `skill_load` tool.
+   - **Forbidden in a `SKILL.md`:** `allowed-tools` and other permission fields in the front matter, and `` !`command` `` lines (they run a shell command before the model sees the skill). A skill is text only.
 2. **Initial skills:**
 
-   | Skill | Content copied from |
-   |---|---|
-   | `research_study` | The HypothesisArchitect and PipelineArchitect prompts in `planning_agents.py` (PICO; the typical radiomics flow) |
-   | `modeling` | The `modeling_agent.py:36-99` prompt: choosing the target, task type, comparisons and folds, rewritten as advice on `run_modeling` params and the engine's estimator ids (Plan 7). No PyCaret names or PyCaret functions. |
-   | `cohort_building` | The population agent prompt (criteria, labels, cohort size) |
-   | `segmentation_choices` | The segmentation prompt (model families, review) |
-   | `reporting` | The result and LaTeX reporter prompts |
+   | Skill | Content copied from | Used by |
+   |---|---|---|
+   | `research_study` | The HypothesisArchitect and PipelineArchitect prompts in `planning_agents.py` (PICO; the typical radiomics flow) | `main_agent`, `composer` |
+   | `modeling` | The `modeling_agent.py:36-99` prompt: choosing the target, task type, comparisons and folds, rewritten as advice on `run_modeling` params and the engine's estimator ids (Plan 7). No PyCaret names or PyCaret functions. | `main_agent`, `composer` |
+   | `cohort_building` | The population agent prompt (criteria, labels, cohort size) | `study_population_planner_agent` |
+   | `segmentation_choices` | The segmentation prompt (model families, review) | `segmentation_agent` |
+   | `reporting` | The result and LaTeX reporter prompts | `result_reporter_agent`, `latex_reporter_agent` |
 
 3. **Rule:** a skill is guidance text. It never routes and never forces a workflow.
-4. **Open decision: how the skills reach the agents** (2026-10-20). Whoever builds Phases 3.5 and 12.6 chooses one option before building them, and records the choice here. The content of item 2 and the rule of item 3 are the same either way.
-   - **Option A: our own loader** (the design in items 1–3 and Phase 12.6). `skills/*.md` with `applies_to`; `harness/skills_loader.py` builds an index per audience; the index goes into the prompt, and the `skill_load` control tool returns a body. Everything is ours and nothing depends on an SDK feature; it costs the loader, the tool and the index.
-   - **Option B: the SDK's own skills.** Each skill is a `SKILL.md` in one read-only local plugin (`agent_system/skills/cubeai/`, holding only `skills/<name>/SKILL.md`), loaded with the SDK's `plugins` option while `setting_sources=[]` stays. Each `agent.md` lists its skills by name (`skills: [modeling]`; none for internal agents), and the engine passes `skills=["cubeai:<name>", …]`, so a session sees only its own skills and never the CLI's bundled ones. The model loads a body with the SDK's `Skill` tool, which is then left out of `disallowed_tools`; the PreToolUse hook lets it through for listed skills only. There is no loader index and no `skill_load` (74 tools instead of 75); `/skills` still reads the front matter. A `SKILL.md` may not carry `allowed-tools` or `` !`command` `` lines (they run a shell command), and a test checks it. **Before choosing it, verify on the pinned SDK:** the plugin loads with `setting_sources=[]`; the `skills` list hides every other skill; leaving `Skill` out of `disallowed_tools` gives back no other built-in tool; a `Skill` call reaches the PreToolUse hook; unknown front-matter fields are ignored; and the `Skill` tool works through LiteLLM on the local Ollama alias.
+4. **Internal agents** list no skills, except the Main's two subagents (the SDK's `AgentDefinition.skills`).
 
 **Tests (`tests/unit/agentpacks/`):**
 
 - loader errors (bad front matter, unknown port type, missing prompt);
 - each spec's allowlist, iterations and ports; the conditional tool; the `completion_check` wiring;
 - the SDK fields: `resumable` defaults per kind; `effort` values; an internal agent with `delegates`, and an explicit `ask_user` in `allowed_tools`, are refused; the old fields `gates`, `workflow` and `human_in_the_loop` are refused with a clear error;
-- the skills index; `catalog.validate()` passes with all agents.
+- the skills: every name in an agent's `skills` has a `SKILL.md` in the plugin; the plugin holds nothing but `skills/`; no `SKILL.md` has `allowed-tools` or a `` !`command` `` line; `catalog.validate()` passes with all agents.
 
 **Done when:**
 
-- the catalog has **16 agents** (3 control, 6 execution, 7 internal) and `validate()` passes; at the end of Phase 1 it has the **9** Phase 1 agents (2 control, 5 execution, 2 internal) and `validate()` passes;
+- the catalog has **16 agents** (1 control, 6 execution, 9 internal: the Main's 2, segmentation's 2, literature's 5) and `validate()` passes; at the first working flow it has **10** (`main_agent`, `composer`, the 6 execution agents, the 2 segmentation internal agents) and `validate()` passes;
 - every execution agent declares its ports.
 
 ---
@@ -547,18 +585,23 @@ Implements Appendix P revision 3.4 (D27 rewritten, D28 new; §P.9 *Cut-over 3*).
 
 1. **The migration:**
    - drops `agent_checkpoints` and `agent_checkpoint_writes` (they hold no production data: nothing has written them outside tests) and creates `agent_transcript_entries` with the shared fencing trigger;
+   - creates `main_transcript_entries` (the Main's saved SDK session, D21): key `(session_id, subpath, seq)`, unique `(session_id, subpath, entry_uuid)`, rows immutable; not an execution table, so no fencing trigger;
    - `run_attempts`: adds `pending_tools`; the `suspension` contract becomes `v:2` (`kind: ask_user|tool_approval|pause`, `tool_use_id`, no `checkpoint_id` or `interrupt_id`);
    - `graph_nodes`: adds `approval` (`none|before|after`, default `none`) and `start_released_by_change_id`;
    - `node_runs`: the `downstream_hold` CHECK accepts `user_review`;
    - the automatic-approval values: `cohorts.frozen_by` (`user|auto`), `segmentation_batches.review_status` gains `auto_accepted`, `segmentation_pairs.review_decision` gains `auto`;
+   - `chat_messages`: drops the Main's tool-call contract (the unique index on `(chat_id, turn_id, call_id)` for `tool_result` rows and the trigger that pairs a `tool_result` with its `tool_calls` row); the Main's tool calls are in its SDK transcript (D21). Existing rows stay as history;
    - `downgrade()` refuses when any transcript entry, `approval` other than `none`, `user_review` hold or automatic-approval value exists.
 2. **Repositories and transactions:**
    - `append_transcript` / `load_transcript` / `list_transcript_subpaths` (attempt path for writes: the run's latest attempt, `running` or `suspended`; reads by any attempt of the run, and by the first attempt of a run whose frozen `seed_from` names it);
-   - `purge_transcripts` (harness path; runs terminal for more than `AGENT_TRANSCRIPT_RETENTION_DAYS`, default 14, that no live `seed_from` names);
+   - `purge_transcripts` (harness path; runs terminal for more than `AGENT_TRANSCRIPT_RETENTION_DAYS`, default 14, that no live `seed_from` names; and the Main transcripts of sessions archived longer than the same retention);
+   - `append_main_transcript` / `load_main_transcript` / `list_main_transcript_subpaths` (owner-checked; one writer by the single-worker rule);
    - `set_pending_tools` (attempt path; the attempt's own column);
    - **T2:** an `approval` change is a definition edit; editing or rerunning a node clears `start_released_by_change_id`; a `ReleaseHold` on an `approval: before` node that has not started sets `start_released_by_change_id`; a `ReleaseHold` that releases a `user_review` hold or a start hold is refused unless the change's author is `user`;
    - **T4:** refuses the start of an `approval: before` node until `start_released_by_change_id` is set (`NEEDS_RELEASE`); retry rule (f) reads the latest attempt's `pending_tools`; a run whose latest attempt failed with `transcript_write_failed` is never retried automatically; a seeded first start only checks the seed (it exists, belongs to a run of the same node, the `privacy_mode`, `spec_digest` and `engine_version` match) and freezes `seed_from.applied`: the copy is the SDK's fork (Plan 9.4);
    - **T6:** an `approval: after` node's completed current run gets `downstream_hold = 'user_review'` and publishes `approval_requested`;
+   - **T1 / T2:** they stop writing the Main's `tool_result` row into the chat (the Main's tool results are in its SDK transcript, D21 revised 2026-10-20); the idempotency key of a Main change is `sha256(session_id‖tool_use_id)`: `main_idempotency_key(session_id, tool_use_id)` in `repositories/graph_changes.py`, and the change schema's `tool_call {turn_id, call_id}` becomes `{session_id, tool_use_id}`;
+   - **Removed code:** the `agent_checkpoints` models, repositories, schemas and routes;
    - **T10:** suspend and resume as before, with the `v:2` suspension; the answer step (user path) records `suspension.resume = {answer | decision, comment, decided_at}` and, for a domain form, the domain columns in the same transaction.
 3. **Routes:**
 
@@ -570,6 +613,7 @@ Implements Appendix P revision 3.4 (D27 rewritten, D28 new; §P.9 *Cut-over 3*).
    | PUT | `/runs/{run_id}/attempts/{attempt_id}/pending-tools` | Set the attempt's pending calls (attempt path) |
    | POST | `/runs/{run_id}/attempts/{attempt_id}/answer` | T10 answer for an `ask_user` question or a tool approval; body `{tool_use_id, answer? , decision?, comment}`; user only. Replaces `/gate-decision` |
    | POST | `/agent-transcripts/purge` | Retention purge (harness path) |
+   | POST, GET | `/sessions/{session_id}/main-transcript` (`?subpath=`), `/sessions/{session_id}/main-transcript/subpaths` | The Main's saved session (append, load, subpaths); a replayed `entry.uuid` is a no-op |
 
    Removed: `/runs/{run_id}/checkpoints*`, `/runs/{run_id}/checkpoint-writes`, `/runs/{run_id}/steps` (the step timeline moves to the Agent System, which reads it with the SDK's helpers, Plan 12.7), `/agent-checkpoints/purge`, `/gate-decision`. The domain form routes (`/populations/approve-cohort`, the segmentation review) also run the T10 answer step when an attempt is suspended on that form.
 4. **Agent System client:** `HarnessClient` and `GraphStore` get the transcript, pending-tools and answer methods and lose the checkpoint ones; `InMemoryGraphStore` keeps the same invariants (transcript fencing, `NEEDS_RELEASE`, user-only release).
@@ -598,7 +642,7 @@ Done (2026-10-06):
 
 ## Phase 7.1 — Manifests and ports of the heavy tools
 
-**Base manifest for all 7 heavy tools** (Phase 2: the job fields; Phase 1 keeps them `INTERIM_HEAVY`, inline, with the ports and visibility below):
+**Base manifest for all 7 heavy tools** (the job fields come with the job platform; until then they stay `INTERIM_HEAVY`, inline, with the ports and visibility below):
 - `execution="job"`, `side_effects="compute"`, `cost="heavy"`, `resources=["cpu_heavy"]`;
 - `trust="first_party"`, `isolation="process"`.
 
@@ -635,7 +679,7 @@ The worker runs the same handlers, so no wrapper code is needed.
 Fix H1–H18 (Appendix C). Two of them change code outside the tools:
 
 - H12 changes `application_api/repositories/radiomics.py`, so that reused rows are linked to the current run, unless `execution_policy.fresh` is set; then nothing produced by another run is reused (Appendix P).
-- H13 changes `toolpacks/bookkeeping/agent_output.py`: skip the temp cleanup while `JobClient.list(run_id, active_only=True)` is not empty.
+- H13: the run's temp cleanup (now done by the Node Runner at completion, Phase 10.1, since `write_agent_output` is gone) is skipped while `JobClient.list(run_id, active_only=True)` is not empty.
 
 ## Phase 7.5 — Progress and hooks
 
@@ -728,7 +772,7 @@ There is no `CYCLE_DETECTED`, `DANGLING_REF` or `REMOVE_WITH_DEPENDENTS`. Removi
    | running | continues | `on_running="restart"`: superseded, its attempt gets a cancel request, and the next start (after the stop is confirmed) creates a new run. Otherwise: `RUNNING_NODE_AFFECTED` |
    | completed / failed | its current run stays; that is the reuse | superseded, never deleted; the next start creates a new run; a completed run adds `supersedes_completed` |
 
-2. **`apply(diff, author, turn_id?, call_id?)`:** runs the Validator, then `GraphStore.submit_change`: T2 when there are no approval reasons, T1 otherwise. For the Main the idempotency key is `sha256(turn_id‖call_id)`. On success it wakes the Executor (`graph_changed`). The durable events come from the Application API.
+2. **`apply(diff, author, turn_id?, call_id?)`:** runs the Validator, then `GraphStore.submit_change`: T2 when there are no approval reasons, T1 otherwise. For the Main the idempotency key is `sha256(turn_id‖call_id)` (the follow-up below changes it to `sha256(session_id‖tool_use_id)`). On success it wakes the Executor (`graph_changed`). The durable events come from the Application API.
 3. **`decide(change_id, decision, content_digest)`** for user decisions (Plan 11).
 
 **Tests (`tests/unit/planning/`, `tests/unit/execution/test_diff_engine.py`):**
@@ -748,6 +792,7 @@ Phases 8.1–8.4 are built (`ce5a777e`, `3ac5411c`). The decision of 2026-10-19 
 1. **`seed_from`:** `SeedFrom.checkpoint_id` becomes `message_uuid` in `planning/graph_model.py`, `application_api/core/graph_content.py` and the `BAD_SEED` check of `planning/validator.py`; the "agent nodes only, `resumable` only, a run of the same node" rules stay.
 2. **`approval`:** `NodeDef.approval` (`none | before | after`, default `none`) in the graph model and in `ChangeContent`; changing it is an edit, so it is in the affected set like any definition change.
 3. **`ReleaseHold`:** `apply(diff, author, …)` refuses a `ReleaseHold` that would release a `user_review` hold or a start hold unless `author == "user"` (`USER_RELEASE_REQUIRED`); T2 enforces the same rule.
+4. **The Main's idempotency key** (decision 2026-10-20, the Main's saved SDK session): `apply(diff, author, session_id?, tool_use_id?)`, key `sha256(session_id‖tool_use_id)`; there is no `turn_id` / `call_id` any more.
 
 **Tests:** the existing Validator and Diff Engine suites with the new `SeedFrom` shape; an `approval` edit is affected; the `USER_RELEASE_REQUIRED` refusal; the A→New→B example with `approval: after` on A.
 
@@ -755,9 +800,28 @@ Phases 8.1–8.4 are built (`ce5a777e`, `3ac5411c`). The decision of 2026-10-19 
 
 # Plan 9 — Claude Agent SDK Engine, Session Store and Model Gateway (LiteLLM)
 
-**Goal:** real LLM execution for every agent through the Claude Agent SDK (Python, `claude-agent-sdk`), with every model reached through LiteLLM (decided 2026-10-19). Agent nodes keep a saved SDK session per run, stored through the Application API (Appendix P D27), so a retry continues instead of reasoning again. An agent that asks the user, a mandatory tool approval and a pause suspend the attempt instead of holding a process. Internal agents are SDK subagents. The Main runs on the same engine without a saved transcript (D21); the Composer and the Recovery Agent are one-shot calls.
+**Goal:** real LLM execution for every agent through the Claude Agent SDK (Python, `claude-agent-sdk`), with every model reached through LiteLLM (decided 2026-10-19). Agent nodes keep a saved SDK session per run, stored through the Application API (Appendix P D27), so a retry continues instead of reasoning again. An agent that asks the user, a mandatory tool approval and a pause suspend the attempt instead of holding a process. Internal agents are SDK subagents. The Main runs on the same engine with its own saved session (D21); the Composer and the Recovery Agent are its subagents. Every feature the SDK has (compaction, subagents, skills, questions, permissions, limits, progress, usage) is configured here, never rebuilt.
 
 **Where the SDK sits:** the SDK is the loop of one agent (model call → tool calls → results → repeat), with context management, compaction, hooks, subagents and saved sessions. It never decides what runs next in the session; the Executor does. Its tools are CUBE.AI tools served from our process, so every call still goes through `dispatch.invoke` and the Guardrails.
+
+**What the SDK does, and what we only configure:**
+
+| Need | SDK feature | Our part |
+|---|---|---|
+| The agent loop, parallel read-only tools | the loop, `readOnlyHint` | the tool bridge (item 1 of 9.4) |
+| Context that outgrows the window | automatic compaction, prompt caching | nothing (the Main included) |
+| Memory across restarts, retries, reruns from a point | saved sessions, `resume`, `fork_session`, `resume_session_at` | `HttpSessionStore` (9.5) |
+| Helper agents, parallel helpers | subagents (`agents=`, `AgentDefinition`) | build the definitions from `agent.md` (9.6) |
+| Guidance loaded on demand | skills (`plugins=`, `skills=`) | the `cubeai` plugin (3.5) |
+| A question to the user | `AskUserQuestion`, `can_use_tool`, PreToolUse `defer` | suspend and resume the attempt (Plan 10) |
+| Blocking or approving a tool | PreToolUse hooks, `disallowed_tools`, the session's tool list | the Guardrails rules that are ours (Plan 11) |
+| Limits | `max_turns`, `max_budget_usd`, `effort` | values from `agent.md` and the profiles |
+| Progress steps | `TaskCreate` / `TaskUpdate` | turn them into canvas events (9.4 item 7) |
+| Usage and cost | `ResultMessage.model_usage`, `total_cost_usd` | write them on the attempt (9.2 item 6) |
+| Filtering a tool result before the model sees it | PostToolUse `updatedToolOutput` | the PHI rule (Plan 13.3) |
+| Final output with a schema | `output_format` | the agent's `output_contract` |
+
+Not in the SDK, so ours: the session-wide wall-clock timeout (the SDK has none), the durable inbox, the graph, the Executor, the job platform, LiteLLM, the database.
 
 **References** (read 2026-10-19): agent loop <https://code.claude.com/docs/en/agent-sdk/agent-loop> · sessions <https://code.claude.com/docs/en/agent-sdk/sessions> · session storage <https://code.claude.com/docs/en/agent-sdk/session-storage> · hooks <https://code.claude.com/docs/en/agent-sdk/hooks> and "Defer a tool call for later" in <https://code.claude.com/docs/en/hooks> · subagents <https://code.claude.com/docs/en/agent-sdk/subagents> · Python reference <https://code.claude.com/docs/en/agent-sdk/python> · gateways <https://code.claude.com/docs/en/llm-gateway-protocol> · LiteLLM <https://docs.litellm.ai/docs/anthropic_unified>.
 
@@ -772,6 +836,12 @@ A short, throwaway check against the pinned SDK version and a local LiteLLM. The
 5. Whether the Python SDK can set a compaction threshold per session. If it cannot, `max_context_tokens` is dropped from `agent.md` (Plan 3).
 6. Through LiteLLM: a Claude alias keeps prompt caching (`cache_read_input_tokens > 0`), structured output and adaptive thinking. An Ollama alias works with `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`, either through LiteLLM's Ollama provider or as an Anthropic-format upstream (Ollama's own `/v1/messages`); record which of the two keeps tool use working.
 7. The bundled CLI runs in the `python:3.13.16-slim` agents image on amd64 and arm64.
+8. **Skills with `setting_sources=[]`:** `plugins=[{"type": "local", "path": <the cubeai plugin>}]` loads its skills (the init message lists `cubeai:<name>`); `skills=["cubeai:<name>", …]` hides every other skill, the CLI's bundled ones included; a `Skill` call reaches the PreToolUse hook; front-matter fields we do not use are ignored; and the `Skill` tool works on the local Ollama alias. Also record what a prompt that starts with `/` does (the SDK dispatches commands and skills by name).
+9. **`AskUserQuestion` with a durable wait:** the PreToolUse hook `defer`s it, the turn ends with `tool_deferred`, and on resume `can_use_tool` returns `PermissionResultAllow(updated_input={questions, answers})` from the recorded answer. Check the permission mode this needs (`dontAsk` denies `AskUserQuestion` even when allowed, so the sessions that use it run in `default` mode with a `can_use_tool` that denies everything else), and that `AskUserQuestion` is not offered to subagents.
+10. **The Main's saved session:** `session_id = <CUBE.AI session id>` with `session_store` set, `resume` after a restart, the SDK's compaction on a long session, and a `UserPromptSubmit` hook that adds the graph summary to each turn (`additionalContext`).
+11. **Subagents of the Main:** the Main calls the `composer` subagent and waits for its answer (subagents may run in the background by default); the subagent's transcript is stored under its `subpath`.
+12. **Task tools:** `TaskCreate` / `TaskUpdate` are offered when named in `allowed_tools` (on every model the deployment uses, the local one included), and their calls appear in the message stream.
+13. **Limits:** `max_budget_usd` ends a run with `error_max_budget_usd`, and counts subagents.
 
 The findings are written into this plan before Phase 9.4 starts.
 
@@ -779,20 +849,20 @@ The findings are written into this plan before Phase 9.4 starts.
 
 - Add `claude-agent-sdk` (pinned exactly; it bundles the Claude Code CLI) to `Backend/agent_system/requirements.txt` (UTF-16 LE, CRLF) and `deploy/Dockerfile.agents`. Add `anthropic` (pinned) for the plain Messages calls of Phase 9.7. **No** `langgraph`, `langgraph-*` or `langchain-*` package.
 - **The CLI's files:** every SDK session runs with `CLAUDE_CONFIG_DIR` set to a fresh per-session directory under `storage_paths` (`temp/`), deleted when the session ends, and with one fixed working directory (`storage_paths`, `cache/agent_cwd/`), so the store key (`project_key`, derived from the working directory) is the same for every run. `install_write_guard()` allows these two trees. Non-essential traffic and telemetry are off (`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`).
-- **One CLI subprocess per running SDK session.** The `llm` pool (`config/resources.yaml`) bounds how many agent nodes run at once. The Main sessions and the Composer / Recovery calls are counted against a separate `llm_control` pool, so a busy graph never blocks the chat.
+- **One CLI subprocess per running SDK session.** The `llm` pool (`config/resources.yaml`) bounds how many agent nodes run at once. The Main sessions (with their Composer and Recovery subagents) are counted against a separate `llm_control` pool, so a busy graph never blocks the chat.
 - **Upgrading the SDK** while runs are `suspended` or `interrupted` is a release step: the transcript format belongs to the SDK, so drain them first, or accept that a resume can fail (`transcript_incompatible`, Phase 9.4) and the node is rerun. Every run freezes the version it started with (`execution_policy.engine_version`) and its spec digest (`execution_policy.spec_digest`: SHA-256 of the agent's prompt, tool names, delegates and `version`).
 
 ## Phase 9.2 — Model Gateway on LiteLLM (`harness/model_gateway.py`, `config/models.yaml`, `deploy/litellm/config.yaml`)
 
 1. **The LiteLLM service** (`deploy/docker-compose.backend.gpu.yml`): a pinned `litellm` image started with `deploy/litellm/config.yaml`, a `LITELLM_MASTER_KEY`, and **no database** (no spend UI and no virtual keys; usage comes from the SDK, item 6). Only this service gets the provider credentials (`ANTHROPIC_API_KEY`, cloud credentials, `OLLAMA_API_BASE`). The agents service gets `LITELLM_BASE_URL` and `LITELLM_API_KEY`. The rule "only the Application API gets `DATABASE_URL`" is unchanged.
 2. **`deploy/litellm/config.yaml`:** one `model_list` entry per model alias the system may use (for example `cubeai-claude-main`, `cubeai-claude-agent`, `cubeai-local-agent`), each with its upstream (`anthropic/…`, `bedrock/…`, `vertex_ai/…`, or the Ollama form the spike chose). Fallbacks between aliases are LiteLLM router fallbacks. The proxy must pass `anthropic-beta`, `anthropic-version` and `cache_control` through unchanged, stream without buffering (SSE `ping` events included), and return upstream error bodies unchanged. `/v1/messages/count_tokens` is optional.
-3. **Profiles** (`config/models.yaml`): `main`, `composer`, `recovery`, `agent_default`, `extraction` (cohort labels) and `summarizer`. Each profile names `{alias, fallback_alias?, locality: local|external, claude_native: bool, effort?}`. Which models the aliases point at is configuration, not plan.
+3. **Profiles** (`config/models.yaml`): `main`, `composer`, `recovery`, `agent_default` and `extraction` (cohort labels). There is no `summarizer` profile: the SDK compacts every session on the session's own model. Each profile names `{alias, fallback_alias?, locality: local|external, claude_native: bool, effort?}`. Which models the aliases point at is configuration, not plan.
 4. **`options_for(profile, ctx) -> ModelOptions{model, fallback_model, effort, env}`** builds what an SDK session needs:
    - `env`: `ANTHROPIC_BASE_URL = LITELLM_BASE_URL`, `ANTHROPIC_AUTH_TOKEN = LITELLM_API_KEY`, and `ANTHROPIC_DEFAULT_HAIKU_MODEL` = the same alias, so the CLI's background requests (titles, summaries) never reach another model. For `claude_native: false`, also `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` and `CLAUDE_CODE_ATTRIBUTION_HEADER=0`;
    - `fallback_model` from `fallback_alias`, which must have the same locality;
    - the `locality_filter(ctx)` hook: empty now; Plan 13 fills it for PHI-Local (only `local` aliases).
-5. **User settings:** `/client-config` (and `ClientSettingsPanel`) picks a LiteLLM alias per profile; it no longer holds base URLs or keys. `client_config.py` keeps its retry delays (`LLM_RETRY_DELAYS_SECONDS`) for the plain Messages calls of Phase 9.7. The panel follows in Phase 2 (`team-plan.md`, *Frontend: whoever changes the backend changes the frontend*).
-6. **Usage:** each SDK session's `ResultMessage.model_usage` (subagents included) is the attempt's usage. It is written once per attempt (`run_attempts.usage`, T5/T6/T7) and once per Main turn (T8), and added to `sessions.tokens_used` there. The budgets in Plan 11 use the persisted total plus the running sessions' counters.
+5. **User settings:** `/client-config` (and `ClientSettingsPanel`) picks a LiteLLM alias per profile; it no longer holds base URLs or keys. `client_config.py` keeps its retry delays (`LLM_RETRY_DELAYS_SECONDS`) for the plain Messages calls of Phase 9.7. The panel follows in the same change (`team-plan.md`).
+6. **Usage:** each SDK session's `ResultMessage.model_usage` (subagents included) is the attempt's usage. It is written once per attempt (`run_attempts.usage`, T5/T6/T7) and once per Main turn (T8, the Composer and Recovery subagents included), and added to `sessions.tokens_used` there. The budgets in Plan 11 use the persisted total plus the running sessions' counters.
 7. **Known limits, written in the docs:** Anthropic does not support routing Claude Code to non-Claude models through a gateway, so tool use on a local model is measured in the `agent-regression` suite before a local alias serves an agent. Sessions that go through a gateway are not eligible for Anthropic's HIPAA configuration (Plan 13).
 
 ## Phase 9.3 — Toolkit contracts for the engine (Plan 1 follow-up)
@@ -801,10 +871,10 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
 
 1. **`AgentStatus.SUSPENDED`** and `AgentResult.suspension = Suspension(kind: ask_user|tool_approval|pause, tool_use_id?, payload)`. A suspended result has a `suspension` and no `error_code`.
 2. **`AgentEngine.run(spec, task, inputs, ctx, cancel=None, resume: Resume | None = None)`.** `Resume(value)` answers the deferred call of a suspended run (an `ask_user` answer, or a tool-approval decision); `Resume.continue_()` continues an interrupted or paused run from its saved session. `FakeAgentEngine` records `resume` and can script a suspension.
-3. **The `ask_user` tool** (`toolpacks/interaction/ask_user.py`, `visibility={"agent"}`, inline, light): `ask_user(question, options?, form?)`. `form` names a domain form that the UI renders instead of a free question (`cohort_approval`, `segmentation_review`); the payload holds refs and summaries only. The tool body only returns the answer it receives on resume (Phase 9.4); the asking itself is the PreToolUse hook's `defer`. A call from the Main is refused (`invalid: NOT_IN_NODE`): the Main simply asks in the chat.
+3. **Questions to the user.** A free question is the SDK's built-in **`AskUserQuestion`** (1–4 multiple-choice questions, with free text as an answer); nothing of ours is built for it. Only the two **domain forms** need a tool of ours: **`ask_user(form, payload)`** (`toolpacks/interaction/ask_user.py`, `visibility={"agent"}`, inline, light), where `form` is `cohort_approval` or `segmentation_review` and the payload holds refs and summaries only; the UI renders the form. In both cases the asking is the PreToolUse hook's `defer` (Phase 9.4), the suspension's `kind` is `ask_user`, and the answer comes back on resume. The Main does not ask through these: it simply asks in the chat.
 4. **Removed:** `ToolContext.user_gate()`; `ToolContext.durable()` / `durable_map()` (a tool that works in parts records each finished part in its domain rows and continues from them on a re-call, Definition of Ready item 13); and `Dispatcher(passthrough=…)` (no engine exception crosses dispatch any more).
 5. **The live part of `ToolContext`** gets an `engine_hooks` field next to `event_sink` (the session's pause flag and the node's mailbox). It is left out of `to_payload()`, like the other live fields.
-6. **The Main's long-lived session:** `open_main(spec, context, ctx) -> MainSession` and `turn(session, message, cancel) -> AgentResult`, next to `run()` on the engine (the Main keeps one `ClaudeSDKClient` across turns, Plan 12.4). `FakeAgentEngine` gets the same two methods.
+6. **The Main's long-lived session:** `open_main(spec, ctx) -> MainSession` (starts the session with `session_id` = the CUBE.AI session id, or resumes it from the store) and `turn(session, message, cancel) -> AgentResult`, next to `run()` on the engine (the Main keeps one `ClaudeSDKClient` across turns, Plan 12.4). `FakeAgentEngine` gets the same two methods.
 
 ## Phase 9.4 — `ClaudeAgentEngine` (`toolkit/engines/claude_engine.py`, `options.py`, `mcp_bridge.py`, `hooks.py`)
 
@@ -813,16 +883,18 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
 1. **The tool bridge (`mcp_bridge.py`):** for each run, one in-process MCP server (`create_sdk_mcp_server("cubeai", tools=…)`) built from `spec.tools_for(ctx)`. Each SDK tool has the catalog tool's name, description and `input_model` JSON schema, and a handler that calls `dispatch.invoke(spec, args, ctx_for_call, cancel)` with the run's bound `ToolContext` (a subagent's calls carry `subagent=<type>`, taken from the hook input). Read-only tools set `readOnlyHint`, so the SDK runs them concurrently. The model sees `mcp__cubeai__<name>`; prompts and `allowed_tools` keep the catalog names, and the bridge maps them. Results go back as the tool returned them: small refs, ids and summaries (Definition of Ready item 14).
 2. **The options (`options.py`):**
    - `system_prompt` = the spec's prompt; `model`, `fallback_model`, `effort` and `env` from the Model Gateway; `mcp_servers={"cubeai": …}`;
-   - `allowed_tools` = the mapped tool names, **except** `ask_user` and every tool a mandatory approval may hold, which must reach the hook and the permission callback;
-   - `disallowed_tools` = every built-in tool (`Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `NotebookEdit`, `TaskCreate`, `TaskUpdate`, `AskUserQuestion`, `Skill`, `ToolSearch`), plus `Agent` unless the spec has delegates, plus `Agent(fork)` always;
-   - `permission_mode="dontAsk"`, `strict_mcp_config=True`, `setting_sources=[]`, `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`;
-   - `max_turns` from `max_tool_iterations`; `output_format` from `output_contract`; `include_partial_messages=True`;
-   - for a resumable run: `session_store = HttpSessionStore` and `session_store_flush = "eager"`;
+   - `allowed_tools` = the mapped tool names, **except** `ask_user` and every tool a mandatory approval may hold, which must reach the hook and the permission callback; plus `TaskCreate` and `TaskUpdate` for execution agents (naming them is also what turns them on);
+   - **the SDK built-ins a spec may use:** `Agent` when it has `delegates` (the Main, segmentation, literature), with `agents=` built from them (Phase 9.6); `Skill` when it has `skills`, with `plugins=[{"type": "local", "path": <agent_system/skills/cubeai>}]` and `skills=["cubeai:<name>", …]`; `AskUserQuestion` for execution agents;
+   - `disallowed_tools` = every other built-in tool (`Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, `NotebookEdit`, `ToolSearch`, and any of `Agent`, `Skill`, `AskUserQuestion`, `TaskCreate`, `TaskUpdate` the spec does not use), plus `Agent(fork)` always;
+   - `permission_mode="dontAsk"` for sessions without `AskUserQuestion`; `"default"` with a `can_use_tool` that denies everything except a resumed `AskUserQuestion` for execution agents (Phase 9.0 item 9); `strict_mcp_config=True`, `setting_sources=[]`, `CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1`;
+   - `max_turns` from `max_tool_iterations`; `max_budget_usd` from the spec or its profile; `effort`; `output_format` from `output_contract`; `include_partial_messages=True`;
+   - for a resumable run and for the Main: `session_store = HttpSessionStore` and `session_store_flush = "eager"`;
    - `cwd` and `CLAUDE_CONFIG_DIR` from Phase 9.1.
 3. **The hooks (`hooks.py`)**, which run in our process:
-   - **PreToolUse:** builds a `ToolCall` action and runs `guardrails.check()` (Plan 11). `allowed` → allow; `permission_denied`, `invalid` or `resource_unavailable` → `deny`, with the code as the reason; `approval_required` inside a node → `defer` (a `tool_approval` suspension). `ask_user` → `defer` (an `ask_user` suspension). On a resumed run the hook fires again for the deferred call and returns `allow` with `updatedInput` carrying the recorded answer, or `deny` with `approval_rejected`. Before it allows a call, it records the call in the attempt's `pending_tools` (Phase 10.1).
+   - **PreToolUse:** builds a `ToolCall` action and runs `guardrails.check()` (Plan 11). `allowed` → allow; `permission_denied`, `invalid` or `resource_unavailable` → `deny`, with the code as the reason; `approval_required` inside a node → `defer` (a `tool_approval` suspension). `ask_user` and `AskUserQuestion` → `defer` (an `ask_user` suspension). On a resumed run the hook fires again for the deferred call and returns `allow` with `updatedInput` carrying the recorded answer (for `AskUserQuestion`, `can_use_tool` returns the `answers`), or `deny` with `approval_rejected`. `Skill` → `allow` for a listed skill. The SDK built-ins of the previous item need no Guardrails check of ours. Before it allows a call, it records the call in the attempt's `pending_tools` (Phase 10.1).
    - **`can_use_tool`** is reached only when `defer` was ignored because the model made parallel calls. It denies the call with "call `ask_user` (or this tool) alone in its turn".
-   - **PostToolUse:** removes the call from `pending_tools`. When the session is pausing, it interrupts the session at this boundary (Phase 10.6).
+   - **PostToolUse:** removes the call from `pending_tools`. For a session whose model is external, it replaces a result marked `phi: true` with its refs and non-PHI summary (`updatedToolOutput`, Plan 13.3). When the session is pausing, it interrupts the session at this boundary (Phase 10.6).
+   - **UserPromptSubmit** (the Main only): adds the current graph summary and the pending approvals to each turn (`additionalContext`, Plan 12.3).
    - **Stop:** runs `completion_check`. While it returns issues and `completion_retries < max_completion_retries`, it blocks the stop with the issues as the reason, so the agent continues.
    - **PreCompact, SubagentStart, SubagentStop:** publish the ephemeral events `agent_compacting`, `subagent_started` and `subagent_finished`.
 4. **Saved sessions** (a `resumable` spec with a run in its context):
@@ -830,24 +902,25 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
    - a retry attempt resumes it (`resume = run_id`);
    - a seeded first start (`seed_from = {run_id, message_uuid}`, Appendix P D27) runs with `resume = seed.run_id`, `fork_session=True`, `session_id = run_id` and `resume_session_at = seed.message_uuid`.
 
-   Control agents and the internal agents that code calls run with no store and with `CLAUDE_CODE_SKIP_PROMPT_HISTORY=1`.
+   The Main uses the same store with `session_id` = the CUBE.AI session id (`resume` after a restart or an idle stop). The internal agents that code calls (the segmentation module) run with no store and with `CLAUDE_CODE_SKIP_PROMPT_HISTORY=1`.
 5. **The outcome of `run()`**, read from the `ResultMessage`:
    - `stop_reason == "tool_deferred"` → `SUSPENDED`, with the `deferred_tool_use` as the suspension (`ask_user` or `tool_approval`); the Node Runner runs T10 suspend (Plan 10);
    - interrupted for a pause → `SUSPENDED(kind=pause)`;
    - `success` → `COMPLETED`, with `structured_output` (validated against `output_contract`) or the final text;
-   - `error_max_turns` → `FAILED(max_iterations)`; `error_max_structured_output_retries` → `FAILED(bad_output)`; `error_during_execution` → `FAILED(error)`;
+   - `error_max_turns` → `FAILED(max_iterations)`; `error_max_budget_usd` → `FAILED(budget_exceeded)`; `error_max_structured_output_retries` → `FAILED(bad_output)`; `error_during_execution` → `FAILED(error)`;
    - a resume whose `spec_digest` or `engine_version` differs from the run's frozen policy, or that the SDK cannot load → `FAILED(transcript_incompatible)`. That failure goes to the inbox, and the fix is a rerun (a new run starts a new session);
    - `resume=Resume(value)` → `resume = run_id`, and the hook answers the deferred call; `resume=Resume.continue_()` → `resume = run_id` with a short "continue" message.
 6. **Mirror failures:** the SDK retries a failed `append` three times, then drops the batch and emits `mirror_error` without stopping. The engine treats the first `mirror_error` as fatal for the attempt: it interrupts the session and returns `FAILED(transcript_write_failed)`. A fencing refusal (`StaleAttempt`: the attempt was superseded or cancelled) is handled the same way. Such a run is never resumed automatically (Appendix P T4 rule (f)).
-7. **Streaming:** `StreamEvent`s become ephemeral `stream_chunk` events (the Main Agent). Tool progress keeps using the ToolContext event sink (`emit_progress` → `tool_progress`). Every message the engine receives is a heartbeat for the Watchdog (Phase 10.5). Messages from a subagent carry `parent_tool_use_id` and are tagged with `subagent`.
+7. **Streaming and progress:** `StreamEvent`s become ephemeral `stream_chunk` events (the Main Agent). `TaskCreate` / `TaskUpdate` calls of an execution agent become ephemeral `agent_task` events (the canvas shows them as the node's steps). Tool progress keeps using the ToolContext event sink (`emit_progress` → `tool_progress`). Every message the engine receives is a heartbeat for the Watchdog (Phase 10.5). Messages from a subagent carry `parent_tool_use_id` and are tagged with `subagent`.
 8. **Cancel:** the cancel token calls `client.interrupt()` and reaches `dispatch.invoke` for a running tool, so a running job is cancelled (Plan 5). A cancelled run is never resumed automatically.
-9. **The Main, the Composer and the Recovery Agent:** no store. The Main is one long-lived `ClaudeSDKClient` per `SessionRuntime` (Plan 12.4). The Composer and the Recovery Agent are one `query()` each, with `output_format` = their `output_contract` and the read-only `main` tools. Graph-change approvals stay harness approvals (D7) and never use `defer`.
+9. **The Main:** one long-lived `ClaudeSDKClient` per `SessionRuntime` (Plan 12.4), with its saved session (item 4) and the SDK's compaction. The Composer and the Recovery Agent are its SDK subagents (`agents=`), with their own model alias, skills and tools. Graph-change approvals stay harness approvals (D7) and never use `defer`.
 
 ## Phase 9.5 — Session store (`execution/session_store.py`)
 
 1. **`HttpSessionStore`** implements the SDK's `SessionStore` protocol over the Application API (Phase 6.6) and never touches PostgreSQL (D1):
-   - `append(key, entries)` → `POST /runs/{run_id}/transcript` on the attempt path (`X-Attempt-Id` of the run's current attempt). `key.session_id` is the `run_id`; `key.subpath` (a subagent's transcript) is stored as given; entries are opaque JSON, deduplicated by `entry.uuid`;
-   - `load(key)` → `GET /runs/{run_id}/transcript?subpath=` (the entries in order, or `None`); `list_subkeys(key)` → the run's subpaths, so subagent transcripts come back on resume;
+   - two kinds, built by the engine: `HttpSessionStore.for_run(run_id, attempt_id)` for an agent node and `HttpSessionStore.for_main(session_id)` for the Main;
+   - `append(key, entries)` → `POST /runs/{run_id}/transcript` on the attempt path (`X-Attempt-Id` of the run's current attempt), or `POST /sessions/{session_id}/main-transcript` for the Main. `key.session_id` is the `run_id` or the session id; `key.subpath` (a subagent's transcript) is stored as given; entries are opaque JSON, deduplicated by `entry.uuid`;
+   - `load(key)` → the matching `GET` (the entries in order, or `None`); `list_subkeys(key)` → the subpaths, so subagent transcripts come back on resume;
    - `list_sessions`, `list_session_summaries` and `delete` are not implemented: deletion is the retention purge only;
    - `key.project_key` must equal the fixed one (Phase 9.1); anything else is refused.
 2. **Fencing:** a refused write raises `StaleAttempt`, and the engine stops the attempt (Phase 9.4 item 6).
@@ -861,8 +934,9 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
 
 1. **Internal agents are SDK subagents.** For a spec with `delegates`, the engine passes `agents={name: AgentDefinition(description, prompt, tools=[mapped names], model=<its profile's alias>, effort?)}`, built from each internal `AgentSpec`, and allows the `Agent` tool. Their transcripts are stored with the parent's, under `subpath`. Limits per session: `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`, and `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS` from the `llm` pool size (`config/resources.yaml`), so one node cannot flood a model.
 2. **`run_agent` is removed:** `delegation/run_agent.py`, its tool and its tests. `catalog.validate()` keeps the delegate rules (every delegate is `internal`; no cycles).
-3. **The literature review** is an ordinary execution agent. Its tools are the 4 search tools, `score_paper_relevance` and `save_literature_output`; its delegates are `pico_analyst`, `query_builder`, `search_executor`, `relevance_ranker` and `context_compiler`. It decides how to search, which subagents to use and when it is done; nothing fixes the order.
+3. **The literature review** is an ordinary execution agent (its first version has no `delegates`, Phase 3.2; the subagents follow). Its tools are the 4 search tools, `score_paper_relevance` and `save_literature_output`; its delegates are `pico_analyst`, `query_builder`, `search_executor`, `relevance_ranker` and `context_compiler`. It decides how to search, which subagents to use and when it is done; nothing fixes the order.
 4. **Parallelism inside a node** is the SDK's own: read-only tools run concurrently, and several subagents may run at once. The Executor still runs one node at a time (D5).
+5. **The Main's subagents:** `composer` and `recovery_agent` (Phase 3.4) are passed to the Main's session the same way. The Main waits for their answer (its prompt says so; the SDK may otherwise run a subagent in the background). `delegation/agent_as_tool.py` is removed with its tests.
 
 ## Phase 9.7 — Engine consumers inside tools
 
@@ -878,17 +952,17 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
 - the tool-call path through the bridge and dispatch (events, error envelope); no built-in tool is offered;
 - the iteration cap; the Stop hook's completion retries; `output_format` parsing;
 - **resume:** stop the session after tool call N; a new `run(resume=Resume.continue_())` finishes without calling tools 1..N again, and a call that was running is reported to the model as cut off, not re-run;
-- **`ask_user`:** returns `SUSPENDED`; `Resume(answer)` continues, and the tool returns the answer; parallel calls are refused through `can_use_tool`; the Main's call is refused;
+- **questions:** `AskUserQuestion` and `ask_user(form=…)` return `SUSPENDED`; `Resume(answer)` continues and the agent receives the answer; parallel calls are refused through `can_use_tool`; the Main has neither tool;
 - **tool approval:** a guardrail `approval_required` suspends; approve runs the call once on resume; reject returns `approval_rejected`;
 - **pause:** a pause request interrupts at the next tool boundary and resumes with a continue message;
 - **subagents:** the literature agent with 3 sources and 5 papers on fake models; a subagent's transcript is stored under its subpath and comes back on resume; the depth and concurrency limits hold;
 - `seed_from` forks from the named message; `mirror_error` and `StaleAttempt` stop the attempt;
-- the Main, the Composer and the Recovery Agent run with no store;
+- the Main resumes its saved session after a simulated restart, and a long Main session is compacted by the SDK; the Main calls the `composer` subagent and gets a `proposal_id`; skills load only when listed; `TaskCreate` / `TaskUpdate` become `agent_task` events; `max_budget_usd` ends a run as `budget_exceeded`;
 - cancel stops a running tool; `fallback_model` on a model error; usage from `model_usage`, subagents included;
 - the Model Gateway: the env per profile, the `claude_native: false` flags, the pinned background model, the `locality_filter` hook;
 - the segmentation module calls the internal agents through the engine.
 
-**Done when:** every `AgentSpec` runs on `ClaudeAgentEngine` against the fake Messages server; every `resumable` execution agent passes a resume test; the `ask_user`, tool-approval, pause and subagent tests pass; the session store passes the SDK conformance suite; and `FakeAgentEngine` still passes the Plan 1 tests.
+**Done when:** every `AgentSpec` runs on `ClaudeAgentEngine` against the fake Messages server; every `resumable` execution agent passes a resume test; the question, tool-approval, pause, subagent, skill and Main-resume tests pass; the session store passes the SDK conformance suite; and `FakeAgentEngine` still passes the Plan 1 tests.
 
 ---
 
@@ -903,7 +977,7 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
 2. **Start (T4):** `GraphStore.start_node(node_id, accepted_by_change_id, resolved_inputs, prompt?, spec_digest?)` creates the run (lazily, D8) and attempt 1, or a retry attempt. The run gets a frozen `execution_policy` (the manifest limits, `resumable`, `gate_timeout_s`, `seed_from` from the accepting change, `spec_digest`, `engine_version`, plus the session's `privacy_mode`) and its `target_version`. A refusal (not ready, a stale definition, another active attempt, `NEEDS_RELEASE`) makes the Executor re-read the graph.
 3. **Context:** a `ToolContext` with `run_id` and `attempt_id`. Every write the agent or the tool makes presents the D24 attempt path.
 4. **Agent Node:**
-   - mark the attempt `running` (with `dispatched_at`) before spawning, and call `scratchpad_register_agent` (a harness tool);
+   - mark the attempt `running` (with `dispatched_at`) before spawning (there is no register tool: the run's lifecycle is T4–T6);
    - `engine.run(spec, task=node.params.task, inputs, ctx, cancel)`, with a **"Node inputs"** section rendered from the pinned summaries. The engine starts the run's SDK session (`session_id = run_id`), or forks the `seed_from` source on attempt 1 of a seeded run (Plan 9.4);
    - **a retry attempt of a `resumable` run** calls `engine.run(..., resume=Resume.continue_())`, so it resumes the run's saved session. With nothing saved yet, it starts normally;
    - the PreToolUse / PostToolUse hooks keep `run_attempts.pending_tools` current (`set_pending_tools`), so T4 rule (f) knows which call was running if the process dies;
@@ -913,7 +987,7 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
    - the user's answer (`gate_resolved`) or the end of a pause wakes the Executor (Phase 10.2), which calls `resume_attempt` and then `engine.run(..., resume=Resume(value))` (for a pause: `Resume.continue_()`) with the **same** attempt. A suspension is not a new attempt (I8);
    - a fencing refusal on resume (the run was superseded or cancelled meanwhile) ends the task without running anything.
 5. **Tool Node:** `dispatch.invoke(spec, params + input refs, ctx, cancel)`: inline (marked `running` first) or a job (the worker marks it `running`, Plan 5).
-6. **Outputs:** call each output port's `extract` → `{type, ref:{table, ids}, summary, phi}`.
+6. **Outputs:** call each output port's `extract` → `{type, ref:{table, ids}, summary, phi}`. For an agent node, the agent's structured output (the SDK's `output_format`, from its `output_contract`) is the input to `extract`; the Node Runner shows the agent's view with it (the view branch `write_agent_output` used to trigger, `common/views.py`) and clears the run's temp dirs (H13). **`write_agent_output` is deleted here**, with its tests.
 7. **Finish (T6):**
    - success → `complete_attempt(outputs, usage)`. The Application API checks the refs, evaluates the node's expectations and may set `downstream_hold`;
    - failure → `fail_attempt(error_code, usage)`, with `error|timeout|oom|interrupted|cancelled|max_iterations|bad_output|resource_unavailable|transcript_incompatible|transcript_write_failed`.
@@ -1025,10 +1099,10 @@ On `graph_changed`:
    | Rule | Outcome |
    |---|---|
    | Schema / Validator errors | `invalid` (with the codes) |
-   | The caller's visibility does not include the tool | `permission_denied` |
-   | Main calls a tool directly that is not `inline`, or that is `heavy` | `invalid: REQUIRES_NODE` |
+   | The caller's visibility does not include the tool (only for calls that do not come from an SDK session: an SDK session only has the tools its spec lists, so the SDK enforces this) | `permission_denied` |
+   | Main calls a tool directly that is not `inline`, or that is `heavy` (the same: such a tool is not in the Main's session, so this only guards `/graph/diff` and direct API calls) | `invalid: REQUIRES_NODE` |
    | A pool or queue is not alive (`GET /jobs/queues`, MONAI health) | `resource_unavailable` |
-   | Budgets: session tokens (`SESSION_TOKEN_BUDGET`), active nodes, `max_attempts` | `permission_denied: BUDGET_EXCEEDED` |
+   | Budgets at `NodeStart` and `GraphChange`: the session total (`SESSION_TOKEN_BUDGET` against `sessions.tokens_used`), active nodes, `max_attempts`. Inside one SDK session the SDK enforces `max_turns` and `max_budget_usd` itself | `permission_denied: BUDGET_EXCEEDED` |
    | Mandatory approvals: `destructive=True`, `trust != first_party`, `generated_code` | `approval_required` |
    | Plan mode (Phase 11.2) | `approval_required: PLAN_MODE` |
    | PHI / privacy (Plan 13) | `permission_denied` |
@@ -1050,7 +1124,7 @@ On `graph_changed`:
 ## Phase 11.3 — Approvals (`harness/approvals.py`)
 
 1. **There is no `approvals` table.** The pending `graph_changes` row is the approval (Appendix P D7), and a session has at most one. A new proposal withdraws the previous one; past `APPROVAL_TTL_H` it becomes `expired`.
-2. **When a change needs approval:** T1 stores it, writes the Main's `tool_result`, and publishes `graph_change_proposed` + `approval_requested`. The caller gets `RunAccepted{node_id, change_id, status: "awaiting_approval"}` (or the `graph_apply` result).
+2. **When a change needs approval:** T1 stores it and publishes `graph_change_proposed` + `approval_requested`. The caller gets `RunAccepted{node_id, change_id, status: "awaiting_approval"}` (or the `graph_apply` result).
 3. **Deciding** is done only by the user, never by an LLM, and always quotes the digest:
    - REST: `POST /session/{id}/changes/{change_id}/decision` with `{decision: approve|reject, content_digest, comment}`. The Agent System forwards it to the Application API (`/graph-changes/{change_id}/decision`);
    - deterministic chat commands, handled before the LLM in the input route: `/approve [change_id]`, `/reject [change_id] [reason]`, and the legacy text `APPROVE` when exactly one change is pending (the current canvas buttons send it). A command uses the digest of the pending change the user was shown.
@@ -1085,11 +1159,11 @@ On `graph_changed`:
    - `Command`.
 2. **It replaces `ConnectionManager.message_queues`** (`socket_store.py:86-98,187,224`). The inbox lives in memory, but every item is durable first: `POST /session/{id}/input` calls T3 on the Application API and enqueues only after the commit (D14); notifications come from waking events in the durable log. The handled position is `sessions.inbox_handled_through_event_id`, advanced by T8 only after the reply and the changes have committed. On restart, and periodically, the inbox re-reads the waking events above the cursor.
 3. **`POST /session/{id}/input`** turns `/skills`, `/approve` and `/reject` into Commands, handled without the LLM. Anything else becomes a `UserMessage`. A message that starts with `/` reaches the Main as plain text (escaped), never as the first characters of an SDK prompt, so a user can never run a CLI command (`/compact`, `/clear`, …) or a skill by name (Phase 9.0 item 8).
-4. **Coalescing:** notifications that arrive during a Main turn are merged into one message for the next turn.
+4. **During a Main turn:** a new item is sent into the live session with `ClaudeSDKClient.query()` (streaming input); the SDK queues it for the running turn. There is no coalescing code of ours.
 
 ## Phase 12.2 — Control tools (`toolpacks/control/`, `visibility={"main"}`, inline)
 
-All control tools are `light`, except `plan` and `recover`, which are `medium` with a hard timeout.
+All control tools are `light`. The Composer and the Recovery Agent are not tools: they are the Main's SDK subagents (Phase 3.4).
 
 | Tool | Does | Returns |
 |---|---|---|
@@ -1097,31 +1171,26 @@ All control tools are `light`, except `plan` and `recover`, which are `medium` w
 | `registry_describe(name)` | `catalog.describe` | Schema, ports, manifest |
 | `graph_inspect(node_id?)` | The graph summary, or one node's details (error, log tail, artifacts, the step timeline read from its transcript with the SDK's helpers, a pending question or approval) | Summary |
 | `execute(target, params, input_sources?, expect?, approval?)` | A one-node change appended to the sequence (or inserted with `at`), through the Guardrails and the Diff Engine. `approval` is `none \| before \| after` (D28) | `RunAccepted {node_id, change_id, status: applied \| awaiting_approval}` |
+| `graph_propose(diff, base_version, origin?)` | Runs the Validator on the whole target sequence and keeps the diff as a proposal (in memory, `planning/proposals.py`; nothing stored, D19). Used by the Composer and the Recovery Agent, and by the Main itself | `{proposal_id, errors, affected, approval_reasons}` |
 | `graph_apply(diff \| proposal_id, base_version, on_running?)` | Applies (T2) or proposes (T1) a change | `{version, change_id, status: applied \| awaiting_approval, affected, errors}` |
 | `node_cancel(node_id)` | Requests cancellation of the node's active attempt (T7); a node that never started is removed with a change | Status |
 | `node_message(node_id, text)` | Adds a user interruption to an agent node: while it runs, it is sent into the live SDK session (`ClaudeSDKClient.query()`, streaming input), which records it in the transcript; while it is `suspended`, it is kept in the node's mailbox (a `chat_messages` row tagged with the `node_id`) and sent with the resume, so the message is durable either way | Ack |
 | `artifact_read(node_id \| run_id, port)` | One port of a run's `outputs`: the summary and the ref (never the raw data) | Summary |
-| `skill_load(name)` | The skill body | Text |
-| `plan(request, focus_node_ids?)` | Phase 12.5 | `GraphProposal` |
 
 `execute` and `graph_apply` **never wait for execution**. They return as soon as the version is applied or proposed (§14).
 
-Their `tool_result` row is written by the Application API in the same transaction as the change (D21), and their idempotency key is `sha256(turn_id‖call_id)`, so a re-handled turn never submits the same work twice.
+Their idempotency key is `sha256(session_id‖tool_use_id)`, so a replayed call never submits the same work twice. Their result reaches the Main's transcript through the SDK like any tool result.
 
-## Phase 12.3 — Context Manager (`harness/context_manager.py`)
+## Phase 12.3 — The Main's context (`harness/turn_context.py`)
 
-1. **Main's context** (§32):
-   - the system prompt from `main_agent/agent.md`;
-   - the recent chat from the Application API, including the `tool_calls` / `tool_result` rows, ordered by `seq`;
-   - the latest `context_summary` system message of the chat, and a compact graph summary (nodes shown as `n<node_seq>`);
-   - the skill index; the compact registry index (`catalog.index("main")`): **every** tool and agent the Main may call (`use: call`) or put in the graph (`use: node`), with its ports and cost, so the Main can build a plan itself without the Composer. Knowing an entry is not calling it: only the `call` entries are SDK tools of the Main (Plan 3.4);
-   - the schemas loaded so far (`registry_describe` results).
+The SDK owns the Main's context: its saved session holds the conversation, and the SDK compacts it when it grows. CUBE.AI only adds what the SDK cannot know.
 
-   The index and the skill index go in the system prompt in a fixed order, so the SDK's prompt cache keeps them across turns.
-2. **Compaction:** above `MAIN_CONTEXT_TOKEN_BUDGET`, the older turns are summarized with the `summarizer` profile and saved as a `role='system'` message `{v, kind:'context_summary', through_message_id}` in the chat (Appendix P; there is no `sessions.context_summary`). Tool results marked `phi: true` are kept out of a context sent to an external model.
-3. **The Composer's context:** the request, the current graph, the relevant registry details (search hits + described entries), the skills with `applies_to: composer`, and the artifact types.
-4. **An execution agent's context:** its own prompt, the node inputs, the node instructions (`params.task`), its own tool schemas and mailbox messages. It is built once, at the first start of the run; after that the agent's context **is** its saved SDK session, which a resume continues and the SDK's automatic compaction keeps within the model's window. The PHI rule of item 2 applies to that compaction too (the compaction runs on the session's own model, Plan 9.2).
-5. **The Main keeps no transcript** (D21): its live `ClaudeSDKClient` holds the context while the `SessionRuntime` lives; after a restart or an idle timeout, a new client starts from the context rebuilt from the chat, as in item 1 (the `context_summary` of item 2 keeps that rebuild within budget). While the client lives, the SDK compacts its context itself.
+1. **The system prompt** (fixed, so the SDK's prompt cache keeps it): the prompt from `main_agent/agent.md`, then the compact registry index (`catalog.index("main")`): **every** tool and agent the Main may call (`use: call`) or put in the graph (`use: node`), with its ports and cost. Knowing an entry is not calling it: only the `call` entries are SDK tools of the Main (Plan 3.4). The skills are the SDK's (Phase 3.5).
+2. **Each turn:** a `UserPromptSubmit` hook adds the current graph summary (nodes as `n<node_seq>`, their status, holds) and the pending approvals and questions as `additionalContext`, so the Main always sees the graph as it is now, even after compaction.
+3. **Compaction:** the SDK's own, on the Main's own model. There is no `context_summary` message, no `summarizer` profile and no rebuild from the chat.
+4. **PHI:** a PHI-marked tool result never reaches an external model: the PostToolUse hook replaces it with refs and a non-PHI summary (`updatedToolOutput`, Plan 13.3).
+5. **The Composer and the Recovery Agent** start from what the Main writes in the subagent call, plus their own prompt, tools and skills (the SDK's subagent context).
+6. **An execution agent's context:** its own prompt, the node inputs, the node instructions (`params.task`), its own tool schemas and mailbox messages. It is built once, at the first start of the run; after that the agent's context **is** its saved SDK session, which a resume continues and the SDK compacts.
 
 ## Phase 12.4 — Main Loop (`harness/main_loop.py`, `harness/session_runtime.py`)
 
@@ -1133,26 +1202,26 @@ Their `tool_result` row is written by the Application API in the same transactio
            item = await rt.inbox.get()
            if item.is_command: await handle_command(rt, item); continue
            if rt.main_client is None:                          # first item, or after a restart / idle stop
-               rt.main_client = await engine.open_main(main_agent, context_manager.for_main(rt), rt.main_ctx)
+               rt.main_client = await engine.open_main(main_agent, rt.main_ctx)   # resumes the saved session
            result = await engine.turn(rt.main_client, item.as_message(), cancel=rt.turn_cancel)
            await reply(rt, result.output)     # `msg` event + persisted chat message
    ```
-   The inner LLM ↔ tool loop is the Main's SDK session on `ClaudeAgentEngine` (Plan 9), with no session store (D21).
-3. **Limits:** each turn has `MAIN_MAX_TOOL_ITERATIONS` and a wall-clock budget. On an error, Main sends a short failure reply, and the error is logged.
+   The inner LLM ↔ tool loop is the Main's SDK session on `ClaudeAgentEngine` (Plan 9), saved through `HttpSessionStore.for_main` (D21).
+3. **Limits:** each turn has the SDK's `max_turns` and `max_budget_usd` (from the `main` profile) and a wall-clock budget of ours. On an error, Main sends a short failure reply, and the error is logged.
 4. **Main never awaits a node**, for two reasons: the control tools return at once, and a direct call to heavy work is refused (`REQUIRES_NODE`).
-5. **Persistence of a turn:** the Main's PreToolUse hook commits the `tool_calls` row before the call runs (one row per call, `call_id` = the SDK's `tool_use_id`), and its PostToolUse hook commits each direct `tool_result` as soon as the call ends. After a restart, calls without a result are closed as `interrupted` before the input is handled again. The turn ends with T8 (the cursor and the token usage from the turn's `ResultMessage`).
+5. **Persistence of a turn:** the SDK saves the turn in the Main's transcript (the tool calls and results included); a call that was cut off by a restart is reported to the model by the SDK on resume. The Main's reply is also written to the chat for the UI. The turn ends with T8 (the cursor and the token usage from the turn's `ResultMessage`).
 
 ## Phase 12.5 — Planner integration
 
-1. **`plan`** = `make_agent_tool("plan", "composer", GraphProposal, post=validate_and_repair)`. The Composer runs as one SDK `query()` with `output_format` = the `GraphProposal` schema, the read-only `main` tools, and no saved session (Plan 9.4).
-2. **`validate_and_repair`** runs the Validator. When there are errors, it sends them back to the Composer for up to `PLAN_REPAIR_ROUNDS` rounds. It then returns the proposal together with any errors that remain.
-3. **The proposal is never applied by `plan`.** Main decides, and then calls `graph_apply(proposal_id=...)`.
+1. **The Composer is the Main's SDK subagent** (Phase 3.4); there is no `plan` tool. The Main calls it with the request and any focus nodes, and waits for its answer.
+2. **The repair loop is the subagent's own:** it calls `graph_propose`, reads the Validator's errors in the result, and proposes again until there are none. It ends with the `proposal_id` (and any errors that remain).
+3. **The proposal is never applied by the Composer** (it has no `graph_apply` or `execute`). The Main decides, and then calls `graph_apply(proposal_id=...)`.
+4. **Removed:** `make_agent_tool`, `validate_and_repair`, `PLAN_REPAIR_ROUNDS` and `delegation/agent_as_tool.py`.
 
-## Phase 12.6 — Skills Loader (`harness/skills_loader.py`)
+## Phase 12.6 — Skills (`harness/skills_index.py`)
 
-- Scans `skills/*.md` and builds an index per audience (`applies_to`).
-- `/skills` lists the index (a Command). `skill_load` returns a skill's body.
-- This is Option A of the open decision in Phase 3.5; with Option B, this phase keeps only `/skills`.
+- The SDK loads the skills (Phases 3.5, 9.4); there is no loader, no index in the prompt and no `skill_load` tool.
+- `/skills` (a Command, no LLM) lists each `SKILL.md`'s `name` and `description` from the `cubeai` plugin, and the agents whose `agent.md` lists it. `skills_index.py` holds only this read.
 
 ## Phase 12.7 — Agent System routes and events
 
@@ -1162,20 +1231,21 @@ Their `tool_result` row is written by the Application API in the same transactio
    - `POST /session/{id}/changes/{change_id}/decision`;
    - `PATCH /session/{id}/settings`;
    - `POST /session/{id}/nodes/{node_id}/cancel`;
-   - `POST /session/{id}/runs/{run_id}/answer` (the answer to an `ask_user` question or a tool approval; the cohort and segmentation forms keep their domain routes) → the Application API T10 answer step;
+   - `POST /session/{id}/runs/{run_id}/answer` (the answer to an `AskUserQuestion` question or a tool approval; the cohort and segmentation forms keep their domain routes) → the Application API T10 answer step;
    - `GET /session/{id}/runs/{run_id}/steps` (the step timeline of the run, read from its transcript with the SDK's store helpers, for debugging, the Recovery Agent and the future canvas).
 2. **Register the new events in `services/event_registry.py`:**
    - **durable** (published by the Application API transactions, registered here for classification): `user_input`, `graph_change_proposed/applied/rejected/stale/expired`, `node_run_superseded`, `run_attempt_started/ended`, `run_attempt_suspended/resumed`, `gate_resolved`, `node_status`, `expectation_violated`, `node_start_refused`, `graph_idle`, `session_state`, `approval_requested`;
-   - **ephemeral:** progress keeps using `tool_progress`, and streaming keeps using `stream_chunk`; new: `agent_compacting`, `subagent_started`, `subagent_finished` (Plan 9.4).
+   - **ephemeral:** progress keeps using `tool_progress`, and streaming keeps using `stream_chunk`; new: `agent_task` (an agent's `TaskCreate` / `TaskUpdate`), `agent_compacting`, `subagent_started`, `subagent_finished` (Plan 9.4).
 3. **Update `_SOURCES`** in `tests/unit/services/test_event_registry.py` to scan `harness/`, `execution/`, `planning/` and `toolpacks/`.
+4. **Progress on the canvas:** the execution view (`views/execution/utils.ts`) shows a node's `agent_task` events instead of its scratchpad notes, and **`scratchpad_write_note` is deleted** with its tests.
 
 **Tests (`tests/unit/harness/`):**
 
-- inbox order and dedupe; commands skip the LLM; coalescing; a restart re-reads the waking events above the cursor; T8 runs only after the reply commits;
+- inbox order and dedupe; commands skip the LLM; an item that arrives during a turn reaches the live session; a restart re-reads the waking events above the cursor; T8 runs only after the reply commits;
 - **a Main turn with a fake model:** `execute` returns `RunAccepted` while a fake node runs, and a second user question is answered before the node finishes (§6);
-- `plan` never applies anything; the repair rounds;
-- context contents and compaction; the skills index; a message that starts with `/` reaches the Main as plain text;
-- `node_message` to a running node reaches the live session, and to a suspended node reaches the agent after resume; the Main's session uses no store, and a restart rebuilds it from the chat;
+- the Composer subagent proposes until the Validator has no errors and never applies anything;
+- the graph summary reaches every turn; `/skills`; a message that starts with `/` reaches the Main as plain text;
+- `node_message` to a running node reaches the live session, and to a suspended node reaches the agent after resume; the Main's session is resumed from its store after a restart;
 - `execute` and `graph_apply` carry `approval` into the change content; whether the Main sets it from the user's words is measured in the `agent-regression` suite, not here;
 - the routes, including the answer route and the steps timeline; the event registry scan.
 
@@ -1185,13 +1255,13 @@ Their `tool_result` row is written by the Application API in the same transactio
 
 # Plan 13 — Recovery and Privacy
 
-**Goal:** system Phase 3: the Recovery Agent, resource failure handling and PHI-Local.
+**Goal:** the Recovery Agent, resource failure handling and PHI-Local.
 
-## Phase 13.1 — Recovery Agent (`execution/recovery.py`, control tool `recover`)
+## Phase 13.1 — Recovery Agent (the Main's SDK subagent `recovery_agent`)
 
-1. **`recover(node_id)`** = `make_agent_tool("recover", "recovery_agent", RecoveryProposal, post=validate)`. It is visible only to Main.
-2. **Its context:** the node spec and params, the `error_code`, the log tail (the job dir or the agent run notes), the graph neighbourhood, and for an agent node the step timeline of the failed run (`/session/{id}/runs/{run_id}/steps`: each step's tool calls and errors, with the message uuids, read through the SDK's store helpers). It reads summaries, never the raw transcript.
-3. **What it returns:** a diagnosis, an optional validated `GraphDiff` (e.g. new params, a smaller cohort, another model) and a message for the user. It **never applies anything**; Main decides.
+1. **The Recovery Agent is the Main's subagent** (Phase 3.4); there is no `recover` tool. The Main calls it with the failed node.
+2. **Its context:** what it reads with its tools: `graph_inspect` gives the node spec and params, the `error_code`, the log tail (the job dir or the agent run notes), the graph neighbourhood, and for an agent node the step timeline of the failed run (each step's tool calls and errors, with the message uuids, read through the SDK's store helpers). It reads summaries, never the raw transcript.
+3. **What it returns:** a diagnosis, an optional `proposal_id` from `graph_propose` (e.g. new params, a smaller cohort, another model) and a message for the user. It **never applies anything** (it has no `graph_apply` or `execute`); Main decides.
    - **Time travel:** when the failure came late in a long agent node (for example a bad tool argument at step 9 of 10), the diff may be a `RerunNode(seed_from={run_id, message_uuid})` that starts the new run from the message before the mistake (the SDK forks the old session up to it, Plan 9.4), with a correction in `params.task`, instead of repeating the whole node. It is still a new run that supersedes the old one, and T4 starts fresh when the seed's transcript is gone or incompatible (D27).
 4. **Order:** the deterministic retries of Phase 10.5 always run first. Only failures that remain reach Main.
 
@@ -1212,7 +1282,7 @@ Their `tool_result` row is written by the Application API in the same transactio
    - the Model Gateway `locality_filter` keeps only `locality: local` LiteLLM aliases, for the session's model, its fallback, its subagents and the CLI's background model (`ANTHROPIC_DEFAULT_HAIKU_MODEL`), so no request of a `phi_local` session can leave for an external model. If there is no local alias, the Guardrails return `permission_denied: NO_LOCAL_MODEL`.
    - the LiteLLM configuration is part of the boundary: a `local` alias must point at a local upstream (Ollama in this deployment), and a contract test reads `deploy/litellm/config.yaml` and checks it.
    - `config/models.yaml` marks `gpt-oss:120b-cloud` as `external`, and ships a commented `local_default` Ollama entry.
-3. **PHI labels:** output ports with `phi=true` (in `node_runs.outputs`), tool results with `phi: true` (in the chat), and tools with PHI scopes mark their content. The Context Manager never puts PHI-marked content into a context that goes to an external model. It sends refs and non-PHI summaries instead.
+3. **PHI labels:** output ports with `phi=true` (in `node_runs.outputs`), tool results with `phi: true`, and tools with PHI scopes mark their content. For a session whose model is external, the engine's PostToolUse hook replaces a PHI-marked tool result with its refs and non-PHI summary (`updatedToolOutput`, Plan 9.4) before the model sees it.
 4. **In `standard` mode:** access is normal, as configured.
 5. **Everywhere:** the audit logs hash patient identifiers.
 6. **Frozen per run:** each run freezes `privacy_mode` in its `execution_policy`. Switching a session to `phi_local` requests cancellation of every active attempt frozen as `standard`, in the same transaction (T7); a `suspended` one is cancelled at once, so it can never resume under the old mode.
@@ -1246,7 +1316,7 @@ Add the first real tests for `monailabel/endpoints/inference_jobs.py`: submit, p
 
 Fix these in place. MONAI keeps its own file store, and its status strings must equal `jobs_core.status` (a contract test checks this).
 
-- J1, J2, J4 (server side), J6, J8, J10, J11, J12. J1 is also the prerequisite of Appendix P §P.9 Phase 3: until it lands, a failed segmentation pair cannot be re-executed within the same run.
+- J1, J2, J4 (server side), J6, J8, J10, J11, J12. J1 is also the prerequisite of Appendix P §P.9 *Execution-adapter prerequisites*: until it lands, a failed segmentation pair cannot be re-executed within the same run.
 - Verify J3 in the 0.8.5 image.
 - J9 ingress rules in `Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/config/nginx.conf`.
 
@@ -1328,13 +1398,13 @@ Ingestion conversion becomes a job on the `compute.cpu` queue (Plan 5) (`job_nam
 
 1. **App lifespan (`app.py`):**
    - build the catalog and run `validate()` (a failure stops start-up);
-   - build `ClaudeAgentEngine` (with `HttpSessionStore` from Phase 2 on); check that LiteLLM answers (a failure is logged and the session's activity shows `blocked`, it does not stop start-up); from Phase 2 on, start the transcript purge sweep (`AGENT_TRANSCRIPT_PURGE_S`, Phase 9.5);
+   - build `ClaudeAgentEngine` (with `HttpSessionStore` once agent memory lands); check that LiteLLM answers (a failure is logged and the session's activity shows `blocked`, it does not stop start-up); once agent memory lands, start the transcript purge sweep (`AGENT_TRANSCRIPT_PURGE_S`, Phase 9.5);
    - start `SessionRuntimeManager` (restart recovery, Phase 10.6, including resuming the `suspended` attempts the user has answered);
    - keep `ensure_storage_layout()` and `install_write_guard()` after every import.
 2. **`POST /session/{id}/input`** → the Session Inbox (Plan 12).
 3. **`/pause`, `/resume`, `/stop`:** the same paths and bodies, now driving `SessionExecutor` control (Phase 10.6).
 4. **Rebuilt from graph state:** `GET /status/{id}`, `/session/{id}/execution-state` and `/session/{id}/recover`.
-5. **Retired, returning `410 Gone` with a short message:** `/plan`, `/run`, `/session/{id}/resume-pipeline`. The canvas and the chat sidebar stop calling them in the same phase (`team-plan.md`, *Frontend: whoever changes the backend changes the frontend*).
+5. **Retired, returning `410 Gone` with a short message:** `/plan`, `/run`, `/session/{id}/resume-pipeline`. The canvas and the chat sidebar stop calling them in the same change (`team-plan.md`).
 6. **Application API:** the persistence cut-overs already happened in Plan 6 (no dual path, D26). What is left: a final migration drops `sessions.intent` and `session_graphs.approved_at` (read-only legacy columns), and `approve_plan` / `create_pending_runs` and `CANONICAL_AGENT_TYPES` are deleted (the producer allowlists stay, checked against the catalog). **No table is dropped.**
 
 ## Phase 17.2 — Delete AutoGen
@@ -1369,8 +1439,9 @@ Nobody posts to it any more, so remove:
 - No backend caller of `/plan` or `/run`, and no `Backend/mcp` in `deploy/`, `scripts/` or the launchers.
 - No retired schema name (the rename map of Appendix P §P.2) outside migrations, old durable events and the problem catalog. The Phase 6.1 source scan stays in the deterministic suite.
 - No `langgraph` or `langchain` import or requirement anywhere in `Backend/` or `deploy/`.
-- No `claude_agent_sdk` import outside `toolkit/engines/` and `execution/session_store.py` (`test_boundary.py`); no `SessionStore` implementation other than `HttpSessionStore` outside tests; no `session_store` passed for the Main, the Composer or the Recovery Agent (D1, D21, D27).
-- No SDK session built without the options of Plan 9.4 (built-in tools disallowed, `strict_mcp_config`, `setting_sources=[]`): one options builder, `toolkit/engines/options.py`, and a source scan that finds no other `ClaudeAgentOptions(` call.
+- No `claude_agent_sdk` import outside `toolkit/engines/` and `execution/session_store.py` (`test_boundary.py`); no `SessionStore` implementation other than `HttpSessionStore` outside tests (D1, D27).
+- Nothing that rebuilds an SDK feature: no `make_agent_tool`, `validate_and_repair`, `delegation/` package, `context_summary` message, `summarizer` profile, `skill_load` tool or skills loader index.
+- No SDK session built without the options of Plan 9.4 (only the allowed built-ins, `strict_mcp_config`, `setting_sources=[]`): one options builder, `toolkit/engines/options.py`, and a source scan that finds no other `ClaudeAgentOptions(` call.
 - No provider key or provider base URL read in `agent_system/` (only `LITELLM_BASE_URL` / `LITELLM_API_KEY`); no `run_agent`, `user_gate`, `durable(` or `durable_map(` left.
 - No caller of `_wait_for_review` or `/segmentation-review/wait` on the agent path, and no `agent_waiting_for_user_input` emitter (replaced by `run_attempt_suspended`).
 
@@ -1379,7 +1450,7 @@ Nobody posts to it any more, so remove:
 1. **`CLAUDE.md`:**
    - the service table (the compute workers on Procrastinate and the `litellm` proxy; no Redis, no beat) and the `JOBS_DATABASE_URL` exception to the database rule;
    - the "Agent pipeline" section, rewritten as the harness (Main Agent, Session Graph, Executor, Guardrails, modes);
-   - the Claude Agent SDK engine: one SDK session per agent-node run (`session_id = run_id`, `HttpSessionStore`), `ask_user` / tool approvals / pause as suspended attempts, subagents for internal agents, the options every session must use, the Main's session rebuilt from the chat, `seed_from` as a fork;
+   - the Claude Agent SDK engine: one SDK session per agent-node run (`session_id = run_id`, `HttpSessionStore`), `AskUserQuestion` / `ask_user` forms / tool approvals / pause as suspended attempts, subagents for internal agents and for the Main's Composer and Recovery Agent, SDK skills, the options every session must use, the Main's saved session, `seed_from` as a fork, and the table of what the SDK does versus what CUBE.AI only configures (Plan 9);
    - LiteLLM: the service, the aliases, the profiles, the `claude_native` flags, and the known limits (non-Claude models unsupported by Anthropic through a gateway, no HIPAA configuration through a gateway);
    - approvals from the user's words (D28): `approval: before | after`, `ask_user`, the optional cohort approval and segmentation review;
    - the Toolkit (`ToolSpec` / `AgentSpec`, packs, catalog, `agent.md`, skills);
@@ -1429,10 +1500,10 @@ Run every suite in the Testing section, plus the final check.
 3. Execution agents declare their ports and read upstream data from "Node inputs".
 4. `completion_check` / `output_contract` are set where the output feeds other nodes.
 5. There is a test run on `ClaudeAgentEngine` against the scripted fake Messages server (`claude_cli` marker).
-6. **A `resumable` agent has a resume test:** the run is stopped after a tool call, resumed from its saved session, finishes, and no finished tool call runs twice. It also has an `ask_user` suspend/resume test.
+6. **A `resumable` agent has a resume test:** the run is stopped after a tool call, resumed from its saved session, finishes, and no finished tool call runs twice. It also has a question (`AskUserQuestion`, or its `ask_user` form) suspend/resume test.
 7. An agent with `delegates` has a test in which it uses its subagents on fake models, including a resume that brings their transcripts back; an agent whose output feeds other nodes has an `output_format` test.
 
-## Testing (the work, plus one end-to-end run at the end of each phase)
+## Testing (the work, plus an end-to-end run at the first working flow and when every part is complete)
 
 | Suite | Command |
 |---|---|
@@ -1454,7 +1525,7 @@ Run every suite in the Testing section, plus the final check.
 
 **Final check:** `python -c "from agent_system.toolkit.catalog import build; c = build(); c.validate(); print(len(c.tools), len(c.agents))"` prints:
 
-- **75 tools** (74 if Phase 3.5 takes Option B): 55 moved + `run_segmentation_with_guard` + 6 literature + `ask_user` + `run_modeling` + 11 control tools (`registry_search`, `registry_describe`, `graph_inspect`, `execute`, `graph_apply`, `node_cancel`, `node_message`, `artifact_read`, `skill_load`, `plan`, `recover`). `run_agent` is gone (Plan 9.6);
+- **64 tools**: 46 moved (the 55 of Plan 2, minus the 7 deleted in Phase 0.2, `write_agent_output` (Phase 10.1) and `scratchpad_write_note` (Phase 12.7); 2 fewer if Phase 3.2 also deletes `scratchpad_write_summary` and `scratchpad_raise_flag`) + `run_segmentation_with_guard` + 6 literature + `ask_user` + `run_modeling` + 9 control tools (`registry_search`, `registry_describe`, `graph_inspect`, `graph_propose`, `execute`, `graph_apply`, `node_cancel`, `node_message`, `artifact_read`). `run_agent`, `plan`, `recover` and `skill_load` are gone: the SDK's subagents and skills replace them;
 - **16 agents.**
 
 
@@ -1587,15 +1658,15 @@ The database rules every plan follows. The schema itself is built (migrations "o
 - **D16 — Each run freezes its `execution_policy`** at start (`max_attempts`, `timeout_s`, `idempotent`, `resumable`, `fresh`, `privacy_mode`, `gate_timeout_s`, `seed_from`, `spec_digest`, `engine_version`). Every execution write presents its attempt (D24).
 - **D17 — Standalone nnUNet training has its receipt table, `training_jobs`** (T9), outside the session graph.
 - **D18 — `render` stored files are never scientific inputs.** Only `retained` files or typed rows can be pinned.
-- **D19 — Not persisted:** direct Main tool calls get no run or attempt (their record is the chat, D21); the in-memory inbox queue, resource pools, heartbeats, Main/Composer/Recovery reasoning state, unsubmitted drafts, and start-time refusals for budget or resources (re-evaluated before every start and published as `node_start_refused`). Questions and approvals inside an agent node **are** persisted, as suspended attempts and transcripts (D27).
+- **D19 — Not persisted:** direct Main tool calls get no run or attempt (their record is the chat, D21); the in-memory inbox queue, resource pools, heartbeats, unsubmitted drafts (`graph_propose` proposals), and start-time refusals for budget or resources (re-evaluated before every start and published as `node_start_refused`). Questions and approvals inside an agent node **are** persisted, as suspended attempts and transcripts (D27), and so is the Main's SDK session (D21).
 - **D20 — One vocabulary** (§P.2). Old names live only in migrations, old durable events and the problem catalog.
-- **D21 — The Main loop has no table of its own.** Its replies and its tool calls and results are rows of the session's `chat_messages` (§P.5 *Main loop outputs*). Anything that writes research results, waits on a person or runs long is submitted with `execute` as **one graph node**. The result of a control tool (`execute`, `graph_apply`) is written by the Application API **in the same transaction as the graph change** (T1/T2).
+- **D21 — The Main keeps a saved SDK session** (revised 2026-10-20). Its reasoning, tool calls and results are its SDK transcript in `main_transcript_entries` (one per CUBE.AI session, the Composer and Recovery subagents under their `subpath`), written through `HttpSessionStore` and compacted by the SDK. The chat (`chat_messages`) keeps what the user sees: the user's messages and the Main's replies. Anything that writes research results, waits on a person or runs long is submitted with `execute` as **one graph node**. A control tool's change is idempotent by `sha256(session_id‖tool_use_id)`.
 - **D22 — One session = one research line.** For every request the Main decides, and records in the change's ops, whether it is: a question (a direct read tool), a modification of existing work (`UpdateParams` / `RerunNode`, which supersedes that node and every node after it), the next step (`AddNode` at the end), or a different study (it proposes a new session). A change that would supersede a **completed** run always carries the reason `supersedes_completed`, even in Auto mode.
 - **D23 — Inputs are resolved strictly, then pinned per port.** Candidates for an input port are the compatible output ports of live nodes earlier in the sequence. One → bound. None → `MISSING_INPUT` (required ports). Several → `AMBIGUOUS_INPUT`, unless `input_sources` names the source (`{port: {node_id, port}}`). Never by distance or type closeness. The Validator checks the whole target sequence on every change. T4 pins, per port, **the current completed run of the selected live upstream node at resolution time**.
 - **D24 — Fencing is enforced by the database on every write path.** The shared trigger sits on every table execution writes (every domain table with `created_by_run_id`, `segmentation_pairs`, `stored_files`, `node_runs`, `run_attempts`, `agent_transcript_entries`). A write must declare its path, or it is rejected: **attempt** (`cubeai.attempt_id`), **internal job** (`cubeai.run_id`), **user gate** (`cubeai.actor = 'user'`), **harness** (`cubeai.actor = 'harness'`), **migration** (Alembic only). The rules of each path are in §P.5 *Typed domain tables*. A run-less `stored_files` row (a direct Main result) needs no fence.
 - **D25 — Selections freeze with the run.** Selection and approval columns (`model_results.selected`, the pair review and selection columns, `segmentation_batches.review_status`, `cohorts.frozen_at`, `feature_sets.frozen_at`) change only while their run is `running` and current. After completion, `outputs` is the only selection; a different choice is a `RerunNode`.
 - **D26 — No dual path.** The AutoGen path does not work against the new schema; its rows are history.
-- **D27 — Agent transcripts and suspended attempts.** A `resumable` agent node keeps one Claude Agent SDK session per run (`session_id = run_id`), stored as opaque entries in `agent_transcript_entries` through the Application API (`HttpSessionStore`). Every attempt of the run resumes it; a rerun starts empty, unless its change sets `seed_from = {run_id, message_uuid}` (an earlier run of the same node): T4 checks the seed (it exists, same node, same `privacy_mode`, `spec_digest`, `engine_version`) and the SDK forks the old session up to that message; otherwise the run starts fresh (`seed_from.applied = false`). Only the run's current non-terminal attempt writes; any attempt of the run reads, and so does a seeded run's first attempt. The Application API never parses entries. A transcript is reasoning state, **never a result**. `ask_user`, a tool approval and a pause **suspend** the attempt (T10); the answer is written on the user gate path, and the same attempt resumes. The attempt lists its running calls in `run_attempts.pending_tools`, which T4 rule (f) reads. Transcripts are purged `AGENT_TRANSCRIPT_RETENTION_DAYS` (default 14) after the run is terminal, unless a live `seed_from` names them. The Main, the Composer and the Recovery Agent keep no transcript.
+- **D27 — Agent transcripts and suspended attempts.** A `resumable` agent node keeps one Claude Agent SDK session per run (`session_id = run_id`), stored as opaque entries in `agent_transcript_entries` through the Application API (`HttpSessionStore`). Every attempt of the run resumes it; a rerun starts empty, unless its change sets `seed_from = {run_id, message_uuid}` (an earlier run of the same node): T4 checks the seed (it exists, same node, same `privacy_mode`, `spec_digest`, `engine_version`) and the SDK forks the old session up to that message; otherwise the run starts fresh (`seed_from.applied = false`). Only the run's current non-terminal attempt writes; any attempt of the run reads, and so does a seeded run's first attempt. The Application API never parses entries. A transcript is reasoning state, **never a result**. `ask_user`, a tool approval and a pause **suspend** the attempt (T10); the answer is written on the user gate path, and the same attempt resumes. The attempt lists its running calls in `run_attempts.pending_tools`, which T4 rule (f) reads. Transcripts are purged `AGENT_TRANSCRIPT_RETENTION_DAYS` (default 14) after the run is terminal, unless a live `seed_from` names them. The Main's own transcript is `main_transcript_entries` (D21); the Composer and the Recovery Agent are stored there as its subagents.
 - **D28 — Approvals come from what the user asks for.** No fixed gate inside a node. A node carries `approval` (`none | before | after`, default `none`), set by the Main from the user's words: `before` → T4 does not start it until a user `ReleaseHold` sets `graph_nodes.start_released_by_change_id` (cleared when the node is edited or rerun); `after` → T6 sets `downstream_hold = 'user_review'` on its completed run, released by a user `ReleaseHold`. Only a change the user authored releases these two. Inside a node the agent asks with `ask_user`. The cohort approval and the segmentation review are domain forms of `ask_user`, used only on request; otherwise the population node freezes its cohort itself (`cohorts.frozen_by = 'auto'`) and the batch is accepted automatically (`review_status = 'auto_accepted'`, pairs `review_decision = 'auto'`).
 
 ---
@@ -1649,7 +1720,7 @@ Each word has one meaning in the schema, the code and the API.
 - **I16** A state change and its event commit together (`publication()`). Provenance is never hard-deleted (transcripts are the one exception, D27).
 - **I17** After its run completes, a result's selection never changes.
 - **I18** Every write to a fenced table declares its path (D24).
-- **I19** A transcript is written only by its run's current non-terminal attempt, read only within its run (or by a seeded run's first attempt), never parsed by the Application API, and never a result.
+- **I19** An agent-node transcript is written only by its run's current non-terminal attempt, read only within its run (or by a seeded run's first attempt), never parsed by the Application API, and never a result. The Main's transcript is written only by its session's runtime and is never a result either.
 - **I20** A suspended attempt holds no running work; it resumes as the same attempt only when the session is `active`, the run is current, and the answer (for a question or a tool approval) is recorded.
 - **I21** A user-requested approval (`approval: before`, a `user_review` hold) is released only by a change the user authored.
 
@@ -1672,15 +1743,12 @@ Never stored; published as `session_state`, checked in this order: `blocked` (an
 
 Only the rules that new code must follow; the columns are in the models.
 
-#### `chat_messages` and the Main loop outputs (D21)
+#### `chat_messages` and the Main's transcript (D21)
 
 - T3 inserts the message and its `user_input` event in one transaction; a replayed `message_id` with other content is a 409.
-- Compaction is a `role='system'` message `{v, kind:'context_summary', through_message_id}`.
-- A Main tool call is an assistant row `{kind:'tool_calls', turn_id, calls:[{call_id, tool, args, started_at}]}` (one row per call, `call_id` = the SDK's `tool_use_id`), and its result a `role='tool'` row `{kind:'tool_result', turn_id, call_id, tool, status: ok|error|interrupted, ended_at, error?, result | file_id, ui?, phi}`. `turn_id` is the `event_id` of the newest event that woke the turn; the pair key is `(turn_id, call_id)`. `args` are stored in full (the Main's context is rebuilt from them). The row `text` is a short label; the payload is in `metadata`.
-- **Commit order:** the `tool_calls` row commits **before** the call runs; a direct tool's result commits as soon as its call ends; a control tool's result commits **with** the graph change (T1/T2), as `{change_id, status: applied|pending, node_ids}`.
-- **Interrupted turn:** after a restart, every call without a result is closed with `status:'interrupted'` before the input is handled again.
-- **Idempotency:** a change the Main submits has `idempotency_key = sha256(turn_id‖call_id)`, so a re-handled turn never submits the same work twice.
-- **Sizes:** metadata holds small results only; large ones go to `retained` `stored_files` with no run, referenced by `file_id`. A message with `ui` is rendered with that view.
+- The chat holds what the user sees: the user's messages and the Main's replies (with an optional `ui` view hint). The Main's tool calls, tool results and compaction live in its SDK transcript (`main_transcript_entries`), not in the chat.
+- **Idempotency:** a change the Main submits has `idempotency_key = sha256(session_id‖tool_use_id)`; a call cut off by a restart is reported to the model by the SDK, and the next turn's graph summary shows whether the change was applied.
+- **Sizes:** a tool result to the model is small (refs, ids, summaries); large results go to `retained` `stored_files` with no run, referenced by `file_id`.
 - **Asking vs saving:** a question is a direct read tool; saving research results (a cohort) is always a node. A direct call creates no run and is never retried; a Main direct call to a `writes` tool is promoted to an `AddNode` change **before** any effect.
 
 #### `session_events`
@@ -1733,6 +1801,11 @@ Sequential execution (D5): `position` plus D23 express every dependency. **A DAG
 - `entry_uuid` is unique per `(run_id, subpath)`, so a re-delivered batch is a no-op. `entry` (JSONB) is stored and returned unchanged. `project_key` is checked against the deployment's one fixed key and not stored.
 - **Writes:** the attempt path, by the run's latest attempt in `running` or `suspended`. **Reads:** any attempt of the run; the first attempt of a run whose frozen `seed_from` names it; the Agent System's step timeline. **Purge:** the harness path, for runs terminal longer than the retention and named by no live `seed_from`.
 
+#### `main_transcript_entries` (new, migration "t")
+
+- Key `(session_id, subpath, seq)`: the Main's SDK `session_id` is the CUBE.AI session id; the Composer and the Recovery Agent are subpaths. `entry_uuid` is unique per `(session_id, subpath)`; entries are opaque.
+- Written and read only by the Agent System for its own session (owner-checked routes); not an execution table, so no fencing path. Purged with the retention after the session is archived.
+
 #### Typed domain tables
 
 - **Producer allow-lists** (by the node's target name): `cohorts` (`study_population_planner_agent`), `segmentation_batches` (`segmentation_agent`, `run_segmentation_with_guard`), `reports` (`latex_reporter_agent`), `feature_sets` and `radiomics_features` (`feature_extraction_agent`, `radiomics_extract_features`), `model_results` (`run_modeling`, the modeling job tools, legacy `modeling_agent`). `stored_files` has none (any run may store a file), `segmentation_pairs` none (owned through its batch). A new producer joins its list with its own migration; a contract test checks every name against the catalog.
@@ -1761,8 +1834,8 @@ Lock order: **session → graph → run → attempt → domain row**. Each trans
 | # | Transaction | Atomic effects |
 |---|---|---|
 | **T0 Create session** | Owner known | Insert the session, its graph (version 0) and its chat; store the opening `prompt` as the first message with its `user_input` event |
-| **T1 Propose** | The change has approval reasons | Lock the session (refuse if `archived`); check new `node_id`s are unused; compute the digest; add the derivable reasons; withdraw (or expire) the pending change, then insert this one `pending` (a replayed idempotency key returns the row when the digests match, else 409); insert the Main's `tool_result` when the Main submitted it; publish `graph_change_proposed` + `approval_requested`. Nothing executable changes |
-| **T2 Decide + apply** | Auto with no reasons, or a user decision quoting the digest | 1. Lock session → graph; refuse if `archived`. 2. Check ownership and `base_version = version`, else `stale` (past the TTL, `expired`). 3. Validate stable ids, one contiguous sequence, and every `input_sources` entry; if a derivable reason is now missing, the change goes `stale` and is re-proposed. 4. Insert, update in place, tombstone, reorder (assign `node_seq`). 5. **Affected set** = changed, moved, rerun or removed nodes, plus every live node after the first of them. 6. Supersede their current runs: `running` → `superseded_at` + `cancel_requested_at` on the active attempt; terminal → `superseded_at`. 7. Set `accepted_by_change_id` on added, edited and rerun nodes and clear their `start_released_by_change_id`; for `release_hold_node_ids`, set `hold_released_by_change_id` on the current run, or `start_released_by_change_id` on an unstarted `approval: before` node; releasing a `user_review` hold or a start needs a user-authored change (`USER_RELEASE_REQUIRED`). **No runs are created.** 8. `version += 1`; the change is `applied`; any other pending change goes `stale`. 9. Insert the Main's `tool_result`. 10. Publish |
+| **T1 Propose** | The change has approval reasons | Lock the session (refuse if `archived`); check new `node_id`s are unused; compute the digest; add the derivable reasons; withdraw (or expire) the pending change, then insert this one `pending` (a replayed idempotency key returns the row when the digests match, else 409); publish `graph_change_proposed` + `approval_requested`. Nothing executable changes |
+| **T2 Decide + apply** | Auto with no reasons, or a user decision quoting the digest | 1. Lock session → graph; refuse if `archived`. 2. Check ownership and `base_version = version`, else `stale` (past the TTL, `expired`). 3. Validate stable ids, one contiguous sequence, and every `input_sources` entry; if a derivable reason is now missing, the change goes `stale` and is re-proposed. 4. Insert, update in place, tombstone, reorder (assign `node_seq`). 5. **Affected set** = changed, moved, rerun or removed nodes, plus every live node after the first of them. 6. Supersede their current runs: `running` → `superseded_at` + `cancel_requested_at` on the active attempt; terminal → `superseded_at`. 7. Set `accepted_by_change_id` on added, edited and rerun nodes and clear their `start_released_by_change_id`; for `release_hold_node_ids`, set `hold_released_by_change_id` on the current run, or `start_released_by_change_id` on an unstarted `approval: before` node; releasing a `user_review` hold or a start needs a user-authored change (`USER_RELEASE_REQUIRED`). **No runs are created.** 8. `version += 1`; the change is `applied`; any other pending change goes `stale`. 9. Publish |
 | **T3 Accept input** | A user message, through the Agent System | Insert the message (a replay compares content; 409 if different), publish `user_input`; refuse if `archived`. The Agent System enqueues only after this commit |
 | **T4 Start node / open attempt** | The Executor, before dispatch | 1. Lock session → node (→ run). 2. Require: node live; session `active`; the previous live node's current run `completed` with no active hold; an `approval: before` node released (else `NEEDS_RELEASE`); **no non-terminal attempt in the session**; the node's `accepted_by_change_id` equal to what the Executor read. 3. **First start:** check every `resolved_inputs` pin (D23); insert the run `running` with `accepted_by_change_id`, the frozen `execution_policy`, `target_version`, `resolved_inputs` and the agent prompt, **plus attempt 1**. 4. **Retry**, only when all hold: (a) step 2 passes; (b) the current run is `failed`, or `cancelled` and the user explicitly retries; (c) no attempt of the run is `preparing`, `submitted`, `running` or `unknown`; (d) the latest attempt is `failed` or `interrupted` (or `cancelled` under (b)); a `cancelled` attempt is never retried automatically; (e) `attempt_number < max_attempts`; (f) an `interrupted` attempt with `dispatched_at` set and `idempotent = false` is not retried automatically: the Recovery Agent or the user decides. **For a `resumable` run**, "idempotent" is read from the latest attempt's `pending_tools`: automatic unless it lists a tool with `idempotent = false`. A latest attempt that failed with `transcript_write_failed` is never retried automatically. Then insert attempt `latest + 1`; for a resumable run it resumes the saved session. 5. **Seeded first start:** check the seed (transcript present, same node, same `privacy_mode`, `spec_digest`, `engine_version`) and freeze `seed_from.applied = true`, else start fresh with `applied = false` and the reason. 6. Attempts start `preparing` with `submission_key` and `request`; publish. **Dispatch after commit:** in-process / inline → commit `running` + `dispatched_at`, then spawn; job → the Application API defers the Procrastinate job (`queueing_lock = submission_key`), then commits `submitted` + `dispatched_at`; the worker moves it to `running` before it writes anything |
 | **T5 Reconcile** | Restart or lost acknowledgement | `suspended` attempts are left unchanged. In-process and inline attempts → `interrupted`. Job attempts by `submission_key`: running or queued → re-attach; terminal → record the outcome; not found and `preparing` → resubmit the same key and request; not found and `submitted` / `running` → `interrupted` with `record_lost`; an unreachable external backend (MONAI) → `unknown`, which blocks T4 for the session. Each terminal state is projected onto the run (`interrupted` → run `failed`, so T4 can retry); usage is added. **No attempt is created here** |
@@ -1780,7 +1853,7 @@ Lock order: **session → graph → run → attempt → domain row**. Each trans
 
 Phase 6.6 lists its steps. Nothing in production wrote the checkpoint tables or a `v:1` suspension, so no data is converted. Two details: the `error.code` list widens with `bad_output`, `transcript_incompatible` and `transcript_write_failed`; `cohorts.frozen_by` is backfilled `user` where `frozen_at` is set. The checkpoint routes answer `410 Gone` until Plan 17 removes them.
 
-#### Phase 3: execution-adapter prerequisites
+#### Execution-adapter prerequisites
 
 1. **MONAI terminal re-queue** (Plan 15, J1): an explicit re-queue of a terminal job under the same id with an incremented internal attempt, releasing the capacity slot on any error. Until it lands, a failed segmentation pair cannot be re-executed within the same run.
 2. **Migration "s" (Plan 5):** the Procrastinate schema of the pinned version, the `job_execution_status` view, and the workers' role `cubeai_jobs` (the Procrastinate objects only). `submission_key = {job_id}.{attempt_number}` is the job's `queueing_lock` and names its job dir. A job dir is purged only after T6 and a finished job row only after `JOB_RETENTION_HOURS`, so "not found" means "never sent" for `preparing` and `record_lost` for anything later.
@@ -1797,11 +1870,10 @@ Do not add these without the trigger in brackets:
 - a node-level `hold_reason` (a start-time condition that needs a human decision and cannot be known at proposal time);
 - saved state for tool nodes (the first resumable tool node that is not a job; until then a tool that works in parts records each part on domain rows);
 - a generic `approvals` table (never: approvals of work are `graph_changes` and node approvals; approvals inside a node are suspensions);
-- transcripts for the Main, the Composer or the Recovery Agent (a Main turn that costs minutes or many tokens: then the same `HttpSessionStore`, keyed by session);
 - cross-session agent memory (a new Application API table read through a tool, with a PHI guardrail);
 - resource grants or pool tables, a controller lease table (durable reservations, or more than one controller);
 - fingerprints or a reuse link (cross-version caching);
-- a context summary on `sessions` (never: it is a system message in the chat);
+- a context summary of ours anywhere (never: the SDK compacts the Main's session);
 - many chats per session (parallel conversations: drop `UNIQUE (session_id)` on `chats`);
 - a `main_turns` table (a turn must resume instead of restart, per-turn metrics are needed, or more than one Agent System worker runs; never runs for turns);
 - user roles, teams, sharing, credentials.
@@ -1819,8 +1891,8 @@ Do not add these without the trigger in brackets:
 | A change makes a later node's input ambiguous | Refused until that node's `input_sources` is set in the same change |
 | Superseded run still stopping when the next node is ready | The session-wide index blocks T4 until the old attempt is confirmed stopped |
 | Node inserted between a violating node and the next | The hold is on the violating run, so the inserted node is not ready either |
-| Restart in the middle of a Main turn | The input is handled again; calls without a result are first closed `interrupted` |
-| Main crashes after applying a change, before T8 | The control call's result committed with the change, so the re-handled turn sees the work was submitted; a literal replay is deduped by the idempotency key |
+| Restart in the middle of a Main turn | The Main's session is resumed from its store; the SDK reports the cut-off call to the model; the input is handled again because the cursor did not advance |
+| Main crashes after applying a change, before T8 | The next turn's graph summary shows the applied change; a literal replay of the call is deduped by the idempotency key |
 | The caller omits a derivable approval reason | T1/T2 add `PLAN_MODE` and `supersedes_completed` themselves; T2 marks the change `stale` if they would be missing |
 | Session switched to `phi_local` while an external-model run is active | T7 cancels every attempt frozen as `standard`, in the same transaction |
 | Late success from a superseded run | Recorded as `completed` + `superseded_at`; never selected or pinned |
@@ -1850,7 +1922,7 @@ Do not add these without the trigger in brackets:
 
 - **The frontend Surface:** chat `/skills` UI, a live Graph Canvas with diff preview, the Approvals Panel, and Settings for mode, privacy and models. The backend routes and events are ready for it.
 - **The evaluation harness** (system §36).
-- **system Phase 4 (Scaling):** embedding-based registry retrieval, domain sub-planners, a Tool Builder, the Result Verifier, tracing and metrics beyond run usage and timings.
+- **Scaling:** embedding-based registry retrieval, domain sub-planners, a Tool Builder, the Result Verifier, tracing and metrics beyond run usage and timings.
 - **`spawn_agent` / `wait_agent`**, and cross-session caching.
 - **DAG or parallel execution.** The roadmap stays sequential; Appendix P §P.4 lists the current-phase constraints and §P.5 the five steps that open the DAG path without a rewrite.
 - **Authentication and multi-user.** One configured default user owns every session until a verified identity exists (Appendix P D2, assumption 5).
