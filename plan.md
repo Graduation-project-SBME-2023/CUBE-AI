@@ -176,13 +176,13 @@ deploy/
 | 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | ✅ 6.1–6.5 done; 6.6 (agent transcripts, user approvals; decision 2026-10-19) not started |
 | 7 | Modeling Engine, Heavy Tools as Jobs + `run_modeling` | M2 | 0, 2, 5, 6 | 🟡 7.0–7.2 done (engine, rename, legacy records); jobs wait for Plan 5 |
 | 8 | Validator and Diff Engine | M3 | 1, 6 | ✅ 8.1–8.4 done (`ce5a777e`, `3ac5411c`); the 2026-10-19 follow-up (`seed_from`, `approval`) not started |
-| 9 | Claude Agent SDK Engine, Session Store and Model Gateway (LiteLLM) | M3 | 1, 3, 6 (6.6 for 9.5) | Not started |
+| 9 | Claude Agent SDK Engine, Session Store and Model Gateway (LiteLLM) | M3 | 1, 3, 6 (6.6 for 9.5), 15.4 (for 9.7) | Not started |
 | 10 | Executor, Node Runner, Watchdog | M3 | 5, 6, 8, 9 | Not started |
 | 11 | Runtime Guardrails, Modes, Approvals | M3 | 5, 6, 8, 10 | Not started |
 | 12 | Session Layer: Inbox, Main Loop, Context, Skills, Planner | M3 | 8, 9, 10, 11 | Not started |
 | 13 | Recovery and Privacy | M4 Hardening | 10, 11, 12 | Not started |
 | 14 | _(removed: no MCP edge for now, 2026-10-20)_ | – | – | – |
-| 15 | MONAI Jobs + Segmentation Client | M5 Job fixes | 5 (Phase 5.1 only); the review of 15.4 needs Phases 9.3 (`ask_user`) and 6.6 (`auto` review values) | Not started |
+| 15 | MONAI Jobs + Segmentation Client | M5 Job fixes | 5 (Phase 5.1 only) | Not started |
 | 16 | Other Job Systems | M5 | 5, 15 | Not started |
 | 17 | Cut-over, AutoGen Removal, Cleanup, Docs | M6 | all | Not started |
 
@@ -196,11 +196,11 @@ How the remaining work is split between five people (the five areas and their or
 
 | Person | Area | Plans and phases, in order |
 |---|---|---|
-| **Person 1** | Compute jobs | Plan 5 → Plan 7 (7.1, 7.3, 7.4, 7.5) → Phases 16.1, 16.3, 16.4 |
-| **Person 2** | Agents, subagents and segmentation | Phase 3.0 (rework of the built Plan 3) → Phases 15.1–15.3 → Phase 9.6 → Phases 9.7 + 15.4 → `ask_user` (Phase 9.3 item 3) → Phase 16.2 → Phase 13.1 |
-| **Person 3** | Execution and session state | Phase 6.6 → Plan 10 → Phase 11.3 → Phase 13.2 |
-| **Person 4** | Agent engine and models | Phase 9.0 spike → Plan 0 → Phases 9.1–9.4 → Plan 8 follow-up → Phase 9.5 → Phase 13.3 |
-| **Person 5** | Main Agent and session layer | Plan 12 → Phases 11.1, 11.2 → Phase 17.1 |
+| **Person 1** | Compute jobs and MONAI (alone: whole plans, no dependency on anyone) | Phase 5.1 → Phases 7.1 (ports), 7.3 → Plan 15 (15.1–15.4) → the rest of Plan 5 → Phases 7.1 (job manifests), 7.4, 7.5 → Plan 16 (16.1–16.4) |
+| **Person 2** | Agents, subagents and approvals | Phase 3.0 (rework of the built Plan 3) + Phase 0.2 (remove what the SDK replaces) → Phase 9.6 → Phase 12.5 → Phase 9.7 (with the segmentation review) → `ask_user` (Phase 9.3 item 3) → Phase 12.6 → Phase 11.3 → Phase 13.1 |
+| **Person 3** | Execution and session state | Phase 6.6 → Plan 10 → Phase 13.2 |
+| **Person 4** | Agent engine and models | Phase 9.0 spike → Phase 0.1 → Phases 9.1–9.4 → Plan 8 follow-up → Phase 9.5 → Phase 13.3 |
+| **Person 5** | Main Agent and session layer | Plan 12 (12.1–12.4, 12.7) → Phases 11.1, 11.2 → Phase 17.1 |
 | **Everyone** | Cut-over | Plan 17.2–17.6, each for their own area |
 
 ---
@@ -209,7 +209,7 @@ How the remaining work is split between five people (the five areas and their or
 
 # Plan 0 — Runtime and cleanup: Python 3.13, PyCaret removed, dead code removed
 
-**Owner:** Person 4 (Agent engine and models). See [team-plan.md](team-plan.md).
+**Owner:** Phase 0.1: Person 4 (Agent engine and models). Phase 0.2: Person 2 (Agents, subagents and approvals). See [team-plan.md](team-plan.md).
 
 **Goal:** every image we build runs Python 3.13, PyCaret and its old pins are gone, and the rest of the roadmap is written and tested on 3.13. The MONAI Label image is not touched. Then the built code loses what the Claude Agent SDK and the new harness replace (Phase 0.2), so no later plan builds on it.
 
@@ -289,7 +289,7 @@ Code built in Plans 1, 2 and 8 that the Claude Agent SDK (or the Node Runner and
 
 # Plan 3 — Agent Definitions and Skills
 
-**Owner:** Person 2 (Agents, subagents and segmentation). Person 5 reviews `main_agent` and `composer`. See [team-plan.md](team-plan.md).
+**Owner:** Person 2 (Agents, subagents and approvals). Person 5 reviews `main_agent` and `composer`. See [team-plan.md](team-plan.md).
 
 **Goal:** every agent is an `agent.md` file that becomes an `AgentSpec`, and the skills exist. Plan 9 makes the agents run.
 
@@ -477,7 +477,7 @@ Do this on the built branch, before it merges. It is the same kind of change as 
 
 # Plan 5 — Job Platform (PostgreSQL + Procrastinate)
 
-**Owner:** Person 1 (Compute jobs). See [team-plan.md](team-plan.md).
+**Owner:** Person 1 (Compute jobs and MONAI). See [team-plan.md](team-plan.md).
 
 **Goal:** heavy tools run as jobs queued in the Application API's PostgreSQL with Procrastinate, behind one `JobClient` contract, each in its own child process. Jobs have deterministic ids, real cancel, progress, timeouts, retention, restart recovery, OOM detection and queue liveness, with no Redis, no Celery and no beat process.
 
@@ -695,7 +695,7 @@ Implements Appendix P revision 3.4 (D27 rewritten, D28 new; §P.9 *Cut-over 3*).
 
 # Plan 7 — Modeling Engine, Heavy Tools as Jobs + `run_modeling`
 
-**Owner:** Person 1 (Compute jobs). Phases 7.0–7.2 are done. See [team-plan.md](team-plan.md).
+**Owner:** Person 1 (Compute jobs and MONAI). Phases 7.0–7.2 are done. See [team-plan.md](team-plan.md).
 
 **Goal:** PyCaret is replaced by a scikit-learn modeling engine. The 7 heavy tools and the new `run_modeling` tool run as jobs on the job platform (Plan 5). They are safe to run twice and at the same time, report progress, and can be used as graph nodes.
 
@@ -744,10 +744,10 @@ The worker runs the same handlers, so no wrapper code is needed.
 
 ## Phase 7.4 — Correctness for jobs
 
-Fix H1–H18 (Appendix C). Two of them change code outside the tools:
+Fix H1–H18 (Appendix C), except the Node Runner half of H13. One of them changes code outside the tools:
 
 - H12 changes `application_api/repositories/radiomics.py`, so that reused rows are linked to the current run, unless `execution_policy.fresh` is set; then nothing produced by another run is reused (Appendix P).
-- H13: the run's temp cleanup (now done by the Node Runner at completion, Phase 10.1, since `write_agent_output` is gone) is skipped while `JobClient.list(run_id, active_only=True)` is not empty.
+- H13: the per-job dirs (H9, H14) are here. Skipping the run's temp cleanup while jobs are active is the Node Runner's (Phase 10.1, Person 3), on `JobClient.list` (Phase 5.1).
 
 ## Phase 7.5 — Progress and hooks
 
@@ -870,7 +870,7 @@ Phases 8.1–8.4 are built (`ce5a777e`, `3ac5411c`). The decision of 2026-10-19 
 
 # Plan 9 — Claude Agent SDK Engine, Session Store and Model Gateway (LiteLLM)
 
-**Owner:** Person 4 (Agent engine and models), except Phase 9.6, `ask_user` (Phase 9.3 item 3) and Phase 9.7: Person 2 (Agents, subagents and segmentation). See [team-plan.md](team-plan.md).
+**Owner:** Person 4 (Agent engine and models), except Phase 9.6, `ask_user` (Phase 9.3 item 3) and Phase 9.7: Person 2 (Agents, subagents and approvals). See [team-plan.md](team-plan.md).
 
 **Goal:** real LLM execution for every agent through the Claude Agent SDK (Python, `claude-agent-sdk`), with every model reached through LiteLLM (decided 2026-10-19). Agent nodes keep a saved SDK session per run, stored through the Application API (Appendix P D27), so a retry continues instead of reasoning again. An agent that asks the user, a mandatory tool approval and a pause suspend the attempt instead of holding a process. Internal agents are SDK subagents. The Main runs on the same engine with its own saved session (D21); the Composer and the Recovery Agent are its subagents. Every feature the SDK has (compaction, subagents, skills, questions, permissions, limits, progress, usage) is configured here, never rebuilt.
 
@@ -1015,7 +1015,7 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
 1. **The segmentation module:**
    - `module.py:96-133` (which builds AutoGen agents from the MCP workbench) and `:1375-1376` now call `AgentEngine.run("clinical_target_intent_agent" | "mask_resolution_agent", ...)`: one-shot calls with `output_format` and no saved session (the module calls them from code, so they are not subagents);
    - `planner.py` keeps its prompts and parsing, and loses its `AssistantAgent` factories;
-   - **the review:** the pair work records each pair on `segmentation_pairs`, as today, so a re-call continues from the pairs already done. When the user asked to review the masks, the segmentation agent asks with `ask_user(form="segmentation_review", …)` after the tool returns. Otherwise the batch is accepted automatically (`review_status = 'auto_accepted'`, each pair `review_decision = 'auto'`). `_wait_for_review` gets no new caller.
+   - **the review (S10, moved here from Phase 15.4):** the pair work records each pair on `segmentation_pairs`, as today, so a re-call continues from the pairs already done. When the user asked to review the masks, the segmentation agent asks with `ask_user(form="segmentation_review", …)` after the tool returns, which suspends the node. Otherwise the batch is accepted automatically (`review_status = 'auto_accepted'`, each pair `review_decision = 'auto'`, D28). No request polls, and a restart during the review loses nothing. The agent path no longer calls `_wait_for_review`; it is deleted with its last caller, or keeps `RetryPolicy` if a non-agent caller remains. This builds on Phase 15.4 (Person 1).
 2. **The population tools:** cohort creation records the cohort, as today. When the user asked to approve it, the population agent asks with `ask_user(form="cohort_approval", …)`, and the approval route freezes the cohort, as today. Otherwise the agent's last step freezes it automatically (`frozen_by = 'auto'`). Either way the cohort is frozen before the node completes (D25).
 3. **`cohort_labels.py`:** its LLM calls use the Model Gateway's `extraction` profile as plain Messages calls through LiteLLM (the `anthropic` SDK with `base_url = LITELLM_BASE_URL` and the profile's alias), not one CLI session per patient. Each patient's labels are recorded when they are done, so a re-call labels only the patients still missing. `common/llm.py` moves onto the gateway.
 
@@ -1032,7 +1032,8 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
 - the Main resumes its saved session after a simulated restart, and a long Main session is compacted by the SDK; the Main calls the `composer` subagent and gets a `proposal_id`; skills load only when listed; `TaskCreate` / `TaskUpdate` become `agent_task` events; `max_budget_usd` ends a run as `budget_exceeded`;
 - cancel stops a running tool; `fallback_model` on a model error; usage from `model_usage`, subagents included;
 - the Model Gateway: the env per profile, the `claude_native: false` flags, the pinned background model, the `locality_filter` hook;
-- the segmentation module calls the internal agents through the engine.
+- the segmentation module calls the internal agents through the engine;
+- the review: with a review requested, the node suspends on `ask_user` after the pairs finish, and a resume after a simulated restart does not resubmit any pair job and reads the review decision from the domain rows; with no review requested, the batch is `auto_accepted`.
 
 **Done when:** every `AgentSpec` runs on `ClaudeAgentEngine` against the fake Messages server; every `resumable` execution agent passes a resume test; the question, tool-approval, pause, subagent, skill and Main-resume tests pass; the session store passes the SDK conformance suite; and `FakeAgentEngine` still passes the Plan 1 tests.
 
@@ -1061,7 +1062,7 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
    - the user's answer (`gate_resolved`) or the end of a pause wakes the Executor (Phase 10.2), which calls `resume_attempt` and then `engine.run(..., resume=Resume(value))` (for a pause: `Resume.continue_()`) with the **same** attempt. A suspension is not a new attempt (I8);
    - a fencing refusal on resume (the run was superseded or cancelled meanwhile) ends the task without running anything.
 5. **Tool Node:** `dispatch.invoke(spec, params + input refs, ctx, cancel)`: inline (marked `running` first) or a job (the worker marks it `running`, Plan 5).
-6. **Outputs:** call each output port's `extract` → `{type, ref:{table, ids}, summary, phi}`. For an agent node, the agent's structured output (the SDK's `output_format`, from its `output_contract`) is the input to `extract`; the Node Runner shows the agent's view with it (the view branch `write_agent_output` used to trigger, `common/views.py`) and clears the run's temp dirs (H13). **`write_agent_output` is deleted here**, with its tests.
+6. **Outputs:** call each output port's `extract` → `{type, ref:{table, ids}, summary, phi}`. For an agent node, the agent's structured output (the SDK's `output_format`, from its `output_contract`) is the input to `extract`; the Node Runner shows the agent's view with it (the view branch `write_agent_output` used to trigger, `common/views.py`) and clears the run's temp dirs, but not while `JobClient.list(run_id, active_only=True)` is not empty (H13; moved here from Phase 7.4). **`write_agent_output` is deleted here**, with its tests.
 7. **Finish (T6):**
    - success → `complete_attempt(outputs, usage)`. The Application API checks the refs, evaluates the node's expectations and may set `downstream_hold`;
    - failure → `fail_attempt(error_code, usage)`, with `error|timeout|oom|interrupted|cancelled|max_iterations|bad_output|resource_unavailable|transcript_incompatible|transcript_write_failed`.
@@ -1155,7 +1156,7 @@ On `graph_changed`:
 
 # Plan 11 — Runtime Guardrails, Modes, Approvals
 
-**Owner:** Phases 11.1 and 11.2: Person 5 (Main Agent and session layer). Phase 11.3: Person 3 (Execution and session state). See [team-plan.md](team-plan.md).
+**Owner:** Phases 11.1 and 11.2: Person 5 (Main Agent and session layer). Phase 11.3: Person 2 (Agents, subagents and approvals). See [team-plan.md](team-plan.md).
 
 **Goal:** one place that decides execution boundaries (system §10). It also covers Plan/Auto modes and approvals (§31).
 
@@ -1225,7 +1226,7 @@ On `graph_changed`:
 
 # Plan 12 — Session Layer: Inbox, Main Loop, Context, Skills, Planner
 
-**Owner:** Person 5 (Main Agent and session layer). See [team-plan.md](team-plan.md).
+**Owner:** Person 5 (Main Agent and session layer), except Phases 12.5 (the Composer) and 12.6 (skills): Person 2 (Agents, subagents and approvals). See [team-plan.md](team-plan.md).
 
 **Goal:** the Main Agent as a free, non-blocking orchestrator (system §5-§8, §23, §25, §30, §32, §33).
 
@@ -1272,7 +1273,7 @@ The SDK owns the Main's context: its saved session holds the conversation, and t
 
 ## Phase 12.4 — Main Loop (`harness/main_loop.py`, `harness/session_runtime.py`)
 
-1. **`SessionRuntime`:** one per active session. It owns the inbox, the Main loop task, the Main's `ClaudeSDKClient` and the `SessionExecutor`. It starts lazily on the first inbox item and stops after `SESSION_IDLE_TIMEOUT_S` (which also closes the Main's client).
+1. **`SessionRuntime`:** one per active session. It owns the inbox, the Main loop task, the Main's `ClaudeSDKClient` and the `SessionExecutor`. It starts lazily on the first inbox item and stops after `SESSION_IDLE_TIMEOUT_S` (which also closes the Main's client). **K2 (moved here from Phase 16.4):** its stop sets the status only after its tasks end, and re-raises `CancelledError`; a test checks the order.
 2. **The loop** (system §23):
    ```
    async def session_loop(rt):
@@ -1333,7 +1334,7 @@ The SDK owns the Main's context: its saved session holds the conversation, and t
 
 # Plan 13 — Recovery and Privacy
 
-**Owner:** Phase 13.1: Person 2 (Agents, subagents and segmentation). Phase 13.2: Person 3 (Execution and session state). Phase 13.3: Person 4 (Agent engine and models). See [team-plan.md](team-plan.md).
+**Owner:** Phase 13.1: Person 2 (Agents, subagents and approvals). Phase 13.2: Person 3 (Execution and session state). Phase 13.3: Person 4 (Agent engine and models). See [team-plan.md](team-plan.md).
 
 **Goal:** the Recovery Agent, resource failure handling and PHI-Local.
 
@@ -1386,7 +1387,7 @@ The SDK owns the Main's context: its saved session holds the conversation, and t
 
 # Plan 15 — MONAI Inference Jobs + Segmentation Client
 
-**Owner:** Person 2 (Agents, subagents and segmentation): the segmentation client (Phase 15.4) and the segmentation module (Phase 9.7) are the same code, so one person builds both. Person 1 reviews `jobs_core/backends/monai_http.py` against the `JobClient` contract. See [team-plan.md](team-plan.md).
+**Owner:** Person 1 (Compute jobs and MONAI), all four phases. It needs nothing from another area: the segmentation review (S10) is Phase 9.7's (Person 2), which builds on Phase 15.4. See [team-plan.md](team-plan.md).
 
 **Goal:** fix the critical MONAI job bugs, and move the segmentation client onto the shared contract, so that the Executor can cancel it and classify its failures. MONAI keeps its own job store and GPU: it is a `JobClient` backend, not a Procrastinate queue (Plan 5).
 
@@ -1418,7 +1419,7 @@ Fix these in place. MONAI keeps its own file store, and its status strings must 
 - The heartbeat in `pipelines/common.py`: J14, S2.
 - Use `to_thread` for heavy numpy / SimpleITK work (S7).
 - The session handle is passed in explicitly (S9); the Executor's cancel token reaches the MONAI cancel.
-- **S10 is solved by removing the wait:** the agent path no longer calls `_wait_for_review`. The tool records each pair on `segmentation_pairs` and returns; when the user asked for a review, the segmentation agent asks with `ask_user(form="segmentation_review", …)`, which suspends the node, and otherwise the batch is accepted automatically (Phase 9.7, D28). No request polls, and a restart during the review loses nothing. `_wait_for_review` is deleted with its last caller, or keeps `RetryPolicy` if a non-agent caller remains.
+- **S10 is not here:** the review moves to `ask_user` in Phase 9.7 (Person 2), which removes the agent path's call to `_wait_for_review`. This phase leaves `_wait_for_review` as it is.
 - The `toolpacks/segmentation/run_segmentation.py` tool also uses `MonaiHttpBackend`.
 
 **Tests (`tests/unit/monai/`, `tests/unit/segmentation/`):**
@@ -1429,21 +1430,21 @@ Fix these in place. MONAI keeps its own file store, and its status strings must 
 - the heartbeat never leaks the inner task;
 - a finished result is kept after a long pause;
 - a node cancel reaches MONAI;
-- the review: with a review requested, the node suspends on `ask_user` after the pairs finish, and a resume after a simulated restart does not resubmit any pair job and reads the review decision from the domain rows; with no review requested, the batch is `auto_accepted`.
+- a re-call after a simulated restart does not resubmit any finished pair job.
 
-**Done when:** the J1 test is green, both clients use `MonaiHttpBackend`, and the segmentation review happens only when the user asked for it.
+**Done when:** the J1 test is green, and both clients use `MonaiHttpBackend`.
 
 ---
 
 # Plan 16 — Other Job Systems
 
-**Owner:** Phases 16.1, 16.3, 16.4: Person 1 (Compute jobs). Phase 16.2 (MONAI training): Person 2 (Agents, subagents and segmentation). See [team-plan.md](team-plan.md).
+**Owner:** Person 1 (Compute jobs and MONAI), all four phases. It needs nothing from another area: K2 (the `SessionRuntime` stop) moved to Phase 12.4. See [team-plan.md](team-plan.md).
 
 **Goal:** fix the remaining long waits, training, ingestion and background tasks.
 
 ## Phase 16.1 — Long waits
 
-- **S11:** the agent path no longer long-polls (Phase 15.4). If another caller of `/segmentation-review/wait` remains, the server is keyed by batch, leaks no waiters, and checks for disconnects; otherwise the endpoint is retired in Plan 17.
+- **S11:** `/segmentation-review/wait` is fixed on the server whoever still calls it: keyed by batch, no leaked waiters, disconnect checks. Whether it is retired is decided in Plan 17, once the agent path stops calling it (Phase 9.7).
 - **S13 (server side):** compile before taking the row lock, with `asyncio.create_subprocess_exec` in its own process group, killed on timeout.
 - **S13 (client side):** `latex_to_pdf` retries and resolves the 409 `stale_version`.
 - **S8:** PATCH only the changed pair.
@@ -1459,7 +1460,7 @@ Ingestion conversion becomes a job on the `compute.cpu` queue (Plan 5) (`job_nam
 ## Phase 16.4 — Agent System tasks
 
 - **K1:** use `best_effort.schedule_best_effort`.
-- **K2:** stop ordering, applied to the new `SessionRuntime` stop: set the status only after the tasks end, and re-raise `CancelledError`.
+- **K2** moved to Phase 12.4 (the `SessionRuntime` stop is built there).
 - **K3:** `reload` only when `APP_ENV=dev`.
 
 **Tests:**
@@ -1467,8 +1468,7 @@ Ingestion conversion becomes a job on the `compute.cpu` queue (Plan 5) (`job_nam
 - S11 waiter cleanup; S13 does not block the event loop (a fake slow compiler);
 - the training job state machine (T9: receipt before the POST; reconcile 404 → resubmit the same id; unfreeze only when no active receipt remains);
 - G1: a failed re-run does not delete an existing series;
-- ingestion job cancel / `INTERRUPTED`;
-- K2 stop ordering.
+- ingestion job cancel / `INTERRUPTED`.
 
 **Done when:** every listed problem has a test that passes.
 
@@ -1649,8 +1649,8 @@ Run every suite in the Testing section, plus the final check.
 | S7 | Heavy numpy / SimpleITK work on the loop (`services.py:462,571,763`, `module.py:446-455`). | `to_thread`. |
 | S8 | O(N²) checkpoint PATCHes (`batch_store.py:228-243`). | PATCH only the changed pair. |
 | S9 | The cancel checks swallow `ImportError` / `KeyError` (`common.py:133-134,152-153`). | An explicit session handle. |
-| S10 | `_wait_for_review` retries too few errors; a 5xx is fatal (`module.py:986-1015`). | Removed on the agent path: the review is a `segmentation_review` gate (Phase 15.4). Otherwise `RetryPolicy` + an overall deadline. |
-| S11 | The review long-poll is keyed by session, leaks tasks and ignores disconnects (`segmentation_review.py:682-705`). | No agent caller after Phase 15.4. For any remaining caller: key by batch; cancel the waiter; `is_disconnected()`. |
+| S10 | `_wait_for_review` retries too few errors; a 5xx is fatal (`module.py:986-1015`). | Removed on the agent path: the review is a `segmentation_review` gate (Phase 9.7). Otherwise `RetryPolicy` + an overall deadline. |
+| S11 | The review long-poll is keyed by session, leaks tasks and ignores disconnects (`segmentation_review.py:682-705`). | Fixed on the server whoever calls it (Phase 16.1): key by batch; cancel the waiter; `is_disconnected()`. No agent caller after Phase 9.7. |
 | S12 | Cohort gate: one transient error ends the wait; the timeout is sleep-only; a global flag (`targets_matcher.py`). | `poll_until` + per-session state. |
 | S13 | The LaTeX compile blocks the Application API loop while holding a row lock (`repositories/reports.py:298-304,346-354,433`); the client doesn't retry. | Compile before the lock with `create_subprocess_exec`; the client retries and resolves the 409. |
 
