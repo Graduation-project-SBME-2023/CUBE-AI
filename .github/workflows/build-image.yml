@@ -123,7 +123,7 @@ jobs:
 
       - name: Set up QEMU
         if: steps.plan.outputs.run == 'true' && contains(inputs.platforms, 'arm64')
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         if: steps.plan.outputs.run == 'true'
