@@ -164,7 +164,7 @@ jobs:
 
       - name: Build and push
         if: steps.plan.outputs.run == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.dockerfile }}
