@@ -3,13 +3,48 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 from pathlib import Path
 
 import pytest
 
-from jobs_core.contract import canonical_json, make_job_id, make_submission_key
+from jobs_core.contract import ErrorCode, canonical_json, make_job_id, make_submission_key
 
 pytestmark = pytest.mark.unit
+
+
+# --- ErrorCode
+
+
+def test_error_codes_are_the_documented_set() -> None:
+    assert {code.value for code in ErrorCode} == {
+        "error",
+        "timeout",
+        "queue_timeout",
+        "oom",
+        "interrupted",
+        "cancelled",
+        "run_not_running",
+        "resource_unavailable",
+    }
+
+
+def test_each_name_is_its_value_in_capitals() -> None:
+    for code in ErrorCode:
+        assert code.name == code.value.upper()
+        assert re.fullmatch(r"[a-z_]+", code.value)
+
+
+def test_an_error_code_is_its_string() -> None:
+    assert ErrorCode.OOM == "oom"
+    assert json.dumps({"code": ErrorCode.OOM}) == '{"code": "oom"}'
+    assert ErrorCode("queue_timeout") is ErrorCode.QUEUE_TIMEOUT
+
+
+def test_an_unknown_code_is_refused() -> None:
+    with pytest.raises(ValueError):
+        ErrorCode("gpu_exploded")
 
 
 # --- canonical_json

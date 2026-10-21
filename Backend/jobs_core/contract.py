@@ -13,7 +13,31 @@ from __future__ import annotations
 
 import hashlib
 import json
+from enum import StrEnum
 from typing import Any
+
+
+class ErrorCode(StrEnum):
+    """Why a job did not succeed: the closed set the Node Runner and the Watchdog decide on.
+
+    error                 the handler failed, or the supervisor itself crashed
+    timeout               it ran longer than ``timeout_s``
+    queue_timeout         it waited longer than ``queue_timeout_s`` and never started
+    oom                   out of memory (``MemoryError``, or killed with exit code 137)
+    interrupted           the worker died or shut down while the job ran
+    cancelled             someone cancelled it
+    run_not_running       its attempt was no longer the run's active one when it started (H20)
+    resource_unavailable  MONAI stayed busy (429) past the ``unavailable_s`` budget
+    """
+
+    ERROR = "error"
+    TIMEOUT = "timeout"
+    QUEUE_TIMEOUT = "queue_timeout"
+    OOM = "oom"
+    INTERRUPTED = "interrupted"
+    CANCELLED = "cancelled"
+    RUN_NOT_RUNNING = "run_not_running"
+    RESOURCE_UNAVAILABLE = "resource_unavailable"
 
 
 def canonical_json(value: Any) -> bytes:
