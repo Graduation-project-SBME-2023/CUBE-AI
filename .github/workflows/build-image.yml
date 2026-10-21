@@ -147,7 +147,7 @@ jobs:
       - name: Image tags
         if: steps.plan.outputs.run == 'true'
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
             name=${{ steps.plan.outputs.ghcr }}
