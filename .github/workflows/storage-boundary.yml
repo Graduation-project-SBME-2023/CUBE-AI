@@ -9,7 +9,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Reject runtime data outside Backend/storage
         shell: pwsh
         run: ./Backend/scripts/check_storage_boundary.ps1

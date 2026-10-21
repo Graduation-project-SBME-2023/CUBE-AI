@@ -107,7 +107,7 @@ jobs:
 
       - name: Check out repository
         if: steps.plan.outputs.run == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Free disk space
         if: steps.plan.outputs.run == 'true' && inputs.free-disk-space

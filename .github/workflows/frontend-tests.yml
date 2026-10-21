@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Same Node major as deploy/Dockerfile.frontend.prod. Yarn 1 is on the
       # runner already; this repo must not be switched to Yarn 3/4 by corepack.
