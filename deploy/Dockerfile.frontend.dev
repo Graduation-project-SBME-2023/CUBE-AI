@@ -1,5 +1,5 @@
 # Dev container for OHIF monorepo
-FROM node:18-slim
+FROM node:25-slim
 
 # Set working directory to monorepo root
 WORKDIR /usr/src/viewers
