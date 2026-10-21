@@ -39,7 +39,7 @@ jobs:
       # Same Node major as deploy/Dockerfile.frontend.prod. Yarn 1 is on the
       # runner already; this repo must not be switched to Yarn 3/4 by corepack.
       - name: Set up Node 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
           cache: yarn
