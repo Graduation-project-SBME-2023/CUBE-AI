@@ -1,6 +1,6 @@
 # CUBE.AI merged roadmap: Agent Harness + Tool Platform
 
-> **How we work (2026-10-20):** five people in parallel, one part each, in one phase, with one checkpoint (the first working flow). See [team-plan.md](team-plan.md) for who does what.
+> **How we work (2026-10-21):** five people in parallel, one area each, in one phase, with one checkpoint (the first working flow). Each plan names its **Owner**; see [team-plan.md](team-plan.md) for who does what and in which order.
 
 ## Context
 
@@ -16,7 +16,7 @@ This roadmap plans the next version of CUBE.AI: an agent harness (a Main Agent, 
 - **No MCP edge for now** (decided 2026-10-20). Plan 14 (third-party MCP servers as untrusted tools) is removed; its number is kept. Every tool an agent can call is a CUBE.AI tool.
 - **Use the SDK harness for everything it already does** (decided 2026-10-20). Nothing the Claude Agent SDK provides is rebuilt in CUBE.AI. Concretely: the Main keeps a **saved SDK session** and the SDK compacts it (no context rebuild from the chat, no own summaries); the **Composer and the Recovery Agent are SDK subagents** of the Main (no `plan` / `recover` agent-as-tool, no repair loop of ours); **skills are SDK skills** (`SKILL.md` in a local plugin, no loader of ours); **tool access** is the SDK's own (a session only has the tools its spec lists, so no visibility check of ours for SDK sessions); **limits** are `max_turns` / `max_budget_usd`; **free questions** to the user are the SDK's `AskUserQuestion`; **progress steps** are the SDK's `TaskCreate` / `TaskUpdate`; **PHI filtering of tool results** is a PostToolUse `updatedToolOutput`. CUBE.AI keeps only what the SDK does not do: the Session Graph, the Executor, the Validator and the Diff Engine, the database and its fencing, the job platform, the durable inbox, LiteLLM, the timeouts, and the domain tools. Before building anything around an agent, check the SDK docs first (*Global rules*).
 - **Not used for planning:** `cubeai-docs/architecture/monai-agent-integration.md`. Segmentation stays the execution agent of Plan 3.
-- **One phase, five parts, one checkpoint** (decided 2026-10-20). Each person owns one part from start to end and builds its simple version first, so the **first working flow** (a question in the chat → the PDF) comes early: until it works, heavy tools run inline, there is no agent memory, no questions to the user, Auto mode only, and synthetic data only. See `team-plan.md`.
+- **One phase, five areas, one checkpoint** (decided 2026-10-20, areas revised 2026-10-21; there is no second phase). Each person owns one area from start to end and builds its simple version first, so the **first working flow** (a question in the chat → the PDF) comes early: until it works, heavy tools run inline, there is no agent memory, no questions to the user, Auto mode only, and synthetic data only. See `team-plan.md`.
 - The scope includes the **cut-over and AutoGen removal** (Plan 17). The evaluation harness is **not** in this roadmap. The frontend changes that a backend change forces are made by the person who makes the backend change (`team-plan.md`); a redesign of the frontend Surface is not in this roadmap.
 - **Python 3.13 for every image we build** (Agent System, compute worker, Application API), done first in Plan 0. The MONAI Label image keeps its own Python 3.10.
 - **PyCaret is removed.** Modeling runs on scikit-learn, with LightGBM, XGBoost and SHAP. The 5 PyCaret tools are rewritten on that engine and **renamed** in Plan 7 (the only rename besides `save_literature_output`).
@@ -170,7 +170,7 @@ deploy/
 | 0 | Runtime and cleanup: Python 3.13, PyCaret removed, dead code removed | M0 Runtime | – | 🟡 0.1 implemented, CI not green yet; 0.2 (remove what the SDK replaces) not started |
 | 1 | Toolkit Core | M1 Toolkit | – | ✅ Done (1.1–1.5) |
 | 2 | Tool Packs | M1 | 1 | ✅ Done (2.1–2.5) |
-| 3 | Agent Definitions and Skills | M1 | 1, 2 | Not started |
+| 3 | Agent Definitions and Skills | M1 | 1, 2 | 🟡 Built on the pre-SDK design, not merged; Phase 3.0 reworks it for the SDK |
 | 4 | _(removed: no sandbox)_ | – | – | – |
 | 5 | Job Platform (PostgreSQL + Procrastinate) | M2 Compute | 1, 6 | Not started |
 | 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | ✅ 6.1–6.5 done; 6.6 (agent transcripts, user approvals; decision 2026-10-19) not started |
@@ -188,17 +188,28 @@ deploy/
 
 **Implementation order:** 0 → 1 ✅ → 6.1 ✅ → 2 → 3 → 5 → 6.2–6.5 → 7 → 8 → 6.6 → 9 → 10 → 11 → 12 → 13 → 15 → 16 → 17.
 
-This is the dependency order. Since 2026-10-20 the five parts of `team-plan.md` are built in parallel against contracts and fakes, so it does not say who works when.
+This is the dependency order. Since 2026-10-20 the five areas of `team-plan.md` are built in parallel against contracts and fakes, so it does not say who works when.
 
 ## The team
 
-How the remaining work is split between five people (the five parts, the first working flow, the contracts, the working rules and the folder owners) is in [team-plan.md](team-plan.md).
+How the remaining work is split between five people (the five areas and their order, the first working flow, the contracts, the working rules and the folder owners) is in [team-plan.md](team-plan.md). In short:
+
+| Person | Area | Plans and phases, in order |
+|---|---|---|
+| **Person 1** | Compute jobs | Plan 5 → Plan 7 (7.1, 7.3, 7.4, 7.5) → Phases 16.1, 16.3, 16.4 |
+| **Person 2** | Agents, subagents and segmentation | Phase 3.0 (rework of the built Plan 3) → Phases 15.1–15.3 → Phase 9.6 → Phases 9.7 + 15.4 → `ask_user` (Phase 9.3 item 3) → Phase 16.2 → Phase 13.1 |
+| **Person 3** | Execution and session state | Phase 6.6 → Plan 10 → Phase 11.3 → Phase 13.2 |
+| **Person 4** | Agent engine and models | Phase 9.0 spike → Plan 0 → Phases 9.1–9.4 → Plan 8 follow-up → Phase 9.5 → Phase 13.3 |
+| **Person 5** | Main Agent and session layer | Plan 12 → Phases 11.1, 11.2 → Phase 17.1 |
+| **Everyone** | Cut-over | Plan 17.2–17.6, each for their own area |
 
 ---
 
 ---
 
 # Plan 0 — Runtime and cleanup: Python 3.13, PyCaret removed, dead code removed
+
+**Owner:** Person 4 (Agent engine and models). See [team-plan.md](team-plan.md).
 
 **Goal:** every image we build runs Python 3.13, PyCaret and its old pins are gone, and the rest of the roadmap is written and tested on 3.13. The MONAI Label image is not touched. Then the built code loses what the Claude Agent SDK and the new harness replace (Phase 0.2), so no later plan builds on it.
 
@@ -278,7 +289,58 @@ Code built in Plans 1, 2 and 8 that the Claude Agent SDK (or the Node Runner and
 
 # Plan 3 — Agent Definitions and Skills
 
+**Owner:** Person 2 (Agents, subagents and segmentation). Person 5 reviews `main_agent` and `composer`. See [team-plan.md](team-plan.md).
+
 **Goal:** every agent is an `agent.md` file that becomes an `AgentSpec`, and the skills exist. Plan 9 makes the agents run.
+
+**Status (2026-10-21):** Plan 3 is **built but not merged**, and it was built on the design that came **before** the Claude Agent SDK decision (2026-10-19): the LangGraph-era Plan 3 (checkpoints, in-node gates, a fixed `workflow` graph for the literature review, control-kind Composer and Recovery Agent with output contracts, and `skills/*.md` with `applies_to`). Phases 3.1–3.5 below are the **target**. Phase 3.0 lists what changes in the built code to reach it. Only after Phase 3.0 does Plan 3 merge.
+
+## Phase 3.0 — Rework the built Plan 3 for the Claude Agent SDK
+
+Do this on the built branch, before it merges. It is the same kind of change as Phase 0.2: delete what the SDK now does, add what the SDK needs, and change the meaning of the fields that stay. Phases 3.1–3.5 are the reference for every item.
+
+**1. Removed:**
+
+| What (in the built code) | Where | Why (replaced by) |
+|---|---|---|
+| The `gates` front-matter field, its known-gate list, and the "only `execution` agents have gates" rule | loader, `AgentSpec`, `catalog.validate()` | There is no fixed gate inside a node (D28). The cohort approval and the segmentation review are `ask_user(form=…)`, used only when the user asked (Phase 9.3) |
+| `human_in_the_loop` (front matter and the derived field) | loader, `AgentSpec` (Phase 0.2 item 1) | `AskUserQuestion` and the `ask_user` forms |
+| The `workflow` field, `hooks.build_graph`, and the rules "`workflow` or `delegates`, never both" and "a `workflow` agent has `build_graph`" | loader, `hooks.py`, `catalog.validate()` | The literature review is an ordinary agent; its 5 internal agents are optional SDK subagents in any order (Phase 9.6) |
+| `max_context_tokens` as a required compaction threshold | loader | The SDK compacts by itself. Keep the field only if the Phase 9.0 spike finds a per-session setting |
+| Every mention of `HttpCheckpointSaver`, checkpoints, the `compact` node, LangGraph or `StateGraph` | `agent.md` prompts, docstrings, tests | Saved SDK sessions (`HttpSessionStore`, Phase 9.5) |
+| `gates: [cohort_approval]` on `study_population_planner_agent`, `gates: [segmentation_review]` on `segmentation_agent`, and every fixed "wait for approval" step in their prompts | `agentpacks/research/` | The prompt rule of Phase 3.2: ask only when the node instructions say the user wants it |
+| `kind: control` on `composer` and `recovery_agent` | `agentpacks/core/` | They are `kind: internal`, `parent: main_agent`: the Main's SDK subagents (Phase 3.4) |
+| `output_contract = GraphProposal` on `composer`, `output_contract = RecoveryProposal` on `recovery_agent`, and `RecoveryProposal` in `planning/graph_model.py` | `agentpacks/core/`, `planning/graph_model.py` (Phase 0.2 item 2) | Both propose with `graph_propose` and end with a `proposal_id` and a short text |
+| "Except `plan` and `recover`" in the Composer's and Recovery Agent's tools, and every mention of the `plan` / `recover` tools in the Main's prompt | `agentpacks/core/` | There are no `plan` / `recover` tools: the Main asks its subagents with the SDK's `Agent` tool |
+| `skills/*.md` with `applies_to`, and the skills index | `agent_system/skills/`, tests | SDK skills in a local plugin, listed per agent (Phase 3.5) |
+| Any prompt line that names a tool removed in Phase 0.2 (`scratchpad_register_agent`, `scratchpad_set_status`, `scratchpad_read_agent`, `scratchpad_read_report`, `read_agent_output`, `read_all_agent_outputs`, `read_agent_task_context`, `run_agent`) | `agent.md` prompts, `allowed_tools` | The Node Runner owns the lifecycle; upstream data is in **Node inputs** |
+| The LangGraph-native tests (gates, `workflow`, `build_graph`, derived `human_in_the_loop`, the skills index) | `tests/unit/agentpacks/` | The SDK-field tests below |
+
+**2. Added:**
+
+| What | Where | Phase |
+|---|---|---|
+| Front-matter fields `effort`, `skills`, `max_budget_usd` (all optional) and `gate_timeout_s` (default `null`), validated by the Pydantic model and carried on `AgentSpec` | loader, `toolkit/agents/spec.py` | 3.1 |
+| Clear refusals for the old fields: `gates`, `workflow`, `human_in_the_loop` in a front matter fail with a message that names the replacement | loader | 3.1 |
+| Refusals for implicit tools: `ask_user`, `AskUserQuestion`, `TaskCreate`, `TaskUpdate` listed in `allowed_tools`; `delegates` on an internal agent (depth 1); `delegates` on a control agent other than `main_agent` | loader, `catalog.validate()` | 3.1, 3.3, 3.4 |
+| The new prompt rules in every execution agent: ask only when the node instructions say so (`AskUserQuestion` for a question, `ask_user` for the cohort or mask form); record main steps with `TaskCreate` / `TaskUpdate`; read upstream data from **Node inputs** | `agentpacks/research/*/agent.md` | 3.2 |
+| The decision on `scratchpad_write_summary` and `scratchpad_raise_flag`: part of `output_contract` or not (Phase 0.2, *Removed later*) | `agentpacks/research/`, `toolpacks/bookkeeping/` | 3.2 |
+| `literature_review_agent` as an ordinary agent: first version with no `delegates` and one prompt over its 6 tools; its `context_builder` (`use_pico`) and output hook (`release`, the review record, `lit_review_output`) | `agentpacks/research/literature_review_agent/` | 3.2 |
+| The 5 literature internal agents rewritten as optional subagents: a `description` that tells the parent when to use each, and `search_executor` / `relevance_ranker` prompts written for one source / one paper so the parent can run several at once | `agentpacks/research/literature_review_agent/…` | 3.3 |
+| `main_agent`: `delegates: [composer, recovery_agent]`, `skills: [research_study, modeling]`, the compact catalog index (`catalog.index("main")`) in its prompt, "ask the `composer` subagent and wait for its answer", and the approval wishes (D28) | `agentpacks/core/main_agent/agent.md` | 3.4 |
+| `composer` and `recovery_agent` as internal agents: the read-only `main` tools plus `graph_propose`; the Composer's "propose, read the Validator errors, propose again" loop in its prompt | `agentpacks/core/` | 3.4 |
+| The `cubeai` SDK plugin: `.claude-plugin/plugin.json` and `skills/<name>/SKILL.md` for the 5 skills, with `name` and `description` only | `agent_system/skills/cubeai/` | 3.5 |
+| The SDK-field tests and the skill tests listed under *Tests* below | `tests/unit/agentpacks/` | 3.1–3.5 |
+
+**3. Kept, with a new meaning:**
+
+- `resumable`: same defaults per kind, but it now means a saved SDK session per run (`session_id = run_id`), not a checkpoint thread.
+- `delegates`: now the agent's SDK subagents, not `run_agent` targets.
+- `max_tool_iterations`: becomes the SDK's `max_turns`.
+- `gate_timeout_s`: counts how long a **suspended attempt** (a question, a form or a tool approval) may wait, not a gate.
+- The prompts copied from `system_prompts/system_messages.py`, the ports, `completion_check`, `context_builder`, `allowed_tools_fn` and the output-port `extract` hooks stay as built.
+
+**Done when:** no file under `agentpacks/`, `skills/`, `toolkit/agents/` or `tests/unit/agentpacks/` names a removed field, tool or LangGraph symbol; the catalog has the agent counts of Phase 3.5's *Done when* (1 control, 6 execution, 9 internal); `validate()` passes; and the Plan 3 tests pass. Then Plan 3 merges.
 
 ## Phase 3.1 — The `agent.md` format and loader
 
@@ -328,7 +390,7 @@ Code built in Plans 1, 2 and 8 that the Claude Agent SDK (or the Node Runner and
 
 **Prompt work** (L14, plus the move to the graph): copy each prompt from `system_prompts/system_messages.py`, which stays frozen, into its `agent.md`. Then:
 
-- remove the `agent_id=` arguments, and use `scratchpad_read_agent(target_agent_id=...)`;
+- remove the `agent_id=` arguments, and every tool that Phase 0.2 removes (`scratchpad_read_agent`, `read_agent_output`, `read_all_agent_outputs`, …);
 - remove the register / set_status instructions (the Node Runner owns them);
 - use one segmentation tool name;
 - read upstream data from the **"Node inputs"** section that the Node Runner provides, not by reading the scratchpad by agent id;
@@ -414,6 +476,8 @@ Code built in Plans 1, 2 and 8 that the Claude Agent SDK (or the Node Runner and
 ---
 
 # Plan 5 — Job Platform (PostgreSQL + Procrastinate)
+
+**Owner:** Person 1 (Compute jobs). See [team-plan.md](team-plan.md).
 
 **Goal:** heavy tools run as jobs queued in the Application API's PostgreSQL with Procrastinate, behind one `JobClient` contract, each in its own child process. Jobs have deterministic ids, real cancel, progress, timeouts, retention, restart recovery, OOM detection and queue liveness, with no Redis, no Celery and no beat process.
 
@@ -562,6 +626,8 @@ Code built in Plans 1, 2 and 8 that the Claude Agent SDK (or the Node Runner and
 
 # Plan 6 — Session State Store: Persistence Design (Application API) (6.1–6.5 ✅; 6.6 open)
 
+**Owner:** Phase 6.6: Person 3 (Execution and session state). Phases 6.1–6.5 are done. See [team-plan.md](team-plan.md).
+
 **Goal:** implement Appendix P (the persistence design, revision 3.4; 6.1–6.5 built revision 3.2, and Phase 6.6 brings it to 3.4): the database, the transactions T0–T10 and the HTTP surface the harness uses. The Application API owns every row, and the Agent System reaches it only over HTTP. Appendix P is the specification; this plan says in which order it is built and how it is tested, and never restates its column lists.
 
 ## Phases 6.1–6.5 — what exists (read the code in `Backend/application_api/`)
@@ -628,6 +694,8 @@ Implements Appendix P revision 3.4 (D27 rewritten, D28 new; §P.9 *Cut-over 3*).
 ---
 
 # Plan 7 — Modeling Engine, Heavy Tools as Jobs + `run_modeling`
+
+**Owner:** Person 1 (Compute jobs). Phases 7.0–7.2 are done. See [team-plan.md](team-plan.md).
 
 **Goal:** PyCaret is replaced by a scikit-learn modeling engine. The 7 heavy tools and the new `run_modeling` tool run as jobs on the job platform (Plan 5). They are safe to run twice and at the same time, report progress, and can be used as graph nodes.
 
@@ -707,6 +775,8 @@ Fix H1–H18 (Appendix C). Two of them change code outside the tools:
 ---
 
 # Plan 8 — Validator and Diff Engine
+
+**Owner:** The follow-up: Person 4 (Agent engine and models). Phases 8.1–8.4 are done. See [team-plan.md](team-plan.md).
 
 **Goal:** deterministic graph code for a sequential live graph: a graph model, a Validator that returns only technical errors, the strict input resolution (D23), the affected set, and atomic, versioned changes through T1/T2 (system §9, §26, §27; Appendix P).
 
@@ -799,6 +869,8 @@ Phases 8.1–8.4 are built (`ce5a777e`, `3ac5411c`). The decision of 2026-10-19 
 ---
 
 # Plan 9 — Claude Agent SDK Engine, Session Store and Model Gateway (LiteLLM)
+
+**Owner:** Person 4 (Agent engine and models), except Phase 9.6, `ask_user` (Phase 9.3 item 3) and Phase 9.7: Person 2 (Agents, subagents and segmentation). See [team-plan.md](team-plan.md).
 
 **Goal:** real LLM execution for every agent through the Claude Agent SDK (Python, `claude-agent-sdk`), with every model reached through LiteLLM (decided 2026-10-19). Agent nodes keep a saved SDK session per run, stored through the Application API (Appendix P D27), so a retry continues instead of reasoning again. An agent that asks the user, a mandatory tool approval and a pause suspend the attempt instead of holding a process. Internal agents are SDK subagents. The Main runs on the same engine with its own saved session (D21); the Composer and the Recovery Agent are its subagents. Every feature the SDK has (compaction, subagents, skills, questions, permissions, limits, progress, usage) is configured here, never rebuilt.
 
@@ -968,6 +1040,8 @@ These extend Plan 1 contracts. `toolkit/` still imports nothing from the SDK (`t
 
 # Plan 10 — Executor, Node Runner, Watchdog
 
+**Owner:** Person 3 (Execution and session state). See [team-plan.md](team-plan.md).
+
 **Goal:** the only component that runs work (system §11-§14, §24), over the persistence of Appendix P. It starts nodes with T4, completes them with T6, cancels with T7, reconciles with T5, and suspends and resumes agent nodes with T10. It absorbs `RunHarness` and `DirectToolExecutor` from tools_plan.
 
 ## Phase 10.1 — Node Runner (`execution/node_runner.py`)
@@ -1081,6 +1155,8 @@ On `graph_changed`:
 
 # Plan 11 — Runtime Guardrails, Modes, Approvals
 
+**Owner:** Phases 11.1 and 11.2: Person 5 (Main Agent and session layer). Phase 11.3: Person 3 (Execution and session state). See [team-plan.md](team-plan.md).
+
 **Goal:** one place that decides execution boundaries (system §10). It also covers Plan/Auto modes and approvals (§31).
 
 ## Phase 11.1 — Guardrails core (`harness/guardrails.py`)
@@ -1148,6 +1224,8 @@ On `graph_changed`:
 ---
 
 # Plan 12 — Session Layer: Inbox, Main Loop, Context, Skills, Planner
+
+**Owner:** Person 5 (Main Agent and session layer). See [team-plan.md](team-plan.md).
 
 **Goal:** the Main Agent as a free, non-blocking orchestrator (system §5-§8, §23, §25, §30, §32, §33).
 
@@ -1255,6 +1333,8 @@ The SDK owns the Main's context: its saved session holds the conversation, and t
 
 # Plan 13 — Recovery and Privacy
 
+**Owner:** Phase 13.1: Person 2 (Agents, subagents and segmentation). Phase 13.2: Person 3 (Execution and session state). Phase 13.3: Person 4 (Agent engine and models). See [team-plan.md](team-plan.md).
+
 **Goal:** the Recovery Agent, resource failure handling and PHI-Local.
 
 ## Phase 13.1 — Recovery Agent (the Main's SDK subagent `recovery_agent`)
@@ -1306,6 +1386,8 @@ The SDK owns the Main's context: its saved session holds the conversation, and t
 
 # Plan 15 — MONAI Inference Jobs + Segmentation Client
 
+**Owner:** Person 2 (Agents, subagents and segmentation): the segmentation client (Phase 15.4) and the segmentation module (Phase 9.7) are the same code, so one person builds both. Person 1 reviews `jobs_core/backends/monai_http.py` against the `JobClient` contract. See [team-plan.md](team-plan.md).
+
 **Goal:** fix the critical MONAI job bugs, and move the segmentation client onto the shared contract, so that the Executor can cancel it and classify its failures. MONAI keeps its own job store and GPU: it is a `JobClient` backend, not a Procrastinate queue (Plan 5).
 
 ## Phase 15.1 — Safety net
@@ -1355,6 +1437,8 @@ Fix these in place. MONAI keeps its own file store, and its status strings must 
 
 # Plan 16 — Other Job Systems
 
+**Owner:** Phases 16.1, 16.3, 16.4: Person 1 (Compute jobs). Phase 16.2 (MONAI training): Person 2 (Agents, subagents and segmentation). See [team-plan.md](team-plan.md).
+
 **Goal:** fix the remaining long waits, training, ingestion and background tasks.
 
 ## Phase 16.1 — Long waits
@@ -1391,6 +1475,8 @@ Ingestion conversion becomes a job on the `compute.cpu` queue (Plan 5) (`job_nam
 ---
 
 # Plan 17 — Cut-over, AutoGen Removal, Cleanup, Docs
+
+**Owner:** Phase 17.1: Person 5, with Person 3. Phases 17.2–17.6: everyone, each for the items of their own area. See [team-plan.md](team-plan.md).
 
 **Goal:** the harness becomes the only execution path, AutoGen is deleted, and the docs describe the new system.
 

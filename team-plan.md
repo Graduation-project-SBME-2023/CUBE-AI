@@ -1,163 +1,186 @@
-# CUBE.AI roadmap — how we work: two phases, five people
+# CUBE.AI roadmap — how we work: one phase, five people
 
-This file says **who** does **what**, and **in which phase** (decided 2026-10-20). What each piece is and how it is built is in [plan.md](plan.md): plan and phase numbers (Plan 9, Phase 10.2), decisions (D24), invariants (I8) and transactions (T4) refer to it.
+This file says **who** builds **what**, and **in which order** (decided 2026-10-21; it replaces the two-phase split of 2026-10-20; Person 2's area revised the same day, after Plan 3 turned out already built on the pre-SDK design). What each piece is and how it is built is in [plan.md](plan.md): plan and phase numbers (Plan 9, Phase 10.2), decisions (D24), invariants (I8) and transactions (T4) refer to it.
 
-## The two phases
+## How the work is split
 
-The remaining work is done in **two phases**. In each phase the five people work in parallel, one area each, and everyone has an **agentic** part (the agents and the harness around them) and a **core** part (a supporting system) of about the same size. Nobody waits for anybody: each person codes against the others' **contracts** and tests with their **fakes** until the real piece lands.
+All the remaining work is done in **one phase**. There is no "first phase" and "second phase": each person owns one area from the start to the end of the roadmap, and works through the plans of that area in the order given below.
 
-- **Phase 1 — Essentials.** The backend works end to end. A user asks a research question in the chat. The Main Agent puts the steps in the Session Graph, by itself or through the Composer. The Executor runs them one after the other on the Claude Agent SDK through LiteLLM, the report PDF comes out, and the canvas shows it. Anything that only makes this stronger, safer or smarter waits for Phase 2.
-- **Phase 2 — Completion.** Everything else in this roadmap: agent memory across restarts, the user's approvals and questions, the job platform, recovery, privacy, the literature review, skills, and the AutoGen removal.
+- **Five areas, one person each.** Each area is a set of whole plans (or whole phases of a plan) that belong together, so that the person who builds a piece is also the person who builds what uses it most.
+- **Simple version first, then the full version, without stopping.** Inside an area, each piece is first built in its simple form (heavy tools inline, no saved sessions, no questions to the user, Auto mode only), so the first working flow comes early. The same person then completes it. Nobody switches to other work in between.
+- **Short waits only.** The order inside each area is chosen so that what you need from someone else is ready by the time you reach it. Where a wait cannot be avoided, it is a few days at most, and you work against that person's **fake** in the meantime (see *Contracts first*).
+- **One checkpoint, not a phase:** the **first working flow** (a question in the chat → the PDF, inside Docker). It is a date on which everything is tested together; nobody stops at it.
 
-The implementation order in `plan.md` (*Milestones, order and dependencies*) is still the dependency order inside each phase. It does not say who works when.
+The implementation order in `plan.md` (*Milestones, order and dependencies*) is the dependency order. It does not say who works when; this file does.
 
-## Phase 1 — done when
+## The five areas
+
+| Person | Area | Plans and phases, in order |
+|---|---|---|
+| **Person 1** | Compute jobs | Plan 5 → Plan 7 (7.1, 7.3, 7.4, 7.5) → Phases 16.1, 16.3, 16.4 |
+| **Person 2** | Agents, subagents and segmentation | Phase 3.0 (rework of the built Plan 3) → Phases 15.1–15.3 → Phase 9.6 → Phases 9.7 + 15.4 → `ask_user` (Phase 9.3 item 3) → Phase 16.2 → Phase 13.1 |
+| **Person 3** | Execution and session state | Phase 6.6 → Plan 10 → Phase 11.3 → Phase 13.2 |
+| **Person 4** | Agent engine and models | Phase 9.0 spike → Plan 0 → Phases 9.1–9.4 → Plan 8 follow-up → Phase 9.5 → Phase 13.3 |
+| **Person 5** | Main Agent and session layer | Plan 12 (12.1–12.7) → Phases 11.1, 11.2 → Phase 17.1 |
+| **Everyone** | Cut-over | Plan 17.2–17.6: each person removes and documents the items of their own area |
+
+### Person 1 — Compute jobs
+
+**Builds:** the job platform on PostgreSQL + Procrastinate, the heavy tools as jobs, and the other job systems.
+
+**Order:**
+
+1. **Phase 5.1 first:** `JobClient`, `JobRequest`, `JobRecord`, the job statuses and the in-memory backend. Persons 2 and 3 use this contract, so it is merged in the first days.
+2. **Phase 7.1 ports and `graph` visibility, and Phase 7.3 `run_modeling`**, still `INTERIM_HEAVY` and inline, so that the first working flow can run the modeling step.
+3. The rest of **Plan 5** (5.2 the Application API queue and migration "s", 5.3 the compute worker, 5.4 toolkit integration, 5.5 deploy and CI).
+4. **Phases 7.1 (job manifests), 7.4, 7.5:** the 8 heavy tools become jobs.
+5. **Phases 16.1, 16.3, 16.4:** long waits, ingestion as a job, Agent System tasks.
+
+**Waits:** none. Person 1 starts on code that already exists.
+
+### Person 2 — Agents, subagents and segmentation
+
+**Builds:** the agents (Plan 3 is already built, on the design that came before the Claude Agent SDK, so it is reworked first), the SDK subagents, the whole segmentation path (the MONAI fixes, the MONAI job backend, the segmentation client and the segmentation module on the new engine), the `ask_user` tool, MONAI training, and the Recovery Agent.
+
+**Why this area:** the segmentation module (Phase 9.7) and the segmentation client (Phase 15.4) are the same code, and the internal agents (Plan 3) are exactly what the subagents (Phase 9.6) run. One person builds each of these pairs, so nobody edits another person's half-finished file.
+
+**Order:**
+
+1. **Phase 3.0, first days:** rework the built Plan 3 for the SDK (the removed, added and changed items are listed in `plan.md`, Phase 3.0), then merge it. The `agent.md` format and loader are a contract, so they merge first.
+2. **Phases 15.1–15.3:** the MONAI safety net (the first real tests of `inference_jobs.py`), the MONAI server fixes (J1, J2, …), and `MonaiHttpBackend` on Person 1's `JobClient` contract.
+3. **Phase 9.6:** internal agents become SDK subagents (`AgentDefinition`s built from their specs), their transcripts stored under the parent's `subpath`, the depth and concurrency limits, `run_agent` and `agent_as_tool` removed; the literature review's 5 subagents; the Main's `composer` and `recovery_agent` subagents. It plugs into Person 4's `ClaudeAgentEngine`.
+4. **Phases 9.7 and 15.4 together:** the segmentation module calls the engine instead of AutoGen, the segmentation client moves onto `MonaiHttpBackend` (J7, J13, S1–S10), and the cohort labels use the Model Gateway.
+5. **`ask_user`** (Phase 9.3 item 3, `toolpacks/interaction/`): the cohort approval and the segmentation review through it, and their screens in the frontend.
+6. **Phase 16.2:** MONAI training as one server-side job (T1–T9).
+7. **Phase 13.1:** the Recovery Agent as the Main's SDK subagent.
+
+**Waits:** Phase 9.6 needs Person 4's `ClaudeAgentEngine` (Phase 9.4). Phases 3.0 and 15.1–15.3 come first and need nothing from anyone except the `JobClient` contract, which Person 1 merges in the first days. By the time Person 2 reaches 9.6, the engine is in.
+
+### Person 3 — Execution and session state
+
+**Builds:** the database side of agent memory and user approvals, and everything that runs the graph.
+
+**Order:**
+
+1. **Phase 6.6:** migration "t", agent transcripts, `pending_tools`, the answer route, node `approval`, the start release, `NEEDS_RELEASE`, `USER_RELEASE_REQUIRED`. Merge its shapes first (in `InMemoryGraphStore` and `fake_domain_api`), because Persons 4 and 5 use them.
+2. **Plan 10:** the Node Runner, the Executor loop, expectations, live changes, the Watchdog, control and restart. Simple version first: no suspensions, a pause that only stops new starts, retries from the start. Then suspend and resume, resumable retries and the full pause.
+3. **Phase 11.3:** approvals (pending graph changes, the decision route, tool approvals inside a node that suspend the attempt), and the approval card in the frontend.
+4. **Phase 13.2:** resource failure handling.
+
+**Waits:** about 2–3 days for the answer of Person 4's spike (Phase 9.0), which says how `defer` and saved sessions behave. Phase 6.6 fills that time. The Executor then runs on `FakeAgentEngine`.
+
+### Person 4 — Agent engine and models
+
+**Builds:** the Claude Agent SDK engine, LiteLLM and the Model Gateway, the runtime, the Plan 8 follow-up, the saved sessions, and PHI-Local.
+
+**Order:**
+
+1. **Phase 9.0 spike, on day 1.** Persons 2, 3 and 5 are waiting for its answer, for both the Claude alias and the local Ollama alias.
+2. **Plan 0:** the rest of 0.1 (CI green) and 0.2 (remove what the SDK replaces), together with the runtime dependencies of 9.1.
+3. **Phases 9.1–9.4:** the dependencies, LiteLLM and the Model Gateway (`options_for`), the toolkit contracts for the engine (`run(..., resume)`, `SUSPENDED`, `open_main()` / `turn()`), and `ClaudeAgentEngine`. The engine types and `FakeModelGateway` are contracts: merge them early.
+4. **Plan 8 follow-up:** `seed_from` and `NodeDef.approval` in the graph model, the Validator and the Diff Engine (`apply(…, session_id, tool_use_id)`).
+5. **Phase 9.5:** `HttpSessionStore` on Person 3's Phase 6.6 routes.
+6. **Phase 13.3:** PHI-Local (the Model Gateway's locality filter and the PostToolUse filter).
+
+**Waits:** none. Phase 9.5 needs Person 3's Phase 6.6, which is merged long before Person 4 reaches it.
+
+**Subagents (Phase 9.6) are Person 2's**, built on this engine: Person 4 keeps the engine's options and hooks, and reviews Person 2's subagent code.
+
+### Person 5 — Main Agent and session layer
+
+**Builds:** everything between the user and the Executor: the inbox, the Main loop, the control tools, the routes and events, the Guardrails and the modes, the API cut-over, and the canvas and chat.
+
+**Order:**
+
+1. **Phases 12.1, 12.2:** the inbox item types and the control tools (`execute`, `graph_apply`, `graph_propose`, `graph_inspect`, …), on `InMemoryGraphStore`. Their names, input models and `RunAccepted` are a contract: merge them first.
+2. **Phase 11.1 core:** `guardrails.check(action, ctx) -> Decision` and the hook points, with `AllowAllGuardrails` as the fake the others use.
+3. **Phases 12.3–12.5:** the Main's context, the Main loop, the Composer as the Main's subagent.
+4. **Phase 12.7:** the Agent System routes and events; the canvas built from the Session Graph and the chat sidebar.
+5. **The rest of 11.1, and 11.2:** the full Guardrails rules and Plan mode.
+6. **Phase 17.1:** the API cut-over, with Person 3.
+
+**Waits:** the Main loop (12.4) needs `open_main()` / `turn()` from Person 4, a few days after the start. Phases 12.1 and 12.2 fill that time.
+
+## The first working flow (the checkpoint)
 
 Inside Docker, with the real database, the real SDK through LiteLLM, and MONAI:
 
-1. A user message → the Main → `execute` / `graph_apply`, or `plan` → the Composer → `graph_apply` → a graph of `study_population_planner_agent` → `segmentation_agent` → `feature_extraction_agent` → `run_modeling` → `result_reporter_agent` → `latex_reporter_agent` → the PDF, and the Main tells the user in the chat.
+1. A user message → the Main → `execute` / `graph_apply`, or the Composer → `graph_apply` → a graph of `study_population_planner_agent` → `segmentation_agent` → `feature_extraction_agent` → `run_modeling` → `result_reporter_agent` → `latex_reporter_agent` → the PDF, and the Main tells the user in the chat.
 2. A second question in the chat is answered while a node runs: the Main never waits.
-3. A change in the middle (new params for a node) reruns that node and the nodes after it, and the nodes before it keep their runs.
+3. A change in the middle (new params for a node) reruns that node and the nodes after it; the nodes before it keep their runs.
 4. Pause stops new starts. Stop cancels the running node. A restart in the middle of a node marks its attempt interrupted, and the node runs again.
-5. The canvas shows the graph's nodes and their status, the existing result views show the results, and the chat works.
-6. The same flow runs once on the Claude alias and once on the local Ollama alias. The second run measures tool use on a local model (Phase 9.2 item 7); a weak result there is recorded, it does not block Phase 1.
+5. The canvas shows the graph's nodes and their status, the result views show the results, and the chat works.
+6. The same flow runs once on the Claude alias and once on the local Ollama alias. A weak result on the local model is recorded; it does not block the checkpoint.
 
-## Phase 1 — interim rules
+**Until a piece's full version lands, the flow uses its simple version:**
 
-These are the simplifications that hold until Phase 2. Each one names what replaces it.
+| Area | Simple version | Full version | Who |
+|---|---|---|---|
+| Heavy tools | `INTERIM_HEAVY`, inline in the Agent System process | Procrastinate jobs (Plan 5, Phases 7.1, 7.4) | Person 1 |
+| Agent memory | `resumable: false`; an interrupted node is retried from the start | `HttpSessionStore`; a retry resumes the saved session (Phases 6.6, 9.5) | Persons 3, 4 |
+| Asking the user | No `ask_user`; the cohort is frozen and the masks accepted automatically; every node `approval: none` | `ask_user`, tool approvals, node `approval: before \| after` (Phases 6.6, 8 follow-up, 9.3, 11.3) | Persons 2, 3, 4 |
+| Modes | Auto mode only | Plan mode (Phase 11.2) | Person 5 |
+| Pause | No new start; a running node runs to its end | A running node is suspended at its next tool boundary (Phase 10.6) | Person 3 |
+| Guardrails | Schema and Validator errors, visibility, `REQUIRES_NODE`, the token budget | Resources, mandatory approvals, PHI rules (Phase 11.1, Plan 13) | Persons 5, 4 |
+| Privacy | Synthetic or de-identified data only | PHI-Local (Phase 13.3) | Person 4 |
+| Agents | `main_agent`, `composer`, the 5 execution agents of item 1, the 2 segmentation internal agents | + `recovery_agent`, `literature_review_agent` and its 5 internal agents | Person 2 |
+| Skills | None; the guidance is in the prompts | SDK skills (Phase 3.5) | Person 2 |
+| AutoGen | Frozen; `/plan`, `/run`, `/session/{id}/resume-pipeline` return `410 Gone` | Deleted (Plan 17) | Everyone |
 
-| Area | Phase 1 | Phase 2 |
-|---|---|---|
-| Heavy tools | They stay `INTERIM_HEAVY` and run inline in the Agent System process, as today. The 5 modeling tools and `run_modeling` become graph-visible with their ports (there is no modeling agent). A restart loses a heavy tool that was running, and a cancel stops it only at its next check | Jobs on PostgreSQL + Procrastinate (Plan 5, Phases 7.1 and 7.4) |
-| Agent memory | No session store: every agent spec runs with `resumable: false`. An interrupted agent node is retried **from the start** (a new attempt with a fresh SDK session) within the policy; otherwise it goes to the inbox | `HttpSessionStore`: a retry resumes the run's saved session (Phases 6.6, 9.5) |
-| Asking the user | No `ask_user` and no suspended attempts. The cohort is frozen automatically (`frozen_by = 'auto'`) and the masks are accepted automatically (`auto_accepted`). Every node has `approval: none` | `ask_user`, tool approvals inside a node, and node `approval: before \| after` (Phases 6.6, 8 follow-up, 9.3 item 3, 11.3) |
-| Modes | Auto mode only (the default already) | Plan mode (Phase 11.2) |
-| Pause | No new start; a running node runs to its end | A running agent node is suspended at its next tool boundary (T10, Phase 10.6) |
-| Guardrails | `check()` and every hook point exist. The rules are: schema and Validator errors (`invalid`), visibility (`permission_denied`), `REQUIRES_NODE`, and the session token budget | Resources, mandatory approvals and PHI rules (Phase 11.1, Plan 13) |
-| The Main's context | Rebuilt from the chat, with no compaction | `context_summary` compaction and the PHI filter (Phase 12.3 item 2) |
-| Privacy | PHI-Local is not enforced, and the Claude alias is an external model. **Phase 1 runs on de-identified or synthetic data only** | PHI-Local (Phase 13.3) |
-| Agents | 9 agents: `main_agent` and `composer`; the 5 execution agents of item 1 above; the 2 segmentation internal agents | + `recovery_agent`, `literature_review_agent` and its 5 internal agents = 16 |
-| Skills | None. The guidance Phase 1 needs (the modeling advice included) is written into the prompts | `skills/*.md`, `skill_load` and `/skills` (Phases 3.5, 12.6; how skills reach the agents is the open decision of Phase 3.5) |
-| Model settings | The profiles come from `config/models.yaml` only. `ClientSettingsPanel` is left as it is and has no effect | `/client-config` picks a LiteLLM alias per profile, and the panel follows (Phase 9.2 item 5) |
-| Expectations | The Application API already evaluates them in T6, and the Executor honours the hold; nothing more is built | The `expectation_violated` path to the Main (Phase 10.3) |
-| AutoGen | Frozen, not deleted. `/plan`, `/run` and `/session/{id}/resume-pipeline` return `410 Gone` | Deleted (Phases 17.2–17.4) |
+## Done when (the whole roadmap)
 
-## Scope by plan
-
-| Plan | Phase 1 | Phase 2 |
-|---|---|---|
-| 0 | CI green | – |
-| 1, 2 | done | – |
-| 3 | 3.1; 3.2 for the 5 Phase 1 execution agents; 3.3 for the segmentation internal agents; 3.4 `main_agent` and `composer` | 3.2 and 3.3 for the literature review; 3.4 `recovery_agent`; 3.5 |
-| 5 | – | all |
-| 6 | done (6.1–6.5) | 6.6 |
-| 7 | 7.3 inline; the 7.1 ports and `graph` visibility (still `INTERIM_HEAVY`); 7.5 `on_result` hooks | 7.1 job manifests, 7.4, 7.5 file sink |
-| 8 | done (8.1–8.4) | the 2026-10-19 follow-up |
-| 9 | 9.0 (both models), 9.1, 9.2 items 1–4, 6, 7; 9.3 items 1, 2, 4–6; 9.4 without `defer`, saved sessions and seeds; 9.7 with the automatic freeze and acceptance | 9.2 item 5 and the locality filter; 9.3 item 3; 9.4 `defer`, saved sessions, seeds, mirror failures; 9.5; 9.6; the 9.7 review and approval parts |
-| 10 | 10.1 without 4a, 9 and `pending_tools`; 10.2 without suspensions and user approvals; 10.4; 10.5 without the suspended and resumable rules; 10.6 with the Phase 1 pause | the rest of 10.1, 10.2, 10.5, 10.6; 10.3 |
-| 11 | 11.1 with the Phase 1 rules | the rest of 11.1; 11.2; 11.3 |
-| 12 | 12.1; 12.2 without `recover` and `skill_load` (`node_message` to running nodes only); 12.3 without compaction and the PHI filter; 12.4; 12.5; 12.7 without the answer and steps routes | `recover`, `skill_load`, `node_message` to suspended nodes; 12.3 item 2; 12.6; the 12.7 answer and steps routes |
-| 13 | – | all |
-| 15 | 15.1, 15.2 | 15.3, 15.4 |
-| 16 | – | all |
-| 17 | 17.1 | 17.2–17.6 |
+The first working flow, plus: an `ask_user` cohort approval that suspends and resumes across a restart; a heavy tool as a Procrastinate job; a node with `approval: after`; a recovery proposal; a `phi_local` session; the segmentation client on `MonaiHttpBackend`. First on fakes, then inside Docker. Then Plan 17.2–17.6.
 
 ## Frontend: whoever changes the backend changes the frontend
 
-There is no separate frontend plan for these changes. When a backend change breaks a screen, the same person updates that screen in the same area. In Phase 1 the changes are small, and they sit in four files of `Frontend/OHIF-Viewer/extensions/research-playground/src/`:
+There is no separate frontend plan. The person whose backend change breaks a screen updates that screen. The files are in `Frontend/OHIF-Viewer/extensions/research-playground/src/`:
 
-- **Unchanged:** the result views (cohort, segmentation, features, modeling, report), because the tools keep sending the same view events from their `on_result` hooks; the chat input (`POST /session/{id}/input`); `node_status`; `/pause` and `/stop`; and the mapping of events to nodes by `source`.
-- **`PlaygroundCanvas.tsx` and `ResearchPlayground.tsx` (Person 2):** the canvas builds its nodes from the Session Graph (`GET /session/{id}/graph` and the `graph_change_*` events) instead of `plan.steps`, and the Plan / Run buttons that call `/plan` and `/run` are removed: the Main starts the work.
-- **`services/api.ts` (Person 2):** `plan-state` and `resume-pipeline` are replaced by the graph read.
-- **`ChatSidebar.tsx` (Person 5):** the "plan received" message is replaced by the Main's replies.
-
-In Phase 2: the cohort approval and segmentation review screens answer `ask_user` (Person 4); a node waiting for the user, and a seeded rerun, show on the canvas (Person 2); the graph-change approval card and `ClientSettingsPanel` follow the approvals and the model settings (Person 1).
-
-## Who does what — Phase 1
-
-| Person | Agentic part | Core part | Frontend | Plans and phases |
-|---|---|---|---|---|
-| **Person 1 — Agent Runtime & Model Infrastructure** | `ClaudeAgentEngine`: the tool bridge, the options, the PreToolUse / PostToolUse / Stop hooks, streaming, cancel, `open_main()` / `turn()` for the Main, and the one-shot `query()` for the Composer | LiteLLM with a Claude alias and a local Ollama alias, the Model Gateway, the runtime dependencies, CI green; the Guardrails core with the Phase 1 rules | – | 0 (rest), 9.0, 9.1, 9.2, 9.3, 9.4, 11.1 (Phase 1 parts) |
-| **Person 2 — Graph & Planning** | The Main's control tools; the Composer (`composer` agent.md, the `plan` tool, validate and repair) | The Application API gaps the flow needs, the graph routes, the event registry | The canvas from the Session Graph | 3.4 item 2, 12.2, 12.5, 12.7 items 1–3 (Phase 1 parts) |
-| **Person 3 — Execution** | The Executor and the Node Runner running agent nodes on the engine | Tool nodes inline, the runtime pools, the Watchdog (heartbeat, timeout, interrupted, retry within the policy), pause / resume / stop, restart reconciliation | – | 10.1, 10.2, 10.4, 10.5, 10.6 (Phase 1 parts), 17.1 item 1 (with Person 5) |
-| **Person 4 — Domain Agents & Medical Imaging** | The `agent.md` loader; the population, segmentation and feature-extraction agents; the 2 segmentation internal agents; the segmentation module and the cohort labels on the engine | The MONAI fixes segmentation needs, with their first real tests | – | 3.1, 3.2 (3 agents), 3.3 (segmentation part), 9.7 (Phase 1 parts), 15.1, 15.2 |
-| **Person 5 — Main Agent & Data/Analysis Tools** | The Main Agent: `main_agent` agent.md, the inbox, the context, the Main loop; the result and LaTeX reporter agents | `run_modeling` and the modeling, radiomics and reporting tools in the flow, with their ports and view hooks | The chat sidebar | 3.2 (2 agents), 3.4 item 1, 7.1 ports, 7.3, 7.5 hooks, 12.1, 12.3, 12.4 (Phase 1 parts), 17.1 items 2–5 (with Person 3) |
-
-The Composer moved to Person 2 for Phase 1 (2026-10-20): `plan` is a control tool, and its validate-and-repair loop runs the Validator, both in Person 2's area.
-
-## Who does what — Phase 2
-
-| Person | Agentic part | Core part | Frontend | Plans and phases |
-|---|---|---|---|---|
-| **Person 1** | The remaining Guardrails rules, Plan mode, graph-change approvals, and tool approvals inside a node (the engine's `defer`) | The engine's saved sessions, resume and fork options; the Model Gateway user settings and the locality filter hook | The approval card, `ClientSettingsPanel` | 9.2 item 5, 9.4 (rest), 11.1 (rest), 11.2, 11.3 |
-| **Person 2** | The Recovery Agent (`recovery_agent` agent.md, `recover`) and seeded reruns; SDK subagents; `node_message` to suspended nodes | Migration "t" and Phase 6.6, `HttpSessionStore`, the Plan 8 follow-up, PHI-Local | Waiting and seeded nodes on the canvas | 3.4 item 3, 6.6, 8 follow-up, 9.5, 9.6, 12.2 (rest), 12.7 (rest), 13.1, 13.3 |
-| **Person 3** | Suspend and resume in the Node Runner and the Executor, resumable retries, expectations, resource failures | The job platform (Plan 5), the compute workers, the job lifecycle | – | 5, 10.1–10.6 (rest), 10.3, 13.2 |
-| **Person 4** | `ask_user`; the cohort approval and the segmentation review through it; the literature review agent and its 5 subagents | `MonaiHttpBackend`, the segmentation client, MONAI training | The cohort approval and segmentation review screens | 3.2 and 3.3 (literature), 9.3 item 3, 9.7 (rest), 15.3, 15.4, 16.2 |
-| **Person 5** | Skills, the Main's context compaction, the Main's approval guidance (D28) in its prompt | The heavy tools as jobs (job manifests, H1–H18), long waits, ingestion, Agent System tasks | – | 3.5, 7.1 (job manifests), 7.4, 7.5 (file sink), 12.3 item 2, 12.6, 16.1, 16.3, 16.4 |
-| **All** | Plan 17.2–17.6: each person does the items of their own area | | | 17 |
-
-Each plan in `plan.md` starts with an **Owner** line that names the phase of each part.
+- **Unchanged:** the result views (cohort, segmentation, features, modeling, report), because the tools keep sending the same view events from their `on_result` hooks; the chat input (`POST /session/{id}/input`); `node_status`; `/pause` and `/stop`.
+- **Person 5:** `PlaygroundCanvas.tsx` and `ResearchPlayground.tsx` build the canvas from the Session Graph (`GET /session/{id}/graph` and the `graph_change_*` events) instead of `plan.steps`, and the Plan / Run buttons go; `services/api.ts` reads the graph instead of `plan-state` and `resume-pipeline`; `ChatSidebar.tsx` shows the Main's replies; Plan mode.
+- **Person 2:** the cohort approval (`DataCohortView.tsx`) and the segmentation review (`views/segmentation/`) answer `ask_user`.
+- **Person 3:** the graph-change approval card; a node waiting for the user, and a seeded rerun, on the canvas.
+- **Person 4:** `ClientSettingsPanel.tsx` follows the Model Gateway's per-profile aliases (Phase 9.2 item 5).
 
 ## Contracts first
 
-At the start of each phase, each person merges the contracts of that phase: the types and function signatures the others call, each with a fake and its tests. Prompts, logic and real backends can be drafts; the shapes cannot.
-
-**Phase 1 (ready at Sync A):**
+In the first days, each person merges the contracts of their area: the types and function signatures the others call, each with a fake and its tests. Prompts, logic and real backends can be drafts; the shapes cannot.
 
 | Contract | Owner | Where | Fake the others use |
 |---|---|---|---|
-| Engine types: `run(..., resume)`, `open_main()` / `turn()`. `AgentStatus.SUSPENDED`, `Suspension` and `Resume` are defined now and used in Phase 2 (Phase 9.3) | Person 1 | `toolkit/agents/engine.py` | `FakeAgentEngine` |
-| `guardrails.check(action, ctx) -> Decision` and the action types (Phase 11.1) | Person 1 | `harness/guardrails.py` | `AllowAllGuardrails` |
-| `options_for(profile, ctx) -> ModelOptions` (Phase 9.2) | Person 1 | `harness/model_gateway.py` | `FakeModelGateway` |
+| `JobClient`, `JobRequest`, `JobRecord`, the job statuses (Phase 5.1) | Person 1 | `jobs_core/` | `jobs_core/backends/in_memory.py` |
+| The ports and `graph` visibility of `run_modeling` and the heavy tools (Phases 7.1, 7.3) | Person 1 | `toolpacks/modeling/`, `toolpacks/radiomics/` | the tools themselves against `fake_domain_api` |
+| `agent.md` format and loader, the specs, reworked for the SDK (Phase 3.0) | Person 2 | `toolkit/agents/loader.py`, `agentpacks/` | the real loader with draft prompts |
+| The `ask_user` tool (Phase 9.3 item 3) | Person 2 | `toolpacks/interaction/` | the real tool on `FakeAgentEngine` with a scripted suspension |
+| `MonaiHttpBackend` as a `JobClient` (Phase 15.3) | Person 2 | `jobs_core/backends/monai_http.py` | the in-memory `JobClient` |
+| Phase 6.6 shapes: transcript, `pending_tools`, answer, node `approval`, start release, `NEEDS_RELEASE`, `USER_RELEASE_REQUIRED` | Person 3 | `application_api/schemas/`, `clients/harness_client.py`, `execution/graph_store.py` | `InMemoryGraphStore` with the new methods; `fake_domain_api` routes |
 | `SessionExecutor`: `start`, `stop`, `wake(reason)`, `pause`, `resume` (Phase 10.2) | Person 3 | `execution/executor.py` | `FakeExecutor` (records the calls) |
-| `agent.md` format and loader, the 9 Phase 1 specs (draft prompts allowed) (Plan 3) | Person 4 | `toolkit/agents/loader.py`, `agentpacks/` | the real loader with draft prompts |
-| Control tools: names, input models, `RunAccepted`; `plan` → `GraphProposal` (Phases 12.2, 12.5) | Person 2 | `toolpacks/control/`, `planning/proposals.py` | handlers backed by `InMemoryGraphStore` |
-| Inbox item types (Phase 12.1) | Person 5 | `harness/inbox.py` | – (plain models) |
-| The ports and `graph` visibility of `run_modeling` and the modeling tools (Phases 7.1, 7.3) | Person 5 | `toolpacks/modeling/` | the tools themselves against `fake_domain_api` |
-
-**Phase 2 (ready at Sync E):**
-
-| Contract | Owner | Where | Fake the others use |
-|---|---|---|---|
-| Phase 6.6 shapes: transcript, `pending_tools`, answer, node `approval`, start release, `NEEDS_RELEASE`, `USER_RELEASE_REQUIRED` | Person 2 | `application_api/schemas/`, `clients/harness_client.py`, `execution/graph_store.py` | `InMemoryGraphStore` with the new methods; `fake_domain_api` routes |
-| `SeedFrom{run_id, message_uuid}`, `NodeDef.approval` (Plan 8 follow-up) | Person 2 | `planning/graph_model.py`, `application_api/core/graph_content.py` | none needed (pure models) |
-| `HttpSessionStore` (Phase 9.5) | Person 2 | `execution/session_store.py` | an in-memory store over `InMemoryGraphStore` |
-| The `ask_user` tool (Phase 9.3 item 3) | Person 4 | `toolpacks/interaction/` | the real tool on `FakeAgentEngine` with a scripted suspension |
-| `JobClient`, `JobRequest`, `JobRecord`, the job statuses (Phase 5.1) | Person 3 | `jobs_core/` | `jobs_core/backends/in_memory.py` |
-| `MonaiHttpBackend` as a `JobClient` (Phase 15.3) | Person 4 | `jobs_core/backends/monai_http.py` | the in-memory `JobClient` |
-| Job tool manifests (`run_modeling`, the modeling and radiomics tools, Phase 7.1) | Person 5 | `toolpacks/modeling/`, `toolpacks/radiomics/` | the in-memory `JobClient` |
-
-## Sync points
-
-| Sync | What is true | Who |
-|---|---|---|
-| **A. Phase 1 contracts** | Every Phase 1 contract is merged with its fake and tests. Person 1's spike (Phase 9.0) has answered, for both aliases | All |
-| **B. Real pieces behind the contracts** | The SDK engine runs against the fake Messages server (Person 1); the control tools and the Composer on `InMemoryGraphStore` (Person 2); the Executor on fakes (Person 3); the 9 agents load and run on `FakeAgentEngine` (Person 4); the Main loop on fakes and `run_modeling` inline (Person 5) | Each person alone |
-| **C. One flow on fakes** | In one test: user message → Main → `plan` → `graph_apply` → Executor → agent nodes (fake engine) → `run_modeling` (inline) → `graph_idle` → Main reply; plus a change in the middle and a restart. Person 5 writes the test; everyone fixes their part | All |
-| **D. Phase 1 done** | "Phase 1 — done when" holds inside Docker, the canvas included | All |
-| **E. Phase 2 contracts** | Every Phase 2 contract is merged with its fake and tests | All |
-| **F. Real pieces behind the contracts** | Migration "t" and `HttpSessionStore` (Person 2); the job platform's unit suite (Person 3); `ask_user` and the literature subagents on the fake Messages server (Persons 1, 4); approvals and Plan mode (Person 1) | Each person alone |
-| **G. The full flow** | The Phase 1 flow plus: an `ask_user` cohort approval that suspends and resumes across a restart, a heavy tool as a Procrastinate job, a node `approval: after`, a recovery proposal, and a `phi_local` session; first on fakes, then inside Docker | All |
-| **H. Cut-over** | Plan 17.2–17.6 | All |
+| Engine types: `run(..., resume)`, `open_main()` / `turn()`, `AgentStatus.SUSPENDED`, `Suspension`, `Resume` (Phase 9.3) | Person 4 | `toolkit/agents/engine.py` | `FakeAgentEngine` |
+| `options_for(profile, ctx) -> ModelOptions` (Phase 9.2) | Person 4 | `harness/model_gateway.py` | `FakeModelGateway` |
+| `SeedFrom{run_id, message_uuid}`, `NodeDef.approval` (Plan 8 follow-up) | Person 4 | `planning/graph_model.py`, `application_api/core/graph_content.py` | none needed (pure models) |
+| `HttpSessionStore` (Phase 9.5) | Person 4 | `execution/session_store.py` | an in-memory store over `InMemoryGraphStore` |
+| Control tools: names, input models, `RunAccepted` (Phase 12.2) | Person 5 | `toolpacks/control/`, `planning/proposals.py` | handlers backed by `InMemoryGraphStore` |
+| Inbox item types (Phase 12.1) | Person 5 | `harness/inbox.py` | none (plain models) |
+| `guardrails.check(action, ctx) -> Decision` and the action types (Phase 11.1) | Person 5 | `harness/guardrails.py` | `AllowAllGuardrails` |
 
 ## Rules for working in parallel
 
-1. **Code against contracts only.** If what you need is not merged yet, use its fake; never wait, and never import another person's unmerged branch.
+1. **Code against contracts only.** If what you need is not merged yet, use its fake; never import another person's unmerged branch.
 2. **A contract change is a small PR** that edits the contract, its fake and the Contracts table above, reviewed by the owner and by the people who use it. Nothing else changes a contract.
-3. **One branch per person** off `New-Architecture` (`track/p1-runtime`, `track/p2-persistence`, `track/p3-execution-jobs`, `track/p4-domain-imaging`, `track/p5-main-analysis`). Small PRs into `New-Architecture`, each passing the deterministic gate; rebase on it often. Nobody pushes to `New-Architecture` directly.
+3. **One branch per person** off `New-Architecture`: `track/p1-compute`, `track/p2-agents`, `track/p3-execution`, `track/p4-engine`, `track/p5-main`. Small PRs into `New-Architecture`, each passing the deterministic gate; rebase on it often. Nobody pushes to `New-Architecture` directly.
 4. **Folders have owners** (table below). A change in another person's folder is a small PR reviewed by that person.
-5. **Shared files** take small, additive edits only: `agent_system/app.py` (one router or one lifespan line per PR), `services/event_registry.py` (append event types), `Backend/agent_system/requirements.txt` (UTF-16 LE, CRLF; one package per PR), `deploy/docker-compose.backend.gpu.yml` (one service per PR), and `CLAUDE.md` (Plan 17.5).
-6. **Migrations (Phase 2):** Person 2 owns migration "t", Person 3 owns migration "s". The one merged second sets its `down_revision` to the head at that time.
-7. **`plan.md` and `team-plan.md`:** each person edits only their own plans in `plan.md` (status, as-built notes) and their own rows of the Contracts tables here. A change that crosses areas is a small PR reviewed by the people it touches.
-8. **Phases do not mix.** During Phase 1, nobody starts Phase 2 work in a shared file, and no Phase 1 PR depends on a Phase 2 item. A person who finishes their Phase 1 part early helps another Phase 1 area (as a small PR reviewed by its owner), or starts their own Phase 2 contracts.
-9. **Done for a PR:** its tests pass with fakes, and it depends on nothing unmerged. A phase of a plan is done when its "Done when" holds for the parts in that phase; mark it in the Milestones table in the same PR.
+5. **Shared files** take small, additive edits only: `agent_system/app.py` (one router or one lifespan line per PR), `services/event_registry.py` (append event types), `Backend/agent_system/requirements.txt` (UTF-16 LE, CRLF; one package per PR), `deploy/docker-compose.backend.gpu.yml` (one service per PR), and `CLAUDE.md`.
+6. **The segmentation path is one person's** (Person 2): the segmentation module, `toolpacks/segmentation/`, the MONAI server and `MonaiHttpBackend`. Person 1 reviews `jobs_core/backends/monai_http.py` against the `JobClient` contract.
+7. **Migrations:** Person 3 owns migration "t", Person 1 owns migration "s". The one merged second sets its `down_revision` to the head at that time.
+8. **`plan.md` and `team-plan.md`:** each person edits only their own plans in `plan.md` (status, as-built notes) and their own rows of the Contracts table here. A change that crosses areas is a small PR reviewed by the people it touches.
+9. **Finished early?** Help another area (a small PR reviewed by its owner), or start the next item of your own area. Nobody waits idle.
+10. **Done for a PR:** its tests pass with fakes, and it depends on nothing unmerged. A phase of a plan is done when its "Done when" holds; mark it in the Milestones table of `plan.md` in the same PR.
+
+## Folder owners
 
 | Person | Owns |
 |---|---|
-| **Person 1** | `toolkit/engines/` (except `subagents.py`), `toolkit/agents/engine.py`, `harness/guardrails.py`, `harness/approvals.py`, `harness/model_gateway.py`, `config/models.yaml`, `deploy/litellm/`, the agents image dependencies, the CI workflows; Phase 2: `ClientSettingsPanel.tsx` and the approval card |
-| **Person 2** | `application_api/` (the session-graph, run, attempt and transcript files; migration "t"), `planning/graph_model.py`, `planning/proposals.py`, `application_api/core/graph_content.py`, `clients/harness_client.py`, `execution/graph_store.py`, `execution/in_memory_graph_store.py`, `execution/session_store.py`, `toolkit/engines/subagents.py`, `toolkit/delegation/`, `toolpacks/control/`, `api/routes/graph.py`, `agentpacks/core/composer/`, `agentpacks/core/recovery_agent/`, `execution/recovery.py`, `harness/privacy.py`; frontend: `PlaygroundCanvas.tsx`, `ResearchPlayground.tsx`, `services/api.ts` |
-| **Person 3** | `jobs_core/` (except `backends/monai_http.py`), `compute_worker/`, `toolkit/runtime/job.py`, the job files of `application_api/` (migration "s", the job routes), `execution/executor.py`, `node_runner.py`, `watchdog.py`, `resources.py`, `expectations.py`, `config/resources.yaml` |
-| **Person 4** | `agentpacks/` (except `core/`), `toolkit/agents/loader.py`, `toolpacks/population/`, `toolpacks/segmentation/`, `toolpacks/literature/`, `toolpacks/interaction/`, the segmentation module, `Backend/monailabel/`, `Backend/apps/radiology/` trainers, the training files of `application_api/` (16.2), `jobs_core/backends/monai_http.py`; Phase 2 frontend: `DataCohortView.tsx` (the approval) and `views/segmentation/` (the review) |
-| **Person 5** | `agentpacks/core/main_agent/`, `skills/`, `harness/inbox.py`, `main_loop.py`, `session_runtime.py`, `context_manager.py`, `skills_loader.py`, `toolpacks/modeling/`, `toolpacks/radiomics/`, `toolpacks/reporting/`, the ingestion code; frontend: `ChatSidebar.tsx` |
-
-`planning/validator.py`, `planning/inputs.py`, `execution/affected.py` and `execution/diff_engine.py` (Plan 8, built) belong to Person 2; a change there is reviewed by Person 2.
+| **Person 1** | `jobs_core/` (except `backends/monai_http.py`), `compute_worker/`, `toolkit/runtime/job.py`, the job files of `application_api/` (migration "s", the job routes), `toolpacks/modeling/`, `toolpacks/radiomics/`, `toolpacks/reporting/`, the ingestion code |
+| **Person 2** | `agentpacks/`, `skills/`, `toolkit/agents/loader.py`, `toolkit/engines/subagents.py`, `toolpacks/population/`, `toolpacks/segmentation/`, `toolpacks/literature/`, `toolpacks/interaction/`, the segmentation module (`agents/execution_agents/segmentation/`), `jobs_core/backends/monai_http.py`, `Backend/monailabel/`, `Backend/apps/radiology/` trainers, the training files of `application_api/` (Phase 16.2); frontend: `DataCohortView.tsx`, `views/segmentation/` |
+| **Person 3** | `application_api/` (the session-graph, run, attempt and transcript files; migration "t"; `core/execution_rules.py`), `clients/harness_client.py`, `execution/graph_store.py`, `execution/in_memory_graph_store.py`, `execution/executor.py`, `node_runner.py`, `watchdog.py`, `resources.py`, `expectations.py`, `config/resources.yaml`, `harness/approvals.py`; frontend: the approval card |
+| **Person 4** | `toolkit/engines/` (except `subagents.py`), `toolkit/agents/engine.py`, `execution/session_store.py`, `harness/model_gateway.py`, `harness/privacy.py`, `config/models.yaml`, `deploy/litellm/`, `planning/graph_model.py`, `planning/validator.py`, `planning/inputs.py`, `execution/affected.py`, `execution/diff_engine.py`, `application_api/core/graph_content.py`, the agents image dependencies, the CI workflows; frontend: `ClientSettingsPanel.tsx` |
+| **Person 5** | `harness/inbox.py`, `main_loop.py`, `session_runtime.py`, `turn_context.py`, `harness/guardrails.py`, `toolpacks/control/`, `planning/proposals.py`, `api/routes/graph.py` and the session routes; frontend: `PlaygroundCanvas.tsx`, `ResearchPlayground.tsx`, `services/api.ts`, `ChatSidebar.tsx` |
