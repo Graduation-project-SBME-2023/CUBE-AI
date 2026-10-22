@@ -78,6 +78,8 @@ Pure Python, no Procrastinate, no HTTP. This is a **contract**: shapes final, lo
   callers in `toolpacks/` (keep a thin re-export in `common/polling.py` only if a pack can't import
   `jobs_core` through `_toolkit.py` — check the import-root rule first). `JobBudgets(queue_s, run_s,
   result_s, unavailable_s)` with `outer = sum + margin`.
+  (Waiting on a Procrastinate job does **not** poll — it reads the SSE job stream, D11. `poll_until`
+  stays for MONAI, C6; `RetryPolicy` also backs off the stream's reconnects.)
 - **Tests:** `test_polling.py` — `Retry-After` honoured, cap, paused time not counted; `test_budgets.py`.
 
 ### A4. `client.py` protocol + `backends/in_memory.py`
@@ -224,12 +226,19 @@ Everything stays `INTERIM_HEAVY` / inline here so the first working flow can run
   `queueing_lock = lock = submission_key`, `retry=False` — **send, then commit** `submitted` +
   `dispatched_at` (defer on Procrastinate's connection, before the T4 transaction).
   `AlreadyEnqueued` = sent. `/dispatched` stays for `in_process`/`inline`. T7: `/cancel` on a job
-  attempt cancels a `todo` job, aborts a `doing` one.
+  attempt cancels a `todo` job (writes its `CANCELLED` result + `NOTIFY job_events` `finished`),
+  aborts a `doing` one.
 - **Tests:** live-DB suite (`run_live_db_tests.ps1`): resend changes nothing; cancel todo never starts.
 
-### D4. Phase 5.2 — read routes
+### D4. Phase 5.2 — read routes + the SSE job stream
 - **Do:** `GET /runs/{run_id}/attempts/{attempt_id}/job` (view row, `owned_run`);
   `GET /jobs/queues` (per queue: `todo`, `doing`, live workers). New router registered in `main.py`.
+- **Job stream** `GET …/job/events` (`text/event-stream`, `owned_run`, header `X-Accel-Buffering: no`):
+  one `LISTEN job_events` connection per API worker process (lifespan), routing by `submission_key`;
+  frames `state` (always first) → `progress` (`id` = seq) → `finished` (then close); `: ping` every
+  `JOB_SSE_PING_S`; on a re-opened `LISTEN` connection, resend `state` on every open stream.
+- **Tests:** stream opens with the current state; already-final job → `state` + `finished` at once;
+  a notification reaches only its own key's streams; `LISTEN` reconnect resends state.
 
 ### D5. Phase 5.3 — `compute_worker/app.py` + `launcher.py`
 - **Do:** `App(connector=PsycopgConnector(conninfo=JOBS_DATABASE_URL))`, JSON args only, one task
@@ -241,23 +250,27 @@ Everything stays `INTERIM_HEAVY` / inline here so the first working flow can run
 ### D6. Phase 5.3 — `supervisor.py`
 - **Do:** in order: complete `result.json` → return; queue timeout → `TIMED_OUT(queue_timeout)`;
   `POST …/running` (refusal → `run_not_running`, H20, no child); launch → `process.json`
-  (`host, pid, pgid`); watch every `JOB_POLL_S` (`cancel_requested_at`, Procrastinate abort,
-  `timeout_s`); exit → atomic `result.json`, return normally; OOM (`MemoryError` or exit 137 without
-  stop) → `FAILED(oom)`; `CancelledError` → stop group in `except` + `finally`, `CANCELLED` (abort)
-  or `INTERRUPTED` (shutdown).
-- **Tests:** fake runner: short-circuit, OOM mapping, kill order, `run_not_running`.
+  (`host, pid, pgid`); relay progress from the child's pipe → atomic `progress.json` (with `seq`) +
+  `NOTIFY job_events` (coalesced to one per `JOB_PROGRESS_NOTIFY_S`, latest never dropped, payload
+  < 8000 bytes); watch every `JOB_POLL_S` (`cancel_requested_at`, Procrastinate abort,
+  `timeout_s`); exit → atomic `result.json` + `NOTIFY` `finished`, return normally; OOM
+  (`MemoryError` or exit 137 without stop) → `FAILED(oom)`; `CancelledError` → stop group in
+  `except` + `finally`, `CANCELLED` (abort) or `INTERRUPTED` (shutdown), + `finished`.
+- **Tests:** fake runner: short-circuit, OOM mapping, kill order, `run_not_running`; progress relay
+  coalescing and the cut message.
 
 ### D7. Phase 5.3 — `child.py`
 - **Do:** `ensure_storage_layout()` + `install_write_guard()`, per-job log handler (fixes H6);
   thread caps (`OMP/OPENBLAS/MKL_NUM_THREADS`, `COMPUTE_CPU_THREADS`); `ToolContext.from_payload()`
-  with a `FileProgressSink` (`progress.json`); catalog lookup — **allowlist of `execution="job"`
+  with a `PipeProgressSink` (one JSON line per update to the supervisor; the child never writes
+  `progress.json` and has no DB); catalog lookup — **allowlist of `execution="job"`
   tools only**; run the same handler; always write a result, even on error.
 
 ### D8. Phase 5.3 — periodic tasks, start-up recovery, `COMPUTE_JOBS_DIR`
 - **Do:** periodic tasks on `compute.cpu`: stale heartbeat → failed (reads `INTERRUPTED`); `todo`
   past `queue_timeout_s` → result then cancel; retention (`JOB_RETENTION_HOURS`) for rows and job
   dirs. Start-up: kill process groups in `process.json` on this host with no live worker, write
-  `INTERRUPTED`. Add `COMPUTE_JOBS_DIR` to `Backend/storage_paths.py` (keep it 3.10-compatible)
+  `INTERRUPTED`. Every one of these that ends a job sends `NOTIFY job_events` `finished`. Add `COMPUTE_JOBS_DIR` to `Backend/storage_paths.py` (keep it 3.10-compatible)
   and document it in `Backend/storage/README.md`.
 
 ### D9. Phase 5.3 — GPU queue (declared only)
@@ -270,10 +283,13 @@ Everything stays `INTERIM_HEAVY` / inline here so the first working flow can run
   `finally`. Register the `job` runner in `dispatch.py`. Test with the in-memory backend.
 
 ### D11. Phase 5.4 — `jobs_core/backends/app_api.py` (`AppApiJobClient`)
-- **Do:** `submit → …/dispatch`; `get → …/job` + job dir via `derive_status`; `wait → poll_until`
-  relaying `progress.json` each poll (H19); `cancel → …/cancel`; `result → result.json`;
+- **Do:** `submit → …/dispatch`; `get → …/job` + job dir via `derive_status`; `wait → the SSE job
+  stream` (`…/job/events`): `progress` → `on_progress` as it arrives (H19), `finished` ends it; a
+  dropped stream reconnects with `RetryPolicy` backoff + `Last-Event-ID` (drop frames already seen);
+  budgets stay the deadlines. **No polling.** `cancel → …/cancel`; `result → result.json`;
   `purge` deletes the job dir after T6; `list → the run's job attempts`.
-- **Tests:** `respx` + a temp job dir.
+- **Tests:** `respx` (scripted `text/event-stream` bodies) + a temp job dir: progress order,
+  `finished` ends the wait, reconnect + dedupe, a budget deadline fires on a silent stream.
 
 ### D12. Phase 5.5 — deploy and CI
 - **Do (one shared file per PR, rule 5):**
@@ -287,7 +303,7 @@ Everything stays `INTERIM_HEAVY` / inline here so the first working flow can run
   - `deploy/Dockerfile.agents`: copy `jobs_core`, `compute_worker`; remove `COPY ./Backend/mcp`.
   - `deploy/.env.example`: `JOBS_DB_PASSWORD, JOBS_DATABASE_URL, COMPUTE_MAX_CONCURRENCY,
     COMPUTE_CPU_THREADS, JOB_RETENTION_HOURS, JOB_HEARTBEAT_TIMEOUT_S, JOB_KILL_GRACE_S, JOB_POLL_S,
-    COMPUTE_MEMORY_LIMIT`.
+    JOB_PROGRESS_NOTIFY_S, JOB_SSE_PING_S, COMPUTE_MEMORY_LIMIT`.
   - `pytest.ini`: `celery` marker → `jobs`; remove `sandbox`.
   - `CLAUDE.md`: the `JOBS_DATABASE_URL` exception to the DB boundary.
 - **Tests (contract):** compose DB-boundary test; nothing outside `compute_worker/` and the API
@@ -295,7 +311,8 @@ Everything stays `INTERIM_HEAVY` / inline here so the first working flow can run
 
 ### D13. Phase 5.5 — jobs integration suite + CI
 - **Files:** `tests/integration/jobs/`, `backend-tests.yml` (`live-db-tests` job, worker from the built image).
-- **Do:** submit→progress→result; cancel queued; cancel running with child + grandchild; SIGTERM-ignoring
+- **Do:** submit→progress→result (progress over the SSE stream while the job runs); a lost
+  notification does not hang a waiter (`LISTEN` reconnect resends state); cancel queued; cancel running with child + grandchild; SIGTERM-ignoring
   child killed after grace; abort reaches supervisor `finally`; soft/hard timeouts; late cancel is a
   no-op; worker killed mid-job → `INTERRUPTED`; killed after `result.json` → no recompute;
   `run_not_running`; stale `attempt_id` write rejected; write guard active in the child.
@@ -398,7 +415,7 @@ Everything stays `INTERIM_HEAVY` / inline here so the first working flow can run
 - [ ] A1 contract.py · [ ] A2 status + derive_status · [ ] A3 polling + budgets · [ ] A4 client + in-memory
 - [ ] B1 modeling ports · [ ] B2 radiomics ports · [ ] B3 run_modeling params · [ ] B4 run_modeling handler · [ ] B5 modeling view hook
 - [ ] C1 MONAI tests · [ ] C2 J1/J2/J11 · [ ] C3 J4/J6/J12 · [ ] C4 J8/J10/J3 · [ ] C5 J9 · [ ] C6 MonaiHttpBackend · [ ] C7 services.py + D10 ids · [ ] C8 heartbeat/threads/handle · [ ] C9 run_segmentation
-- [ ] D1 Procrastinate app · [ ] D2 migration "s" · [ ] D3 dispatch/cancel · [ ] D4 read routes · [ ] D5 app + launcher · [ ] D6 supervisor · [ ] D7 child · [ ] D8 periodic + start-up · [ ] D9 GPU pool · [ ] D10 runtime/job.py · [ ] D11 AppApiJobClient · [ ] D12 deploy · [ ] D13 integration suite
+- [ ] D1 Procrastinate app · [ ] D2 migration "s" · [ ] D3 dispatch/cancel · [ ] D4 read routes + SSE stream · [ ] D5 app + launcher · [ ] D6 supervisor · [ ] D7 child · [ ] D8 periodic + start-up · [ ] D9 GPU pool · [ ] D10 runtime/job.py · [ ] D11 AppApiJobClient · [ ] D12 deploy · [ ] D13 integration suite
 - [ ] E1 job manifests · [ ] E2 modeling H-fixes · [ ] E3 radiomics H-fixes · [ ] E4 H12 · [ ] E5 progress/hooks/job tests
 - [ ] F1 S11 · [ ] F2 S13 · [ ] F3 S8 · [ ] F4 training job · [ ] F5 T2–T8 · [ ] F6 ingestion job · [ ] F7 K1/K3
 - [ ] G cut-over items
