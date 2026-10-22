@@ -80,14 +80,60 @@ async def test_a_write_declares_one_path(client):
     assert response.status_code == 422
 
 
-async def test_a_checkpoint_write_presents_its_attempt(client):
-    body = {"checkpoint_id": "c", "type": "t", "checkpoint": "AA==",
-            "metadata": {"v": 1, "spec_digest": "s", "engine_version": "1"}}
-    assert (await client.put(f"/runs/{uuid.uuid4()}/checkpoints", json=body)).status_code == 403
-    bad = {**body, "metadata": {"v": 1}}
-    response = await client.put(f"/runs/{uuid.uuid4()}/checkpoints", json=bad,
-                                headers={"X-Attempt-Id": str(uuid.uuid4())})
-    assert response.status_code == 422
+async def test_a_transcript_write_presents_its_attempt(client, monkeypatch):
+    from application_api.repositories import agent_transcript_entries
+
+    calls = []
+
+    async def append(db, run_id, attempt_id, data):
+        calls.append(attempt_id)
+        return {"stored": len(data.entries), "replayed": 0}
+
+    monkeypatch.setattr(agent_transcript_entries, "append", append)
+    url = f"/runs/{uuid.uuid4()}/transcript"
+    body = {"project_key": "cubeai", "entries": [{"uuid": "m1", "type": "assistant"}]}
+    assert (await client.post(url, json=body)).status_code == 403
+    attempt = str(uuid.uuid4())
+    missing_uuid = {**body, "entries": [{"type": "assistant"}]}
+    assert (await client.post(url, json=missing_uuid, headers={"X-Attempt-Id": attempt})).status_code == 422
+    ok = await client.post(url, json=body, headers={"X-Attempt-Id": attempt})
+    assert ok.status_code == 200 and calls == [uuid.UUID(attempt)]
+
+
+async def test_an_attempt_sets_only_its_own_pending_tools(client):
+    run_id, attempt_id = uuid.uuid4(), uuid.uuid4()
+    url = f"/runs/{run_id}/attempts/{attempt_id}/pending-tools"
+    body = {"v": 1, "calls": []}
+    assert (await client.put(url, json=body)).status_code == 403
+    other = await client.put(url, json=body, headers={"X-Attempt-Id": str(uuid.uuid4())})
+    assert other.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"tool_use_id": "toolu_1"},  # neither an answer nor a decision
+        {"tool_use_id": "toolu_1", "answer": "yes", "decision": "approve"},  # both
+        {"tool_use_id": "toolu_1", "decision": "maybe"},
+    ],
+)
+async def test_an_answer_is_one_answer_or_one_decision(client, body):
+    url = f"/runs/{uuid.uuid4()}/attempts/{uuid.uuid4()}/answer"
+    assert (await client.post(url, json=body)).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "suspension",
+    [
+        {"kind": "ask_user"},  # a question names its tool call
+        {"kind": "pause", "tool_use_id": "toolu_1"},  # a pause names none
+        {"kind": "tool_approval", "tool_use_id": "toolu_1", "form": "cohort_approval"},
+        {"kind": "gate", "gate": "tool_approval", "interrupt_id": "i1", "checkpoint_id": "c1"},  # v1
+    ],
+)
+async def test_a_suspension_is_a_v2_suspension(client, suspension):
+    url = f"/runs/{uuid.uuid4()}/attempts/{uuid.uuid4()}/suspend"
+    assert (await client.post(url, json={"suspension": suspension})).status_code == 422
 
 
 @pytest.mark.parametrize(
@@ -106,10 +152,16 @@ async def test_change_requests_are_validated(client, body):
 
 
 async def test_the_main_names_its_tool_call_and_users_send_a_key(client):
-    url = f"/session-graphs/session/{uuid.uuid4()}/changes"
+    session_id = uuid.uuid4()
+    url = f"/session-graphs/session/{session_id}/changes"
     body = {"author": "main", "base_version": 0, "content": {"v": 1, "nodes": []}}
     response = await client.post(url, json=body)
     assert response.json()["detail"]["code"] == "TOOL_CALL_REQUIRED"
+    another_session = {"session_id": str(uuid.uuid4()), "tool_use_id": "toolu_1"}
+    response = await client.post(url, json={**body, "tool_call": another_session})
+    assert response.json()["detail"]["code"] == "TOOL_CALL_REQUIRED"
+    old_shape = {"turn_id": 7, "call_id": "c", "tool": "execute"}
+    assert (await client.post(url, json={**body, "tool_call": old_shape})).status_code == 422
     response = await client.post(url, json={**body, "author": "user"})
     assert response.json()["detail"]["code"] == "IDEMPOTENCY_KEY_REQUIRED"
 
@@ -118,12 +170,6 @@ async def test_a_decision_quotes_a_digest(client):
     response = await client.post(f"/graph-changes/{uuid.uuid4()}/decision",
                                  json={"decision": "approve", "content_digest": "abc"})
     assert response.status_code == 422
-
-
-async def test_the_draft_plan_api_is_gone(client):
-    session_id = uuid.uuid4()
-    assert (await client.post(f"/session-graphs/session/{session_id}/approve")).status_code == 410
-    assert (await client.put(f"/session-graphs/session/{session_id}/nodes", json={})).status_code == 410
 
 
 async def test_start_requires_a_known_dispatch_kind(client):

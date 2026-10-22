@@ -48,7 +48,7 @@ def _cases():
     new = node("literature_agent")
     sources = InputSources(ports={"cohort": InputSource(node_id=a.node_id, port="cohort")})
     expect = Expectations(rules=[Expectation(metric="size", op=">=", value=30)])
-    seed = SeedFrom(run_id=uuid.uuid4(), checkpoint_id="cp")
+    seed = SeedFrom(run_id=uuid.uuid4(), message_uuid="cp")
     return [
         ("unchanged", old, ChangeContent(nodes=old)),
         ("edit params", old, ChangeContent(nodes=[a, b.model_copy(update={"params": {"task": "x"}}), c, d])),

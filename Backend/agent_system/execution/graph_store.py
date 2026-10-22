@@ -6,7 +6,14 @@ is the real one, over the Application API (which owns every invariant).
 never looser than the database: the same scenario table runs against both.
 
 Refusals are ``GraphStoreError`` with the Application API's stable codes
-(STALE_BASE, NOT_READY, ATTEMPT_ACTIVE, MAX_ATTEMPTS, ...).
+(STALE_BASE, NOT_READY, NEEDS_RELEASE, USER_RELEASE_REQUIRED, ATTEMPT_ACTIVE,
+MAX_ATTEMPTS, ...).
+
+Agent memory (D27): an agent-node run keeps its Claude Agent SDK session as
+opaque transcript entries, written only by the run's latest running or
+suspended attempt and never parsed here; the Main's session is kept the same
+way per CUBE.AI session (D21). An attempt lists the tool calls it is running in
+``pending_tools``, so a restart knows whether a retry is safe (T4 rule (f)).
 """
 
 from __future__ import annotations
@@ -42,7 +49,10 @@ class Attempt(_Record):
     state: str
     submission_key: Optional[str] = None
     request: Optional[dict[str, Any]] = None
+    # {v: 2, kind: ask_user|tool_approval|pause, tool_use_id?, form?, payload, since, resume?}
     suspension: Optional[dict[str, Any]] = None
+    # {v: 1, calls: [{tool_use_id, tool, idempotent, started_at}]}
+    pending_tools: Optional[dict[str, Any]] = None
     dispatched_at: Optional[datetime] = None
     cancel_requested_at: Optional[datetime] = None
     resumed_at: Optional[datetime] = None
@@ -78,6 +88,9 @@ class Node(_Record):
     params: dict[str, Any] = Field(default_factory=dict)
     input_sources: Optional[dict[str, Any]] = None
     expectations: Optional[dict[str, Any]] = None
+    # D28: `before` waits for a user release; `after` holds the next node for a user review.
+    approval: Literal["none", "before", "after"] = "none"
+    start_released_by_change_id: Optional[str] = None
     accepted_by_change_id: str
 
 
@@ -134,19 +147,8 @@ class StartRequest(_Record):
     compiled_prompt: Optional[str] = None
     request: Optional[dict[str, Any]] = None
     spec_digest: Optional[str] = None
+    engine_version: Optional[str] = None
     explicit_retry: bool = False
-
-
-class Checkpoint(_Record):
-    run_id: str
-    checkpoint_ns: str = ""
-    checkpoint_id: str
-    parent_checkpoint_id: Optional[str] = None
-    attempt_id: str
-    type: str
-    checkpoint: bytes
-    metadata: dict[str, Any]
-    writes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ----------------------------------------------------------------------
@@ -172,18 +174,26 @@ class GraphStore(Protocol):
     async def confirm_stopped(self, run_id: str, attempt_id: str) -> Attempt: ...
     async def reconcile(self, run_id: str, attempt_id: str, observed: str,
                         outputs: Optional[dict[str, Any]] = None) -> tuple[Attempt, str]: ...
+    # T10: suspend (harness), answer (the user), resume (harness); the same attempt throughout.
     async def suspend(self, run_id: str, attempt_id: str, suspension: dict[str, Any]) -> Attempt: ...
-    async def gate_decision(self, run_id: str, attempt_id: str, interrupt_id: str, decision: str) -> Attempt: ...
+    async def answer(self, run_id: str, attempt_id: str, tool_use_id: str, *, answer: Any = None,
+                     decision: Optional[str] = None, comment: Optional[str] = None) -> Attempt: ...
     async def resume(self, run_id: str, attempt_id: str) -> Attempt: ...
-    async def put_checkpoint(self, run_id: str, attempt_id: str, *, checkpoint_id: str, checkpoint: bytes,
-                             type: str, metadata: dict[str, Any], checkpoint_ns: str = "",
-                             parent_checkpoint_id: Optional[str] = None) -> None: ...
-    async def put_checkpoint_writes(self, run_id: str, attempt_id: str, *, checkpoint_id: str,
-                                    writes: list[dict[str, Any]], checkpoint_ns: str = "") -> int: ...
-    async def get_checkpoint(self, run_id: str, checkpoint_id: Optional[str] = None,
-                             checkpoint_ns: str = "") -> Optional[Checkpoint]: ...
-    async def list_checkpoints(self, run_id: str, *, checkpoint_ns: Optional[str] = None,
-                               before: Optional[str] = None, limit: int = 20) -> list[Checkpoint]: ...
+    async def set_pending_tools(self, run_id: str, attempt_id: str, calls: list[dict[str, Any]]) -> Attempt: ...
+    # Agent-node transcripts (D27). A read may present the reading attempt
+    # (its own run's, or the first attempt of a run seeded from this one).
+    async def append_transcript(self, run_id: str, attempt_id: str, entries: list[dict[str, Any]], *,
+                                project_key: str, subpath: str = "") -> int: ...
+    async def load_transcript(self, run_id: str, *, subpath: str = "",
+                              attempt_id: Optional[str] = None) -> Optional[list[dict[str, Any]]]: ...
+    async def list_transcript_subpaths(self, run_id: str) -> list[str]: ...
+    # The Main's saved session (D21), one per CUBE.AI session.
+    async def append_main_transcript(self, session_id: str, entries: list[dict[str, Any]], *,
+                                     project_key: str, subpath: str = "") -> int: ...
+    async def load_main_transcript(self, session_id: str, *,
+                                   subpath: str = "") -> Optional[list[dict[str, Any]]]: ...
+    async def list_main_transcript_subpaths(self, session_id: str) -> list[str]: ...
+    async def purge_transcripts(self) -> dict[str, int]: ...
 
 
 # ----------------------------------------------------------------------
@@ -261,37 +271,45 @@ class HttpGraphStore:
     async def suspend(self, run_id: str, attempt_id: str, suspension: dict[str, Any]) -> Attempt:
         return Attempt.model_validate(await self._call(self.client.suspend_attempt(run_id, attempt_id, suspension)))
 
-    async def gate_decision(self, run_id: str, attempt_id: str, interrupt_id: str, decision: str) -> Attempt:
-        return Attempt.model_validate(
-            await self._call(self.client.record_gate_decision(run_id, attempt_id, interrupt_id, decision))
-        )
+    async def answer(self, run_id: str, attempt_id: str, tool_use_id: str, *, answer: Any = None,
+                     decision: Optional[str] = None, comment: Optional[str] = None) -> Attempt:
+        return Attempt.model_validate(await self._call(self.client.answer_attempt(
+            run_id, attempt_id, tool_use_id, answer=answer, decision=decision, comment=comment,
+        )))
 
     async def resume(self, run_id: str, attempt_id: str) -> Attempt:
         return Attempt.model_validate(await self._call(self.client.resume_attempt(run_id, attempt_id)))
 
-    async def put_checkpoint(self, run_id: str, attempt_id: str, *, checkpoint_id: str, checkpoint: bytes,
-                             type: str, metadata: dict[str, Any], checkpoint_ns: str = "",
-                             parent_checkpoint_id: Optional[str] = None) -> None:
-        await self._call(self.client.put_checkpoint(
-            run_id, attempt_id, checkpoint_id=checkpoint_id, checkpoint=checkpoint, type=type,
-            metadata=metadata, checkpoint_ns=checkpoint_ns, parent_checkpoint_id=parent_checkpoint_id,
-        ))
+    async def set_pending_tools(self, run_id: str, attempt_id: str, calls: list[dict[str, Any]]) -> Attempt:
+        return Attempt.model_validate(await self._call(self.client.set_pending_tools(run_id, attempt_id, calls)))
 
-    async def put_checkpoint_writes(self, run_id: str, attempt_id: str, *, checkpoint_id: str,
-                                    writes: list[dict[str, Any]], checkpoint_ns: str = "") -> int:
-        return await self._call(self.client.put_checkpoint_writes(
-            run_id, attempt_id, checkpoint_id=checkpoint_id, writes=writes, checkpoint_ns=checkpoint_ns,
+    async def append_transcript(self, run_id: str, attempt_id: str, entries: list[dict[str, Any]], *,
+                                project_key: str, subpath: str = "") -> int:
+        body = await self._call(self.client.append_transcript(
+            run_id, attempt_id, entries, project_key=project_key, subpath=subpath,
         ))
+        return body["stored"]
 
-    async def get_checkpoint(self, run_id: str, checkpoint_id: Optional[str] = None,
-                             checkpoint_ns: str = "") -> Optional[Checkpoint]:
-        found = await self._call(self.client.get_checkpoint(run_id, checkpoint_id, checkpoint_ns))
-        return Checkpoint.model_validate(found) if found else None
+    async def load_transcript(self, run_id: str, *, subpath: str = "",
+                              attempt_id: Optional[str] = None) -> Optional[list[dict[str, Any]]]:
+        return await self._call(self.client.load_transcript(run_id, subpath=subpath, attempt_id=attempt_id))
 
-    async def list_checkpoints(self, run_id: str, *, checkpoint_ns: Optional[str] = None,
-                               before: Optional[str] = None, limit: int = 20) -> list[Checkpoint]:
-        rows = await self._call(self.client.list_checkpoints(
-            run_id, checkpoint_ns=checkpoint_ns, before=before, limit=limit
+    async def list_transcript_subpaths(self, run_id: str) -> list[str]:
+        return await self._call(self.client.list_transcript_subpaths(run_id))
+
+    async def append_main_transcript(self, session_id: str, entries: list[dict[str, Any]], *,
+                                     project_key: str, subpath: str = "") -> int:
+        body = await self._call(self.client.append_main_transcript(
+            session_id, entries, project_key=project_key, subpath=subpath,
         ))
-        # A listing has no blobs; fetch one by id when the bytes are needed.
-        return [Checkpoint.model_validate({**row, "type": "", "checkpoint": b""}) for row in rows]
+        return body["stored"]
+
+    async def load_main_transcript(self, session_id: str, *,
+                                   subpath: str = "") -> Optional[list[dict[str, Any]]]:
+        return await self._call(self.client.load_main_transcript(session_id, subpath=subpath))
+
+    async def list_main_transcript_subpaths(self, session_id: str) -> list[str]:
+        return await self._call(self.client.list_main_transcript_subpaths(session_id))
+
+    async def purge_transcripts(self) -> dict[str, int]:
+        return await self._call(self.client.purge_transcripts())

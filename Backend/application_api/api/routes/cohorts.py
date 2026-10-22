@@ -110,6 +110,16 @@ async def freeze_cohort(
     }
 
 
+@router.post("/{cohort_id}/freeze-auto", response_model=CohortOut)
+async def auto_freeze_cohort(
+    cohort_id: UUID, db: AsyncSession = Depends(fenced_db), _: UUID = Depends(owned_cohort)
+):
+    """No approval was asked for (D28): the population node freezes its own
+    cohort (attempt path, `frozen_by = 'auto'`). Idempotent once frozen."""
+    cohort, _event = await repo.auto_freeze_cohort(db, cohort_id)
+    return cohort
+
+
 @router.get("/{cohort_id}/analysis-rows")
 async def read_analysis_rows(
     cohort_id: UUID,

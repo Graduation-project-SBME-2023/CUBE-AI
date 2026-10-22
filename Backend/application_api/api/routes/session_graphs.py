@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.api.dependencies import owned_session
@@ -33,19 +33,3 @@ async def submit_change(
     """Applied at once when no approval reason applies, proposed otherwise
     (pending). 409 `STALE_BASE` or `IDEMPOTENCY_CONFLICT`; 422 `INVALID_CHANGE`."""
     return await changes_repo.submit_change(db, session_id, data, idempotency_key)
-
-
-_GONE = (
-    "The draft-and-approve plan API was replaced by graph changes: "
-    "POST /session-graphs/session/{id}/changes, then POST /graph-changes/{change_id}/decision."
-)
-
-
-@router.put("/session/{session_id}/nodes", status_code=410, include_in_schema=False)
-async def replace_graph_nodes(session_id: UUID):
-    raise HTTPException(status_code=410, detail=_GONE)
-
-
-@router.post("/session/{session_id}/approve", status_code=410, include_in_schema=False)
-async def approve_session_graph(session_id: UUID):
-    raise HTTPException(status_code=410, detail=_GONE)

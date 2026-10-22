@@ -210,7 +210,7 @@ def test_bad_seed():
     pop = node("population_agent")
     earlier_run = uuid.uuid4()
     graph = state(live(pop, "completed", history=(earlier_run,)))
-    seed = SeedFrom(run_id=earlier_run, checkpoint_id="c7")
+    seed = SeedFrom(run_id=earlier_run, message_uuid="c7")
 
     def seeded(definition, reruns=True):
         seeded_node = definition.model_copy(update={"seed_from": seed})
@@ -218,7 +218,7 @@ def test_bad_seed():
 
     assert check(seeded(pop), graph) == []
     assert codes(seeded(pop, reruns=False), graph) == ["BAD_SEED"]
-    other_run = SeedFrom(run_id=uuid.uuid4(), checkpoint_id="c7")
+    other_run = SeedFrom(run_id=uuid.uuid4(), message_uuid="c7")
     assert codes(ChangeContent(nodes=[pop.model_copy(update={"seed_from": other_run})],
                                rerun_node_ids=[pop.node_id]), graph) == ["BAD_SEED"]
     lit = node("literature_agent")

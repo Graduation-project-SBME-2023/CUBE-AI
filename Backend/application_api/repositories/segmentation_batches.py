@@ -17,6 +17,8 @@ from application_api.db.models.graph_nodes import GraphNode
 from application_api.db.models.inference_models import InferenceModel
 from application_api.db.models.node_runs import NodeRun
 from application_api.db.models.segmentation_batches import (
+    REVIEWED_STATUSES,
+    SELECTING_DECISIONS,
     SegmentationBatch,
     SegmentationPair,
     SegmentationTarget,
@@ -172,13 +174,14 @@ async def list_session_batches(db: AsyncSession, session_id: UUID) -> list[dict[
 
 
 async def reviewed_masks(db: AsyncSession, session_id: UUID) -> list[dict[str, Any]]:
-    """Accepted and modified pairs of this session's submitted reviews."""
+    """Accepted, modified and automatically accepted pairs of this session's
+    final reviews (submitted, or accepted automatically when no review was asked for)."""
     rows = []
     for batch in await list_session_batches(db, session_id):
-        if batch["review_status"] != "submitted":
+        if batch["review_status"] not in REVIEWED_STATUSES:
             continue
         for pair in batch["pairs"]:
-            if pair["status"] == "ready" and pair["review_decision"] in {"accepted", "modified"}:
+            if pair["status"] == "ready" and pair["review_decision"] in SELECTING_DECISIONS:
                 rows.append({**pair, "cohort_id": batch["cohort_id"]})
     return rows
 
@@ -369,7 +372,7 @@ async def update_pair_states(
     db: AsyncSession, segmentation_batch_id: UUID, data: schemas.PairStatesUpdate
 ) -> dict[str, Any]:
     batch = await _locked_batch(db, segmentation_batch_id)
-    if batch.review_status in {"submitting", "submitted"}:
+    if batch.review_status in {"submitting", *REVIEWED_STATUSES}:
         raise await _abort(
             db,
             HTTPException(
@@ -576,3 +579,57 @@ async def complete_review(
             },
         )
     return await batch_out(db, await _batch_or_404(db, segmentation_batch_id)), event
+
+
+# ----------------------------------------------------------------------
+# Accepted automatically (D28): no review was asked for
+# ----------------------------------------------------------------------
+async def auto_accept(db: AsyncSession, segmentation_batch_id: UUID) -> dict[str, Any]:
+    """The segmentation node accepts its own batch as it came (its attempt
+    path): every ready pair keeps its candidate with the decision `auto`, and
+    the review is final (`auto_accepted`). Idempotent once accepted."""
+    batch = await _locked_batch(db, segmentation_batch_id)
+    if batch.review_status == "auto_accepted":
+        await db.commit()
+        return await batch_out(db, batch)
+    if batch.review_status != "pending":
+        raise await _abort(db, HTTPException(
+            status_code=409,
+            detail=(
+                f"Segmentation batch {segmentation_batch_id} is {batch.review_status}; only a batch "
+                "whose review is pending (every pair finished) is accepted automatically."
+            ),
+        ))
+    by_key, _ = await _pairs_by_key(db, segmentation_batch_id)
+    node_run = await runs_repo.get_run(db, batch.created_by_run_id)
+    async with publication(db, node_run.session_id) as publish:
+        accepted = []
+        for key, pair in by_key.items():
+            if pair.status == "ready":
+                pair.review_decision = "auto"
+                pair.selected_segmentation_uid = pair.candidate_segmentation_uid
+                accepted.append(key)
+            else:
+                pair.review_decision = None
+                pair.selected_segmentation_uid = None
+        try:
+            await db.flush()
+            batch.review_status = "auto_accepted"
+            batch.reviewed_at = _now()
+            await db.flush()
+        except IntegrityError as exc:
+            raise HTTPException(
+                status_code=409, detail=f"Automatic acceptance rejected by the database: {exc.orig}"
+            ) from exc
+        publish(
+            "segmentation_review_submitted",
+            {
+                "schema_version": 1,
+                "segmentation_batch_id": str(batch.segmentation_batch_id),
+                "accepted": sorted(accepted),
+                "modified": [],
+                "rejected": [],
+                "automatic": True,
+            },
+        )
+    return await batch_out(db, batch)

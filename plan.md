@@ -173,7 +173,7 @@ deploy/
 | 3 | Agent Definitions and Skills | M1 | 1, 2 | 🟡 Built on the pre-SDK design, not merged; Phase 3.0 reworks it for the SDK |
 | 4 | _(removed: no sandbox)_ | – | – | – |
 | 5 | Job Platform (PostgreSQL + Procrastinate) | M2 Compute | 1, 6 | Not started |
-| 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | ✅ 6.1–6.5 done; 6.6 (agent transcripts, user approvals; decision 2026-10-19) not started |
+| 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | ✅ Done (6.1–6.6; 6.6 migration "t" on 2026-10-22) |
 | 7 | Modeling Engine, Heavy Tools as Jobs + `run_modeling` | M2 | 0, 2, 5, 6 | 🟡 7.0–7.2 done (engine, rename, legacy records); jobs wait for Plan 5 |
 | 8 | Validator and Diff Engine | M3 | 1, 6 | ✅ 8.1–8.4 done (`ce5a777e`, `3ac5411c`); the 2026-10-19 follow-up (`seed_from`, `approval`) not started |
 | 9 | Claude Agent SDK Engine, Session Store and Model Gateway (LiteLLM) | M3 | 1, 3, 6 (6.6 for 9.5), 15.4 (for 9.7) | Not started |
@@ -624,7 +624,7 @@ Do this on the built branch, before it merges. It is the same kind of change as 
 
 ---
 
-# Plan 6 — Session State Store: Persistence Design (Application API) (6.1–6.5 ✅; 6.6 open)
+# Plan 6 — Session State Store: Persistence Design (Application API) ✅
 
 **Owner:** Phase 6.6: Person 3 (Execution and session state). Phases 6.1–6.5 are done. See [team-plan.md](team-plan.md).
 
@@ -638,7 +638,7 @@ Done (2026-10-06): migrations `o1f0a2c3d4e5_v1_o_renames` (the renames of §P.2)
 - **D24 fencing** (`services/fencing.py`): a write route on the execution path takes `Depends(fenced_db)` (from `X-Attempt-Id` / `X-Run-Id`); a harness or gate transaction opens `fenced_transaction(db, HARNESS | USER)`; `@on_path(USER)` wraps the in-node gate repositories. A database refusal is a 409 `{code: REFUSED_BY_DATABASE, …}`; harness refusals carry stable codes (`STALE_BASE`, `IDEMPOTENCY_CONFLICT`, `NOT_READY`, `ATTEMPT_ACTIVE`, `STALE_DEFINITION`, `BAD_PIN`, `MAX_ATTEMPTS`, `NEEDS_DECISION`, `CANCELLED`, `NOT_RESUMABLE`, `NO_OPEN_GATE`, `INVALID_CHANGE`). `tests/contracts/test_v1_harness_contract.py` scans the write routes for it.
 - **Repositories** for T0–T10: `sessions`, `chats`, `graph_changes` (T1/T2), `node_runs` (T4), `run_attempts` (T4–T7, T10), `training_jobs` (T9). Every lifecycle transaction publishes `node_status` (schema v2) and `session_state`.
 - **Content shapes** (also the `graph_nodes` columns): `input_sources = {v, ports: {port: {node_id, port}}}`, `expect = {v, rules: [{metric, op, value, port?}]}`. The `seed_from` built here names a LangGraph checkpoint; Phase 6.6 and the Plan 8 follow-up change it to `{run_id, message_uuid}`.
-- **Routes:** nodes change only through `POST /session-graphs/session/{id}/changes`; runs start only through `POST /runs/start`; the old plan approve route answers `410 Gone`. Every session-scoped route checks ownership through an `owned_*` dependency (`api/dependencies.py`; another user's session is a 404), enforced by `tests/contracts/test_route_ownership_contract.py`. The user is `DEFAULT_USERNAME` until authentication exists.
+- **Routes:** nodes change only through `POST /session-graphs/session/{id}/changes`; runs start only through `POST /runs/start`; the old plan draft and approve routes answered `410 Gone` until Phase 6.6 removed them. Every session-scoped route checks ownership through an `owned_*` dependency (`api/dependencies.py`; another user's session is a 404), enforced by `tests/contracts/test_route_ownership_contract.py`. The user is `DEFAULT_USERNAME` until authentication exists.
 - **Agent System client:** `clients/harness_client.py` (`HarnessClient`: one method per route, refusals as `ApplicationApiError(code)`; an attempt's own writes send `X-Attempt-Id` from the attempt id they are given). `execution/graph_store.py` (`GraphStore`, `HttpGraphStore`) and `execution/in_memory_graph_store.py` (`InMemoryGraphStore`) pass one scenario table (`tests/support/graph_store_scenarios.py`).
 - **Old names kept on purpose:** tool result keys such as `agent_run_id` and the `output_summary` argument, each marked `tool result key, kept`; `tests/contracts/test_retired_vocabulary.py` accepts them.
 - **Tests:** the deterministic gate, and the live database suites `Backend/tests/run_live_db_tests.ps1` (throwaway PostgreSQL 18, never the compose one).
@@ -690,6 +690,13 @@ Implements Appendix P revision 3.4 (D27 rewritten, D28 new; §P.9 *Cut-over 3*).
 - **Scenarios:** the `graph_store_scenarios.py` table gains the approval and transcript cases and runs on both stores.
 
 **Done when:** migration t applies and reverses, and every test above passes.
+
+**Status (2026-10-22): ✅ done.** Migration `t1f0a2c3d4e5_v1_t_agent_transcripts` (after `r1f0a2c3d4e5`) applies and reverses; the deterministic gate, the scenario table on both stores and every live suite (`run_live_db_tests.ps1`, with the new `test_v1_t_agent_transcripts_live.py`) pass. As built, beyond the list above:
+- **The database enforces D28 too:** a trigger refuses a start release or a `user_review` release that names a change the user did not author, and the first start of an unreleased `approval: before` node; the fencing trigger requires `frozen_by = 'user'` on the user gate path and `'auto'` on the attempt path.
+- **The automatic values have writers:** `POST /cohorts/{id}/freeze-auto` and `POST /segmentation-batches/{id}/review/auto-accept` (attempt path); the segmentation row rules accept `pending -> auto_accepted` (every ready pair `auto` with its candidate selected) and treat it as final.
+- **The generic answer route refuses a domain form** (`FORM_ANSWER`): the cohort approval and the segmentation review are answered by their own routes, which write the form's columns in the same transaction.
+- **The checkpoint routes, `/runs/{run_id}/steps`, `/gate-decision` and `/agent-checkpoints/purge` are removed** (no `410 Gone` stubs; nothing calls them), and so are the old plan draft and approve routes (`PUT …/nodes`, `POST …/approve`), whose only caller is the frozen AutoGen planner in `session_service.py`; `AGENT_CHECKPOINT_*` settings became `AGENT_TRANSCRIPT_RETENTION_DAYS` / `AGENT_TRANSCRIPT_PURGE_INTERVAL_SECONDS`, plus `AGENT_SESSION_PROJECT_KEY` (when set, a transcript naming another project key is refused).
+- **Touched in other areas, for review:** Person 4's `graph_content.py`, `graph_model.py` (`NodeDef.approval`, `AddNode.approval`, `SeedFrom{run_id, message_uuid}`) and `diff_engine.py` (`apply(..., tool_use_id)`), and the live-suite line in `backend-tests.yml`; the `auto_accepted` mapping in Person 1's segmentation module and Person 2's `population_review.py`. A `SetApproval` op for an existing node is left to the Plan 8 follow-up.
 
 ---
 
@@ -1937,7 +1944,7 @@ Lock order: **session → graph → run → attempt → domain row**. Each trans
 
 #### Cut-over 3: migration "t" (Phase 6.6)
 
-Phase 6.6 lists its steps. Nothing in production wrote the checkpoint tables or a `v:1` suspension, so no data is converted. Two details: the `error.code` list widens with `bad_output`, `transcript_incompatible` and `transcript_write_failed`; `cohorts.frozen_by` is backfilled `user` where `frozen_at` is set. The checkpoint routes answer `410 Gone` until Plan 17 removes them.
+Phase 6.6 lists its steps. Nothing in production wrote the checkpoint tables or a `v:1` suspension, so no data is converted. Two details: the `error.code` list widens with `bad_output`, `transcript_incompatible` and `transcript_write_failed`; `cohorts.frozen_by` is backfilled `user` where `frozen_at` is set. The checkpoint routes are removed.
 
 #### Execution-adapter prerequisites
 

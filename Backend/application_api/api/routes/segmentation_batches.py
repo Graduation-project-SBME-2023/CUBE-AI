@@ -96,6 +96,17 @@ async def update_pairs(
     return await repo.update_pair_states(db, segmentation_batch_id, data)
 
 
+@router.post("/{segmentation_batch_id}/review/auto-accept", response_model=SegmentationBatchOut)
+async def auto_accept_review(
+    segmentation_batch_id: UUID,
+    db: AsyncSession = Depends(fenced_db),
+    _: UUID = Depends(owned_segmentation_batch),
+):
+    """No review was asked for (D28): the segmentation node accepts its batch as
+    it came (attempt path). Ready pairs carry `auto`; the review is final."""
+    return await repo.auto_accept(db, segmentation_batch_id)
+
+
 @router.put("/{segmentation_batch_id}/review/draft", response_model=SegmentationBatchOut)
 async def save_review_draft(
     segmentation_batch_id: UUID,

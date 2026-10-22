@@ -34,19 +34,23 @@ def _def(title: str, **extra) -> dict:
             "title": title, "params": {}, **extra}
 
 
-def _live(defn: dict, position: int, run_status=None, holds=False) -> LiveNode:
+def _live(defn: dict, position: int, run_status=None, holds=False, hold="expectation_violated",
+          released=None) -> LiveNode:
     columns = node_columns(ChangeContent.model_validate({"v": 1, "nodes": [defn]}).nodes[0])
     return LiveNode(
         node_id=uuid.UUID(defn["node_id"]), position=position, kind=defn["kind"], ref=defn["ref"],
         ref_version=columns["target_version"], title=columns["title"], params=columns["params"],
         input_sources=columns["input_sources"], expectations=columns["expectations"],
+        approval=columns["approval"], start_released_by_change_id=released,
         run_id=uuid.uuid4() if run_status else None, run_status=run_status, holds_downstream=holds,
+        hold=hold if holds else None,
     )
 
 
-def _apply(live, nodes, mode="auto", used=(), **content):
+def _apply(live, nodes, mode="auto", used=(), author="user", **content):
     change = ChangeContent.model_validate({"v": 1, "nodes": nodes, **content})
-    return plan_apply(live, change, used_node_ids={uuid.UUID(i) for i in used}, execution_mode=mode)
+    return plan_apply(live, change, used_node_ids={uuid.UUID(i) for i in used}, execution_mode=mode,
+                      author=author)
 
 
 # ----------------------------------------------------------------------
@@ -78,7 +82,7 @@ def test_a_node_id_twice_and_a_seed_on_a_tool_are_refused():
     a = _def("a")
     with pytest.raises(ValidationError, match="DUPLICATE_NODE"):
         ChangeContent.model_validate({"v": 1, "nodes": [a, a]})
-    seeded = {**a, "seed_from": {"run_id": str(uuid.uuid4()), "checkpoint_id": "c"}}
+    seeded = {**a, "seed_from": {"run_id": str(uuid.uuid4()), "message_uuid": "m"}}
     with pytest.raises(ValidationError, match="BAD_SEED"):
         ChangeContent.model_validate({"v": 1, "nodes": [seeded], "rerun_node_ids": [a["node_id"]]})
 
@@ -150,6 +154,41 @@ def test_a_reused_node_id_and_a_bad_release():
 
 
 # ----------------------------------------------------------------------
+# D28: the approvals the user asked for
+# ----------------------------------------------------------------------
+def test_approval_is_part_of_the_definition():
+    a = _def("a")
+    plan = _apply([_live(a, 1, "completed")], [{**a, "approval": "after"}])
+    assert plan.accepting == {uuid.UUID(a["node_id"])} and SUPERSEDES_COMPLETED in plan.reasons
+
+
+def test_only_the_user_releases_an_approval_before_start():
+    a = _def("a", approval="before")
+    released = _apply([_live(a, 1)], [a], release_hold_node_ids=[a["node_id"]])
+    assert not released.errors and released.start_releases == [uuid.UUID(a["node_id"])]
+    by_main = _apply([_live(a, 1)], [a], author="main", release_hold_node_ids=[a["node_id"]])
+    assert [e.code for e in by_main.errors] == ["USER_RELEASE_REQUIRED"]
+    # Already released: nothing waits.
+    again = _apply([_live(a, 1, released=uuid.uuid4())], [a], release_hold_node_ids=[a["node_id"]])
+    assert [e.code for e in again.errors] == ["BAD_RELEASE"]
+    # Added and released in one change, by the user.
+    b = _def("b", approval="before")
+    added = _apply([], [b], release_hold_node_ids=[b["node_id"]])
+    assert added.start_releases == [uuid.UUID(b["node_id"])]
+
+
+def test_only_the_user_releases_a_review_hold():
+    a = _def("a", approval="after")
+    held = _live(a, 1, "completed", holds=True, hold="user_review")
+    assert [e.code for e in _apply([held], [a], author="main", release_hold_node_ids=[a["node_id"]]).errors] == [
+        "USER_RELEASE_REQUIRED"]
+    assert len(_apply([held], [a], release_hold_node_ids=[a["node_id"]]).released) == 1
+    # The Main may still release an expectation hold.
+    violated = _live(a, 1, "completed", holds=True)
+    assert len(_apply([violated], [a], author="main", release_hold_node_ids=[a["node_id"]]).released) == 1
+
+
+# ----------------------------------------------------------------------
 # Outputs, expectations, retries, activity
 # ----------------------------------------------------------------------
 def test_outputs_reference_only_allowed_tables():
@@ -181,15 +220,24 @@ def test_expectations():
         ("failed", "interrupted", 1, True, {"max_attempts": 3, "idempotent": True}, False, None, ""),
         ("failed", "interrupted", 1, False, {"max_attempts": 3}, False, None, ""),
         ("failed", "interrupted", 1, True, {"max_attempts": 3, "resumable": True}, False,
-         [{"name": "write", "idempotent": False}], "NEEDS_DECISION"),
+         [{"tool": "save_cohort", "idempotent": False}], "NEEDS_DECISION"),
         ("failed", "interrupted", 1, True, {"max_attempts": 3, "resumable": True}, False,
-         [{"name": "read", "idempotent": True}], ""),
+         [{"tool": "count_studies", "idempotent": True}], ""),
+        ("failed", "interrupted", 1, True, {"max_attempts": 3, "resumable": True}, True,
+         [{"tool": "save_cohort", "idempotent": False}], ""),
     ],
 )
 def test_retry_rules(status, state, number, dispatched, policy, explicit, pending, expected):
     verdict = retry_verdict(run_status=status, latest=LatestAttempt(number, state, dispatched),
                             policy=policy, explicit=explicit, pending_tools=pending)
     assert verdict.code == expected and verdict.allowed is (expected == "")
+
+
+def test_a_lost_transcript_batch_is_never_retried_automatically():
+    latest = LatestAttempt(1, "failed", True, "transcript_write_failed")
+    policy = {"max_attempts": 3, "resumable": True}
+    assert retry_verdict(run_status="failed", latest=latest, policy=policy, explicit=False).code == "NEEDS_DECISION"
+    assert retry_verdict(run_status="failed", latest=latest, policy=policy, explicit=True).allowed
 
 
 @pytest.mark.parametrize(
@@ -200,10 +248,14 @@ def test_retry_rules(status, state, number, dispatched, policy, explicit, pendin
         (ActivityFacts("active", (("running", None),), False, False, True), "running"),
         (ActivityFacts("paused", (("running", None),), False, False, False), "pausing"),
         (ActivityFacts("paused", (("suspended", "pause"),), False, False, False), "idle"),
-        (ActivityFacts("active", (("suspended", "gate"),), False, False, False), "awaiting_user"),
+        (ActivityFacts("active", (("suspended", "ask_user"),), False, False, False), "awaiting_user"),
+        (ActivityFacts("active", (("suspended", "tool_approval"),), False, False, False), "awaiting_user"),
         (ActivityFacts("active", (("unknown", None),), False, False, False), "blocked"),
         (ActivityFacts("active", (), True, False, False), "blocked"),
         (ActivityFacts("active", (), False, True, False), "blocked"),
+        (ActivityFacts("active", (), False, False, False, user_review_hold=True), "awaiting_user"),
+        (ActivityFacts("active", (), False, False, True, awaiting_release=True), "awaiting_user"),
+        (ActivityFacts("active", (), True, False, False, user_review_hold=True), "blocked"),
     ],
 )
 def test_derived_activity(facts, expected):

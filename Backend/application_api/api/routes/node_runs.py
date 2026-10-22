@@ -1,23 +1,22 @@
 """Run routes: starting a node, the attempt lifecycle (dispatch, reconcile,
-complete, cancel, suspend and resume), the agent checkpoints, the reads, and the agent scratchpad.
+complete, cancel, suspend, answer and resume, pending tools), the reads, and
+the agent scratchpad. The agent transcripts are in `agent_transcript_entries`.
 
 Writes an attempt makes about itself (it marks itself running, completes or
-fails, stores checkpoints, writes its scratchpad) present the attempt in
-`X-Attempt-Id`. The other transitions are the harness's.
+fails, sets its pending tools, writes its scratchpad) present the attempt in
+`X-Attempt-Id`. An answer is the user's. The other transitions are the harness's.
 """
 
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.api.dependencies import current_user, owned_node, owned_run, owned_session
 from application_api.db.session import get_db
-from application_api.repositories import agent_checkpoints as checkpoints_repo
 from application_api.repositories import node_runs as runs_repo
 from application_api.repositories import run_attempts as attempts_repo
-from application_api.schemas import agent_checkpoints as checkpoint_schemas
 from application_api.schemas import run_attempts as attempt_schemas
 from application_api.schemas.node_runs import (
     AgentOutputWrite,
@@ -186,17 +185,19 @@ async def attempt_suspend(
     run_id: UUID, attempt_id: UUID, data: attempt_schemas.AttemptSuspend,
     _: UUID = Depends(owned_run), db: AsyncSession = Depends(get_db),
 ):
-    """Suspend, after the interrupt checkpoint is stored."""
+    """T10 suspend: an `ask_user` question, a tool approval or a pause (v2)."""
     return await attempts_repo.suspend_attempt(db, run_id, attempt_id, data)
 
 
-@router.post(f"{_ATTEMPT}/gate-decision", response_model=AttemptOut)
-async def attempt_gate_decision(
-    run_id: UUID, attempt_id: UUID, data: attempt_schemas.GateDecision,
+@router.post(f"{_ATTEMPT}/answer", response_model=AttemptOut)
+async def attempt_answer(
+    run_id: UUID, attempt_id: UUID, data: attempt_schemas.AttemptAnswer,
     _: UUID = Depends(owned_run), db: AsyncSession = Depends(get_db),
 ):
-    """Gate decision for a gate with no domain row (`tool_approval`). User only."""
-    return await attempts_repo.record_gate_decision(db, run_id, attempt_id, data)
+    """T10 answer (user only): the answer to an `ask_user` question or the
+    decision on a tool approval. Wakes the Executor (`gate_resolved`), which
+    resumes the same attempt. A domain form is answered by its own route."""
+    return await attempts_repo.answer_attempt(db, run_id, attempt_id, data)
 
 
 @router.post(f"{_ATTEMPT}/resume", response_model=AttemptOut)
@@ -207,64 +208,16 @@ async def attempt_resume(
     return await attempts_repo.resume_attempt(db, run_id, attempt_id)
 
 
-# ----------------------------------------------------------------------
-# Agent checkpoints: written by the run's current attempt, read by any
-# ----------------------------------------------------------------------
-def _attempt_of(path: Optional[WritePath]) -> UUID:
-    if path is None or path.attempt_id is None:
-        raise HTTPException(status_code=403, detail="A checkpoint write presents its attempt in X-Attempt-Id.")
-    return path.attempt_id
-
-
-@router.put("/{run_id}/checkpoints", response_model=checkpoint_schemas.CheckpointSummary)
-async def put_checkpoint(
-    run_id: UUID, data: checkpoint_schemas.CheckpointPut,
+@router.put(f"{_ATTEMPT}/pending-tools", response_model=AttemptOut)
+async def attempt_pending_tools(
+    run_id: UUID, attempt_id: UUID, data: attempt_schemas.PendingTools,
     path: Optional[WritePath] = Depends(declared_write_path),
     _: UUID = Depends(owned_run), db: AsyncSession = Depends(get_db),
 ):
-    return await checkpoints_repo.put_checkpoint(db, run_id, _attempt_of(path), data)
-
-
-@router.post("/{run_id}/checkpoint-writes")
-async def put_checkpoint_writes(
-    run_id: UUID, data: checkpoint_schemas.CheckpointWritesPut,
-    path: Optional[WritePath] = Depends(declared_write_path),
-    _: UUID = Depends(owned_run), db: AsyncSession = Depends(get_db),
-):
-    return {"stored": await checkpoints_repo.put_checkpoint_writes(db, run_id, _attempt_of(path), data)}
-
-
-@router.get("/{run_id}/checkpoints/latest", response_model=checkpoint_schemas.CheckpointOut)
-async def latest_checkpoint(
-    run_id: UUID, ns: str = "", _: UUID = Depends(owned_run), db: AsyncSession = Depends(get_db)
-):
-    return await checkpoints_repo.get_checkpoint(db, run_id, ns)
-
-
-@router.get("/{run_id}/checkpoints/{checkpoint_id}", response_model=checkpoint_schemas.CheckpointOut)
-async def read_checkpoint(
-    run_id: UUID, checkpoint_id: str, ns: str = "",
-    _: UUID = Depends(owned_run), db: AsyncSession = Depends(get_db),
-):
-    return await checkpoints_repo.get_checkpoint(db, run_id, ns, checkpoint_id)
-
-
-@router.get("/{run_id}/checkpoints", response_model=list[checkpoint_schemas.CheckpointSummary])
-async def list_checkpoints(
-    run_id: UUID,
-    ns: Optional[str] = None,
-    before: Optional[str] = None,
-    limit: int = Query(20, ge=1, le=200),
-    _: UUID = Depends(owned_run),
-    db: AsyncSession = Depends(get_db),
-):
-    return await checkpoints_repo.list_checkpoints(db, run_id, ns, before, limit)
-
-
-@router.get("/{run_id}/steps", response_model=list[checkpoint_schemas.RunStep])
-async def run_steps(run_id: UUID, _: UUID = Depends(owned_run), db: AsyncSession = Depends(get_db)):
-    """The step timeline from checkpoint metadata (no blobs), for the Recovery Agent."""
-    return await checkpoints_repo.run_steps(db, run_id)
+    """The calls the attempt is running (attempt path): written before a call
+    runs and when it ends, read by the retry rule (f) after a restart."""
+    require_attempt_header(path, attempt_id)
+    return await attempts_repo.set_pending_tools(db, run_id, attempt_id, data)
 
 
 # ----------------------------------------------------------------------

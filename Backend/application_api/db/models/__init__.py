@@ -1,4 +1,4 @@
-from .agent_checkpoints import AgentCheckpoint, AgentCheckpointWrite
+from .agent_transcript_entries import AgentTranscriptEntry
 from .chat_messages import ChatMessage
 from .chats import Chat
 from .cohorts import Cohort, CohortMember
@@ -7,6 +7,7 @@ from .graph_changes import GraphChange
 from .graph_nodes import GraphNode
 from .inference_models import InferenceModel
 from .literature import LiteraturePaper, LiteratureReview
+from .main_transcript_entries import MainTranscriptEntry
 from .model_results import ModelResult
 from .node_runs import NodeRun
 from .patient import Patient
@@ -27,8 +28,7 @@ from .workflow import Workflow
 from .workflow_details import WorkflowDetail
 
 __all__ = [
-    "AgentCheckpoint",
-    "AgentCheckpointWrite",
+    "AgentTranscriptEntry",
     "Chat",
     "ChatMessage",
     "Cohort",
@@ -39,6 +39,7 @@ __all__ = [
     "InferenceModel",
     "LiteraturePaper",
     "LiteratureReview",
+    "MainTranscriptEntry",
     "ModelResult",
     "NodeRun",
     "Patient",

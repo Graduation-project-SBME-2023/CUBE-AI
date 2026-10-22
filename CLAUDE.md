@@ -219,10 +219,10 @@ fails keeps the API from serving, and the restart policy retries it.
   name in production source; old names live only in migrations, the replayed legacy event type
   `pipeline_agent_status`, and tool contracts that keep their result keys.
 - **Session graph and harness transactions (Phases 6.2–6.5).** Cut-over 2
-  (`p1f0a2c3d4e5_v1_p_session_graph`) adds `users`, `graph_changes`, `run_attempts`,
-  `agent_checkpoints(_writes)` and `training_jobs`. Nodes change **only** through graph changes
+  (`p1f0a2c3d4e5_v1_p_session_graph`) adds `users`, `graph_changes`, `run_attempts`
+  and `training_jobs`. Nodes change **only** through graph changes
   (`POST /session-graphs/session/{id}/changes`, T1/T2); runs are created **only** by
-  `POST /runs/start` (T4) with their first attempt; the old plan approve route is `410 Gone`.
+  `POST /runs/start` (T4) with their first attempt; the old plan draft and approve routes are removed.
   Every write to a fenced table must declare its D24 path: a write route on the execution path
   takes `Depends(fenced_db)` (the caller's `X-Attempt-Id` / `X-Run-Id`), a harness or gate
   transaction opens `fenced_transaction(db, HARNESS | USER)` (`services/fencing.py`) — the
@@ -231,6 +231,16 @@ fails keeps the API from serving, and the restart policy retries it.
   `core/execution_rules.py`. Agent-side: `clients/harness_client.py` and
   `execution/graph_store.py` (+ `InMemoryGraphStore`, held to the same scenario table as the
   live API). Live database suites: `Backend/tests/run_live_db_tests.ps1`.
+- **Agent transcripts and user approvals (Phase 6.6).** Cut-over 3
+  (`t1f0a2c3d4e5_v1_t_agent_transcripts`) drops the LangGraph checkpoint tables (their routes and
+  `/gate-decision` are removed) and adds `agent_transcript_entries` (an agent node's Claude
+  Agent SDK session per run, fenced: only the run's latest running or suspended attempt appends)
+  and `main_transcript_entries` (the Main's session). A suspension is v2 (`ask_user |
+  tool_approval | pause` with `tool_use_id`), answered by `POST /runs/{id}/attempts/{id}/answer`
+  (a domain form by its own route); `run_attempts.pending_tools` drives retry rule (f). A node's
+  `approval: before | after` (D28) yields `NEEDS_RELEASE` and the `user_review` hold, and only a
+  change the user authored releases either (`USER_RELEASE_REQUIRED`, also enforced by a trigger).
+  Without an approval asked for, the cohort is frozen `auto` and a batch `auto_accepted`.
 
 ### Generated-data boundary
 

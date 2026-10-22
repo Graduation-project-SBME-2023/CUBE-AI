@@ -52,10 +52,11 @@ type Author = Literal["main", "user", "harness"]
 type GraphChanged = Callable[[str], Awaitable[None] | None]
 
 
-def main_idempotency_key(turn_id: int, call_id: str) -> str:
-    """sha256(turn_id || call_id): a re-handled Main turn never submits twice.
-    The same key the Application API derives from ``tool_call``."""
-    return hashlib.sha256(f"{turn_id}\x1f{call_id}".encode("utf-8")).hexdigest()
+def main_idempotency_key(session_id: str, tool_use_id: str) -> str:
+    """sha256(session_id || tool_use_id) (D21): a Main tool call the SDK
+    replays never submits twice. The same key the Application API derives
+    from ``tool_call``."""
+    return hashlib.sha256(f"{session_id}\x1f{tool_use_id}".encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +120,7 @@ def state_from_view(view: GraphView, histories: Optional[dict[str, Sequence[Run]
             ref_version=node.target_version, title=node.title, params=node.params,
             input_sources=InputSources.model_validate(node.input_sources) if node.input_sources else None,
             expect=Expectations.model_validate(node.expectations) if node.expectations else None,
+            approval=node.approval,
         )
         summary = None
         if run is not None:
@@ -207,21 +209,20 @@ class DiffEngine:
         diff: GraphDiff,
         *,
         author: Author,
-        turn_id: Optional[int] = None,
-        call_id: Optional[str] = None,
-        tool: str = "graph_apply",
+        tool_use_id: Optional[str] = None,
         approval_reasons: Sequence[str] = (),
         idempotency_key: Optional[str] = None,
     ) -> ApplyResult:
         """Validate ``diff`` and submit it. ``approval_reasons`` are the ones
         the guardrails compute from the manifests (Plan 11); the database adds
-        ``PLAN_MODE`` and ``supersedes_completed`` itself."""
+        ``PLAN_MODE`` and ``supersedes_completed`` itself. A change from the
+        Main names its SDK tool call (``tool_use_id``)."""
         tool_call = None
         if author == "main":
-            if turn_id is None or not call_id:
-                raise ValueError("a change from the Main needs its turn_id and call_id")
-            tool_call = {"turn_id": turn_id, "call_id": call_id, "tool": tool}
-            idempotency_key = main_idempotency_key(turn_id, call_id)
+            if not tool_use_id:
+                raise ValueError("a change from the Main needs its tool_use_id")
+            tool_call = {"session_id": session_id, "tool_use_id": tool_use_id}
+            idempotency_key = main_idempotency_key(session_id, tool_use_id)
         elif not idempotency_key:
             raise ValueError(f"a change from {author!r} needs an idempotency key")
 
@@ -264,6 +265,6 @@ class DiffEngine:
 
 # The refusals of T1/T2 that answer the proposer (anything else is a fault).
 _CHANGE_REFUSALS = frozenset({
-    "STALE_BASE", "INVALID_CHANGE", "ARCHIVED", "IDEMPOTENCY_CONFLICT",
+    "STALE_BASE", "INVALID_CHANGE", "ARCHIVED", "IDEMPOTENCY_CONFLICT", "USER_RELEASE_REQUIRED",
 })
 

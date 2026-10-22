@@ -113,6 +113,7 @@ class LatestAttempt:
     attempt_number: int
     state: str
     dispatched: bool
+    error_code: Optional[str] = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,8 +132,9 @@ def retry_verdict(
     pending_tools: Optional[list[dict[str, Any]]] = None,
 ) -> RetryVerdict:
     """Whether a failed or cancelled run may get another attempt; the readiness
-    checks belong to the start itself. ``explicit`` is a user or Recovery Agent retry; ``pending_tools`` comes from the latest
-    checkpoint of a resumable run."""
+    checks belong to the start itself. ``explicit`` is a user or Recovery Agent
+    retry; ``pending_tools`` are the calls the latest attempt was running
+    (``run_attempts.pending_tools.calls``)."""
 
     def refuse(code: str, reason: str) -> RetryVerdict:
         return RetryVerdict(False, code, reason)
@@ -150,14 +152,19 @@ def retry_verdict(
     max_attempts = int(policy.get("max_attempts", 1))
     if latest.attempt_number >= max_attempts:
         return refuse("MAX_ATTEMPTS", f"the run allows {max_attempts} attempt(s)")
+    if explicit:
+        return RetryVerdict(True)
+    # A lost transcript batch: a resume would continue from a gap (D27).
+    if latest.error_code == "transcript_write_failed":
+        return refuse("NEEDS_DECISION", "the attempt lost part of its transcript; a retry is decided, not automatic")
     # Work that may already have had effects is not repeated automatically.
-    if latest.state == "interrupted" and latest.dispatched and not explicit:
+    if latest.state == "interrupted" and latest.dispatched:
         if policy.get("resumable"):
-            unsafe = [tool["name"] for tool in pending_tools or [] if not tool.get("idempotent", False)]
+            unsafe = [call["tool"] for call in pending_tools or [] if not call.get("idempotent", False)]
             if unsafe:
                 return refuse(
                     "NEEDS_DECISION",
-                    f"the checkpoint has unfinished non-idempotent tool calls: {', '.join(unsafe)}",
+                    f"the attempt was running non-idempotent tool calls: {', '.join(unsafe)}",
                 )
         elif not policy.get("idempotent", False):
             return refuse(
@@ -183,24 +190,38 @@ def auto_retry_left(
 Activity = Literal["idle", "running", "pausing", "awaiting_user", "awaiting_approval", "blocked"]
 
 
+# Suspensions that wait for the user's answer; a pause waits for the session.
+QUESTION_KINDS = ("ask_user", "tool_approval")
+
+
 @dataclass(frozen=True, slots=True)
 class ActivityFacts:
     control_state: str
     # States of the session's non-terminal attempts (at most one now).
     active_attempts: tuple[tuple[str, Optional[str]], ...]  # (state, suspension kind)
+    # An unreleased expectation_violated hold on a current run.
     active_hold: bool
     failed_without_auto_retry: bool
     pending_change: bool
+    # D28: an unreleased user_review hold, or an otherwise ready
+    # `approval: before` node the user has not released.
+    user_review_hold: bool = False
+    awaiting_release: bool = False
 
 
 def derive_activity(facts: ActivityFacts) -> Activity:
+    """Appendix P §P.4, in its order."""
     states = {state for state, _ in facts.active_attempts}
     working = bool(states & {"preparing", "submitted", "running"})
     if facts.active_hold or facts.failed_without_auto_retry or "unknown" in states:
         return "blocked"
     if facts.control_state == "paused" and working:
         return "pausing"
-    if any(state == "suspended" and kind == "gate" for state, kind in facts.active_attempts):
+    if (
+        any(state == "suspended" and kind in QUESTION_KINDS for state, kind in facts.active_attempts)
+        or facts.user_review_hold
+        or facts.awaiting_release
+    ):
         return "awaiting_user"
     if working:
         return "running"

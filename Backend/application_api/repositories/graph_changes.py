@@ -28,8 +28,6 @@ from application_api.core.graph_content import (
     node_columns,
     plan_apply,
 )
-from application_api.db.models.chat_messages import ChatMessage
-from application_api.db.models.chats import Chat
 from application_api.db.models.graph_changes import GraphChange
 from application_api.db.models.graph_nodes import GraphNode
 from application_api.db.models.node_runs import NodeRun
@@ -49,10 +47,10 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def main_idempotency_key(turn_id: int, call_id: str) -> str:
-    """The Main's key: sha256(turn_id || call_id), so a re-handled turn never
-    submits the same work twice."""
-    return hashlib.sha256(f"{turn_id}\x1f{call_id}".encode("utf-8")).hexdigest()
+def main_idempotency_key(session_id: UUID, tool_use_id: str) -> str:
+    """The Main's key (D21): sha256(session_id || tool_use_id), so a call the
+    SDK replays after a restart never submits the same work twice."""
+    return hashlib.sha256(f"{session_id}\x1f{tool_use_id}".encode("utf-8")).hexdigest()
 
 
 def _expired(change: GraphChange, now: datetime) -> bool:
@@ -93,7 +91,8 @@ async def pending_change(db: AsyncSession, session_id: UUID, *, lock: bool = Fal
 _LIVE = text(
     """
     SELECT n.node_id, n.position, n.target_kind, n.target_name, n.target_version, n.title,
-           n.params, n.input_sources, n.expectations, r.run_id, r.status,
+           n.params, n.input_sources, n.expectations, n.approval, n.start_released_by_change_id,
+           r.run_id, r.status, r.downstream_hold,
            (r.downstream_hold IS NOT NULL AND r.hold_released_by_change_id IS NULL) AS holds
     FROM graph_nodes n
     LEFT JOIN node_runs r ON r.node_id = n.node_id AND r.superseded_at IS NULL
@@ -109,7 +108,9 @@ async def live_nodes(db: AsyncSession, session_id: UUID) -> list[LiveNode]:
             node_id=row.node_id, position=row.position, kind=row.target_kind, ref=row.target_name,
             ref_version=row.target_version, title=row.title, params=row.params,
             input_sources=row.input_sources, expectations=row.expectations,
+            approval=row.approval, start_released_by_change_id=row.start_released_by_change_id,
             run_id=row.run_id, run_status=row.status, holds_downstream=bool(row.holds),
+            hold=row.downstream_hold if row.holds else None,
         )
         for row in (await db.execute(_LIVE, {"sid": str(session_id)})).all()
     ]
@@ -149,17 +150,26 @@ def _refuse_archived(locked: _Locked) -> None:
         )
 
 
-async def _plan(db: AsyncSession, locked: _Locked, content: ChangeContent) -> ApplyPlan:
+async def _plan(db: AsyncSession, locked: _Locked, content: ChangeContent, author: str) -> ApplyPlan:
     ids = [node.node_id for node in content.nodes]
     used = set(
         (await db.execute(select(GraphNode.node_id).where(GraphNode.node_id.in_(ids)))).scalars()
     ) if ids else set()
     return plan_apply(
-        locked.live, content, used_node_ids=used, execution_mode=locked.session.execution_mode
+        locked.live, content, used_node_ids=used, execution_mode=locked.session.execution_mode, author=author,
     )
 
 
 def _invalid(plan: ApplyPlan) -> HTTPException:
+    """INVALID_CHANGE, or USER_RELEASE_REQUIRED when the change releases what
+    only the user may release (D28)."""
+    refused = [error for error in plan.errors if error.code == "USER_RELEASE_REQUIRED"]
+    if refused:
+        return conflict(
+            "USER_RELEASE_REQUIRED",
+            "; ".join(error.message for error in refused),
+            node_ids=[str(error.node_id) for error in refused],
+        )
     return conflict(
         "INVALID_CHANGE",
         "; ".join(error.message for error in plan.errors),
@@ -217,10 +227,26 @@ async def _apply(
         for name, value in columns.items():
             setattr(row, name, value)
         if node.node_id in accepting:
+            # A new definition or a rerun needs a new release (T2 step 7).
             row.accepted_by_change_id = change.change_id
+            row.start_released_by_change_id = None
     for node in plan.removed:
         rows[node.node_id].removed_at = now
     await db.flush()
+    # Step 7: the user releases the start of an `approval: before` node.
+    if plan.start_releases:
+        released = {
+            node.node_id: node
+            for node in (
+                await db.execute(
+                    select(GraphNode).where(GraphNode.node_id.in_(plan.start_releases))
+                    .execution_options(populate_existing=True)
+                )
+            ).scalars()
+        }
+        for node_id in plan.start_releases:
+            released[node_id].start_released_by_change_id = change.change_id
+        await db.flush()
 
     # Step 6: supersede the current runs of affected nodes. A running run also
     # gets a cancel request on its active attempt (confirmed at once when the
@@ -283,27 +309,9 @@ async def _apply(
         "removed_node_ids": [str(node.node_id) for node in plan.removed],
         "affected": [str(node_id) for node_id in plan.affected],
         "superseded_run_ids": [str(run_id) for run_id in superseded],
+        "start_released_node_ids": [str(node_id) for node_id in plan.start_releases],
     })
     return superseded
-
-
-async def _tool_result(
-    db: AsyncSession, session_id: UUID, call: schemas.ToolCallRef, result: dict[str, Any]
-) -> None:
-    """The Main's control-tool result, committed with the change. The
-    pairing trigger refuses it unless the call was committed first."""
-    chat_id = (await db.execute(select(Chat.chat_id).where(Chat.session_id == session_id))).scalar_one()
-    db.add(ChatMessage(
-        chat_id=chat_id,
-        role="tool",
-        text=call.tool,
-        metadata_={
-            "v": 2, "kind": "tool_result", "turn_id": call.turn_id, "call_id": call.call_id,
-            "tool": call.tool, "status": "ok", "ended_at": _now().isoformat(), "result": result,
-            "phi": False,
-        },
-    ))
-    await db.flush()
 
 
 def _result(change: GraphChange, version: int, plan: Optional[ApplyPlan], content: ChangeContent,
@@ -325,9 +333,11 @@ async def submit_change(
     db: AsyncSession, session_id: UUID, data: schemas.GraphChangeSubmit, idempotency_key: Optional[str],
 ) -> schemas.GraphChangeResult:
     if data.author == "main":
-        if data.tool_call is None:
-            raise conflict("TOOL_CALL_REQUIRED", "A change from the Main names its tool call.", status_code=422)
-        idempotency_key = main_idempotency_key(data.tool_call.turn_id, data.tool_call.call_id)
+        if data.tool_call is None or data.tool_call.session_id != session_id:
+            raise conflict(
+                "TOOL_CALL_REQUIRED", "A change from the Main names its tool call in this session.", status_code=422
+            )
+        idempotency_key = main_idempotency_key(session_id, data.tool_call.tool_use_id)
     elif not idempotency_key:
         raise conflict("IDEMPOTENCY_KEY_REQUIRED", "Send an Idempotency-Key header.", status_code=422)
     content = data.content
@@ -357,7 +367,7 @@ async def submit_change(
                 f"The graph is at version {locked.graph.version}, not {data.base_version}; re-read and re-propose.",
                 version=locked.graph.version,
             )
-        plan = await _plan(db, locked, content)
+        plan = await _plan(db, locked, content, data.author)
         if plan.errors:
             raise _invalid(plan)
         reasons = sorted(set(data.approval_reasons) | plan.reasons)
@@ -395,12 +405,6 @@ async def submit_change(
             db.add(change)
             await db.flush()
             superseded = await _apply(db, locked, change, content, plan, publish)
-        if data.tool_call is not None:
-            await _tool_result(db, session_id, data.tool_call, {
-                "change_id": str(change.change_id),
-                "status": change.status,
-                "node_ids": [str(node_id) for node_id in _defined_ids(content, plan)],
-            })
         await attempts_repo.publish_progress(db, session_id, publish)
     return _result(change, locked.graph.version, plan, content, superseded)
 
@@ -449,7 +453,7 @@ async def decide_change(
             if change.base_version != locked.graph.version:
                 stale = f"the graph moved to version {locked.graph.version}"
             else:
-                plan = await _plan(db, locked, content)
+                plan = await _plan(db, locked, content, change.author)
                 missing = plan.reasons - set(change.approval_reasons)
                 if plan.errors or missing:
                     stale = "; ".join(

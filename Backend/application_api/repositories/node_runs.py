@@ -18,12 +18,12 @@ from sqlalchemy.orm import selectinload
 from application_api.core.canonical_json import content_digest
 from application_api.core.execution_rules import LatestAttempt, retry_verdict
 from application_api.core.graph_content import NodeDef
-from application_api.db.models.agent_checkpoints import AgentCheckpoint, AgentCheckpointWrite
 from application_api.db.models.graph_changes import GraphChange
 from application_api.db.models.graph_nodes import GraphNode
 from application_api.db.models.node_runs import NodeRun
-from application_api.db.models.run_attempts import RunAttempt
+from application_api.db.models.run_attempts import QUESTION_KINDS, RunAttempt
 from application_api.db.models.sessions import Session as SessionModel
+from application_api.repositories import agent_transcript_entries as transcripts_repo
 from application_api.repositories import run_attempts as attempts_repo
 from application_api.schemas import node_runs as schemas
 from application_api.services.fencing import HARNESS, fenced_transaction
@@ -107,7 +107,8 @@ _NODE_STATUS = text(
     """
     SELECT n.node_id, n.node_seq, n.position, n.target_name, n.title,
            r.run_id, r.status, r.started_at, r.completed_at, r.error, r.downstream_hold,
-           r.hold_released_by_change_id, a.state AS attempt_state, a.suspension ->> 'gate' AS gate
+           r.hold_released_by_change_id, a.state AS attempt_state, a.suspension ->> 'kind' AS suspension_kind,
+           n.approval, n.start_released_by_change_id
     FROM graph_nodes n
     LEFT JOIN node_runs r ON r.node_id = n.node_id AND r.superseded_at IS NULL
     LEFT JOIN LATERAL (SELECT x.state, x.suspension FROM run_attempts x WHERE x.run_id = r.run_id
@@ -133,7 +134,15 @@ async def node_status_payload(db: AsyncSession, session_id: UUID) -> dict[str, A
                 "run_id": str(row.run_id) if row.run_id else None,
                 "status": _UI_STATUS[row.status],
                 "attempt_state": row.attempt_state,
-                "waiting_for_user": row.attempt_state == "suspended" and row.gate is not None,
+                # A question or a tool approval inside the node, a review hold
+                # on its result, or an unreleased `approval: before` start (D28).
+                "waiting_for_user": (
+                    (row.attempt_state == "suspended" and row.suspension_kind in QUESTION_KINDS)
+                    or (row.downstream_hold == "user_review" and not row.hold_released_by_change_id)
+                    or (row.run_id is None and row.approval == "before"
+                        and row.start_released_by_change_id is None)
+                ),
+                "approval": row.approval,
                 "holds_downstream": bool(row.downstream_hold and not row.hold_released_by_change_id),
                 "started_at": _iso(row.started_at),
                 "finished_at": _iso(row.completed_at),
@@ -194,8 +203,13 @@ async def _require_ready(db: AsyncSession, node: GraphNode, session: SessionMode
         raise _not_ready(
             "NOT_READY",
             f"The previous live node {previous.node_id} has "
-            + ("an expectation hold" if previous.holds else f"no completed run ({previous.status or 'not started'})")
+            + ("a hold on its result" if previous.holds else f"no completed run ({previous.status or 'not started'})")
             + ".",
+        )
+    if node.approval == "before" and node.start_released_by_change_id is None:
+        raise _not_ready(
+            "NEEDS_RELEASE",
+            f"Node {node.node_id} waits for the user to release it (approval: before).",
         )
     active = (await db.execute(_ACTIVE_ATTEMPT, {"sid": str(node.session_id)})).scalar()
     if active is not None:
@@ -262,70 +276,27 @@ async def _accepted_definition(db: AsyncSession, node: GraphNode) -> tuple[Optio
 
 async def _seed_verdict(
     db: AsyncSession, node: GraphNode, seed, privacy_mode: str, data: schemas.NodeStart
-) -> tuple[dict[str, Any], Optional[AgentCheckpoint]]:
-    """Copy the seed only when it still exists, belongs to a
-    run of this node, and its spec digest and privacy mode match."""
-    frozen = {"run_id": str(seed.run_id), "checkpoint_id": seed.checkpoint_id, "applied": False}
+) -> dict[str, Any]:
+    """T4 step 5 (D27): the seed applies only when its transcript still holds
+    the message, it is a run of this node, and its privacy mode, spec digest
+    and engine version match. Nothing is copied: the engine forks the source
+    session up to the message, reading it as this run's first attempt."""
+    frozen = {"run_id": str(seed.run_id), "message_uuid": seed.message_uuid, "applied": False}
     if node.target_kind != "agent" or not data.limits.resumable:
-        return {**frozen, "reason": "not a resumable agent"}, None
+        return {**frozen, "reason": "not a resumable agent"}
     source = (
-        await db.execute(
-            select(AgentCheckpoint, NodeRun.node_id, NodeRun.execution_policy)
-            .join(NodeRun, NodeRun.run_id == AgentCheckpoint.run_id)
-            .where(
-                AgentCheckpoint.run_id == seed.run_id,
-                AgentCheckpoint.checkpoint_ns == seed.checkpoint_ns,
-                AgentCheckpoint.checkpoint_id == seed.checkpoint_id,
-            )
-        )
+        await db.execute(select(NodeRun.node_id, NodeRun.execution_policy).where(NodeRun.run_id == seed.run_id))
     ).one_or_none()
-    if source is None:
-        return {**frozen, "reason": "checkpoint not found (purged?)"}, None
-    checkpoint, source_node, source_policy = source
-    if source_node != node.node_id:
-        return {**frozen, "reason": "checkpoint of another node"}, None
-    if checkpoint.metadata_.get("spec_digest") != data.spec_digest:
-        return {**frozen, "reason": "spec_digest differs"}, None
-    if source_policy.get("privacy_mode") != privacy_mode:
-        return {**frozen, "reason": "privacy_mode differs"}, None
-    return {**frozen, "applied": True}, checkpoint
-
-
-async def _copy_seed(db: AsyncSession, run: NodeRun, attempt: RunAttempt, source: AgentCheckpoint) -> None:
-    """The seed becomes the first checkpoint of the new run's thread, written
-    for attempt 1 (harness path), with its pending writes."""
-    db.add(AgentCheckpoint(
-        run_id=run.run_id,
-        session_id=run.session_id,
-        checkpoint_ns=source.checkpoint_ns,
-        checkpoint_id=source.checkpoint_id,
-        parent_checkpoint_id=None,
-        attempt_id=attempt.attempt_id,
-        type=source.type,
-        checkpoint=source.checkpoint,
-        metadata_={
-            **source.metadata_,
-            "seeded_from": {"run_id": str(source.run_id), "checkpoint_id": source.checkpoint_id},
-        },
-    ))
-    await db.flush()
-    writes = (
-        await db.execute(
-            select(AgentCheckpointWrite).where(
-                AgentCheckpointWrite.run_id == source.run_id,
-                AgentCheckpointWrite.checkpoint_ns == source.checkpoint_ns,
-                AgentCheckpointWrite.checkpoint_id == source.checkpoint_id,
-            )
-        )
-    ).scalars().all()
-    db.add_all(
-        AgentCheckpointWrite(
-            run_id=run.run_id, session_id=run.session_id, checkpoint_ns=write.checkpoint_ns,
-            checkpoint_id=write.checkpoint_id, task_id=write.task_id, idx=write.idx,
-            channel=write.channel, type=write.type, value=write.value, attempt_id=attempt.attempt_id,
-        )
-        for write in writes
-    )
+    if source is None or not await transcripts_repo.has_message(db, seed.run_id, seed.message_uuid):
+        return {**frozen, "reason": "transcript or message not found (purged?)"}
+    if source.node_id != node.node_id:
+        return {**frozen, "reason": "transcript of another node"}
+    for key in ("spec_digest", "engine_version"):
+        if source.execution_policy.get(key) != getattr(data, key):
+            return {**frozen, "reason": f"{key} differs"}
+    if source.execution_policy.get("privacy_mode") != privacy_mode:
+        return {**frozen, "reason": "privacy_mode differs"}
+    return {**frozen, "applied": True}
 
 
 def _submission_key(run_id: UUID, tool: str, request: Optional[dict[str, Any]], number: int) -> str:
@@ -417,12 +388,10 @@ async def _first_start(
         **data.limits.model_dump(mode="json", exclude_none=True),
         "fresh": fresh,
         "privacy_mode": session.privacy_mode,
+        **{key: value for key in ("spec_digest", "engine_version") if (value := getattr(data, key)) is not None},
     }
-    seed_source = None
     if definition is not None and definition.seed_from is not None:
-        policy["seed_from"], seed_source = await _seed_verdict(
-            db, node, definition.seed_from, session.privacy_mode, data
-        )
+        policy["seed_from"] = await _seed_verdict(db, node, definition.seed_from, session.privacy_mode, data)
     run = NodeRun(
         node_id=node.node_id,
         session_id=node.session_id,
@@ -439,8 +408,6 @@ async def _first_start(
     attempt = _attempt(run, 1, data, node.target_name, data.request)
     db.add(attempt)
     await db.flush()
-    if seed_source is not None:
-        await _copy_seed(db, run, attempt, seed_source)
     return run, attempt
 
 
@@ -453,23 +420,15 @@ async def _retry(
             .order_by(RunAttempt.attempt_number.desc()).limit(1)
         )
     ).scalar_one()
-    pending_tools = None
-    if run.execution_policy.get("resumable"):
-        pending_tools = (
-            await db.execute(
-                text(
-                    "SELECT metadata -> 'pending_tools' FROM agent_checkpoints WHERE run_id = :rid "
-                    "AND checkpoint_ns = '' ORDER BY created_at DESC, checkpoint_id DESC LIMIT 1"
-                ),
-                {"rid": str(run.run_id)},
-            )
-        ).scalar()
     verdict = retry_verdict(
         run_status=run.status,
-        latest=LatestAttempt(latest.attempt_number, latest.state, latest.dispatched_at is not None),
+        latest=LatestAttempt(
+            latest.attempt_number, latest.state, latest.dispatched_at is not None,
+            (latest.error or {}).get("code"),
+        ),
         policy=run.execution_policy,
         explicit=data.explicit_retry,
-        pending_tools=pending_tools,
+        pending_tools=(latest.pending_tools or {}).get("calls"),
     )
     if not verdict.allowed:
         raise conflict(verdict.code, f"Run {run.run_id} cannot be retried: {verdict.reason}.")

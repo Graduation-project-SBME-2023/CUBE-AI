@@ -4,13 +4,14 @@
 
 .DESCRIPTION
     Starts a disposable PostgreSQL container on a private Docker network, runs
-    the four live suites in the project image, and removes the container and the
+    the five live suites in the project image, and removes the container and the
     network afterwards, whatever happens. The compose database is never touched.
 
-      - test_v1_o_renames_live.py        rename migration up/down
-      - test_v1_p_session_graph_live.py  session-graph migration: backfills, rules, downgrade refusals
-      - test_v1_p_transactions_live.py   harness transactions through the HTTP API, fencing, ORM == schema
-      - test_v1_p_graph_store_live.py    the GraphStore scenario table on HttpGraphStore
+      - test_v1_o_renames_live.py           rename migration up/down
+      - test_v1_p_session_graph_live.py     session-graph migration: backfills, rules, downgrade refusals
+      - test_v1_t_agent_transcripts_live.py agent-transcript migration up/down and its refusals
+      - test_v1_p_transactions_live.py      harness transactions through the HTTP API, fencing, ORM == schema
+      - test_v1_p_graph_store_live.py       the GraphStore scenario table on HttpGraphStore
 
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File Backend/tests/run_live_db_tests.ps1
@@ -19,7 +20,7 @@
     powershell -NoProfile -ExecutionPolicy Bypass -File Backend/tests/run_live_db_tests.ps1 -Pattern "transactions"
 #>
 param(
-    # Substring of the suite file names to run (default: all four).
+    # Substring of the suite file names to run (default: all five).
     [string]$Pattern = "",
     [string]$Image = "cubeai1/agents-app:latest",
     [string]$PostgresImage = "postgres:18-alpine"
@@ -34,6 +35,7 @@ $Database = "cubeai-livedb-pg-$Suffix"
 $Suites = @(
     "tests/integration/test_v1_o_renames_live.py",
     "tests/integration/test_v1_p_session_graph_live.py",
+    "tests/integration/test_v1_t_agent_transcripts_live.py",
     "tests/integration/test_v1_p_transactions_live.py",
     "tests/integration/test_v1_p_graph_store_live.py"
 ) | Where-Object { $_ -like "*$Pattern*" }
@@ -57,7 +59,7 @@ try {
     }
     if (-not $ready) { throw "PostgreSQL did not become ready." }
 
-    $migrationSuites = ($Suites | Where-Object { $_ -match "renames|session_graph" }) -join " "
+    $migrationSuites = ($Suites | Where-Object { $_ -match "renames|session_graph|agent_transcripts" }) -join " "
     $apiSuites = ($Suites | Where-Object { $_ -match "transactions|graph_store" }) -join " "
     $commands = @("python -m pip install --quiet -r requirements/test.txt psycopg2-binary 'psycopg[binary]'")
     if ($migrationSuites) {

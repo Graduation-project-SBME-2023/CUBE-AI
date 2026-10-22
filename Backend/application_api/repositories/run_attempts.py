@@ -1,11 +1,12 @@
 """Run-attempt repository: dispatch, reconcile, complete and fail,
-cancel, and suspend / gate decision / resume.
+cancel, suspend / answer / resume (T10), and an attempt's pending tools.
 
 Every transition locks session -> run -> attempt and runs on the
-harness path, except the two writes an attempt or a user makes itself: a worker
-marking its own attempt running (attempt path) and a gate decision (user
-path). The run's status is always written in the same transaction as the
-attempt state it projects, which a deferred trigger checks at commit.
+harness path, except the writes an attempt or a user makes itself: a worker
+marking its own attempt running and an attempt setting its pending tools
+(attempt path), and an answer (user path). The run's status is always written
+in the same transaction as the attempt state it projects, which a deferred
+trigger checks at commit.
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ from typing import Any, AsyncIterator, Callable, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from application_api.core.execution_rules import (
@@ -30,9 +32,10 @@ from application_api.core.execution_rules import (
     violated_expectations,
 )
 from application_api.db.models.graph_nodes import GraphNode
-from application_api.db.models.node_runs import EXPECTATION_VIOLATED, NodeRun
+from application_api.db.models.node_runs import EXPECTATION_VIOLATED, USER_REVIEW, NodeRun
 from application_api.db.models.run_attempts import (
     ACTIVE_ATTEMPT_STATES,
+    QUESTION_KINDS,
     TERMINAL_ATTEMPT_STATES,
     TIMEOUT_CODES,
     RunAttempt,
@@ -40,7 +43,7 @@ from application_api.db.models.run_attempts import (
 from application_api.repositories import sessions as sessions_repo
 from application_api.schemas import run_attempts as schemas
 from application_api.services.fencing import HARNESS, USER, WritePath, fenced_transaction
-from application_api.services.publication import conflict, lock_run, publication
+from application_api.services.publication import conflict, database_refusal, lock_run, publication
 
 logger = logging.getLogger(__name__)
 
@@ -298,6 +301,13 @@ async def _succeed(
             "expectation_violated",
             {"node_id": str(node.node_id), "run_id": str(t.run.run_id), "violations": failures},
         )
+    elif node.approval == "after":
+        # D28: the user asked to review this node's result before the next one starts.
+        t.run.downstream_hold = USER_REVIEW
+        t.publish(
+            "approval_requested",
+            {"node_id": str(node.node_id), "run_id": str(t.run.run_id), "kind": USER_REVIEW},
+        )
     follows = (
         await db.execute(
             text(
@@ -431,7 +441,7 @@ async def reconcile_attempt(
     async with transition(db, run_id, attempt_id) as t:
         attempt, observed = t.attempt, data.observed
         if attempt.state in TERMINAL_ATTEMPT_STATES or attempt.state == "suspended":
-            # A suspended attempt runs nothing; its state is in its checkpoint.
+            # A suspended attempt runs nothing; its state is in its transcript.
             return attempt, "unchanged"
         if attempt.dispatch_kind in ("in_process", "inline"):
             # The process that ran it is gone.
@@ -477,14 +487,19 @@ async def reconcile_attempt(
 
 
 # ----------------------------------------------------------------------
-# Suspend / gate decision / resume
+# T10: suspend / answer / resume (the same attempt throughout, I8)
 # ----------------------------------------------------------------------
 async def suspend_attempt(
     db: AsyncSession, run_id: UUID, attempt_id: UUID, data: schemas.AttemptSuspend
 ) -> RunAttempt:
+    """An `ask_user` question, a tool approval or a pause: the attempt waits with
+    no running work; its state is in its transcript."""
     async with transition(db, run_id, attempt_id) as t:
         attempt, suspension = t.attempt, data.suspension
-        if attempt.state == "suspended" and (attempt.suspension or {}).get("interrupt_id") == suspension.interrupt_id:
+        current = attempt.suspension or {}
+        if attempt.state == "suspended" and (current.get("kind"), current.get("tool_use_id")) == (
+            suspension.kind, suspension.tool_use_id
+        ):
             return attempt  # a replayed suspend
         if attempt.state != "running" or t.run.superseded_at is not None:
             raise conflict(
@@ -493,10 +508,10 @@ async def suspend_attempt(
                 + (" on a superseded run" if t.run.superseded_at else "")
                 + "; only a running attempt of a current run suspends.",
             )
-        if suspension.kind == "gate" and suspension.gate is None:
-            raise conflict("GATE_REQUIRED", "A gate suspension names its gate.", status_code=422)
         attempt.state = "suspended"
-        attempt.suspension = {"v": 1, **suspension.model_dump(mode="json", exclude_none=True), "since": _now().isoformat()}
+        attempt.suspension = {
+            "v": 2, **suspension.model_dump(mode="json", exclude_none=True), "since": _now().isoformat()
+        }
         t.publish(
             "run_attempt_suspended",
             {
@@ -504,8 +519,8 @@ async def suspend_attempt(
                 "run_id": str(run_id),
                 "attempt_id": str(attempt_id),
                 "kind": suspension.kind,
-                "gate": suspension.gate,
-                "interrupt_id": suspension.interrupt_id,
+                "tool_use_id": suspension.tool_use_id,
+                "form": suspension.form,
                 "payload": suspension.payload,
             },
         )
@@ -513,27 +528,31 @@ async def suspend_attempt(
     return attempt
 
 
-async def _resolve(
-    t: Transition, gate: Optional[str], interrupt_id: Optional[str], decision: str, comment: Optional[str]
+def _answer(
+    t: Transition, *, tool_use_id: Optional[str], form: Optional[str], answer: Any = None,
+    decision: Optional[str] = None, comment: Optional[str] = None,
 ) -> None:
+    """Record the answer on the suspension; `gate_resolved` wakes the Executor,
+    not the Main."""
     attempt = t.attempt
     suspension = attempt.suspension or {}
     if (
         attempt.state != "suspended"
-        or suspension.get("kind") != "gate"
+        or suspension.get("kind") not in QUESTION_KINDS
         or "resume" in suspension
-        or (gate is not None and suspension.get("gate") != gate)
-        or (interrupt_id is not None and suspension.get("interrupt_id") != interrupt_id)
+        or (tool_use_id is not None and suspension.get("tool_use_id") != tool_use_id)
+        or (form is not None and suspension.get("form") != form)
+        or (suspension.get("kind") == "tool_approval" and decision is None)
     ):
         raise conflict(
             "NO_OPEN_GATE",
-            f"Run {t.run.run_id} has no undecided {gate or 'gate'} waiting for this decision.",
+            f"Run {t.run.run_id} has no unanswered {form or 'question'} waiting for this answer.",
         )
     if t.run.status != "running" or t.run.superseded_at is not None:
         raise conflict("RUN_NOT_CURRENT", f"Run {t.run.run_id} is not running and current.")
+    given = {"answer": answer} if decision is None else {"decision": decision}
     attempt.suspension = {
-        **suspension,
-        "resume": {"decision": decision, "comment": comment, "decided_at": _now().isoformat()},
+        **suspension, "resume": {**given, "comment": comment, "decided_at": _now().isoformat()},
     }
     t.publish(
         "gate_resolved",
@@ -541,44 +560,53 @@ async def _resolve(
             "node_id": str(t.run.node_id),
             "run_id": str(t.run.run_id),
             "attempt_id": str(attempt.attempt_id),
-            "gate": suspension.get("gate"),
-            "interrupt_id": suspension.get("interrupt_id"),
+            "kind": suspension.get("kind"),
+            "tool_use_id": suspension.get("tool_use_id"),
+            "form": suspension.get("form"),
             "decision": decision,
         },
     )
 
 
-async def record_gate_decision(
-    db: AsyncSession, run_id: UUID, attempt_id: UUID, data: schemas.GateDecision
+async def answer_attempt(
+    db: AsyncSession, run_id: UUID, attempt_id: UUID, data: schemas.AttemptAnswer
 ) -> RunAttempt:
-    """A gate with no domain row (`tool_approval`): the user gate path."""
+    """The user's answer to an `ask_user` question or decision on a tool
+    approval (the user gate path). A domain form is answered by its own route,
+    which writes the form's columns in the same transaction."""
     async with transition(db, run_id, attempt_id, USER) as t:
-        await _resolve(t, None, data.interrupt_id, data.decision, data.comment)
+        if (t.attempt.suspension or {}).get("form") is not None:
+            raise conflict(
+                "FORM_ANSWER",
+                f"Attempt {attempt_id} waits on the {t.attempt.suspension['form']} form; answer it there.",
+            )
+        _answer(t, tool_use_id=data.tool_use_id, form=None, answer=data.answer, decision=data.decision,
+                comment=data.comment)
         await sessions_repo.publish_session_state(db, t.session_id, t.publish)
     return t.attempt
 
 
 async def resolve_domain_gate(
-    db: AsyncSession, run_id: UUID, gate: str, publish: Publish, *, decision: str = "approve",
+    db: AsyncSession, run_id: UUID, form: str, publish: Publish, *, decision: str = "approve",
     comment: Optional[str] = None,
 ) -> None:
-    """The gate decision of a domain gate (cohort approval, segmentation review),
-    inside the caller's user-gate transaction, so the domain gate columns and
-    the attempt's `resume` commit together."""
+    """T10's answer step for a domain form of `ask_user` (the cohort approval,
+    the segmentation review), inside the caller's user-gate transaction, so the
+    form's columns and the attempt's `resume` commit together."""
     attempt_id = (
         await db.execute(
             text(
                 "SELECT attempt_id FROM run_attempts WHERE run_id = :rid AND state = 'suspended' "
-                "AND suspension ->> 'kind' = 'gate' AND suspension ->> 'gate' = :gate"
+                "AND suspension ->> 'kind' = 'ask_user' AND suspension ->> 'form' = :form"
             ),
-            {"rid": str(run_id), "gate": gate},
+            {"rid": str(run_id), "form": form},
         )
     ).scalar()
     if attempt_id is None:
-        raise conflict("NO_OPEN_GATE", f"Run {run_id} is not waiting on its {gate} gate.")
+        raise conflict("NO_OPEN_GATE", f"Run {run_id} is not waiting on its {form} form.")
     run, attempt = await lock_run_and_attempt(db, run_id, attempt_id)
-    session_id = run.session_id
-    await _resolve(Transition(session_id, run, attempt, publish), gate, None, decision, comment)
+    _answer(Transition(run.session_id, run, attempt, publish), tool_use_id=None, form=form,
+            decision=decision, comment=comment)
 
 
 async def resume_attempt(db: AsyncSession, run_id: UUID, attempt_id: UUID) -> RunAttempt:
@@ -592,12 +620,12 @@ async def resume_attempt(db: AsyncSession, run_id: UUID, attempt_id: UUID) -> Ru
             attempt.state != "suspended"
             or control_state != "active"
             or t.run.superseded_at is not None
-            or (suspension.get("kind") == "gate" and "resume" not in suspension)
+            or (suspension.get("kind") in QUESTION_KINDS and "resume" not in suspension)
         ):
             raise conflict(
                 "NOT_RESUMABLE",
                 f"Attempt {attempt_id} resumes only while suspended, in an active session "
-                f"(it is {control_state}), on a current run, and after its gate is decided.",
+                f"(it is {control_state}), on a current run, and once answered.",
             )
         attempt.state, attempt.resumed_at = "running", _now()
         t.publish(
@@ -607,3 +635,32 @@ async def resume_attempt(db: AsyncSession, run_id: UUID, attempt_id: UUID) -> Ru
         )
         await publish_progress(db, t.session_id, t.publish)
     return attempt
+
+
+# ----------------------------------------------------------------------
+# Pending tools (attempt path): the calls a running attempt is making
+# ----------------------------------------------------------------------
+async def set_pending_tools(
+    db: AsyncSession, run_id: UUID, attempt_id: UUID, data: schemas.PendingTools
+) -> RunAttempt:
+    """Written before a call runs and when it ends, so a restart knows whether
+    a retry is safe (T4 rule f). Only the run's latest attempt, running or
+    suspended, writes its own; the fencing trigger checks it."""
+    async with fenced_transaction(db, WritePath.attempt(attempt_id)):
+        try:
+            updated = (
+                await db.execute(
+                    update(RunAttempt)
+                    .where(RunAttempt.attempt_id == attempt_id, RunAttempt.run_id == run_id)
+                    .values(pending_tools=data.model_dump(mode="json"))
+                    .returning(RunAttempt)
+                    .execution_options(populate_existing=True)
+                )
+            ).scalar_one_or_none()
+            if updated is None:
+                raise HTTPException(status_code=404, detail=f"Attempt {attempt_id} of run {run_id} not found")
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise database_refusal(exc) from exc
+    return updated

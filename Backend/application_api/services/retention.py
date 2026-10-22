@@ -1,8 +1,8 @@
 """Retention sweeps run from the application lifespan.
 
-The agent-checkpoint purge deletes in batches, so one sweep repeats it until
-a batch comes back short. A failed sweep is logged and retried on the next
-tick: the timer must outlive a database restart.
+The transcript purge deletes in batches, so one sweep repeats it until a batch
+comes back short. A failed sweep is logged and retried on the next tick: the
+timer must outlive a database restart.
 """
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ import logging
 from typing import Awaitable, Callable
 
 from application_api.db.session import AsyncSessionLocal
-from application_api.repositories import agent_checkpoints as checkpoints_repo
-from application_api.schemas.agent_checkpoints import PurgeOut
+from application_api.repositories import agent_transcript_entries as transcripts_repo
+from application_api.schemas.agent_transcript_entries import TranscriptPurgeOut
 
 logger = logging.getLogger(__name__)
 
@@ -21,37 +21,38 @@ PURGE_BATCH = 500
 # A runaway guard: one sweep never deletes more than this many batches.
 MAX_BATCHES_PER_SWEEP = 100
 
-PurgeBatch = Callable[[int], Awaitable[PurgeOut]]
+PurgeBatch = Callable[[int], Awaitable[TranscriptPurgeOut]]
 
 
-async def _purge_batch(batch: int) -> PurgeOut:
+async def _purge_batch(batch: int) -> TranscriptPurgeOut:
     async with AsyncSessionLocal() as db:
-        return await checkpoints_repo.purge_checkpoints(db, batch)
+        return await transcripts_repo.purge(db, batch)
 
 
-async def purge_expired_checkpoints(
+async def purge_expired_transcripts(
     purge: PurgeBatch = _purge_batch, batch: int = PURGE_BATCH
-) -> PurgeOut:
+) -> TranscriptPurgeOut:
     """One sweep: purge batch after batch until one comes back short."""
-    runs = checkpoints = 0
+    runs = entries = sessions = 0
     for _ in range(MAX_BATCHES_PER_SWEEP):
         result = await purge(batch)
         runs += result.runs
-        checkpoints += result.checkpoints
-        if result.runs < batch:
+        entries += result.entries
+        sessions += result.main_sessions
+        if result.runs < batch and result.main_sessions < batch:
             break
-    return PurgeOut(runs=runs, checkpoints=checkpoints)
+    return TranscriptPurgeOut(runs=runs, entries=entries, main_sessions=sessions)
 
 
-async def purge_checkpoints_forever(interval_seconds: float) -> None:
+async def purge_transcripts_forever(interval_seconds: float) -> None:
     """Sweep at startup and then on a timer; a non-positive interval disables it."""
     if interval_seconds <= 0:
         return
     while True:
         try:
-            await purge_expired_checkpoints()
+            await purge_expired_transcripts()
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Agent-checkpoint purge failed; retrying in %.0fs", interval_seconds)
+            logger.exception("Transcript purge failed; retrying in %.0fs", interval_seconds)
         await asyncio.sleep(interval_seconds)

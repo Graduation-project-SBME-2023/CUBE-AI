@@ -1110,6 +1110,7 @@ class SegmentationModule:
             "pending": "awaiting_review",
             "submitting": "awaiting_review",
             "submitted": "reviewed",
+            "auto_accepted": "reviewed",
         }[batch["review_status"]]
         self.segmentation_batch_id = str(batch["segmentation_batch_id"])
         return outcome, work_items, batch_correlation_id, stage

@@ -72,7 +72,7 @@ def test_remove_move_and_edit_ops():
 
 def test_rerun_with_seed_release_and_on_running_are_carried():
     a, b, c, graph = three()
-    seed = SeedFrom(run_id=uuid.uuid4(), checkpoint_id="cp")
+    seed = SeedFrom(run_id=uuid.uuid4(), message_uuid="cp")
     content = apply_ops(graph, GraphDiff(base_version=3, on_running="restart", origin="composer", ops=[
         RerunNode(node_id=b.node_id, seed_from=seed), ReleaseHold(node_id=a.node_id),
     ]))

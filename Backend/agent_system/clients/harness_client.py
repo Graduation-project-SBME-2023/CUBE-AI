@@ -5,8 +5,9 @@ client only carries requests and turns refusals into ``ApplicationApiError``
 with the API's stable ``code`` (STALE_BASE, NOT_READY, ...).
 
 Write paths: a write an attempt makes about itself (it marks itself running, completes
-or fails, stores checkpoints) sends ``X-Attempt-Id`` with that attempt's id; the
-other transitions are the harness's and declare no attempt.
+or fails, appends its transcript, sets its pending tools) sends ``X-Attempt-Id``
+with that attempt's id; the other transitions are the harness's and declare no
+attempt, and an answer to a suspended attempt is the user's.
 
 The legacy ``BackendClient`` (``backend_client.py``) stays for the frozen
 AutoGen pipeline until both are removed.
@@ -14,7 +15,6 @@ AutoGen pipeline until both are removed.
 
 from __future__ import annotations
 
-import base64
 import os
 from typing import Any, Optional
 
@@ -209,55 +209,56 @@ class HarnessClient:
         return await self._call("POST", self._attempt(run_id, attempt_id, "suspend"),
                                 json={"suspension": suspension})
 
-    async def record_gate_decision(self, run_id: str, attempt_id: str, interrupt_id: str, decision: str,
-                                   comment: Optional[str] = None) -> dict:
-        return await self._call("POST", self._attempt(run_id, attempt_id, "gate-decision"),
-                                json={"interrupt_id": interrupt_id, "decision": decision, "comment": comment})
+    async def answer_attempt(self, run_id: str, attempt_id: str, tool_use_id: str, *, answer: Any = None,
+                             decision: Optional[str] = None, comment: Optional[str] = None) -> dict:
+        """T10's answer step: the user's answer to an `ask_user` question, or
+        decision on a tool approval (user path, no attempt header)."""
+        body = {"tool_use_id": tool_use_id, "comment": comment}
+        body.update({k: v for k, v in (("answer", answer), ("decision", decision)) if v is not None})
+        return await self._call("POST", self._attempt(run_id, attempt_id, "answer"), json=body)
 
     async def resume_attempt(self, run_id: str, attempt_id: str) -> dict:
         return await self._call("POST", self._attempt(run_id, attempt_id, "resume"))
 
-    # -- agent checkpoints --------------------------------------------
-    async def put_checkpoint(self, run_id: str, attempt_id: str, *, checkpoint_id: str, checkpoint: bytes,
-                             type: str, metadata: dict, checkpoint_ns: str = "",
-                             parent_checkpoint_id: Optional[str] = None) -> dict:
-        return await self._call("PUT", f"/runs/{run_id}/checkpoints", attempt_id=attempt_id, json={
-            "checkpoint_ns": checkpoint_ns, "checkpoint_id": checkpoint_id,
-            "parent_checkpoint_id": parent_checkpoint_id, "type": type,
-            "checkpoint": base64.b64encode(checkpoint).decode("ascii"), "metadata": metadata,
-        })
+    async def set_pending_tools(self, run_id: str, attempt_id: str, calls: list[dict]) -> dict:
+        return await self._call("PUT", self._attempt(run_id, attempt_id, "pending-tools"),
+                                json={"v": 1, "calls": calls}, attempt_id=attempt_id)
 
-    async def put_checkpoint_writes(self, run_id: str, attempt_id: str, *, checkpoint_id: str,
-                                    writes: list[dict], checkpoint_ns: str = "") -> int:
-        encoded = [{**write, "value": base64.b64encode(write["value"]).decode("ascii")} for write in writes]
-        body = {"checkpoint_ns": checkpoint_ns, "checkpoint_id": checkpoint_id, "writes": encoded}
-        return (await self._call("POST", f"/runs/{run_id}/checkpoint-writes", json=body,
-                                 attempt_id=attempt_id))["stored"]
-
-    async def get_checkpoint(self, run_id: str, checkpoint_id: Optional[str] = None,
-                             checkpoint_ns: str = "") -> Optional[dict]:
-        path = f"/runs/{run_id}/checkpoints/{checkpoint_id or 'latest'}"
+    # -- agent transcripts (D27) and the Main's (D21) -------------------
+    async def _load(self, path: str, subpath: str, attempt_id: Optional[str] = None) -> Optional[list[dict]]:
         try:
-            found = await self._call("GET", path, params={"ns": checkpoint_ns})
+            found = await self._call("GET", path, params={"subpath": subpath}, attempt_id=attempt_id)
         except ApplicationApiError as exc:
             if exc.status_code == 404:
                 return None
             raise
-        found["checkpoint"] = base64.b64decode(found["checkpoint"])
-        for write in found.get("writes", []):
-            write["value"] = base64.b64decode(write["value"])
-        return found
+        return found["entries"]
 
-    async def list_checkpoints(self, run_id: str, *, checkpoint_ns: Optional[str] = None,
-                               before: Optional[str] = None, limit: int = 20) -> list[dict]:
-        params = {k: v for k, v in (("ns", checkpoint_ns), ("before", before)) if v is not None}
-        return await self._call("GET", f"/runs/{run_id}/checkpoints", params={**params, "limit": limit})
+    async def append_transcript(self, run_id: str, attempt_id: str, entries: list[dict], *,
+                                project_key: str, subpath: str = "") -> dict:
+        return await self._call("POST", f"/runs/{run_id}/transcript", attempt_id=attempt_id,
+                                json={"subpath": subpath, "project_key": project_key, "entries": entries})
 
-    async def run_steps(self, run_id: str) -> list[dict]:
-        return await self._call("GET", f"/runs/{run_id}/steps")
+    async def load_transcript(self, run_id: str, *, subpath: str = "",
+                              attempt_id: Optional[str] = None) -> Optional[list[dict]]:
+        return await self._load(f"/runs/{run_id}/transcript", subpath, attempt_id)
 
-    async def purge_checkpoints(self) -> dict:
-        return await self._call("POST", "/agent-checkpoints/purge")
+    async def list_transcript_subpaths(self, run_id: str) -> list[str]:
+        return await self._call("GET", f"/runs/{run_id}/transcript/subpaths")
+
+    async def append_main_transcript(self, session_id: str, entries: list[dict], *,
+                                     project_key: str, subpath: str = "") -> dict:
+        return await self._call("POST", f"/sessions/{session_id}/main-transcript",
+                                json={"subpath": subpath, "project_key": project_key, "entries": entries})
+
+    async def load_main_transcript(self, session_id: str, *, subpath: str = "") -> Optional[list[dict]]:
+        return await self._load(f"/sessions/{session_id}/main-transcript", subpath)
+
+    async def list_main_transcript_subpaths(self, session_id: str) -> list[str]:
+        return await self._call("GET", f"/sessions/{session_id}/main-transcript/subpaths")
+
+    async def purge_transcripts(self) -> dict:
+        return await self._call("POST", "/agent-transcripts/purge")
 
     # -- training ------------------------------------------------------
     async def start_training(self, task_name: str) -> dict:

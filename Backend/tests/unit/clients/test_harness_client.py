@@ -3,7 +3,7 @@ writes, the idempotency key, and refusals as stable codes. No network."""
 
 from __future__ import annotations
 
-import base64
+import json
 
 import pytest
 
@@ -53,15 +53,35 @@ async def test_refusals_keep_their_code_and_hide_server_errors(api):
         assert failed.value.code == "INTERNAL" and "Traceback" not in failed.value.message
 
 
-async def test_checkpoints_travel_base64(api):
-    put = api.put("/runs/r/checkpoints").respond(200, json={})
-    api.get("/runs/r/checkpoints/latest").respond(200, json={
-        "checkpoint": base64.b64encode(b"blob").decode(), "writes": [{"value": base64.b64encode(b"w").decode()}],
-    })
-    api.get("/runs/r/checkpoints/gone").respond(404, json={"detail": "none"})
+async def test_an_attempts_transcript_and_pending_tools_present_the_attempt(api):
+    append = api.post("/runs/r/transcript").respond(200, json={"stored": 1, "replayed": 0})
+    pending = api.put("/runs/r/attempts/a/pending-tools").respond(200, json={"state": "running"})
+    read = api.get("/runs/r/transcript").respond(200, json={"subpath": "", "entries": [{"uuid": "m1"}]})
     async with HarnessClient(BASE) as client:
-        await client.put_checkpoint("r", "a", checkpoint_id="c", checkpoint=b"blob", type="t", metadata={})
-        latest = await client.get_checkpoint("r")
-        assert await client.get_checkpoint("r", "gone") is None
-    assert put.calls.last.request.headers["X-Attempt-Id"] == "a"
-    assert (latest["checkpoint"], latest["writes"][0]["value"]) == (b"blob", b"w")
+        await client.append_transcript("r", "a", [{"uuid": "m1"}], project_key="cubeai")
+        await client.set_pending_tools("r", "a", [])
+        assert await client.load_transcript("r", attempt_id="b") == [{"uuid": "m1"}]
+    assert append.calls.last.request.headers["X-Attempt-Id"] == "a"
+    assert json.loads(append.calls.last.request.content) == {
+        "subpath": "", "project_key": "cubeai", "entries": [{"uuid": "m1"}]}
+    assert json.loads(pending.calls.last.request.content) == {"v": 1, "calls": []}
+    assert read.calls.last.request.headers["X-Attempt-Id"] == "b"  # the reader presents itself
+
+
+async def test_a_missing_transcript_is_none(api):
+    api.get("/runs/r/transcript").respond(404, json={"detail": "none"})
+    api.get("/sessions/s/main-transcript").respond(404, json={"detail": "none"})
+    async with HarnessClient(BASE) as client:
+        assert await client.load_transcript("r") is None
+        assert await client.load_main_transcript("s", subpath="subagents/agent-composer") is None
+
+
+async def test_an_answer_is_the_users_and_carries_only_what_was_given(api):
+    route = api.post("/runs/r/attempts/a/answer").respond(200, json={"state": "suspended"})
+    async with HarnessClient(BASE) as client:
+        await client.answer_attempt("r", "a", "toolu_1", decision="approve")
+        await client.answer_attempt("r", "a", "toolu_2", answer=False, comment="no wavelets")
+    first, second = (json.loads(c.request.content) for c in route.calls)
+    assert first == {"tool_use_id": "toolu_1", "comment": None, "decision": "approve"}
+    assert second == {"tool_use_id": "toolu_2", "comment": "no wavelets", "answer": False}
+    assert "X-Attempt-Id" not in route.calls.last.request.headers  # the user gate path

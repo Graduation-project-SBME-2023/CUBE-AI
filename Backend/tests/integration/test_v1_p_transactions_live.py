@@ -14,7 +14,6 @@ Run (from Backend/, with a throwaway database):
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
 import subprocess
 import sys
@@ -305,11 +304,6 @@ async def test_a_change_with_a_reused_or_invalid_node_is_refused(api: Api):
     assert body["detail"]["errors"][0]["code"] == "TARGET_IMMUTABLE"
 
 
-async def test_the_old_plan_api_is_gone(api: Api):
-    session_id = await api.session()
-    await api.call("POST", f"/session-graphs/session/{session_id}/approve", expect=410)
-
-
 # ----------------------------------------------------------------------
 # Start and completion
 # ----------------------------------------------------------------------
@@ -459,14 +453,14 @@ async def test_switching_to_phi_local_cancels_standard_attempts(api: Api):
 
 
 # ----------------------------------------------------------------------
-# Reconcile, suspend and resume
+# Reconcile, suspend, answer and resume (T10); agent transcripts (D27)
 # ----------------------------------------------------------------------
-def _checkpoint(checkpoint_id: str, spec: str = "spec-1", pending: Optional[list] = None) -> dict:
-    return {
-        "checkpoint_id": checkpoint_id, "type": "msgpack",
-        "checkpoint": base64.b64encode(b"state").decode(),
-        "metadata": {"v": 1, "spec_digest": spec, "engine_version": "1", "step": 1, "pending_tools": pending or []},
-    }
+def _entries(*uuids: str) -> list[dict]:
+    return [{"uuid": u, "type": "assistant", "message": {"content": u}} for u in uuids]
+
+
+def _transcript(*uuids: str, subpath: str = "") -> dict:
+    return {"subpath": subpath, "project_key": "cubeai", "entries": _entries(*uuids)}
 
 
 async def _agent(api: Api) -> tuple[str, dict, dict]:
@@ -474,83 +468,187 @@ async def _agent(api: Api) -> tuple[str, dict, dict]:
     agent = node("study_population_planner_agent", "agent")
     await api.submit(session_id, [agent])
     agent["session_id"] = session_id
-    started = await api.start(agent, prompt="p", limits={"resumable": True, "max_attempts": 3}, spec_digest="spec-1")
+    started = await api.start(agent, prompt="p", limits={"resumable": True, "max_attempts": 3},
+                              spec_digest="spec-1", engine_version="engine-1")
     await api.dispatch(started)
     return session_id, agent, started
 
 
-async def test_t10_suspend_gate_and_resume_the_same_attempt(api: Api):
+async def test_t10_a_question_suspends_and_the_answer_resumes_the_same_attempt(api: Api):
     session_id, _, started = await _agent(api)
-    run_id, attempt_id = started["run"]["run_id"], started["attempt"]["attempt_id"]
-    gate = {"suspension": {"kind": "gate", "gate": "tool_approval", "interrupt_id": "i1", "checkpoint_id": "c1"}}
-    await api.call("POST", Api._attempt(started, "suspend"), json=gate, expect=409)  # no checkpoint yet
-    await api.call("PUT", f"/runs/{run_id}/checkpoints", json=_checkpoint("c1"), attempt=attempt_id)
-    await api.call("PUT", f"/runs/{run_id}/checkpoints", json=_checkpoint("c1"), attempt=attempt_id)  # replay
-    suspended = await api.call("POST", Api._attempt(started, "suspend"), json=gate)
-    assert suspended["state"] == "suspended"
+    attempt_id = started["attempt"]["attempt_id"]
+    question = {"suspension": {"kind": "ask_user", "tool_use_id": "toolu_1", "payload": {"q": "wavelets?"}}}
+    suspended = await api.call("POST", Api._attempt(started, "suspend"), json=question)
+    assert (suspended["state"], suspended["suspension"]["v"]) == ("suspended", 2)
     assert (await api.graph(session_id))["activity"] == "awaiting_user"
+    status = await api.call("GET", f"/runs/session/{session_id}/status")
+    assert status["agents"][0]["waiting_for_user"] is True
     assert (await api.call("POST", Api._attempt(started, "resume"), expect=409))["detail"]["code"] == "NOT_RESUMABLE"
     reconciled = await api.call("POST", Api._attempt(started, "reconcile"), json={"observed": "not_found"})
     assert (reconciled["action"], reconciled["attempt"]["state"]) == ("unchanged", "suspended")
-    await api.call("POST", Api._attempt(started, "gate-decision"),
-                   json={"interrupt_id": "i1", "decision": "approve"})
+    wrong = await api.call("POST", Api._attempt(started, "answer"), json={"tool_use_id": "toolu_2", "answer": "y"},
+                           expect=409)
+    assert wrong["detail"]["code"] == "NO_OPEN_GATE"
+    await api.call("POST", Api._attempt(started, "answer"), json={"tool_use_id": "toolu_1", "answer": "yes"})
+    assert "gate_resolved" in await _events(api, session_id)
     await api.call("PATCH", f"/sessions/{session_id}/control-state/paused")
     await api.call("POST", Api._attempt(started, "resume"), expect=409)  # paused
     await api.call("PATCH", f"/sessions/{session_id}/control-state/active")
     resumed = await api.call("POST", Api._attempt(started, "resume"))
     assert (resumed["attempt_id"], resumed["state"]) == (attempt_id, "running")
-    assert resumed["suspension"]["resume"]["decision"] == "approve"
+    assert resumed["suspension"]["resume"]["answer"] == "yes"
 
 
 async def test_t7_on_a_suspended_attempt_is_confirmed_at_once(api: Api):
     _, _, started = await _agent(api)
-    run_id, attempt_id = started["run"]["run_id"], started["attempt"]["attempt_id"]
-    await api.call("PUT", f"/runs/{run_id}/checkpoints", json=_checkpoint("c1"), attempt=attempt_id)
-    await api.call("POST", Api._attempt(started, "suspend"),
-                   json={"suspension": {"kind": "pause", "interrupt_id": "p", "checkpoint_id": "c1"}})
+    await api.call("POST", Api._attempt(started, "suspend"), json={"suspension": {"kind": "pause"}})
     cancelled = await api.call("POST", Api._attempt(started, "cancel"), json={"reason": "user"})
     assert cancelled["state"] == "cancelled"
 
 
-async def test_checkpoints_are_fenced_shared_by_attempts_and_kept_while_live(api: Api):
+async def test_transcripts_are_fenced_shared_by_attempts_and_kept_while_live(api: Api):
     session_id, agent, started = await _agent(api)
     run_id, attempt_id = started["run"]["run_id"], started["attempt"]["attempt_id"]
-    await api.call("PUT", f"/runs/{run_id}/checkpoints", json=_checkpoint("c1"), attempt=attempt_id)
-    await api.call("POST", f"/runs/{run_id}/checkpoint-writes", attempt=attempt_id, json={
-        "checkpoint_id": "c1", "writes": [{"task_id": "t", "idx": 0, "channel": "x",
-                                           "value": base64.b64encode(b"v").decode()}]})
-    await api.call("PUT", f"/runs/{run_id}/checkpoints", json=_checkpoint("c2"), attempt=str(uuid.uuid4()),
-                   expect=409)
-    # Interrupted by a restart; the retry (attempt 2) reads attempt 1's thread.
+    url = f"/runs/{run_id}/transcript"
+    assert (await api.call("POST", url, json=_transcript("m1", "m2"), attempt=attempt_id))["stored"] == 2
+    replay = await api.call("POST", url, json=_transcript("m2", "m3"), attempt=attempt_id)
+    assert (replay["stored"], replay["replayed"]) == (1, 1)
+    await api.call("POST", url, json=_transcript("x1", subpath="subagents/agent-x"), attempt=attempt_id)
+    stranger = await api.call("POST", url, json=_transcript("m9"), attempt=str(uuid.uuid4()), expect=409)
+    assert stranger["detail"]["code"] == "REFUSED_BY_DATABASE"
+    # Interrupted by a restart; the retry (attempt 2) reads attempt 1's session.
     reconciled = await api.call("POST", Api._attempt(started, "reconcile"), json={"observed": "not_found"})
     assert reconciled["attempt"]["state"] == "interrupted"
-    await api.call("PUT", f"/runs/{run_id}/checkpoints", json=_checkpoint("c2"), attempt=attempt_id, expect=409)
+    await api.call("POST", url, json=_transcript("late"), attempt=attempt_id, expect=409)  # a terminal attempt
     retry = await api.start(agent, limits={"resumable": True, "max_attempts": 3})
-    latest = await api.call("GET", f"/runs/{run_id}/checkpoints/latest")
-    assert latest["checkpoint_id"] == "c1" and latest["writes"][0]["task_id"] == "t"
     assert retry["attempt"]["attempt_number"] == 2
-    steps = await api.call("GET", f"/runs/{run_id}/steps")
-    assert [step["checkpoint_id"] for step in steps] == ["c1"]
-    purged = await api.call("POST", "/agent-checkpoints/purge")
-    assert purged["runs"] == 0  # a non-terminal run keeps its checkpoints
+    loaded = await api.call("GET", url, attempt=retry["attempt"]["attempt_id"])
+    assert [entry["uuid"] for entry in loaded["entries"]] == ["m1", "m2", "m3"]
+    assert await api.call("GET", f"{url}/subpaths") == ["subagents/agent-x"]
+    await api.call("GET", url, params={"subpath": "subagents/none"}, expect=404)
+    purged = await api.call("POST", "/agent-transcripts/purge")
+    assert purged["runs"] == 0  # a non-terminal run keeps its transcript
 
 
-async def test_a_seed_is_copied_only_when_compatible(api: Api):
+async def test_a_seed_applies_only_when_its_message_and_definition_match(api: Api):
     session_id, agent, started = await _agent(api)
     run_id, attempt_id = started["run"]["run_id"], started["attempt"]["attempt_id"]
-    await api.call("PUT", f"/runs/{run_id}/checkpoints", json=_checkpoint("c1"), attempt=attempt_id)
+    await api.call("POST", f"/runs/{run_id}/transcript", json=_transcript("m1", "m2"), attempt=attempt_id)
     await api.complete(started)
-    seeded = {**agent, "seed_from": {"run_id": run_id, "checkpoint_id": "c1"}}
-    for spec, applied in (("other-spec", False), ("spec-1", True)):
+    for message, spec, applied in (("m2", "other-spec", False), ("gone", "spec-1", False), ("m2", "spec-1", True)):
+        seeded = {**agent, "seed_from": {"run_id": run_id, "message_uuid": message}}
         change = await api.submit(session_id, [seeded], rerun_node_ids=[agent["node_id"]])
         await api.call("POST", f"/graph-changes/{change['change']['change_id']}/decision",
                        json={"decision": "approve", "content_digest": change["change"]["content_digest"]})
-        rerun = await api.start(agent, prompt="p", limits={"resumable": True}, spec_digest=spec)
+        rerun = await api.start(agent, prompt="p", limits={"resumable": True}, spec_digest=spec,
+                                engine_version="engine-1")
         assert rerun["run"]["execution_policy"]["seed_from"]["applied"] is applied
-        copies = await api.call("GET", f"/runs/{rerun['run']['run_id']}/checkpoints")
-        assert len(copies) == (1 if applied else 0)
+        # Nothing is copied; the seeded run's first attempt reads its seed.
+        await api.call("GET", f"/runs/{rerun['run']['run_id']}/transcript", expect=404)
+        await api.call("GET", f"/runs/{run_id}/transcript", attempt=rerun["attempt"]["attempt_id"])
         await api.dispatch(rerun)
         await api.complete(rerun)
+    _, _, other = await _agent(api)
+    forbidden = await api.call("GET", f"/runs/{run_id}/transcript", attempt=other["attempt"]["attempt_id"],
+                               expect=403)
+    assert forbidden["detail"]["code"] == "TRANSCRIPT_FORBIDDEN"
+
+
+async def test_pending_tools_decide_the_automatic_retry(api: Api):
+    session_id, agent, started = await _agent(api)
+    calls = {"v": 1, "calls": [{"tool_use_id": "toolu_1", "tool": "save_cohort", "idempotent": False,
+                                "started_at": "2026-10-22T10:00:00+00:00"}]}
+    url = Api._attempt(started, "pending-tools")
+    await api.call("PUT", url, json=calls, attempt=str(uuid.uuid4()), expect=403)  # another attempt's header
+    written = await api.call("PUT", url, json=calls, attempt=started["attempt"]["attempt_id"])
+    assert written["pending_tools"]["calls"][0]["tool"] == "save_cohort"
+    await api.call("POST", Api._attempt(started, "reconcile"), json={"observed": "not_found"})
+    refused = await api.start(agent, limits={"resumable": True, "max_attempts": 3}, expect=409)
+    assert refused["detail"]["code"] == "NEEDS_DECISION"
+    assert (await api.graph(session_id))["activity"] == "blocked"
+    await api.start(agent, explicit_retry=True)
+
+
+async def test_the_main_transcript_is_kept_per_session(api: Api):
+    session_id = await api.session()
+    url = f"/sessions/{session_id}/main-transcript"
+    await api.call("GET", url, expect=404)
+    assert (await api.call("POST", url, json=_transcript("u1", "a1")))["stored"] == 2
+    assert (await api.call("POST", url, json=_transcript("a1")))["replayed"] == 1
+    await api.call("POST", url, json=_transcript("c1", subpath="subagents/agent-composer"))
+    assert [entry["uuid"] for entry in (await api.call("GET", url))["entries"]] == ["u1", "a1"]
+    assert await api.call("GET", f"{url}/subpaths") == ["subagents/agent-composer"]
+
+
+# ----------------------------------------------------------------------
+# D28: the approvals the user asked for
+# ----------------------------------------------------------------------
+async def test_an_approval_before_node_waits_for_the_users_release(api: Api):
+    session_id = await api.session()
+    gated = node(title="gated", approval="before")
+    await api.submit(session_id, [gated])
+    gated["session_id"] = session_id
+    assert (await api.graph(session_id))["activity"] == "awaiting_user"
+    assert (await api.start(gated, expect=409))["detail"]["code"] == "NEEDS_RELEASE"
+    by_main = await api.call(
+        "POST", f"/session-graphs/session/{session_id}/changes",
+        json={"author": "main", "base_version": 1, "content": {"v": 1, "nodes": [
+            {k: v for k, v in gated.items() if k != "session_id"}], "release_hold_node_ids": [gated["node_id"]]},
+              "tool_call": {"session_id": session_id, "tool_use_id": "toolu_release"}},
+        expect=409,
+    )
+    assert by_main["detail"]["code"] == "USER_RELEASE_REQUIRED"
+    released = await api.submit(session_id, [gated], release_hold_node_ids=[gated["node_id"]])
+    graph = await api.graph(session_id)
+    assert graph["nodes"][0]["node"]["start_released_by_change_id"] == released["change"]["change_id"]
+    await api.start(gated)
+
+
+async def test_an_approval_after_node_holds_the_next_one_for_the_users_review(api: Api):
+    session_id, first, second = await _two_nodes(api)
+    reviewed = {**first, "approval": "after"}
+    await api.submit(session_id, [reviewed, second])
+    started = await api.start(first)
+    await api.dispatch(started)
+    await api.complete(started)
+    graph = await api.graph(session_id)
+    assert (graph["nodes"][0]["run"]["downstream_hold"], graph["activity"]) == ("user_review", "awaiting_user")
+    assert "approval_requested" in await _events(api, session_id)
+    pin = {"in": {"node_id": first["node_id"], "run_id": started["run"]["run_id"], "port": "summary"}}
+    assert (await api.start(second, pins=pin, expect=409))["detail"]["code"] == "NOT_READY"
+    await api.submit(session_id, [reviewed, second], release_hold_node_ids=[first["node_id"]])
+    await api.start(second, pins=pin)
+
+
+async def test_only_a_change_the_user_authored_releases_at_the_database(api: Api):
+    """The database itself, not only T2: a release of what the user asked to
+    approve names a change the user authored, and a start waits for it."""
+    session_id = await api.session()
+    gated = node(title="gated", approval="before")
+    proposal = await api.call(
+        "POST", f"/session-graphs/session/{session_id}/changes",
+        json={"author": "main", "base_version": 0, "content": {"v": 1, "nodes": [gated]},
+              "tool_call": {"session_id": session_id, "tool_use_id": "toolu_add"}},
+    )
+    main_change = proposal["change"]["change_id"]
+    release = ("UPDATE graph_nodes SET start_released_by_change_id = %s WHERE node_id = %s",
+               (main_change, gated["node_id"]))
+    assert "change the user authored" in _write_on_path(*release, actor="harness")
+
+
+# ----------------------------------------------------------------------
+# D28: automatic approval when none was asked for
+# ----------------------------------------------------------------------
+async def test_the_population_node_freezes_its_own_cohort_automatically(api: Api):
+    _, _, started = await _agent(api)
+    run_id, attempt_id = started["run"]["run_id"], started["attempt"]["attempt_id"]
+    cohort = await api.call("PUT", f"/cohorts/run/{run_id}/population", json={}, attempt=attempt_id, expect=201)
+    as_user = ("UPDATE cohorts SET frozen_at = now(), frozen_by = 'user' WHERE cohort_id = %s",
+               (cohort["cohort_id"],))
+    assert "frozen_by is auto on this write path" in _write_on_path(*as_user, attempt_id=attempt_id)
+    as_auto = ("UPDATE cohorts SET frozen_at = now(), frozen_by = 'auto' WHERE cohort_id = %s",
+               (cohort["cohort_id"],))
+    assert _write_on_path(*as_auto, attempt_id=attempt_id) is None
 
 
 # ----------------------------------------------------------------------
@@ -631,25 +729,29 @@ def _write_on_path(sql: str, params: tuple, **path: str) -> Optional[str]:
         connection.close()
 
 
-async def test_the_user_gate_path_works_only_on_a_run_suspended_on_its_gate(api: Api):
+async def test_the_user_gate_path_works_only_on_a_run_suspended_on_its_form(api: Api):
     """The database itself, not only the route: the doctor's approval lands only
-    while the run is running, current and suspended on that gate."""
+    while the run is running, current and suspended on that `ask_user` form."""
     _, _, started = await _agent(api)
     run_id, attempt_id = started["run"]["run_id"], started["attempt"]["attempt_id"]
     cohort = await api.call("PUT", f"/cohorts/run/{run_id}/population", json={}, attempt=attempt_id, expect=201)
-    freeze = ("UPDATE cohorts SET frozen_at = now() WHERE cohort_id = %s", (cohort["cohort_id"],))
+    freeze = ("UPDATE cohorts SET frozen_at = now(), frozen_by = 'user' WHERE cohort_id = %s",
+              (cohort["cohort_id"],))
 
-    assert "not suspended on its cohort_approval gate" in _write_on_path(*freeze, actor="user")
+    assert "not suspended on its cohort_approval form" in _write_on_path(*freeze, actor="user")
 
-    await api.call("PUT", f"/runs/{run_id}/checkpoints", json=_checkpoint("c1"), attempt=attempt_id)
-    gate = {"suspension": {"kind": "gate", "gate": "cohort_approval", "interrupt_id": "i1", "checkpoint_id": "c1"}}
-    await api.call("POST", Api._attempt(started, "suspend"), json=gate)
+    form = {"suspension": {"kind": "ask_user", "tool_use_id": "toolu_cohort", "form": "cohort_approval"}}
+    await api.call("POST", Api._attempt(started, "suspend"), json=form)
     assert _write_on_path(*freeze, actor="user") is None
     rename = ("UPDATE cohorts SET cohort_key = 'renamed' WHERE cohort_id = %s", (cohort["cohort_id"],))
     assert "changes only gate columns" in _write_on_path(*rename, actor="user")
+    # A domain form is answered by its own route, which writes the form's columns too.
+    generic = await api.call("POST", Api._attempt(started, "answer"),
+                             json={"tool_use_id": "toolu_cohort", "decision": "approve"}, expect=409)
+    assert generic["detail"]["code"] == "FORM_ANSWER"
 
     await api.call("POST", Api._attempt(started, "cancel"), json={"reason": "user"})
-    assert "not suspended on its cohort_approval gate" in _write_on_path(*freeze, actor="user")
+    assert "not suspended on its cohort_approval form" in _write_on_path(*freeze, actor="user")
 
 
 async def test_a_write_racing_completion_holds_it_off_until_it_commits(api: Api):
@@ -689,7 +791,7 @@ async def test_a_write_racing_completion_holds_it_off_until_it_commits(api: Api)
 # ----------------------------------------------------------------------
 HARNESS_TABLES = {
     "users", "sessions", "session_graphs", "graph_changes", "graph_nodes", "node_runs", "run_attempts",
-    "agent_checkpoints", "agent_checkpoint_writes", "training_jobs", "chats", "chat_messages",
+    "agent_transcript_entries", "main_transcript_entries", "training_jobs", "chats", "chat_messages",
 }
 
 
@@ -716,8 +818,9 @@ async def test_the_fencing_trigger_is_attached_to_every_fenced_table():
     """Fencing-trigger coverage, checked in pg_trigger (not in the migration text)."""
     import importlib.util
 
-    path = BACKEND_ROOT / "application_api" / "migrations" / "versions" / "p1f0a2c3d4e5_v1_p_session_graph.py"
-    spec = importlib.util.spec_from_file_location("_p1", path)
+    # The fenced tables as of the latest revision that changed them.
+    path = BACKEND_ROOT / "application_api" / "migrations" / "versions" / "t1f0a2c3d4e5_v1_t_agent_transcripts.py"
+    spec = importlib.util.spec_from_file_location("_t1", path)
     migration = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(migration)
     engine = _sync_engine()

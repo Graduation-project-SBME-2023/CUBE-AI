@@ -22,7 +22,9 @@ TERMINAL_ATTEMPT_STATES = ("succeeded", "failed", "cancelled", "interrupted")
 # Attempts that hold (or may hold) a live process.
 WORKING_ATTEMPT_STATES = ("preparing", "submitted", "running")
 DISPATCH_KINDS = ("in_process", "job", "inline")
-SUSPENSION_KINDS = ("gate", "pause")
+# Suspensions that wait for the user's answer; a pause waits for the session.
+QUESTION_KINDS = ("ask_user", "tool_approval")
+SUSPENSION_KINDS = (*QUESTION_KINDS, "pause")
 # The error codes a confirmed stop keeps as a failure rather than a cancellation.
 TIMEOUT_CODES = ("timeout", "gate_timeout")
 
@@ -42,13 +44,16 @@ class RunAttempt(Base):
     session_id = Column(UUID(as_uuid=True), nullable=False)
     attempt_number = Column(SmallInteger, nullable=False)
     dispatch_kind = Column(Text, nullable=False)
-    # Job attempts: `{job_id}.{attempt_number}`, the Celery task id and the
-    # Redis record key. Set once, before dispatch; reused on resubmission.
+    # Job attempts: `{job_id}.{attempt_number}`, the job's queueing lock and the
+    # name of its job dir. Set once, before dispatch; reused on resubmission.
     submission_key = Column(Text, nullable=True)
     request = Column(JSONB(none_as_null=True), nullable=True)
     state = Column(Text, nullable=False)
-    # {v, kind: gate|pause, gate?, interrupt_id, payload, checkpoint_id, since, resume?}.
+    # {v: 2, kind: ask_user|tool_approval|pause, tool_use_id?, form?, payload, since, resume?}.
     suspension = Column(JSONB(none_as_null=True), nullable=True)
+    # {v: 1, calls: [{tool_use_id, tool, idempotent, started_at}]}: the calls the
+    # attempt is running, so a retry after a crash knows whether it is safe (T4 rule f).
+    pending_tools = Column(JSONB(none_as_null=True), nullable=True)
     resumed_at = Column(DateTime(timezone=True), nullable=True)
     dispatched_at = Column(DateTime(timezone=True), nullable=True)
     cancel_requested_at = Column(DateTime(timezone=True), nullable=True)

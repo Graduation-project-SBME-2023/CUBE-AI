@@ -344,8 +344,19 @@ async def write_labels(db: AsyncSession, cohort_id: UUID, data: schemas.CohortLa
 
 @on_path(USER)
 async def freeze_cohort(db: AsyncSession, cohort_id: UUID) -> tuple[Cohort, Any]:
-    """The doctor's approval (the cohort_approval gate) — one-way. Written on the
-    user gate path with the gate decision of the suspended attempt."""
+    """The doctor's approval (the `cohort_approval` form of `ask_user`) —
+    one-way. Written on the user gate path with the answer of the suspended
+    attempt (T10)."""
+    return await _freeze(db, cohort_id, "user")
+
+
+async def auto_freeze_cohort(db: AsyncSession, cohort_id: UUID) -> tuple[Cohort, Any]:
+    """No approval was asked for (D28): the population node freezes its own
+    cohort before its run completes (its attempt path, `frozen_by = 'auto'`)."""
+    return await _freeze(db, cohort_id, "auto")
+
+
+async def _freeze(db: AsyncSession, cohort_id: UUID, frozen_by: str) -> tuple[Cohort, Any]:
     cohort = await _locked_cohort(db, cohort_id)
     if cohort.frozen_at is not None:
         await db.commit()
@@ -379,13 +390,17 @@ async def freeze_cohort(db: AsyncSession, cohort_id: UUID) -> tuple[Cohort, Any]
         )
     event = None
     async with publication(db, session_id) as publish:
-        await attempts_repo.resolve_domain_gate(db, run.run_id, "cohort_approval", publish)
-        cohort.frozen_at = _now()
-        await db.flush()
+        if frozen_by == "user":
+            await attempts_repo.resolve_domain_gate(db, run.run_id, "cohort_approval", publish)
+        cohort.frozen_at, cohort.frozen_by = _now(), frozen_by
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail=f"Freeze rejected by the database: {exc.orig}") from exc
         event = publish(
             "cohort_approval_status",
             {
-                "status": "approved",
+                "status": "approved" if frozen_by == "user" else "auto_frozen",
                 "cohort_id": str(cohort_id),
                 "labeled_count": labeled,
                 "total_count": total,

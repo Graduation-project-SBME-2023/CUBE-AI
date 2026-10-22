@@ -249,6 +249,7 @@ def snapshot_manifest(batch: dict[str, Any]) -> dict[str, Any]:
         "pending": "awaiting_review",
         "submitting": "awaiting_review",
         "submitted": "reviewed",
+        "auto_accepted": "reviewed",
     }[batch["review_status"]]
     config = batch.get("config") or {}
     return {

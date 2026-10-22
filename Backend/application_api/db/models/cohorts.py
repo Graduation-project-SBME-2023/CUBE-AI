@@ -49,6 +49,9 @@ class Cohort(Base):
     label_definition = Column(JSONB, nullable=False)
     selection_summary = Column(JSONB(none_as_null=True), nullable=True)
     frozen_at = Column(DateTime(timezone=True), nullable=True)
+    # Who froze it (D28): `user` (the doctor's approval, asked for) or `auto`
+    # (the population node itself, when no approval was asked for).
+    frozen_by = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     members = relationship(
@@ -70,6 +73,8 @@ class Cohort(Base):
         CheckConstraint(
             _versioned("selection_summary", nullable=True), name="selection_summary_versioned"
         ),
+        CheckConstraint("frozen_by IS NULL OR frozen_by IN ('user', 'auto')", name="frozen_by"),
+        CheckConstraint("(frozen_by IS NULL) = (frozen_at IS NULL)", name="frozen_by_iff_frozen"),
     )
 
 

@@ -22,6 +22,8 @@ from application_api.db.base import Base
 NODE_RUN_STATUSES = ("running", "completed", "failed", "cancelled")
 TERMINAL_RUN_STATUSES = ("completed", "failed", "cancelled")
 EXPECTATION_VIOLATED = "expectation_violated"
+# An `approval: after` node's completed run holds the next node for the user (D28).
+USER_REVIEW = "user_review"
 
 
 class NodeRun(Base):
@@ -116,7 +118,7 @@ class NodeRun(Base):
         CheckConstraint("status <> 'failed' OR error IS NOT NULL", name="failed_has_error"),
         CheckConstraint(
             "downstream_hold IS NULL OR (status = 'completed' "
-            "AND downstream_hold = 'expectation_violated')",
+            "AND downstream_hold IN ('expectation_violated', 'user_review'))",
             name="downstream_hold",
         ),
         CheckConstraint(

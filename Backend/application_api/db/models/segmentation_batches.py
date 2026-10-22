@@ -16,9 +16,13 @@ from sqlalchemy.sql import func
 from application_api.db.base import Base
 from application_api.db.models.cohorts import _versioned
 
-REVIEW_STATUSES = ("not_ready", "pending", "submitting", "submitted")
+# `auto_accepted`: no review was asked for, so the batch was accepted as it
+# came (D28); final like `submitted`. Its ready pairs carry the decision `auto`.
+REVIEW_STATUSES = ("not_ready", "pending", "submitting", "submitted", "auto_accepted")
+REVIEWED_STATUSES = ("submitted", "auto_accepted")
 PAIR_STATUSES = ("pending", "running", "ready", "failed")
-REVIEW_DECISIONS = ("accepted", "modified", "rejected")
+REVIEW_DECISIONS = ("accepted", "modified", "rejected", "auto")
+SELECTING_DECISIONS = ("accepted", "modified", "auto")
 
 
 class SegmentationBatch(Base):
@@ -66,7 +70,7 @@ class SegmentationBatch(Base):
         CheckConstraint("length(btrim(batch_key)) > 0", name="batch_key_not_blank"),
         CheckConstraint(_versioned("config", nullable=False), name="config_versioned"),
         CheckConstraint(
-            "review_status IN ('not_ready', 'pending', 'submitting', 'submitted')",
+            "review_status IN ('not_ready', 'pending', 'submitting', 'submitted', 'auto_accepted')",
             name="review_status",
         ),
         CheckConstraint(
@@ -74,7 +78,7 @@ class SegmentationBatch(Base):
             name="hash_iff_submitting",
         ),
         CheckConstraint(
-            "(review_status = 'submitted') = (reviewed_at IS NOT NULL)",
+            "(review_status IN ('submitted', 'auto_accepted')) = (reviewed_at IS NOT NULL)",
             name="reviewed_at_iff_submitted",
         ),
         CheckConstraint(
@@ -200,11 +204,11 @@ class SegmentationPair(Base):
         ),
         CheckConstraint("segment_number > 0", name="segment_number_positive"),
         CheckConstraint(
-            "review_decision IS NULL OR review_decision IN ('accepted', 'modified', 'rejected')",
+            "review_decision IS NULL OR review_decision IN ('accepted', 'modified', 'rejected', 'auto')",
             name="review_decision",
         ),
         CheckConstraint(
-            "selected_segmentation_uid IS NULL OR review_decision IN ('accepted', 'modified')",
+            "selected_segmentation_uid IS NULL OR review_decision IN ('accepted', 'modified', 'auto')",
             name="selected_implies_positive_decision",
         ),
         CheckConstraint(

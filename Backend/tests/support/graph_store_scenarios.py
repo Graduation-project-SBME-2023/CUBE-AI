@@ -22,11 +22,14 @@ def node(ref: str = "run_modeling", kind: str = "tool", **fields: Any) -> dict[s
             "params": {}, **fields}
 
 
-async def submit(store: GraphStore, session_id: str, nodes: list[dict], *, reasons=(), **content: Any):
+async def submit(store: GraphStore, session_id: str, nodes: list[dict], *, reasons=(), author: str = "user",
+                 **content: Any):
     version = (await store.get_graph(session_id)).version
+    # The Main's change is keyed by its SDK tool call (D21); anyone else's by an idempotency key.
+    call = {"session_id": session_id, "tool_use_id": f"toolu_{uuid.uuid4().hex}"} if author == "main" else None
     return await store.submit_change(
-        session_id, author="user", base_version=version, content={"v": 1, "nodes": nodes, **content},
-        approval_reasons=tuple(reasons), idempotency_key=str(uuid.uuid4()),
+        session_id, author=author, base_version=version, content={"v": 1, "nodes": nodes, **content},
+        approval_reasons=tuple(reasons), tool_call=call, idempotency_key=None if call else str(uuid.uuid4()),
     )
 
 
@@ -35,13 +38,14 @@ async def approve(store: GraphStore, result) -> Any:
 
 
 async def start(store: GraphStore, session_id: str, node_id: str, *, pins: Optional[dict] = None,
-                prompt: Optional[str] = None, explicit: bool = False, spec: Optional[str] = None, **limits: Any):
+                prompt: Optional[str] = None, explicit: bool = False, spec: Optional[str] = None,
+                engine: Optional[str] = None, **limits: Any):
     graph = await store.get_graph(session_id)
     live = next(item.node for item in graph.nodes if item.node.node_id == node_id)
     return await store.start_node(StartRequest(
         node_id=node_id, accepted_by_change_id=live.accepted_by_change_id, limits=limits,
         resolved_inputs={"v": 1, "ports": pins or {}}, compiled_prompt=prompt, explicit_retry=explicit,
-        spec_digest=spec,
+        spec_digest=spec, engine_version=engine,
     ))
 
 
@@ -59,9 +63,27 @@ async def refused(code: str, awaitable: Awaitable) -> None:
     assert caught.value.code == code, f"expected {code}, got {caught.value.code}: {caught.value.message}"
 
 
-def checkpoint(store_id: str, spec: str = "s1") -> dict[str, Any]:
-    return {"checkpoint_id": store_id, "checkpoint": b"state", "type": "msgpack",
-            "metadata": {"v": 1, "spec_digest": spec, "engine_version": "1", "pending_tools": []}}
+PROJECT_KEY = "cubeai"
+
+
+def entries(*uuids: str) -> list[dict[str, Any]]:
+    """Opaque SDK transcript entries; only their uuid is read."""
+    return [{"uuid": u, "type": "assistant", "message": {"content": f"step {u}"}} for u in uuids]
+
+
+def call(tool_use_id: str, tool: str, idempotent: bool) -> dict[str, Any]:
+    return {"tool_use_id": tool_use_id, "tool": tool, "idempotent": idempotent,
+            "started_at": "2026-10-21T10:00:00+00:00"}
+
+
+async def running_agent(store: GraphStore, **limits: Any):
+    """A session with one resumable agent node whose first attempt is running."""
+    session_id = await store.create_session("q")
+    agent = node("study_population_planner_agent", "agent")
+    await submit(store, session_id, [agent])
+    started = await start(store, session_id, agent["node_id"], prompt="p", resumable=True, **limits)
+    await store.mark_dispatched(started.run.run_id, started.attempt.attempt_id, "running")
+    return session_id, agent, started
 
 
 # ----------------------------------------------------------------------
@@ -190,51 +212,156 @@ async def a_cancel_is_confirmed_and_never_retried_automatically(store: GraphStor
     await start(store, session_id, a["node_id"], max_attempts=3, explicit=True)
 
 
-async def a_gate_suspends_and_the_same_attempt_resumes(store: GraphStore) -> None:
-    session_id = await store.create_session("q")
-    agent = node("study_population_planner_agent", "agent")
-    await submit(store, session_id, [agent])
-    started = await start(store, session_id, agent["node_id"], prompt="p", resumable=True)
+async def a_question_suspends_and_the_same_attempt_resumes(store: GraphStore) -> None:
+    session_id, _, started = await running_agent(store)
     run_id, attempt_id = started.run.run_id, started.attempt.attempt_id
-    await store.mark_dispatched(run_id, attempt_id, "running")
-    gate = {"kind": "gate", "gate": "tool_approval", "interrupt_id": "i1", "checkpoint_id": "c1"}
-    await refused("REFUSED_BY_DATABASE", store.suspend(run_id, attempt_id, gate))
-    await store.put_checkpoint(run_id, attempt_id, **checkpoint("c1"))
-    assert (await store.suspend(run_id, attempt_id, gate)).state == "suspended"
+    question = {"kind": "ask_user", "tool_use_id": "toolu_1", "payload": {"question": "use wavelets?"}}
+    await refused("INVALID", store.suspend(run_id, attempt_id, {"kind": "ask_user"}))  # names no tool call
+    suspended = await store.suspend(run_id, attempt_id, question)
+    assert (suspended.state, suspended.suspension["v"]) == ("suspended", 2)
+    await store.suspend(run_id, attempt_id, question)  # a replay is a no-op
     assert (await store.get_graph(session_id)).activity == "awaiting_user"
-    await refused("NOT_RESUMABLE", store.resume(run_id, attempt_id))
+    await refused("NOT_RESUMABLE", store.resume(run_id, attempt_id))  # not answered yet
     attempt, action = await store.reconcile(run_id, attempt_id, "not_found")
-    assert (attempt.state, action) == ("suspended", "unchanged")
-    await store.gate_decision(run_id, attempt_id, "i1", "approve")
+    assert (attempt.state, action) == ("suspended", "unchanged")  # a restart leaves it waiting
+    await refused("NO_OPEN_GATE", store.answer(run_id, attempt_id, "toolu_2", answer="yes"))
+    answered = await store.answer(run_id, attempt_id, "toolu_1", decision="approve", comment="fine")
+    assert answered.suspension["resume"]["decision"] == "approve"
+    await refused("NO_OPEN_GATE", store.answer(run_id, attempt_id, "toolu_1", decision="reject"))  # once
     await store.set_control_state(session_id, "paused")
     await refused("NOT_RESUMABLE", store.resume(run_id, attempt_id))
     await store.set_control_state(session_id, "active")
     resumed = await store.resume(run_id, attempt_id)
     assert (resumed.attempt_id, resumed.state) == (attempt_id, "running")
+    # A pause names no tool call, and resumes with no answer.
+    await store.suspend(run_id, attempt_id, {"kind": "pause"})
+    assert (await store.resume(run_id, attempt_id)).state == "running"
+    # A domain form of ask_user is answered by its own route (it writes the form's columns).
+    form = {"kind": "ask_user", "tool_use_id": "toolu_3", "form": "cohort_approval"}
+    assert (await store.suspend(run_id, attempt_id, form)).suspension["form"] == "cohort_approval"
+    await refused("FORM_ANSWER", store.answer(run_id, attempt_id, "toolu_3", decision="approve"))
 
 
-async def checkpoints_are_fenced_and_seeds_copied_only_when_compatible(store: GraphStore) -> None:
-    session_id = await store.create_session("q")
-    agent = node("study_population_planner_agent", "agent")
-    await submit(store, session_id, [agent])
-    started = await start(store, session_id, agent["node_id"], prompt="p", resumable=True, spec="s1")
+async def a_tool_approval_takes_a_decision_and_a_cancel_is_confirmed_at_once(store: GraphStore) -> None:
+    _, _, started = await running_agent(store)
     run_id, attempt_id = started.run.run_id, started.attempt.attempt_id
-    await store.mark_dispatched(run_id, attempt_id, "running")
-    await store.put_checkpoint(run_id, attempt_id, **checkpoint("c1"))
-    await store.put_checkpoint(run_id, attempt_id, **checkpoint("c1"))  # a replay is a no-op
-    await refused("REFUSED_BY_DATABASE", store.put_checkpoint(run_id, str(uuid.uuid4()), **checkpoint("c2")))
-    assert (await store.get_checkpoint(run_id)).checkpoint_id == "c1"
-    await store.complete_attempt(run_id, attempt_id, {"v": 1, "ports": {}})
-    await refused("REFUSED_BY_DATABASE", store.put_checkpoint(run_id, attempt_id, **checkpoint("c3")))
-    seeded = {**agent, "seed_from": {"run_id": run_id, "checkpoint_id": "c1"}}
+    await store.suspend(run_id, attempt_id, {"kind": "tool_approval", "tool_use_id": "toolu_9"})
+    await refused("NO_OPEN_GATE", store.answer(run_id, attempt_id, "toolu_9", answer="ok"))  # needs a decision
+    await refused("INVALID", store.answer(run_id, attempt_id, "toolu_9", answer="ok", decision="approve"))
+    stopped = await store.request_cancel(run_id, attempt_id, "user")
+    assert stopped.state == "cancelled"  # a suspended attempt holds no work
+
+
+async def transcripts_are_fenced_and_seeds_checked(store: GraphStore) -> None:
+    session_id, agent, first = await running_agent(store, spec="s1", engine="e1", max_attempts=2,
+                                                    idempotent=True)
+    run_id, a1 = first.run.run_id, first.attempt.attempt_id
+    assert await store.load_transcript(run_id) is None
+    assert await store.append_transcript(run_id, a1, entries("m1", "m2"), project_key=PROJECT_KEY) == 2
+    assert await store.append_transcript(run_id, a1, entries("m2", "m3"), project_key=PROJECT_KEY) == 1
+    await store.append_transcript(run_id, a1, entries("x1"), project_key=PROJECT_KEY, subpath="subagents/agent-x")
+    await refused("REFUSED_BY_DATABASE", store.append_transcript(
+        run_id, str(uuid.uuid4()), entries("m4"), project_key=PROJECT_KEY))  # not this run's attempt
+    await refused("INVALID", store.append_transcript(run_id, a1, [{"type": "user"}], project_key=PROJECT_KEY))
+    assert [e["uuid"] for e in await store.load_transcript(run_id)] == ["m1", "m2", "m3"]
+    assert await store.list_transcript_subpaths(run_id) == ["subagents/agent-x"]
+    await store.fail_attempt(run_id, a1, {"code": "error"})
+    await refused("REFUSED_BY_DATABASE", store.append_transcript(
+        run_id, a1, entries("late"), project_key=PROJECT_KEY))  # a terminal attempt
+    second = await start(store, session_id, agent["node_id"], prompt="p")
+    assert second.attempt.attempt_number == 2
+    assert len(await store.load_transcript(run_id, attempt_id=second.attempt.attempt_id)) == 3  # same session
+    await run_ok(store, second)
+    # A rerun from message m2: the seed is checked at the first start, never copied.
+    seeded = {**agent, "seed_from": {"run_id": run_id, "message_uuid": "m2"}}
     for spec, applied in (("other", False), ("s1", True)):
         change = await submit(store, session_id, [seeded], rerun_node_ids=[agent["node_id"]])
         await approve(store, change)
-        rerun = await start(store, session_id, agent["node_id"], prompt="p", resumable=True, spec=spec)
+        rerun = await start(store, session_id, agent["node_id"], prompt="p", resumable=True, spec=spec, engine="e1")
         assert rerun.run.execution_policy["seed_from"]["applied"] is applied
-        copied = await store.get_checkpoint(rerun.run.run_id)
-        assert (copied is not None) is applied
+        assert await store.load_transcript(rerun.run.run_id) is None
+        if applied:  # the seeded run's first attempt reads its seed
+            assert len(await store.load_transcript(run_id, attempt_id=rerun.attempt.attempt_id)) == 3
         await run_ok(store, rerun)
+    _, _, other = await running_agent(store)
+    await refused("TRANSCRIPT_FORBIDDEN", store.load_transcript(run_id, attempt_id=other.attempt.attempt_id))
+
+
+async def pending_tools_decide_the_automatic_retry(store: GraphStore) -> None:
+    session_id, agent, first = await running_agent(store, max_attempts=4)
+    run_id, a1 = first.run.run_id, first.attempt.attempt_id
+    await store.set_pending_tools(run_id, a1, [call("toolu_1", "count_studies", True)])
+    await refused("INVALID", store.set_pending_tools(run_id, a1, [{"tool_use_id": "toolu_2"}]))
+    await refused("NOT_FOUND", store.set_pending_tools(run_id, str(uuid.uuid4()), []))
+    await store.reconcile(run_id, a1, "process_gone")  # restart while an idempotent call ran
+    second = await start(store, session_id, agent["node_id"], prompt="p")  # retried automatically
+    a2 = second.attempt.attempt_id
+    await store.mark_dispatched(run_id, a2, "running")
+    await store.set_pending_tools(run_id, a2, [call("toolu_3", "save_cohort", False)])
+    latest = (await store.node_runs(agent["node_id"]))[0].attempts[-1]
+    assert latest.pending_tools["calls"][0]["tool"] == "save_cohort"
+    await store.reconcile(run_id, a2, "process_gone")  # restart while a write ran
+    await refused("NEEDS_DECISION", start(store, session_id, agent["node_id"], prompt="p"))
+    third = await start(store, session_id, agent["node_id"], prompt="p", explicit=True)
+    await store.mark_dispatched(run_id, third.attempt.attempt_id, "running")
+    await store.fail_attempt(run_id, third.attempt.attempt_id, {"code": "transcript_write_failed"})
+    await refused("NEEDS_DECISION", start(store, session_id, agent["node_id"], prompt="p"))
+    assert (await store.get_graph(session_id)).activity == "blocked"
+
+
+async def approval_before_waits_for_the_users_release(store: GraphStore) -> None:
+    session_id = await store.create_session("q")
+    a = node(approval="before")
+    await submit(store, session_id, [a])
+    graph = await store.get_graph(session_id)
+    assert (graph.nodes[0].node.approval, graph.activity) == ("before", "awaiting_user")
+    await refused("NEEDS_RELEASE", start(store, session_id, a["node_id"]))
+    await refused("USER_RELEASE_REQUIRED", submit(
+        store, session_id, [a], author="main", release_hold_node_ids=[a["node_id"]]))
+    released = await submit(store, session_id, [a], release_hold_node_ids=[a["node_id"]])
+    graph = await store.get_graph(session_id)
+    assert graph.nodes[0].node.start_released_by_change_id == released.change.change_id
+    assert graph.activity == "idle"
+    edited = {**a, "params": {"threshold": 0.5}}
+    await submit(store, session_id, [edited])  # an edit needs a new release
+    await refused("NEEDS_RELEASE", start(store, session_id, a["node_id"]))
+    await submit(store, session_id, [edited], release_hold_node_ids=[a["node_id"]])
+    await start(store, session_id, a["node_id"])
+
+
+async def approval_after_holds_the_next_node_for_a_user_review(store: GraphStore) -> None:
+    session_id = await store.create_session("q")
+    a, b = node(approval="after"), node()
+    await submit(store, session_id, [a, b])
+    started = await start(store, session_id, a["node_id"])
+    await run_ok(store, started)
+    graph = await store.get_graph(session_id)
+    assert (graph.nodes[0].run.downstream_hold, graph.activity) == ("user_review", "awaiting_user")
+    pin = {"in": {"node_id": a["node_id"], "run_id": started.run.run_id, "port": "summary"}}
+    await refused("NOT_READY", start(store, session_id, b["node_id"], pins=pin))
+    await refused("USER_RELEASE_REQUIRED", submit(
+        store, session_id, [a, b], author="main", release_hold_node_ids=[a["node_id"]]))
+    await submit(store, session_id, [a, b], release_hold_node_ids=[a["node_id"]])
+    await start(store, session_id, b["node_id"], pins=pin)
+
+
+async def the_mains_session_and_its_change_key(store: GraphStore) -> None:
+    session_id = await store.create_session("q")
+    assert await store.load_main_transcript(session_id) is None
+    assert await store.append_main_transcript(session_id, entries("u1", "a1"), project_key=PROJECT_KEY) == 2
+    assert await store.append_main_transcript(session_id, entries("a1"), project_key=PROJECT_KEY) == 0
+    await store.append_main_transcript(session_id, entries("c1"), project_key=PROJECT_KEY,
+                                       subpath="subagents/agent-composer")
+    assert [e["uuid"] for e in await store.load_main_transcript(session_id)] == ["u1", "a1"]
+    assert await store.list_main_transcript_subpaths(session_id) == ["subagents/agent-composer"]
+    # A replayed Main call (same tool_use_id) returns the change it already made.
+    tool_call = {"session_id": session_id, "tool_use_id": "toolu_main_1"}
+    content = {"v": 1, "nodes": [node()]}
+    first = await store.submit_change(session_id, author="main", base_version=0, content=content,
+                                      tool_call=tool_call)
+    again = await store.submit_change(session_id, author="main", base_version=0, content=content,
+                                      tool_call=tool_call)
+    assert again.replayed and again.change.change_id == first.change.change_id
 
 
 SCENARIOS: list[Callable[[GraphStore], Awaitable[None]]] = [
@@ -246,6 +373,11 @@ SCENARIOS: list[Callable[[GraphStore], Awaitable[None]]] = [
     retries_stop_at_the_attempt_limit,
     an_expectation_holds_the_next_node_until_released,
     a_cancel_is_confirmed_and_never_retried_automatically,
-    a_gate_suspends_and_the_same_attempt_resumes,
-    checkpoints_are_fenced_and_seeds_copied_only_when_compatible,
+    a_question_suspends_and_the_same_attempt_resumes,
+    a_tool_approval_takes_a_decision_and_a_cancel_is_confirmed_at_once,
+    transcripts_are_fenced_and_seeds_checked,
+    pending_tools_decide_the_automatic_retry,
+    approval_before_waits_for_the_users_release,
+    approval_after_holds_the_next_node_for_a_user_review,
+    the_mains_session_and_its_change_key,
 ]

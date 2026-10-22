@@ -79,7 +79,7 @@ class MaskSetSummary(ArtifactSummary):
     n_masks: Count
     n_failed: Count = 0
     # segmentation_batches.review_status
-    review_status: Literal["not_ready", "pending", "submitting", "submitted"]
+    review_status: Literal["not_ready", "pending", "submitting", "submitted", "auto_accepted"]
 
 
 MASK_SET = ArtifactType(

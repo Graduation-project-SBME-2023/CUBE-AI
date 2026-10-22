@@ -39,12 +39,6 @@ BODY_SCOPED_CREATES = {
     ("POST", "/files/renders"),
 }
 
-# Retired routes that only answer 410 Gone: nothing behind them to protect.
-GONE = {
-    ("POST", "/session-graphs/session/{session_id}/approve"),
-    ("PUT", "/session-graphs/session/{session_id}/nodes"),
-}
-
 
 def _api_routes(routes):
     from fastapi.routing import APIRoute
@@ -76,8 +70,6 @@ def _calls(dependant) -> set:
 
 def _must_check_owner(method: str, path: str) -> bool:
     key = (method, path)
-    if key in GONE:
-        return False
     named = set(re.findall(r"{(\w+)}", path))
     return bool(named & SESSION_SCOPED_PARAMS) or key in CROSS_SESSION_LISTINGS | BODY_SCOPED_CREATES
 
@@ -96,7 +88,7 @@ def test_every_session_scoped_route_checks_its_owner():
 def test_the_listed_routes_exist():
     """A renamed route must not silently drop out of the lists above."""
     registered = {(method, path) for method, path, _ in _routes()}
-    missing = sorted(f"{m} {p}" for m, p in CROSS_SESSION_LISTINGS | BODY_SCOPED_CREATES | GONE
+    missing = sorted(f"{m} {p}" for m, p in CROSS_SESSION_LISTINGS | BODY_SCOPED_CREATES
                      if (m, p) not in registered)
     assert not missing, missing
 

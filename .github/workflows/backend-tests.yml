@@ -147,6 +147,7 @@ jobs:
           -c pytest.ini
           tests/integration/test_v1_o_renames_live.py
           tests/integration/test_v1_p_session_graph_live.py
+          tests/integration/test_v1_t_agent_transcripts_live.py
           --junitxml=test-results/backend-live-db-migrations.xml
 
       - name: Run transaction suites

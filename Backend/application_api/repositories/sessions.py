@@ -283,21 +283,43 @@ _ACTIVITY_FACTS = text(
                        AND run_attempt_state_is_active(a.state)), '[]'::json) AS active_attempts,
            EXISTS (SELECT 1 FROM node_runs r JOIN graph_nodes n ON n.node_id = r.node_id
                    WHERE r.session_id = s.session_id AND r.superseded_at IS NULL
-                     AND n.removed_at IS NULL AND r.downstream_hold IS NOT NULL
+                     AND n.removed_at IS NULL AND r.downstream_hold = 'expectation_violated'
                      AND r.hold_released_by_change_id IS NULL) AS active_hold,
+           EXISTS (SELECT 1 FROM node_runs r JOIN graph_nodes n ON n.node_id = r.node_id
+                   WHERE r.session_id = s.session_id AND r.superseded_at IS NULL
+                     AND n.removed_at IS NULL AND r.downstream_hold = 'user_review'
+                     AND r.hold_released_by_change_id IS NULL) AS user_review_hold,
+           -- An otherwise ready `approval: before` node the user has not released.
+           EXISTS (SELECT 1 FROM graph_nodes n
+                   WHERE n.session_id = s.session_id AND n.removed_at IS NULL
+                     AND n.approval = 'before' AND n.start_released_by_change_id IS NULL
+                     AND s.control_state = 'active'
+                     AND NOT EXISTS (SELECT 1 FROM node_runs r
+                                     WHERE r.node_id = n.node_id AND r.superseded_at IS NULL)
+                     AND NOT EXISTS (SELECT 1 FROM run_attempts a
+                                     WHERE a.session_id = s.session_id
+                                       AND run_attempt_state_is_active(a.state))
+                     AND NOT EXISTS (
+                         SELECT 1 FROM graph_nodes p
+                         LEFT JOIN node_runs pr ON pr.node_id = p.node_id AND pr.superseded_at IS NULL
+                         WHERE p.session_id = s.session_id AND p.removed_at IS NULL
+                           AND p.position = (SELECT max(q.position) FROM graph_nodes q
+                                             WHERE q.session_id = s.session_id AND q.removed_at IS NULL
+                                               AND q.position < n.position)
+                           AND (pr.status IS DISTINCT FROM 'completed'
+                                OR (pr.downstream_hold IS NOT NULL
+                                    AND pr.hold_released_by_change_id IS NULL)))) AS awaiting_release,
            EXISTS (SELECT 1 FROM graph_changes c
                    WHERE c.session_id = s.session_id AND c.status = 'pending') AS pending_change
     FROM sessions s WHERE s.session_id = :sid
     """
 )
-# Current failed runs of live nodes, with their latest attempt and, for a
-# resumable run, the unfinished tools of its latest checkpoint.
+# Current failed runs of live nodes, with their latest attempt (its error and
+# the calls it was running).
 _FAILED_RUNS = text(
     """
     SELECT r.execution_policy, a.attempt_number, a.state, a.dispatched_at IS NOT NULL AS dispatched,
-           (SELECT c.metadata -> 'pending_tools' FROM agent_checkpoints c
-            WHERE c.run_id = r.run_id AND c.checkpoint_ns = ''
-            ORDER BY c.created_at DESC, c.checkpoint_id DESC LIMIT 1) AS pending_tools
+           a.error ->> 'code' AS error_code, a.pending_tools -> 'calls' AS pending_tools
     FROM node_runs r
     JOIN graph_nodes n ON n.node_id = r.node_id AND n.removed_at IS NULL
     JOIN LATERAL (SELECT * FROM run_attempts x WHERE x.run_id = r.run_id
@@ -315,7 +337,7 @@ async def session_activity(db: AsyncSession, session_id: UUID) -> str:
     stuck = any(
         not auto_retry_left(
             run_status="failed",
-            latest=LatestAttempt(row.attempt_number, row.state, row.dispatched),
+            latest=LatestAttempt(row.attempt_number, row.state, row.dispatched, row.error_code),
             policy=row.execution_policy,
             pending_tools=row.pending_tools,
         )
@@ -328,6 +350,8 @@ async def session_activity(db: AsyncSession, session_id: UUID) -> str:
             active_hold=facts.active_hold,
             failed_without_auto_retry=stuck,
             pending_change=facts.pending_change,
+            user_review_hold=facts.user_review_hold,
+            awaiting_release=facts.awaiting_release,
         )
     )
 

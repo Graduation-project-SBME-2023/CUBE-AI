@@ -48,6 +48,12 @@ class GraphNode(Base):
     input_sources = Column(JSONB(none_as_null=True), nullable=True)
     # {v, rules: [{metric, op, value, port?}]}: checked when the run completes.
     expectations = Column(JSONB(none_as_null=True), nullable=True)
+    # D28, part of the definition: `before` waits for the user's release,
+    # `after` holds the next node for the user's review.
+    approval = Column(Text, nullable=False, server_default="none")
+    # The user's change that released an `approval: before` node; cleared
+    # whenever the node is edited or rerun.
+    start_released_by_change_id = Column(UUID(as_uuid=True), nullable=True)
 
     # The applied change that last added, edited or reran this node.
     accepted_by_change_id = Column(UUID(as_uuid=True), nullable=False)
@@ -70,6 +76,10 @@ class GraphNode(Base):
         CheckConstraint("node_seq > 0", name="node_seq_positive"),
         CheckConstraint("target_kind IN ('agent', 'tool')", name="target_kind"),
         CheckConstraint("length(btrim(target_version)) > 0", name="target_version_not_blank"),
+        CheckConstraint("approval IN ('none', 'before', 'after')", name="approval"),
+        CheckConstraint(
+            "start_released_by_change_id IS NULL OR approval = 'before'", name="start_release_needs_before"
+        ),
         CheckConstraint(
             "(input_sources IS NULL OR (jsonb_typeof(input_sources) = 'object' AND input_sources ? 'v')) "
             "AND (expectations IS NULL OR (jsonb_typeof(expectations) = 'object' AND expectations ? 'v'))",
@@ -92,6 +102,12 @@ class GraphNode(Base):
             ["accepted_by_change_id", "session_id"],
             ["graph_changes.change_id", "graph_changes.session_id"],
             name="fk_graph_nodes_accepted_by_change_id_graph_changes",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["start_released_by_change_id", "session_id"],
+            ["graph_changes.change_id", "graph_changes.session_id"],
+            name="fk_graph_nodes_start_released_by_change_id_graph_changes",
             ondelete="RESTRICT",
         ),
         Index("ix_graph_nodes_accepted_by_change_id", "accepted_by_change_id"),

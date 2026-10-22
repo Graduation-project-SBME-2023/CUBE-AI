@@ -142,7 +142,7 @@ async def get_segmentations_by_volume(
                                p.review_decision AS positive_decision
                         FROM segmentation_pairs p
                         JOIN segmentation_batches r ON r.segmentation_batch_id = p.segmentation_batch_id
-                        WHERE r.review_status = 'submitted'
+                        WHERE r.review_status IN ('submitted', 'auto_accepted')
                           AND p.volume_series_instance_uid = :volume
                           AND p.selected_segmentation_uid IS NOT NULL
                         UNION ALL

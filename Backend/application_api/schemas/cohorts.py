@@ -119,6 +119,8 @@ class CohortOut(BaseModel):
     label_definition: dict[str, Any]
     selection_summary: Optional[dict[str, Any]] = None
     frozen_at: Optional[datetime] = None
+    # `user` (the doctor's approval) or `auto` (no approval was asked for).
+    frozen_by: Optional[str] = None
     created_at: datetime
     members: list[CohortMemberOut] = Field(default_factory=list)
 

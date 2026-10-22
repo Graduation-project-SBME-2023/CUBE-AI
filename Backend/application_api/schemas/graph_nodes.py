@@ -20,6 +20,8 @@ class GraphNodeOut(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     input_sources: Optional[dict[str, Any]] = None
     expectations: Optional[dict[str, Any]] = None
+    approval: str = "none"
+    start_released_by_change_id: Optional[UUID] = None
     accepted_by_change_id: UUID
     removed_at: Optional[datetime] = None
 

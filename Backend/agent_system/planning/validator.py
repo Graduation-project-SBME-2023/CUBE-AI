@@ -163,7 +163,7 @@ def _seed_errors(
 ) -> Iterator[ValidationError]:
     seed = node.seed_from
     if not isinstance(spec, AgentSpec):
-        yield _error("BAD_SEED", node, "seed_from is for agent nodes; a tool node has no checkpoints")
+        yield _error("BAD_SEED", node, "seed_from is for agent nodes; a tool node has no transcript")
     elif not spec.resumable:
         yield _error("BAD_SEED", node, f"agent {node.ref!r} is not resumable")
     elif node.node_id not in content.rerun_node_ids:

@@ -4,7 +4,10 @@ It enforces the same invariants as the database, so a
 fake is never looser than the real thing: compare-and-swap on the
 graph version, one pending change, the derived approval reasons, one current
 run per node, one non-terminal attempt per session, the start readiness and retry
-rules, attempt fencing, the `suspended` transitions, and checkpoint fencing.
+rules, attempt fencing, the `suspended` transitions (v2: `ask_user`,
+`tool_approval`, `pause`) and their answer, the node approvals the user asked
+for (D28: `NEEDS_RELEASE`, `user_review`, user-only release), and transcript
+fencing (D27).
 The scenario table in ``tests/unit/execution/test_graph_store_scenarios.py``
 runs against it, and ``tests/integration/test_v1_p_transactions_live.py``
 covers the same rules against PostgreSQL.
@@ -22,14 +25,13 @@ import json
 import operator
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from .graph_store import (
     Attempt,
     Change,
     ChangeResult,
-    Checkpoint,
     GraphStoreError,
     GraphView,
     LiveNode,
@@ -43,6 +45,9 @@ ACTIVE = ("preparing", "submitted", "running", "unknown", "suspended")
 WORKING = ("preparing", "submitted", "running")
 TERMINAL = ("succeeded", "failed", "cancelled", "interrupted")
 TIMEOUT_CODES = ("timeout", "gate_timeout")
+# Suspensions that wait for the user's answer; a pause waits for the session to resume.
+QUESTIONS = ("ask_user", "tool_approval")
+FORMS = ("cohort_approval", "segmentation_review")
 _OPS = {"==": operator.eq, "!=": operator.ne, "<": operator.lt, "<=": operator.le, ">": operator.gt,
         ">=": operator.ge}
 
@@ -67,6 +72,7 @@ class _Session:
     privacy_mode: str = "standard"
     version: int = 0
     next_seq: int = 0
+    archived_at: Optional[datetime] = None
 
 
 @dataclass
@@ -80,6 +86,7 @@ class _Node:
     definition: dict[str, Any]
     accepted_by_change_id: str
     removed: bool = False
+    start_released_by_change_id: Optional[str] = None
 
 
 @dataclass
@@ -101,17 +108,23 @@ class _Run:
 
 
 def _definition(node: dict[str, Any]) -> dict[str, Any]:
-    return {key: node.get(key) for key in ("title", "params", "ref_version", "input_sources", "expect")}
+    """The stored definition; `approval` is part of it (D28), so changing it is an edit."""
+    stored = {key: node.get(key) for key in ("title", "params", "ref_version", "input_sources", "expect")}
+    return {**stored, "approval": node.get("approval") or "none"}
 
 
 class InMemoryGraphStore:
-    def __init__(self) -> None:
+    def __init__(self, *, project_key: Optional[str] = None, transcript_retention_days: int = 14) -> None:
         self.sessions: dict[str, _Session] = {}
         self.nodes: dict[str, _Node] = {}
         self.changes: dict[str, dict[str, Any]] = {}
         self.runs: dict[str, _Run] = {}
-        self.checkpoints: dict[tuple[str, str, str], dict[str, Any]] = {}
-        self.writes: dict[tuple[str, str, str, str, int], dict[str, Any]] = {}
+        # (run_id | session_id, subpath) -> entries in append order
+        self.transcripts: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        self.main_transcripts: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        # The deployment's one key; None accepts any non-empty key.
+        self.project_key = project_key
+        self.transcript_retention_days = transcript_retention_days
 
     # ------------------------------------------------------------------
     # Sessions and reads
@@ -127,6 +140,8 @@ class InMemoryGraphStore:
         session = self._session(session_id)
         if session.control_state == "archived" and control_state != "archived":
             raise _refuse("ARCHIVED", "an archived session is final")
+        if control_state == "archived" and session.archived_at is None:
+            session.archived_at = _now()
         session.control_state = control_state
 
     def _session(self, session_id: str) -> _Session:
@@ -154,7 +169,9 @@ class InMemoryGraphStore:
         return Node(node_id=node.node_id, node_seq=node.node_seq, position=node.position, target_kind=node.kind,
                     target_name=node.ref, target_version=d["ref_version"], title=d["title"],
                     params=d.get("params") or {}, input_sources=d.get("input_sources"),
-                    expectations=d.get("expect"), accepted_by_change_id=node.accepted_by_change_id)
+                    expectations=d.get("expect"), approval=d["approval"],
+                    start_released_by_change_id=node.start_released_by_change_id,
+                    accepted_by_change_id=node.accepted_by_change_id)
 
     @staticmethod
     def _run_out(run: _Run) -> Run:
@@ -166,20 +183,43 @@ class InMemoryGraphStore:
                    downstream_hold=run.downstream_hold, hold_released_by_change_id=run.hold_released_by_change_id,
                    error=run.error, attempts=[Attempt.model_validate(a) for a in run.attempts])
 
+    @staticmethod
+    def _holds(run: Optional[_Run]) -> bool:
+        return bool(run and run.downstream_hold and not run.hold_released_by_change_id)
+
+    def _previous_done(self, node: _Node, live: list[_Node]) -> bool:
+        """The previous live node's current run completed with no active hold."""
+        earlier = [n for n in live if n.position < node.position]
+        if not earlier:
+            return True
+        previous = self._current(earlier[-1].node_id)
+        return previous is not None and previous.status == "completed" and not self._holds(previous)
+
+    def _awaiting_release(self, session_id: str) -> bool:
+        """An `approval: before` node that is otherwise ready waits for the user."""
+        session, live = self._session(session_id), self._live(session_id)
+        if session.control_state != "active" or self._active_attempt(session_id) is not None:
+            return False
+        return any(n.definition["approval"] == "before" and not n.start_released_by_change_id
+                   and self._current(n.node_id) is None and self._previous_done(n, live) for n in live)
+
     def activity(self, session_id: str) -> str:
+        """Appendix P §P.4, in its order: blocked, pausing, awaiting_user, running,
+        awaiting_approval, idle."""
         session = self._session(session_id)
         states = [(a["state"], (a.get("suspension") or {}).get("kind"))
                   for r in self.runs.values() if r.session_id == session_id for a in r.attempts
                   if a["state"] in ACTIVE]
         working = any(state in WORKING for state, _ in states)
         current = [self._current(n.node_id) for n in self._live(session_id)]
-        hold = any(r and r.downstream_hold and not r.hold_released_by_change_id for r in current)
+        held = [r.downstream_hold for r in current if self._holds(r)]
         stuck = any(r and r.status == "failed" and self._retry_refusal(r, False) is not None for r in current)
-        if hold or stuck or any(state == "unknown" for state, _ in states):
+        if "expectation_violated" in held or stuck or any(state == "unknown" for state, _ in states):
             return "blocked"
         if session.control_state == "paused" and working:
             return "pausing"
-        if any(state == "suspended" and kind == "gate" for state, kind in states):
+        if (any(state == "suspended" and kind in QUESTIONS for state, kind in states)
+                or "user_review" in held or self._awaiting_release(session_id)):
             return "awaiting_user"
         if working:
             return "running"
@@ -205,7 +245,7 @@ class InMemoryGraphStore:
     # ------------------------------------------------------------------
     # Propose / apply a change
     # ------------------------------------------------------------------
-    def _plan(self, session: _Session, content: dict[str, Any]) -> dict[str, Any]:
+    def _plan(self, session: _Session, content: dict[str, Any], author: str) -> dict[str, Any]:
         """The apply rule: the same as plan_apply() in the API."""
         live = self._live(session.session_id)
         by_id = {n.node_id: n for n in live}
@@ -238,13 +278,28 @@ class InMemoryGraphStore:
         superseded = [r for r in (self._current(i) for i in affected if i in by_id) if r is not None]
         if content.get("on_running", "reject") == "reject" and any(r.status == "running" for r in superseded):
             raise _refuse("INVALID_CHANGE", "RUNNING_NODE_AFFECTED", 422)
-        released = []
-        for node_id in content.get("release_hold_node_ids", []):
-            run = self._current(str(node_id))
-            if run is None or not run.downstream_hold or run.hold_released_by_change_id:
+        # A release frees a held run, or the start of an unstarted `approval: before`
+        # node. Releasing what the user asked to approve (a `user_review` hold, a
+        # start) needs a change the user authored (D28).
+        targets = {str(n["node_id"]): n for n in target}
+        released, starts = [], []
+        for node_id in map(str, content.get("release_hold_node_ids", [])):
+            run = self._current(node_id)
+            stored = self.nodes.get(node_id)
+            accepting = node_id in added or node_id in edited or node_id in reruns
+            if self._holds(run):
+                if run.downstream_hold == "user_review" and author != "user":
+                    raise _refuse("USER_RELEASE_REQUIRED", "only the user releases a user_review hold")
+                if node_id not in affected:
+                    released.append(run)
+            elif (node_id in targets and (targets[node_id].get("approval") or "none") == "before"
+                  and (run is None or node_id in affected)
+                  and (accepting or stored is None or not stored.start_released_by_change_id)):
+                if author != "user":
+                    raise _refuse("USER_RELEASE_REQUIRED", "only the user releases an approval: before node")
+                starts.append(node_id)
+            else:
                 raise _refuse("INVALID_CHANGE", "BAD_RELEASE", 422)
-            if str(node_id) not in affected:
-                released.append(run)
         reasons = set()
         if any(r.status == "completed" for r in superseded):
             reasons.add("supersedes_completed")
@@ -253,7 +308,8 @@ class InMemoryGraphStore:
                                                   or content.get("release_hold_node_ids")):
             reasons.add("PLAN_MODE")
         return {"added": added, "edited": edited, "reruns": reruns, "removed": removed, "affected": affected,
-                "superseded": superseded, "released": released, "reasons": reasons, "ids": ids}
+                "superseded": superseded, "released": released, "starts": starts, "reasons": reasons,
+                "ids": ids}
 
     def _apply(self, session: _Session, change: dict[str, Any], plan: dict[str, Any]) -> list[str]:
         content = change["content"]
@@ -268,7 +324,11 @@ class InMemoryGraphStore:
                 stored = self.nodes[node_id]
                 stored.position, stored.definition = position, _definition(node)
                 if accepting:
+                    # A new definition or a rerun needs a new release (T2 step 7).
                     stored.accepted_by_change_id = change["change_id"]
+                    stored.start_released_by_change_id = None
+        for node_id in plan["starts"]:
+            self.nodes[node_id].start_released_by_change_id = change["change_id"]
         for node_id in plan["removed"]:
             self.nodes[node_id].removed = True
         superseded = []
@@ -301,9 +361,10 @@ class InMemoryGraphStore:
         content = {"v": 1, "rerun_node_ids": [], "release_hold_node_ids": [], "on_running": "reject",
                    **copy.deepcopy(content)}
         if author == "main":
-            if not tool_call:
+            # D21: the Main's change is keyed by its SDK tool call, sha256(session_id || tool_use_id).
+            if not tool_call or not tool_call.get("tool_use_id") or str(tool_call.get("session_id")) != session_id:
                 raise _refuse("TOOL_CALL_REQUIRED", "", 422)
-            idempotency_key = hashlib.sha256(f"{tool_call['turn_id']}\x1f{tool_call['call_id']}".encode()).hexdigest()
+            idempotency_key = hashlib.sha256(f"{session_id}\x1f{tool_call['tool_use_id']}".encode()).hexdigest()
         if not idempotency_key:
             raise _refuse("IDEMPOTENCY_KEY_REQUIRED", "", 422)
         digest = _digest(content)
@@ -317,7 +378,7 @@ class InMemoryGraphStore:
             raise _refuse("ARCHIVED")
         if base_version != session.version:
             raise _refuse("STALE_BASE", f"the graph is at version {session.version}")
-        plan = self._plan(session, content)
+        plan = self._plan(session, content, author)
         reasons = sorted(set(approval_reasons) | plan["reasons"])
         change = {"change_id": str(uuid.uuid4()), "session_id": session_id, "author": author,
                   "idempotency_key": idempotency_key, "base_version": base_version, "content": content,
@@ -353,7 +414,7 @@ class InMemoryGraphStore:
         try:
             if change["base_version"] != session.version:
                 raise _refuse("STALE_BASE")
-            plan = self._plan(session, change["content"])
+            plan = self._plan(session, change["content"], change["author"])
             if not plan["reasons"] <= set(change["approval_reasons"]):
                 raise _refuse("STALE_BASE", "a derivable reason is missing")
         except GraphStoreError as exc:
@@ -378,10 +439,16 @@ class InMemoryGraphStore:
             return "ATTEMPT_ACTIVE"
         if latest["attempt_number"] >= int(policy.get("max_attempts", 1)):
             return "MAX_ATTEMPTS"
-        if latest["state"] == "interrupted" and latest.get("dispatched_at") and not explicit:
+        if explicit:
+            return None
+        # A lost transcript batch: a resume would continue from a gap (D27).
+        if (latest.get("error") or {}).get("code") == "transcript_write_failed":
+            return "NEEDS_DECISION"
+        # Rule (f): work that may already have had effects is not repeated automatically.
+        if latest["state"] == "interrupted" and latest.get("dispatched_at"):
             if policy.get("resumable"):
-                pending = (self._latest_checkpoint(run.run_id) or {}).get("metadata", {}).get("pending_tools", [])
-                if any(not tool.get("idempotent", False) for tool in pending):
+                pending = (latest.get("pending_tools") or {}).get("calls") or []
+                if any(not call.get("idempotent", False) for call in pending):
                     return "NEEDS_DECISION"
             elif not policy.get("idempotent", False):
                 return "NEEDS_DECISION"
@@ -406,12 +473,12 @@ class InMemoryGraphStore:
             raise _refuse("SESSION_NOT_ACTIVE")
         if node.accepted_by_change_id != request.accepted_by_change_id:
             raise _refuse("STALE_DEFINITION")
-        earlier = [n for n in self._live(node.session_id) if n.position < node.position]
-        if earlier:
-            previous = self._current(earlier[-1].node_id)
-            if previous is None or previous.status != "completed" or (
-                    previous.downstream_hold and not previous.hold_released_by_change_id):
-                raise _refuse("NOT_READY")
+        live = self._live(node.session_id)
+        earlier = [n for n in live if n.position < node.position]
+        if not self._previous_done(node, live):
+            raise _refuse("NOT_READY")
+        if node.definition["approval"] == "before" and not node.start_released_by_change_id:
+            raise _refuse("NEEDS_RELEASE", "the user approves this node before it starts")
         if self._active_attempt(node.session_id) is not None:
             raise _refuse("ATTEMPT_ACTIVE")
         current = self._current(node.node_id)
@@ -425,12 +492,14 @@ class InMemoryGraphStore:
             entry = next((n for n in change["nodes"] if str(n["node_id"]) == node.node_id), {})
             policy = {"v": 1, **request.limits, "privacy_mode": session.privacy_mode,
                       "fresh": node.node_id in {str(i) for i in change.get("rerun_node_ids", [])}}
+            policy.update({key: getattr(request, key) for key in ("spec_digest", "engine_version")
+                           if getattr(request, key) is not None})
             run = _Run(str(uuid.uuid4()), node.node_id, node.session_id, node.accepted_by_change_id, policy,
                        node.definition["ref_version"], pins)
             self.runs[run.run_id] = run
             attempt = self._new_attempt(run, request)
             if entry.get("seed_from"):
-                policy["seed_from"] = self._seed(node, run, attempt, entry["seed_from"], request)
+                policy["seed_from"] = self._seed(node, run, entry["seed_from"], request)
             return StartResult(run=self._run_out(run), attempt=Attempt.model_validate(attempt), first_start=True)
         refusal = self._retry_refusal(current, request.explicit_retry)
         if refusal:
@@ -455,25 +524,23 @@ class InMemoryGraphStore:
                            "type": produced["type"], "ref": produced["ref"]}
         return {"v": 1, "ports": ports, "target_version": node.definition["ref_version"]}
 
-    def _seed(self, node: _Node, run: _Run, attempt: dict, seed: dict, request: StartRequest) -> dict[str, Any]:
-        frozen = {"run_id": str(seed["run_id"]), "checkpoint_id": seed["checkpoint_id"], "applied": False}
-        source = self.checkpoints.get((str(seed["run_id"]), seed.get("checkpoint_ns", ""), seed["checkpoint_id"]))
+    def _seed(self, node: _Node, run: _Run, seed: dict, request: StartRequest) -> dict[str, Any]:
+        """T4 step 5: check the seed and freeze the verdict. Nothing is copied:
+        the engine forks the source session up to the message (Plan 9.4)."""
+        frozen = {"run_id": str(seed["run_id"]), "message_uuid": seed["message_uuid"], "applied": False}
         source_run = self.runs.get(str(seed["run_id"]))
+        entries = self.transcripts.get((str(seed["run_id"]), ""), [])
         if node.kind != "agent" or not request.limits.get("resumable"):
             return {**frozen, "reason": "not a resumable agent"}
-        if source is None or source_run is None:
-            return {**frozen, "reason": "checkpoint not found (purged?)"}
+        if source_run is None or not any(e["uuid"] == seed["message_uuid"] for e in entries):
+            return {**frozen, "reason": "transcript or message not found (purged?)"}
         if source_run.node_id != node.node_id:
-            return {**frozen, "reason": "checkpoint of another node"}
-        if source["metadata"].get("spec_digest") != request.spec_digest:
-            return {**frozen, "reason": "spec_digest differs"}
+            return {**frozen, "reason": "transcript of another node"}
+        for key in ("spec_digest", "engine_version"):
+            if source_run.execution_policy.get(key) != getattr(request, key):
+                return {**frozen, "reason": f"{key} differs"}
         if source_run.execution_policy.get("privacy_mode") != run.execution_policy["privacy_mode"]:
             return {**frozen, "reason": "privacy_mode differs"}
-        key = (run.run_id, source["checkpoint_ns"], source["checkpoint_id"])
-        self.checkpoints[key] = {**copy.deepcopy(source), "run_id": run.run_id, "attempt_id": attempt["attempt_id"],
-                                 "parent_checkpoint_id": None,
-                                 "metadata": {**source["metadata"], "seeded_from": {
-                                     "run_id": source_run.run_id, "checkpoint_id": source["checkpoint_id"]}}}
         return {**frozen, "applied": True}
 
     # ------------------------------------------------------------------
@@ -548,7 +615,9 @@ class InMemoryGraphStore:
                 ok = False
             if not ok:
                 run.downstream_hold = "expectation_violated"
-                break
+                return
+        if self.nodes[run.node_id].definition["approval"] == "after":
+            run.downstream_hold = "user_review"
 
     async def complete_attempt(self, run_id: str, attempt_id: str, outputs: dict[str, Any]) -> Attempt:
         run, attempt = self._locate(run_id, attempt_id)
@@ -627,25 +696,46 @@ class InMemoryGraphStore:
             action = "recorded"
         return Attempt.model_validate(attempt), action
 
+    # ------------------------------------------------------------------
+    # T10: suspend, answer, resume (the same attempt throughout, I8)
+    # ------------------------------------------------------------------
     async def suspend(self, run_id: str, attempt_id: str, suspension: dict[str, Any]) -> Attempt:
         run, attempt = self._locate(run_id, attempt_id)
+        kind, tool_use_id, form = suspension.get("kind"), suspension.get("tool_use_id"), suspension.get("form")
+        if (kind not in QUESTIONS + ("pause",) or (kind == "pause") != (tool_use_id is None)
+                or (form is not None and (kind != "ask_user" or form not in FORMS))):
+            raise _refuse("INVALID", "a question or a tool approval names its tool_use_id; a pause does not; "
+                          "only ask_user carries a form", 422)
+        current = attempt.get("suspension") or {}
+        if attempt["state"] == "suspended" and (current.get("kind"), current.get("tool_use_id")) == (kind, tool_use_id):
+            return Attempt.model_validate(attempt)  # a replayed suspend
         if attempt["state"] != "running" or run.superseded or attempt["dispatch_kind"] != "in_process":
             raise _refuse("NOT_SUSPENDABLE")
-        stored = self.checkpoints.get((run_id, "", suspension["checkpoint_id"]))
-        if stored is None or stored["attempt_id"] != attempt_id:
-            raise _refuse("REFUSED_BY_DATABASE", "suspend after storing the interrupt checkpoint")
-        attempt.update(state="suspended", suspension={"v": 1, **suspension, "since": _now().isoformat()})
+        stored = {"v": 2, "kind": kind, "payload": copy.deepcopy(suspension.get("payload") or {}),
+                  "since": _now().isoformat()}
+        stored.update({k: v for k, v in (("tool_use_id", tool_use_id), ("form", form)) if v is not None})
+        attempt.update(state="suspended", suspension=stored)
         return Attempt.model_validate(attempt)
 
-    async def gate_decision(self, run_id: str, attempt_id: str, interrupt_id: str, decision: str) -> Attempt:
+    async def answer(self, run_id: str, attempt_id: str, tool_use_id: str, *, answer: Any = None,
+                     decision: Optional[str] = None, comment: Optional[str] = None) -> Attempt:
+        """The user's answer (user gate path): recorded on the suspension; the
+        Executor, not the Main, is woken and resumes the same attempt."""
         run, attempt = self._locate(run_id, attempt_id)
         suspension = attempt.get("suspension") or {}
-        if (attempt["state"] != "suspended" or suspension.get("kind") != "gate" or "resume" in suspension
-                or suspension.get("interrupt_id") != interrupt_id):
+        if (answer is None) == (decision is None) or decision not in (None, "approve", "reject"):
+            raise _refuse("INVALID", "an answer or a decision (approve | reject), not both", 422)
+        if suspension.get("form") is not None:
+            # A domain form is answered by its own route, which writes the form's columns too.
+            raise _refuse("FORM_ANSWER", f"the attempt waits on the {suspension['form']} form")
+        if (attempt["state"] != "suspended" or suspension.get("kind") not in QUESTIONS or "resume" in suspension
+                or suspension.get("tool_use_id") != tool_use_id
+                or (suspension["kind"] == "tool_approval" and decision is None)):
             raise _refuse("NO_OPEN_GATE")
         if run.status != "running" or run.superseded:
             raise _refuse("RUN_NOT_CURRENT")
-        suspension["resume"] = {"decision": decision, "decided_at": _now().isoformat()}
+        resume = {"answer": answer} if decision is None else {"decision": decision}
+        suspension["resume"] = {**resume, "comment": comment, "decided_at": _now().isoformat()}
         return Attempt.model_validate(attempt)
 
     async def resume(self, run_id: str, attempt_id: str) -> Attempt:
@@ -655,67 +745,135 @@ class InMemoryGraphStore:
         suspension = attempt.get("suspension") or {}
         session = self._session(run.session_id)
         if (attempt["state"] != "suspended" or session.control_state != "active" or run.superseded
-                or (suspension.get("kind") == "gate" and "resume" not in suspension)):
+                or (suspension.get("kind") in QUESTIONS and "resume" not in suspension)):
             raise _refuse("NOT_RESUMABLE")
         attempt.update(state="running", resumed_at=_now())
         return Attempt.model_validate(attempt)
 
     # ------------------------------------------------------------------
-    # Checkpoints: the latest running/suspended attempt writes
+    # Agent memory: the run's latest running or suspended attempt writes
     # ------------------------------------------------------------------
-    def _fence_checkpoint(self, run_id: str, attempt_id: str) -> None:
+    def _fence_writer(self, run_id: str, attempt_id: str) -> dict[str, Any]:
         run = self.runs.get(run_id)
         latest = run.attempts[-1] if run else None
         if latest is None or latest["attempt_id"] != attempt_id or latest["state"] not in ("running", "suspended"):
-            raise _refuse("REFUSED_BY_DATABASE", "only the latest running or suspended attempt writes")
+            raise _refuse("REFUSED_BY_DATABASE", "only the run's latest running or suspended attempt writes")
+        return latest
 
-    async def put_checkpoint(self, run_id: str, attempt_id: str, *, checkpoint_id: str, checkpoint: bytes,
-                             type: str, metadata: dict[str, Any], checkpoint_ns: str = "",
-                             parent_checkpoint_id: Optional[str] = None) -> None:
-        self._fence_checkpoint(run_id, attempt_id)
-        missing = {"v", "spec_digest", "engine_version"} - metadata.keys()
-        if missing:
-            raise _refuse("INVALID", f"metadata needs {sorted(missing)}", 422)
-        key = (run_id, checkpoint_ns, checkpoint_id)
-        row = {"run_id": run_id, "checkpoint_ns": checkpoint_ns, "checkpoint_id": checkpoint_id,
-               "parent_checkpoint_id": parent_checkpoint_id, "attempt_id": attempt_id, "type": type,
-               "checkpoint": checkpoint, "metadata": copy.deepcopy(metadata), "order": len(self.checkpoints)}
-        existing = self.checkpoints.get(key)
-        if existing is not None:
-            if (existing["type"], existing["checkpoint"], existing["metadata"]) != (type, checkpoint, metadata):
-                raise _refuse("CHECKPOINT_EXISTS")
+    async def set_pending_tools(self, run_id: str, attempt_id: str, calls: list[dict[str, Any]]) -> Attempt:
+        self._locate(run_id, attempt_id)  # an attempt the run does not have is NOT_FOUND
+        attempt = self._fence_writer(run_id, attempt_id)
+        if any(not call.get("tool_use_id") or not call.get("tool") or not isinstance(call.get("idempotent"), bool)
+               for call in calls):
+            raise _refuse("INVALID", "a pending call names its tool_use_id, tool and idempotent", 422)
+        attempt["pending_tools"] = {"v": 1, "calls": copy.deepcopy(calls)}
+        return Attempt.model_validate(attempt)
+
+    def _check_entries(self, entries: list[dict[str, Any]], project_key: str) -> None:
+        if not project_key or (self.project_key is not None and project_key != self.project_key):
+            raise _refuse("PROJECT_KEY_MISMATCH", "not this deployment's project key", 422)
+        if not entries or any(not isinstance(e.get("uuid"), str) or not e["uuid"] for e in entries):
+            raise _refuse("INVALID", "every entry carries its uuid", 422)
+
+    @staticmethod
+    def _append(store: dict[tuple[str, str], list[dict[str, Any]]], key: tuple[str, str],
+                entries: list[dict[str, Any]]) -> int:
+        """A replayed entry uuid is a no-op; entries are kept unchanged and in order."""
+        stored = store.setdefault(key, [])
+        known = {e["uuid"] for e in stored}
+        new = []
+        for entry in entries:
+            if entry["uuid"] not in known:
+                known.add(entry["uuid"])
+                new.append(copy.deepcopy(entry))
+        stored.extend(new)
+        return len(new)
+
+    @staticmethod
+    def _load(store: dict[tuple[str, str], list[dict[str, Any]]],
+              key: tuple[str, str]) -> Optional[list[dict[str, Any]]]:
+        return copy.deepcopy(store[key]) if store.get(key) else None
+
+    @staticmethod
+    def _subpaths(store: dict[tuple[str, str], list[dict[str, Any]]], owner: str) -> list[str]:
+        return sorted(subpath for (key, subpath), entries in store.items() if key == owner and subpath and entries)
+
+    def _may_read(self, run_id: str, attempt_id: Optional[str]) -> None:
+        """A reading attempt belongs to the run, or is the first attempt of a
+        run whose frozen seed_from names it."""
+        if attempt_id is None:
             return
-        self.checkpoints[key] = row
+        for run in self.runs.values():
+            attempt = next((a for a in run.attempts if a["attempt_id"] == attempt_id), None)
+            if attempt is None:
+                continue
+            seed = run.execution_policy.get("seed_from") or {}
+            if run.run_id == run_id or (attempt["attempt_number"] == 1 and seed.get("run_id") == run_id):
+                return
+            break
+        raise _refuse("TRANSCRIPT_FORBIDDEN", "a transcript is read within its run or by its seeded run", 403)
 
-    async def put_checkpoint_writes(self, run_id: str, attempt_id: str, *, checkpoint_id: str,
-                                    writes: list[dict[str, Any]], checkpoint_ns: str = "") -> int:
-        self._fence_checkpoint(run_id, attempt_id)
-        if (run_id, checkpoint_ns, checkpoint_id) not in self.checkpoints:
-            raise _refuse("REFUSED_BY_DATABASE", "a write belongs to a stored checkpoint")
-        for write in writes:
-            key = (run_id, checkpoint_ns, checkpoint_id, write["task_id"], write["idx"])
-            self.writes.setdefault(key, {**write, "attempt_id": attempt_id})
-        return len(writes)
+    async def append_transcript(self, run_id: str, attempt_id: str, entries: list[dict[str, Any]], *,
+                                project_key: str, subpath: str = "") -> int:
+        self._fence_writer(run_id, attempt_id)
+        self._check_entries(entries, project_key)
+        return self._append(self.transcripts, (run_id, subpath), entries)
 
-    def _latest_checkpoint(self, run_id: str, checkpoint_ns: str = "") -> Optional[dict[str, Any]]:
-        rows = [c for (r, ns, _), c in self.checkpoints.items() if r == run_id and ns == checkpoint_ns]
-        return max(rows, key=lambda c: c["order"]) if rows else None
+    async def load_transcript(self, run_id: str, *, subpath: str = "",
+                              attempt_id: Optional[str] = None) -> Optional[list[dict[str, Any]]]:
+        self._may_read(run_id, attempt_id)
+        return self._load(self.transcripts, (run_id, subpath))
 
-    def _checkpoint_out(self, row: dict[str, Any]) -> Checkpoint:
-        writes = [w for (r, ns, cid, _, _), w in sorted(self.writes.items())
-                  if (r, ns, cid) == (row["run_id"], row["checkpoint_ns"], row["checkpoint_id"])]
-        return Checkpoint.model_validate({**row, "writes": writes})
+    async def list_transcript_subpaths(self, run_id: str) -> list[str]:
+        return self._subpaths(self.transcripts, run_id)
 
-    async def get_checkpoint(self, run_id: str, checkpoint_id: Optional[str] = None,
-                             checkpoint_ns: str = "") -> Optional[Checkpoint]:
-        row = (self._latest_checkpoint(run_id, checkpoint_ns) if checkpoint_id is None
-               else self.checkpoints.get((run_id, checkpoint_ns, checkpoint_id)))
-        return self._checkpoint_out(row) if row else None
+    async def append_main_transcript(self, session_id: str, entries: list[dict[str, Any]], *,
+                                     project_key: str, subpath: str = "") -> int:
+        self._session(session_id)
+        self._check_entries(entries, project_key)
+        return self._append(self.main_transcripts, (session_id, subpath), entries)
 
-    async def list_checkpoints(self, run_id: str, *, checkpoint_ns: Optional[str] = None,
-                               before: Optional[str] = None, limit: int = 20) -> list[Checkpoint]:
-        rows = [c for (r, ns, cid), c in self.checkpoints.items()
-                if r == run_id and (checkpoint_ns is None or ns == checkpoint_ns)
-                and (before is None or cid < before)]
-        rows.sort(key=lambda c: c["order"], reverse=True)
-        return [self._checkpoint_out(row) for row in rows[:limit]]
+    async def load_main_transcript(self, session_id: str, *,
+                                   subpath: str = "") -> Optional[list[dict[str, Any]]]:
+        self._session(session_id)
+        return self._load(self.main_transcripts, (session_id, subpath))
+
+    async def list_main_transcript_subpaths(self, session_id: str) -> list[str]:
+        self._session(session_id)
+        return self._subpaths(self.main_transcripts, session_id)
+
+    def _named_seeds(self) -> set[str]:
+        """Runs a live seed_from still names: in a pending change, or in the
+        accepting change of a live node that has not started a run from it."""
+        named = set()
+        for change in self.changes.values():
+            for entry in change["content"].get("nodes", []):
+                if not entry.get("seed_from"):
+                    continue
+                node = self.nodes.get(str(entry["node_id"]))
+                waiting = change["status"] == "pending" or (
+                    node is not None and not node.removed and node.accepted_by_change_id == change["change_id"]
+                    and not any(r.node_id == node.node_id and r.accepted_by_change_id == change["change_id"]
+                                for r in self.runs.values()))
+                if waiting:
+                    named.add(str(entry["seed_from"]["run_id"]))
+        return named
+
+    async def purge_transcripts(self) -> dict[str, int]:
+        """The retention purge (harness path): runs terminal for longer than the
+        retention that no live seed_from names, and the Main transcripts of
+        sessions archived for longer than it."""
+        cutoff = _now() - timedelta(days=self.transcript_retention_days)
+        named = self._named_seeds()
+        runs = {r.run_id for r in self.runs.values()
+                if r.status in ("completed", "failed", "cancelled") and r.attempts
+                and r.attempts[-1].get("ended_at") and r.attempts[-1]["ended_at"] <= cutoff
+                and r.run_id not in named}
+        sessions = {s.session_id for s in self.sessions.values() if s.archived_at and s.archived_at <= cutoff}
+        run_keys = [k for k in self.transcripts if k[0] in runs]
+        main_keys = [k for k in self.main_transcripts if k[0] in sessions]
+        entries = sum(len(self.transcripts.pop(key)) for key in run_keys)
+        for key in main_keys:
+            del self.main_transcripts[key]
+        return {"runs": len({k[0] for k in run_keys}), "entries": entries,
+                "main_sessions": len({k[0] for k in main_keys})}

@@ -211,6 +211,8 @@ def test_graph_nodes_match_the_session_graph_shape():
     assert set(nodes.columns.keys()) == {
         "node_id", "session_id", "node_seq", "position", "target_kind", "target_name",
         "target_version", "title", "params", "input_sources", "expectations",
+        # D28 (migration "t"): the approval the user asked for, and its release.
+        "approval", "start_released_by_change_id",
         "accepted_by_change_id", "removed_at",
     }
     constraints = {constraint.name: constraint for constraint in nodes.constraints}

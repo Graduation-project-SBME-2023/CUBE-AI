@@ -24,6 +24,8 @@ PLAN_MODE = "PLAN_MODE"
 SUPERSEDES_COMPLETED = "supersedes_completed"
 DERIVED_REASONS = frozenset({PLAN_MODE, SUPERSEDES_COMPLETED})
 EXPECTATION_OPS = ("==", "!=", "<", "<=", ">", ">=")
+# The hold an `approval: after` node's completed run puts on the next node.
+USER_REVIEW = "user_review"
 
 
 class _Strict(BaseModel):
@@ -59,11 +61,11 @@ class Expectations(_Strict):
 
 
 class SeedFrom(_Strict):
-    """Start a rerun from a checkpoint of an earlier run of the same node."""
+    """Start a rerun from a message of an earlier run of the same node: the
+    engine forks that run's SDK session up to the message (D27)."""
 
     run_id: UUID
-    checkpoint_id: str = Field(min_length=1)
-    checkpoint_ns: str = ""
+    message_uuid: str = Field(min_length=1, max_length=256)
 
 
 class NodeDef(_Strict):
@@ -78,6 +80,9 @@ class NodeDef(_Strict):
     params: dict[str, Any] = Field(default_factory=dict)
     input_sources: Optional[InputSources] = None
     expect: Optional[Expectations] = None
+    # D28, part of the definition: `before` waits for the user's release,
+    # `after` holds the next node for the user's review.
+    approval: Literal["none", "before", "after"] = "none"
     # Only on a node this change reruns (it is not part of the stored definition).
     seed_from: Optional[SeedFrom] = None
 
@@ -135,14 +140,18 @@ class LiveNode:
     params: dict[str, Any]
     input_sources: Optional[dict[str, Any]]
     expectations: Optional[dict[str, Any]]
+    approval: str = "none"
+    start_released_by_change_id: Optional[UUID] = None
     # The node's current run, when it has one.
     run_id: Optional[UUID] = None
     run_status: Optional[str] = None
-    # An expectation hold on the current run that no change released yet.
+    # A hold on the current run that no change released yet, and its kind
+    # (`expectation_violated` or `user_review`).
     holds_downstream: bool = False
+    hold: Optional[str] = None
 
     def definition(self) -> tuple:
-        return (self.title, self.params, self.ref_version, self.input_sources, self.expectations)
+        return (self.title, self.params, self.ref_version, self.input_sources, self.expectations, self.approval)
 
 
 def node_columns(node: NodeDef) -> dict[str, Any]:
@@ -154,6 +163,7 @@ def node_columns(node: NodeDef) -> dict[str, Any]:
         "target_version": dump["ref_version"],
         "input_sources": dump.get("input_sources"),
         "expectations": dump.get("expect"),
+        "approval": dump["approval"],
     }
 
 
@@ -165,6 +175,7 @@ def _definition(node: NodeDef) -> tuple:
         columns["target_version"],
         columns["input_sources"],
         columns["expectations"],
+        columns["approval"],
     )
 
 
@@ -188,6 +199,8 @@ class ApplyPlan:
     # Current runs that applying supersedes (affected nodes that have one).
     superseded: list[LiveNode] = field(default_factory=list)
     released: list[LiveNode] = field(default_factory=list)
+    # Unstarted `approval: before` nodes this change releases.
+    start_releases: list[UUID] = field(default_factory=list)
     reasons: set[str] = field(default_factory=set)
     errors: list[GraphError] = field(default_factory=list)
 
@@ -203,11 +216,14 @@ def plan_apply(
     *,
     used_node_ids: set[UUID],
     execution_mode: str,
+    author: str = "user",
 ) -> ApplyPlan:
     """The apply rule over a sequential graph.
 
     ``live`` is the live sequence in position order; ``used_node_ids`` is every
-    node id that exists anywhere (a new node must mint an unused one).
+    node id that exists anywhere (a new node must mint an unused one);
+    ``author`` is the change's author: only the user releases what the user
+    asked to approve (D28, I21).
     """
     plan = ApplyPlan(reruns=set(content.rerun_node_ids))
     by_id = {node.node_id: node for node in live}
@@ -270,14 +286,35 @@ def plan_apply(
                 node_id,
             ))
 
+    # A release frees a held run, or the start of an unstarted `approval: before`
+    # node. A user_review hold and a start are the user's to release.
+    by_target = {node.node_id: node for node in target}
+    accepting = plan.accepting
     for node_id in content.release_hold_node_ids:
         current = by_id.get(node_id)
-        if current is None or not current.holds_downstream:
+        definition = by_target[node_id]
+        if current is not None and current.holds_downstream:
+            if current.hold == USER_REVIEW and author != "user":
+                plan.errors.append(GraphError(
+                    "USER_RELEASE_REQUIRED", f"only the user releases the review hold of node {node_id}", node_id
+                ))
+            elif node_id not in plan.affected:
+                plan.released.append(current)
+        elif (
+            definition.approval == "before"
+            and (current is None or current.run_id is None or node_id in plan.affected)
+            and (node_id in accepting or current is None or current.start_released_by_change_id is None)
+        ):
+            if author != "user":
+                plan.errors.append(GraphError(
+                    "USER_RELEASE_REQUIRED", f"only the user releases node {node_id} (approval: before)", node_id
+                ))
+            else:
+                plan.start_releases.append(node_id)
+        else:
             plan.errors.append(GraphError(
-                "BAD_RELEASE", f"node {node_id} holds nothing downstream to release", node_id
+                "BAD_RELEASE", f"node {node_id} holds nothing downstream and waits for no release", node_id
             ))
-        elif node_id not in plan.affected:
-            plan.released.append(current)
 
     if any(node.run_status == "completed" for node in plan.superseded):
         plan.reasons.add(SUPERSEDES_COMPLETED)

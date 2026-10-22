@@ -30,9 +30,10 @@ class ChatMessage(Base):
     # A tool row's text is a short label; its payload lives in metadata.
     text = Column(Text, nullable=False)
 
-    # The versioned contract (v2): tool_calls / tool_result rows paired by
-    # (turn_id, call_id), and the context_summary boundary. `metadata` is
-    # reserved on declarative classes, hence the attribute name.
+    # What the user sees: the user's messages and the Main's replies, with an
+    # optional `ui` view hint. The Main's tool calls and results live in its SDK
+    # transcript (`main_transcript_entries`, D21); older `tool` rows stay as
+    # history. `metadata` is reserved on declarative classes, hence the name.
     metadata_ = Column("metadata", JSONB, nullable=True)
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -44,13 +45,4 @@ class ChatMessage(Base):
         CheckConstraint("length(btrim(text)) > 0", name="text_not_blank"),
         Index("ix_chat_messages_chat_id_seq", "chat_id", "seq"),
         Index("ix_chat_messages_chat_id_created_at", "chat_id", "created_at", "message_id"),
-        # One result per call, per turn.
-        Index(
-            "uq_chat_messages_one_tool_result",
-            "chat_id",
-            sql_text("(metadata ->> 'turn_id')"),
-            sql_text("(metadata ->> 'call_id')"),
-            unique=True,
-            postgresql_where=sql_text("metadata ->> 'kind' = 'tool_result'"),
-        ),
     )

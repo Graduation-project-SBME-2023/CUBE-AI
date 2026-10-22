@@ -126,8 +126,10 @@ class NodeStart(BaseModel):
     compiled_prompt: Optional[str] = Field(default=None, min_length=1)
     # Job attempts: the exact submitted request, persisted before dispatch.
     request: Optional[dict[str, Any]] = None
-    # The agent's spec digest, compared with a seed_from checkpoint.
-    spec_digest: Optional[str] = None
+    # The agent's spec digest and the engine version, frozen in the policy and
+    # compared with a seed_from source run (D27).
+    spec_digest: Optional[str] = Field(default=None, max_length=256)
+    engine_version: Optional[str] = Field(default=None, max_length=128)
     # A retry by the user or the Recovery Agent.
     explicit_retry: bool = False
 

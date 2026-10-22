@@ -40,11 +40,16 @@ class Settings(BaseSettings):
     DEFAULT_USERNAME: str = "default"
     # A pending graph change past this age is `expired`.
     APPROVAL_TTL_H: float = 72.0
-    # Agent checkpoints of runs terminal for longer than this are purged.
-    AGENT_CHECKPOINT_RETENTION_DAYS: int = 14
+    # Agent transcripts of runs terminal for longer than this (unless a live
+    # seed_from names them), and the Main transcripts of sessions archived for
+    # longer than this, are purged (D27).
+    AGENT_TRANSCRIPT_RETENTION_DAYS: int = 14
     # How often the lifespan sweep runs that purge (0 disables the sweep;
-    # POST /agent-checkpoints/purge still works).
-    AGENT_CHECKPOINT_PURGE_INTERVAL_SECONDS: float = 3600.0
+    # POST /agent-transcripts/purge still works).
+    AGENT_TRANSCRIPT_PURGE_INTERVAL_SECONDS: float = 3600.0
+    # The SDK's project key of the deployment's working directory; when set, a
+    # transcript naming another key is refused. Unset accepts any key.
+    AGENT_SESSION_PROJECT_KEY: str = ""
 
     model_config = SettingsConfigDict(
         env_file=("deploy/.env", "../deploy/.env", "../../deploy/.env"),

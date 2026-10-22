@@ -89,11 +89,11 @@ class Expectations(_Model):
 
 
 class SeedFrom(_Model):
-    """Start a rerun from a checkpoint of an earlier run of the same node (D27)."""
+    """Start a rerun from a message of an earlier run of the same node: the
+    engine forks that run's SDK session up to the message (D27)."""
 
     run_id: UUID
-    checkpoint_id: str = Field(min_length=1)
-    checkpoint_ns: str = ""
+    message_uuid: str = Field(min_length=1, max_length=256)
 
 
 class NodeDef(_Model):
@@ -105,6 +105,9 @@ class NodeDef(_Model):
     params: dict[str, Any] = Field(default_factory=dict)
     input_sources: Optional[InputSources] = None
     expect: Optional[Expectations] = None
+    # D28, part of the definition: `before` waits for the user's release,
+    # `after` holds the next node for the user's review.
+    approval: Literal["none", "before", "after"] = "none"
     # Only on a node this change reruns; not part of the stored definition.
     seed_from: Optional[SeedFrom] = None
 
@@ -196,6 +199,8 @@ class AddNode(_Model):
     params: dict[str, Any] = Field(default_factory=dict)
     input_sources: Optional[dict[str, InputSource]] = None
     expect: Optional[list[Expectation]] = None
+    # D28, from the user's words: approve the node before it starts, or its result after.
+    approval: Literal["none", "before", "after"] = "none"
     at: Optional[int] = Field(default=None, ge=0)
 
 
@@ -244,7 +249,7 @@ class ReleaseHold(_Model):
 
 class RerunNode(_Model):
     """A new run of the node; ``seed_from`` (agent nodes only) starts it from
-    a checkpoint of an earlier run of the same node. Still a new run (I8)."""
+    a message of an earlier run of the same node. Still a new run (I8)."""
 
     op: Literal["rerun_node"] = "rerun_node"
     node_id: UUID
@@ -323,6 +328,7 @@ def apply_ops(
                 title=op.title or op.ref, params=op.params,
                 input_sources=InputSources(ports=op.input_sources) if op.input_sources else None,
                 expect=Expectations(rules=op.expect) if op.expect else None,
+                approval=op.approval,
             ))
             continue
 

@@ -166,7 +166,7 @@ def test_describe_gives_the_composer_the_schemas():
     assert described["phi"] is True
     assert "segmentation_batch_id" in described["ref"]["properties"]
     assert described["summary"]["properties"]["review_status"]["enum"] == [
-        "not_ready", "pending", "submitting", "submitted",
+        "not_ready", "pending", "submitting", "submitted", "auto_accepted",
     ]
 
 

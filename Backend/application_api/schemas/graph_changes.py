@@ -17,14 +17,14 @@ MANIFEST_REASON_PATTERN = r"^(destructive|generated_code|untrusted_tool|approval
 
 
 class ToolCallRef(BaseModel):
-    """The Main's control-tool call this change answers: its result row
-    is written in the same transaction as the change."""
+    """The Main's control-tool call this change answers (D21). Its result is
+    in the Main's SDK transcript; the call keys the change, so a replayed call
+    returns the change it already made."""
 
     model_config = ConfigDict(extra="forbid")
 
-    turn_id: int = Field(ge=0)
-    call_id: str = Field(min_length=1, max_length=128)
-    tool: str = Field(min_length=1, max_length=64)
+    session_id: UUID
+    tool_use_id: str = Field(min_length=1, max_length=256)
 
 
 class GraphChangeSubmit(BaseModel):
@@ -37,7 +37,7 @@ class GraphChangeSubmit(BaseModel):
     base_version: int = Field(ge=0)
     content: ChangeContent
     approval_reasons: list[str] = Field(default_factory=list, max_length=32)
-    # Required for the Main: the key is then sha256(turn_id || call_id).
+    # Required for the Main: the key is then sha256(session_id || tool_use_id).
     tool_call: Optional[ToolCallRef] = None
 
     @field_validator("approval_reasons")

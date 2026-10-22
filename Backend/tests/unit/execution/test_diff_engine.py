@@ -181,20 +181,20 @@ async def test_the_main_submits_once_per_tool_call():
     diff_engine = engine(store, woken)
     session_id = await store.create_session("q")
     diff = GraphDiff(base_version=0, ops=[_add("build_cohort")])
-    first = await diff_engine.apply(session_id, diff, author="main", turn_id=7, call_id="call_0", tool="execute")
+    first = await diff_engine.apply(session_id, diff, author="main", tool_use_id="toolu_0")
     assert first.status == "applied" and woken == [session_id]
     [stored] = store.changes.values()
-    assert stored["idempotency_key"] == main_idempotency_key(7, "call_0")
-    assert main_idempotency_key(7, "call_0") != main_idempotency_key(8, "call_0")
+    assert stored["idempotency_key"] == main_idempotency_key(session_id, "toolu_0")
+    assert main_idempotency_key(session_id, "toolu_0") != main_idempotency_key(session_id, "toolu_1")
 
     # The key replays the same submission: the store returns the change it already has.
     replay = await store.submit_change(
         session_id, author="main", base_version=0, content=first.outcome.content.document(),
-        tool_call={"turn_id": 7, "call_id": "call_0", "tool": "execute"},
+        tool_call={"session_id": session_id, "tool_use_id": "toolu_0"},
     )
     assert replay.replayed and replay.change.change_id == first.change.change.change_id
-    # Re-handling the turn against the moved graph submits nothing new.
-    again = await diff_engine.apply(session_id, diff, author="main", turn_id=7, call_id="call_0", tool="execute")
+    # A call the SDK replays against the moved graph submits nothing new.
+    again = await diff_engine.apply(session_id, diff, author="main", tool_use_id="toolu_0")
     assert [e.code for e in again.errors] == ["STALE_BASE"] and len(store.changes) == 1
     with pytest.raises(ValueError):
         await diff_engine.apply(session_id, diff, author="main")
@@ -231,7 +231,7 @@ async def test_a_seeded_rerun_names_an_earlier_run_of_the_same_resumable_node():
     started = await start(store, session_id, str(pop.node_id), prompt="find patients")
     await run_ok(store, started)
 
-    good = SeedFrom(run_id=uuid.UUID(started.run.run_id), checkpoint_id="cp-3")
+    good = SeedFrom(run_id=uuid.UUID(started.run.run_id), message_uuid="cp-3")
     seeded = await diff_engine.apply(session_id, GraphDiff(base_version=1, ops=[
         RerunNode(node_id=pop.node_id, seed_from=good)]), author="user", idempotency_key="k2")
     assert seeded.status == "pending"  # it supersedes a completed run, like any rerun
@@ -240,7 +240,7 @@ async def test_a_seeded_rerun_names_an_earlier_run_of_the_same_resumable_node():
     assert content["rerun_node_ids"] == [str(pop.node_id)]
     assert content["nodes"][0]["seed_from"]["run_id"] == started.run.run_id
 
-    stranger = SeedFrom(run_id=uuid.uuid4(), checkpoint_id="cp-3")
+    stranger = SeedFrom(run_id=uuid.uuid4(), message_uuid="cp-3")
     refused = await diff_engine.apply(session_id, GraphDiff(base_version=1, ops=[
         RerunNode(node_id=pop.node_id, seed_from=stranger)]), author="user", idempotency_key="k3")
     assert [e.code for e in refused.errors] == ["BAD_SEED"]

@@ -26,6 +26,8 @@ pytestmark = pytest.mark.contract
 BACKEND = Path(__file__).resolve().parents[2]
 API = BACKEND / "application_api"
 MIGRATION = API / "migrations" / "versions" / "p1f0a2c3d4e5_v1_p_session_graph.py"
+# The fenced tables as of the latest revision that changed them.
+FENCING_MIGRATION = API / "migrations" / "versions" / "t1f0a2c3d4e5_v1_t_agent_transcripts.py"
 WRITE_METHODS = {"post", "put", "patch", "delete"}
 # A repository function declares a path when it opens one itself, or runs on
 # the shared lifecycle transition (which opens one).
@@ -34,12 +36,20 @@ DECLARES = ("fenced_transaction(", "@on_path(", "transition(db")
 WRITES = ("commit(", "flush(", "publication(", "db.add(", "_commit(", "@on_path(", "transition(db")
 
 
-@lru_cache(maxsize=1)
-def _migration():
-    spec = importlib.util.spec_from_file_location("_cubeai_v1_p_harness", MIGRATION)
+@lru_cache(maxsize=None)
+def _load(path: Path):
+    spec = importlib.util.spec_from_file_location(f"_cubeai_{path.stem}_harness", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _migration():
+    return _load(MIGRATION)
+
+
+def _fenced_tables() -> set[str]:
+    return set(_load(FENCING_MIGRATION).FENCED_TABLES)
 
 
 @lru_cache(maxsize=None)
@@ -64,7 +74,7 @@ def _functions(path: Path) -> dict[str, str]:
 
 def _fenced_model_modules() -> set[str]:
     """Model modules (named after their table) that map a fenced table."""
-    fenced = set(_migration().FENCED_TABLES)
+    fenced = _fenced_tables()
     modules = set()
     for path in (API / "db" / "models").glob("*.py"):
         module = importlib.import_module(f"application_api.db.models.{path.stem}")
@@ -164,9 +174,10 @@ def test_every_fenced_write_declares_its_path():
 def test_the_scan_sees_the_fenced_repositories():
     """Guard the guard: the scan must recognise the tables it protects."""
     fenced_models = _fenced_model_modules()
-    assert {"node_runs", "run_attempts", "agent_checkpoints", "cohorts", "stored_files"} <= fenced_models
-    for module in ("graph_changes", "run_attempts", "node_runs", "cohorts"):
+    assert {"node_runs", "run_attempts", "agent_transcript_entries", "cohorts", "stored_files"} <= fenced_models
+    for module in ("graph_changes", "run_attempts", "node_runs", "cohorts", "agent_transcript_entries"):
         assert _repository_writes_fenced(module, fenced_models)
+    assert not _repository_writes_fenced("main_transcript_entries", fenced_models)  # not an execution table
     assert _declares("graph_changes", "submit_change")
     assert _declares("sessions", "update_settings")  # through run_attempts
     assert not _declares("chats", "accept_input")
@@ -214,7 +225,6 @@ def _index(table: str, name: str):
         ("graph_changes", "uq_graph_changes_one_pending", "pending"),
         ("node_runs", "uq_node_runs_one_current", "superseded_at IS NULL"),
         ("training_jobs", "uq_training_jobs_one_active", "ended_at IS NULL"),
-        ("chat_messages", "uq_chat_messages_one_tool_result", "tool_result"),
     ],
 )
 def test_partial_unique_indexes(table, index, where):
@@ -239,6 +249,12 @@ def test_the_attempt_states_match_the_migration():
                           "failed_has_error_code", "suspension_shape"}),
         ("sessions", {"control_state", "execution_mode", "privacy_mode"}),
         ("training_jobs", {"outcome", "ended_at_iff_outcome"}),
+        # Phase 6.6 (migration "t").
+        ("graph_nodes", {"approval", "start_release_needs_before"}),
+        ("node_runs", {"downstream_hold"}),
+        ("cohorts", {"frozen_by", "frozen_by_iff_frozen"}),
+        ("agent_transcript_entries", {"entry_uuid_not_blank", "entry_bounded"}),
+        ("main_transcript_entries", {"entry_uuid_not_blank", "entry_bounded"}),
     ],
 )
 def test_named_checks(table, checks):
@@ -256,7 +272,9 @@ def test_named_checks(table, checks):
         ("node_runs", ("accepted_by_change_id", "session_id"), "graph_changes"),
         ("node_runs", ("hold_released_by_change_id", "session_id"), "graph_changes"),
         ("run_attempts", ("run_id", "session_id"), "node_runs"),
-        ("agent_checkpoints", ("attempt_id", "run_id"), "run_attempts"),
+        ("graph_nodes", ("start_released_by_change_id", "session_id"), "graph_changes"),
+        ("agent_transcript_entries", ("run_id", "session_id"), "node_runs"),
+        ("agent_transcript_entries", ("attempt_id", "run_id"), "run_attempts"),
     ],
 )
 def test_composite_foreign_keys(table, columns, target):

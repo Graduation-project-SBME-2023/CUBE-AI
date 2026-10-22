@@ -73,6 +73,8 @@ def test_cohorts_have_the_a10_shape_without_a_session_or_a_title():
         "label_definition",
         "selection_summary",
         "frozen_at",
+        # `user` or `auto` (D28, migration "t").
+        "frozen_by",
         "created_at",
     }
     # The session is one indexed join through agent_runs, not a copy.

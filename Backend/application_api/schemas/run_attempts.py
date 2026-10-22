@@ -1,4 +1,5 @@
-"""Run-attempt schemas (dispatch, reconcile, complete, cancel, suspend)."""
+"""Run-attempt schemas (dispatch, reconcile, complete, cancel, suspend, answer,
+pending tools)."""
 
 from __future__ import annotations
 
@@ -6,7 +7,7 @@ from datetime import datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from application_api.core.execution_rules import RunOutputs
 
@@ -73,24 +74,60 @@ class AttemptReconcile(_Request):
     usage: Optional[Usage] = None
 
 
+SuspensionForm = Literal["cohort_approval", "segmentation_review"]
+
+
 class Suspension(_Request):
-    kind: Literal["gate", "pause"]
-    gate: Optional[Literal["cohort_approval", "segmentation_review", "tool_approval"]] = None
-    interrupt_id: str = Field(min_length=1, max_length=256)
+    """T10 (v2): an `ask_user` question, a tool approval, or a pause. A
+    question or a tool approval names the tool call it suspends on; a domain
+    form (the cohort approval, the segmentation review) is a form of `ask_user`."""
+
+    kind: Literal["ask_user", "tool_approval", "pause"]
+    tool_use_id: Optional[str] = Field(default=None, min_length=1, max_length=256)
+    form: Optional[SuspensionForm] = None
     payload: dict[str, Any] = Field(default_factory=dict)
-    checkpoint_id: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _shape(self) -> Suspension:
+        if (self.kind == "pause") != (self.tool_use_id is None):
+            raise ValueError("a question or a tool approval names its tool_use_id; a pause does not")
+        if self.form is not None and self.kind != "ask_user":
+            raise ValueError("only an ask_user question is a domain form")
+        return self
 
 
 class AttemptSuspend(_Request):
     suspension: Suspension
 
 
-class GateDecision(_Request):
-    """A user's decision in a gate with no domain row (`tool_approval`)."""
+class AttemptAnswer(_Request):
+    """T10's answer step, the user's: an answer to an `ask_user` question or a
+    decision on a tool approval, for the suspended call `tool_use_id`."""
 
-    interrupt_id: str = Field(min_length=1, max_length=256)
-    decision: Literal["approve", "reject"]
+    tool_use_id: str = Field(min_length=1, max_length=256)
+    answer: Optional[Any] = None
+    decision: Optional[Literal["approve", "reject"]] = None
     comment: Optional[str] = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def _one(self) -> AttemptAnswer:
+        if (self.answer is None) == (self.decision is None):
+            raise ValueError("send an answer or a decision, not both")
+        return self
+
+
+class PendingCall(_Request):
+    tool_use_id: str = Field(min_length=1, max_length=256)
+    tool: str = Field(min_length=1, max_length=255)
+    idempotent: bool
+    started_at: datetime
+
+
+class PendingTools(_Request):
+    """The calls the attempt is running, written before a call runs and when it ends."""
+
+    v: Literal[1] = 1
+    calls: list[PendingCall] = Field(default_factory=list, max_length=200)
 
 
 class RunAttemptOut(BaseModel):
@@ -103,6 +140,7 @@ class RunAttemptOut(BaseModel):
     request: Optional[dict[str, Any]] = None
     state: str
     suspension: Optional[dict[str, Any]] = None
+    pending_tools: Optional[dict[str, Any]] = None
     resumed_at: Optional[datetime] = None
     dispatched_at: Optional[datetime] = None
     cancel_requested_at: Optional[datetime] = None
