@@ -14,7 +14,19 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+# Copies of the toolkit's rules. jobs_core cannot import agent_system (the
+# Application API image does not contain it), so test_contract_matches_toolkit.py
+# checks that these stay equal to toolkit/manifest.py.
+JOB_NAME_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"  # = TOOL_NAME_PATTERN
+RESOURCE_CLASSES = ("compute.gpu", "compute.highmem", "compute.cpu")  # = RESOURCE_QUEUES
+MIN_PRIORITY = 0
+MAX_PRIORITY = 9
+
+ResourceClass = Literal["compute.gpu", "compute.highmem", "compute.cpu"]
 
 
 class ErrorCode(StrEnum):
@@ -78,3 +90,62 @@ def make_submission_key(job_id: str, attempt_number: int) -> str:
     if attempt_number < 1:
         raise ValueError(f"attempt number must be >= 1, got {attempt_number}")
     return f"{job_id}.{attempt_number}"
+
+
+class JobRequest(BaseModel):
+    """One try of a job, as sent to the worker and stored on the attempt.
+
+    It crosses a process boundary as JSON, so every field is JSON, and it is
+    checked whole: the ids must be the ones the helpers above compute from the
+    other fields, so two requests for the same work can never disagree on them.
+
+    job_id           make_job_id(context["run_id"], job_name, args)
+    submission_key   make_submission_key(job_id, attempt)
+    attempt          the run_attempts number, from 1
+    job_name         a registered tool name, never an import path
+    job_version      the tool's ToolSpec.version
+    args             the tool's arguments (JSON only)
+    context          ToolContext.to_payload(); must name the node run
+    resource_class   the queue, copied from ToolSpec.resource_class
+    timeout_s        run budget, from the spec
+    queue_timeout_s  how long it may wait to start; None = no limit
+    priority         MIN_PRIORITY..MAX_PRIORITY, from the spec
+    """
+
+    # strict: no silent conversions ("2" is not an attempt number).
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True, allow_inf_nan=False)
+
+    job_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    submission_key: str
+    attempt: int = Field(ge=1)
+    job_name: str = Field(pattern=JOB_NAME_PATTERN)
+    job_version: int = Field(ge=1)
+    args: dict[str, Any]
+    context: dict[str, Any]
+    resource_class: ResourceClass
+    timeout_s: float = Field(gt=0)
+    queue_timeout_s: float | None = Field(gt=0)
+    priority: int = Field(ge=MIN_PRIORITY, le=MAX_PRIORITY)
+
+    @field_validator("args", "context")
+    @classmethod
+    def _json_only(cls, value: dict[str, Any]) -> dict[str, Any]:
+        try:
+            canonical_json(value)
+        except (TypeError, ValueError) as exc:
+            # pydantic reports a ValueError as a validation error, not a TypeError.
+            raise ValueError(f"must be JSON only: {exc}") from None
+        return value
+
+    @model_validator(mode="after")
+    def _ids_match(self) -> JobRequest:
+        run_id = self.context.get("run_id")
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError("context.run_id must name the node run the job belongs to")
+        if self.job_id != make_job_id(run_id, self.job_name, self.args):
+            raise ValueError("job_id is not make_job_id(context.run_id, job_name, args)")
+        if self.submission_key != make_submission_key(self.job_id, self.attempt):
+            raise ValueError("submission_key is not make_submission_key(job_id, attempt)")
+        if self.context.get("job_id") not in (None, self.job_id):
+            raise ValueError("context.job_id names a different job")
+        return self
