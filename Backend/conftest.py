@@ -195,6 +195,8 @@ PY313_ONLY_TESTS = (
     "tests/unit/execution/test_affected.py",
     "tests/unit/execution/test_diff_engine.py",
     "tests/contracts/test_graph_change_contract.py",
+    # Plan 5: compares jobs_core's copies with the toolkit's rules.
+    "tests/unit/jobs/test_contract_matches_toolkit.py",
 )
 collect_ignore = list(PY313_ONLY_TESTS) if sys.version_info < (3, 13) else []
 
