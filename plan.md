@@ -172,7 +172,7 @@ deploy/
 | 2 | Tool Packs | M1 | 1 | ✅ Done (2.1–2.5) |
 | 3 | Agent Definitions and Skills | M1 | 1, 2 | 🟡 Built on the pre-SDK design, not merged; Phase 3.0 reworks it for the SDK |
 | 4 | _(removed: no sandbox)_ | – | – | – |
-| 5 | Job Platform (PostgreSQL + Procrastinate) | M2 Compute | 1, 6 | Not started |
+| 5 | Job Platform (PostgreSQL + Procrastinate) | M2 Compute | 1, 6 | 🟡 5.1 started: the contract types (`contract.py`, `JobStatus`) done 2026-10-22; decisions of 2026-10-22 (SSE wait, MONAI owns the GPU, one submit) written in |
 | 6 | Session State Store: Persistence Design (Application API) | M3 Harness | – (6.1 right after 0) | ✅ Done (6.1–6.6; 6.6 migration "t" on 2026-10-22) |
 | 7 | Modeling Engine, Heavy Tools as Jobs + `run_modeling` | M2 | 0, 2, 5, 6 | 🟡 7.0–7.2 done (engine, rename, legacy records); jobs wait for Plan 5 |
 | 8 | Validator and Diff Engine | M3 | 1, 6 | ✅ 8.1–8.4 done (`ce5a777e`, `3ac5411c`); the 2026-10-19 follow-up (`seed_from`, `approval`) not started |
@@ -532,6 +532,12 @@ Do this on the built branch, before it merges. It is the same kind of change as 
 5. **`polling.py`** (moved from `toolpacks/common/polling.py`, see the Plan 2 follow-ups): `RetryPolicy` (backoff, jitter, cap, `Retry-After`) and `poll_until()` with a monotonic, pause-aware deadline. Used by `MonaiHttpBackend` (Plan 15) and for the reconnect backoff of the job stream; waiting on a Procrastinate job does not poll.
 6. **`budgets.py`:** `JobBudgets(queue_s, run_s, result_s, unavailable_s)`, where the outer budget = the sum of the inner budgets + a margin.
 7. **`backends/in_memory.py`** for tests, scriptable as either kind of backend (reusable or not). The HTTP backend, `backends/app_api.py`, and the routing client, `backends/router.py`, are Phase 5.4; `backends/monai_http.py` is Phase 15.3.
+
+**Status (2026-10-22): 🟡 step 1 done, steps 2–7 open.** Built in `Backend/jobs_core/` (Person 1's task A1), tests in `Backend/tests/unit/jobs/` (98 pass on Python 3.13, in the deterministic gate):
+- **`contract.py`:** `canonical_json` (frozen encoding: sorted keys, no spaces, UTF-8, no NaN), `make_job_id`, `make_submission_key`, `make_input_hash(job_name, job_version, args)`; `ErrorCode` (`StrEnum`, the eight codes above minus `protocol_error`); `ERROR_CODES_BY_STATUS` (which status carries which code); `JobRequest` (frozen, `extra="forbid"`, strict; its validator checks `job_id`, `submission_key` and `context.job_id` against the helpers, and that `args` / `context` are JSON); `JobProgress` (`seq` + the toolkit's `ProgressPayload` fields); `JobRecord` (frozen, strict except the status, error code and times, which arrive as strings; error code consistent with the status, `result` xor `result_ref`, times in order).
+- **`status.py`:** the `JobStatus` enum only, in capitals as MONAI writes them, Python 3.10-compatible (`str, Enum`; a test parses it as 3.10). `TERMINAL`, `ACTIVE`, `is_final` and `derive_status` are step 3 (task A2).
+- **The toolkit's rules are copied, not imported** (the Application API image has no `agent_system`): `JOB_NAME_PATTERN`, `RESOURCE_CLASSES` and the priority bounds; `tests/unit/jobs/test_contract_matches_toolkit.py` (Python 3.13 only, in `PY313_ONLY_TESTS`) keeps them equal to `toolkit/manifest.py`.
+- **Still to change in this code for the 2026-10-22 decisions** (task A1b): `JobRequest.reusable`, `monai.gpu` in `RESOURCE_CLASSES` (and no `compute.gpu`), `ErrorCode.PROTOCOL_ERROR` and `JobProtocolError`.
 
 ## Phase 5.2 — Application API: the queue, dispatch and cancel
 

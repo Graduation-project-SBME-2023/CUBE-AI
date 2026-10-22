@@ -20,7 +20,8 @@ Plan 5 → Phases 7.1 (job manifests), 7.4, 7.5 → Plan 16. **Waits:** none.
 
 **Where the code stands today** (checked in the repo):
 
-- `Backend/jobs_core/` and `Backend/compute_worker/` do not exist yet.
+- `Backend/jobs_core/` exists since 2026-10-22: `contract.py` (A1 done) and `status.py` (the `JobStatus`
+  enum only; the rest is A2). `Backend/compute_worker/` does not exist yet.
 - `toolpacks/common/polling.py` already has `RetryPolicy`, `PollTimeout`, `poll_until` (to move in A3).
 - `toolpacks/common/manifests.py` has the `INTERIM_HEAVY` preset; it is used by
   `modeling/manifest.py` (5 tools), `radiomics/extract_features.py`, `radiomics/analyze_importance.py`,
