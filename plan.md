@@ -54,7 +54,7 @@ The decision in force on each topic the source documents covered.
 | 8 | Runs | _Persistence:_ `agent_runs` is renamed `node_runs` and holds every node run, agent or tool. A run is created lazily when its node starts, together with attempt 1 (D8); every try is a row of the new `run_attempts` table (D9). Domain FKs become `created_by_run_id`. The job id is `sha256(run_id\|tool\|args)`, and the submission key adds `.{attempt_number}`. |
 | 9 | Plan contract | This contract is dropped. The Validator and the registry decide what is valid. A contract test checks the producer allowlists in the Application API against the catalog. _Persistence:_ `plans` and `plan_steps` are renamed `session_graphs` and `graph_nodes` and become the live graph (D4, D6); every mutation is a `graph_changes` row (D7). |
 | 10 | Session status | _Persistence:_ `sessions.status` is renamed `control_state` and holds only intent: `active \| paused \| archived` (D13). The activity (`idle`, `running`, `pausing`, `awaiting_approval`, `blocked`) is derived and never stored. Nothing is ever `completed`. |
-| 11 | Resources | `resources` is the manifest field. `resource_class` is derived from it: `cpu_heavy`→`compute.cpu`, `gpu`→`compute.gpu`, `highmem`→`compute.highmem`; these are the Procrastinate queue names (Plan 5), and each queue's worker concurrency is the real limit. Executor pools are set in `config/resources.yaml` and are runtime only: a node waiting for a pool, or refused at start, is not stored; it is published as `node_start_refused` (D19). |
+| 11 | Resources | `resources` is the manifest field. `resource_class` is derived from it: `cpu_heavy`→`compute.cpu`, `highmem`→`compute.highmem`; these are the Procrastinate queue names (Plan 5). `gpu` maps to no queue: MONAI owns the GPU (decided 2026-10-22), and a MONAI job's `resource_class` is `monai.gpu`; and each queue's worker concurrency is the real limit. Executor pools are set in `config/resources.yaml` and are runtime only: a node waiting for a pool, or refused at start, is not stored; it is published as `node_start_refused` (D19). |
 | 12 | Cache vs job dedupe | _Persistence:_ only the **job id** now. It re-attaches an attempt to the same run after a restart. Fingerprints and cross-version caching are deferred (Appendix P §P.10): sequential suffix invalidation keeps the unaffected prefix, and `execution_policy.fresh` covers fresh reruns. |
 | 13 | Human gates | _Persistence:_ every durable approval of work is a `graph_changes` row decided by a user who quotes its digest (D7); there is no `approvals` table. **There is no fixed gate inside a node** (decided 2026-10-19, D28): approvals happen where the user asked for them. A node's `approval: before` stops its start until the user releases it, and `approval: after` puts a `user_review` hold on its completed run; both are released by a user `ReleaseHold`. Inside a node, the agent asks with `ask_user`, which **suspends** the attempt through the SDK's `defer` (T10): the wait is durable, survives a restart and holds no process. A mandatory tool approval inside a node (Phase 11.3) suspends the same way. The cohort approval and the segmentation review stay as domain forms on their rows (D24 `user gate` path), used only when the user asked; otherwise the cohort is frozen and the masks are accepted automatically (`auto`). |
 | 14 | PHI | `phi` is derived from `data_scopes`. Artifacts carry a `phi` label. The Model Gateway filters the LiteLLM aliases by locality (every model a session's CLI may call, the background model included). `gpt-oss:120b-cloud` counts as **external**. |
@@ -493,8 +493,10 @@ Do this on the built branch, before it merges. It is the same kind of change as 
   - **Every writer of `result.json` sends `finished`** (the supervisor, the queue sweep, the stale-heartbeat sweep, start-up recovery), and T7 sends it for a `todo` job it cancels.
   - **No polling of the Application API.** The client keeps its budgets as deadlines and reconnects a dropped stream with backoff (`RetryPolicy`), sending `Last-Event-ID`. MONAI (Plan 15) has no stream, so `MonaiHttpBackend` keeps `poll_until`.
 - **No Procrastinate retries** (`retry=False`). A retry is a new attempt opened by T4 (I8, D9). A stalled job is never re-run; it is observed as `INTERRUPTED`, and the Watchdog decides (Phase 10.5).
-- **Queues are the `resource_class` names:** `compute.cpu` (started), `compute.gpu` and `compute.highmem` (declared only). One worker process per queue per machine; its `--concurrency` is that queue's limit on that machine.
-- **MONAI is not a Procrastinate queue.** Segmentation inference (Plan 15) and training (Phase 16.2) stay on MONAI's own job store, which owns the GPU it runs on.
+- **Queues are the `resource_class` names:** `compute.cpu` (started) and `compute.highmem` (declared only). One worker process per queue per machine; its `--concurrency` is that queue's limit on that machine.
+- **MONAI owns the GPU (decided 2026-10-22).** Every GPU workload (segmentation inference, Plan 15; training, Phase 16.2) runs in MONAI, behind **one GPU gate** in MONAI (Phase 15.2). There is no `compute.gpu` queue: a tool declaring the `gpu` resource with `execution="job"` is refused by the catalog. MONAI is not a Procrastinate queue; it keeps its own job store. If a Procrastinate GPU queue is ever added, the GPU it uses must not be MONAI's, and its GPU-index pool must hold across worker processes (one worker per machine, enforced, or a shared lock), not only inside one process.
+- **One submit for every job (decided 2026-10-22).** Every job the Agent System starts, a Procrastinate tool job or a MONAI inference job, is one `JobRequest` sent through one `JobClient.submit`; a routing client picks the backend by `resource_class` (`compute.*` → `AppApiJobClient`, `monai.gpu` → `MonaiHttpBackend`). `job_name` is a registered job name: an `execution="job"` tool, or a MONAI job kind (`monai_infer`). Every backend uses the same ids (`job_id`, `submission_key`) and the same `JobRecord`, statuses and error codes. Training is the one exception: the Application API submits it to MONAI with its `training_jobs` receipt (Phase 16.2), because it belongs to no node run; it still takes MONAI's GPU gate.
+- **The work and the try (decided 2026-10-22).** `job_id` names the work inside one node run (it is the run's idempotency key, not a cache across runs: `run_id` is part of it, and `input_hash` adds `job_version`). `submission_key` names one try. A try's result belongs to that try: the job dir is per `submission_key`, `result.json` records its `submission_key` and `attempt_id`, and every reader refuses a result whose identity does not match the attempt it reads for. Only a **reusable** job (`JobRequest.reusable`: it writes nothing but its result, such as a MONAI inference) may hand its `SUCCEEDED` result to a later attempt of the same run; a job that writes domain rows (every Procrastinate tool job: its writes are fenced to its attempt, D24) is always run again under the new key.
 - **Version-specific behaviour is tested, not assumed:** the abort of a running async task, stalled-job detection, worker heartbeats and `queueing_lock` after a job starts are checked against the pinned Procrastinate version by the integration suite.
 
 ## Phase 5.1 — Job contract and client library (`Backend/jobs_core/`)
@@ -504,27 +506,32 @@ Do this on the built branch, before it merges. It is the same kind of change as 
    JobRequest {
      job_id:  sha256(run_id | job_name | canonical_json(args))   # run_id = the node run (Plan 6) -> resume re-attaches
      submission_key: f"{job_id}.{attempt_number}"              # = run_attempts.submission_key (Appendix P)
-     attempt, job_name (a REGISTERED tool name, never an import path), job_version,
-     args (JSON only), context (ToolContext.to_payload()),
-     resource_class (derived from resources),
+     attempt, job_name (a REGISTERED job name, never an import path), job_version,
+     args (JSON only), context (ToolContext.to_payload(); must name the node run),
+     resource_class (compute.cpu | compute.highmem | monai.gpu),
+     reusable (true only for a job that writes nothing but its result),
      timeout_s, queue_timeout_s, priority
    }
    JobRecord { id, status, error_code, attempt, input_hash, progress, queued_at,
-               started_at, finished_at, error, result | result_ref, host }   # built from the view row + the job dir
+               started_at, finished_at, error, result | result_ref, host }   # built from the view row + the job dir, or MONAI's store
    ```
-   `error_code` is one of: `error`, `timeout`, `queue_timeout`, `oom`, `interrupted`, `cancelled`, `run_not_running`.
-2. **`status.py`:** `QUEUED RUNNING CANCELLING SUCCEEDED FAILED TIMED_OUT CANCELLED INTERRUPTED`, plus `TERMINAL`, `ACTIVE` and `is_final()` (an unknown status counts as final).
+   `error_code` is one of: `error`, `timeout`, `queue_timeout`, `oom`, `interrupted`, `cancelled`, `run_not_running`, `resource_unavailable`, `protocol_error`. As built (A1), `ERROR_CODES_BY_STATUS` fixes which status carries which code.
+2. **`status.py`:** `QUEUED RUNNING CANCELLING SUCCEEDED FAILED TIMED_OUT CANCELLED INTERRUPTED`, plus `TERMINAL`, `ACTIVE` and `is_final(status: JobStatus)`. **Only a known terminal status is final.** A backend that reads a status string it does not know raises `JobProtocolError` and logs it; `wait` treats that as "not final yet" and keeps waiting (so a job that is still running on a GPU is never abandoned and resubmitted on top of itself), and when the budget runs out it cancels the job and fails with `protocol_error`. Kept Python 3.10-compatible (MONAI shares the strings).
 3. **`derive_status(row, job_dir)`**, the only mapping from queue state to job status:
    - `result.json` present → its status;
    - `todo` → `QUEUED`; `doing` with a live worker → `RUNNING` (`CANCELLING` once a cancel is requested);
-   - `doing` with a worker heartbeat older than `JOB_HEARTBEAT_TIMEOUT_S` → `INTERRUPTED`;
+   - `doing` with a worker heartbeat older than `JOB_HEARTBEAT_TIMEOUT_S` → `INTERRUPTED`; also `doing` with a live worker but a **job** heartbeat (`process.json`, `heartbeat_at`, written by the supervisor every `JOB_POLL_S`) older than that → `INTERRUPTED` (the worker lives, its supervisor for this job does not). Progress is never a heartbeat: a job may run for a long time without reporting any;
    - `cancelled` before it started → `CANCELLED`, or `TIMED_OUT` (`queue_timeout`) when the queue sweep cancelled it;
    - `failed` with no `result.json` → `FAILED` (`error`): the supervisor itself crashed;
    - no row → not found.
-4. **`client.py`:** the `JobClient` protocol: `submit` (the same key returns the existing record), `get`, `wait(budgets, on_progress, cancel)`, `result`, `cancel`, `purge`, `list(run_id, active_only)`.
+4. **`client.py`:** the `JobClient` protocol, the same for every backend: `submit(request: JobRequest)`, `get`, `wait(budgets, on_progress, cancel)`, `result`, `cancel`, `purge`, `list(run_id, active_only)`. `submit` rules:
+   - the same `submission_key` returns the existing record;
+   - the same `job_id` with a different `input_hash` is a conflict (the tool changed version inside one run);
+   - a `reusable` request whose `job_id` already has a `SUCCEEDED` record from an earlier attempt returns that record; anything else (a failed earlier try, or a job that is not reusable) runs again under the new key;
+   - a full queue is refused with `queue_full` and a `Retry-After`; the client waits and retries within `unavailable_s`, then fails with `resource_unavailable` (the same rule as MONAI's 429).
 5. **`polling.py`** (moved from `toolpacks/common/polling.py`, see the Plan 2 follow-ups): `RetryPolicy` (backoff, jitter, cap, `Retry-After`) and `poll_until()` with a monotonic, pause-aware deadline. Used by `MonaiHttpBackend` (Plan 15) and for the reconnect backoff of the job stream; waiting on a Procrastinate job does not poll.
 6. **`budgets.py`:** `JobBudgets(queue_s, run_s, result_s, unavailable_s)`, where the outer budget = the sum of the inner budgets + a margin.
-7. **`backends/in_memory.py`** for tests. The HTTP backend, `backends/app_api.py`, is Phase 5.4.
+7. **`backends/in_memory.py`** for tests, scriptable as either kind of backend (reusable or not). The HTTP backend, `backends/app_api.py`, and the routing client, `backends/router.py`, are Phase 5.4; `backends/monai_http.py` is Phase 15.3.
 
 ## Phase 5.2 — Application API: the queue, dispatch and cancel
 
@@ -539,6 +546,8 @@ Do this on the built branch, before it merges. It is the same kind of change as 
    - Require the attempt current, `dispatch_kind='job'`, and `preparing` (or `submitted` / `running` for a resend, which changes nothing).
    - Defer `compute.run_tool_job` with the attempt's stored `request`, `queue = request.resource_class`, `queueing_lock = lock = submission_key`, `retry=False`; then commit `submitted` + `dispatched_at` ("send, then commit", Appendix P T4). The defer runs on Procrastinate's own connection before the T4 dispatch transaction opens, so no transaction spans it.
    - `AlreadyEnqueued` for the same lock, or a row already present for the key, counts as sent.
+   - **The worker may start before the commit.** Between the send and the commit, a worker can take the job and call `/running`. That is allowed: `mark_running` accepts `preparing` as well as `submitted` (`run_attempts.py:229`), and the T4 commit that follows finds the attempt `running` with `dispatched_at` set and changes nothing (`mark_dispatched`, `:204`). A crash between the send and the commit leaves a `preparing` attempt with a queued job: the worker's `/running`, or a resend of T4 (`AlreadyEnqueued` = sent), brings it forward. Both orders are live-DB tests. (If this ever proves fragile: the queue is in the same database, so Procrastinate's own defer SQL function can be called inside the T4 transaction, making the send and the commit one atomic step; check the function's name in the pinned version.)
+   - **Admission:** before the send, refuse with `429 queue_full` and a `Retry-After` when the queue already holds `JOB_QUEUE_CAPACITY` `todo` jobs, or the session already has `JOB_SESSION_CAPACITY` jobs `todo` or `doing` (so one session cannot fill the queue). A refused attempt stays `preparing`; the client retries within `unavailable_s`.
    - `/dispatched` stays for `in_process` and `inline` attempts.
 4. **T7 for jobs:** `request_cancel` on a job attempt also cancels its Procrastinate job in the same request: a `todo` job is cancelled and never starts (T7 writes its `CANCELLED` result and sends `finished` on `job_events`); a `doing` job gets an abort. The worker also polls `cancel_requested_at` (Phase 5.3).
 5. **Reads:** `GET /runs/{run_id}/attempts/{attempt_id}/job` (the view row for the attempt's key, `owned_run`), and `GET /jobs/queues` (per queue: `todo`, `doing`, live workers) for Plans 11 and 13.
@@ -546,7 +555,7 @@ Do this on the built branch, before it merges. It is the same kind of change as 
    - **`LISTEN`:** one connection per API worker process on the channel `job_events`, opened and closed in the lifespan; a notification is routed to the streams open for its `submission_key`. A dropped connection is re-opened, then every open stream gets the current state again.
    - **Frames:** first `state` (the current record), then `progress` (`id` = the progress sequence number, so a client drops a frame it has seen) and one `finished`, after which the server closes the stream. A `: ping` comment every `JOB_SSE_PING_S` keeps proxies from closing a quiet stream. A job that is already final gets `state` then `finished` at once.
    - **Ingress:** the Agent System calls the API directly (`APP_API_URL`), not through OpenResty. If a browser ever reads the stream, its OpenResty location needs `proxy_buffering off` and a read timeout longer than `JOB_SSE_PING_S`; the route sends `X-Accel-Buffering: no` either way.
-6. **T5 and T6 do not change:** the Node Runner observes the job through `JobClient.get` and reports the outcome (T5) or completes the attempt (T6), as for any backend.
+7. **T5 and T6 do not change:** the Node Runner observes the job through `JobClient.get` and reports the outcome (T5) or completes the attempt (T6), as for any backend.
 
 ## Phase 5.3 — Compute worker (`Backend/compute_worker/`, a Procrastinate app)
 
@@ -555,18 +564,18 @@ Do this on the built branch, before it merges. It is the same kind of change as 
    - `asyncio.create_subprocess_exec(..., start_new_session=True)`, so a stop reaches the child's own subprocesses;
    - an **env allowlist** (no `MODEL_API_KEY`, no `JOBS_DATABASE_URL`, no tokens);
    - stdout and stderr go to the job dir;
-   - `stop(grace_s)`: `killpg(SIGTERM)` → wait `grace_s` → `killpg(SIGKILL)` → reap.
+   - `stop(grace_s)`: `killpg(SIGTERM)` → wait `grace_s` → `killpg(SIGKILL)` → reap. **Stopped means gone:** `stop` returns only when the child is reaped and `killpg(pgid, 0)` finds no process left in the group. If one is still there after a second `grace_s` (a process stuck in the kernel), `stop` raises `StopFailed`; the supervisor records `INTERRUPTED`, and the worker stops taking jobs and exits, so the container restart frees what is left. A worker slot is never handed to a new job while an old process may still hold memory.
 3. **`supervisor.py`**, in order:
-   1. **Already done?** A complete `result.json` → return. The work finished before a crash, so nothing is computed again.
+   1. **Already done?** A complete `result.json` whose `submission_key` and `attempt_id` are this request's → return. The work finished before a crash, so nothing is computed again. A `result.json` with another identity is a bug: it is moved aside, logged, and the job runs.
    2. **Queue timeout:** `queued_at + queue_timeout_s` has passed → write a `TIMED_OUT` (`queue_timeout`) result and return.
    3. **Start:** move the attempt to `running` through the Application API (`POST /runs/{run_id}/attempts/{attempt_id}/running`). A refusal (the attempt is no longer the run's active one; H20) writes `run_not_running` and starts no child.
    4. **Launch:** start the child through the launcher, with a progress pipe; `{host, pid, pgid}` go to `process.json`.
    5. **Relay progress** as it arrives on the pipe: write `progress.json` (temp file + rename, with a sequence number) and `NOTIFY job_events` (`{submission_key, seq, kind: "progress", progress}`, under PostgreSQL's 8000-byte payload limit, so a long message is cut). Coalesced: at most one notification per `JOB_PROGRESS_NOTIFY_S`, and the latest one is never dropped.
-   6. **Watch,** every `JOB_POLL_S`: the attempt's `cancel_requested_at`, the Procrastinate abort, and `timeout_s`. A stop is `launcher.stop(JOB_KILL_GRACE_S)`. (This is the supervisor watching its own child, on its own machine; nothing outside the worker polls.)
-   7. **Exit:** write `result.json` (`SUCCEEDED`, `FAILED`, `TIMED_OUT` or `CANCELLED`) through a temp file and a rename, send `NOTIFY job_events` (`kind: "finished"`), then **return normally**, so a queue `failed` means only that the supervisor itself crashed. **OOM:** a child that reports `MemoryError`, or that is killed by SIGKILL (exit code 137) without a stop request, is recorded as `FAILED` with `error_code="oom"`.
+   6. **Watch,** every `JOB_POLL_S`: write the job heartbeat (`heartbeat_at` in `process.json`), then check the attempt's `cancel_requested_at`, the Procrastinate abort, and `timeout_s`. A stop is `launcher.stop(JOB_KILL_GRACE_S)`. (This is the supervisor watching its own child, on its own machine; nothing outside the worker polls.)
+   7. **Exit:** write `result.json` (`SUCCEEDED`, `FAILED`, `TIMED_OUT` or `CANCELLED`, with this request's `submission_key` and `attempt_id`) through a temp file and a rename, send `NOTIFY job_events` (`kind: "finished"`), then **return normally**, so a queue `failed` means only that the supervisor itself crashed. **Failure classes:** the child writes a structured failure (`{class, message}`, with the traceback in the job log, never in `error`); `class="oom"` comes from `MemoryError` (and, for any future GPU code, `torch.cuda.OutOfMemoryError`), and a child killed by SIGKILL (exit code 137) without a stop request is also `oom`. Each maps to `FAILED` with that `error_code`; anything unclassified is `error`.
    8. **Cancelled coroutine** (an abort, or the worker shutting down): stop the process group in `except CancelledError` and in `finally`, then write `CANCELLED` (abort) or `INTERRUPTED` (shutdown), and send `finished`.
 4. **`child.py`:**
-   - calls `ensure_storage_layout()` and `install_write_guard()`, and sets up a per-job log handler;
+   - calls `ensure_storage_layout()` and `install_write_guard(job_dir=...)`, and sets up a per-job log handler. Inside `COMPUTE_JOBS_DIR`, the guard lets the child write only its own job dir (another job's dir, or another attempt's, raises). The audit hook does not see writes made by native code, and the child runs as the same user with the same mount (there is no sandbox, Plan 4), so this stops mistakes, not a hostile tool; tests cover the Python paths;
    - applies thread caps (`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `COMPUTE_CPU_THREADS`);
    - builds `ToolContext.from_payload()` with a `PipeProgressSink` (one JSON line per update on the progress pipe; the supervisor, its parent, writes `progress.json`). The payload carries `run_id` and `attempt_id`, so every write the handler makes presents the D24 attempt path;
    - looks up `job_name` in the catalog (an **allowlist**: only `execution="job"` tools);
@@ -574,9 +583,9 @@ Do this on the built branch, before it merges. It is the same kind of change as 
 5. **Periodic tasks** (Procrastinate periodic tasks on the `compute.cpu` worker):
    - a `doing` job whose worker heartbeat is older than `JOB_HEARTBEAT_TIMEOUT_S` is marked failed, and reads as `INTERRUPTED` through `derive_status`; it sends `finished`;
    - a `todo` job past its `queue_timeout_s` gets its `queue_timeout` result, then is cancelled; it sends `finished`;
-   - finished jobs older than `JOB_RETENTION_HOURS` are deleted, and so are job dirs left behind that long.
+   - finished jobs older than `JOB_RETENTION_HOURS` are deleted, and so are job dirs left behind that long, **but only once their attempt is terminal in `run_attempts`** (its result was read and the attempt completed or failed, T5/T6). A job whose attempt is still open keeps its dir, however old, so an Agent System that was down for a weekend still finds its result.
 6. **Start-up:** kill the process groups recorded in `process.json` on this host whose job no live worker holds, write `INTERRUPTED` for them, and send `finished`.
-7. **GPU queue** (declared; started when the first GPU job tool exists): one `compute.gpu` worker per machine, `--concurrency` = the number of GPUs, and an in-worker pool of free GPU indices. A slot takes an index, sets `CUDA_VISIBLE_DEVICES` for its child, and returns it in `finally`. `CUDA_VISIBLE_DEVICES` alone is not a reservation.
+7. **No GPU queue.** MONAI owns the GPU (decision above); the worker hides GPUs from its children (`CUDA_VISIBLE_DEVICES=""` in the env allowlist), so a CPU job cannot take GPU memory by accident.
 8. **`Backend/storage_paths.py`:** add `COMPUTE_JOBS_DIR` (and document it in `Backend/storage/README.md`). Every output a tool keeps goes through `storage_paths` / `stored_files`, never `/tmp`, so a second machine needs only a shared mount.
 
 ## Phase 5.4 — Toolkit integration
@@ -586,10 +595,12 @@ Do this on the built branch, before it merges. It is the same kind of change as 
    - runs `JobClient.submit` → `wait` (progress goes to the `EventSink` as `tool_progress`) → `result`, which returns the same JSON as today;
    - maps the cancel token to `JobClient.cancel`, and calls `purge` in `finally`;
    - `dispatch.py` routes `execution="job"` here.
-2. **`jobs_core/backends/app_api.py` (`AppApiJobClient`):**
+   - **one client:** `runtime/job.py` and the segmentation client (Phase 15.4) both hold the routing client, never a backend directly.
+2. **`jobs_core/backends/router.py` (`RoutingJobClient`):** a `JobClient` that sends each call to the backend for the request's `resource_class` (`compute.*` → `AppApiJobClient`, `monai.gpu` → `MonaiHttpBackend`). For `get`/`wait`/`cancel`/`result`/`purge`, it uses the backend it chose at `submit` (kept by `submission_key`); after a restart the caller submits the same request again, which returns the existing record (same key) and restores the route, so nothing about routing is stored. An unknown `resource_class` is refused at `submit`.
+3. **`jobs_core/backends/app_api.py` (`AppApiJobClient`):**
    - `submit` → `…/dispatch`; `get` → `…/job` plus the job dir, through `derive_status`;
    - `wait` → reads the job stream (`…/job/events`): each `progress` frame goes to `on_progress` as it arrives (H19), `finished` ends the wait; a dropped stream is re-opened with `RetryPolicy` backoff and `Last-Event-ID`, and the budgets stay the deadlines. No polling;
-   - `cancel` → T7 (`…/cancel`); `result` → `result.json`; `purge` → deletes the job dir after T6; `list` → the run's job attempts.
+   - `cancel` → T7 (`…/cancel`); `result` → `result.json`, refused unless its `submission_key` and `attempt_id` are the attempt's; `purge` → deletes the job dir after T6; `list` → the run's job attempts.
 
 ## Phase 5.5 — Deploy and CI
 
@@ -600,11 +611,10 @@ Do this on the built branch, before it merges. It is the same kind of change as 
    - `Backend/agent_system/requirements.txt` is **UTF-16 LE with CRLF**, so keep that encoding.
 2. **`deploy/docker-compose.backend.gpu.yml`:**
    - `compute-worker-cpu`: the agents image, running `procrastinate --app=compute_worker.app.app worker --queues=compute.cpu --concurrency=${COMPUTE_MAX_CONCURRENCY:-1}`, with `JOBS_DATABASE_URL` and `APP_API_URL`. It uses the **same `/storage` mount path**, a non-root user, no Docker socket, and a `mem_limit` (`COMPUTE_MEMORY_LIMIT`), so an out-of-memory job is killed inside the container. Its network reaches only PostgreSQL and the Application API. `init: true`, and a `stop_grace_period` longer than `JOB_KILL_GRACE_S`;
-   - `compute-worker-gpu`: declared under the compose profile `gpu-jobs`, not started;
    - the PostgreSQL init script creates the role `cubeai_jobs`;
    - remove the `Backend/mcp` bind mount (`:13`).
 3. **`deploy/Dockerfile.agents`:** copy `jobs_core` and `compute_worker`; remove `COPY ./Backend/mcp` (`:40`).
-4. **`deploy/.env.example`:** `JOBS_DB_PASSWORD`, `JOBS_DATABASE_URL`, `COMPUTE_MAX_CONCURRENCY`, `COMPUTE_CPU_THREADS`, `JOB_RETENTION_HOURS`, `JOB_HEARTBEAT_TIMEOUT_S`, `JOB_KILL_GRACE_S`, `JOB_POLL_S`, `JOB_PROGRESS_NOTIFY_S`, `JOB_SSE_PING_S`, `COMPUTE_MEMORY_LIMIT`.
+4. **`deploy/.env.example`:** `JOBS_DB_PASSWORD`, `JOBS_DATABASE_URL`, `COMPUTE_MAX_CONCURRENCY`, `COMPUTE_CPU_THREADS`, `JOB_RETENTION_HOURS`, `JOB_HEARTBEAT_TIMEOUT_S`, `JOB_KILL_GRACE_S`, `JOB_POLL_S`, `JOB_PROGRESS_NOTIFY_S`, `JOB_SSE_PING_S`, `JOB_QUEUE_CAPACITY`, `JOB_SESSION_CAPACITY`, `COMPUTE_MEMORY_LIMIT`.
 5. **The database boundary:** `DATABASE_URL` only on `application-api`, and `JOBS_DATABASE_URL` only on `compute-worker-*`. The test that checks the compose files, and `CLAUDE.md`, say so.
 6. **pytest:** the `celery` marker (Phase 1.5) becomes `jobs` ("needs PostgreSQL and a compute worker"), and the `sandbox` marker is removed.
 7. **CI:** the jobs integration suite runs in `live-db-tests` against its `postgres:18-alpine` service, with a worker started from the built image. No Redis service.
@@ -618,7 +628,13 @@ Do this on the built branch, before it merges. It is the same kind of change as 
   - retry policy / `Retry-After`; the pause-aware deadline;
   - the supervisor with a fake runner: the `result.json` short-circuit, the OOM mapping, the SIGTERM → grace → SIGKILL order, `run_not_running`;
   - the launcher: no secret and no `JOBS_DATABASE_URL` reach the child; a stop reaches grandchildren; the SIGTERM → grace → SIGKILL order;
-  - the GPU pool: two GPUs and two jobs get different indices, and an index comes back after a failure;
+  - `is_final` takes only known statuses; an unknown status string keeps `wait` waiting (logged), and the budget's end cancels the job and fails with `protocol_error`;
+  - `submit`: same key → the record; same id + other `input_hash` → conflict; a reusable job's earlier `SUCCEEDED` record is handed to a later attempt, a non-reusable job's is not; `queue_full` → retried, then `resource_unavailable`;
+  - the routing client: each `resource_class` reaches its backend; an unknown one is refused;
+  - a `result.json` with another attempt's identity is refused by the supervisor and by `result`;
+  - the launcher's `stop` returns only when no process of the group is left, and raises `StopFailed` otherwise;
+  - the child's write guard: its own job dir is writable, another job's dir is not;
+  - retention keeps a job dir whose attempt is still open;
   - progress relay: pipe lines → `progress.json` + one coalesced notification per interval, the latest never dropped; a long message is cut under the payload limit;
   - `AppApiJobClient.wait` on a scripted stream: progress reaches `on_progress` in order, `finished` ends it, a dropped stream reconnects with `Last-Event-ID` and drops a frame it has seen, a budget deadline still fires on a silent stream.
 - **`tests/integration/jobs/`** (`-m "integration and jobs"`, with real PostgreSQL and a real worker, **on the pinned Procrastinate version**):
@@ -630,7 +646,10 @@ Do this on the built branch, before it merges. It is the same kind of change as 
   - soft and hard timeouts; a cancel that arrives after the job finished changes nothing;
   - the worker killed mid-job → `INTERRUPTED` after the heartbeat timeout; the worker container stopped mid-job → the job stops within the grace period;
   - the worker killed after `result.json` was written → the outcome is read back, and nothing is computed again;
-  - `run_not_running`; a write with a stale `attempt_id` is rejected; the write guard is active in the child.
+  - `run_not_running`; a write with a stale `attempt_id` is rejected; the write guard is active in the child;
+  - T4 race: a worker that calls `/running` before the T4 commit starts, and the commit then changes nothing; a crash between the send and the commit is recovered by `/running` or by a resend;
+  - admission: `JOB_QUEUE_CAPACITY` and `JOB_SESSION_CAPACITY` refuse with `429 queue_full`;
+  - a live worker whose supervisor stops writing the job heartbeat → `INTERRUPTED`.
 - **Contract:** `job_execution_status` exists with the expected columns; `cubeai_jobs` has rights on the Procrastinate objects only; nothing outside `compute_worker/` and the Application API imports `procrastinate`; no `redis` or `celery` import or requirement anywhere.
 
 **Done when:** the unit and integration job suites pass; `runtime/job.py` works with both the in-memory and the `app_api` backends; and no Redis or Celery is left in the requirements, the compose files or the code.
@@ -1413,13 +1432,18 @@ Add the first real tests for `monailabel/endpoints/inference_jobs.py`: submit, p
 Fix these in place. MONAI keeps its own file store, and its status strings must equal `jobs_core.status` (a contract test checks this).
 
 - J1, J2, J4 (server side), J6, J8, J10, J11, J12. J1 is also the prerequisite of Appendix P §P.9 *Execution-adapter prerequisites*: until it lands, a failed segmentation pair cannot be re-executed within the same run.
+- **One GPU gate (J5, decided 2026-10-22).** MONAI owns the GPU, so it has one admission point for it: `services/gpu_gate.py` replaces `inference_capacity`. Inference jobs **and** training take the same gate (`GPU_MAX_CONCURRENCY`, default 1; plus `GPU_QUEUE_CAPACITY` waiting, default 8: the limit counts running + waiting, and beyond it the answer is `429` with `Retry-After`). Training preparation (download, dataset build: CPU and I/O) runs **before** the gate and does not hold it. MONAI Label's own `/train/` route, which the browser calls today (`MonaiLabelClient.js:84`) and which takes no slot, is closed at the ingress (J9) and reached only from the Phase 16.2 training job, inside the gate.
+- **A slot is freed when the GPU work has ended, not when the request ended (J2).** A cancel or a timeout marks the job `CANCELLING` and stops waiting for it, but keeps the slot until the `/infer` call actually returns; MONAI does not close its loopback call to `/infer` early (the GPU would keep working with the slot already freed). A call still running `INFERENCE_STUCK_S` after its cancel cannot be stopped (Python cannot kill a thread): MONAI reports itself unhealthy and exits, and the restart frees the GPU memory with the process. Start-up marks its jobs `INTERRUPTED`.
+- **GPU out of memory** (`torch.cuda.OutOfMemoryError`) is `FAILED` with `error_code="oom"`, not a generic failure; the traceback goes to the MONAI log, the job's `error` gets one line.
 - Verify J3 in the 0.8.5 image.
 - J9 ingress rules in `Frontend/OHIF-Viewer/platform/app/.recipes/OpenResty-Orthanc/config/nginx.conf`.
 
 ## Phase 15.3 — MONAI backend
 
-`jobs_core/backends/monai_http.py` (`MonaiHttpBackend` implements `JobClient`):
+`jobs_core/backends/monai_http.py` (`MonaiHttpBackend` implements `JobClient`, reached through the routing client of Phase 5.4):
 
+- **`submit(JobRequest)` like every backend:** `job_name="monai_infer"`, `resource_class="monai.gpu"`, `reusable=true`; `args` carry what decides the mask (`pair_id`, `model`, `image`, `prompt`). MONAI's job id is the request's `job_id` (the work), and MONAI records the request's `attempt`, so a later attempt of the same run re-attaches to a finished pair job instead of running it again, and a failed one is re-queued with `attempt + 1` (J1);
+- maps MONAI's job JSON into a `JobRecord`; a status string it does not know raises `JobProtocolError` (Phase 5.1);
 - honours `Retry-After`; uses a closed status set; uses separate budgets;
 - streams the result download, with retry;
 - cancels and purges in `finally`;
@@ -1428,7 +1452,7 @@ Fix these in place. MONAI keeps its own file store, and its status strings must 
 ## Phase 15.4 — Segmentation client
 
 - `segmentation/services.py` `_await_inference_job` → `MonaiHttpBackend` (J7, J13, S1, S3, S4).
-- The pair job id follows D10: `inference_job_id = sha256(batch_correlation_id|pair_id|model|prompt)`, with the correlation id stored once in `segmentation_batches.config`. Every attempt of a run re-attaches to the same jobs, and a new run gets new ones (S5, `module.py:1439-1441`).
+- The pair job id follows the one job id rule (Phase 5.1, decided 2026-10-22): `make_job_id(run_id, "monai_infer", {pair_id, model, image, prompt})`, built as a `JobRequest` and sent through the routing client. `run_id` gives what the batch correlation id gave: every attempt of a run re-attaches to the same jobs, and a new run gets new ones (S5, `module.py:1439-1441`), so no correlation id is stored. Check while building it that a segmentation batch never spans two node runs; if one can, the batch id goes into `args`.
 - The heartbeat in `pipelines/common.py`: J14, S2.
 - Use `to_thread` for heavy numpy / SimpleITK work (S7).
 - The session handle is passed in explicitly (S9); the Executor's cancel token reaches the MONAI cancel.
@@ -1437,7 +1461,10 @@ Fix these in place. MONAI keeps its own file store, and its status strings must 
 
 **Tests (`tests/unit/monai/`, `tests/unit/segmentation/`):**
 
-- J1 resubmit + slot count; J2 slot kept until the work ends;
+- J1 resubmit + slot count; J2 slot kept until the work ends, also after a cancel;
+- one GPU gate: an inference job and a training job never hold the GPU at once; training preparation runs without the gate; a full gate answers `429`;
+- a `/infer` call stuck past `INFERENCE_STUCK_S` after its cancel makes MONAI unhealthy; `torch.cuda.OutOfMemoryError` → `FAILED(oom)`;
+- `MonaiHttpBackend.submit`: a later attempt re-attaches to a `SUCCEEDED` pair job; a failed one is re-queued with `attempt + 1`; an unknown status raises `JobProtocolError`;
 - `INTERRUPTED` handling; the TTL sweep; the status-string contract;
 - backend tests with `respx`, including the 429 → `resource_unavailable` mapping;
 - the heartbeat never leaks the inner task;
@@ -1464,7 +1491,7 @@ Fix these in place. MONAI keeps its own file store, and its status strings must 
 
 ## Phase 16.2 — Training
 
-Fix T1–T9. T1 becomes one server-side training job (prepare → create-model → train), orchestrated by the Application API. Its receipt is a `training_jobs` row committed before the POST (Appendix P D17, transaction T9); the table is created by migration "p" in Plan 6. Training stays outside the Session Graph; it belongs to the MONAI training UI.
+Fix T1–T9. T1 becomes one server-side training job (prepare → create-model → train), orchestrated by the Application API. Its receipt is a `training_jobs` row committed before the POST (Appendix P D17, transaction T9); the table is created by migration "p" in Plan 6. Training stays outside the Session Graph; it belongs to the MONAI training UI. It is the one job not submitted through `JobClient` (it has no node run, Plan 5), but its train step takes MONAI's one GPU gate (Phase 15.2), and its preparation runs outside the gate. The browser no longer calls MONAI's `/train/` directly (J9).
 
 ## Phase 16.3 — Ingestion as a job
 
@@ -1637,8 +1664,8 @@ Run every suite in the Testing section, plus the final check.
 | J1 | **Critical.** Resubmitting a job in a terminal non-success state calls `reserve()` (`inference_jobs.py:282`), then `_write_job(QUEUED)` (`:305`) hits the terminal guard (`job_root.py:133-143`) → 500, and the slot leaks. After 9 retries, all inference returns 429 until a restart. A normal Stop → Resume triggers it. | Explicit re-queue (`attempt + 1`); write the state before reserving; release on any error. |
 | J2 | Cancel and timeout only close the loopback call; the GPU work continues, but the slot is freed. | Keep the slot until `/infer` returns; persist `CANCELLING` → `CANCELLED`. |
 | J3 | (to verify) `/infer` may block MONAI's event loop. | Check the 0.8.5 image; if it blocks, run the infer task in a thread. |
-| J4 | Clients ignore `INTERRUPTED` (`services.py:301`, `run_segmentation.py:111`). | Shared vocabulary; unknown = final; re-queue once. |
-| J5 | Training preparation uses the inference slot (`training_jobs.py:118`). | Named capacity pools (Plans 10, 16). |
+| J4 | Clients ignore `INTERRUPTED` (`services.py:301`, `run_segmentation.py:111`). | Shared vocabulary; an unknown status is a protocol error, not final (Phase 5.1); re-queue once. |
+| J5 | Training preparation uses the inference slot (`training_jobs.py:118`), while the real training, started by the browser on MONAI's `/train/`, takes no slot at all: inference and training can share the GPU. | One GPU gate in MONAI for inference and training; preparation outside it (Phase 15.2). |
 | J6 | No server-side limit on queue wait. | `queue_timeout_s` → `TIMED_OUT(queue)`. |
 | J7 | 429 is treated as permanent; `Retry-After` is ignored (`services.py:203-212`). | `RetryPolicy`. |
 | J8 | Job files are never cleaned; `.result.tmp` is left after a crash. | TTL sweeper; start-up cleanup; purge in `finally`. |
@@ -1707,7 +1734,7 @@ All fixed in Plan 2 except L14, which Plan 3 takes:
 - **T3:** each run creates a new `Task*` folder. Fix: use the DB `dataset_id`.
 - **T4:** the workflow is frozen before MONAI accepts the job. Fix: freeze it after the accept.
 - **T5:** MONAI errors become a 503. Fix: pass the 4xx through.
-- **T6:** preparation shares the inference slot. Fix: see J5.
+- **T6:** preparation shares the inference slot, and the train step takes none. Fix: see J5 (one GPU gate; preparation outside it).
 - **T7:** cancel is not granular, and nothing is rolled back. Fix: check between files and delete partial data.
 - **T8:** the reservation leaks, and `_workflow_locks` grows forever. Fix: `try/finally` and a `WeakValueDictionary`.
 - **T9:** browser polling is fragile. Fix: backoff, and tolerance of transient errors.
@@ -1748,7 +1775,7 @@ The database rules every plan follows. The schema itself is built (migrations "o
 - **D7 — Every graph mutation is a `graph_changes` row**, and that row is the only durable approval of work. Every approval reason is computed **when the change is proposed**, never when a node starts. The proposer mints the `node_id` of every new node. At most one pending change per session. A change that needs approval is applied only by a **user** decision quoting its `content_digest`.
 - **D8 — Runs are created lazily, when a node starts** (T4, together with attempt 1). Applying a change creates no run. A node has many runs over time, at most one current.
 - **D9 — Attempts are `run_attempts`:** one real try with one submission key, persisted before dispatch. A restart, reconnect or resubmission of an uncertain submission **reuses** the attempt; a new attempt only when execution must truly start again. At most one non-terminal attempt per run always, and per **session** now (a current-phase constraint, §P.4). `unknown` and `suspended` are non-terminal. An attempt is terminal only on evidence that its work stopped; a timeout is a cancel request until the stop is confirmed. A suspended attempt has no running work: the same attempt resumes, and its cancel is confirmed at once.
-- **D10 — Segmentation fan-out stays inside one node attempt.** Pair jobs are domain items on `segmentation_pairs`, with `inference_job_id = sha256(batch_correlation_id|pair_id|model|prompt)`; the correlation id is minted once per batch (`segmentation_batches.config`), so every attempt of a run re-attaches to the same jobs and a new run gets new ones.
+- **D10 — Segmentation fan-out stays inside one node attempt.** Pair jobs are domain items on `segmentation_pairs`, with `inference_job_id = make_job_id(run_id, "monai_infer", {pair_id, model, image, prompt})` (the one job id rule, Plan 5; revised 2026-10-22 from a per-batch correlation id), so every attempt of a run re-attaches to the same jobs and a new run gets new ones.
 - **D11 — Results live in the typed domain tables.** Inputs are pinned per port in `resolved_inputs` at first start (D23); the port → result selection is frozen in `node_runs.outputs` at completion. No generic artifact table.
 - **D12 — Backends own physical execution state** (the Procrastinate rows and job dir, the MONAI job store). The harness tables keep identity and the last confirmed outcome and copy nothing from the queue; the Application API reads it through the `job_execution_status` view.
 - **D13 — `sessions.control_state` is intent only:** `active | paused | archived`. The activity is derived (§P.4) and never stored. Nothing is ever "completed".
