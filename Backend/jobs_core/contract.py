@@ -16,7 +16,16 @@ import json
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
+
+from .status import JobStatus
 
 # Copies of the toolkit's rules. jobs_core cannot import agent_system (the
 # Application API image does not contain it), so test_contract_matches_toolkit.py
@@ -50,6 +59,23 @@ class ErrorCode(StrEnum):
     CANCELLED = "cancelled"
     RUN_NOT_RUNNING = "run_not_running"
     RESOURCE_UNAVAILABLE = "resource_unavailable"
+
+
+# Which error codes each status may carry. A status missing here (QUEUED,
+# RUNNING, CANCELLING, SUCCEEDED) carries none; the others must carry one.
+ERROR_CODES_BY_STATUS: dict[JobStatus, frozenset[ErrorCode]] = {
+    JobStatus.FAILED: frozenset(
+        {
+            ErrorCode.ERROR,
+            ErrorCode.OOM,
+            ErrorCode.RUN_NOT_RUNNING,
+            ErrorCode.RESOURCE_UNAVAILABLE,
+        }
+    ),
+    JobStatus.TIMED_OUT: frozenset({ErrorCode.TIMEOUT, ErrorCode.QUEUE_TIMEOUT}),
+    JobStatus.CANCELLED: frozenset({ErrorCode.CANCELLED}),
+    JobStatus.INTERRUPTED: frozenset({ErrorCode.INTERRUPTED}),
+}
 
 
 def canonical_json(value: Any) -> bytes:
@@ -90,6 +116,17 @@ def make_submission_key(job_id: str, attempt_number: int) -> str:
     if attempt_number < 1:
         raise ValueError(f"attempt number must be >= 1, got {attempt_number}")
     return f"{job_id}.{attempt_number}"
+
+
+def make_input_hash(job_name: str, job_version: int, args: dict[str, Any]) -> str:
+    """``sha256(canonical_json({job_name, job_version, args}))``: what decides the output.
+
+    The job id already covers the args, so a second submit with the same id
+    can differ only here: the tool was upgraded between attempts. ``submit``
+    refuses that as a conflict instead of mixing two versions' results.
+    """
+    inputs = {"job_name": job_name, "job_version": job_version, "args": args}
+    return hashlib.sha256(canonical_json(inputs)).hexdigest()
 
 
 class JobRequest(BaseModel):
@@ -148,4 +185,85 @@ class JobRequest(BaseModel):
             raise ValueError("submission_key is not make_submission_key(job_id, attempt)")
         if self.context.get("job_id") not in (None, self.job_id):
             raise ValueError("context.job_id names a different job")
+        return self
+
+    @property
+    def input_hash(self) -> str:
+        # A property, not a field: it is derived, so it is never sent or stored twice.
+        return make_input_hash(self.job_name, self.job_version, self.args)
+
+
+class JobProgress(BaseModel):
+    """The latest progress of a running job: the toolkit's ``ProgressPayload``
+    fields plus ``seq``, which counts updates so a stream reader drops one it has seen."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True, allow_inf_nan=False)
+
+    seq: int = Field(ge=0)
+    current: int | float = Field(ge=0)
+    total: int = Field(ge=0)
+    label: str | None = None
+
+
+class JobRecord(BaseModel):
+    """What a backend knows about one try of a job: built from the queue view row
+    plus the job dir (Procrastinate), or from MONAI's job store.
+
+    id            the job id (``JobRequest.job_id``, or MONAI's job id)
+    status        a ``JobStatus``
+    error_code    set exactly when the status failed; see ERROR_CODES_BY_STATUS
+    attempt       the try this record describes, from 1
+    input_hash    ``make_input_hash(...)`` of the request (conflict check)
+    progress      the latest ``JobProgress``, if any was reported
+    queued_at, started_at, finished_at   timezone-aware; started/finished once reached
+    error         a human-readable reason, never a traceback
+    result        a small JSON result, inline
+    result_ref    or the name of a file in the job dir holding a large one (claim check)
+    host          the machine that ran it, once started
+    """
+
+    # Rows and HTTP bodies carry statuses, codes and times as strings, so those
+    # fields alone are parsed (strict=False); a bad value is still refused.
+    model_config = ConfigDict(frozen=True, extra="forbid", strict=True, allow_inf_nan=False)
+
+    id: str = Field(min_length=1)
+    status: JobStatus = Field(strict=False)
+    error_code: ErrorCode | None = Field(strict=False)
+    attempt: int = Field(ge=1)
+    input_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    progress: JobProgress | None = None
+    queued_at: AwareDatetime = Field(strict=False)
+    started_at: AwareDatetime | None = Field(default=None, strict=False)
+    finished_at: AwareDatetime | None = Field(default=None, strict=False)
+    error: str | None = None
+    result: dict[str, Any] | None = None
+    result_ref: str | None = None
+    host: str | None = None
+
+    @field_validator("result")
+    @classmethod
+    def _result_is_json(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is not None:
+            try:
+                canonical_json(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"must be JSON only: {exc}") from None
+        return value
+
+    @model_validator(mode="after")
+    def _consistent(self) -> JobRecord:
+        allowed = ERROR_CODES_BY_STATUS.get(self.status, frozenset())
+        if allowed and self.error_code not in allowed:
+            names = ", ".join(sorted(code.value for code in allowed))
+            raise ValueError(f"status {self.status.value} needs an error_code in: {names}")
+        if not allowed and self.error_code is not None:
+            raise ValueError(f"status {self.status.value} carries no error_code")
+        if self.result is not None and self.result_ref is not None:
+            raise ValueError("set result or result_ref, not both")
+        for name, earlier, later in (
+            ("started_at", self.queued_at, self.started_at),
+            ("finished_at", self.started_at or self.queued_at, self.finished_at),
+        ):
+            if later is not None and later < earlier:
+                raise ValueError(f"{name} is before the time it follows")
         return self

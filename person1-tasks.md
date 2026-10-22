@@ -412,7 +412,7 @@ Everything stays `INTERIM_HEAVY` / inline here so the first working flow can run
 
 ## Checklist
 
-- [ ] A1 contract.py · [ ] A2 status + derive_status · [ ] A3 polling + budgets · [ ] A4 client + in-memory
+- [x] A1 contract.py · [ ] A2 status + derive_status · [ ] A3 polling + budgets · [ ] A4 client + in-memory
 - [ ] B1 modeling ports · [ ] B2 radiomics ports · [ ] B3 run_modeling params · [ ] B4 run_modeling handler · [ ] B5 modeling view hook
 - [ ] C1 MONAI tests · [ ] C2 J1/J2/J11 · [ ] C3 J4/J6/J12 · [ ] C4 J8/J10/J3 · [ ] C5 J9 · [ ] C6 MonaiHttpBackend · [ ] C7 services.py + D10 ids · [ ] C8 heartbeat/threads/handle · [ ] C9 run_segmentation
 - [ ] D1 Procrastinate app · [ ] D2 migration "s" · [ ] D3 dispatch/cancel · [ ] D4 read routes + SSE stream · [ ] D5 app + launcher · [ ] D6 supervisor · [ ] D7 child · [ ] D8 periodic + start-up · [ ] D9 GPU pool · [ ] D10 runtime/job.py · [ ] D11 AppApiJobClient · [ ] D12 deploy · [ ] D13 integration suite

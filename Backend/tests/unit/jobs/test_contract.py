@@ -12,12 +12,17 @@ import pytest
 from pydantic import ValidationError
 
 from jobs_core.contract import (
+    ERROR_CODES_BY_STATUS,
     ErrorCode,
+    JobProgress,
+    JobRecord,
     JobRequest,
     canonical_json,
+    make_input_hash,
     make_job_id,
     make_submission_key,
 )
+from jobs_core.status import JobStatus
 
 pytestmark = pytest.mark.unit
 
@@ -244,3 +249,169 @@ def test_context_job_id_must_be_this_job() -> None:
     context = {"session_id": "s-1", "run_id": RUN_ID, "job_id": "f" * 64}
     with pytest.raises(ValidationError, match="different job"):
         JobRequest(**_request_fields(context=context))
+
+
+def test_request_input_hash_is_derived_not_stored() -> None:
+    request = JobRequest(**_request_fields())
+    assert request.input_hash == make_input_hash("train_classifier", 1, request.args)
+    assert "input_hash" not in request.model_dump()
+
+
+# --- make_input_hash
+
+
+def test_input_hash_ignores_key_order() -> None:
+    assert make_input_hash("t", 1, {"a": 1, "b": 2}) == make_input_hash("t", 1, {"b": 2, "a": 1})
+
+
+@pytest.mark.parametrize(
+    "other",
+    [("u", 1, {"a": 1}), ("t", 2, {"a": 1}), ("t", 1, {"a": 2})],
+    ids=["name", "version", "args"],
+)
+def test_input_hash_changes_with_each_part(other: tuple[str, int, dict]) -> None:
+    assert make_input_hash(*other) != make_input_hash("t", 1, {"a": 1})
+
+
+# --- JobProgress
+
+
+def test_progress_has_the_toolkit_payload_fields_plus_seq() -> None:
+    progress = JobProgress(seq=3, current=2, total=5, label="fold 2/5")
+    assert progress.model_dump() == {"seq": 3, "current": 2, "total": 5, "label": "fold 2/5"}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"seq": -1}, {"current": -0.5}, {"total": -1}, {"current": float("nan")}],
+    ids=["seq", "current", "total", "nan"],
+)
+def test_bad_progress_is_refused(overrides: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError):
+        JobProgress(**({"seq": 0, "current": 0, "total": 1} | overrides))
+
+
+# --- JobRecord
+
+HASH = make_input_hash("train_classifier", 1, {"folds": 5})
+
+
+def _record_fields(**overrides: Any) -> dict[str, Any]:
+    """A queued record, in the shape it arrives in over HTTP: plain strings."""
+    fields: dict[str, Any] = {
+        "id": "a" * 64,
+        "status": "QUEUED",
+        "error_code": None,
+        "attempt": 1,
+        "input_hash": HASH,
+        "queued_at": "2026-10-22T10:00:00+00:00",
+    }
+    return fields | overrides
+
+
+def test_a_record_is_read_from_strings() -> None:
+    record = JobRecord(**_record_fields())
+    assert record.status is JobStatus.QUEUED
+    assert record.queued_at.tzinfo is not None
+
+
+def test_a_record_survives_a_json_round_trip() -> None:
+    record = JobRecord(
+        **_record_fields(
+            status="RUNNING",
+            started_at="2026-10-22T10:00:05+00:00",
+            progress={"seq": 1, "current": 1, "total": 5, "label": None},
+            host="worker-1",
+        )
+    )
+    assert JobRecord.model_validate_json(record.model_dump_json()) == record
+
+
+def test_a_finished_record_holds_its_result() -> None:
+    record = JobRecord(
+        **_record_fields(
+            status="SUCCEEDED",
+            started_at="2026-10-22T10:00:05+00:00",
+            finished_at="2026-10-22T10:01:00+00:00",
+            result={"status": "success", "auc": 0.91},
+        )
+    )
+    assert record.result == {"status": "success", "auc": 0.91}
+
+
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [(status, code) for status, codes in ERROR_CODES_BY_STATUS.items() for code in codes],
+)
+def test_each_failed_status_takes_its_codes(status: JobStatus, code: ErrorCode) -> None:
+    assert JobRecord(**_record_fields(status=status.value, error_code=code.value)).error_code is code
+
+
+def test_every_error_code_belongs_to_a_status() -> None:
+    assert set().union(*ERROR_CODES_BY_STATUS.values()) == set(ErrorCode)
+
+
+@pytest.mark.parametrize("status", list(ERROR_CODES_BY_STATUS))
+def test_a_failed_status_needs_a_code(status: JobStatus) -> None:
+    with pytest.raises(ValidationError, match="needs an error_code"):
+        JobRecord(**_record_fields(status=status.value))
+
+
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [("FAILED", "cancelled"), ("TIMED_OUT", "oom"), ("INTERRUPTED", "timeout")],
+)
+def test_a_code_from_another_status_is_refused(status: str, code: str) -> None:
+    with pytest.raises(ValidationError, match="needs an error_code"):
+        JobRecord(**_record_fields(status=status, error_code=code))
+
+
+@pytest.mark.parametrize("status", ["QUEUED", "RUNNING", "CANCELLING", "SUCCEEDED"])
+def test_a_status_that_did_not_fail_carries_no_code(status: str) -> None:
+    with pytest.raises(ValidationError, match="carries no error_code"):
+        JobRecord(**_record_fields(status=status, error_code="error"))
+
+
+def test_result_and_result_ref_are_exclusive() -> None:
+    with pytest.raises(ValidationError, match="not both"):
+        JobRecord(**_record_fields(status="SUCCEEDED", result={}, result_ref="result.bin"))
+
+
+@pytest.mark.parametrize(
+    ("times", "field_name"),
+    [
+        ({"started_at": "2026-10-22T09:59:00+00:00"}, "started_at"),
+        (
+            {"started_at": "2026-10-22T10:05:00+00:00", "finished_at": "2026-10-22T10:01:00+00:00"},
+            "finished_at",
+        ),
+        ({"finished_at": "2026-10-22T09:00:00+00:00"}, "finished_at"),
+    ],
+    ids=["started-before-queued", "finished-before-started", "finished-before-queued"],
+)
+def test_times_go_forward(times: dict[str, str], field_name: str) -> None:
+    with pytest.raises(ValidationError, match=f"{field_name} is before"):
+        JobRecord(**_record_fields(**times))
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"unknown_field": 1},
+        {"id": ""},
+        {"status": "succeeded"},  # the values are capitals, as MONAI writes them
+        {"status": "PAUSED"},
+        {"error_code": "gpu_exploded"},
+        {"attempt": 0},
+        {"attempt": "1"},
+        {"input_hash": "xyz"},
+        {"queued_at": "2026-10-22T10:00:00"},  # no time zone
+        {"result": {"x": float("nan")}},
+    ],
+    ids=lambda overrides: f"{next(iter(overrides))}={next(iter(overrides.values()))!r}",
+)
+def test_a_bad_record_field_is_refused(overrides: dict[str, Any]) -> None:
+    with pytest.raises(ValidationError) as caught:
+        JobRecord(**_record_fields(**overrides))
+    [field_name] = overrides
+    assert {error["loc"][0] for error in caught.value.errors()} == {field_name}

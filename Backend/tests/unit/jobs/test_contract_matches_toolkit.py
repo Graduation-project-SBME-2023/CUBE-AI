@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from agent_system.toolkit.context import Caller, ToolContext
+from agent_system.toolkit.events import ProgressPayload
 from agent_system.toolkit.manifest import (
     MAX_PRIORITY,
     MIN_PRIORITY,
@@ -12,7 +13,7 @@ from agent_system.toolkit.manifest import (
     TOOL_NAME_PATTERN,
 )
 from jobs_core import contract
-from jobs_core.contract import JobRequest, make_job_id, make_submission_key
+from jobs_core.contract import JobProgress, JobRequest, make_job_id, make_submission_key
 
 pytestmark = pytest.mark.unit
 
@@ -27,6 +28,11 @@ def test_resource_classes_are_the_toolkit_queues() -> None:
 
 def test_priority_bounds_are_the_toolkit_bounds() -> None:
     assert (contract.MIN_PRIORITY, contract.MAX_PRIORITY) == (MIN_PRIORITY, MAX_PRIORITY)
+
+
+def test_job_progress_carries_the_toolkit_progress_fields() -> None:
+    # The supervisor relays a JobProgress as a tool_progress ProgressPayload.
+    assert set(JobProgress.model_fields) == set(ProgressPayload.model_fields) | {"seq"}
 
 
 def test_a_real_tool_context_payload_is_accepted() -> None:
